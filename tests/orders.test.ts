@@ -17,9 +17,13 @@ import {
   type PreTaxItemType,
   type FromTotalItemType,
   OrderDocLineItem,
+  OrderDocItemPrice,
 } from "../src/schemas/mod.ts";
 import {
   assembleLinePrice,
+  declaredInvoicePrice,
+  declaredOrderPrice,
+  ORDER_DECLARED_PRICE_KEYS,
   calculateItemDiscountCents,
   calculateItemPrice,
   calculateItemSubtotal,
@@ -3846,6 +3850,62 @@ Deno.test("computeLineMoney — three arms, and the residual one throws by name"
     Error,
     "no pricing rule",
   );
+});
+
+Deno.test("ORDER_DECLARED_PRICE_KEYS — equals the runtime schema's keys minus money and taxes_base", () => {
+  // The `satisfies` checks the INTERFACE; this checks the SCHEMA, which the
+  // `z.ZodType<…>` annotation hides from the type. Either can drift alone.
+  const shape = (OrderDocItemPrice as unknown as { shape: Record<string, unknown> }).shape;
+  const computed = new Set(["subtotal_cents", "subtotal_discounted_cents", "discount", "taxes", "total_cents", "taxes_base"]);
+  assertEquals(
+    Object.keys(shape).filter((k) => !computed.has(k)).sort(),
+    Object.keys(ORDER_DECLARED_PRICE_KEYS).sort(),
+  );
+});
+
+Deno.test("declaredOrderPrice — a percent fee keeps base_percent, every other line gets it as null", () => {
+  const fee = declaredOrderPrice({ base_cents: 0, base_percent: 4, formula: "percent_of_total" });
+  assertEquals(fee, { base_cents: 0, base_percent: 4, replacement_cents: null, chargeable_days: null, formula: "percent_of_total" });
+
+  // Extra input keys (money, discount, taxes) are the pricer's and are not copied.
+  const sale = declaredOrderPrice({ base_cents: 1_000, formula: "fixed", replacement_cents: 5_000, ...{ subtotal_cents: 9 } });
+  assertEquals(sale, { base_cents: 1_000, base_percent: null, replacement_cents: 5_000, chargeable_days: null, formula: "fixed" });
+
+  assertEquals(
+    declaredInvoicePrice({ base_cents: 1_000, formula: "fixed", replacement_cents: 5_000 }),
+    { base_cents: 1_000, base_percent: null, chargeable_days: null, formula: "fixed" },
+  );
+});
+
+Deno.test("declaredOrderPrice — assembled fee and sale lines both parse as OrderDocItemPrice (api-cloudrun#984)", () => {
+  const feeMoney: LinePriceMoney = {
+    subtotal_cents: 400,
+    subtotal_discounted_cents: 400,
+    discount: null,
+    taxes: [],
+    total_cents: 400,
+  };
+  const feeItem: PricingItem = { type: "transaction_fee", quantity: 1, price: { base_cents: 0, base_percent: 4, formula: "percent_of_total" } };
+  const fee = assembleLinePrice(
+    declaredOrderPrice({ base_cents: 0, base_percent: 4, formula: "percent_of_total" }),
+    feeMoney,
+    feeItem,
+    { taxesBase: [] },
+  );
+  const feeParse = OrderDocItemPrice.safeParse(fee);
+  assertEquals(feeParse.success, true, JSON.stringify(feeParse.error?.issues));
+  assertEquals(fee.base_percent, 4);
+
+  const saleItem: PricingItem = { type: "sale", quantity: 1, price: { base_cents: 1_000, formula: "fixed" } };
+  const sale = assembleLinePrice(
+    declaredOrderPrice({ base_cents: 1_000, formula: "fixed" }),
+    { ...feeMoney, subtotal_cents: 1_000, subtotal_discounted_cents: 1_000, total_cents: 1_000 },
+    saleItem,
+    { taxesBase: [] },
+  );
+  const saleParse = OrderDocItemPrice.safeParse(sale);
+  assertEquals(saleParse.success, true, JSON.stringify(saleParse.error?.issues));
+  assertEquals(Object.keys(sale).length, 11);
 });
 
 Deno.test("assembleLinePrice — an ORDER shape keeps replacement_cents, an INVOICE shape never gains one", () => {

@@ -35,6 +35,7 @@ import type {
   PriceModifierType,
   OrderDocTotalsType,
   OrderDocItemPriceType,
+  InvoiceDocItemPriceType,
   OrderDatesType,
   OrderDocDatesType,
   DestinationType,
@@ -1427,6 +1428,92 @@ export function assembleLinePrice<P extends object>(
   assertLineMoneyIdentities(out as unknown as LinePriceMoney, item.type);
 
   return out as P & LinePriceMoney & { taxes_base?: TaxRefType[] };
+}
+
+/**
+ * The keys of a stored price that are neither money nor `taxes_base` — the
+ * DECLARED half {@link assembleLinePrice} is handed.
+ */
+export type DeclaredPriceKey<T> = Exclude<keyof T, keyof LinePriceMoney | "taxes_base">;
+
+/**
+ * The declared half of a stored ORDER line price, derived from
+ * `OrderDocItemPriceType` rather than listed at each writer.
+ *
+ * 🔴 **A hand-written declared literal drops every key it does not name, and
+ * that is not hypothetical.** `buildLineItem` (api-cloudrun) named four keys and
+ * not `base_percent`, so every `percent_of_total` fee line lost its rate after
+ * the catalog had filled it and `checkPriceBaseUnit` refused the write
+ * (api-cloudrun#984) — at least the fourth drop of that shape.
+ *
+ * The `Record` annotation makes this exhaustive in BOTH directions: a key added to the
+ * interface and not here, or named here and not on the interface, is a compile
+ * error. `tests/orders.test.ts` asserts the same set against the runtime schema,
+ * which the type cannot see.
+ */
+export const ORDER_DECLARED_PRICE_KEYS: Record<DeclaredPriceKey<OrderDocItemPriceType>, true> = {
+  base_cents: true,
+  base_percent: true,
+  replacement_cents: true,
+  chargeable_days: true,
+  formula: true,
+};
+
+/** The declared half of a stored INVOICE line price — see {@link ORDER_DECLARED_PRICE_KEYS}. */
+export const INVOICE_DECLARED_PRICE_KEYS: Record<DeclaredPriceKey<InvoiceDocItemPriceType>, true> = {
+  base_cents: true,
+  base_percent: true,
+  chargeable_days: true,
+  formula: true,
+};
+
+/** What a writer must have resolved before it can declare a price. */
+interface DeclaredPriceInput {
+  base_cents: number;
+  formula: PriceFormulaType;
+  base_percent?: number | null;
+  replacement_cents?: number | null;
+  chargeable_days?: number | null;
+}
+
+/** An order line's declared price half, every nullable key present. */
+export interface OrderDeclaredPrice {
+  base_cents: number;
+  base_percent: number | null;
+  replacement_cents: number | null;
+  chargeable_days: number | null;
+  formula: PriceFormulaType;
+}
+
+/** An invoice line's declared price half, every nullable key present. */
+export type InvoiceDeclaredPrice = Omit<OrderDeclaredPrice, "replacement_cents">;
+
+function pickDeclared(keys: Record<string, true>, price: DeclaredPriceInput): Record<string, unknown> {
+  const src = price as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  // `?? null` on every key: absent and `null` mean the same thing for each
+  // nullable declared key, and `base_cents` / `formula` are required by the
+  // input type, so it never fires on them.
+  for (const k of Object.keys(keys)) out[k] = src[k] ?? null;
+  return out;
+}
+
+/**
+ * Copy exactly {@link ORDER_DECLARED_PRICE_KEYS} off an input price, normalizing
+ * an absent nullable key to `null`. Extra keys (computed money, `discount`,
+ * `taxes`) are ignored — they are the pricer's, not the caller's.
+ *
+ * ⚠️ **Every order line therefore carries `base_percent`** — `null` on all but a
+ * `percent_of_total` line. That matches what `buildOrderLineFromProduct` already
+ * stages, and `invoicePriceDifferences` drops null keys before comparing.
+ */
+export function declaredOrderPrice(price: DeclaredPriceInput): OrderDeclaredPrice {
+  return pickDeclared(ORDER_DECLARED_PRICE_KEYS, price) as unknown as OrderDeclaredPrice;
+}
+
+/** Copy exactly {@link INVOICE_DECLARED_PRICE_KEYS} — see {@link declaredOrderPrice}. */
+export function declaredInvoicePrice(price: DeclaredPriceInput): InvoiceDeclaredPrice {
+  return pickDeclared(INVOICE_DECLARED_PRICE_KEYS, price) as unknown as InvoiceDeclaredPrice;
 }
 
 /**

@@ -205,6 +205,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // would advertise a helper whose first argument is a half-built price a
     // template never has.
     "assembleLinePrice",
+    // The declared half `assembleLinePrice` is handed — writer-side for the same
+    // reason (api-cloudrun#984).
+    "declaredOrderPrice",
+    "declaredInvoicePrice",
     "computeLineMoney",
     "priceTransactionFeeLine",
     // The type-level predicate the three above branch on. A template that needs

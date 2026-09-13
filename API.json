@@ -13027,6 +13027,12 @@
           "doc": ""
         },
         {
+          "kind": "typeAlias",
+          "name": "DeclaredPriceKey",
+          "declaration": "type DeclaredPriceKey = Exclude<keyof T, keyof LinePriceMoney | \"taxes_base\">;",
+          "doc": "The keys of a stored price that are neither money nor `taxes_base` — the\nDECLARED half {@link assembleLinePrice} is handed."
+        },
+        {
           "kind": "interface",
           "name": "DestinationDividerLike",
           "declaration": "interface DestinationDividerLike {\n  uid: string;\n  type: string;\n}",
@@ -13087,6 +13093,18 @@
           "doc": "Count and pricing totals for a collapsed destination or group section."
         },
         {
+          "kind": "variable",
+          "name": "INVOICE_DECLARED_PRICE_KEYS",
+          "declaration": "const INVOICE_DECLARED_PRICE_KEYS: Record<DeclaredPriceKey<InvoiceDocItemPriceType>, true>;",
+          "doc": "The declared half of a stored INVOICE line price — see {@link ORDER_DECLARED_PRICE_KEYS}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InvoiceDeclaredPrice",
+          "declaration": "type InvoiceDeclaredPrice = Omit<OrderDeclaredPrice, \"replacement_cents\">;",
+          "doc": "An invoice line's declared price half, every nullable key present."
+        },
+        {
           "kind": "interface",
           "name": "ItemParentageIssue",
           "declaration": "interface ItemParentageIssue {\n  index: number;\n  uid: string;\n  type: string;\n  parentUid: string;\n  parentType: string;\n}",
@@ -13118,6 +13136,12 @@
         },
         {
           "kind": "variable",
+          "name": "ORDER_DECLARED_PRICE_KEYS",
+          "declaration": "const ORDER_DECLARED_PRICE_KEYS: Record<DeclaredPriceKey<OrderDocItemPriceType>, true>;",
+          "doc": "The declared half of a stored ORDER line price, derived from\n`OrderDocItemPriceType` rather than listed at each writer.\n\n🔴 **A hand-written declared literal drops every key it does not name, and\nthat is not hypothetical.** `buildLineItem` (api-cloudrun) named four keys and\nnot `base_percent`, so every `percent_of_total` fee line lost its rate after\nthe catalog had filled it and `checkPriceBaseUnit` refused the write\n(api-cloudrun#984) — at least the fourth drop of that shape.\n\nThe `Record` annotation makes this exhaustive in BOTH directions: a key added to the\ninterface and not here, or named here and not on the interface, is a compile\nerror. `tests/orders.test.ts` asserts the same set against the runtime schema,\nwhich the type cannot see."
+        },
+        {
+          "kind": "variable",
           "name": "ORDER_ITEM_LEVELS",
           "declaration": "const ORDER_ITEM_LEVELS: \"destination\" | \"group\"[];",
           "doc": "The structural divider hierarchy of an ORDER's items array, outermost first.\n\nA divider's index here is its level: encountering one closes every level at\nor below it and opens its own. So a `destination` (level 0) ends the group\nthat preceded it, while a `group` (level 1) only ends a sibling group.\n\nInvoices nest one level deeper — see `INVOICE_ITEM_LEVELS` in\n`@cfs/core/utils/invoices`. Fulfillments share the order hierarchy."
@@ -13127,6 +13151,12 @@
           "name": "OrderDateEnvelope",
           "declaration": "interface OrderDateEnvelope {\n  delivery_start: string | null;\n  delivery_start_fs: FirestoreTimestampType | null;\n  delivery_end: string | null;\n  delivery_end_fs: FirestoreTimestampType | null;\n  collection_start: string | null;\n  collection_start_fs: FirestoreTimestampType | null;\n  collection_end: string | null;\n  collection_end_fs: FirestoreTimestampType | null;\n  charge_start: string | null;\n  charge_start_fs: FirestoreTimestampType | null;\n  charge_end: string | null;\n  charge_end_fs: FirestoreTimestampType | null;\n  days_active: number | null;\n  days_charged: number | null;\n}",
           "doc": "Order-level date envelope derived on demand from per-destination dates.\n\nMirrors the field set of the old top-level `order.dates`, except the `_fs`\ncompanions are nullable: utilities can't mint a Firestore Timestamp, so each\nboundary copies the `_fs` from whichever destination owns the extreme value\n(and is null when no destination sets that boundary)."
+        },
+        {
+          "kind": "interface",
+          "name": "OrderDeclaredPrice",
+          "declaration": "interface OrderDeclaredPrice {\n  base_cents: number;\n  base_percent: number | null;\n  replacement_cents: number | null;\n  chargeable_days: number | null;\n  formula: PriceFormulaType;\n}",
+          "doc": "An order line's declared price half, every nullable key present."
         },
         {
           "kind": "typeAlias",
@@ -13408,6 +13438,22 @@
           "name": "costTransactionFees",
           "signature": "costTransactionFees(items: LineItem[], basisCents: number): LineItem[]",
           "doc": "Cost every `transaction_fee` line against a document subtotal, returning\ncopies with the computed amount written into `price`.\n\nShared by the order and invoice totals so the two cannot drift — they were\ntwo byte-identical loops, and the invoice copy was reading `price.rate` /\n`price.type` off a shape invoice line items have never had.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "declaredInvoicePrice",
+          "signature": "declaredInvoicePrice(price: DeclaredPriceInput): InvoiceDeclaredPrice",
+          "doc": "Copy exactly {@link INVOICE_DECLARED_PRICE_KEYS} — see {@link declaredOrderPrice}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "declaredOrderPrice",
+          "signature": "declaredOrderPrice(price: DeclaredPriceInput): OrderDeclaredPrice",
+          "doc": "Copy exactly {@link ORDER_DECLARED_PRICE_KEYS} off an input price, normalizing\nan absent nullable key to `null`. Extra keys (computed money, `discount`,\n`taxes`) are ignored — they are the pricer's, not the caller's.\n\n⚠️ **Every order line therefore carries `base_percent`** — `null` on all but a\n`percent_of_total` line. That matches what `buildOrderLineFromProduct` already\nstages, and `invoicePriceDifferences` drops null keys before comparing.",
           "paramTags": [],
           "returnsTag": null
         },
