@@ -4,6 +4,58 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
+> ## ✅ STATUS 2026-09-13 — **batch 14 (2 of 2), first cluster: the top-level `items` array. Backlog 42 → 38. Chain verified by digest.**
+>
+> `orders.items` / `invoices.items` / `fulfillments.items` / `credit-notes.items` — the bare
+> `.default([])` on the whole items array, distinct from `items[].path` (batch 13, a member field).
+> `core` `fe50c7e` → published **`beta.424`**. Census, both projects, via `api-cloudrun`'s committed
+> `audit:reparse --positions` (not the MCP — a hand-rolled `orderBy`/`>=[]` Firestore-filter probe
+> was tried first and caught lying: dev's filtered count read HIGHER than its own unfiltered total,
+> impossible for a real filter, so it was abandoned before being trusted): **orders 1024/1024,
+> invoices 1048/1048, fulfillments 1024/1024, credit-notes 13/13 present in both projects, 0
+> absences.** Writer audit (forked agent, full `src/` + `scripts/` sweep): all four create paths
+> (`createOrder`, `createInvoice`, `buildFulfillment`, `createCreditNote`) state `items` explicitly
+> from real data; every update path replaces or mutates it directly; `CreateOrderInput.items` carries
+> no default of its own (ruling out batch 9's input-default trap). `getInitialValues` unaffected
+> (array type-zero is `[]`, matching the removed default). Fixture sweep: all 15 `quote` + 8 `invoice`
+> fixtures already state `items`; `pick-sheet`/`packing-list`/`aging-report`/`statement`/`receipt` are
+> computed views with a different shape and legitimately have none.
+>
+> ✅ **The chain is CLOSED, by digest.** `api-cloudrun` `f2416980` (pin bump) → release PR #983 merged
+> as `de755a11`, cutting **`v0.256.0`**. Build `4f61b066` produced digest
+> `sha256:0093ee11c730775b8f67de3ae0ca19876587eaed1a3ada7dc9b41d1669a444b5`, and revision
+> `api-cloudrun-00383-xpd` serving 100% traffic carries exactly that digest. Released tree's
+> `deno.json` confirmed 40/40 `beta.424`. `audit:reparse` with no `--core` flag, both projects: all 4
+> positions **REACHED, 0 failures** — 1024/1048/1024/13 present, identical prod and dev. `manager`
+> released FIRST as `manager-v26.6.2` (PR #461) — `requires-manager` needed one manual re-run (cached
+> the pre-release result, the batch-11/12/14-1 pattern) but came back green before the api-cloudrun
+> merge. `templates` PR #334 merged as `97ef1e1`, all four required checks green on the first run.
+>
+> ⭐ **Three concurrent peer sessions were coordinating in the same workspace this batch** (`card fee`
+> in a `manager` worktree, `org tree multip repo campaign` in `api-cloudrun`/`core`/`templates`,
+> `manager-ed` and `derive-price-keys-root-cause` arriving mid-batch) — no worktree was needed for
+> this session's own work; file lists were exchanged and none overlapped. `manager`'s pin-bump commit
+> was staged and committed with an explicit pathspec (`git commit -m … -- package.json
+> package-lock.json`) to avoid sweeping up `manager-ed`'s concurrent uncommitted edits in the same
+> checkout, and their files were left untouched through the whole batch (confirmed after push).
+>
+> 🔴 **A hand-rolled Firestore key-presence probe (`[["items", ">=", []]]` via the MCP count tool)
+> produced a self-contradicting result and was correctly distrusted rather than acted on** — dev's
+> "filtered" count exceeded its own unfiltered total on all three grains tested, which a real filter
+> can never produce. Abandoned in favor of the committed `audit:reparse` instrument instead of
+> debugging the ad-hoc probe further. No repair needed since nothing was built on the bad result.
+>
+> ⚠️ **A backgrounded `git push … > log 2>&1 &` inside a `run_in_background: true` Bash call detached
+> silently** — the outer wrapper's `echo` returned before the push (and its ~9-minute suite) had even
+> started, so the reported "exit 0" was the echo's, not the push's, exactly as `cfs-worktrees`
+> predicts. Caught by checking the remote ref by content rather than trusting the exit code; the
+> actual push was still running (verified via `pgrep`) and was waited on properly the second time by
+> putting the push itself last in a `run_in_background` call with no trailing `&`.
+>
+> | # | what | backlog | state |
+>|---|---|---:|---|
+> | 14 (2 of 2), cluster 1 | `orders.items` / `invoices.items` / `fulfillments.items` / `credit-notes.items` — 4 paths, 4 declarations | 42 → **38** | ✅ prod, `v0.256.0`, revision `api-cloudrun-00383-xpd`, digest-verified |
+
 > ## ✅ STATUS 2026-09-13 — **batch 14 (1 of 2) landed. Backlog 46 → 42. Chain verified by digest.**
 >
 > `orders.invoices`/`query_by_invoices` and `contacts.organizations`/`query_by_organizations` — the
