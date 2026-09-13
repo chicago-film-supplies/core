@@ -437,8 +437,8 @@ export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject(
   uid_template: FirestoreId,
   status: z.enum(TEMPLATE_VERSION_STATUSES).meta({ column: true, label: "Status" }),
   content: z.record(z.string(), z.string()),
-  params: z.array(TemplateParamSchema).default([]),
-  consumed_components: z.array(z.string()).default([]),
+  params: z.array(TemplateParamSchema),
+  consumed_components: z.array(z.string()),
 
   git_branch: z.string().min(1).optional(),
   base_sha: z.string().min(1).optional(),

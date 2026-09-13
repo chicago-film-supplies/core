@@ -9351,7 +9351,7 @@ interface Template {
   collection_target: TemplateTargetCollectionType;
   surfaces: TemplateSurfaceType[];
   uid_active: string | null;
-  active_semver?: string | null;
+  active_semver: string | null;
   depends_on: TemplateDependsOn;
   fixtures: FixtureMeta[];
   params: TemplateParam[];
@@ -21362,7 +21362,7 @@ interface Template {
   collection_target: TemplateTargetCollectionType;
   surfaces: TemplateSurfaceType[];
   uid_active: string | null;
-  active_semver?: string | null;
+  active_semver: string | null;
   depends_on: TemplateDependsOn;
   fixtures: FixtureMeta[];
   params: TemplateParam[];

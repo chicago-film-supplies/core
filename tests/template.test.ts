@@ -23,7 +23,9 @@ function baseFamily(extra: Record<string, unknown> = {}): Record<string, unknown
     collection_target: "quotes",
     surfaces: ["order"],
     uid_active: null,
+    active_semver: null,
     depends_on: { components: [] },
+    fixtures: [],
     params: [],
     draft_uids: [],
     version_count: 0,
@@ -121,10 +123,21 @@ Deno.test("FixtureMetaSchema rejects a non-boolean param value", () => {
   );
 });
 
-Deno.test("TemplateSchema defaults fixtures to []", () => {
-  const res = TemplateSchema.safeParse(baseFamily());
+Deno.test("TemplateSchema accepts a family with an empty fixtures manifest", () => {
+  const res = TemplateSchema.safeParse(baseFamily({ fixtures: [] }));
   assertEquals(res.success, true);
   if (res.success) assertEquals(res.data.fixtures, []);
+});
+
+Deno.test("TemplateSchema rejects a family with no fixtures key", () => {
+  // `.default([])` on this stored field was inert — `validateBeforeWrite`
+  // discards the parsed result and writes the raw document, so the default
+  // never materialized on a write. Required with no default: a writer that
+  // forgets the projection gets a ValidationError, not a family doc that
+  // silently reads as "never captured".
+  const family = baseFamily();
+  delete family.fixtures;
+  assertEquals(TemplateSchema.safeParse(family).success, false);
 });
 
 Deno.test("TemplateSchema accepts a family with multiple fixtures", () => {

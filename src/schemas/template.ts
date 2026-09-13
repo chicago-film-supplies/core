@@ -279,7 +279,7 @@ export interface Template {
   uid_active: string | null;
   /** Rollup: semver of the active published version, or null until first publish.
    * Lets consumers show current→predicted without fetching the active version. */
-  active_semver?: string | null;
+  active_semver: string | null;
   depends_on: TemplateDependsOn;
   /** Operator-managed fixture manifest, projected from the sidecar
    * `fixtures: [{slug, label, description}]`. Files in `fixtures/<git_path>/`
@@ -325,15 +325,20 @@ export const TemplateSchema: z.ZodType<Template> = z.strictObject({
   collection_target: z.enum(TEMPLATE_TARGET_COLLECTIONS).meta({ column: true, label: "Target" }),
   surfaces: z.array(z.enum(TEMPLATE_SURFACES)).min(1).meta({ column: true, label: "Surfaces" }),
   uid_active: FirestoreId.nullable(),
-  active_semver: z.string().nullable().default(null),
+  // Required and nullable, matching its sibling `uid_active`: present, possibly
+  // null, never absent (core#83's ruling — `.nullable().optional()` on a
+  // stored field is the state that made a legally-absent `reference` 400 an
+  // unrelated ORDER update via a stray `undefined`). `registerTemplateFamily`
+  // now states `active_semver: null` at create.
+  active_semver: z.string().nullable(),
   depends_on: z.strictObject({
-    components: z.array(z.string()).default([]),
+    components: z.array(z.string()),
   }),
-  fixtures: z.array(FixtureMetaSchema).default([]),
+  fixtures: z.array(FixtureMetaSchema),
   // Required and no `.default([])`: `publishFromMerge` is the sole writer and
   // stamps it from the same resolved value it puts on the version doc.
   params: z.array(TemplateParamSchema),
-  draft_uids: z.array(FirestoreId).default([]),
+  draft_uids: z.array(FirestoreId),
   // `version_count` and `version` are required (no `.default(0)`): the
   // Typesense config declares both so, and a `.default()` never materializes
   // on a write — see the note in `product.ts`.

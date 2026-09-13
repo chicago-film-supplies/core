@@ -4071,7 +4071,7 @@
         {
           "kind": "interface",
           "name": "Template",
-          "declaration": "interface Template {\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: TemplateSourceCollectionType;\n  collection_target: TemplateTargetCollectionType;\n  surfaces: TemplateSurfaceType[];\n  uid_active: string | null;\n  active_semver?: string | null;\n  depends_on: TemplateDependsOn;\n  fixtures: FixtureMeta[];\n  params: TemplateParam[];\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Template {\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: TemplateSourceCollectionType;\n  collection_target: TemplateTargetCollectionType;\n  surfaces: TemplateSurfaceType[];\n  uid_active: string | null;\n  active_semver: string | null;\n  depends_on: TemplateDependsOn;\n  fixtures: FixtureMeta[];\n  params: TemplateParam[];\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A thin template *family* document — identity + rollups, no content/status."
         },
         {
@@ -9546,7 +9546,7 @@
         {
           "kind": "interface",
           "name": "Template",
-          "declaration": "interface Template {\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: TemplateSourceCollectionType;\n  collection_target: TemplateTargetCollectionType;\n  surfaces: TemplateSurfaceType[];\n  uid_active: string | null;\n  active_semver?: string | null;\n  depends_on: TemplateDependsOn;\n  fixtures: FixtureMeta[];\n  params: TemplateParam[];\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Template {\n  uid: string;\n  git_path: string;\n  name: string;\n  collection_source: TemplateSourceCollectionType;\n  collection_target: TemplateTargetCollectionType;\n  surfaces: TemplateSurfaceType[];\n  uid_active: string | null;\n  active_semver: string | null;\n  depends_on: TemplateDependsOn;\n  fixtures: FixtureMeta[];\n  params: TemplateParam[];\n  draft_uids: string[];\n  version_count: number;\n  last_published_at: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A thin template *family* document — identity + rollups, no content/status."
         },
         {
