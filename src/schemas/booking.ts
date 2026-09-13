@@ -226,7 +226,7 @@ export const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
   name: z.string().meta({ column: true }),
   default: z.boolean(),
   quantity: z.int().meta({ column: true, label: "Quantity" }),
-  locations: z.array(BookingStoreLocationSchema).default([]).meta({ label: "Location" }),
+  locations: z.array(BookingStoreLocationSchema).meta({ label: "Location" }),
 });
 
 // ── Update input ──────────────────────────────────────────────
@@ -438,8 +438,8 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
     path: OrderDerivedOrgPath,
     crms_id: z.int().nullable(),
   }).meta({ label: "Organization" }),
-  stores: z.array(BookingStoreSchema).default([]).meta({ label: "Store" }),
-  query_by_uid_store: z.array(FirestoreId).default([]),
+  stores: z.array(BookingStoreSchema).meta({ label: "Store" }),
+  query_by_uid_store: z.array(FirestoreId),
   query_by_uid_location: z.array(FirestoreId),
   uid_destination_delivery: FirestoreId,
   uid_destination_collection: FirestoreId,

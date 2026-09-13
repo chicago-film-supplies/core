@@ -172,6 +172,16 @@ const OOSStoreLocationSchema: z.ZodType<OOSStoreLocation> = z.strictObject({
   max: z.int().nullable().optional(),
 });
 
+// ⚠️ `locations` keeps its `.default([])` deliberately (core#95 batch 12 REFUSAL,
+// 2026-09-13) — this schema is embedded verbatim by `CreateOutOfServiceInput` and
+// `UpdateOutOfServiceInput` (`z.array(OOSStoreSchema).optional()`), so the default
+// is LIVE there, not inert: "the warehouse can fill these in via PUT once the
+// actual location is known" (`api-cloudrun/src/services/bookings.ts`) is a real
+// staged-input case, a store named before its shelf is. And the corpus is
+// VACUOUS either way — both `out-of-service.stores` arrays measured (2 prod / 4
+// dev) are themselves empty, 0 `OOSStore` objects to test in either direction.
+// Tightening this needs a deliberate input-vs-storage split (batch 9's
+// `products.price.taxes` shape), not a corpus census.
 const OOSStoreSchema: z.ZodType<OOSStore> = z.strictObject({
   uid_store: FirestoreId,
   name: z.string().meta({ column: true }),
@@ -222,7 +232,7 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   query_by_sources: z.array(z.string()),
   crms_id: z.int().nullable().optional(),
   crms_stock_level_id: z.int().nullable().optional(),
-  stores: z.array(OOSStoreSchema).default([]).meta({ label: "Store" }),
+  stores: z.array(OOSStoreSchema).meta({ label: "Store" }),
   query_by_uid_store: z.array(FirestoreId),
   query_by_uid_location: z.array(FirestoreId),
   transactions: z.array(OOSTransactionSchema).optional(),

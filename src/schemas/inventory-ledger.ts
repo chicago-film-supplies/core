@@ -65,7 +65,7 @@ export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject(
     maintenance: z.number(),
     lost: z.number(),
   }),
-  store_breakdown: z.array(StoreBreakdownEntrySchema).default([]).meta({ label: "Store" }),
+  store_breakdown: z.array(StoreBreakdownEntrySchema).meta({ label: "Store" }),
   query_by_uid_store: z.array(FirestoreId),
   query_by_uid_location: z.array(FirestoreId),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),

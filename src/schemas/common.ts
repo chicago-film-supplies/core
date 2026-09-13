@@ -1824,7 +1824,7 @@ export const StoreBreakdownEntrySchema: z.ZodType<StoreBreakdownEntry> = z.stric
   default: z.boolean(),
   crms_stock_level_id: z.int().nullable(),
   quantity: z.number().min(0).meta({ column: true, label: "Quantity" }), // Σ of this store's location quantities — can't go negative
-  locations: z.array(StoreBreakdownLocationSchema).default([]).meta({ label: "Location" }),
+  locations: z.array(StoreBreakdownLocationSchema).meta({ label: "Location" }),
 });
 
 // ── Address ─────────────────────────────────────────────────────────
