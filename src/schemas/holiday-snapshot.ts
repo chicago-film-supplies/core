@@ -29,7 +29,7 @@ export interface HolidaySnapshot {
 /** Zod schema for HolidaySnapshot. */
 export const HolidaySnapshotSchema: z.ZodType<HolidaySnapshot> = z.strictObject({
   uid: z.literal("current"),
-  materialized_dates: z.array(z.iso.date()).default([]),
+  materialized_dates: z.array(z.iso.date()),
   materialized_count: z.int().min(0).meta({ column: true, label: "Materialized Count" }),
   materialized_year_range: z.strictObject({
     from: z.int(),

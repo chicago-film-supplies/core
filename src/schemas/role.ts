@@ -97,7 +97,7 @@ export const RoleSchema: z.ZodType<Role> = z.strictObject({
   // be spelled here, in `session.ts`, and five more times across two repos.
   name: RoleId.meta({ pii: "none", column: true, label: "Name" }),
   label: z.string().min(1).max(128).meta({ pii: "none", column: true, label: "Label" }),
-  permissions: z.array(z.string()).default([]).meta({ column: true, label: "Permissions" }),
+  permissions: z.array(z.string()).meta({ column: true, label: "Permissions" }),
   description: z.string().max(500).optional().meta({ column: true, label: "Description" }),
   uid_thread: ThreadId.optional(),
   ...TimestampFields,

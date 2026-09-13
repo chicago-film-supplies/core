@@ -92,7 +92,7 @@ export const StoreSchema: z.ZodType<Store> = z.strictObject({
   // `product.ts`. `active` carries `initial` so the create form still seeds
   // `true`.
   default: z.boolean().meta({ column: true, label: "Default" }),
-  default_location: UidNameRef.nullable().default(null).meta({ label: "Default Location" }),
+  default_location: UidNameRef.nullable().meta({ label: "Default Location" }),
   // No `column: true` — `display-columns.test.ts` bans a heading ending in
   // "Uid", and there is no name to show in its place (see the docblock).
   uid_destination: FirestoreId.nullable().optional(),

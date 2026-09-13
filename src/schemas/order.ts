@@ -1440,7 +1440,13 @@ export interface Order {
    */
   subject: string;
   reference: string | null;
-  xero_id?: string | null;
+  /**
+   * The order's live Xero Quote id, `null` until `xeroQuotes.ts` creates or
+   * recovers one. Required (no `?`) as of core#95 batch 16 — `createOrder`
+   * now states `xero_id: null` explicitly, matching `reference`'s own
+   * `|| null` pattern above.
+   */
+  xero_id: string | null;
   /**
    * Required. Every order is born with a default thread — `createOrder` stamps
    * `orderThreadDoc.uid` in the same transaction that writes the order — and
@@ -1609,7 +1615,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // ever assigns a string-or-null), so nothing produced the absence the
   // declaration allowed.
   reference: z.string().max(255).nullable().meta({ column: true, label: "Reference", linkTo: "orderDetail" }),
-  xero_id: z.uuid().nullable().default(null),
+  xero_id: z.uuid().nullable(),
   uid_thread: ThreadId,
   version: z.int().min(0).default(0),
   // Both actor fields — see the interface for why each is optional rather than

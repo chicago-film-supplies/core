@@ -251,7 +251,7 @@ export const TaxSchema: z.ZodType<Tax> = z.strictObject({
   name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
   rate: z.number().meta({ column: true, label: "Rate", ...RATE_UNIT_META }),
   type: RateTypeEnum.meta({ column: true, label: "Type" }),
-  crms_id: z.int().nullable().default(null),
+  crms_id: z.int().nullable(),
   jurisdiction: JurisdictionEnum.nullable().optional().meta({
     column: true,
     label: "Jurisdiction",

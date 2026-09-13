@@ -172,22 +172,24 @@ const OOSStoreLocationSchema: z.ZodType<OOSStoreLocation> = z.strictObject({
   max: z.int().nullable().optional(),
 });
 
-// ⚠️ `locations` keeps its `.default([])` deliberately (core#95 batch 12 REFUSAL,
-// 2026-09-13) — this schema is embedded verbatim by `CreateOutOfServiceInput` and
-// `UpdateOutOfServiceInput` (`z.array(OOSStoreSchema).optional()`), so the default
-// is LIVE there, not inert: "the warehouse can fill these in via PUT once the
-// actual location is known" (`api-cloudrun/src/services/bookings.ts`) is a real
-// staged-input case, a store named before its shelf is. And the corpus is
-// VACUOUS either way — both `out-of-service.stores` arrays measured (2 prod / 4
-// dev) are themselves empty, 0 `OOSStore` objects to test in either direction.
-// Tightening this needs a deliberate input-vs-storage split (batch 9's
-// `products.price.taxes` shape), not a corpus census.
+// core#95 batch 12 REFUSED this default on the theory that
+// `api-cloudrun/src/services/bookings.ts` names a real staged-input case ("the
+// warehouse can fill these in via PUT once the actual location is known"). Batch
+// 16 re-checked: `api-cloudrun/src/services/bookings.ts` creates an OOS record with a bare `stores: []` —
+// no per-store `OOSStore` object ever constructed there, staged or otherwise —
+// and neither `api-cloudrun/src/services/outOfService.ts` (`data.stores ?? []`,
+// pass-through) nor any manager component builds one either
+// (`manager/src/components/outOfService/OOSStores.tsx` only reads `.locations`;
+// no add-store UI exists). `OOSStore.locations` was already required on the
+// INTERFACE for both inputs (they type `stores?: OOSStore[]`, not a separate
+// lenient shape), so the staged-input case this default was protecting has no
+// call site anywhere in either repo. Removed rather than split.
 const OOSStoreSchema: z.ZodType<OOSStore> = z.strictObject({
   uid_store: FirestoreId,
   name: z.string().meta({ column: true }),
   default: z.boolean(),
   quantity: z.int().meta({ column: true, label: "Quantity" }),
-  locations: z.array(OOSStoreLocationSchema).default([]).meta({ label: "Location" }),
+  locations: z.array(OOSStoreLocationSchema).meta({ label: "Location" }),
 });
 
 const OOSTransactionSchema: z.ZodType<OOSTransaction> = z.strictObject({

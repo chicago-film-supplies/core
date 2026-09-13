@@ -74,7 +74,7 @@ export const HolidayDefinitionSchema: z.ZodType<HolidayDefinition> = z.strictObj
   display_day: z.string().min(1).max(10).optional(),
   week: z.string().min(1).max(4).optional(),
   display_suffix: z.string().min(1).max(2).optional(),
-  active: z.boolean().default(true),
+  active: z.boolean().meta({ initial: true }),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),

@@ -228,7 +228,7 @@ export const StockSchema: z.ZodType<Stock> = z.strictObject({
   // the source permits — which fails the rebuild rather than the write that
   // created the situation.
   quantity_held: z.number().min(0).meta({ column: true, label: "Quantity Held" }),
-  unavailable: z.array(StockUnavailableEntrySchema).default([]).meta({ label: "Unavailable" }),
+  unavailable: z.array(StockUnavailableEntrySchema).meta({ label: "Unavailable" }),
   claim_seq: z.int().min(0).meta({ column: true, label: "Claim Seq" }),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
   updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),

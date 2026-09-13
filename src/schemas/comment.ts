@@ -89,7 +89,7 @@ export const CommentSchema: z.ZodType<Comment> = z.strictObject({
   // Required (no `.default("")`): the Typesense config declares it so, and a
   // `.default()` never materializes on a write — see the note in `product.ts`.
   body_text: z.string().meta({ pii: "mask", column: true, label: "Body" }),
-  reactions: z.record(z.string(), z.record(z.string(), ActorRef)).default({}),
+  reactions: z.record(z.string(), z.record(z.string(), ActorRef)),
   git: CommentGitMirrorSchema.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),

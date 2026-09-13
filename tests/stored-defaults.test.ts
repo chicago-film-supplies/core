@@ -111,19 +111,7 @@ const SENTINEL_DEFAULTS: ReadonlyMap<string, string> = new Map([
  * Each is inert: it cannot put a value in Firestore, and its only effect is to
  * let a writer omit the key. **This set only ever shrinks.**
  */
-const INERT_DEFAULTS: ReadonlySet<string> = new Set([
-  "comments.reactions",
-  "holiday-definitions.active",
-  "holiday-snapshot.materialized_dates",
-  "orders.xero_id",
-  "organizations.contacts[].roles",
-  "out-of-service.stores[].locations",
-  "roles.permissions",
-  "stock.unavailable",
-  "stores.default_location",
-  "taxes.crms_id",
-  "threads.last_message_preview",
-]);
+const INERT_DEFAULTS: ReadonlySet<string> = new Set([]);
 
 // deno-lint-ignore no-explicit-any
 function defOf(node: any): any {

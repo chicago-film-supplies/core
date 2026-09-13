@@ -6059,7 +6059,7 @@ interface Order {
   crms_status?: string;
   subject: string;
   reference: string | null;
-  xero_id?: string | null;
+  xero_id: string | null;
   uid_thread: string;
   version: number;
   created_by?: ActorRefType | null;
@@ -16434,7 +16434,7 @@ interface Order {
   crms_status?: string;
   subject: string;
   reference: string | null;
-  xero_id?: string | null;
+  xero_id: string | null;
   uid_thread: string;
   version: number;
   created_by?: ActorRefType | null;

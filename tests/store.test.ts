@@ -19,6 +19,7 @@ const validStore = (overrides: Record<string, unknown> = {}) => ({
   uid: "teststore10000000000",
   name: "Main Warehouse",
   default: true,
+  default_location: null,
   crms_store_id: 100,
   jurisdiction: "chicago",
   active: true,

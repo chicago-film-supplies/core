@@ -49,7 +49,7 @@ export const ThreadSchema: z.ZodType<Thread> = z.strictObject({
   sources: z.array(DocSource).min(1),
   title: z.string().max(200).meta({ pii: "mask" }).nullable().meta({ column: true, label: "Title" }),
   last_message_at: FirestoreTimestamp.nullable().meta({ column: true, label: "Last Activity" }),
-  last_message_preview: z.string().max(280).meta({ pii: "mask", column: true, label: "Last Message" }).default(""),
+  last_message_preview: z.string().max(280).meta({ pii: "mask", column: true, label: "Last Message" }),
   // Required (no `.default(0)`): the `threads` Typesense config declares it so.
   // That config is `enabled: false` today — the parity gate deliberately walks
   // disabled collections too, so provisioning `threads` later cannot silently

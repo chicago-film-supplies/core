@@ -46,7 +46,7 @@ Deno.test("HolidayDefinitionSchema validates a variable-date holiday", () => {
   assertEquals(HolidayDefinitionSchema.safeParse(doc).success, true);
 });
 
-Deno.test("HolidayDefinitionSchema applies active/version defaults when omitted", () => {
+Deno.test("HolidayDefinitionSchema applies the version default when omitted", () => {
   const doc = {
     uid: DEF_ID,
     type: "fixed",
@@ -54,6 +54,7 @@ Deno.test("HolidayDefinitionSchema applies active/version defaults when omitted"
     display_month: 1,
     js_month: 0,
     date: 1,
+    active: true,
     created_by: actor,
     updated_by: actor,
     created_at: mockTimestamp,
@@ -62,9 +63,29 @@ Deno.test("HolidayDefinitionSchema applies active/version defaults when omitted"
   const parsed = HolidayDefinitionSchema.safeParse(doc);
   assertEquals(parsed.success, true);
   if (parsed.success) {
-    assertEquals(parsed.data.active, true);
     assertEquals(parsed.data.version, 0);
   }
+});
+
+// core#95 batch 16: `active` lost its inert `.default(true)` — `createHolidayDefinition`
+// already states it explicitly. Mirror of the test above: omitting the key now fails
+// rather than silently defaulting.
+Deno.test("HolidayDefinitionSchema requires active", () => {
+  const doc = {
+    uid: DEF_ID,
+    type: "fixed",
+    name: "New Year's Day",
+    display_month: 1,
+    js_month: 0,
+    date: 1,
+    version: 0,
+    created_by: actor,
+    updated_by: actor,
+    created_at: mockTimestamp,
+    updated_at: mockTimestamp,
+  };
+  const parsed = HolidayDefinitionSchema.safeParse(doc);
+  assertEquals(parsed.success, false);
 });
 
 Deno.test("HolidayDefinitionSchema rejects a uuid uid (Firestore auto-id only)", () => {

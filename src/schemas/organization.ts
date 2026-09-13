@@ -40,7 +40,7 @@ export const OrganizationContact: z.ZodType<OrganizationContactType> = z.strictO
   uid: FirestoreId,
   ...NamePartsFields,
   name: NameField,
-  roles: z.array(z.string()).default([]).meta({ column: true, label: "Roles" }),
+  roles: z.array(z.string()).meta({ column: true, label: "Roles" }),
 });
 
 /**
