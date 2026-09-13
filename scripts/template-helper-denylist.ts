@@ -184,6 +184,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // disagree with the doc it renders — the same trap as `allocation` above.
     "calculateTransactionFeeAmountCents", // fee arithmetic — totals pass only
     "costTransactionFees", // fee arithmetic over an array — totals pass only
+    // A fee ROW's amount for the manager's row cells. A rendered document reads
+    // its stored `totals.transaction_fees`; recomputing one line's share at
+    // render time is the same self-disagreement trap.
+    "transactionFeeBasisCents",
+    "transactionFeeLineAmountCents",
     // The six-field fold shared by calculateOrderTotals and
     // calculateInvoiceTotals. Same argument as the two above, one level up: a
     // rendered document reads its STORED `totals`, and recomputing at render

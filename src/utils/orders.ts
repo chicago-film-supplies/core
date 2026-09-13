@@ -828,6 +828,35 @@ export function calculateTransactionFeeAmountCents(item: PricingItem, basisCents
 }
 
 /**
+ * The basis a document's `transaction_fee` lines are costed against:
+ * `subtotal_discounted + Σ tax`, read off a document's `totals`.
+ *
+ * {@link sumDocumentTotals} costs its fees through this same function, so a
+ * reader that needs ONE fee line's amount (a row cell, where a percent line's
+ * stored `total_cents` is 0 by contract) gets the number the totals pass used
+ * rather than a second derivation of it.
+ */
+export function transactionFeeBasisCents(
+  totals: { subtotal_discounted_cents: number; taxes: ReadonlyArray<{ amount_cents: number }> },
+): number {
+  let taxSumCents = 0;
+  for (const entry of totals.taxes) taxSumCents += entry.amount_cents;
+  return totals.subtotal_discounted_cents + taxSumCents;
+}
+
+/**
+ * The amount ONE `transaction_fee` line contributes, given its document's
+ * `totals`. A percent line stores no money (see {@link priceTransactionFeeLine}),
+ * and `totals.transaction_fees` aggregates by NAME, so neither answers per row.
+ */
+export function transactionFeeLineAmountCents(
+  item: PricingItem,
+  totals: { subtotal_discounted_cents: number; taxes: ReadonlyArray<{ amount_cents: number }> },
+): number {
+  return calculateTransactionFeeAmountCents(item, transactionFeeBasisCents(totals));
+}
+
+/**
  * Calculate the discount amount, in cents, for a single line item.
  *
  * Plain integer subtraction: both operands are exact counts of cents, so there
@@ -1655,10 +1684,6 @@ export function sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTota
   const discount_amount_cents = getTotalDiscountCents(items);
   const taxTotals = getTaxTotals(items, taxes);
 
-  let taxSumCents = 0;
-  for (const entry of taxTotals) {
-    taxSumCents += entry.amount_cents;
-  }
 
   // Pass 2: cost the transaction fees, against the CAPTURED amount.
   //
@@ -1670,7 +1695,7 @@ export function sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTota
   //
   // ⚠️ **No circularity, and it is worth stating because the expression looks
   // like there could be.** A `transaction_fee` is not an `isPreTaxItem`, so
-  // `getTaxTotals` above never sees one: `taxSumCents` is fully determined
+  // `getTaxTotals` above never sees one: the tax half of `feeBasisCents` is fully determined
   // before this line, and the fee it feeds is itself untaxed (Card Fee and the
   // Distance/Holiday/Rush surcharges are all `tax_class: none` by policy). A
   // future decision to TAX a fee would make this genuinely circular and needs a
@@ -1687,8 +1712,11 @@ export function sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTota
   // `TotalsTable` flat-rate arm had never executed for the same reason, and it
   // shipped a 100x error ($43.60 rendering as $0.43) that only became reachable
   // when this stopped being true.
+  // `subtotal_discounted + Σ tax` — through the exported helper, so a per-row
+  // reader of one fee's amount costs it against exactly this basis.
+  const feeBasisCents = transactionFeeBasisCents({ subtotal_discounted_cents: subtotalDiscountedCents, taxes: taxTotals });
   const transaction_fees = getTransactionFeeTotals(
-    costTransactionFees(items, subtotalDiscountedCents + taxSumCents),
+    costTransactionFees(items, feeBasisCents),
   );
 
   let feeSumCents = 0;
@@ -1702,7 +1730,7 @@ export function sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTota
     subtotal_discounted_cents: subtotalDiscountedCents,
     taxes: taxTotals,
     transaction_fees,
-    total_cents: subtotalDiscountedCents + taxSumCents + feeSumCents,
+    total_cents: feeBasisCents + feeSumCents,
   };
 }
 

@@ -29,6 +29,8 @@ import {
   TAXABLE_REVENUE_COAS,
   calculateItemTotalCents,
   calculateTransactionFeeAmountCents,
+  transactionFeeBasisCents,
+  transactionFeeLineAmountCents,
   calculateOrderTotals,
   calculateReplacementTotals,
   computeLineMoney,
@@ -943,6 +945,21 @@ Deno.test("calculateOrderTotals fee basis nets the DISCOUNT and includes the tax
   assertEquals(result.taxes[0].amount_cents, 1200);
   assertEquals(result.transaction_fees[0].amount_cents, 276);
   assertEquals(result.total_cents, 9476); // 80 + 12 + 2.76
+});
+
+Deno.test("transactionFeeLineAmountCents gives each fee ROW its own amount from stored totals", () => {
+  // Two percent lines sharing a name: `totals.transaction_fees` folds them into
+  // one entry by name, so a row cell cannot read its amount from there. The
+  // expected numbers are literals, not re-derived through the helper.
+  const feeA = makeFeeItem({}, { base_percent: 3, formula: "percent_of_total" });
+  const feeB = makeFeeItem({}, { base_percent: 1, formula: "percent_of_total" });
+  const flat = makeFeeItem({ quantity: 2 }, { base_cents: 500, base_percent: null, formula: "fixed" });
+  const totals = calculateOrderTotals([makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] }), feeA, feeB, flat], TAXES);
+  // basis = 100 + 15 = 115
+  assertEquals(transactionFeeBasisCents(totals), 11500);
+  assertEquals(transactionFeeLineAmountCents(feeA, totals), 345); // 3% of 115
+  assertEquals(transactionFeeLineAmountCents(feeB, totals), 115); // 1% of 115
+  assertEquals(transactionFeeLineAmountCents(flat, totals), 1000); // 5 × 2
 });
 
 Deno.test("calculateOrderTotals flat transaction fee", () => {

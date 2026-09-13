@@ -29844,6 +29844,22 @@ with the doc it renders.
 Update chargeable_days on line items that still match the previous default.
 Skips structural items, items without a price, and manual overrides.
 
+### `transactionFeeBasisCents(totals: typeLiteral): number`
+
+The basis a document's `transaction_fee` lines are costed against:
+`subtotal_discounted + Σ tax`, read off a document's `totals`.
+
+{@link sumDocumentTotals} costs its fees through this same function, so a
+reader that needs ONE fee line's amount (a row cell, where a percent line's
+stored `total_cents` is 0 by contract) gets the number the totals pass used
+rather than a second derivation of it.
+
+### `transactionFeeLineAmountCents(item: PricingItem, totals: typeLiteral): number`
+
+The amount ONE `transaction_fee` line contributes, given its document's
+`totals`. A percent line stores no money (see {@link priceTransactionFeeLine}),
+and `totals.transaction_fees` aggregates by NAME, so neither answers per row.
+
 ### `validateComponentUniqueness(items: T[]): ItemUniquenessIssue[]`
 
 Products' `components` variant of {@link validateItemUniqueness}. A product

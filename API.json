@@ -13675,6 +13675,22 @@
         },
         {
           "kind": "function",
+          "name": "transactionFeeBasisCents",
+          "signature": "transactionFeeBasisCents(totals: typeLiteral): number",
+          "doc": "The basis a document's `transaction_fee` lines are costed against:\n`subtotal_discounted + Σ tax`, read off a document's `totals`.\n\n{@link sumDocumentTotals} costs its fees through this same function, so a\nreader that needs ONE fee line's amount (a row cell, where a percent line's\nstored `total_cents` is 0 by contract) gets the number the totals pass used\nrather than a second derivation of it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "transactionFeeLineAmountCents",
+          "signature": "transactionFeeLineAmountCents(item: PricingItem, totals: typeLiteral): number",
+          "doc": "The amount ONE `transaction_fee` line contributes, given its document's\n`totals`. A percent line stores no money (see {@link priceTransactionFeeLine}),\nand `totals.transaction_fees` aggregates by NAME, so neither answers per row.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "validateComponentUniqueness",
           "signature": "validateComponentUniqueness(items: T[]): ItemUniquenessIssue[]",
           "doc": "Products' `components` variant of {@link validateItemUniqueness}. A product\ncomponent `path` is the ancestor chain and EXCLUDES the component's own uid,\nso the immediate parent is the LAST segment (`path[-1]`), not the\nsecond-to-last. Reusing {@link validateItemUniqueness} here is off by one: it\nkeys a depth->=2 entry on its GRANDparent, so the same sub-product placed\nunder two different direct children — a placement the product editor supports\n— collapses into one key and is falsely rejected (api-cloudrun#348).\nExact-duplicate rows (identical full `path` + `uid`) still collide and are\nstill rejected.\n\nReturns `[]` when uniqueness holds.",
