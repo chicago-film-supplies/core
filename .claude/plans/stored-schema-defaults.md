@@ -4,6 +4,69 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
+> ## ✅ STATUS 2026-09-13 — **batch 13 landed. Backlog 56 → 46. Chain verified by digest.**
+>
+> `items[].path` ×10 — the row identity, one author (`computeItemPaths`/`computeInvoiceItemPaths`),
+> across `LineItemCore` (`_items.ts`), `DestinationDividerArm`/`GroupDividerArm` (`_dividers.ts`) and
+> `InvoiceDocOrderItem` (`invoice.ts`) — 4 declarations covering all 10 discriminator positions across
+> orders/invoices/fulfillments. `core` `65eb133` → **`beta.417`**. This was the batch the doc's own
+> prior session flagged "take deliberately or last" because `path` is the row identity and an
+> `items[]` backfill can make the array unwritable if it doesn't preserve `resolveBlock`'s
+> `zero_priced`-sorted canonical order (core#95's `items[]` hazard). **It needed none of that care in
+> the event, because there was no backfill at all**: `audit:reparse` read every one of the 10
+> positions **100% present, 100% non-null, in both projects, before the edit** — `orders` 10,114 +
+> 1,024 + 2,905 · `invoices` 9,618 + 3,145 + 1,017 + 1,017 · `fulfillments` 10,035 + 1,024 + 2,905
+> item rows, ~42,800 total. The tightening was purely definitional.
+>
+> **Writer audit closed it outright** (batch 6's pattern: a complete denominator discharges the
+> census). `computeItemPaths` (line items, both dividers) and `computeInvoiceItemPaths` (the invoice
+> `order` divider) are each called at every create AND rebuild site — `createOrder`/`updateOrder`
+> (`services/orders.ts`), `createInvoice`/`updateInvoice`/`resyncInvoice` (`services/invoices.ts`),
+> `buildFulfillment` (`services/fulfillment.ts`, itself the one author every fulfillment
+> create/sync/edit path routes through) — confirmed by reading each call site, not inferred.
+> `createInvoice`'s own comment already recorded the fix (*"before this every item of a create whose
+> caller omitted `path` was persisted with `path: []`"*), so the corpus completeness was not an
+> accident of a thin population — it is what the writer audit predicts for a fully-covered writer set.
+>
+> **All ten interface fields (`path: string[]`, no `?`) were already required** — no batch-10/11
+> interface-vs-schema mismatch here, so nothing reddened downstream. `getInitialValues` byte-identical
+> before/after (`[]` is the array's own type-zero, same as every prior `items[]` batch). Fixture sweep
+> clean: all 23 committed `quote`/`invoice` templates fixtures (224 item rows) already state `path` on
+> every row, confirmed by `deno task lint:fixtures` post-bump as well as a direct JSON count pre-bump.
+> An Explore-agent sweep of `api-cloudrun/tests`, `api-cloudrun/scripts` and all of `manager/` found no
+> hand-built order/invoice/fulfillment item or divider literal missing `path` that reaches a real
+> schema parse — the few candidates found either flow through the sole author first or never reach a
+> `.safeParse`. Three `core/tests/{order,invoice}.test.ts` literals (`docLine` and five inline
+> destination/group/order-divider objects) had relied on the now-removed default and were completed
+> with an explicit `path`, each dropping exactly one field per the campaign's negative-test rule.
+>
+> ✅ **The chain is CLOSED, by digest.** `api-cloudrun` `e17a3ddf` → release PR #973 merged as
+> `d5900ab5`, cutting **`v0.252.0`**. Build `2db0e5fa` produced
+> `sha256:1ec2440d831d2e2b495992c9c20d4dc1fb312ac757c37abeb6be6308bee33df1`, and revision
+> `api-cloudrun-00378-jv5` serving 100% traffic carries exactly that digest. Deployed tree's
+> `deno.json`/`deno.lock` (pulled off the Artifact Registry blob store, Docker Registry HTTP API)
+> byte-identical to the released commit — diffed against `git show d5900ab5:...` rather than the
+> working tree, because **a peer session was already using this shared checkout** for unrelated work
+> (core#108's `app_version` field) with `deno.json` bumped ahead to `beta.418` uncommitted; the
+> verification ran from a throwaway `git worktree add` at the exact released sha instead of disturbing
+> that WIP. Reparse with no `--core` flag from that worktree: all 10 positions **REACHED**, 0 failures,
+> both projects, denominators unchanged. `manager` released FIRST as `manager-v26.4.0` — its own
+> release PR #454 had already been queued for an unrelated fulfillment-UI feature batch, and this
+> pin's `chore(deps)` commit folded into it; `requires-manager` measured green. `templates` PR #326,
+> all four required checks (`money-lint`, `money-lint-ratchet`, `templates-lint`, `visual-diff`)
+> passed before merge.
+>
+> ⚠️ **The `stores` family's leftover — `out-of-service.stores[].locations` — is still deliberately
+> left**, unchanged by this batch (it needs the input/storage split noted in batch 12, not a census).
+>
+> | batch | what | backlog | state |
+> |---|---|---:|---|
+> | 1–9 | see `core/CLAUDE.md` § *`.default()` and `.optional()`* and the table two sections below | 259 → 75 | ✅ prod |
+> | 10 | `sources`/`reference` tidy-up — 6 paths, 5 declarations | 75 → 69 | ✅ prod, `v0.251.0` |
+> | 11 | the templates family — 7 paths, 3 declarations | 69 → 62 | ✅ prod, `v0.251.1` |
+> | 12 | the `stores` family — 6 of 7 paths, 3 declarations | 62 → 56 | ✅ prod, `v0.251.2` |
+> | 13 | `items[].path` — 10 paths, 4 declarations | 56 → **46** | ✅ prod, `v0.252.0`, revision `api-cloudrun-00378-jv5`, digest-verified |
+
 > ## ✅ STATUS 2026-09-13 — **batch 12 landed. Backlog 62 → 56. Chain verified by digest.**
 >
 > The `stores` family — 6 of 7 candidate paths: `bookings.stores` / `.query_by_uid_store` /
@@ -837,7 +900,8 @@ campaign knows about, in order of who is blocked:
 |---|---|---|---|
 | 1 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
 | 2 | ✅ **Batch 12** — the `stores` family, 6 of 7 paths. Done, see status block. `out-of-service.stores[].locations` deliberately left, reason beside the schema | — | closed |
-| 3 | **Batch 13** — 56 paths left. `items[].path` ×10 is now the largest remaining cluster; see below | next session | nothing |
+| 3 | ✅ **Batch 13** — `items[].path` ×10. Done, see status block — no backfill needed, corpus was already 100% present/non-null both projects | — | closed |
+| 3b | **Batch 14** — 46 paths left. Read the split off `tests/stored-defaults.test.ts`; the small-singles tail (`organizations.contacts[].roles`, `orders.invoices`+`query_by_invoices`, `credit-notes.remaining_credit_cents`+`xero_credit_note_id`, `comments.reactions`, `contacts.organizations`+`query_by_organizations`, `stock.unavailable`, `taxes.crms_id`, etc.) is what remains — no natural cluster left, assemble deliberately | next session | nothing |
 | 4 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
 | 5 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip. ⚠️ **Batch 11 is a live counter-example this issue should cite**: a stale bare-basename citation from batch 10's own status-update commit blocked `beta.415`'s first publish attempt, and only CI's core-alone run caught it — two prior full-workspace `audit:citations` runs had read it clean | — | nothing |
 | 6 | **Historic orders/invoices priced from the 3 untaxed rentals** — lines carry a tax SNAPSHOT, so the catalog repair does NOT reach them. Unmeasured on purpose | the owner | a money call; wants its own issue with `risk:money-path` |
@@ -949,14 +1013,17 @@ green core suite over such a fixture is not evidence; assert each path directly.
 
 ## Context recommendation
 
-**Clear before batch 13.**
+**Clear before batch 14.**
 
-Batches 9, 10, 11 and 12 (and batch 9's two follow-ups) are closed — nothing mechanical is left to
-watch, and every prod repair (including batch 12's own backfill-bug correction) is applied and
-verified. **Batch 13 depends on none of this session's analysis.** Everything it requires is written
-down: the backlog is read off `core/tests/stored-defaults.test.ts` (**56** paths as of batch 12 —
-`items[].path` ×10 is now the largest single cluster left; re-derive the scalar/array split rather
-than trusting this number),
+Batches 9, 10, 11, 12 and 13 (and batch 9's two follow-ups) are closed — nothing mechanical is left
+to watch, and every prod repair (including batch 12's own backfill-bug correction) is applied and
+verified. Batch 13 (`items[].path` ×10) needed no backfill at all — the corpus was already 100%
+present/non-null on all 10 positions in both projects before the edit, so the whole batch was a
+writer-audit-plus-fixture-sweep with a beta cut and a deploy, no data migration. **Batch 14 depends on
+none of this session's analysis.** Everything it requires is written
+down: the backlog is read off `core/tests/stored-defaults.test.ts` (**46** paths as of batch 13 —
+the cheap clusters are gone; what remains is the small-singles tail named in the "what is left" table
+above — re-derive the scalar/array split rather than trusting this number),
 the partition is re-derived by the recipe above, the `items[]` hazards are in the section above, and
 the policy — the parse-not-census rule, the shared stored/input-node rule, the denominator rule
 batches 4 and 6 sharpened between them, batch 7's *require the KEY, claim nothing about the VALUE*,
