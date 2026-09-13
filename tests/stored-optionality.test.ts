@@ -217,6 +217,10 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["invoices.organization.jurisdiction_claim", "mid-expand"],
   ["orders.organization.jurisdiction_claim", "mid-expand"],
   ["organizations.jurisdiction_claim", "mid-expand"],
+  //    api-cloudrun#979's expand third: the sweep backfills both, then the
+  //    tightening beta drops `.optional()` and these two entries with it.
+  ["organizations.active", "mid-expand"],
+  ["organizations.active_override", "mid-expand"],
   // ── refused — a written refusal sits beside the declaration, with its corpus
   //    count. See `src/schemas/supplier.ts`.
   ["transactions.supplier", "refused:no-writer-yet"],

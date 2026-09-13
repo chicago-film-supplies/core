@@ -104,6 +104,12 @@ export const organizations: TypesenseCollectionConfig = {
       // exactly that correspondence.
       { name: "jurisdiction_claim", type: "string", facet: true, optional: true },
       { name: "tax_exempt", type: "bool", facet: true, optional: true },
+      // The picker's noise filter (`active:!=false`, api-cloudrun#979). STORED,
+      // not derived at index time like `level`/`derived` above: it is the
+      // sweep's answer, mirrored onto departments, so a department hit filters
+      // on its project's liveness without a join.
+      { name: "active", type: "bool", facet: true, optional: true },
+      { name: "active_override", type: "bool", facet: true, optional: true },
       { name: "emails", type: "string[]", stem: true, optional: true },
       { name: "phones", type: "string[]", optional: true },
       // 🔴 **`parentOptional` must be TRUE: `Organization.billing_address` is

@@ -617,6 +617,14 @@ export interface OrganizationDocument {
   xero_id?: string;
   jurisdiction_claim?: string;
   tax_exempt?: boolean;
+  /**
+   * The stored `Organization.active` — sweep-computed at a project, mirrored at
+   * a department, absent at a root (api-cloudrun#979). ⚠️ **`undefined` is not
+   * `false`**: filter with `active:!=false` so roots and not-yet-swept nodes
+   * stay visible.
+   */
+  active?: boolean;
+  active_override?: boolean;
   emails?: string[];
   phones?: string[];
   billing_address: TypesenseAddressFields;

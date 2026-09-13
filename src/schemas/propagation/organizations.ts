@@ -552,6 +552,47 @@ const reparentOrganizationTransaction: TransactionDefinition = {
   ],
 };
 
+// ── sweep-organization-active ───────────────────────────────────────
+//
+// ⚠️ **`enforced_by` names only core's invariant 13 for now, deliberately.**
+// The sweep, its drift arm and its location ratchet land in api-cloudrun AFTER
+// this declaration publishes, and api-cloudrun's `enforcedByResolves` fails on
+// an `api-cloudrun/...` ref to a file that does not exist yet — so naming them
+// here would redden the next pin bump of whichever session takes this beta
+// first. They are added in the beta that tightens `active` to required.
+const ORG_ACTIVE_ONE_DOCUMENT: EnforcementRef = {
+  kind: "zod",
+  ref: "core/src/schemas/organization.ts::13. `active` lives below the root",
+  clause:
+    "the one-document half only: `active` is non-null exactly below the root, and `active_override` is non-null only on a project. Says NOTHING about whether a department's `active` equals its project's — that reads two documents.",
+  gates: true,
+};
+
+const sweepOrganizationActiveRules: CollectionRule[] = [
+  {
+    id: "sweep-org-active:project-to-departments",
+    source: "organizations",
+    target: "organizations",
+    mode: "fan-out",
+    invariant:
+      "A department's `active` is a MIRROR of its project's (`active_override ?? computed`), written by the daily sweep in the same pass that computes the project's. 🔴 **A deliberate exception to the tree's \"resolve, don't copy\" rule** (billing address, tax axes): a search filter decides which rows a query returns and cannot walk to a parent, so the value has to sit on the row. A department carries no `active_override`, so the copy has exactly one author and no override ambiguity. ⚠️ Written as a narrow field update, never through `updateOrganization` — an activity flip must fire no rename, Xero or tax cascade.",
+    enforced_by: [ORG_ACTIVE_ONE_DOCUMENT],
+    transaction: "sweep-organization-active",
+    fields: [
+      { source: ["active"], target: ["active"] },
+    ],
+  },
+];
+
+const sweepOrganizationActiveTransaction: TransactionDefinition = {
+  id: "sweep-organization-active",
+  description:
+    "The daily project-activity sweep (api-cloudrun#979): computes each project's `active` from open orders/invoices and recent activity in its subtree, honours `active_override`, and mirrors the result onto its departments. Its OWN transaction rather than a borrowed `update-organization`, so the drift warning counts the rules it actually fires.",
+  steps: [
+    "sweep-org-active:project-to-departments",
+  ],
+};
+
 const updateOrganizationTransaction: TransactionDefinition = {
   id: "update-organization",
   description:
@@ -577,10 +618,12 @@ export const organizations: PropagationModule = {
     ...updateOrganizationRules,
     nameToDescendantsRule,
     ...reparentRules,
+    ...sweepOrganizationActiveRules,
   ],
   transactions: [
     createOrganizationTransaction,
     updateOrganizationTransaction,
     reparentOrganizationTransaction,
+    sweepOrganizationActiveTransaction,
   ],
 };

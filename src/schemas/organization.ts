@@ -164,6 +164,38 @@ export interface Organization {
    */
   dates?: { start: string | null; wrap: string | null };
   /**
+   * Whether this node's PROJECT is live — the answer a picker filters on
+   * (`active:!=false`) to hide productions nobody has touched (api-cloudrun#979).
+   *
+   * 🔴 **Stored, and it has exactly ONE writer: the daily
+   * `sweep-organization-active` task.** It is in neither input schema, so no
+   * client payload can carry it. At a project (depth 2) it is
+   * `active_override ?? computed`, where computed is *"an open order/invoice in
+   * the subtree, or any activity in the last 60 days"*. At a department (depth 3)
+   * it is a MIRROR of its project's value — a deliberate exception to the tree's
+   * "resolve, don't copy" rule, because a search filter decides which rows a
+   * query returns and cannot walk to a parent (invariant 13 + the
+   * `sweep-organization-active` propagation rule). `null` at a root, which this
+   * lifecycle does not reach.
+   *
+   * ⚠️ **This REVERSES the "no stored status" note on `dates` above**, which is
+   * being removed: an operator pin and a Typesense-filterable answer are two
+   * things a pure derivation cannot give.
+   *
+   * Optional through the expand third — tightened once both corpora are
+   * backfilled. Never `.default()`.
+   */
+  active?: boolean | null;
+  /**
+   * An operator's PIN on a project's `active` — `null` lets the sweep decide,
+   * `true`/`false` overrides it. Non-null only at depth 2 (invariant 13): a
+   * department has no authorship channel for one, which is what keeps its
+   * mirrored `active` unambiguous.
+   *
+   * Optional through the expand third. Never `.default()`.
+   */
+  active_override?: boolean | null;
+  /**
    * The organization's **human-readable account number** — despite the name.
    *
    * 🔴 **It is NOT expendable CRMS surface area, and the name says otherwise, so
@@ -449,6 +481,35 @@ function checkOrganizationNode(doc: Organization, ctx: z.RefinementCtx): void {
       });
     }
   }
+
+  // 13. `active` lives below the root, and only a PROJECT may pin it.
+  //
+  //     🔴 **The one-document half of the project-activity lifecycle**
+  //     (api-cloudrun#979). A project's `active` is the sweep's answer or the
+  //     operator's pin; a department's is a MIRROR of its project's, so a pin on
+  //     a department would be a second author for a value that must equal its
+  //     parent's. A root is out of the lifecycle and states neither.
+  //
+  //     ⚠️ **The pin is `non-null ⇒ depth 2`, not `⟺`** — `null` on a project is
+  //     a real answer ("let the sweep decide"), not a missing one.
+  //
+  //     ⚠️ The mirror's EQUALITY (department `active` === its project's) reads two
+  //     documents and cannot live here; the sweep's per-run drift check owns it.
+  //     Guarded on `!== undefined` through the expand third.
+  if (doc.active !== undefined && path.length > 0 && (doc.active !== null) !== (path.length >= 2)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["active"],
+      message: `active is non-null exactly below the root (projects and departments) — this node is depth ${path.length} and active is ${doc.active}`,
+    });
+  }
+  if (doc.active_override != null && path.length !== 2) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["active_override"],
+      message: `only a project pins its activity — active_override must be null at depth ${path.length}; a department mirrors its project's active`,
+    });
+  }
 }
 
 /** Zod schema for a full organization Firestore document. */
@@ -470,6 +531,8 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
     start: chicagoStartOfDay().nullable().meta({ column: true, label: "Start" }),
     wrap: chicagoStartOfDay().nullable().meta({ column: true, label: "Wrap" }),
   }).optional().meta({ label: "Dates" }),
+  active: z.boolean().nullable().optional().meta({ column: true, label: "Active" }),
+  active_override: z.boolean().nullable().optional().meta({ column: true, label: "Active Override" }),
   crms_id: z.int().nullable(),
   xero_id: z.uuid().nullable(),
   // ⚠️ The "Required (no `.default(\"tax_applied\")`) … TAX_PROFILES[0]" note
@@ -621,6 +684,14 @@ export interface UpdateOrganizationInputType {
   uid_parent?: string | null;
   uid_department_type?: string | null;
   dates?: { start: string | null; wrap: string | null };
+  /**
+   * Pin a PROJECT's activity (`true`/`false`) or hand it back to the sweep
+   * (`null`). Absent leaves the pin alone. Refused off a project by invariant 13.
+   *
+   * ⚠️ **`active` itself is deliberately NOT here** — its only writer is the
+   * sweep, so there is no field for a client payload to carry.
+   */
+  active_override?: boolean | null;
   /** The AXES — see {@link CreateOrganizationInputType}. */
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
@@ -643,6 +714,7 @@ export const UpdateOrganizationInput: z.ZodType<UpdateOrganizationInputType> = z
     start: chicagoStartOfDay().nullable(),
     wrap: chicagoStartOfDay().nullable(),
   }).optional(),
+  active_override: z.boolean().nullable().optional(),
   jurisdiction_claim: JurisdictionEnum.nullable().optional(),
   tax_exempt: z.boolean().optional(),
   description: z.string().optional(),
