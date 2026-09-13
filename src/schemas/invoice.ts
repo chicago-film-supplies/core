@@ -924,7 +924,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   number: z.int().meta({ column: true, label: "#", linkTo: "invoiceDetail" }),
   status: InvoiceStatus.meta({ column: true, label: "Status" }),
   query_by_orders: z.array(z.string()),
-  number_orders: z.array(z.int()).default([]).meta({
+  number_orders: z.array(z.int()).meta({
     column: true,
     label: "Order #",
   }),
@@ -986,8 +986,8 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     .superRefine(checkZeroPricedComponents),
   totals: InvoiceDocTotals,
   xero_id: z.uuid().nullable(),
-  uploadcare_uuid: uploadcareRef(z.string().nullable().default(null)),
-  pdf_generated_at: FirestoreTimestamp.nullable().default(null),
+  uploadcare_uuid: uploadcareRef(z.string().nullable()),
+  pdf_generated_at: FirestoreTimestamp.nullable(),
   // Required and no `.default({})`: a default never materializes on a write
   // (`validateBeforeWrite` discards `result.data`), so it would only license a
   // future writer to forget the stamp. `generateInvoicePdf` is the sole author.
