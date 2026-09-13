@@ -4,330 +4,72 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ✅ STATUS 2026-09-13 — **batch 10 landed. Backlog 75 → 69. Chain verified by digest.**
-> Took the doc's own recommendation — `sources` + `reference`, said out loud as a tidy-up — and it
-> was 6 paths across 5 declarations, not 7: `recurrences.prototype.sources` re-derived out of the
-> backlog (batch 9's `cards` repair or an intervening walk had already resolved it), so the actual
-> take is `orders.reference`, `fulfillments.reference`, `credit-notes.reference`,
-> `credit-notes.sources`, `out-of-service.sources`, `transactions.sources`. `core` published
-> **`beta.414`** (`720a8f6`). Census, both projects, 0 absent on all six before the edit: credit-notes
-> 13/13, fulfillments 1,022/1,022, orders 1,022/1,022, out-of-service 2/2 prod · 4/4 dev,
-> transactions 2,015/2,015 prod · 2,205/2,205 dev.
+> ## ✅ STATUS 2026-09-13 — **batch 11 landed. Backlog 69 → 62. Chain verified by digest.**
 >
-> **No shared stored/input node this time — every input schema already spelled these fields
-> `.optional()`, never `.default()`**, so this was a pure-storage tightening with no client-first
-> ordering to take, unlike batch 9's `cards`/`products` remainder. `Order.reference` carried the
-> batch-9 tell anyway: the interface said `reference?: string | null` while the schema defaulted it —
-> corrected to required. The other four interfaces were already non-optional.
+> The templates family — 7 paths across three collections: `templates.active_semver` /
+> `depends_on.components` / `fixtures` / `draft_uids`, `templates-versions.params` /
+> `consumed_components`, `template-components.draft_uids`. `core` published **`beta.415`**
+> (`dc900c2`). Writer audit (agent-run): of the 16 (field × real create-site) combinations across
+> `registerTemplateFamily`, `publishFromMerge` and the manager-facing draft flow, **15 already
+> stated the field explicitly**; the one exception, `active_semver` at `registerTemplateFamily`,
+> writes via a raw `tx.set()` that bypasses schema validation entirely (so no default was ever
+> consulted there either). Census, both projects, 100% present / 0 null on all seven paths before
+> the edit: `templates` 7/7 prod · 9/9 dev, `templates-versions` 137/137 · 741/741,
+> `template-components` 1/1 · 1/1 — thin denominators, so the writer audit carried the claim, not
+> the census (batch 4's rule).
 >
-> 🔴 **The interface fix immediately surfaced the exact failure `updateOrder`'s own comment
-> predicted for `subject` (core#97), now on `reference`.** `"reference" in update` narrows the
-> OBJECT, not the already-`.optional()` INPUT property, so `update.reference` still typed as
-> `string | null | undefined` against a now-required `string | null` field — a real `TS2322`, not a
-> hypothetical. Fixed the same way `uid_store` two lines below it already is: `update.reference ??
-> null`. A present JSON key can never carry a real `undefined`, so this changes no runtime behavior —
-> `deno task check` was the instrument that caught it, not a census.
+> 🔴 **`active_semver` is the one field whose interface was already optional (`?: string | null`),
+> and the right fix was NOT `.nullable().optional()` — a sibling ratchet (`tests/stored-optionality.test.ts`,
+> core#83) caught that immediately.** Owner ruling there: a stored field is `.nullable()` (present,
+> possibly null) or fully required, never `.nullable().optional()` — the absent state is what once
+> made a legally-missing `Invoice.reference` hand a stray `undefined` into an unrelated ORDER update
+> and 400 it. Fixed by making `active_semver` required-and-nullable like its sibling `uid_active`,
+> and having `registerTemplateFamily` state `active_semver: null` explicitly.
 >
-> 🔴 **The templates classifier work paid off immediately**: `quote` (orders-sourced) was the only
-> family touching any of these six fields, and reading its sidecar's `collection_source` first meant
-> checking exactly one family's fixtures rather than sweeping all seven. All 15 committed `quote`
-> fixtures already stated `reference` — `lint:fixtures` clean, no fixture repair needed. One
-> hand-spelled `orders` literal in `api-cloudrun/tests/unit/fixtureFormat.test.ts` was missing
-> `reference` (the same class batch 5 hit twice) and was completed.
+> ⚠️ **The `Template` interface change (making `active_semver` non-optional) surfaced 9 more
+> hand-spelled/seed `Template` literals the compiler had never checked** — `api-cloudrun/tests/helpers/seedTemplate.ts`,
+> `api-cloudrun/scripts/seed-quote-template.ts`, and 7 integration-test fixtures across
+> `api-cloudrun/tests/integration/templates/` — all "create-shaped" literals; every `...fam`-spread
+> update-path literal was already safe by
+> construction. `deno task check` against a `file://`-pinned local core found all of them.
 >
-> ✅ **The chain is CLOSED, by digest, extracted from the running image with no `docker` available.**
-> Release PR #967 merged as `b3607570`, cutting **`v0.251.0`**. Build `563c1484` (region
-> `us-central1`) produced `sha256:697e6c05896bfb6a7d94b7bbac86a9331ba9d09394c5fd927372849dbd27c6d4`,
-> and revision **`api-cloudrun-00375-cxd`** serves exactly that digest at 100% traffic. With no
-> `docker`/`crane`/`skopeo` on the box, the deployed tree's `deno.json` and `deno.lock` were pulled
-> straight off the Artifact Registry blob store via the Docker Registry HTTP API (`curl` + a gcloud
-> access token, manifest → layer list → the one small COPY-only layer carrying the container's
-> `app/`-rooted `deno.json` + `deno.lock`) — **both byte-identical** to the checkout the probe ran
-> from. The reparse with
-> **no `--core` flag** (header: *"schemas from pinned @cfs/core/schemas"*) parses against the core
-> the image itself resolves: **all 6 positions `REACHED`, 0 new failures, in both projects.** The
-> one `transactions` failure in each project is the pre-existing `api-cloudrun#955` supplier-null row
-> (item 1 on the "What is LEFT" table below), unrelated to this batch. ⭐ published → pinned →
-> deployed → enforcing, each link a different claim and each one checked.
+> ✅ **The chain is CLOSED, by digest.** Release PR #970 merged as `cb2a7930`, cutting **`v0.251.1`**.
+> Build `afa77e2f` (region `us-central1`) produced `sha256:a3d0973811adf56c129d427f193b956583d418048714db3e15b227b6f614f297`,
+> and revision **`api-cloudrun-00376-sl6`** serves exactly that digest at 100% traffic. Deployed
+> tree's `deno.json`/`deno.lock` pulled off the Artifact Registry blob store (Docker Registry HTTP
+> API, no `docker` on the box) — both byte-identical to the checkout. Reparse with no `--core` flag:
+> **all 3 positions `REACHED`, 0 new failures, in both projects** — the same pre-existing
+> `api-cloudrun#955` transactions row (plus dev's known `locations`/`users` rows) unrelated to this
+> batch.
 >
-> ⚠️ **`manager` was released BEFORE api-cloudrun's release PR was merged**, as the ordering rule
-> requires — `manager-v26.2.0` carried the `beta.414` pin first, so `requires-manager`'s measured arm
-> was green on its first run rather than red-then-fixed.
+> ⭐ **`getInitialValues` checked and unaffected**: before/after dump of all three schemas is
+> byte-identical — every one of the 7 defaults equalled its node's type-zero (`active_semver` seeds
+> `null`, matching its own `.nullable()`), so no `.meta({ initial })` was needed.
 >
-> ⭐ **`getInitialValues` checked and unaffected**: dumped for all five stored schemas, `reference`'s
-> type-zero (`null`) and `sources`'s (`[]`) both equal the dropped default exactly, so no
-> `.meta({ initial })` was needed and no manager form seed moved.
-
-> ## ⚠️ STATUS 2026-09-11 — **batch 9 landed, plus TWO follow-ups and a prod repair. Backlog 75.**
-> **Three deploys in this session, and only the first is a batch.** `beta.410` is batch 9 itself
-> (`v0.249.5`, revision `api-cloudrun-00372-f6z`). `beta.411` and `beta.412` are its consequences —
-> a finding the batch made, then a CORRECTION to the call that finding prompted — and
-> `api-cloudrun` `0b6ab037` repaired the prod data the correction exposed. All four are closed and
-> verified; the backlog moved only for the batch.
-> One statement, compacted rather than stacked. Nine batches. Batch 9 is **the products family plus
-> the two unblocked card paths — 15 paths across THREE declarations**: `ProductSchema` ×6
-> (`alternates`, `components`, `component_of`, `price.taxes`, `price.discountable`,
-> `webshop.available`), `WebshopProductSchema` ×7 (the same five plus
-> `components[]`/`component_of[].price.taxes`, which are ONE node at two positions), and `CardSchema`
-> ×2 (`action`, `organization`). Backlog **90 → 75**. `core` published **`beta.410`** (`22e695e`);
-> `api-cloudrun` (40 pins, `1cdb3a2a`), `manager` (1 pin, `156d470`, released as `manager-v26.0.3`)
-> and `templates` (15 pins, PR #315, merged as `a069082`) are all bumped.
+> ⚠️ **A peer's uncommitted, in-progress WIP in the shared `manager` checkout (a pane-rail component)
+> failed my pre-push suite on the first try — not my change.** Messaged the peer rather than
+> stashing their files; they confirmed their tree was green minutes later and the retry passed.
+> **`manager` was released (`manager-v26.2.1`) before api-cloudrun's release PR was merged**, as the
+> ordering rule requires — `requires-manager`'s measured arm needed a manual re-run (it had cached
+> the pre-release-manager result) but came back green before the merge.
 >
-> ✅ **The chain is CLOSED, by digest and against the deployed artifact.** Release PR #963 merged as
-> `6bcefeed`, cutting **`v0.249.5`**. Build `a5170e7a` (region `us-central1`) produced
-> `sha256:edb31486a30c673c8bd1804aa86a424a7d27b7242acc99131584905d5393b84d`, and revision
-> **`api-cloudrun-00372-f6z`** serves exactly that digest at 100% traffic. The deployed tree's
-> `deno.json` was diffed against the checkout the probe ran from — **identical, 10,406 bytes** — so
-> the reparse with **no `--core` flag** (header: *"schemas from pinned @cfs/core/schemas"*) parses
-> against the core the image itself resolves: **all 15 positions `REACHED`, 0 failures, exit 0.**
-> ⭐ published → pinned → deployed → enforcing, each link a different claim and each one checked.
->
-> ### ✅ FOLLOW-UP 1 — `beta.411` moved the authorship to the writer
-> On the owner's call, batch 9's first finding was **resolved rather than documented**.
-> `CreateProductInput`'s four array defaults are now `.optional()` and `createProduct` states
-> `alternates` / `components` / `component_of` / `tags` at its construction site — `core` `933248c`
-> → **`beta.411`**, `api-cloudrun` `1e6fc531` → **`v0.250.0`**, revision `api-cloudrun-00373-nwx`,
-> digest `sha256:e129ab26…`, deployed tree verified to carry BOTH halves. `manager-v26.0.5` and
-> `templates` PR #316 are on `.411`.
->
-> 🔴 **The suite could not see the change, and the mutation control is what found that.** Reverting
-> `createProduct` to the spread-only form against a loosened input left the products integration
-> suite **GREEN** — `productBase` is `getInitialValues(CreateProductInput)`, so no create in that
-> file omits a key. **Third instance of one blindness in two days**, after core's product and
-> webshop fixtures. A test that OMITS all four and asserts the stored document carries them now
-> exists, and was verified as a pair: old writer red on exactly that assertion, new writer green.
->
-> ⭐ **Nine `|| []` guards came out with it.** `CreateProductInputType` had always declared the four
-> `?`, so every reader carried one to satisfy the compiler while the default made them dead at
-> runtime. **A `.default()` whose own interface marks it optional is a schema disagreeing with
-> itself, and the `|| []` count is the tell.**
->
-> ### 🔴 FOLLOW-UP 2 — `beta.412` corrected follow-up 1's own exclusion
->
-> ✅ **Shipped and deployed**: `core` `4c41d10` → **`beta.412`**, `api-cloudrun` `2c38a3bb` →
-> **`v0.250.1`**, revision **`api-cloudrun-00374-r6f`**, digest
-> `sha256:9c75357262ca74d25c2649b4f6f329863c297180c40c06da17e58976e8c6ef90`, deployed tree verified
-> at `.412`. `manager-v26.0.6` and `templates` PR #317 are on it. `price.taxes` is now REQUIRED on
-> both product inputs and the dead presence test is deleted.
->
-> 🔴 **It was left defaulted in `beta.411` on a reason that turned out to be BACKWARDS.** The call was *"`UpdateProductInput` replaces the price wholesale and a cascade keys on
-> `"taxes" in update.price`, so its default is load-bearing"*. The wholesale replacement is precisely
-> why it is a defect: `assembleProduct` spreads `update.price` over the stored price, so an omitted
-> `taxes` is filled with `[]` and **erases the product's tax profile** rather than 400ing. The
-> presence test could never be false — a fossil, not a dependant. Both inputs now require the key and
-> the dead test is gone.
->
-> ⭐ **What produced the wrong call, because it will recur:** *"a live branch reads this default"* and
-> *"a live branch is HARMED by this default"* produce the same grep. The question that separates them
-> is whether the branch could ever observe the key ABSENT — if not, the default is what made the test
-> unfalsifiable. ⭐ And: **a whole-object replacement inverts what a default MEANS.** On a patch it
-> fills a gap; on a replacement it deletes whatever the client did not restate.
->
-> ⚠️ The evidence was in the file the whole time: `UpdateProductInputType.price.taxes` is
-> non-optional, and its sibling `coa_revenue` one line above carries *"Required — `price` here is a
-> WHOLE-OBJECT replacement, so an update that omitted this erased the stored account."* **The repair
-> stopped one line short, and the second reading found it.**
->
-> ⚠️ **And the ordering is asymmetric**: the writer must state a key BEFORE its default comes off,
-> never after.
->
-> ### ✅ THE PROD DATA IS REPAIRED — 3 rentals and 3 component copies (`api-cloudrun#966`)
->
-> The correction exposed live data: **30 of 570 prod products held an empty `price.taxes`.** 26 are
-> legitimate (`service` 15/15 and `surcharge` 11/11 are untaxed by nature); **3 RENTALS of 219 were
-> each the only untaxed member of their own family.** Owner ruling: repair them. Applied
-> 2026-09-11, `api-cloudrun` `0b6ab037`; `devReplica` mirrored the writes so both projects healed.
->
-> | | before | after |
-> |---|---:|---:|
-> | `rental` | **3 / 219** | **0 / 219** |
-> | `service` · `surcharge` | 15/15 · 11/11 | unchanged — untouched |
-> | total | 30 / 570 | 27 / 570 |
->
-> Verified by the INDEPENDENT census rather than the repair's own report, and `audit:reparse` reads
-> 815 scanned / 0 failed per project.
->
-> ⭐ **The value was DERIVED from the tax CATALOG, not copied from a sibling — and that was
-> load-bearing.** `Chicago Rental Tax` has **three versions** (rate 9, 11, 15) and only
-> `VEW4Ivy7VNqgxFA5eJw6` is current, so a sibling-copy repair was one stale window away from
-> stamping a wrong RATE onto a live catalogue. The script builds the ref from the live `taxes`
-> document whose `[applied_from, applied_to)` window contains today, then asserts it is the ref the
-> corpus already uses (216 of 216, byte-identical) and refuses otherwise.
->
-> ⭐ **Each target needed its OWN witness, and this is the rule this doc already had, exercised.**
-> A population argument says what is TYPICAL, never what THIS document said. `createReplacementDoc`
-> and `createWebshopDoc` both copy `taxes: product.price.taxes` VERBATIM, so each copy is a frozen
-> snapshot of its parent's own profile: the two paper rolls resolved to same-day replacement twins,
-> the Folding Chair to its own webshop mirror.
->
-> ⚠️ **The Folding Chair's twin is NOT its witness and the script DECLINED it** — Chicago *Sales*
-> Tax, created 2022-12-01, last touched by Migration Bot: a migrated legacy pair, not a mint.
-> Replacements are sales, so a sales-taxed twin is the NORMAL shape. **A witness has to be a COPY of
-> the subject, not merely a document near it** — and the arm discriminating on live data is the only
-> reason that distinction is known to hold rather than merely intended.
->
-> 🔴 **The component copies were part of the repair, not a tail.** `buildOrderComponentLines` reads
-> `taxes: unpricedTaxRefs(comp.price?.taxes)` — an expanded line takes its taxes from the COMPONENT
-> ENTRY, not the child product. Fixing only the products would have left every component expansion
-> billing untaxed while the repair reported success. ⚠️ One entry declaring
-> `price_overridden: ["taxes"]` was LEFT ALONE: an operator patching the missing tax one level up,
-> which is the same defect seen from the other side.
->
-> ⚠️ **NOT done, deliberately**: orders and invoices already written carry a tax SNAPSHOT from write
-> time. Re-pricing them is a money decision for the owner, not a side effect of a catalog fix, and
-> the scope is unmeasured. Recorded on #966 before it was closed.
->
-> ### 🔴 The finding that prompted it: an INPUT default was what put the keys in storage
->
-> **There are TWO parse seams and they dispose of `result.data` in OPPOSITE directions.**
-> `validateBeforeWrite` DISCARDS it and writes the raw document — the campaign's founding premise,
-> and the reason a stored `.default()` is inert. The route validator does the reverse:
-> `@hono/zod-validator`'s `zValidatorFunction` ends `return result.data`, so `c.req.valid("json")`
-> hands the handler the **parsed** input with defaults materialized.
->
-> 🔴 **`createProduct` names none of `alternates` / `components` / `component_of`.** It spreads
-> `productWithoutTx` — the route's validated input — and `CreateProductInput`'s own `.default([])` is
-> what put those keys into all 570 stored documents in both projects. ⭐ **So the 570-of-570
-> completeness that LICENSED this tightening was produced by the input default**, not by any writer
-> naming the field. Removing the stored default is safe *because the input default stays*, and the
-> two are now coupled: `core/tests/product.test.ts` asserts that materialization directly, so a
-> future batch sweeping the input defaults fails a test instead of emptying a stored key.
->
-> ⚠️ **This does not overturn the campaign's premise; it bounds it.** *"A `.default()` never
-> materializes on a write"* is true of `validateBeforeWrite` and false of the route validator. Ask
-> which seam a key's completeness comes from before reading a clean census as a statement about
-> writers.
->
-> ### 🔴 A fixture built from `getInitialValues` CANNOT fail a required-key tightening
->
-> `resolveField` is TYPE-derived, so a seed states every key whether the schema asks for it or not —
-> the fixture is complete by construction and the tightening is invisible to it.
->
-> | fixture | built from | result |
-> |---|---|---|
-> | `core/tests/product.test.ts` `validProduct` | `getInitialValues(ProductSchema)` | green, **nothing repaired** |
-> | `core/tests/webshop-product.test.ts` `validWebshopProduct` | `getInitialValues(WebshopProductSchema)` | green, **nothing repaired** |
-> | `core/tests/card.test.ts` `validCard` | hand-spelled literal | 🔴 **11 failures** |
->
-> ⚠️ **The two greens are not the same fact as the third**, and only the fixture's provenance says
-> which you have. ⭐ **The remedy is a direct assertion per path — drop one key, require the issue to
-> name exactly it** — never a fixture edit, because there is nothing in the fixture to edit. 15 such
-> cases were added. This is the mirror of batch 2's inverted test: not a green that asserts the
-> default's spec, but a green that cannot see the default at all.
->
-> ⚠️ **`getInitialValues` wears both hats.** Batch 8 established it as a LIVE consumer of these
-> defaults in ~10 manager stores; batch 9 finds it is also why two of core's own fixtures are blind.
-> Same helper, two opposite roles, one batch apart.
->
-> ### ✅ `getInitialValues` checked, and the one non-type-zero was real
->
-> A before/after JSON dump of `ProductSchema`, `CardSchema` and `WebshopProductSchema` is
-> **byte-identical**. 14 of the 15 defaults equalled their node's type-zero.
-> 🔴 **`products.price.discountable` did not** — `.default(true)` over a `false` type-zero — and took
-> **`.meta({ initial: true })` in the same commit**, exactly as this doc predicted. The probe was
-> mutation-controlled by removing that annotation, which moves the seed to `false`; without it every
-> new-product draft would have seeded non-discountable with nothing failing.
->
-> ### The two EXCLUSIONS, both structural, and both found by grepping the NODE
->
-> | left | why |
-> |---|---|
-> | `products.components[].price.taxes`, `products.component_of[].price.taxes` | `ComponentObject.price` is **ONE node** shared with `CreateProductInput` and `UpdateProductInput` (`z.array(ComponentSchema)` on both) — an API-input change needing a client-first ordering |
-> | `cards.attachments[].locked`, `cards.dates.start`, `cards.dates.end` | same class, shared with both card inputs and both recurrence inputs (batch 8 left these too) |
->
-> ⭐ **`webshop-products` has NO input schema at all** — `WebshopProductSchema` is written only by
-> `createWebshopDoc`/`mapComponentToWebshop`, both typed builders — which is why all 7 of its paths
-> were free while the structurally identical `products` pair was not. **A field name is not a node.**
->
-> ### The denominators, and whether dev was a second sample
->
-> | position group | prod containers/present | dev containers/present |
-> |---|---|---|
-> | `products.*` (6) | 570 / 570 | 570 / 570 |
-> | `webshop-products.*` (5 scalar) | 245 / 245 | 245 / 245 |
-> | `webshop-products.components[].price.taxes` | 135 / 135 | 135 / 135 |
-> | `webshop-products.component_of[].price.taxes` | 68 / 68 | 64 / 64 |
-> | `cards.action` · `cards.organization` | 1,161 / 1,161 | 1,168 / 1,168 |
->
-> ⚠️ **`products` and `webshop-products` are the SAME SIZE to the document, so dev is one corpus
-> measured twice there** — not a second sample. `cards` differs by 7 and is a genuine second sample;
-> both its positions read 1,168/1,168 because batch 8's session repaired those 7 dev rows.
-> ⭐ Note `component_of[]` differs (68 vs 64) while the document count does not — **an array-member
-> denominator moves independently of its collection's**, so compare the one you are actually claiming.
->
-> ### The gates
->
-> `core`: **2,301 passed, 0 failed**, plus `check`, `check:generated`, `check:declarations` and
-> `audit:citations` (1,258 citations, 0 broken, 0 ambiguous).
->
-> `api-cloudrun`, pre-publish against `file://` pins in a throwaway worktree: **2,045 passed, 3
-> failed, all 3 the documented `file://` guard class** (`lockfileSync`, `referenceCoverage`,
-> `captureFloor`). ⭐ Re-run after the publish against the real `beta.410`: **2,048 passed, 0 failed**
-> — those same three green, which CONFIRMS the diagnosis rather than merely asserting it. Integration:
-> products + cards + recurrences **49 passed, 0 failed**; taxes + tags + xeroQuotes **20 passed, 0
-> failed**. `deno check src/` and `deno check tests/` clean against the local core.
->
-> `manager`: `tsc --noEmit` clean, **1,977 passed across 178 files**.
->
-> 🔴 **`templates` `lint:fixtures` has a ZERO DENOMINATOR again and was not credited.** 38 fixtures
-> across 7 families and **not one declares `products`, `webshop-products` or `cards` as its
-> `collection_source`** (measured: `orders`, `invoices`, `pick-sheets` ×2, `movement-sessions`,
-> `aging-reports`, `statements`). Batch 4 learned this on `organizations`, batch 8 on `cards`, and it
-> recurs whenever a batch takes a collection templates does not render.
->
-> ### ⚠️ The manager-first ordering is now load-bearing, and it held
->
-> `requires-manager.yaml`'s measured arm compares this release's core pin against the pin manager's
-> latest **published release** carries. `manager-v26.0.3` (`beta.410`) was released at 18:25Z and the
-> API's release PR #963 went green on that arm at 18:38Z. ⭐ **Release manager BEFORE merging the
-> API's release PR** — batch 8 learned this after the fact; batch 9 sequenced it deliberately and the
-> gate was green on the first run.
->
-> ⚠️ A peer had a release-please commit land in `manager` mid-session; a `git rebase origin/main`
-> cleared it. **It was release-please's own release commit, not a peer's code** — checked with the
-> `Claude-Session` trailer before rebasing, because rebasing a peer's commit is the same overreach as
-> pushing one.
+> 🔴 **A stale citation from batch 10's OWN status-update commit broke `beta.415`'s first push —
+> not this batch's schema change.** A backticked path naming only `fixtureFormat.test.ts`'s
+> directory and filename, with no `api-cloudrun/` prefix inside the backticks, resolved against
+> core's own tree in CI's core-alone checkout ("no such file"), even though the surrounding prose
+> named `api-cloudrun` outside the backticks — the audit only reads what is inside them. Blocked
+> the `release` job; fixed in a follow-up commit
+> (`f485a32`) and republished as `beta.415` (the `beta.414`-tagged `dc900c2` commit never actually
+> published — CI failed before the `release` job ran). **Two full-workspace `deno task
+> audit:citations` runs missed it**; only CI's core-alone run (the doc's own "STRONGER" claim) caught
+> it, exactly as `core/CLAUDE.md`'s citations section already predicted.
 >
 > | batch | what | backlog | state |
 > |---|---|---:|---|
-> | 1 | 20 `totals` defaults | 259 → 239 | ✅ prod, `v0.247.0` |
-> | 2 | 20 `query_by_*` + 8 `bookings_breakdown` | 239 → 211 | ✅ prod, `v0.248.0` |
-> | — | **the ratchet hole**: +47 paths nothing had ever enumerated | 211 → 258 | ✅ `core` `4f73bca` |
-> | 3 | the seven `Address` keys — 105 paths, 15 positions | 258 → 153 | ✅ prod, `v0.248.1` |
-> | 4 | `phones` ×9 + `organizations.emails` — 10 paths, 3 declarations | 153 → 143 | ✅ prod, `v0.248.1`, revision `api-cloudrun-00366-whd` |
-> | — | **the corpus-parse instrument** (`api-cloudrun#951` + `#636`) | — | ✅ `api-cloudrun` `5ed776fe` |
-> | 5 | `items[].description` ×11 — 5 declarations, one leaf, four grains | 143 → 132 | ✅ prod, `v0.249.0`, revision `api-cloudrun-00367-xm4` |
-> | 6 | the `price` block ×3 — 24 paths, 3 declarations, one block | 132 → 108 | ✅ prod, `v0.249.1`, revision `api-cloudrun-00368-bx8`, digest-verified |
-> | 7 | `quantity` ×4 + `name` ×4 — 8 paths, 4 declarations, two leaves | 108 → 100 | ✅ prod, `v0.249.2`, revision `api-cloudrun-00369-7rk`, digest-verified |
-> | 8 | the `cards` family's pure-storage half — 10 paths, 2 declarations | 100 → 90 | ✅ prod, `v0.249.4`, revision `api-cloudrun-00371-zqw`, digest-verified |
-> | 9 | the `products` family + 2 card stragglers — 15 paths, 3 declarations | 90 → **75** | ✅ prod, `v0.249.5`, revision `api-cloudrun-00372-f6z`, digest-verified |
-> | 10 | the `sources`/`reference` tidy-up — 6 paths, 5 declarations | 75 → **69** | ✅ prod, `v0.251.0`, revision `api-cloudrun-00375-cxd`, digest-verified |
->
-> ### ✅ The prerequisite is DONE — and `api-cloudrun#951`'s premise was partly WRONG
->
-> The issue said *"nothing re-parses the live corpus"*. **`api-cloudrun/scripts/audit-schema-validation.ts`
-> already existed and already re-parsed it.** Five sessions wrote their own probe anyway, and the
-> reason is one line: it did `import { db } from "../src/db.ts"`, which drags the repo's PINNED
-> `@cfs/core` in beside any local one — so a probe of an UNPUBLISHED tightening parsed against the OLD
-> schema and read 0 failures. **The instrument was there; it could not answer the question, and
-> nothing said so.**
->
-> ⭐ **The transferable half: before building the instrument an issue asks for, look for the one that
-> is already committed and ask why nobody used it.** `api-cloudrun#636` had been open for weeks saying
-> the same script under-covered; the two issues were the same artifact seen from two sides, and
-> building a sixth script would have left both open plus a seventh thing to maintain.
->
-> **What it now does** (`deno task audit:reparse`, `api-cloudrun` `5ed776fe`): paged
-> `orderBy("__name__")` walk, collection set derived from `listCollections()` ∩ the registry rather
-> than a hand-written block of 40 imports, failures bucketed by issue-path SHAPE, **exit non-zero**,
-> `--groups` for subcollections, `--core=../core/src/schemas/mod.ts` for an unpublished tightening,
-> `--positions` for the per-position denominator, and `--reach`.
->
-> ⭐ **`--positions` takes a DISCRIMINATOR FILTER, which is what makes it usable on `items[]`** —
-> `orders.items[type!=destination|group].description`. ⚠️ **Quote it in zsh** — a bare `[]` is a glob.
-> ⭐ And it distinguishes `NO-POPULATION` from `OPTIONAL-HERE` from `REACHED`, which is what let batch
-> 8 report the recurrences half honestly instead of banking a vacuous green.
-> 8 report the recurrences half honestly instead of banking a vacuous green.
+> | 1–9 | see `core/CLAUDE.md` § *`.default()` and `.optional()`* and the table two sections below | 259 → 75 | ✅ prod |
+> | 10 | `sources`/`reference` tidy-up — 6 paths, 5 declarations | 75 → 69 | ✅ prod, `v0.251.0` |
+> | 11 | the templates family — 7 paths, 3 declarations | 69 → **62** | ✅ prod, `v0.251.1`, revision `api-cloudrun-00376-sl6`, digest-verified |
+
 ## What shipped
 
 | piece | where | state |
@@ -408,6 +150,12 @@ api-cloudrun#943's remaining half.*
 | 1 pin, released first so `requires-manager` measured green | `manager` `7350791` → `manager-v26.2.0` | ✅ released |
 | 15 pins | `templates` `0be9047` (PR #323) | ✅ merged |
 | `beta.414` reaching prod, verified by digest (deno.json/deno.lock pulled off the registry blob store, no docker available) and by a deployed-core reparse | `v0.251.0` (`b3607570`) → revision `api-cloudrun-00375-cxd` | ✅ deployed |
+| **batch 11** — the templates family, 7 paths across 3 declarations | `core` `dc900c2` → `beta.414` (never published — citation broke the release; see next row) | ✅ merged |
+| the citation fix that unblocked the publish | `core` `f485a32` → **`beta.415`** | ✅ published |
+| `registerTemplateFamily` states `active_semver: null` + 9 completed `Template` literals (`api-cloudrun/tests/helpers/seedTemplate.ts`, `api-cloudrun/scripts/seed-quote-template.ts`, 7 integration fixtures) + 40 pins | `api-cloudrun` `757540a9` | ✅ landed on `main` |
+| 1 pin, released first so `requires-manager` measured green (needed a manual gate re-run — see below) | `manager` `695aa4b` → `manager-v26.2.1` | ✅ released |
+| 1 pin + `deno install`-regenerated lockfile | `templates` `e6bdcd5` (PR #324) | ✅ merged |
+| `beta.415` reaching prod, verified by digest and by a deployed-core reparse | `v0.251.1` (`cb2a7930`) → revision `api-cloudrun-00376-sl6` | ✅ deployed |
 
 `OrderDocDates` is `DestinationPairCore.dates`, so it is the dates map on **all three grains** —
 one edit changed orders, invoices and fulfillments together. That is also why an *invoice* parity
@@ -1024,7 +772,7 @@ with most care: it is the row identity, and the `items[]` backfill/ordering haza
 
 ## What is LEFT — read this first
 
-**Batches 9 and 10, and batch 9's two follow-ups, have NO residue** — published, swept, merged,
+**Batches 9, 10 and 11, and batch 9's two follow-ups, have NO residue** — published, swept, merged,
 deployed, digest-verified, and the prod data the beta.412 follow-up exposed is repaired and
 independently re-censused (`api-cloudrun#966`, closed). What follows is everything else this
 campaign knows about, in order of who is blocked:
@@ -1032,9 +780,9 @@ campaign knows about, in order of who is blocked:
 | # | what | owner | blocked on |
 |---|---|---|---|
 | 1 | **`api-cloudrun#955`'s prod row** — the last thing between `audit:reparse` and being a scheduled job | the owner | a call between four options, all measured |
-| 2 | **Batch 11** — 69 paths, 14 of them `items[]`. The cheap tidy-up is gone; see below | next session | nothing |
+| 2 | **Batch 12** — 62 paths, 22 of them `array[]` (14 `items[]`). The cheap tidy-up is gone; see below | next session | nothing |
 | 3 | `api-cloudrun#943`'s remaining half — manager `collection_end`/`delivery_end` editors | — | nothing; pre-existing |
-| 4 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip | — | nothing |
+| 4 | `core#106` — nothing runs the citation audit at CI scope, so a publish can silently skip. ⚠️ **Batch 11 is a live counter-example this issue should cite**: a stale bare-basename citation from batch 10's own status-update commit blocked `beta.415`'s first publish attempt, and only CI's core-alone run caught it — two prior full-workspace `audit:citations` runs had read it clean | — | nothing |
 | 5 | **Historic orders/invoices priced from the 3 untaxed rentals** — lines carry a tax SNAPSHOT, so the catalog repair does NOT reach them. Unmeasured on purpose | the owner | a money call; wants its own issue with `risk:money-path` |
 
 ⚠️ **The deploy verification is a four-link chain and the batch-6 near-miss still applies.** A
@@ -1074,18 +822,45 @@ it already is (`?? null`). ⭐ **Reading the templates sidecar's `collection_sou
 than sweeping all seven families) meant checking exactly one fixture family** — `quote` was the only
 one touching any of these six fields, and all 15 committed fixtures already stated `reference`.
 
-**(2) batch 11 — read the split off `core/tests/stored-defaults.test.ts`, not this doc.**
+### ✅ the templates family WAS batch 11 — the writer audit carried it, not the census
+
+**Done** (`core` `dc900c2` → `beta.414`, republished as `beta.415` after a citation fix, in prod as
+`v0.251.1`, revision `api-cloudrun-00376-sl6`, digest-verified), 7 paths across 3 declarations,
+leaving **62**. The predicted cost — "the widest spread of small declarations; needs a
+per-declaration writer read" — was real but cheap: an agent-run writer audit across
+`registerTemplateFamily`, `publishFromMerge` and the draft flow found **15 of 16** (field ×
+create-site) combinations already stated the field explicitly; the sixteenth
+(`active_semver` at `registerTemplateFamily`) writes via a raw `tx.set()` that bypasses schema
+validation entirely, so no default was ever consulted there either. No backfill, no fixture repair
+(`templates`/`templates-versions`/`template-components` are never rendered — no committed fixture
+touches them).
+
+🔴 **One field's own interface was already optional, and the obvious fix was wrong.** `active_semver`
+was `?: string | null` — the ONE exception among the seven — and reaching for
+`.nullable().optional()` (present, null, or absent) is exactly what core#83's sibling ratchet
+(`tests/stored-optionality.test.ts`) exists to catch. Made required-and-nullable instead, matching
+its sibling `uid_active`, and had the one writer that could legitimately omit it state
+`active_semver: null` explicitly. **Two campaigns' guards intersecting on one field is a preview of
+what batch 12+ will hit more often as the backlog thins** — check both ratchets, not just this one's.
+
+⭐ **Making a previously-optional interface field required re-runs batch 10's lesson at a WIDER
+radius.** `deno check` against a `file://`-pinned local core found **9** hand-spelled/seed `Template`
+literals across `api-cloudrun` (`api-cloudrun/tests/helpers/seedTemplate.ts`, `api-cloudrun/scripts/seed-quote-template.ts`, 7 integration test
+files) that had never stated `active_semver` — invisible until the interface changed, because a
+`z.ZodType<T>` check runs one direction only. Every `...fam`-spread update-path literal was already
+safe by construction (the `updateOrder` pattern generalises past order objects).
+
+**(2) batch 12 — read the split off `core/tests/stored-defaults.test.ts`, not this doc.**
 
 🔴 **The cheap era is over, and saying so is the most useful thing this section can do.** Batches
-1–10 each had an obvious candidate: a shared block, a leaf clustering across grains, a family with a
-complete corpus and a typed writer, or — batch 10 — a scalar tidy-up nobody had swept. **None of the
-69 remaining paths is that any more.** The two plausible batches each carry a cost the previous ten
-did not:
+1–11 each had an obvious candidate: a shared block, a leaf clustering across grains, a family with a
+complete corpus and a typed writer, or — batches 10 and 11 — a scalar tidy-up nobody had swept.
+**None of the 62 remaining paths is that any more.** The two plausible batches each carry a cost the
+previous eleven did not:
 
 | candidate | paths | the cost |
 |---|---:|---|
-| `templates` / `templates-versions` / `template-components` | 7 | the widest spread of small declarations; needs a per-declaration writer read, and `templates` is the one collection whose documents are a PROJECTION of git |
-| `stores` / `stores[].locations` / `store_breakdown` | 7 (re-derived; the doc's table said 6 before batch 10) | one shape across `bookings`, `out-of-service` and `inventory-ledgers`; `bookings.query_by_uid_store` has **4,205 measured absences** and its SOURCE `bookings.stores` is absent on the same 4,205 — one repair, not two, and it is a real backfill |
+| `stores` / `stores[].locations` / `store_breakdown` | 7 | one shape across `bookings`, `out-of-service` and `inventory-ledgers`; `bookings.query_by_uid_store` has **4,205 measured absences** and its SOURCE `bookings.stores` is absent on the same 4,205 — one repair, not two, and it is a real backfill |
 | `items[].path` ×10 | 10 | 🔴 **take deliberately or last.** `path` is the row identity with ONE author (`computeItemPaths`), and the array-ordering hazard above is entirely about it |
 
 ⭐ **The remaining tail (organizations.contacts[].roles, the `cards`/`products` shared-node
@@ -1100,13 +875,13 @@ tidy-up batch, if one is taken, has to be assembled from this tail deliberately 
 ⚠️ **Whatever is chosen, three things are NOT re-derivable from this doc and must be re-run:**
 
 1. **The backlog itself** — the recipe above, off `tests/stored-defaults.test.ts`.
-2. **The `getInitialValues` census** — still **2 of 69** (`holiday-definitions.active`,
-   `location-types.active`), both `.default(true)` over a `false` type-zero, unaffected by batch 10.
-   Neither is in either candidate above, so batch 11 probably needs no `.meta({ initial })` — but
-   check, do not assume.
+2. **The `getInitialValues` census** — still **2 of 62** (`holiday-definitions.active`,
+   `location-types.active`), both `.default(true)` over a `false` type-zero, unaffected by batches
+   10 or 11. Neither is in either candidate above, so batch 12 probably needs no
+   `.meta({ initial })` — but check, do not assume.
 3. **Whether each node is SHARED with an input schema.** Batch 9's two exclusions and the whole
-   `cards` remainder are this class; batch 10 had none. A path-level view cannot see it — **grep the
-   node.**
+   `cards` remainder are this class; batches 10 and 11 had none. A path-level view cannot see it —
+   **grep the node.**
 
 🔴 **And carry batch 9's two findings into the writer audit, because they change what a clean census
 means.** (a) A 100%-present column can be produced by the INPUT schema's `.default()` rather than by
@@ -1116,21 +891,23 @@ green core suite over such a fixture is not evidence; assert each path directly.
 
 ## Context recommendation
 
-**Clear before batch 11.**
+**Clear before batch 12.**
 
-Batches 9 and 10 and batch 9's two follow-ups are closed — nothing mechanical is left to watch, and
-the prod repair is applied and verified. **Batch 11 depends on none of this session's
+Batches 9, 10 and 11 and batch 9's two follow-ups are closed — nothing mechanical is left to watch,
+and the prod repair is applied and verified. **Batch 12 depends on none of this session's
 analysis.** Everything it requires is written down: the backlog is read off
-`core/tests/stored-defaults.test.ts` (**69** paths — 47 scalar, 22 `array[]`, 14 of them `items[]`),
+`core/tests/stored-defaults.test.ts` (**62** paths — 40 scalar, 22 `array[]`, 14 of them `items[]`),
 the partition is re-derived by the recipe above, the `items[]` hazards are in the section above, and
 the policy — the parse-not-census rule, the shared stored/input-node rule, the denominator rule
 batches 4 and 6 sharpened between them, batch 7's *require the KEY, claim nothing about the VALUE*,
 batch 8's *a VACUOUS declaration is gated by the TYPE and the SUITE*, batch 9's *two parse seams*,
 *a `getInitialValues` fixture is blind*, *"a branch READS this default" and "a branch is HARMED by
-it" produce the same grep*, and *a whole-object replacement INVERTS what a default means*, and
-batch 10's *check the local corpus TYPE surface too — an interface/schema mismatch on a stored field
+it" produce the same grep*, and *a whole-object replacement INVERTS what a default means*, batch
+10's *check the local corpus TYPE surface too — an interface/schema mismatch on a stored field
 reddens its writer the moment the interface is fixed, and the compiler finds it before any census
-does* — is in `core/CLAUDE.md` § *`.default()` and `.optional()`*.
+does*, and batch 11's *`.nullable().optional()` on a stored field is core#83's defect, not this
+campaign's fix — check that ratchet too when a field's own interface is already optional* — is in
+`core/CLAUDE.md` § *`.default()` and `.optional()`*.
 
 ⭐ **The batch-9 session's own shape is worth carrying: it shipped, then its FINDING shipped
 (`beta.411`), then a CORRECTION to that shipment shipped (`beta.412`), then the prod data the
@@ -1141,7 +918,7 @@ can disagree with them. Batch 10 was a smaller instance of the same shape: the t
 finding the reddened writer was cheap only because `deno task check` ran before the push rather than
 after.
 
-⚠️ **Do not carry this doc's numbers into batch 11 — re-run the recipe.** Batch 3 proved the doc's
+⚠️ **Do not carry this doc's numbers into batch 12 — re-run the recipe.** Batch 3 proved the doc's
 own table can be wrong in both directions with the errors in the INSTRUMENTS; batch 4 proved the
 numbers can be right and still mean something different from what they look like; batch 6 proved a
 column labelled VACUOUS can be decisive for the claim actually being made; batch 7 proved a
@@ -1149,10 +926,33 @@ documented guard class can be three files rather than two the first time anyone 
 proved the doc's own *"dev is not a second sample"* habit had become an assumption — `cards` is
 1,159 / 1,166 and the 7-document difference decided which paths the batch could take; batch 9
 proved a 100%-present column can be produced by a schema this campaign never looks at, because the
-route validator returns `result.data` where `validateBeforeWrite` discards it; **batch 10 proved the
-doc's own "7 paths" count for `sources`+`reference` had already drifted by one** (`recurrences.
-prototype.sources` was gone from the backlog before the batch started) **and that the `stores`
-family's count moves too** (6 → 7, re-derived). Re-derive, and ask what the instrument can see.
+route validator returns `result.data` where `validateBeforeWrite` discards it; batch 10 proved the
+doc's own "7 paths" count for `sources`+`reference` had already drifted by one (`recurrences.
+prototype.sources` was gone from the backlog before the batch started) and that the `stores`
+family's count moves too (6 → 7, re-derived); **batch 11 proved a citation drift outside the
+schema entirely (a status-update commit's own bare-basename citation) can block a publish that has
+nothing to do with the citation's subject** — the schema change was clean, the corpus was clean, and
+the release still failed on a sentence written two commits earlier. Re-derive, and ask what the
+instrument can see — including the instruments that have nothing to do with the batch's own diff.
+
+⭐ **Batch 11's transferable habits**, all cheap:
+- **A writer audit beats a census when the denominator is thin.** 7-9 documents per collection is
+  too small for a census to mean much either way; the writer audit (every real create site, read
+  directly) was the actual gate, and an agent-run pass covered it in one turn.
+- 🔴 **When a field's OWN interface is already optional, ask which of `.nullable()` or
+  `.nullable().optional()` is right BEFORE editing the schema — they are different campaigns'
+  answers to the same-looking question**, and getting it backwards is caught by a sibling ratchet,
+  not by this one's own suite. Grep for a `NULLABLE_OPTIONAL`/`stored-optionality`-shaped test
+  before assuming this campaign's rule is the only one that applies to a stored field.
+- **Making one interface field non-optional can surface a compiler-invisible backlog of hand-spelled
+  literals far wider than the fields actually touched** — batch 10 found one (`updateOrder`'s
+  `?? null`); batch 11 found nine, because `active_semver` had been silently optional on every
+  `Template` literal in the repo, not just the one writer that mattered. Grep broadly
+  (`: Template = {`, not just `src/` or `tests/` alone — `scripts/` had one too) once an interface
+  member's optionality changes.
+- **Repo-qualify a citation the moment you write it, in the SAME commit — don't rely on a later
+  audit run to catch a bare basename**, because a full-workspace run can resolve it against a
+  sibling repo's copy while CI's core-alone run cannot. This is the concrete case `core#106` names.
 
 ⭐ **Batch 9's transferable habits**, all cheap:
 - **Run the consumer suite BEFORE the publish** (batches 7 and 8's habit, repeated and again worth
