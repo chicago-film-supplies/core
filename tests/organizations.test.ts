@@ -8,6 +8,10 @@ import {
   buildOrganizationSnapshot,
   composeOrgName,
   computeOrganizationNode,
+  isOrganizationDormant,
+  ORGANIZATION_DORMANT_AFTER_DAYS,
+  organizationActivityMs,
+  organizationDormantCutoffMs,
   orgLevel,
   orgOwnName,
   orgParentUid,
@@ -686,4 +690,21 @@ Deno.test("resolveTaxAxes: the LEAF is read from the node, never from the map", 
     tax_exempt: false,
     uid_exempt_source: null,
   });
+});
+
+Deno.test("isOrganizationDormant — strictly older than 60 days, at the 60-day boundary", () => {
+  assertEquals(ORGANIZATION_DORMANT_AFTER_DAYS, 60);
+  const now = Date.parse("2026-09-13T12:00:00.000Z");
+  const day = 86_400_000;
+  const cutoff = organizationDormantCutoffMs(now);
+  assertEquals(cutoff, now - 60 * day);
+  assertEquals(isOrganizationDormant({ activity_at: cutoff }, now), false, "exactly at the cutoff is active — the sort's `>=`");
+  assertEquals(isOrganizationDormant({ activity_at: cutoff - 1 }, now), true, "one ms past it is dormant");
+  assertEquals(isOrganizationDormant({ activity_at: now }, now), false);
+  // The stored shape, not only the Typesense int64.
+  const ts = { seconds: (cutoff - day) / 1000, nanoseconds: 0, toMillis: () => cutoff - day, toDate: () => new Date(cutoff - day) };
+  assertEquals(isOrganizationDormant({ activity_at: ts }, now), true);
+  assertEquals(organizationActivityMs({ activity_at: { seconds: 2, nanoseconds: 5_000_000 } as never }), 2005, "a cloned map still reads");
+  assertEquals(isOrganizationDormant({}, now), false, "an unstamped node is never muted");
+  assertEquals(isOrganizationDormant({ activity_at: null }, now), false);
 });

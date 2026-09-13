@@ -104,20 +104,6 @@ export const INTEGRATION_EVENT_MSGS = [
   // on a field its arm does not declare fails `alertRuleContract`.
   "organization_tree_check",
   "organization_tree_check_failed",
-  // The daily project-activity sweep (api-cloudrun#979). Same two-emission
-  // shape as `organization_tree_check` above, for the same reasons:
-  //   - `organization_active_sweep` — one summary per run, EVERY run, carrying
-  //     `checked` / `repaired` (nodes whose `active` was written) / `drifted` /
-  //     `failed`, so a clean pass and a pass that read nothing differ.
-  //   - `organization_active_drift` — one per DEPARTMENT whose stored `active`
-  //     disagreed with its project's before this run, via `invariant` /
-  //     `doc_id` / `detail`. A mirror that drifts is a writer bug; the sweep
-  //     reports it rather than repairing it silently.
-  //   - `organization_active_sweep_failed` — a node the run could not compute,
-  //     logged and skipped rather than aborting the run.
-  "organization_active_sweep",
-  "organization_active_drift",
-  "organization_active_sweep_failed",
   // The backstop under the DEFERRED stock rebuild (api-cloudrun#358). The
   // rebuild's enqueue is post-commit and therefore not transactional with Firestore,
   // so a crash or an exhausted retry budget leaves a summary stale with nothing

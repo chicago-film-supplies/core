@@ -6,6 +6,7 @@
 
 import {
   type AddressType,
+  type FirestoreTimestampType,
   type DocumentOrganizationSnapshotType,
   type JurisdictionType,
   ORG_LEVELS,
@@ -483,4 +484,62 @@ export function resolveTaxAxes(
     if (stated.tax_exempt === true) uid_exempt_source = uid;
   }
   return { jurisdiction_claim, uid_claim_source, tax_exempt: uid_exempt_source !== null, uid_exempt_source };
+}
+
+/**
+ * How long a node may go without meaningful activity before it is DORMANT
+ * (api-cloudrun#979) — the one definition search sorting, muted row rendering
+ * and tests all read.
+ *
+ * ⚠️ **Dormant reorders and mutes; it never hides.** A last-year project back
+ * for reshoots must stay findable and pickable on the spot.
+ */
+export const ORGANIZATION_DORMANT_AFTER_DAYS = 60;
+
+const DAY_MS = 86_400_000;
+
+/**
+ * The epoch-ms instant before which a node's `activity_at` makes it dormant —
+ * what the manager's Typesense `_eval(activity_at:>=<cutoff>)` sort compares
+ * against, built once per search.
+ */
+export function organizationDormantCutoffMs(nowMs: number): number {
+  return nowMs - ORGANIZATION_DORMANT_AFTER_DAYS * DAY_MS;
+}
+
+/**
+ * A node's `activity_at` as epoch-ms, from either shape a reader holds: the
+ * stored Firestore `Timestamp` or a Typesense hit's `int64`. `null` when absent
+ * (the expand third) or unreadable — never guessed.
+ */
+export function organizationActivityMs(
+  node: { activity_at?: FirestoreTimestampType | number | null },
+): number | null {
+  const v = node.activity_at;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (v && typeof (v as { toMillis?: unknown }).toMillis === "function") {
+    return (v as { toMillis(): number }).toMillis();
+  }
+  if (v && typeof (v as { seconds?: unknown }).seconds === "number") {
+    const t = v as { seconds: number; nanoseconds?: number };
+    return t.seconds * 1000 + Math.floor((t.nanoseconds ?? 0) / 1e6);
+  }
+  return null;
+}
+
+/**
+ * Whether a node is dormant at `nowMs`: its last activity is strictly older
+ * than {@link ORGANIZATION_DORMANT_AFTER_DAYS}. Exactly at the cutoff is still
+ * active, matching the search sort's `>=`.
+ *
+ * ⚠️ **An UNSTAMPED node is not dormant.** Absent `activity_at` during the
+ * expand third means "not yet backfilled", and muting a live customer on a
+ * missing value is the wrong direction to fail.
+ */
+export function isOrganizationDormant(
+  node: { activity_at?: FirestoreTimestampType | number | null },
+  nowMs: number,
+): boolean {
+  const ms = organizationActivityMs(node);
+  return ms !== null && ms < organizationDormantCutoffMs(nowMs);
 }

@@ -207,6 +207,22 @@ const ORG_REPARENT_TO_DESCENDANTS: EnforcementRef = {
   gates: true,
 };
 
+const ORG_ACTIVITY_STAMP_UNIT: EnforcementRef = {
+  kind: "test",
+  ref: "api-cloudrun/tests/unit/organizationActivity.test.ts",
+  clause:
+    "the stamper's decision half: a create stamps every node in `organization.path`; a cascade-only patch (org snapshot, user name, `xero_id`, PDF version) stamps nothing; a stale or same-day candidate writes nothing; a future `collection_end` wins over the event time. Says nothing about the corpus — the backfill's audit is added with the tightening beta.",
+  gates: true,
+};
+
+const ORG_ACTIVITY_SHAPE: EnforcementRef = {
+  kind: "zod",
+  ref: "core/src/schemas/organization.ts::activity_at",
+  clause:
+    "the value's SHAPE only — a Timestamp or absent, never null. Nothing in one document can say whether it is the max over its subtree.",
+  gates: true,
+};
+
 // ── create-organization ──────────────────────────────────────────
 
 const createOrganizationRules: CollectionRule[] = [
@@ -507,6 +523,19 @@ const reparentRules: CollectionRule[] = [
       { source: ["path"], target: ["query_by_path"] },
     ],
   },
+  {
+    id: "reparent-org:activity-to-new-ancestors",
+    source: "organizations",
+    target: "organizations",
+    mode: "fan-out",
+    invariant:
+      "A move carries the moved subtree's `activity_at` onto its NEW ancestors by the same max rule the stamper uses, so a project re-homed under a dormant root lifts that root. ⚠️ **Old ancestors are never lowered** — they keep a slightly high value, which only affects sort order, and lowering would need the whole remaining subtree re-read. Conditional: it writes only where the moved subtree's value is newer.",
+    enforced_by: [ORG_REPARENT_TO_DESCENDANTS, ORG_ACTIVITY_SHAPE],
+    transaction: "reparent-organization",
+    fields: [
+      { source: ["activity_at"], target: ["activity_at"] },
+    ],
+  },
 ];
 
 const reparentOrganizationTransaction: TransactionDefinition = {
@@ -549,6 +578,59 @@ const reparentOrganizationTransaction: TransactionDefinition = {
     // ancestors answer `resolveTaxAxes` for the whole moved subtree, so its live
     // un-invoiced orders reprice exactly as a billing address re-resolves above.
     "update-org:tax-axes-to-orders",
+    // ⚠️ Conditional — only where the moved subtree's `activity_at` is newer
+    // than a new ancestor's (api-cloudrun#979).
+    "reparent-org:activity-to-new-ancestors",
+  ],
+};
+
+// ── organization-activity-stamp ─────────────────────────────────────
+//
+// 🔴 **Published in the SAME beta api-cloudrun bumps to in the commit that adds
+// the stamper.** `propagationCoverage` has no pending list, so a transaction
+// declared ahead of its emitter reddens every consumer pin bump — `beta.428`'s
+// early `sweep-organization-active` did exactly that and `beta.429` withdrew it.
+
+const ACTIVITY_STAMP_INVARIANT =
+  "Every node in a document's `organization.path` (root, project, department) carries `activity_at = max(node.created_at, the latest meaningful activity on any order or invoice in its subtree)`, where one document's candidate is `max(event time, the order's latest destinations[].dates.collection_end)`. Stamped from Eventarc (`/eventarc/firestore`) with before and after in hand, so scripts and every write path are covered from one place. 🔴 **Meaningful only**: a create, a `status` change, an `items`/`dates` change on an order, a settlement or totals change on an invoice — never a cascade patch, and never `updated_at` (bulk migrations stamp it). ⚠️ **A narrow per-node update, only when the candidate exceeds the stored value by more than a day** (or the key is absent through the expand third) — no `version` or `updated_at` bump, never through `updateOrganization`, so a stamp fires no rename, Xero or tax cascade, and duplicate or out-of-order at-least-once deliveries do nothing. Bookings are deliberately NOT a source: allocation recomputes patch other orders' bookings.";
+
+const organizationActivityStampRules: CollectionRule[] = [
+  {
+    id: "stamp-org-activity:orders-to-organizations",
+    source: "orders",
+    target: "organizations",
+    mode: "fan-out",
+    invariant: ACTIVITY_STAMP_INVARIANT,
+    enforced_by: [ORG_ACTIVITY_STAMP_UNIT, ORG_ACTIVITY_SHAPE],
+    transaction: "organization-activity-stamp",
+    trigger: "onWrite:orders",
+    fields: [
+      { source: ["created_at"], target: ["activity_at"] },
+      { source: ["destinations", "dates", "collection_end"], target: ["activity_at"] },
+    ],
+  },
+  {
+    id: "stamp-org-activity:invoices-to-organizations",
+    source: "invoices",
+    target: "organizations",
+    mode: "fan-out",
+    invariant: ACTIVITY_STAMP_INVARIANT,
+    enforced_by: [ORG_ACTIVITY_STAMP_UNIT, ORG_ACTIVITY_SHAPE],
+    transaction: "organization-activity-stamp",
+    trigger: "onWrite:invoices",
+    fields: [
+      { source: ["created_at"], target: ["activity_at"] },
+    ],
+  },
+];
+
+const organizationActivityStampTransaction: TransactionDefinition = {
+  id: "organization-activity-stamp",
+  description:
+    "Stamps `activity_at` on every node of a written order's or invoice's organization chain (api-cloudrun#979). Its OWN transaction, never a borrowed `update-organization`: a stamp must not read as a rename. One of the two steps fires per event, keyed on the source collection.",
+  steps: [
+    "stamp-org-activity:orders-to-organizations",
+    "stamp-org-activity:invoices-to-organizations",
   ],
 };
 
@@ -577,10 +659,12 @@ export const organizations: PropagationModule = {
     ...updateOrganizationRules,
     nameToDescendantsRule,
     ...reparentRules,
+    ...organizationActivityStampRules,
   ],
   transactions: [
     createOrganizationTransaction,
     updateOrganizationTransaction,
     reparentOrganizationTransaction,
+    organizationActivityStampTransaction,
   ],
 };

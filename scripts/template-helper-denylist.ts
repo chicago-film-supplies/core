@@ -74,6 +74,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   organizations: [
     "buildOrganizationSnapshot",
     "computeOrganizationNode",
+    // Dormancy (api-cloudrun#979) is a picker/search concern: a render context
+    // holds a frozen document snapshot, which carries no `activity_at`.
+    "isOrganizationDormant",
+    "organizationActivityMs",
+    "organizationDormantCutoffMs",
     "orgLevel",
     "orgOwnName",
     "orgParentUid",

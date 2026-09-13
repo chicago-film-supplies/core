@@ -617,14 +617,6 @@ export interface OrganizationDocument {
   xero_id?: string;
   jurisdiction_claim?: string;
   tax_exempt?: boolean;
-  /**
-   * The stored `Organization.active` — sweep-computed at a project, mirrored at
-   * a department, absent at a root (api-cloudrun#979). ⚠️ **`undefined` is not
-   * `false`**: filter with `active:!=false` so roots and not-yet-swept nodes
-   * stay visible.
-   */
-  active?: boolean;
-  active_override?: boolean;
   emails?: string[];
   phones?: string[];
   billing_address: TypesenseAddressFields;
@@ -639,6 +631,11 @@ export interface OrganizationDocument {
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;
   last_order?: number;
+  /**
+   * `Organization.activity_at` as epoch-ms — the dormancy sort key
+   * (api-cloudrun#979). ⚠️ `undefined` means not yet stamped/indexed, not dormant.
+   */
+  activity_at?: number;
   created_at?: number;
   updated_at: number;
 }

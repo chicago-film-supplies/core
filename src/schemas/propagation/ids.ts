@@ -85,6 +85,9 @@ export type TransactionId =
   // Six writers borrowed `update-invoice`, which declares exactly one step, and
   // a borrowed transaction id turns the drift warning off SILENTLY.
   | "reparent-organization"
+  // The Eventarc `activity_at` stamper (api-cloudrun#979) — its OWN id, never a
+  // borrowed `update-organization`: a stamp must not read as a rename.
+  | "organization-activity-stamp"
   // contacts.ts
   | "create-contact"
   | "update-contact"
@@ -217,6 +220,9 @@ export type RuleId =
   | "update-org:contacts-change"
   | "update-org:name-to-descendants"
   | "reparent-org:tree-to-descendants"
+  | "reparent-org:activity-to-new-ancestors"
+  | "stamp-org-activity:orders-to-organizations"
+  | "stamp-org-activity:invoices-to-organizations"
   // contacts.ts
   | "create-contact:contact-to-orgs"
   | "create-contact:link-to-user"

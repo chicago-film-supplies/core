@@ -482,42 +482,23 @@ Deno.test("UpdateOrganizationInput distinguishes ABSENT from an explicit null ui
   assertEquals(explicitNull.data?.uid_parent, null);
 });
 
-Deno.test("tree invariant 13 — `active` is non-null exactly below the root", () => {
-  // Each case differs from a valid node by ONE field, so a failure names this arm.
+Deno.test("activity_at — a Timestamp or ABSENT, never null, and never client-authored", () => {
   const ok = (doc: Record<string, unknown>) => OrganizationSchema.safeParse(doc).success;
-  assertEquals(ok(namedProject({ active: true })), true, "a project states its activity");
-  assertEquals(ok(namedProject({ active: false })), true, "…in either direction");
-  assertEquals(ok(validTreeOrganization({ active: false })), true, "a department MIRRORS its project's");
-  assertEquals(ok(namedRoot({ active: null })), true, "a root is out of the lifecycle");
-
-  assertEquals(ok(namedProject({ active: null })), false, "a project must carry an answer once the key is stated");
-  assertEquals(ok(validTreeOrganization({ active: null })), false, "…and so must a department");
-  assertEquals(ok(namedRoot({ active: true })), false, "a root states no activity");
+  const ts = { seconds: 1_757_000_000, nanoseconds: 0, toMillis: () => 1_757_000_000_000, toDate: () => new Date(0) };
+  assertEquals(ok(namedRoot({ activity_at: ts })), true, "a root carries one");
+  assertEquals(ok(validTreeOrganization({ activity_at: ts })), true, "…and so does a department");
   assertEquals(ok(namedRoot()), true, "absent still parses — the expand third");
-});
+  assertEquals(ok(namedRoot({ activity_at: null })), false, "null is not a state this field has");
+  assertEquals(ok(namedRoot({ activity_at: "2026-09-13T00:00:00.000-05:00" })), false, "an ISO string is not a Timestamp");
 
-Deno.test("tree invariant 13 — only a PROJECT may pin its activity", () => {
-  const ok = (doc: Record<string, unknown>) => OrganizationSchema.safeParse(doc).success;
-  assertEquals(ok(namedProject({ active: false, active_override: false })), true, "an operator pins a project inactive");
-  assertEquals(ok(namedProject({ active: true, active_override: null })), true, "null hands it back to the sweep — a real answer, so `⇒` not `⟺`");
-  assertEquals(ok(validTreeOrganization({ active: true, active_override: null })), true, "a department states no pin");
-
-  const dept = OrganizationSchema.safeParse(validTreeOrganization({ active: true, active_override: true }));
-  assertEquals(dept.success, false, "a department pin would be a second author for a mirrored value");
-  assertEquals(dept.error?.issues.map((i) => i.path.join(".")), ["active_override"]);
-  assertEquals(ok(namedRoot({ active_override: false })), false, "a root has no lifecycle to pin");
-});
-
-Deno.test("active is never client-authored — neither input schema carries it", () => {
   // `z.object` strips unknown keys, so the claim is that the PARSED input has none.
-  const create = CreateOrganizationInput.safeParse({ uid: SELF_ID, name: "Acme", billing_address: null, active: false });
+  const create = CreateOrganizationInput.safeParse({ uid: SELF_ID, name: "Acme", billing_address: null, activity_at: ts });
   assertEquals(create.success, true);
-  assertEquals("active" in (create.data ?? {}), false);
-  assertEquals("active_override" in (create.data ?? {}), false, "a brand-new node has no history to override");
-
-  const update = UpdateOrganizationInput.safeParse({ version: 1, active: false, active_override: false });
+  assertEquals("activity_at" in (create.data ?? {}), false);
+  const update = UpdateOrganizationInput.safeParse({ version: 1, activity_at: ts });
   assertEquals(update.success, true);
-  assertEquals("active" in (update.data ?? {}), false);
-  assertEquals(update.data?.active_override, false);
-  assertEquals("active_override" in (UpdateOrganizationInput.safeParse({ version: 1 }).data ?? {}), false, "absent leaves the pin alone");
+  assertEquals("activity_at" in (update.data ?? {}), false);
+  for (const key of ["active", "active_override"]) {
+    assertEquals(ok(namedProject({ [key]: false })), false, `${key} is deleted — a strict schema refuses it`);
+  }
 });

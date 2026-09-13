@@ -104,12 +104,6 @@ export const organizations: TypesenseCollectionConfig = {
       // exactly that correspondence.
       { name: "jurisdiction_claim", type: "string", facet: true, optional: true },
       { name: "tax_exempt", type: "bool", facet: true, optional: true },
-      // The picker's noise filter (`active:!=false`, api-cloudrun#979). STORED,
-      // not derived at index time like `level`/`derived` above: it is the
-      // sweep's answer, mirrored onto departments, so a department hit filters
-      // on its project's liveness without a join.
-      { name: "active", type: "bool", facet: true, optional: true },
-      { name: "active_override", type: "bool", facet: true, optional: true },
       { name: "emails", type: "string[]", stem: true, optional: true },
       { name: "phones", type: "string[]", optional: true },
       // 🔴 **`parentOptional` must be TRUE: `Organization.billing_address` is
@@ -142,6 +136,11 @@ export const organizations: TypesenseCollectionConfig = {
       { name: "updated_by.name", type: "string", sort: true, stem: true, facet: true, optional: true },
       { name: "last_order", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "created_at", type: "int64", sort: true, index: true, facet: false, optional: true },
+      // The dormancy sort key (api-cloudrun#979) — the picker's `sort_by` puts
+      // `_eval(activity_at:>=<cutoff>)` ahead of the level tier, so dormant rows
+      // sort LAST and are never filtered out. `optional: true` only through the
+      // expand third, matching `Organization.activity_at`.
+      { name: "activity_at", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "updated_at", type: "int64", sort: true, index: true, facet: false },
     ],
     // 🔴 **Moved off `name` in v14, and Typesense forced the choice.** Probed

@@ -160,45 +160,40 @@ export interface Organization {
    * the defect `core/CLAUDE.md` names under *"Required, not merely
    * non-optional"*. Precedent: `CardDatesType`, `OOSDates`, `booking.dates`.
    *
-   * ACTIVE/DORMANT stays DERIVED from this window — no stored status.
+   * ⚠️ **Being removed (api-cloudrun#979).** Its only reader is the editor, and
+   * dormancy is derived from `activity_at` rather than from this window.
    */
   dates?: { start: string | null; wrap: string | null };
   /**
-   * Whether this node's PROJECT is live — the answer a picker filters on
-   * (`active:!=false`) to hide productions nobody has touched (api-cloudrun#979).
+   * When this node last saw meaningful activity — the key search sorts dormant
+   * rows LAST on (api-cloudrun#979). Nothing is ever hidden: a dormant project
+   * back for reshoots stays findable and pickable, and returns to the top the
+   * moment its first new order stamps it.
    *
-   * 🔴 **Stored, and it has exactly ONE writer: the daily
-   * `sweep-organization-active` task.** It is in neither input schema, so no
-   * client payload can carry it. At a project (depth 2) it is
-   * `active_override ?? computed`, where computed is *"an open order/invoice in
-   * the subtree, or any activity in the last 60 days"*. At a department (depth 3)
-   * it is a MIRROR of its project's value — a deliberate exception to the tree's
-   * "resolve, don't copy" rule, because a search filter decides which rows a
-   * query returns and cannot walk to a parent (invariant 13). `null` at a root,
-   * which this lifecycle does not reach.
+   * `max(created_at, latest meaningful order/invoice activity in the subtree)`,
+   * where one document's candidate is `max(event time, the order's latest
+   * destinations[].dates.collection_end)` — so a
+   * rental still out keeps its whole chain on top until it returns.
    *
-   * ⚠️ **Its propagation rule is declared WITH the sweep, not ahead of it.**
-   * api-cloudrun's `propagationCoverage` refuses a declared transaction step that
-   * no `logTransactionPropagation` call fires, so a rule published before its
-   * emitter blocks every api-cloudrun pin bump (`beta.428` did, for one publish).
+   * 🔴 **The only valid stored value is a Firestore `Timestamp`.** Never `null`,
+   * never an ISO string: it is a machine instant like `created_at`, not a
+   * business datetime, so the Chicago offset form does not apply. The
+   * `created_at` floor is what makes it non-nullable — a never-used node carries
+   * its creation time, derived rather than guessed.
    *
-   * ⚠️ **This REVERSES the "no stored status" note on `dates` above**, which is
-   * being removed: an operator pin and a Typesense-filterable answer are two
-   * things a pure derivation cannot give.
+   * 🔴 **Written ONLY by api-cloudrun's Eventarc stamper, the backfill, and every
+   * organization CREATE writer (`= created_at`).** In neither input schema. The
+   * stamper writes a narrow field update — no `version` or `updated_at` bump,
+   * never through `updateOrganization` — so a stamp fires no rename, Xero or tax
+   * cascade.
    *
-   * Optional through the expand third — tightened once both corpora are
-   * backfilled. Never `.default()`.
+   * "Dormant" is DERIVED at read time — `ORGANIZATION_DORMANT_AFTER_DAYS` /
+   * `isOrganizationDormant` in `@cfs/core/utils/organizations` — never stored.
+   *
+   * Optional (ABSENT, never `.nullable()`) through the expand third — tightened
+   * to required once both corpora are backfilled. Never `.default()` (core#95).
    */
-  active?: boolean | null;
-  /**
-   * An operator's PIN on a project's `active` — `null` lets the sweep decide,
-   * `true`/`false` overrides it. Non-null only at depth 2 (invariant 13): a
-   * department has no authorship channel for one, which is what keeps its
-   * mirrored `active` unambiguous.
-   *
-   * Optional through the expand third. Never `.default()`.
-   */
-  active_override?: boolean | null;
+  activity_at?: FirestoreTimestampType;
   /**
    * The organization's **human-readable account number** — despite the name.
    *
@@ -485,35 +480,6 @@ function checkOrganizationNode(doc: Organization, ctx: z.RefinementCtx): void {
       });
     }
   }
-
-  // 13. `active` lives below the root, and only a PROJECT may pin it.
-  //
-  //     🔴 **The one-document half of the project-activity lifecycle**
-  //     (api-cloudrun#979). A project's `active` is the sweep's answer or the
-  //     operator's pin; a department's is a MIRROR of its project's, so a pin on
-  //     a department would be a second author for a value that must equal its
-  //     parent's. A root is out of the lifecycle and states neither.
-  //
-  //     ⚠️ **The pin is `non-null ⇒ depth 2`, not `⟺`** — `null` on a project is
-  //     a real answer ("let the sweep decide"), not a missing one.
-  //
-  //     ⚠️ The mirror's EQUALITY (department `active` === its project's) reads two
-  //     documents and cannot live here; the sweep's per-run drift check owns it.
-  //     Guarded on `!== undefined` through the expand third.
-  if (doc.active !== undefined && path.length > 0 && (doc.active !== null) !== (path.length >= 2)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["active"],
-      message: `active is non-null exactly below the root (projects and departments) — this node is depth ${path.length} and active is ${doc.active}`,
-    });
-  }
-  if (doc.active_override != null && path.length !== 2) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["active_override"],
-      message: `only a project pins its activity — active_override must be null at depth ${path.length}; a department mirrors its project's active`,
-    });
-  }
 }
 
 /** Zod schema for a full organization Firestore document. */
@@ -535,8 +501,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
     start: chicagoStartOfDay().nullable().meta({ column: true, label: "Start" }),
     wrap: chicagoStartOfDay().nullable().meta({ column: true, label: "Wrap" }),
   }).optional().meta({ label: "Dates" }),
-  active: z.boolean().nullable().optional().meta({ column: true, label: "Active" }),
-  active_override: z.boolean().nullable().optional().meta({ column: true, label: "Active Override" }),
+  activity_at: FirestoreTimestamp.optional().meta({ column: true, label: "Last Active" }),
   crms_id: z.int().nullable(),
   xero_id: z.uuid().nullable(),
   // ⚠️ The "Required (no `.default(\"tax_applied\")`) … TAX_PROFILES[0]" note
@@ -688,14 +653,6 @@ export interface UpdateOrganizationInputType {
   uid_parent?: string | null;
   uid_department_type?: string | null;
   dates?: { start: string | null; wrap: string | null };
-  /**
-   * Pin a PROJECT's activity (`true`/`false`) or hand it back to the sweep
-   * (`null`). Absent leaves the pin alone. Refused off a project by invariant 13.
-   *
-   * ⚠️ **`active` itself is deliberately NOT here** — its only writer is the
-   * sweep, so there is no field for a client payload to carry.
-   */
-  active_override?: boolean | null;
   /** The AXES — see {@link CreateOrganizationInputType}. */
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
@@ -718,7 +675,6 @@ export const UpdateOrganizationInput: z.ZodType<UpdateOrganizationInputType> = z
     start: chicagoStartOfDay().nullable(),
     wrap: chicagoStartOfDay().nullable(),
   }).optional(),
-  active_override: z.boolean().nullable().optional(),
   jurisdiction_claim: JurisdictionEnum.nullable().optional(),
   tax_exempt: z.boolean().optional(),
   description: z.string().optional(),
