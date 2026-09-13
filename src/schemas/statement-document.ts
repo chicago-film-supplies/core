@@ -121,6 +121,18 @@ export interface StatementDocument {
   organization_path: OrgPathNodeType[];
   /** 1-based, per organization. */
   version: number;
+  /**
+   * The statement's GLOBAL number — unique across every organization, printed
+   * on the PDF and in its download filename.
+   *
+   * ⚠️ **Not `version`, and the two answer different questions.** `version` is
+   * per organization and part of the doc id ("which save of this org's
+   * statement"); `number` is "which statement". Allocated from
+   * `counters/statement-documents` before the render, outside any transaction,
+   * so a render or claim that fails burns one — **gaps are expected**: this is a
+   * display index a customer can quote back, not an accounting series.
+   */
+  number: number;
   request: StatementRequestSnapshot;
   /**
    * The closing balance the saved page printed.
@@ -160,6 +172,7 @@ export const StatementDocumentSchema: z.ZodType<StatementDocument> = z.strictObj
     label: "Organization",
   }),
   version: z.int().min(1).meta({ column: true, label: "Version" }),
+  number: z.int().min(1).meta({ column: true, label: "Number" }),
   request: StatementRequestSnapshotSchema,
   closing_balance_cents: z.int(),
   uploadcare_uuid: uploadcareRef(z.string().nullable()),

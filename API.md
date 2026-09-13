@@ -8450,6 +8450,7 @@ interface StatementDocument {
   uid_organization: string;
   organization_path: OrgPathNodeType[];
   version: number;
+  number: number;
   request: StatementRequestSnapshot;
   closing_balance_cents: number;
   uploadcare_uuid: string | null;
