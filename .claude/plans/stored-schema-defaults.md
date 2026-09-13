@@ -32,7 +32,7 @@ api-cloudrun#943's remaining half.*
 > family touching any of these six fields, and reading its sidecar's `collection_source` first meant
 > checking exactly one family's fixtures rather than sweeping all seven. All 15 committed `quote`
 > fixtures already stated `reference` — `lint:fixtures` clean, no fixture repair needed. One
-> hand-spelled `orders` literal in api-cloudrun's `tests/unit/fixtureFormat.test.ts` was missing
+> hand-spelled `orders` literal in `api-cloudrun/tests/unit/fixtureFormat.test.ts` was missing
 > `reference` (the same class batch 5 hit twice) and was completed.
 >
 > ✅ **The chain is CLOSED, by digest, extracted from the running image with no `docker` available.**
