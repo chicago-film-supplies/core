@@ -102,8 +102,8 @@ export const ContactSchema: z.ZodType<Contact> = z.strictObject({
   // `.default()` never materializes on a write — see the note in `product.ts`.
   emails: z.array(Email).meta({ column: true, label: "Emails" }),
   phones: z.array(Phone).meta({ column: true, label: "Phones" }),
-  organizations: z.array(ContactOrganization).default([]).meta({ label: "Organizations" }),
-  query_by_organizations: z.array(z.string()).default([]),
+  organizations: z.array(ContactOrganization).meta({ label: "Organizations" }),
+  query_by_organizations: z.array(z.string()),
   // Declared ahead of use, and NOT dead. `api-cloudrun/src/services/contacts.ts`
   // writes it whenever a contact resolves to a user, and `src/schemas/propagation/users.ts`
   // carries both the set and the clear — but no contact has ever been linked:
