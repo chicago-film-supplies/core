@@ -4,6 +4,64 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
+> ## ✅ STATUS 2026-09-13 — **batch 14 (2 of 2), cluster 4: invites + lists. Backlog 28 → 24. Chain verified by digest.**
+>
+> `invites.{roles,used}` + `lists.{description,locked}` — 4 paths, 2 small collections. `core`
+> `7718a3b` → published `beta.429`. Census: `invites` 1/1 prod present+non-null (dev has **0**
+> documents — vacuous, gated by the type + suite: the interface already required both fields and
+> `createInvite` is the sole compiler-gated create site); `lists` 4/4 present+non-null, both projects.
+> Writer audit: single create path per collection, both stating every field explicitly; every update
+> path (`updateList`'s `cloneDeep`, `roleRename`'s `validatedPatch`, `validateInviteToken`'s
+> `transaction.patch`) merges over the existing document.
+>
+> 🔴 **Repaired two INVERTED tests as their mirrors** — `InviteSchema defaults used to false` and
+> `ListSchema defaults locked to []` each asserted the default's own spec (the exact core#95 batch-2
+> hazard). Rewritten to assert the key is now REQUIRED (omit it, expect failure), and added the
+> matching `requires roles`/`requires description` cases that had no test at all before. Also
+> completed the `validList` fixture, which had never carried `locked`.
+>
+> ⭐ **A different self-check's floor tripped as a direct, correctly-predicted consequence of the
+> campaign itself, not a regression.** `tests/testing.test.ts`'s "required-only" sweep asserts
+> `optional > 50` as a non-vacuity floor on how many input-optional keys its classifier finds — and
+> that classifier (`isInputOptional`) flags `.default()` nodes, while `getTestDoc` only ever
+> populates required-or-defaulted keys (never a bare `.optional()` one, which never reaches the
+> counted set at all). So the counter is almost entirely measuring THIS campaign's own remaining
+> `.default()` backlog, and it legitimately shrinks batch by batch — it tripped at 49 this batch.
+> Lowered to `> 20` with a comment naming the mechanism, rather than restoring a default to keep it
+> green. **Carry this forward**: a future batch may trip it again as the last ~24 paths close; lower
+> it again with the same reasoning, don't reach for the default.
+>
+> ✅ **The chain is CLOSED, by digest.** `api-cloudrun` `2bfbafd3` (pin bump to beta.429, plus three
+> `SCHEMA_PENDING_EMISSION` entries patched in from a concurrent peer session's api-cloudrun#979 —
+> `organization_active_sweep`/`_drift`/`_sweep_failed`, declared by core beta.428 ahead of their own
+> emitter) → release PR #986 merged as `b73b6fd5`, cutting **`v0.256.2`**. Build
+> `463264fd-5955-4ac7-ab74-fc4d9d64ed01` produced digest
+> `sha256:6663ab334c8556912b6cf088e78cef1f845bbd82d9b5cb13a782027bafda148b`, and revision
+> `api-cloudrun-00385-scs` serving 100% traffic carries exactly that digest. Released tree's
+> `deno.json` confirmed 40/40 `beta.429`. `audit:reparse` with no `--core` flag, both projects: all 4
+> positions **REACHED** (dev `invites` correctly `NO-POPULATION`), 0 failures. `manager` released
+> FIRST as `manager-v26.7.1` (PR #464) — `requires-manager` needed one manual re-run (the batch-11/12/
+> 14-1/14-3 pattern: cached the pre-release result) but came back green before the api-cloudrun merge.
+> `templates` PR #337 merged as `7187096`, all four required checks green on the first run.
+>
+> ⭐ **This batch's coordination load came from TWO concurrent, unrelated core campaigns sharing the
+> checkout at once** (`derive-price-keys-root-cause`, api-cloudrun#984, wound down mid-batch;
+> `cfs-42`, api-cloudrun#979, was active for all of cluster 4). Handled entirely over cross-session
+> messages and independent verification, never by trusting a report: `cfs-42`'s in-progress
+> `organizations.active`/`active_override` tripped `tests/stored-optionality.test.ts` and blocked a
+> push for several minutes (their fix, re-verified independently before retrying — never just taking
+> their word); a later correction (`sweep-organization-active` propagation rule withdrawn ahead of
+> its emitter) required holding all core commits for ~10 minutes; and cfs-42 handed off three
+> `SCHEMA_PENDING_EMISSION` catalog entries as a small patch file, read in full before applying rather
+> than applied blind, then independently re-verified (`logRecordCoverage.test.ts`, `gate`,
+> `test:units`) rather than trusted on the strength of "it's just a test file." Every push and merge
+> was confirmed by content (`git ls-remote` / `gh release list` / digest), never by a peer's report
+> alone.
+>
+> | # | what | backlog | state |
+>|---|---|---:|---|
+> | 14 (2 of 2), cluster 4 | invites + lists — 4 paths, 4 declarations | 28 → **24** | ✅ prod, `v0.256.2`, revision `api-cloudrun-00385-scs`, digest-verified |
+
 > ## ✅ STATUS 2026-09-13 — **batch 14 (2 of 2), clusters 2+3: credit-notes + transactions. Backlog 38 → 28. Chain verified by digest.**
 >
 > **Cluster 2 — the credit-notes Xero/money remainder** (6 paths, 1 declaration each):
