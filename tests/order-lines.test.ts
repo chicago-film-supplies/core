@@ -120,6 +120,38 @@ Deno.test("buildOrderLineFromProduct carries inheritedAncestry and reads its own
   assertEquals(line.price.chargeable_days, null);
 });
 
+Deno.test("buildOrderLineFromProduct carries a percent_of_total product's rate and zeroes base_cents", () => {
+  // The prod Card Fee shape. Before `base_percent` was copied, this line staged
+  // as a percent fee with no rate and priced at $0.
+  const line = buildOrderLineFromProduct(
+    product({
+      uid: REAL_PRODUCT_UID,
+      type: "transaction_fee",
+      stock_method: "none",
+      price: { base_cents: 0, base_percent: 4, formula: "percent_of_total", taxes: [] },
+    }),
+    { ...OPTS, uidOrder: REAL_ORDER_UID },
+  );
+  assertEquals(line.price.formula, "percent_of_total");
+  assertEquals(line.price.base_percent, 4);
+  assertEquals(line.price.base_cents, 0);
+  assertEquals(line.price.chargeable_days, null);
+
+  // A stray base_cents on the catalog doc cannot break the biconditional.
+  const stray = buildOrderLineFromProduct(
+    product({ type: "transaction_fee", price: { base_cents: 500, base_percent: 4, formula: "percent_of_total" } }),
+    OPTS,
+  );
+  assertEquals(stray.price.base_cents, 0);
+  assertEquals(stray.price.base_percent, 4);
+});
+
+Deno.test("buildOrderLineFromProduct states base_percent: null on a non-percent price", () => {
+  const line = buildOrderLineFromProduct(product(), OPTS);
+  assertEquals(line.price.base_percent, null);
+  assertEquals(line.price.base_cents, 10000);
+});
+
 // ── buildOrderComponentLines: the path seam ─────────────────────────
 
 Deno.test("component doc paths are parent-derived and match the catalog concat on well-formed rows", () => {

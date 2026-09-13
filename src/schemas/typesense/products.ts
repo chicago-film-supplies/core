@@ -24,6 +24,10 @@ export const products: TypesenseCollectionConfig = {
       { name: "eligible_shipping_air", type: "bool", sort: true, facet: true },
       { name: "price", type: "object", optional: true },
       { name: "price.base_cents", type: "int64", optional: true, money: true },
+      // A RATE, not an amount: the `percent_of_total` percentage at 4dp. Without
+      // it a transaction-fee hit carries its formula and no rate, and every line
+      // built from the hit prices at $0.
+      { name: "price.base_percent", type: "float", optional: true },
       { name: "price.replacement_cents", type: "int64", optional: true, money: true },
       { name: "price.coa_revenue", type: "int32", facet: true, optional: true },
       { name: "price.taxes", type: "object[]", optional: true },

@@ -148,6 +148,11 @@ export function buildOrderLineFromProduct(
 ): OrderDocLineItemType {
   const type = doc.type as DocLineItemTypeType;
   const isRental = type === "rental";
+  const formula = (doc.price?.formula as PriceFormulaType | undefined) ?? "five_day_week";
+  // A `percent_of_total` price carries its unit in `base_percent` and must
+  // state `base_cents: 0` (`checkPriceBaseUnit`), so both are decided here by
+  // the formula rather than copied independently.
+  const isPercent = formula === "percent_of_total";
   return {
     uid: doc.uid,
     type,
@@ -163,10 +168,11 @@ export function buildOrderLineFromProduct(
     inclusion_type: null,
     zero_priced: null,
     price: {
-      base_cents: doc.price?.base_cents ?? 0,
+      base_cents: isPercent ? 0 : doc.price?.base_cents ?? 0,
+      base_percent: isPercent ? (doc.price?.base_percent ?? null) : null,
       replacement_cents: doc.price?.replacement_cents ?? null,
       chargeable_days: isRental ? opts.chargeDays : null,
-      formula: (doc.price?.formula as PriceFormulaType | undefined) ?? "five_day_week",
+      formula,
       discount: null,
       subtotal_cents: 0,
       subtotal_discounted_cents: 0,

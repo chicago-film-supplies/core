@@ -678,6 +678,8 @@ export interface ProductDocument {
   eligible_shipping_air?: boolean;
   price?: {
     base_cents?: number;
+    /** The `percent_of_total` percentage at 4dp — a rate, not cents. */
+    base_percent?: number | null;
     replacement_cents?: number;
     coa_revenue?: number;
     taxes?: Array<{ uid?: string; name?: string; rate?: number; type?: string }>;
