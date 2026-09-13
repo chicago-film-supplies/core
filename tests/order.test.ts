@@ -32,6 +32,7 @@ const docLine = (over: Record<string, unknown> = {}) => ({
   quantity: 1,
   stock_method: "none",
   price: priceBase,
+  path: [],
   ...over,
 });
 

@@ -485,7 +485,10 @@ const InvoiceDocOrderItemInner = z.strictObject({
   // `DestinationDividerArm.name`, which moved in the same batch — a field name is
   // not a node, and only reading both said the two agree.
   name: z.string().max(200).meta({ pii: "none" }),
-  path: z.array(ItemUid).default([]),
+  // REQUIRED — the inert `.default([])` came off (core#95 batch 13), same
+  // rationale as `_items.ts`'s `LineItemCore.path`. `computeInvoiceItemPaths`
+  // is the sole author of every order divider's path.
+  path: z.array(ItemUid),
   description: z.string().meta({ pii: "none" }),
 });
 

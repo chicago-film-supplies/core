@@ -253,6 +253,7 @@ Deno.test("InvoiceSchema accepts group item in items array", () => {
         type: "group",
         name: "Lighting Package",
         description: "",
+        path: [],
       },
       ...validInvoice.items,
     ],
@@ -269,6 +270,7 @@ Deno.test("InvoiceSchema accepts destination item in items array", () => {
         type: "destination",
         name: "Main Venue",
         description: "",
+        path: [],
       },
       ...validInvoice.items,
     ],
@@ -285,12 +287,14 @@ Deno.test("InvoiceSchema accepts mixed items (line + group + destination)", () =
         type: "destination",
         name: "Main Venue",
         description: "",
+        path: [],
       },
       {
         uid: "550e8400-e29b-41d4-a716-446655440000",
         type: "group",
         name: "Lighting Package",
         description: "",
+        path: ["550e8400-e29b-41d4-a716-446655440001"],
       },
       {
         ...validInvoice.items[0],
@@ -409,6 +413,7 @@ Deno.test("InvoiceSchema accepts order divider item in items array", () => {
         type: "order",
         name: "Order #1001",
         description: "",
+        path: [],
       },
       {
         ...validInvoice.items[0],
@@ -471,12 +476,14 @@ Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
         type: "order",
         name: "Order #1001",
         description: "",
+        path: [],
       },
       {
         uid: "550e8400-e29b-41d4-a716-446655440001",
         type: "destination",
         name: "Main Venue",
         description: "",
+        path: ["550e8400-e29b-41d4-a716-446655440010"],
       },
       {
         ...validInvoice.items[0],
@@ -487,6 +494,7 @@ Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
         type: "order",
         name: "Order #1002",
         description: "",
+        path: [],
       },
       {
         ...lineItemBase,

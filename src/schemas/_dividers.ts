@@ -59,7 +59,10 @@ export const DestinationDividerArm = z.strictObject({
   // stored value — there is no `.min(1)` here, unlike `GroupDividerArm.name`
   // below — so this requires the KEY and says nothing about the VALUE.
   name: z.string().max(200).meta({ pii: "mask" }),
-  path: z.array(ItemUid).default([]),
+  // REQUIRED — the inert `.default([])` came off (core#95 batch 13). See
+  // `_items.ts`'s `LineItemCore.path` for the row-identity rationale and the
+  // corpus/writer evidence, which covers this arm too.
+  path: z.array(ItemUid),
   // 🔴 **There is no `uid_delivery`/`uid_collection` here, and re-adding either
   // re-opens api-cloudrun#662/#663/#664.** They were a SECOND copy of the pair's
   // own `delivery.uid`/`collection.uid` — a join by VALUE across two arrays,
@@ -80,6 +83,7 @@ export const GroupDividerArm = z.strictObject({
   // the dev replica. 0 occurrences match a contact or organization name. A
   // label, so `none` — see `OrderDocLineItem.name`.
   name: z.string().min(1).max(100).meta({ pii: "none" }),
-  path: z.array(ItemUid).default([]),
+  // REQUIRED — see `DestinationDividerArm.path` above.
+  path: z.array(ItemUid),
   description: z.string().meta({ pii: "none" }),
 });

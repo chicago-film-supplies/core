@@ -115,7 +115,7 @@ export const LineItemCore: {
   name: z.ZodString;
   description: z.ZodString;
   quantity: z.ZodNumber;
-  path: z.ZodDefault<z.ZodArray<z.ZodType<string>>>;
+  path: z.ZodArray<z.ZodType<string>>;
   zero_priced: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
 } = {
   uid: ItemUid,
@@ -190,7 +190,17 @@ export const LineItemCore: {
   // `item.uid` is NOT a row identity: it repeats within one document, in 18% of
   // prod orders, which is why `uid_parent: string` is unrepresentable and why
   // this field exists.
-  path: z.array(ItemUid).default([]),
+  //
+  // **REQUIRED — the inert `.default([])` came off (core#95 batch 13).** It never
+  // reached storage (`validateBeforeWrite` writes the raw document), so it only
+  // ever let a partial line PARSE. Gated by the corpus: `orders` 10,114+1,024+2,905 /
+  // `invoices` 9,618+3,145+1,017+1,017 / `fulfillments` 10,035+1,024+2,905 item
+  // rows across the two arms this file covers plus `_dividers.ts` and
+  // `InvoiceDocOrderItem`, **every one stating a non-null `path`, in both
+  // projects** — and the sole author, `computeItemPaths`/`computeInvoiceItemPaths`,
+  // runs at every create and rebuild site (`createOrder`, `updateOrder`,
+  // `createInvoice`, `updateInvoice`, `resyncInvoice`, `buildFulfillment`).
+  path: z.array(ItemUid),
 
   // Mirrored across all three grains with the same display-column metadata
   // (`manager#421`), so the column renders identically wherever it appears.
