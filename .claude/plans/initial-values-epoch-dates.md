@@ -18,12 +18,12 @@ Both data repairs and the writer mitigation landed earlier (manager `b5747a3` /
 `fa9052fb` repaired all 8 documents and pushed 7 to Xero). This is the **class fix**.
 
 The fix is two returns: `SKIP` instead of an epoch, in both format branches
-(`src/schemas/initial.ts`). An absent key is what lets the writer's `??` fire.
+(`core/src/schemas/initial.ts`). An absent key is what lets the writer's `??` fire.
 
 ## Step 1 — the enumeration (re-measured 2026-09-13 against `core` @ `beta.437`)
 
 **222 object schemas walked, 22 seeded an epoch, 26 fields.** The probe is now the
-guard arm in `tests/initial.test.ts` (§ Step 5) rather than a throwaway — re-run it
+guard arm in `core/tests/initial.test.ts` (§ Step 5) rather than a throwaway — re-run it
 with `deno test tests/initial.test.ts`.
 
 | schema | field(s) |
@@ -73,18 +73,18 @@ decide it hold for every one:
    (`manager/src/primitives/createEntityCache.ts:59`), so for a draft **absent and
    null are the same state**. SKIP is behaviourally identical to what every
    `.nullable()` date already does.
-3. **Both live forms author their own date** — `TaxManager.tsx:435` uses
-   `todayChicago()`, `MakeRecurringModal.tsx:55` uses `todayIso()`. Credit notes have
+3. **Both live forms author their own date** — `manager/src/components/settings/TaxManager.tsx:435` uses
+   `todayChicago()`, `manager/src/components/cards/MakeRecurringModal.tsx:55` uses `todayIso()`. Credit notes have
    no create path.
 
 **The four manager-facing rows**, all `initialValues`-only:
 
 | schema | field(s) | store | consumer |
 |---|---|---|---|
-| `TaxSchema` | `applied_from` | `src/stores/taxes.ts:12` | `initialValues` only |
-| `InvoiceSchema` | `date`, `due_date` | `src/stores/invoices.ts:23` | **already deleted** at `:56-57` |
-| `RecurrenceSchema` | `active_from` | `src/stores/recurrences.ts:28` | `initialValues` only |
-| `CreditNoteSchema` | `date` | `src/stores/creditNotes.ts:8` | `initialValues` only |
+| `TaxSchema` | `applied_from` | `manager/src/stores/taxes.ts:12` | `initialValues` only |
+| `InvoiceSchema` | `date`, `due_date` | `manager/src/stores/invoices.ts:23` | **already deleted** at `:56-57` |
+| `RecurrenceSchema` | `active_from` | `manager/src/stores/recurrences.ts:28` | `initialValues` only |
+| `CreditNoteSchema` | `date` | `manager/src/stores/creditNotes.ts:8` | `initialValues` only |
 
 ⭐ **Two measured negatives, so nobody re-derives them:**
 
@@ -101,30 +101,30 @@ decide it hold for every one:
 
 ## Steps 3–5 — done
 
-- **`src/schemas/initial.ts`** — both format branches return `SKIP`. The `pipe` and
+- **`core/src/schemas/initial.ts`** — both format branches return `SKIP`. The `pipe` and
   `getInitialValues` docblocks are corrected: the "three separate holes" list gains a
   fourth, and `pipe`'s note no longer claims dates inherit an ISO-datetime initial.
-- **`tests/initial.test.ts`** — the assertion pinning `applied_from` to the epoch is
+- **`core/tests/initial.test.ts`** — the assertion pinning `applied_from` to the epoch is
   gone from the *"defaults are used when present"* arm (where it never belonged:
   `applied_from` has no default). Replaced by two arms — a named-witness arm covering
   **both** format branches, and the sweep.
-- **The sweep** walks every object schema `src/schemas/mod.ts` exports and fails on any epoch
+- **The sweep** walks every object schema `core/src/schemas/mod.ts` exports and fails on any epoch
   value at any depth. It carries a **non-vacuity floor** (`walked > 150`) because a
   walk that resolved nothing would otherwise pass silently.
   ✅ **Verified RED without the fix** — reverting the two `SKIP`s fails both arms.
 
 ⭐ **Step 4 turned out to be a no-op, and that is worth recording rather than
-re-deriving.** The draft plan predicted `tests/tax.test.ts:6`,
-`tests/transaction.test.ts:41` and `tests/invoice.test.ts:9` would each need their
+re-deriving.** The draft plan predicted `core/tests/tax.test.ts:6`,
+`core/tests/transaction.test.ts:41` and `core/tests/invoice.test.ts:9` would each need their
 date key added. None did: all three already state their dates explicitly
-(`tax.test.ts:19`, `transaction.test.ts:93`, `invoice.test.ts:56`), and
+(`core/tests/tax.test.ts:19`, `core/tests/transaction.test.ts:93`, `core/tests/invoice.test.ts:56`), and
 `InvoiceSchema.due_date` is `.optional()` so its absence is legal. **`deno task test`
 is green at 2354 passed / 0 failed with no fixture edit at all**, plus `deno task
 check` and `deno task lint`.
 
 ⚠️ **api-cloudrun's integration fixtures are unaffected** — re-verified 2026-09-13.
-Both `CreateProductInput` consumers (`tests/integration/products/products.test.ts:21`
-and `tests/integration/products/componentAssembly.test.ts:54`) already
+Both `CreateProductInput` consumers (`api-cloudrun/tests/integration/products/products.test.ts:21`
+and `api-cloudrun/tests/integration/products/componentAssembly.test.ts:54`) already
 `delete productBase.transaction`, which is the only affected sub-block.
 
 This discharges the first half of **manager#435** (a seed that materializes a *wrong*
@@ -139,7 +139,7 @@ newest published beta `.437`, `manager` `.437`, `api-cloudrun` `.435`, `template
 
 1. Commit on `core`'s **`beta`** branch (workspace rule — not a feature branch). The
    push publishes the JSR beta. Keep `core/deno.json` `version` at `"0.0.0"`.
-2. Bump **manager** (`package.json`, npm alias `@jsr/cfs__core`), push, **merge its
+2. Bump **manager** (`manager/package.json`, npm alias `@jsr/cfs__core`), push, **merge its
    release PR and wait for the release to cut**.
 3. Bump **api-cloudrun**, push, merge its release PR.
 4. Open the **templates** pin PR.
@@ -159,7 +159,7 @@ deploy-before-backfill ordering beyond the release train itself.
   the two `SKIP` returns are reverted.
 - ✅ The probe reports **zero** epoch seeds across all 222 schemas.
 - ⬜ `manager`: `npm run build` + `vitest run`, and confirm
-  `tests/stores/invoices-seed-dates.test.ts` still passes — its own sweep arm fails
+  `manager/tests/stores/invoices-seed-dates.test.ts` still passes — its own sweep arm fails
   on any epoch-shaped value, so it is an independent check on this change.
 - ⬜ Exercise the two live forms in the manager preview: create a tax version
   (`TaxManager`) and make a card recurring (`MakeRecurringModal`), confirming each
@@ -170,10 +170,10 @@ deploy-before-backfill ordering beyond the release train itself.
 ## Issues
 
 - **core#107** — closes when the core fix, the guard and the pin wave have all
-  landed. Post the re-measurement as a comment so the `stores/orders.ts` claim is not
+  landed. Post the re-measurement as a comment so the `manager/src/stores/orders.ts` claim is not
   acted on.
 - **manager#435** — comment naming which half this discharges; do not close.
-- **api-cloudrun** — delete `scripts/repair-invoice-epoch-due-dates.ts` (an applied
+- **api-cloudrun** — delete `api-cloudrun/scripts/repair-invoice-epoch-due-dates.ts` (an applied
   one-shot) in the same PR as the api-cloudrun pin bump, and drop its catalogue entry.
 - Leave the **onset** as "first observed 2026-09-11" — the 189/3/8 gap table is the
   constraint, no cause was reproduced, and the fix does not depend on it.

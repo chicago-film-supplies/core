@@ -52,8 +52,8 @@ function resolveField(schema: any): unknown {
       //
       // A field that genuinely wants a seed carries `.meta({ initial })` — but
       // that takes a static literal, so "today" is not expressible there and the
-      // FORM must author it. Both live surfaces already do: `TaxManager.tsx`
-      // (`applied_from`) and `MakeRecurringModal.tsx` (`active_from`).
+      // FORM must author it. Both live surfaces already do: `manager/src/components/settings/TaxManager.tsx`
+      // (`applied_from`) and `manager/src/components/cards/MakeRecurringModal.tsx` (`active_from`).
       if (def.format === "datetime") return SKIP;
       if (def.format === "date") return SKIP;
       return "";
