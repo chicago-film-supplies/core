@@ -426,7 +426,10 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   // and uses `chicagoInstant()`; the two semantics are why both factories exist.)
   date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
-  reference: z.string().nullable().default(null).meta({ column: true, label: "Reference", linkTo: "creditNoteDetail" }),
+  // Bare `.nullable()` — the dropped `.default(null)` is core#95 batch 10.
+  // 13 of 13 in both projects already carry the key (`createCreditNote`
+  // writes `reference: input.reference ?? null`).
+  reference: z.string().nullable().meta({ column: true, label: "Reference", linkTo: "creditNoteDetail" }),
   notes: z.string().meta({ pii: "mask", column: true, label: "Notes" }).nullable(),
   organization: DocumentOrganizationSnapshot,
   // `tax_profile` was DELETED here — api-cloudrun#596 item 3's contract third,
@@ -437,7 +440,10 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   items: z.array(CreditNoteDocLineItem).default([]).meta({ label: "Item" }),
   totals: CreditNoteDocTotalsSchema,
   remaining_credit_cents: z.int().default(0).meta({ column: true, label: "Remaining Credit" }),
-  sources: z.array(DocSource).default([]),
+  // Bare `z.array(DocSource)` — the dropped `.default([])` is core#95 batch
+  // 10. 13 of 13 in both projects already carry the key (`createCreditNote`
+  // writes a literal `sources: []`).
+  sources: z.array(DocSource),
   query_by_sources: z.array(z.string()),
   xero_credit_note_id: z.uuid().nullable().default(null),
   uid_thread: ThreadId.optional(),

@@ -453,7 +453,10 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
     label: "Subject",
     linkTo: "fulfillmentDetail",
   }),
-  reference: z.string().max(255).nullable().default(null).meta({
+  // Bare `.nullable()` — the dropped `.default(null)` is core#95 batch 10.
+  // 1,022 of 1,022 in both projects already carry the key
+  // (`buildFulfillment` writes `reference: orderNew.reference ?? null`).
+  reference: z.string().max(255).nullable().meta({
     column: true,
     label: "Reference",
     linkTo: "fulfillmentDetail",

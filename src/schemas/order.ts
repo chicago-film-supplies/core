@@ -1439,7 +1439,7 @@ export interface Order {
    * Normalize at the writer, require at storage.
    */
   subject: string;
-  reference?: string | null;
+  reference: string | null;
   xero_id?: string | null;
   /**
    * Required. Every order is born with a default thread — `createOrder` stamps
@@ -1603,7 +1603,12 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // Bare `z.string()` — the dropped `.default("")` is core#97 increment 3; the
   // interface above carries the census and the reason.
   subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "orderDetail" }),
-  reference: z.string().max(255).nullable().default(null).meta({ column: true, label: "Reference", linkTo: "orderDetail" }),
+  // Bare `.nullable()` — the dropped `.default(null)` is core#95 batch 10.
+  // 1,022 of 1,022 in both projects already carry the key (`createOrder`
+  // writes `reference: orderData.reference || null` and `updateOrder` only
+  // ever assigns a string-or-null), so nothing produced the absence the
+  // declaration allowed.
+  reference: z.string().max(255).nullable().meta({ column: true, label: "Reference", linkTo: "orderDetail" }),
   xero_id: z.uuid().nullable().default(null),
   uid_thread: ThreadId,
   version: z.int().min(0).default(0),

@@ -6057,7 +6057,7 @@ interface Order {
   crms_id: number | null;
   crms_status?: string;
   subject: string;
-  reference?: string | null;
+  reference: string | null;
   xero_id?: string | null;
   uid_thread: string;
   version: number;
@@ -16430,7 +16430,7 @@ interface Order {
   crms_id: number | null;
   crms_status?: string;
   subject: string;
-  reference?: string | null;
+  reference: string | null;
   xero_id?: string | null;
   uid_thread: string;
   version: number;

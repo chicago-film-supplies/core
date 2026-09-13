@@ -792,7 +792,11 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   // (2026-08-23) because no movement has been reversed yet. Not dead — the
   // reversal path reads it at `:535`. CLAUDE.md § "Is a field dead?".
   reverses: MovementId.nullable(),
-  sources: z.array(DocSource).default([]).meta({ label: "Source" }),
+  // Bare `z.array(DocSource)` — the dropped `.default([])` is core#95 batch
+  // 10. 2,015/2,015 prod, 2,205/2,205 dev already carry the key
+  // (`createTransaction`, `reverseTransaction` and `createStoreTransfer` each
+  // name `sources` explicitly).
+  sources: z.array(DocSource).meta({ label: "Source" }),
   query_by_sources: z.array(z.string()),
   query_by_uid_store: z.array(FirestoreId),
   query_by_uid_location: z.array(FirestoreId),

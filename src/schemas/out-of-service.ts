@@ -215,7 +215,10 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
     crms_id: z.int().nullable(),
   }).nullable().meta({ label: "Organization" }),
   dates: OOSDatesSchema,
-  sources: z.array(DocSource).default([]).meta({ label: "Source" }),
+  // Bare `z.array(DocSource)` — the dropped `.default([])` is core#95 batch
+  // 10. 2/2 prod, 4/4 dev already carry the key (`createOutOfServiceRecord`
+  // writes a literal `sources: [...]`).
+  sources: z.array(DocSource).meta({ label: "Source" }),
   query_by_sources: z.array(z.string()),
   crms_id: z.int().nullable().optional(),
   crms_stock_level_id: z.int().nullable().optional(),
