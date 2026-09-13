@@ -85,9 +85,6 @@ export type TransactionId =
   // Six writers borrowed `update-invoice`, which declares exactly one step, and
   // a borrowed transaction id turns the drift warning off SILENTLY.
   | "reparent-organization"
-  // The daily project-activity sweep (api-cloudrun#979) — its OWN id, never a
-  // borrowed `update-organization`: an activity flip must not read as a rename.
-  | "sweep-organization-active"
   // contacts.ts
   | "create-contact"
   | "update-contact"
@@ -220,7 +217,6 @@ export type RuleId =
   | "update-org:contacts-change"
   | "update-org:name-to-descendants"
   | "reparent-org:tree-to-descendants"
-  | "sweep-org-active:project-to-departments"
   // contacts.ts
   | "create-contact:contact-to-orgs"
   | "create-contact:link-to-user"

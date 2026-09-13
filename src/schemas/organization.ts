@@ -174,9 +174,13 @@ export interface Organization {
    * the subtree, or any activity in the last 60 days"*. At a department (depth 3)
    * it is a MIRROR of its project's value — a deliberate exception to the tree's
    * "resolve, don't copy" rule, because a search filter decides which rows a
-   * query returns and cannot walk to a parent (invariant 13 + the
-   * `sweep-organization-active` propagation rule). `null` at a root, which this
-   * lifecycle does not reach.
+   * query returns and cannot walk to a parent (invariant 13). `null` at a root,
+   * which this lifecycle does not reach.
+   *
+   * ⚠️ **Its propagation rule is declared WITH the sweep, not ahead of it.**
+   * api-cloudrun's `propagationCoverage` refuses a declared transaction step that
+   * no `logTransactionPropagation` call fires, so a rule published before its
+   * emitter blocks every api-cloudrun pin bump (`beta.428` did, for one publish).
    *
    * ⚠️ **This REVERSES the "no stored status" note on `dates` above**, which is
    * being removed: an operator pin and a Typesense-filterable answer are two
