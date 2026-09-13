@@ -13,6 +13,7 @@ import {
   orgParentUid,
   orgRootUid,
   resolveBillingAddress,
+  resolveTaxAxes,
   validateOrganizationTree,
 } from "../src/utils/organizations.ts";
 import { DocumentOrganizationSnapshot, type Organization } from "../src/schemas/mod.ts";
@@ -546,5 +547,143 @@ Deno.test("resolveBillingAddress: the LEAF is read from the node, never from the
   assertEquals(resolveBillingAddress(dept(CHICAGO), ancestors), {
     address: CHICAGO,
     uid_source: DEPT_ID,
+  });
+});
+
+// ── resolveTaxAxes ───────────────────────────────────────────────────────────
+//
+// Claim: nearest non-null, leaf-first (organization states, project overrides,
+// department inherits). Exemption: sticky — true if ANY node is, sourced to the
+// TOPMOST. Every expected value below is written by hand.
+
+const deptAxes = (claim: Organization["jurisdiction_claim"] = null, exempt = false) => ({
+  uid: DEPT_ID,
+  path: [rootNode, projectNode, deptNode],
+  jurisdiction_claim: claim,
+  tax_exempt: exempt,
+});
+
+Deno.test("resolveTaxAxes: a department inherits the ROOT's claim through a silent project", () => {
+  // The Kenwood TV case — the root claims `frankfort`, its departments state nothing.
+  const ancestors = new Map([
+    [ROOT_ID, { jurisdiction_claim: "frankfort" as const, tax_exempt: false }],
+    [PROJECT_ID, { jurisdiction_claim: null, tax_exempt: false }],
+  ]);
+  assertEquals(resolveTaxAxes(deptAxes(), ancestors), {
+    jurisdiction_claim: "frankfort",
+    uid_claim_source: ROOT_ID,
+    tax_exempt: false,
+    uid_exempt_source: null,
+  });
+});
+
+Deno.test("resolveTaxAxes: NEAREST claim wins — a project overrides its organization", () => {
+  const ancestors = new Map([
+    [ROOT_ID, { jurisdiction_claim: "frankfort" as const, tax_exempt: false }],
+    [PROJECT_ID, { jurisdiction_claim: "rantoul" as const, tax_exempt: false }],
+  ]);
+  assertEquals(resolveTaxAxes(deptAxes(), ancestors), {
+    jurisdiction_claim: "rantoul",
+    uid_claim_source: PROJECT_ID,
+    tax_exempt: false,
+    uid_exempt_source: null,
+  });
+});
+
+Deno.test("resolveTaxAxes: exemption is STICKY — a project's false cannot un-exempt the root", () => {
+  const ancestors = new Map([
+    [ROOT_ID, { jurisdiction_claim: null, tax_exempt: true }],
+    [PROJECT_ID, { jurisdiction_claim: "rantoul" as const, tax_exempt: false }],
+  ]);
+  assertEquals(resolveTaxAxes(deptAxes(), ancestors), {
+    jurisdiction_claim: "rantoul",
+    uid_claim_source: PROJECT_ID,
+    tax_exempt: true,
+    uid_exempt_source: ROOT_ID,
+  });
+});
+
+Deno.test("resolveTaxAxes: a project may ADD an exemption its organization lacks", () => {
+  const ancestors = new Map([
+    [ROOT_ID, { jurisdiction_claim: "frankfort" as const, tax_exempt: false }],
+    [PROJECT_ID, { jurisdiction_claim: null, tax_exempt: true }],
+  ]);
+  assertEquals(resolveTaxAxes(deptAxes(), ancestors), {
+    jurisdiction_claim: "frankfort",
+    uid_claim_source: ROOT_ID,
+    tax_exempt: true,
+    uid_exempt_source: PROJECT_ID,
+  });
+});
+
+Deno.test("resolveTaxAxes: two exempt nodes source to the TOPMOST, not the nearest", () => {
+  // The node whose flag a project editor cannot clear is the root's; reporting
+  // the project would render an editable checkbox whose edit changes nothing.
+  const project = {
+    uid: PROJECT_ID,
+    path: [rootNode, projectNode],
+    jurisdiction_claim: null,
+    tax_exempt: true,
+  };
+  const ancestors = new Map([[ROOT_ID, { jurisdiction_claim: null, tax_exempt: true }]]);
+  assertEquals(resolveTaxAxes(project, ancestors), {
+    jurisdiction_claim: null,
+    uid_claim_source: null,
+    tax_exempt: true,
+    uid_exempt_source: ROOT_ID,
+  });
+});
+
+Deno.test("resolveTaxAxes: a root answers for itself, with no ancestors at all", () => {
+  const root = { uid: ROOT_ID, path: [rootNode], jurisdiction_claim: "frankfort" as const, tax_exempt: true };
+  assertEquals(resolveTaxAxes(root), {
+    jurisdiction_claim: "frankfort",
+    uid_claim_source: ROOT_ID,
+    tax_exempt: true,
+    uid_exempt_source: ROOT_ID,
+  });
+});
+
+Deno.test("resolveTaxAxes: nothing stated anywhere → null claim, not exempt, and no sources", () => {
+  const ancestors = new Map([
+    [ROOT_ID, { jurisdiction_claim: null, tax_exempt: false }],
+    [PROJECT_ID, { jurisdiction_claim: undefined, tax_exempt: undefined }],
+  ]);
+  assertEquals(resolveTaxAxes(deptAxes(), ancestors), {
+    jurisdiction_claim: null,
+    uid_claim_source: null,
+    tax_exempt: false,
+    uid_exempt_source: null,
+  });
+});
+
+Deno.test("resolveTaxAxes: a MISSING ancestor states nothing rather than throwing", () => {
+  const ancestors = new Map([[ROOT_ID, { jurisdiction_claim: "frankfort" as const, tax_exempt: true }]]);
+  assertEquals(resolveTaxAxes(deptAxes(), ancestors), {
+    jurisdiction_claim: "frankfort",
+    uid_claim_source: ROOT_ID,
+    tax_exempt: true,
+    uid_exempt_source: ROOT_ID,
+  });
+  assertEquals(resolveTaxAxes(deptAxes(), new Map()), {
+    jurisdiction_claim: null,
+    uid_claim_source: null,
+    tax_exempt: false,
+    uid_exempt_source: null,
+  });
+});
+
+Deno.test("resolveTaxAxes: the LEAF is read from the node, never from the map", () => {
+  // A map entry for the leaf itself must be ignored — the caller holds the node.
+  const project = { uid: PROJECT_ID, path: [rootNode, projectNode], jurisdiction_claim: "rantoul" as const, tax_exempt: false };
+  const ancestors = new Map([
+    [ROOT_ID, { jurisdiction_claim: "frankfort" as const, tax_exempt: false }],
+    [PROJECT_ID, { jurisdiction_claim: "frankfort" as const, tax_exempt: true }],
+  ]);
+  assertEquals(resolveTaxAxes(project, ancestors), {
+    jurisdiction_claim: "rantoul",
+    uid_claim_source: PROJECT_ID,
+    tax_exempt: false,
+    uid_exempt_source: null,
   });
 });

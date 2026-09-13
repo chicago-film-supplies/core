@@ -398,11 +398,11 @@ const updateOrganizationRules: CollectionRule[] = [
     target: "orders",
     mode: "fan-out",
     invariant:
-      "An order's stored line taxes are computed under its organization's current tax AXES — `jurisdiction_claim` supplies the level-2 jurisdiction and `tax_exempt` zeroes the result — unless a destination names its own",
+      "An order's stored line taxes are computed under its organization's RESOLVED tax axes — `resolveTaxAxes` over the addressed node's chain: the nearest `jurisdiction_claim` supplies the level-2 jurisdiction and `tax_exempt` (true if ANY node on the chain is) zeroes the result — unless a destination names its own. ⚠️ **The axes INHERIT down the tree, so the order a change reaches is not only the edited node's own**: a department states neither axis (`OrganizationSchema` invariant 12) and answers from its project or organization.",
     enforced_by: [ORG_TAX_AXES_TO_ORDERS],
     transaction: "update-organization",
     trigger:
-      "a `jurisdiction_claim` or `tax_exempt` change — targets non-terminal orders that carry no invoice. An invoiced order is skipped: its money is already committed downstream, and `POST /orders/{uid}/tax-resync` is the deliberate repair path for it.",
+      "a `jurisdiction_claim` or `tax_exempt` change, or a re-parent — targets the non-terminal, un-invoiced orders addressed to any node in the affected SUBTREE whose resolved axes actually moved. A descendant project stating its own claim shields its own subtree from a claim change above it; nothing shields an exemption, which is sticky. An invoiced order is skipped: its money is already committed downstream, and `POST /orders/{uid}/tax-resync` is the deliberate repair path for it.",
     fields: [
       {
         source: ["jurisdiction_claim"],
@@ -545,6 +545,10 @@ const reparentOrganizationTransaction: TransactionDefinition = {
     // firing undeclared — so the omission is silent in both directions.
     "update-org:billing-to-orders",
     "update-org:billing-to-invoices",
+    // ⚠️ **Added when the tax axes began to inherit.** A move changes which
+    // ancestors answer `resolveTaxAxes` for the whole moved subtree, so its live
+    // un-invoiced orders reprice exactly as a billing address re-resolves above.
+    "update-org:tax-axes-to-orders",
   ],
 };
 

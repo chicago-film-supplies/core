@@ -69,6 +69,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   //     holds one frozen snapshot and no way to read Firestore. A template that
   //     wants the billing address reads `it.doc.organization.billing_address` —
   //     already this function's output, resolved at write time.
+  //   - `resolveTaxAxes` is its tax twin — the same ancestors map, frozen into
+  //     `it.doc.organization.jurisdiction_claim` / `tax_exempt` at write time.
   organizations: [
     "buildOrganizationSnapshot",
     "computeOrganizationNode",
@@ -77,6 +79,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "orgParentUid",
     "orgRootUid",
     "resolveBillingAddress",
+    "resolveTaxAxes",
     "validateOrganizationTree",
   ],
   // Stock primitives — the interval rules and the two consumption definitions.

@@ -414,6 +414,41 @@ function checkOrganizationNode(doc: Organization, ctx: z.RefinementCtx): void {
         `${ORG_LEVELS.length} (${ORG_LEVELS[ORG_LEVELS.length - 1]}); state it on the project or organization above`,
     });
   }
+
+  // 12. a DEPARTMENT or a derived placeholder states neither tax axis.
+  //
+  //     🔴 **The one-document half of the tax-axes inheritance rule** —
+  //     `resolveTaxAxes` walks the chain: the nearest `jurisdiction_claim`
+  //     answers, and `tax_exempt` is true if ANY node is. So a claim on a
+  //     department would be a COPY outranking its project's, and an exemption on
+  //     one would exempt a single department of a customer the tree says is not
+  //     exempt — neither is a fact about a department. A placeholder is
+  //     structure nobody authored, exactly as invariant 10 says of an address.
+  //
+  //     ⚠️ **Only `tax_exempt === true` is refused, not `false`.** `false` asserts
+  //     nothing under a sticky rule — it cannot un-exempt anything — and every
+  //     stored department carries it today, so refusing it would turn a no-op
+  //     into a rollback of the whole corpus. Measured prod 2026-09-12: all 38
+  //     typed departments hold `null`/`false`, and every `tax_exempt: true` (11)
+  //     and every claim (5) sits on a root.
+  const leafDerived = path.length > 0 && path[path.length - 1].derived;
+  if (path.length === ORG_LEVELS.length || leafDerived) {
+    const where = leafDerived ? "a derived placeholder" : `a ${ORG_LEVELS[ORG_LEVELS.length - 1]}`;
+    if (doc.jurisdiction_claim != null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["jurisdiction_claim"],
+        message: `${where} inherits its jurisdiction claim and never states one — jurisdiction_claim must be null; state it on the project or organization above`,
+      });
+    }
+    if (doc.tax_exempt === true) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["tax_exempt"],
+        message: `${where} inherits its tax exemption and never states one — tax_exempt must not be true; state it on the project or organization above`,
+      });
+    }
+  }
 }
 
 /** Zod schema for a full organization Firestore document. */

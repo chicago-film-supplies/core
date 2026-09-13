@@ -30013,6 +30013,19 @@ interface ResolvedBillingAddress {
 }
 ```
 
+### `ResolvedTaxAxes`
+
+What {@link resolveTaxAxes} answers.
+
+```ts
+interface ResolvedTaxAxes {
+  jurisdiction_claim: JurisdictionType | null;
+  uid_claim_source: string | null;
+  tax_exempt: boolean;
+  uid_exempt_source: string | null;
+}
+```
+
 ### `buildOrganizationSnapshot(org: Pick<Organization, "uid" | "path" | "crms_id" | "jurisdiction_claim" | "tax_exempt" | "xero_id" | "billing_address">, _: unknown): DocumentOrganizationSnapshotType`
 
 Build the denormalized organization snapshot an order, invoice or credit note
@@ -30166,6 +30179,32 @@ take down every order write for the whole subtree instead of one report.
 and is the authority on ancestry (invariants 1 and 5), so the caller only has
 to supply the ANCESTOR documents — at most two point-gets, and usually one,
 because a department that inherits stops at its project.
+
+### `resolveTaxAxes(node: Pick<Organization, "uid" | "path" | "jurisdiction_claim" | "tax_exempt">, _: unknown): ResolvedTaxAxes`
+
+The two tax AXES a document addressed to `node` should freeze.
+
+**The rule mirrors {@link resolveBillingAddress} for the claim, and is sticky
+for the exemption.** An organization states a `jurisdiction_claim`, a project
+may override it, a department never states one — so the claim is the nearest
+non-null value walking LEAF-FIRST. `tax_exempt` is `true` when ANY node on the
+chain is `true`: exemption is a legal fact about the buyer, and the existing
+document rule (`org.tax_exempt || doc.tax_exempt === true`) is already sticky
+in exactly this direction, so a project may add one and never remove one.
+
+⭐ **A derived `(default)` placeholder and a department need no special case.**
+`OrganizationSchema`'s invariant 12 makes both axes unstorable on them, so the
+walk passes through by construction — the same return `resolveBillingAddress`
+gets from invariants 10 and 11.
+
+⚠️ **A missing ancestor states nothing rather than throwing**, for the same
+reason as the billing walk: a dangling chain is a repair script's finding, and
+an exception here would take down every order write under it. That does mean
+a dangling reference to an exempt root reads as NOT exempt — a missing
+ancestor is reported, not guessed.
+
+⚠️ **Reads the leaf from `node`, never from `ancestors`**, and reads ancestry
+from `node.path`, never a re-fetched chain.
 
 ### `validateOrganizationTree(node: Pick<Organization, "uid" | "path" | "uid_department_type">, parent: Pick<Organization, "uid" | "path"> | null, siblings: readonly Pick<Organization, "uid" | "path" | "uid_department_type">[]): string[]`
 

@@ -357,6 +357,59 @@ Deno.test("tree invariant 11 — a DEPARTMENT inherits its billing address, it n
   );
 });
 
+/** Refused, AND the issue names exactly `field` — see {@link assertBillingIssue}. */
+function assertIssueAt(doc: Record<string, unknown>, field: string) {
+  const result = OrganizationSchema.safeParse(doc);
+  assertEquals(result.success, false, "expected the document to be refused");
+  const paths = result.error?.issues.map((i) => i.path.join(".")) ?? [];
+  assertEquals(paths.includes(field), true, `expected a ${field} issue, got [${paths.join(", ")}]`);
+}
+
+function assertParses(doc: Record<string, unknown>) {
+  const result = OrganizationSchema.safeParse(doc);
+  assertEquals(result.success, true, JSON.stringify(result.error?.issues));
+}
+
+Deno.test("tree invariant 12 — a DEPARTMENT states neither tax axis; it inherits both", () => {
+  // The positive: what all 38 prod typed departments hold today.
+  assertParses(validTreeOrganization({ jurisdiction_claim: null, tax_exempt: false }));
+  assertParses(validTreeOrganization());
+
+  assertIssueAt(validTreeOrganization({ jurisdiction_claim: "frankfort" }), "jurisdiction_claim");
+  assertIssueAt(validTreeOrganization({ tax_exempt: true }), "tax_exempt");
+
+  // Depth, not the catalog reference — a MINTED department carries no type.
+  assertIssueAt(
+    validOrganization({
+      path: [treeRoot, treeProject, { ...treeSelf, name: "(default)", derived: true }],
+      query_by_path: [ROOT_ID, PROJECT_ID, SELF_ID],
+      derived_from: { source_uid: ROOT_ID, reason: "minted-department" },
+      uid_department_type: null,
+      tax_exempt: true,
+    }),
+    "tax_exempt",
+  );
+
+  // ⚠️ The controls: a root states both, and a named project may override the
+  // claim and add an exemption. An arm reaching either takes every customer's tax.
+  assertParses(namedRoot({ jurisdiction_claim: "frankfort", tax_exempt: true }));
+  assertParses(namedProject({ jurisdiction_claim: "rantoul", tax_exempt: true }));
+});
+
+Deno.test("tree invariant 12 — a derived (default) PROJECT states neither tax axis", () => {
+  const placeholder = (overrides: Record<string, unknown> = {}) =>
+    validOrganization({
+      path: [treeRoot, { uid: SELF_ID, name: "(default)", derived: true }],
+      query_by_path: [ROOT_ID, SELF_ID],
+      derived_from: { source_uid: ROOT_ID, reason: "minted-project" },
+      uid_department_type: null,
+      ...overrides,
+    });
+  assertParses(placeholder({ jurisdiction_claim: null, tax_exempt: false }));
+  assertIssueAt(placeholder({ jurisdiction_claim: "frankfort" }), "jurisdiction_claim");
+  assertIssueAt(placeholder({ tax_exempt: true }), "tax_exempt");
+});
+
 Deno.test("tree invariant 4 — query_by_path IS path.map(n => n.uid), order included", () => {
   assertEquals(
     OrganizationSchema.safeParse(validTreeOrganization({ query_by_path: [ROOT_ID, PROJECT_ID] })).success,

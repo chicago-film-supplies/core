@@ -7,6 +7,7 @@
 import {
   type AddressType,
   type DocumentOrganizationSnapshotType,
+  type JurisdictionType,
   ORG_LEVELS,
   type OrgLevel,
   type OrgPathNodeType,
@@ -413,4 +414,73 @@ export function resolveBillingAddress(
     if (stated != null) return { address: stated, uid_source: uid };
   }
   return { address: null, uid_source: null };
+}
+
+/** What {@link resolveTaxAxes} answers. */
+export interface ResolvedTaxAxes {
+  /** The nearest stated claim on the chain, `null` when no node states one. */
+  jurisdiction_claim: JurisdictionType | null;
+  /** The uid of the node that stated {@link jurisdiction_claim}, `null` when nothing did. */
+  uid_claim_source: string | null;
+  /** `true` when ANY node on the chain is exempt. */
+  tax_exempt: boolean;
+  /**
+   * The uid of the TOPMOST exempt node, `null` when nothing is exempt.
+   *
+   * ⚠️ **Topmost, not nearest — the opposite of the claim, on purpose.** An
+   * exemption cannot be removed from below, so the node that matters to a
+   * caller is the highest one stating it: that is the only node where clearing
+   * the flag could change the answer. A project stating `true` under an exempt
+   * organization reports the ORGANIZATION, which is what lets the manager
+   * render the project's own checkbox as locked rather than as an editable
+   * control whose edit would change nothing.
+   */
+  uid_exempt_source: string | null;
+}
+
+/**
+ * The two tax AXES a document addressed to `node` should freeze.
+ *
+ * **The rule mirrors {@link resolveBillingAddress} for the claim, and is sticky
+ * for the exemption.** An organization states a `jurisdiction_claim`, a project
+ * may override it, a department never states one — so the claim is the nearest
+ * non-null value walking LEAF-FIRST. `tax_exempt` is `true` when ANY node on the
+ * chain is `true`: exemption is a legal fact about the buyer, and the existing
+ * document rule (`org.tax_exempt || doc.tax_exempt === true`) is already sticky
+ * in exactly this direction, so a project may add one and never remove one.
+ *
+ * ⭐ **A derived `(default)` placeholder and a department need no special case.**
+ * `OrganizationSchema`'s invariant 12 makes both axes unstorable on them, so the
+ * walk passes through by construction — the same return `resolveBillingAddress`
+ * gets from invariants 10 and 11.
+ *
+ * ⚠️ **A missing ancestor states nothing rather than throwing**, for the same
+ * reason as the billing walk: a dangling chain is a repair script's finding, and
+ * an exception here would take down every order write under it. That does mean
+ * a dangling reference to an exempt root reads as NOT exempt — a missing
+ * ancestor is reported, not guessed.
+ *
+ * ⚠️ **Reads the leaf from `node`, never from `ancestors`**, and reads ancestry
+ * from `node.path`, never a re-fetched chain.
+ */
+export function resolveTaxAxes(
+  node: Pick<Organization, "uid" | "path" | "jurisdiction_claim" | "tax_exempt">,
+  ancestors: ReadonlyMap<string, Pick<Organization, "jurisdiction_claim" | "tax_exempt">> = new Map(),
+): ResolvedTaxAxes {
+  const path = node.path ?? [];
+  let jurisdiction_claim: JurisdictionType | null = null;
+  let uid_claim_source: string | null = null;
+  let uid_exempt_source: string | null = null;
+  for (let i = path.length - 1; i >= 0; i--) {
+    const uid = path[i].uid;
+    const stated = uid === node.uid ? node : ancestors.get(uid);
+    if (stated === undefined) continue;
+    if (uid_claim_source === null && stated.jurisdiction_claim != null) {
+      jurisdiction_claim = stated.jurisdiction_claim;
+      uid_claim_source = uid;
+    }
+    // Overwritten on every exempt node, so the walk ends holding the topmost.
+    if (stated.tax_exempt === true) uid_exempt_source = uid;
+  }
+  return { jurisdiction_claim, uid_claim_source, tax_exempt: uid_exempt_source !== null, uid_exempt_source };
 }
