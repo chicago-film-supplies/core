@@ -37,7 +37,9 @@
  * addresses, contacts, collecting/returning flags, dates, jurisdiction. Only the
  * pair's identity (`uid`) and scope (`uid_order`) are skipped. An equality check
  * enumerates what it skips, never what it takes, so a new pair field is compared
- * by construction (the rule `pairsMatch` states).
+ * by construction (the rule `pairsMatch` states). The one exception: a
+ * comparison involving a fulfillment skips `jurisdiction`, a tax fact the
+ * fulfillment carries read-only and does not own.
  *
  * ## Presence against invoices is judged on the UNION of invoices
  *
@@ -194,6 +196,17 @@ const COMPARED_LINE_FIELDS: ReadonlySet<string> = new Set([
 
 /** The pair keys a comparison is addressed BY, never part of what it compares. */
 const PAIR_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["uid", "uid_order"]);
+
+/**
+ * Pair fields a FULFILLMENT does not own, skipped whenever one is on either side.
+ *
+ * `jurisdiction` is a tax fact: it prices lines, and a fulfillment carries no
+ * price. The fulfillment stores it only because `destinations[]` is projected
+ * whole from the order; it is server-managed and read-only there. A mismatch
+ * (16 prod pairs on 2026-09-13) is therefore not a difference a fulfillment can
+ * have an opinion about (owner ruling, 2026-09-13).
+ */
+const FULFILLMENT_UNOWNED_PAIR_FIELDS: ReadonlySet<string> = new Set(["jurisdiction"]);
 
 const key = (path: readonly string[]): string => path.join("/");
 
@@ -370,8 +383,10 @@ function compareScope(
     const h = here as unknown as Record<string, unknown>;
     const t = there as unknown as Record<string, unknown>;
     const fields: DocumentDiffField[] = [];
+    const involvesFulfillment = viewed.kind === "fulfillment" || source.kind === "fulfillment";
     for (const field of [...new Set([...Object.keys(h), ...Object.keys(t)])].sort()) {
       if (PAIR_IDENTITY_FIELDS.has(field)) continue;
+      if (involvesFulfillment && FULFILLMENT_UNOWNED_PAIR_FIELDS.has(field)) continue;
       if (JSON.stringify(canonicalizePayload(h[field])) !== JSON.stringify(canonicalizePayload(t[field]))) {
         fields.push({ field, here: h[field] ?? null, there: t[field] ?? null });
       }

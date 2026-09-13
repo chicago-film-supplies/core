@@ -52,7 +52,7 @@ function orderItems(): LineItem[] {
 }
 
 function order(items: LineItem[] = orderItems(), uid = O): Order {
-  return { uid, number: 1001, version: 7, status: "reserved", items, destinations: [PAIR] } as unknown as Order;
+  return { uid, number: 1001, version: 7, status: "reserved", items, destinations: [structuredClone(PAIR)] } as unknown as Order;
 }
 
 /** The fulfillment projection of an order: same paths, no price. */
@@ -64,7 +64,7 @@ function fulfillment(items: LineItem[] = orderItems(), uid = O): Fulfillment {
       const { price: _price, ...rest } = it as unknown as Record<string, unknown>;
       return rest;
     });
-  return { uid, number: 1001, version: 3, items: rows, destinations: [PAIR] } as unknown as Fulfillment;
+  return { uid, number: 1001, version: 3, items: rows, destinations: [structuredClone(PAIR)] } as unknown as Fulfillment;
 }
 
 /** An invoice scoped to one or more orders, each scope the exact projection of its order's items. */
@@ -74,7 +74,7 @@ function invoice(uid: string, scopes: Array<{ order: string; items: LineItem[] }
   for (const s of scopes) {
     items.push({ uid: s.order, type: "order", name: `Order ${s.order}`, description: "", path: [s.order] } as unknown as InvoiceDocItemType);
     items.push(...buildOrderScopedItems(s.items, s.order));
-    destinations.push({ ...PAIR, uid_order: s.order });
+    destinations.push({ ...structuredClone(PAIR), uid_order: s.order });
   }
   return { uid, number, version: 1, status: "draft", items, destinations } as unknown as Invoice;
 }
@@ -277,6 +277,22 @@ Deno.test("documentDiff: pairs compare every payload field — an address correc
   assertEquals(summary(diff.pairs), {
     [D]: ['invoice#2241:pair_field(delivery=null→{"address":{"full":"3100 W Fillmore St"}})'],
   });
+});
+
+Deno.test("documentDiff: jurisdiction is never compared against a fulfillment, only between order and invoice", () => {
+  const f = fulfillment();
+  (f.destinations[0] as unknown as Record<string, unknown>).jurisdiction = "illinois";
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  (inv.destinations[0] as unknown as Record<string, unknown>).jurisdiction = "illinois";
+  const sources = { orders: [order()], fulfillments: [f], invoices: [inv] };
+  // Order view: the invoice's jurisdiction differs and shows; the fulfillment's does not.
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).pairs), {
+    [D]: ['invoice#2241:pair_field(jurisdiction="chicago"→"illinois")'],
+  });
+  assertEquals(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).pairs.size, 0);
+  // A non-tax pair field still compares against a fulfillment.
+  (f.destinations[0] as unknown as Record<string, unknown>).delivery = { address: { full: "elsewhere" } };
+  assertEquals(Object.keys(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).pairs)), [D]);
 });
 
 Deno.test("documentDiff: a substituted-away line is explained by its substitute, not reported missing", () => {
