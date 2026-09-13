@@ -11046,10 +11046,10 @@
           "doc": "What the order ↔ invoice explanation arms need, per order."
         },
         {
-          "kind": "interface",
+          "kind": "typeAlias",
           "name": "DocumentDiffEntry",
-          "declaration": "interface DocumentDiffEntry {\n  source: DocumentRef;\n  kind: DocumentDiffKind;\n  fields: DocumentDiffField[];\n}",
-          "doc": "One source's difference at one key of the viewed document."
+          "declaration": "type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry;",
+          "doc": "One entry at one key of the viewed document. Discriminated on `kind`."
         },
         {
           "kind": "interface",
@@ -11060,8 +11060,8 @@
         {
           "kind": "typeAlias",
           "name": "DocumentDiffKind",
-          "declaration": "type DocumentDiffKind = \"differs\" | \"only_here\" | \"missing_here\" | \"pair_field\";",
-          "doc": "- `differs` — the same path on both sides, a compared field disagrees\n- `only_here` — on the viewed document, absent from the source\n- `missing_here` — on the source, absent from the viewed document\n- `pair_field` — a destination pair's compared field disagrees"
+          "declaration": "type DocumentDiffKind = \"differs\" | \"only_here\" | \"missing_here\" | \"pair_field\" | \"uninvoiced\";",
+          "doc": "- `differs` — the same path on both sides, a compared field disagrees\n- `only_here` — on the viewed document, absent from the source\n- `missing_here` — on the source, absent from the viewed document\n- `pair_field` — a destination pair's compared field disagrees\n- `uninvoiced` — an order/fulfillment line that no invoice carries"
         },
         {
           "kind": "interface",
@@ -11086,6 +11086,18 @@
           "name": "DocumentRef",
           "declaration": "interface DocumentRef {\n  kind: DocumentKind;\n  uid: string;\n  number: number;\n  version: number;\n}",
           "doc": "Which document a diff entry is against — enough to link to it and to CAS a later sync."
+        },
+        {
+          "kind": "interface",
+          "name": "DocumentSourceDiffEntry",
+          "declaration": "interface DocumentSourceDiffEntry {\n  kind: Exclude<DocumentDiffKind, \"uninvoiced\">;\n  source: DocumentRef;\n  fields: DocumentDiffField[];\n}",
+          "doc": "One source's difference at one key of the viewed document."
+        },
+        {
+          "kind": "interface",
+          "name": "DocumentUninvoicedEntry",
+          "declaration": "interface DocumentUninvoicedEntry {\n  kind: \"uninvoiced\";\n  invoices: DocumentRef[];\n}",
+          "doc": "A line no invoice carries. It has no single source — it is a statement about\nall of them — so it names every invoice that was checked instead."
         },
         {
           "kind": "function",

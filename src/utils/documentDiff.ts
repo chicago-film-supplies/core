@@ -32,7 +32,35 @@
  * differences alone put rows on hundreds of settled invoices whose catalog names
  * moved after invoicing, and `taxes_base` is not money. A fulfillment carries no
  * price, so every comparison with a fulfillment is quantity and existence only.
- * Destination pairs compare `dates` and `jurisdiction`.
+ *
+ * **Destination pairs compare EVERY payload field** (owner decision, same day) —
+ * addresses, contacts, collecting/returning flags, dates, jurisdiction. Only the
+ * pair's identity (`uid`) and scope (`uid_order`) are skipped. An equality check
+ * enumerates what it skips, never what it takes, so a new pair field is compared
+ * by construction (the rule `pairsMatch` states).
+ *
+ * ## Presence against invoices is judged on the UNION of invoices
+ *
+ * An order is routinely billed across several invoices, so "invoice A lacks this
+ * line" says nothing when invoice B carries it. Asked per invoice, every line of
+ * a split-billed order would read `only_here` against the invoice that does not
+ * bill it. So:
+ *
+ * - **differences in money or quantity** stay per invoice — each invoice is its
+ *   own source row;
+ * - **a line on the order or fulfillment that NO invoice carries** is one
+ *   `uninvoiced` entry naming every invoice checked — on the order, fulfillment
+ *   AND invoice views;
+ * - **a line a SIBLING invoice carries** produces nothing on an invoice view;
+ * - **a line an invoice carries that the order or fulfillment lacks** stays per
+ *   invoice (`missing_here` on the order/fulfillment view, `only_here` on the
+ *   invoice view).
+ *
+ * `uninvoiced` is emitted only when at least one ALIGNED invoice was passed for
+ * that order: an order with no invoices yet is not flagged line by line, and an
+ * unaligned invoice cannot vouch for or against any line. ⚠️ The invoice view
+ * therefore needs the sibling invoices passed in (`order.invoices`) — without
+ * them, a line billed on a sibling reads `uninvoiced`.
  *
  * Order ↔ invoice line differences go through
  * {@link invoiceItemDifferences} + {@link explainInvoiceItemDifferences} FIRST
@@ -81,8 +109,9 @@ export interface DocumentRef {
  * - `only_here` — on the viewed document, absent from the source
  * - `missing_here` — on the source, absent from the viewed document
  * - `pair_field` — a destination pair's compared field disagrees
+ * - `uninvoiced` — an order/fulfillment line that no invoice carries
  */
-export type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field";
+export type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field" | "uninvoiced";
 
 /** One compared field. `here` is the viewed document's value, `there` the source's. */
 export interface DocumentDiffField {
@@ -92,12 +121,24 @@ export interface DocumentDiffField {
 }
 
 /** One source's difference at one key of the viewed document. */
-export interface DocumentDiffEntry {
+export interface DocumentSourceDiffEntry {
+  kind: Exclude<DocumentDiffKind, "uninvoiced">;
   source: DocumentRef;
-  kind: DocumentDiffKind;
   /** Empty for `only_here` / `missing_here`. */
   fields: DocumentDiffField[];
 }
+
+/**
+ * A line no invoice carries. It has no single source — it is a statement about
+ * all of them — so it names every invoice that was checked instead.
+ */
+export interface DocumentUninvoicedEntry {
+  kind: "uninvoiced";
+  invoices: DocumentRef[];
+}
+
+/** One entry at one key of the viewed document. Discriminated on `kind`. */
+export type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry;
 
 /**
  * The answer for one viewed document.
@@ -151,8 +192,8 @@ const COMPARED_LINE_FIELDS: ReadonlySet<string> = new Set([
   "price.total_cents",
 ]);
 
-/** The destination-pair fields that produce a `pair_field` entry. */
-const COMPARED_PAIR_FIELDS = ["dates", "jurisdiction"] as const;
+/** The pair keys a comparison is addressed BY, never part of what it compares. */
+const PAIR_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["uid", "uid_order"]);
 
 const key = (path: readonly string[]): string => path.join("/");
 
@@ -258,22 +299,43 @@ function push<K>(map: Map<K, DocumentDiffEntry[]>, k: K, entry: DocumentDiffEntr
   else map.set(k, [entry]);
 }
 
+/**
+ * The invoice coverage of one order scope: which order-relative line keys ANY
+ * aligned invoice carries, and which invoices were checked.
+ */
+interface InvoiceCoverage {
+  keys: ReadonlySet<string>;
+  invoices: DocumentRef[];
+}
+
 /** Compare the viewed side against one source side, within one order scope. */
 function compareScope(
   out: DocumentDiffMap,
   viewed: Side,
   source: Side,
   orderUid: string,
+  coverage: InvoiceCoverage,
   context: DocumentDiffContext,
 ): void {
   const sourceRef = refOf(source.kind, source.doc);
   // An invoice key carries its order-divider prefix; the others are order-relative.
   const viewedKey = (rel: string) => (viewed.kind === "invoice" ? (rel === "" ? orderUid : `${orderUid}/${rel}`) : rel);
+  const uninvoiced = (rel: string) => {
+    const k = viewedKey(rel);
+    // One entry per key however many sources reach the same conclusion.
+    if (out.lines.get(k)?.some((e) => e.kind === "uninvoiced")) return;
+    push(out.lines, k, { kind: "uninvoiced", invoices: coverage.invoices });
+  };
 
   for (const [rel, here] of viewed.lines.byKey) {
     if (!comparable(viewed, source, here)) continue;
     const there = source.lines.byKey.get(rel);
     if (there === undefined) {
+      if (source.kind === "invoice") {
+        // Presence against invoices is a question about ALL of them.
+        if (coverage.invoices.length > 0 && !coverage.keys.has(rel)) uninvoiced(rel);
+        continue;
+      }
       push(out.lines, viewedKey(rel), { source: sourceRef, kind: "only_here", fields: [] });
       continue;
     }
@@ -284,6 +346,12 @@ function compareScope(
     if (viewed.lines.byKey.has(rel) || !comparable(source, viewed, there)) continue;
     // A line the viewed document substituted away is explained by the substitute's own `only_here`.
     if (isRemovedBySubstitution(rel.split("/"), viewed.lines.anchors)) continue;
+    if (viewed.kind === "invoice") {
+      // The order or fulfillment has it and this invoice does not: a sibling may bill it.
+      if (coverage.keys.has(rel)) continue;
+      if (coverage.invoices.length > 0) uninvoiced(rel);
+      continue;
+    }
     push(out.lines, viewedKey(rel), { source: sourceRef, kind: "missing_here", fields: [] });
   }
 
@@ -299,12 +367,13 @@ function compareScope(
   for (const [uid, here] of pairsOf(viewed)) {
     const there = sourcePairs.get(uid);
     if (there === undefined) continue;
+    const h = here as unknown as Record<string, unknown>;
+    const t = there as unknown as Record<string, unknown>;
     const fields: DocumentDiffField[] = [];
-    for (const field of COMPARED_PAIR_FIELDS) {
-      const h = (here as unknown as Record<string, unknown>)[field] ?? null;
-      const t = (there as unknown as Record<string, unknown>)[field] ?? null;
-      if (JSON.stringify(canonicalizePayload(h)) !== JSON.stringify(canonicalizePayload(t))) {
-        fields.push({ field, here: h, there: t });
+    for (const field of [...new Set([...Object.keys(h), ...Object.keys(t)])].sort()) {
+      if (PAIR_IDENTITY_FIELDS.has(field)) continue;
+      if (JSON.stringify(canonicalizePayload(h[field])) !== JSON.stringify(canonicalizePayload(t[field]))) {
+        fields.push({ field, here: h[field] ?? null, there: t[field] ?? null });
       }
     }
     if (fields.length > 0) push(out.pairs, viewedKey(uid), { source: sourceRef, kind: "pair_field", fields });
@@ -332,19 +401,38 @@ export function computeDocumentDiffs(
   const orderByUid = new Map(orders.map((o) => [o.uid, o]));
   const fulfillmentByUid = new Map(fulfillments.map((f) => [f.uid, f]));
 
-  /** Compare an order-or-fulfillment-shaped viewed side against every other document on its order. */
-  const againstInvoices = (viewed: Side, orderUid: string) => {
+  /** Is this invoice's scope for `orderUid` comparable at all? Needs the order. */
+  const aligned = (invoice: Invoice, orderUid: string): boolean => {
     const order = orderByUid.get(orderUid);
+    if (order === undefined) return false;
+    const scoped = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.path[0] === orderUid);
+    return invoiceScopeDividersMatch(scoped as unknown as InvoiceItem[], order.items as unknown as LineItem[], orderUid);
+  };
+
+  /** Every aligned invoice passed for `orderUid`, with the union of the lines they carry. */
+  const coverageOf = (orderUid: string): InvoiceCoverage & { alignedInvoices: Invoice[] } => {
+    const keys = new Set<string>();
+    const refs: DocumentRef[] = [];
+    const alignedInvoices: Invoice[] = [];
+    for (const invoice of invoices) {
+      if (!invoiceScopes(invoice).includes(orderUid) || !aligned(invoice, orderUid)) continue;
+      alignedInvoices.push(invoice);
+      refs.push(refOf("invoice", invoice));
+      for (const k of scopeInvoice(invoice, orderUid).byKey.keys()) keys.add(k);
+    }
+    return { keys, invoices: refs, alignedInvoices };
+  };
+
+  /** An order- or fulfillment-shaped viewed side against every invoice on its order. */
+  const againstInvoices = (viewed: Side, orderUid: string) => {
+    const coverage = coverageOf(orderUid);
     for (const invoice of invoices) {
       if (!invoiceScopes(invoice).includes(orderUid)) continue;
-      const invoiceRef = refOf("invoice", invoice);
-      const scoped = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.path[0] === orderUid);
-      // Alignment is a fact about the invoice and its ORDER; without the order it cannot be asked.
-      if (order === undefined || !invoiceScopeDividersMatch(scoped as unknown as InvoiceItem[], order.items as unknown as LineItem[], orderUid)) {
-        out.unaligned.push({ scope: orderUid, source: invoiceRef });
+      if (!coverage.alignedInvoices.includes(invoice)) {
+        out.unaligned.push({ scope: orderUid, source: refOf("invoice", invoice) });
         continue;
       }
-      compareScope(out, viewed, { kind: "invoice", doc: invoice, lines: scopeInvoice(invoice, orderUid) }, orderUid, context);
+      compareScope(out, viewed, { kind: "invoice", doc: invoice, lines: scopeInvoice(invoice, orderUid) }, orderUid, coverage, context);
     }
   };
 
@@ -354,7 +442,7 @@ export function computeDocumentDiffs(
     const viewed: Side = { kind: "order", doc: order, lines: scopeOrder(order) };
     const fulfillment = fulfillmentByUid.get(order.uid);
     if (fulfillment !== undefined) {
-      compareScope(out, viewed, { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) }, order.uid, context);
+      compareScope(out, viewed, { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) }, order.uid, coverageOf(order.uid), context);
     }
     againstInvoices(viewed, order.uid);
     return out;
@@ -366,7 +454,7 @@ export function computeDocumentDiffs(
     const viewed: Side = { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) };
     const order = orderByUid.get(fulfillment.uid);
     if (order !== undefined) {
-      compareScope(out, viewed, { kind: "order", doc: order, lines: scopeOrder(order) }, order.uid, context);
+      compareScope(out, viewed, { kind: "order", doc: order, lines: scopeOrder(order) }, order.uid, coverageOf(order.uid), context);
     }
     againstInvoices(viewed, fulfillment.uid);
     return out;
@@ -377,18 +465,17 @@ export function computeDocumentDiffs(
   for (const orderUid of invoiceScopes(invoice)) {
     const viewed: Side = { kind: "invoice", doc: invoice, lines: scopeInvoice(invoice, orderUid) };
     const order = orderByUid.get(orderUid);
-    const scoped = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.path[0] === orderUid);
-    const aligned = order !== undefined &&
-      invoiceScopeDividersMatch(scoped as unknown as InvoiceItem[], order.items as unknown as LineItem[], orderUid);
-    if (order !== undefined) {
-      if (aligned) compareScope(out, viewed, { kind: "order", doc: order, lines: scopeOrder(order) }, orderUid, context);
-      else out.unaligned.push({ scope: orderUid, source: refOf("order", order) });
-    }
     const fulfillment = fulfillmentByUid.get(orderUid);
+    if (!aligned(invoice, orderUid)) {
+      if (order !== undefined) out.unaligned.push({ scope: orderUid, source: refOf("order", order) });
+      if (fulfillment !== undefined) out.unaligned.push({ scope: orderUid, source: refOf("fulfillment", fulfillment) });
+      continue;
+    }
+    const coverage = coverageOf(orderUid);
+    compareScope(out, viewed, { kind: "order", doc: order!, lines: scopeOrder(order!) }, orderUid, coverage, context);
+    // Invoice ↔ fulfillment goes through the order's path space, so it needs the same alignment.
     if (fulfillment !== undefined) {
-      // Invoice ↔ fulfillment goes through the order's path space, so it needs the same alignment.
-      if (aligned) compareScope(out, viewed, { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) }, orderUid, context);
-      else out.unaligned.push({ scope: orderUid, source: refOf("fulfillment", fulfillment) });
+      compareScope(out, viewed, { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) }, orderUid, coverage, context);
     }
   }
   return out;

@@ -84,8 +84,10 @@ function summary(map: DocumentDiffMap["lines"] | DocumentDiffMap["pairs"]): Reco
   const out: Record<string, string[]> = {};
   for (const [k, entries] of [...map].sort(([a], [b]) => a.localeCompare(b))) {
     out[k] = entries.map((e) =>
-      `${e.source.kind}#${e.source.number}:${e.kind}` +
-      (e.fields.length ? `(${e.fields.map((f) => `${f.field}=${JSON.stringify(f.here)}→${JSON.stringify(f.there)}`).join(",")})` : "")
+      e.kind === "uninvoiced"
+        ? `uninvoiced[${e.invoices.map((i) => `#${i.number}`).join(",")}]`
+        : `${e.source.kind}#${e.source.number}:${e.kind}` +
+          (e.fields.length ? `(${e.fields.map((f) => `${f.field}=${JSON.stringify(f.here)}→${JSON.stringify(f.there)}`).join(",")})` : "")
     );
   }
   return out;
@@ -153,19 +155,42 @@ Deno.test("documentDiff: order ↔ invoice compares money and quantity, never la
   });
 });
 
-Deno.test("documentDiff: a line not yet invoiced is only_here on the order and fulfillment views, missing_here on the invoice view", () => {
+Deno.test("documentDiff: a line no invoice carries is ONE uninvoiced entry on all three views", () => {
   const partial = orderItems().filter((it) => it.uid !== TRIPOD);
   const sources = { orders: [order()], fulfillments: [fulfillment()], invoices: [invoice("inv-1", [{ order: O, items: partial }])] };
 
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
-    [`${D}/${G}/${TRIPOD}`]: ["invoice#2241:only_here"],
+    [`${D}/${G}/${TRIPOD}`]: ["uninvoiced[#2241]"],
   });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
-    [`${D}/${G}/${TRIPOD}`]: ["invoice#2241:only_here"],
+    [`${D}/${G}/${TRIPOD}`]: ["uninvoiced[#2241]"],
   });
+  // The order and the fulfillment both lack it on the invoice: one entry, not one per source.
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).lines), {
-    [`${O}/${D}/${G}/${TRIPOD}`]: ["order#1001:missing_here", "fulfillment#1001:missing_here"],
+    [`${O}/${D}/${G}/${TRIPOD}`]: ["uninvoiced[#2241]"],
   });
+});
+
+Deno.test("documentDiff: an order billed across two invoices has no presence entries on any view", () => {
+  // Invoice A bills the grip Light; invoice B bills the Tripod and the second Light.
+  const a = invoice("inv-a", [{ order: O, items: orderItems().filter((it) => it.path.join("/") !== `${D}/${G}/${TRIPOD}` && it.path.join("/") !== `${D}/${LIGHT}`) }], 2241);
+  const b = invoice("inv-b", [{ order: O, items: orderItems().filter((it) => it.path.join("/") !== `${D}/${G}/${LIGHT}`) }], 2250);
+  const sources = { orders: [order()], fulfillments: [fulfillment()], invoices: [a, b] };
+
+  for (const viewing of [{ kind: "order", uid: O }, { kind: "fulfillment", uid: O }, { kind: "invoice", uid: "inv-a" }, { kind: "invoice", uid: "inv-b" }] as const) {
+    assertEquals(summary(computeDocumentDiffs(sources, viewing, CONTEXT).lines), {}, `${viewing.kind} ${viewing.uid}`);
+  }
+
+  // Without the sibling passed, invoice A cannot know B bills the Tripod — so it says so.
+  assertEquals(
+    summary(computeDocumentDiffs({ orders: [order()], invoices: [a] }, { kind: "invoice", uid: "inv-a" }, CONTEXT).lines),
+    { [`${O}/${D}/${G}/${TRIPOD}`]: ["uninvoiced[#2241]"], [`${O}/${D}/${LIGHT}`]: ["uninvoiced[#2241]"] },
+  );
+});
+
+Deno.test("documentDiff: an order with no invoices is not flagged line by line", () => {
+  const diff = computeDocumentDiffs({ orders: [order()], fulfillments: [fulfillment()], invoices: [] }, { kind: "order", uid: O }, CONTEXT);
+  assertEquals(diff.lines.size, 0);
 });
 
 Deno.test("documentDiff: a picker add and an invoice add of the same product are two separate lines, never a match", () => {
@@ -178,11 +203,11 @@ Deno.test("documentDiff: a picker add and an invoice add of the same product are
 
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
     [invAddKey]: ["invoice#2241:missing_here"],
-    [`${D}/${TRIPOD}`]: ["order#1001:only_here", "invoice#2241:only_here"],
+    [`${D}/${TRIPOD}`]: ["order#1001:only_here", "uninvoiced[#2241]"],
   });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).lines), {
     [`${O}/${invAddKey}`]: ["order#1001:only_here", "fulfillment#1001:only_here"],
-    [`${O}/${D}/${TRIPOD}`]: ["fulfillment#1001:missing_here"],
+    [`${O}/${D}/${TRIPOD}`]: ["uninvoiced[#2241]"],
   });
 });
 
@@ -241,6 +266,16 @@ Deno.test("documentDiff: a jurisdiction override is a pair_field entry under the
   });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).pairs), {
     [`${O}/${D}`]: ['order#1001:pair_field(jurisdiction="illinois"→"chicago")'],
+  });
+});
+
+Deno.test("documentDiff: pairs compare every payload field — an address correction is a pair_field entry", () => {
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  (inv.destinations[0] as unknown as Record<string, unknown>).delivery = { address: { full: "3100 W Fillmore St" } };
+  const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv] }, { kind: "order", uid: O }, CONTEXT);
+  // `uid_order` sits on the invoice pair only and is identity, not payload: no entry for it.
+  assertEquals(summary(diff.pairs), {
+    [D]: ['invoice#2241:pair_field(delivery=null→{"address":{"full":"3100 W Fillmore St"}})'],
   });
 });
 

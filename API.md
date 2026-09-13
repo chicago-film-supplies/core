@@ -24535,14 +24535,10 @@ interface DocumentDiffContext {
 
 ### `DocumentDiffEntry`
 
-One source's difference at one key of the viewed document.
+One entry at one key of the viewed document. Discriminated on `kind`.
 
 ```ts
-interface DocumentDiffEntry {
-  source: DocumentRef;
-  kind: DocumentDiffKind;
-  fields: DocumentDiffField[];
-}
+type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry;
 ```
 
 ### `DocumentDiffField`
@@ -24563,9 +24559,10 @@ interface DocumentDiffField {
 - `only_here` — on the viewed document, absent from the source
 - `missing_here` — on the source, absent from the viewed document
 - `pair_field` — a destination pair's compared field disagrees
+- `uninvoiced` — an order/fulfillment line that no invoice carries
 
 ```ts
-type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field";
+type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field" | "uninvoiced";
 ```
 
 ### `DocumentDiffMap`
@@ -24615,6 +24612,30 @@ interface DocumentRef {
   uid: string;
   number: number;
   version: number;
+}
+```
+
+### `DocumentSourceDiffEntry`
+
+One source's difference at one key of the viewed document.
+
+```ts
+interface DocumentSourceDiffEntry {
+  kind: Exclude<DocumentDiffKind, "uninvoiced">;
+  source: DocumentRef;
+  fields: DocumentDiffField[];
+}
+```
+
+### `DocumentUninvoicedEntry`
+
+A line no invoice carries. It has no single source — it is a statement about
+all of them — so it names every invoice that was checked instead.
+
+```ts
+interface DocumentUninvoicedEntry {
+  kind: "uninvoiced";
+  invoices: DocumentRef[];
 }
 ```
 
