@@ -4,6 +4,64 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
+> ## ✅ STATUS 2026-09-13 — **batch 14 (2 of 2), clusters 2+3: credit-notes + transactions. Backlog 38 → 28. Chain verified by digest.**
+>
+> **Cluster 2 — the credit-notes Xero/money remainder** (6 paths, 1 declaration each):
+> `items[].{tracking_category, xero_id, xero_tracking_option_id, uid_invoice_item}` +
+> `remaining_credit_cents` + `xero_credit_note_id`. `core` `d67625e` → published `beta.426`. Census,
+> both projects (identical — dev mirrors credit-notes): 146/146 item rows, 13/13 documents, 100%
+> present. `uid_invoice_item` is VACUOUS on value (0/146 non-null) — stays `.nullable()`, only the KEY
+> is now required. Writer audit: `createCreditNote` is the ONLY create path and states all six
+> explicitly; every update path (`allocateCreditNote`, `pushCreditNoteToXero`) merges over the
+> existing document, safe by construction. No templates family sources `credit-notes`.
+>
+> **Cluster 3 — the transactions movement remainder** (4 paths): `cost.unit_costs_cents`, `lines`,
+> `serialized_details.{asset_tags, serial_numbers}` — not `unit_cost`, the 4dp rate beside the cents
+> array. `core` `7ff5d3a` → published `beta.427`. Census: `cost.unit_costs_cents` 1048/1048,
+> `serialized_details.*` 266/266 (both denominators are non-null-parent counts — `cost` and
+> `serialized_details` are themselves nullable), `lines` 2048/2048 prod. `lines` was already
+> **REACHED under the CURRENT (pre-tightening) schema** — the document-level `superRefine` (a
+> physical-movement type's lines must sum to its quantity) already rejected an empty default for any
+> real movement, so removing the default only made explicit what the refine already enforced at the
+> value level. Writer audit: `movementScaffold` (`api-cloudrun/src/lib/movementBuild.ts`) is the ONE
+> author of every Movement document, and its arg type already required `lines`/`cost`/
+> `serializedDetails` with no `?` — all 6 call sites (`transactions`, `storeTransfers`,
+> `outOfService`, `products`, `bookings`, `reverseTransaction`) were already compiler-gated. No shared
+> node with `movement-sessions` (a structurally similar but separate schema — its own independent
+> `lines`/`serialized_details` with its own `.default()`, untouched) and no templates fixture
+> exposure (the 4 `receipt` fixtures matching `serialized_details` belong to `movement-sessions`, not
+> `transactions` — confirmed by reading the schema imports, not by the field name alone).
+>
+> ✅ **The chain is CLOSED, by digest, for both clusters together.** `api-cloudrun` `9f38d3fe` (pin
+> bump to beta.427, folding in both clusters) → release PR #985 merged as `ae39691d`, cutting
+> **`v0.256.1`**. Build `2649cc6a-9212-4674-b475-634f4cd754b1` produced digest
+> `sha256:501ae8b20c585998c30c037be45bf6c56a0c8b26920ca62e507e983e787a290d`, and revision
+> `api-cloudrun-00384-ssl` serving 100% traffic carries exactly that digest. Released tree's
+> `deno.json` confirmed 40/40 `beta.427`. `audit:reparse` with no `--core` flag, both projects: all 10
+> positions across both clusters **REACHED, 0 new failures** — the 1 failure per project in both runs
+> is api-cloudrun#951's pre-existing dirty transactions row, unchanged before and after. `manager`
+> released FIRST as `manager-v26.7.0` (PR #462) — `requires-manager` measured green on both halves
+> (the declared-floor arm and the measured-pin arm) before the api-cloudrun merge.
+>
+> ⭐ **This batch ran almost entirely inside a shared `core`/`api-cloudrun`/`manager` checkout
+> alongside a concurrent, unrelated core campaign** (`derive-price-keys-root-cause`, api-cloudrun#984
+> — a `declaredOrderPrice`/`declaredInvoicePrice` refactor touching `src/utils/orders.ts`). Sequencing
+> was negotiated entirely over cross-session messages: a `git commit` collided on `core`'s
+> `index.lock` while the peer's own commit was mid-flight (waited it out — `until [ ! -f
+> .git/index.lock ]`, never deleted) and their in-progress, uncommitted `src/utils/orders.ts` failed
+> `check:declarations` (`TS9010`, unrelated to this batch) and blocked a docs-only commit for several
+> minutes until they landed their own commit. The publish/pin/release dance for the two campaigns'
+> six commits across three repos was interleaved by mutual agreement (whoever's core beta was newest
+> carried both), including one session explicitly holding all `api-cloudrun` pushes/commits for ~15
+> minutes around the peer's own push and a full release-PR merge sequencing negotiated in three
+> messages. No lost work, no wrong file committed, no ref race — every push and merge was confirmed
+> by content (`git ls-remote` / `gh release list` / digest) rather than trusted from a peer's report.
+>
+> | # | what | backlog | state |
+>|---|---|---:|---|
+> | 14 (2 of 2), cluster 2 | credit-notes Xero/money remainder — 6 paths, 6 declarations | 38 → 32 | ✅ prod |
+> | 14 (2 of 2), cluster 3 | transactions movement remainder — 4 paths, 3 declarations | 32 → **28** | ✅ prod, `v0.256.1`, revision `api-cloudrun-00384-ssl`, digest-verified |
+
 > ## ✅ STATUS 2026-09-13 — **batch 14 (2 of 2), first cluster: the top-level `items` array. Backlog 42 → 38. Chain verified by digest.**
 >
 > `orders.items` / `invoices.items` / `fulfillments.items` / `credit-notes.items` — the bare

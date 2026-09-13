@@ -6622,6 +6622,8 @@ interface Organization {
   derived_from: typeLiteral | null;
   uid_department_type: string | null;
   dates?: typeLiteral;
+  active?: boolean | null;
+  active_override?: boolean | null;
   crms_id: number | null;
   xero_id: string | null;
   jurisdiction_claim?: JurisdictionType | null;
@@ -17297,6 +17299,8 @@ interface Organization {
   derived_from: typeLiteral | null;
   uid_department_type: string | null;
   dates?: typeLiteral;
+  active?: boolean | null;
+  active_override?: boolean | null;
   crms_id: number | null;
   xero_id: string | null;
   jurisdiction_claim?: JurisdictionType | null;
