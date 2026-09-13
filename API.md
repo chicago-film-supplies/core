@@ -1588,6 +1588,7 @@ interface ClientLogEntry {
   app: ClientAppType;
   page?: string;
   request_id?: string;
+  app_version?: string;
   data?: Record<string, unknown>;
 }
 ```
@@ -21891,6 +21892,7 @@ interface ClientLogEntry {
   app: ClientAppType;
   page?: string;
   request_id?: string;
+  app_version?: string;
   data?: Record<string, unknown>;
 }
 ```
@@ -21933,6 +21935,7 @@ interface ClientLogRecord {
   client_level: BaseLogLevelType;
   page?: string;
   request_id?: string;
+  app_version?: string;
   user_id?: string;
   trace_id?: string;
   span_id?: string;

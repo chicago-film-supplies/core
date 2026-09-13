@@ -723,7 +723,7 @@
         {
           "kind": "interface",
           "name": "ClientLogEntry",
-          "declaration": "interface ClientLogEntry {\n  level: LogLevelType;\n  msg: string;\n  ts: string;\n  app: ClientAppType;\n  page?: string;\n  request_id?: string;\n  data?: Record<string, unknown>;\n}",
+          "declaration": "interface ClientLogEntry {\n  level: LogLevelType;\n  msg: string;\n  ts: string;\n  app: ClientAppType;\n  page?: string;\n  request_id?: string;\n  app_version?: string;\n  data?: Record<string, unknown>;\n}",
           "doc": "A single log entry sent from a client application."
         },
         {
@@ -9775,7 +9775,7 @@
         {
           "kind": "interface",
           "name": "ClientLogEntry",
-          "declaration": "interface ClientLogEntry {\n  level: LogLevelType;\n  msg: string;\n  ts: string;\n  app: ClientAppType;\n  page?: string;\n  request_id?: string;\n  data?: Record<string, unknown>;\n}",
+          "declaration": "interface ClientLogEntry {\n  level: LogLevelType;\n  msg: string;\n  ts: string;\n  app: ClientAppType;\n  page?: string;\n  request_id?: string;\n  app_version?: string;\n  data?: Record<string, unknown>;\n}",
           "doc": "A single log entry sent from a client application."
         },
         {
@@ -9787,7 +9787,7 @@
         {
           "kind": "interface",
           "name": "ClientLogRecord",
-          "declaration": "interface ClientLogRecord {\n  level: BaseLogLevelType;\n  msg: \"client_log\";\n  ts: string;\n  source: \"browser\";\n  app: ClientAppType;\n  client_msg: string;\n  client_ts: string;\n  client_level: BaseLogLevelType;\n  page?: string;\n  request_id?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  email?: string;\n  to?: string;\n  subject?: string;\n}",
+          "declaration": "interface ClientLogRecord {\n  level: BaseLogLevelType;\n  msg: \"client_log\";\n  ts: string;\n  source: \"browser\";\n  app: ClientAppType;\n  client_msg: string;\n  client_ts: string;\n  client_level: BaseLogLevelType;\n  page?: string;\n  request_id?: string;\n  app_version?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n  email?: string;\n  to?: string;\n  subject?: string;\n}",
           "doc": "Server-emitted log record for browser-shipped events.\n\n`api-cloudrun/src/routes/clientLogs.ts` re-emits each ingested\n{@link ClientLogEntry} as `msg: \"client_log\"` with the wire entry's\nenvelope rewritten into `client_*` namespaced fields (`client_msg`,\n`client_ts`, `client_level` — to avoid collision with the server\nenvelope's `msg`/`ts`/`level`) and the `data` payload spread to the\ntop level. PII-shaped passthrough keys are declared here with their\n`pii: \"mask\"` meta so the schema walker masks them partial-form\ninstead of Tier 2 fully redacting."
         },
         {

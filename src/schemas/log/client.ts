@@ -45,6 +45,8 @@ export interface ClientLogEntry {
   app: ClientAppType;
   page?: string;
   request_id?: string;
+  /** The emitting build, `<package version>+<git sha>` — the same value manager sends as `X-Manager-Version`. */
+  app_version?: string;
   data?: Record<string, unknown>;
 }
 
@@ -63,6 +65,7 @@ export const ClientLogEntrySchema: z.ZodType<ClientLogEntry> = z.object({
   app: z.enum(CLIENT_APPS),
   page: z.string().max(500).optional(),
   request_id: z.string().max(100).optional(),
+  app_version: z.string().max(100).optional(),
   data: z.record(z.string(), z.unknown())
     .refine(
       (d) => Object.keys(d).length <= 20,
@@ -112,6 +115,7 @@ export interface ClientLogRecord {
   client_level: BaseLogLevelType;
   page?: string;
   request_id?: string;
+  app_version?: string;
   user_id?: string;
   trace_id?: string;
   span_id?: string;
@@ -134,6 +138,7 @@ export const ClientLogRecordSchema: z.ZodType<ClientLogRecord> = z.object({
   client_msg: z.string().max(100),
   client_ts: z.iso.datetime(),
   client_level: z.enum(LOG_LEVELS),
+  app_version: z.string().max(100).optional(),
   // Partial-reveal mask. The CFS-owned receiving address pattern
   // (verify@/reset@/invite@/alerts@/...chicagofilmsupplies.com) shows
   // up as the email_from sender and is intentionally left raw on the
