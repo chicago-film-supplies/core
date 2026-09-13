@@ -1083,7 +1083,7 @@
         {
           "kind": "interface",
           "name": "CreateOrganizationInputType",
-          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  uid_parent?: string | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
+          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  uid_parent?: string | null;\n  uid_department_type?: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
           "doc": "Input schema for POST /organizations.\ncrms_id and xero_id are obtained from external APIs — not in input."
         },
         {
@@ -1606,7 +1606,7 @@
           "kind": "variable",
           "name": "FIRESTORE_TIMESTAMP_META",
           "declaration": "const FIRESTORE_TIMESTAMP_META: \"firestoreTimestamp\";",
-          "doc": "Meta key marking a node as the {@link FirestoreTimestamp} custom type.\n\n`isDateLikeNode` used to recognise it by **instance identity** — the only\nhandle a `z.custom()` offers, since its `def.type` is the uninformative\n`\"custom\"`. That was safe exactly as long as nobody annotated a timestamp\nfield, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a\ndifferent instance, the identity test fails, and a `created_at` column\nsilently stops rendering as a date and starts printing a raw epoch. Declaring\ndisplay columns means annotating `created_at` / `updated_at` / `last_order`,\nso the identity test had to go.\n\nA meta marker survives the clone because `.meta()` **merges**: the clone\ncarries both this key and whatever the annotation added."
+          "doc": "Meta key marking a node as the {@link FirestoreTimestamp} custom type.\n\n`isDateLikeNode` used to recognise it by **instance identity** — the only\nhandle a `z.custom()` offers, since its `def.type` is the uninformative\n`\"custom\"`. That was safe exactly as long as nobody annotated a timestamp\nfield, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a\ndifferent instance, the identity test fails, and a `created_at` column\nsilently stops rendering as a date and starts printing a raw epoch. Declaring\ndisplay columns means annotating `created_at` / `updated_at` / `activity_at`,\nso the identity test had to go.\n\nA meta marker survives the clone because `.meta()` **merges**: the clone\ncarries both this key and whatever the annotation added."
         },
         {
           "kind": "variable",
@@ -2931,7 +2931,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  path: OrgPathNodeType[];\n  query_by_path: string[];\n  derived_from: typeLiteral | null;\n  uid_department_type: string | null;\n  dates?: typeLiteral;\n  activity_at?: FirestoreTimestampType;\n  crms_id: number | null;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  path: OrgPathNodeType[];\n  query_by_path: string[];\n  derived_from: typeLiteral | null;\n  uid_department_type: string | null;\n  activity_at: FirestoreTimestampType;\n  crms_id: number | null;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -4539,7 +4539,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrganizationInputType",
-          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  uid_parent?: string | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
+          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  uid_parent?: string | null;\n  uid_department_type?: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
           "doc": "Input schema for PUT /organizations/:uid — partial update."
         },
         {
@@ -5665,7 +5665,7 @@
           "kind": "variable",
           "name": "FIRESTORE_TIMESTAMP_META",
           "declaration": "const FIRESTORE_TIMESTAMP_META: \"firestoreTimestamp\";",
-          "doc": "Meta key marking a node as the {@link FirestoreTimestamp} custom type.\n\n`isDateLikeNode` used to recognise it by **instance identity** — the only\nhandle a `z.custom()` offers, since its `def.type` is the uninformative\n`\"custom\"`. That was safe exactly as long as nobody annotated a timestamp\nfield, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a\ndifferent instance, the identity test fails, and a `created_at` column\nsilently stops rendering as a date and starts printing a raw epoch. Declaring\ndisplay columns means annotating `created_at` / `updated_at` / `last_order`,\nso the identity test had to go.\n\nA meta marker survives the clone because `.meta()` **merges**: the clone\ncarries both this key and whatever the annotation added."
+          "doc": "Meta key marking a node as the {@link FirestoreTimestamp} custom type.\n\n`isDateLikeNode` used to recognise it by **instance identity** — the only\nhandle a `z.custom()` offers, since its `def.type` is the uninformative\n`\"custom\"`. That was safe exactly as long as nobody annotated a timestamp\nfield, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a\ndifferent instance, the identity test fails, and a `created_at` column\nsilently stops rendering as a date and starts printing a raw epoch. Declaring\ndisplay columns means annotating `created_at` / `updated_at` / `activity_at`,\nso the identity test had to go.\n\nA meta marker survives the clone because `.meta()` **merges**: the clone\ncarries both this key and whatever the annotation added."
         },
         {
           "kind": "variable",
@@ -7826,7 +7826,7 @@
         {
           "kind": "interface",
           "name": "CreateOrganizationInputType",
-          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  uid_parent?: string | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
+          "declaration": "interface CreateOrganizationInputType {\n  uid: string;\n  name: string;\n  uid_parent?: string | null;\n  uid_department_type?: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  billing_address: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n}",
           "doc": "Input schema for POST /organizations.\ncrms_id and xero_id are obtained from external APIs — not in input."
         },
         {
@@ -7856,7 +7856,7 @@
         {
           "kind": "interface",
           "name": "Organization",
-          "declaration": "interface Organization {\n  uid: string;\n  path: OrgPathNodeType[];\n  query_by_path: string[];\n  derived_from: typeLiteral | null;\n  uid_department_type: string | null;\n  dates?: typeLiteral;\n  activity_at?: FirestoreTimestampType;\n  crms_id: number | null;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  last_order?: FirestoreTimestampType | null;\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Organization {\n  uid: string;\n  path: OrgPathNodeType[];\n  query_by_path: string[];\n  derived_from: typeLiteral | null;\n  uid_department_type: string | null;\n  activity_at: FirestoreTimestampType;\n  crms_id: number | null;\n  xero_id: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  emails: string[];\n  phones: string[];\n  billing_address: AddressType | null;\n  contacts: OrganizationContactType[];\n  query_by_contacts: string[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full organization document schema (Firestore document shape)."
         },
         {
@@ -7886,7 +7886,7 @@
         {
           "kind": "interface",
           "name": "UpdateOrganizationInputType",
-          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  uid_parent?: string | null;\n  uid_department_type?: string | null;\n  dates?: typeLiteral;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
+          "declaration": "interface UpdateOrganizationInputType {\n  uid?: string;\n  name?: string;\n  uid_parent?: string | null;\n  uid_department_type?: string | null;\n  jurisdiction_claim?: JurisdictionType | null;\n  tax_exempt?: boolean;\n  description?: string;\n  billing_address?: AddressType | null;\n  contacts?: OrganizationContactType[];\n  newContacts?: NewContactInputType[] | null;\n  emails?: string[];\n  phones?: string[];\n  version: number;\n}",
           "doc": "Input schema for PUT /organizations/:uid — partial update."
         }
       ]
@@ -8946,7 +8946,7 @@
         {
           "kind": "interface",
           "name": "OrganizationDocument",
-          "declaration": "interface OrganizationDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  level?: string;\n  derived?: boolean;\n  xero_id?: string;\n  jurisdiction_claim?: string;\n  tax_exempt?: boolean;\n  emails?: string[];\n  phones?: string[];\n  billing_address: TypesenseAddressFields;\n  contacts: Array<typeLiteral>;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  last_order?: number;\n  activity_at?: number;\n  created_at?: number;\n  updated_at: number;\n}",
+          "declaration": "interface OrganizationDocument {\n  id: string;\n  uid: string;\n  name: string;\n  description?: string;\n  crms_id?: number;\n  crms_id_str?: string;\n  level?: string;\n  derived?: boolean;\n  xero_id?: string;\n  jurisdiction_claim?: string;\n  tax_exempt?: boolean;\n  emails?: string[];\n  phones?: string[];\n  billing_address: TypesenseAddressFields;\n  contacts: Array<typeLiteral>;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  activity_at: number;\n  created_at?: number;\n  updated_at: number;\n}",
           "doc": "Typesense document type for organizations."
         },
         {
@@ -13841,7 +13841,7 @@
           "kind": "function",
           "name": "isOrganizationDormant",
           "signature": "isOrganizationDormant(node: typeLiteral, nowMs: number): boolean",
-          "doc": "Whether a node is dormant at `nowMs`: its last activity is strictly older\nthan {@link ORGANIZATION_DORMANT_AFTER_DAYS}. Exactly at the cutoff is still\nactive, matching the search sort's `>=`.\n\n⚠️ **An UNSTAMPED node is not dormant.** Absent `activity_at` during the\nexpand third means \"not yet backfilled\", and muting a live customer on a\nmissing value is the wrong direction to fail.",
+          "doc": "Whether a node is dormant at `nowMs`: its last activity is strictly older\nthan {@link ORGANIZATION_DORMANT_AFTER_DAYS}. Exactly at the cutoff is still\nactive, matching the search sort's `>=`.\n\n⚠️ **An UNREADABLE value is not dormant.** The key is required on the stored\ndocument, but a reader can still hold a projection without it, and muting a\nlive customer on a missing value is the wrong direction to fail.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13881,7 +13881,7 @@
           "kind": "function",
           "name": "organizationActivityMs",
           "signature": "organizationActivityMs(node: typeLiteral): number | null",
-          "doc": "A node's `activity_at` as epoch-ms, from either shape a reader holds: the\nstored Firestore `Timestamp` or a Typesense hit's `int64`. `null` when absent\n(the expand third) or unreadable — never guessed.",
+          "doc": "A node's `activity_at` as epoch-ms, from either shape a reader holds: the\nstored Firestore `Timestamp` or a Typesense hit's `int64`. `null` when absent\n(a projection that did not select it) or unreadable — never guessed.",
           "paramTags": [],
           "returnsTag": null
         },

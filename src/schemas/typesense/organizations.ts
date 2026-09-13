@@ -134,13 +134,12 @@ export const organizations: TypesenseCollectionConfig = {
       { name: "updated_by", type: "object", optional: true },
       { name: "updated_by.uid", type: "string", facet: true, optional: true },
       { name: "updated_by.name", type: "string", sort: true, stem: true, facet: true, optional: true },
-      { name: "last_order", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "created_at", type: "int64", sort: true, index: true, facet: false, optional: true },
       // The dormancy sort key (api-cloudrun#979) — the picker's `sort_by` puts
       // `_eval(activity_at:>=<cutoff>)` ahead of the level tier, so dormant rows
-      // sort LAST and are never filtered out. `optional: true` only through the
-      // expand third, matching `Organization.activity_at`.
-      { name: "activity_at", type: "int64", sort: true, index: true, facet: false, optional: true },
+      // sort LAST and are never filtered out. Required, matching
+      // `Organization.activity_at`.
+      { name: "activity_at", type: "int64", sort: true, index: true, facet: false },
       { name: "updated_at", type: "int64", sort: true, index: true, facet: false },
     ],
     // 🔴 **Moved off `name` in v14, and Typesense forced the choice.** Probed

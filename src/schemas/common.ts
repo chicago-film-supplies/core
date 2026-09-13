@@ -39,7 +39,7 @@ export type FirestoreTimestampType = FirestoreTimestampValue | FirestoreFieldVal
  * field, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a
  * different instance, the identity test fails, and a `created_at` column
  * silently stops rendering as a date and starts printing a raw epoch. Declaring
- * display columns means annotating `created_at` / `updated_at` / `last_order`,
+ * display columns means annotating `created_at` / `updated_at` / `activity_at`,
  * so the identity test had to go.
  *
  * A meta marker survives the clone because `.meta()` **merges**: the clone

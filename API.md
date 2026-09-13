@@ -2397,7 +2397,6 @@ interface CreateOrganizationInputType {
   name: string;
   uid_parent?: string | null;
   uid_department_type?: string | null;
-  dates?: typeLiteral;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   billing_address: AddressType | null;
@@ -3576,7 +3575,7 @@ handle a `z.custom()` offers, since its `def.type` is the uninformative
 field, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a
 different instance, the identity test fails, and a `created_at` column
 silently stops rendering as a date and starts printing a raw epoch. Declaring
-display columns means annotating `created_at` / `updated_at` / `last_order`,
+display columns means annotating `created_at` / `updated_at` / `activity_at`,
 so the identity test had to go.
 
 A meta marker survives the clone because `.meta()` **merges**: the clone
@@ -6621,8 +6620,7 @@ interface Organization {
   query_by_path: string[];
   derived_from: typeLiteral | null;
   uid_department_type: string | null;
-  dates?: typeLiteral;
-  activity_at?: FirestoreTimestampType;
+  activity_at: FirestoreTimestampType;
   crms_id: number | null;
   xero_id: string | null;
   jurisdiction_claim?: JurisdictionType | null;
@@ -6633,7 +6631,6 @@ interface Organization {
   billing_address: AddressType | null;
   contacts: OrganizationContactType[];
   query_by_contacts: string[];
-  last_order?: FirestoreTimestampType | null;
   uid_thread: string;
   version: number;
   created_by: ActorRefType;
@@ -10310,7 +10307,6 @@ interface UpdateOrganizationInputType {
   name?: string;
   uid_parent?: string | null;
   uid_department_type?: string | null;
-  dates?: typeLiteral;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
@@ -12591,7 +12587,7 @@ handle a `z.custom()` offers, since its `def.type` is the uninformative
 field, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a
 different instance, the identity test fails, and a `created_at` column
 silently stops rendering as a date and starts printing a raw epoch. Declaring
-display columns means annotating `created_at` / `updated_at` / `last_order`,
+display columns means annotating `created_at` / `updated_at` / `activity_at`,
 so the identity test had to go.
 
 A meta marker survives the clone because `.meta()` **merges**: the clone
@@ -17229,7 +17225,6 @@ interface CreateOrganizationInputType {
   name: string;
   uid_parent?: string | null;
   uid_department_type?: string | null;
-  dates?: typeLiteral;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   billing_address: AddressType | null;
@@ -17297,8 +17292,7 @@ interface Organization {
   query_by_path: string[];
   derived_from: typeLiteral | null;
   uid_department_type: string | null;
-  dates?: typeLiteral;
-  activity_at?: FirestoreTimestampType;
+  activity_at: FirestoreTimestampType;
   crms_id: number | null;
   xero_id: string | null;
   jurisdiction_claim?: JurisdictionType | null;
@@ -17309,7 +17303,6 @@ interface Organization {
   billing_address: AddressType | null;
   contacts: OrganizationContactType[];
   query_by_contacts: string[];
-  last_order?: FirestoreTimestampType | null;
   uid_thread: string;
   version: number;
   created_by: ActorRefType;
@@ -17366,7 +17359,6 @@ interface UpdateOrganizationInputType {
   name?: string;
   uid_parent?: string | null;
   uid_department_type?: string | null;
-  dates?: typeLiteral;
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
   description?: string;
@@ -19982,8 +19974,7 @@ interface OrganizationDocument {
   contacts: Array<typeLiteral>;
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;
-  last_order?: number;
-  activity_at?: number;
+  activity_at: number;
   created_at?: number;
   updated_at: number;
 }
@@ -30240,9 +30231,9 @@ Whether a node is dormant at `nowMs`: its last activity is strictly older
 than {@link ORGANIZATION_DORMANT_AFTER_DAYS}. Exactly at the cutoff is still
 active, matching the search sort's `>=`.
 
-⚠️ **An UNSTAMPED node is not dormant.** Absent `activity_at` during the
-expand third means "not yet backfilled", and muting a live customer on a
-missing value is the wrong direction to fail.
+⚠️ **An UNREADABLE value is not dormant.** The key is required on the stored
+document, but a reader can still hold a projection without it, and muting a
+live customer on a missing value is the wrong direction to fail.
 
 ### `orgLevel(node: Pick<Organization, "path">): OrgLevel | null`
 
@@ -30268,7 +30259,7 @@ The root of this node's tree — `path[0].uid`. `null` before the backfill.
 
 A node's `activity_at` as epoch-ms, from either shape a reader holds: the
 stored Firestore `Timestamp` or a Typesense hit's `int64`. `null` when absent
-(the expand third) or unreadable — never guessed.
+(a projection that did not select it) or unreadable — never guessed.
 
 ### `organizationDormantCutoffMs(nowMs: number): number`
 

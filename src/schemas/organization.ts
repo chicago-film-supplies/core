@@ -2,7 +2,6 @@
  * Organization document schema — Firestore collection: organizations
  */
 import { z } from "zod";
-import { chicagoStartOfDay } from "./_datetime.ts";
 import { FirestoreId, ThreadId } from "./_uid.ts";
 import {
   ActorRef,
@@ -153,18 +152,6 @@ export interface Organization {
    */
   uid_department_type: string | null;
   /**
-   * Project-level facts — the production's shoot window.
-   *
-   * ⚠️ **NOT nullable on the outer object.** `null` and
-   * `{ start: null, wrap: null }` would be two spellings of one fact, which is
-   * the defect `core/CLAUDE.md` names under *"Required, not merely
-   * non-optional"*. Precedent: `CardDatesType`, `OOSDates`, `booking.dates`.
-   *
-   * ⚠️ **Being removed (api-cloudrun#979).** Its only reader is the editor, and
-   * dormancy is derived from `activity_at` rather than from this window.
-   */
-  dates?: { start: string | null; wrap: string | null };
-  /**
    * When this node last saw meaningful activity — the key search sorts dormant
    * rows LAST on (api-cloudrun#979). Nothing is ever hidden: a dormant project
    * back for reshoots stays findable and pickable, and returns to the top the
@@ -190,10 +177,15 @@ export interface Organization {
    * "Dormant" is DERIVED at read time — `ORGANIZATION_DORMANT_AFTER_DAYS` /
    * `isOrganizationDormant` in `@cfs/core/utils/organizations` — never stored.
    *
-   * Optional (ABSENT, never `.nullable()`) through the expand third — tightened
-   * to required once both corpora are backfilled. Never `.default()` (core#95).
+   * Required at every depth, roots included, never `.nullable()` and never
+   * `.default()` (core#95). Tightened once both corpora were backfilled (334/334
+   * prod and dev, 2026-09-13), so a create writer that forgets it is a loud 400.
+   *
+   * It replaced the project-level `dates: { start, wrap }` shoot window, whose
+   * only reader was the editor; that key and the never-written `last_order` were
+   * deleted in the same beta.
    */
-  activity_at?: FirestoreTimestampType;
+  activity_at: FirestoreTimestampType;
   /**
    * The organization's **human-readable account number** — despite the name.
    *
@@ -281,7 +273,6 @@ export interface Organization {
   billing_address: AddressType | null;
   contacts: OrganizationContactType[];
   query_by_contacts: string[];
-  last_order?: FirestoreTimestampType | null;
   /**
    * Required. `createOrganization` stamps `threadDoc.uid` in the same
    * transaction that writes the organization. **291 of 291 prod and 313 of 313
@@ -497,11 +488,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
     reason: z.enum(["minted-root", "minted-project", "minted-department"]),
   }).nullable(),
   uid_department_type: FirestoreId.nullable(),
-  dates: z.strictObject({
-    start: chicagoStartOfDay().nullable().meta({ column: true, label: "Start" }),
-    wrap: chicagoStartOfDay().nullable().meta({ column: true, label: "Wrap" }),
-  }).optional().meta({ label: "Dates" }),
-  activity_at: FirestoreTimestamp.optional().meta({ column: true, label: "Last Active" }),
+  activity_at: FirestoreTimestamp.meta({ column: true, label: "Last Active" }),
   crms_id: z.int().nullable(),
   xero_id: z.uuid().nullable(),
   // ⚠️ The "Required (no `.default(\"tax_applied\")`) … TAX_PROFILES[0]" note
@@ -525,7 +512,6 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   // object, and `TableCell` joins the name parts.
   contacts: z.array(OrganizationContact).meta({ column: true, label: "Contacts" }),
   query_by_contacts: z.array(z.string()),
-  last_order: FirestoreTimestamp.nullable().optional().meta({ column: true, label: "Last Order" }),
   uid_thread: ThreadId,
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
@@ -589,7 +575,6 @@ export interface CreateOrganizationInputType {
    * server denormalizes its name into `path.at(-1).name`.
    */
   uid_department_type?: string | null;
-  dates?: { start: string | null; wrap: string | null };
   /**
    * The two tax AXES a client states — the customer's standing jurisdiction
    * claim (level 2) and whether they are exempt.
@@ -614,10 +599,6 @@ export const CreateOrganizationInput: z.ZodType<CreateOrganizationInputType> = z
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }),
   uid_parent: FirestoreId.nullable().optional(),
   uid_department_type: FirestoreId.nullable().optional(),
-  dates: z.object({
-    start: chicagoStartOfDay().nullable(),
-    wrap: chicagoStartOfDay().nullable(),
-  }).optional(),
   jurisdiction_claim: JurisdictionEnum.nullable().optional(),
   tax_exempt: z.boolean().optional(),
   billing_address: Address,
@@ -652,7 +633,6 @@ export interface UpdateOrganizationInputType {
    */
   uid_parent?: string | null;
   uid_department_type?: string | null;
-  dates?: { start: string | null; wrap: string | null };
   /** The AXES — see {@link CreateOrganizationInputType}. */
   jurisdiction_claim?: JurisdictionType | null;
   tax_exempt?: boolean;
@@ -671,10 +651,6 @@ export const UpdateOrganizationInput: z.ZodType<UpdateOrganizationInputType> = z
   name: z.string().min(1, "Organization name is required").max(100).meta({ pii: "mask" }).optional(),
   uid_parent: FirestoreId.nullable().optional(),
   uid_department_type: FirestoreId.nullable().optional(),
-  dates: z.object({
-    start: chicagoStartOfDay().nullable(),
-    wrap: chicagoStartOfDay().nullable(),
-  }).optional(),
   jurisdiction_claim: JurisdictionEnum.nullable().optional(),
   tax_exempt: z.boolean().optional(),
   description: z.string().optional(),

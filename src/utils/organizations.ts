@@ -510,7 +510,7 @@ export function organizationDormantCutoffMs(nowMs: number): number {
 /**
  * A node's `activity_at` as epoch-ms, from either shape a reader holds: the
  * stored Firestore `Timestamp` or a Typesense hit's `int64`. `null` when absent
- * (the expand third) or unreadable — never guessed.
+ * (a projection that did not select it) or unreadable — never guessed.
  */
 export function organizationActivityMs(
   node: { activity_at?: FirestoreTimestampType | number | null },
@@ -532,9 +532,9 @@ export function organizationActivityMs(
  * than {@link ORGANIZATION_DORMANT_AFTER_DAYS}. Exactly at the cutoff is still
  * active, matching the search sort's `>=`.
  *
- * ⚠️ **An UNSTAMPED node is not dormant.** Absent `activity_at` during the
- * expand third means "not yet backfilled", and muting a live customer on a
- * missing value is the wrong direction to fail.
+ * ⚠️ **An UNREADABLE value is not dormant.** The key is required on the stored
+ * document, but a reader can still hold a projection without it, and muting a
+ * live customer on a missing value is the wrong direction to fail.
  */
 export function isOrganizationDormant(
   node: { activity_at?: FirestoreTimestampType | number | null },

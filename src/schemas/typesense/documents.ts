@@ -630,12 +630,11 @@ export interface OrganizationDocument {
   }>;
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;
-  last_order?: number;
   /**
    * `Organization.activity_at` as epoch-ms — the dormancy sort key
-   * (api-cloudrun#979). ⚠️ `undefined` means not yet stamped/indexed, not dormant.
+   * (api-cloudrun#979).
    */
-  activity_at?: number;
+  activity_at: number;
   created_at?: number;
   updated_at: number;
 }

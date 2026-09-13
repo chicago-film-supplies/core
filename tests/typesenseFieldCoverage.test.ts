@@ -555,7 +555,7 @@ function leavesFor(storage: z.ZodType, fieldName: string) {
  * Keyed on the `firestoreTimestamp` meta marker rather than on a `*_fs` name
  * suffix, for two measured reasons: the marker survives a `.meta()` clone (the
  * whole reason it exists — annotating `created_at` with a display label produces
- * a different instance of the same type), and `organizations:last_order` /
+ * a different instance of the same type), and `organizations:activity_at` /
  * `out-of-service:canceled_at` are timestamps whose NAMES a suffix rule would
  * miss entirely.
  */
@@ -686,7 +686,7 @@ Deno.test("typesense integer parity companion: a numeric literal is integer-safe
 Deno.test("typesense integer parity companion: FirestoreTimestamp is exempt by META, not by name", () => {
   // The exemption has to survive a `.meta()` clone, because annotating a
   // timestamp with a display label produces a different instance of the same
-  // type — and `organizations:last_order` / `out-of-service:canceled_at` are
+  // type — and `organizations:activity_at` / `out-of-service:canceled_at` are
   // timestamps whose names a `*_fs` suffix rule would miss entirely.
   assertEquals(isIntegerSafeLeaf(FirestoreTimestamp), false, "not a number, correctly");
   const annotated = FirestoreTimestamp.meta({ column: true, label: "Created" });

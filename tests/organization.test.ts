@@ -49,6 +49,7 @@ const validOrganization = (overrides: Record<string, unknown> = {}) => ({
   contacts: [] as Array<Record<string, unknown>>,
   query_by_contacts: [] as string[],
   uid_thread: "testthread0000000000",
+  activity_at: ts.created_at,
   created_by: actor,
   updated_by: actor,
   ...ts,
@@ -77,6 +78,19 @@ Deno.test("OrganizationSchema validates a complete document", () => {
     query_by_contacts: ["testc100000000000000"],
   });
   assertEquals(OrganizationSchema.safeParse(doc).success, true);
+});
+
+Deno.test("OrganizationSchema requires activity_at — tightened once both corpora were backfilled (api-cloudrun#979)", () => {
+  const { activity_at: _omitted, ...without } = validOrganization();
+  const result = OrganizationSchema.safeParse(without);
+  assertEquals(result.success, false);
+  assertEquals(result.error?.issues.some((i) => i.path[0] === "activity_at"), true, "the issue names activity_at");
+  assertEquals(OrganizationSchema.safeParse(validOrganization({ activity_at: null })).success, false, "never nullable");
+});
+
+Deno.test("OrganizationSchema refuses the deleted dates and last_order keys", () => {
+  assertEquals(OrganizationSchema.safeParse(validOrganization({ dates: { start: null, wrap: null } })).success, false);
+  assertEquals(OrganizationSchema.safeParse(validOrganization({ last_order: null })).success, false);
 });
 
 Deno.test("OrganizationSchema rejects missing required fields", () => {
