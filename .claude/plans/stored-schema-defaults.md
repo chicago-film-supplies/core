@@ -4,7 +4,34 @@
 `api-cloudrun` owns the repair scripts and the census this doc names; `manager` is named only by
 api-cloudrun#943's remaining half.*
 
-> ## ✅ STATUS 2026-09-13 — **batch 15, two clusters. Backlog 24 → 15.**
+> ## ✅ STATUS 2026-09-13 — **batch 15, two clusters. Backlog 24 → 10 — chain CLOSED, prod digest-verified.**
+>
+> 🔴 **Correction to this block's own first posting: it said "24 → 15."** Cluster 2 removed 10 catalogued
+> entries from `INERT_DEFAULTS`, not 6 — re-counted directly off the ratchet after the fact
+> (`awk`-and-`grep` over `tests/stored-defaults.test.ts`, not arithmetic from memory). The real number
+> is **10 remaining**: `comments.reactions`, `holiday-definitions.active`,
+> `holiday-snapshot.materialized_dates`, `orders.xero_id`, `organizations.contacts[].roles`,
+> `out-of-service.stores[].locations`, `roles.permissions`, `stock.unavailable`,
+> `stores.default_location`, `taxes.crms_id`, `threads.last_message_preview`. All small singles — no
+> natural free cluster left; the next batch has to be assembled deliberately.
+>
+> ✅ **The chain is CLOSED, by digest.** `api-cloudrun` release PR #987 merged as `0e49f142`, cutting
+> **`v0.256.3`** (covers both clusters — beta.430 and beta.431 pin bumps). Build `bfbbd563-21da-4716-
+> 9ad5-afb0527fb29d` produced digest `sha256:6ed529cbd8ea1fba9b440d398b3712e9ddbd5eb04805c2c66eef6525b
+> 286c32c`, and revision `api-cloudrun-00386-zzj` serving 100% traffic carries exactly that digest.
+> Local checkout at the exact released commit (no peer WIP interleaved this time) confirms 40/40
+> `beta.431`. `audit:reparse` with no `--core` flag, both projects: all 10 positions **REACHED**,
+> 0 failures — prod 2991 scanned, dev 1 pre-existing unrelated `locations` uid failure (same
+> api-cloudrun#955-adjacent row as before).
+>
+> ⚠️ **A transient run immediately post-deploy showed 6 additional dev `products` failures — every
+> required field `undefined`, and they were gone on the very next run seconds later.** Not this
+> batch's doing: a concurrent peer session (`cfs-9d`, api-cloudrun#979) had a failed push whose retry
+> rung died mid-run (`invalid_grant` on expired gcloud ADC) and warned in advance that its orphan
+> cleanup likely got skipped, leaving leaked test docs. The failure shape (every field on a document
+> undefined, all at once) matches a half-written test scaffold rather than any real defect, and the
+> second `audit:reparse` run — scanned moments later — read 0 such failures. Recorded here as the
+> reason the two consecutive runs in this session disagree, not as an open finding.
 >
 > **Cluster 1 — invoices' three Xero/Uploadcare scalars** (`number_orders`, `uploadcare_uuid`,
 > `pdf_generated_at`). `core` `d91dfe3` → published `beta.430`. `createInvoice` is the sole create
