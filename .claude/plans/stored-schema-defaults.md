@@ -59,7 +59,7 @@ api-cloudrun#943's remaining half.*
 >
 > 🔴 **The push-time investigation surfaced a real gap the fork's earlier sweep had missed**: two
 > hand-built order literals — `validOrder()` in `api-cloudrun/tests/unit/fixtureFormat.test.ts` and
-> `orderDoc()` in `tests/integration/templates/fixtures.test.ts` — predated `invoices`/
+> `orderDoc()` in `api-cloudrun/tests/integration/templates/fixtures.test.ts` — predated `invoices`/
 > `query_by_invoices` and reddened 4 tests on the FIRST push attempt. Neither is a committed
 > `templates/fixtures/*.json` file (which the earlier sweep did check and did fix, correctly, on
 > `discounts-and-fee.json`); both are in-code TS factories the fixture sweep never looks at. Fixed
