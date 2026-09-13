@@ -259,10 +259,10 @@ const CreditNoteDocLineItemInner = z.strictObject({
   price: CreditNoteDocItemPriceSchema,
   coa_revenue: COARevenueEnum.nullable(),
   coa_posting: COACode,
-  tracking_category: z.string().nullable().default(null),
-  xero_id: z.uuid().nullable().default(null),
-  xero_tracking_option_id: z.uuid().nullable().default(null),
-  uid_invoice_item: ItemUid.nullable().default(null),
+  tracking_category: z.string().nullable(),
+  xero_id: z.uuid().nullable(),
+  xero_tracking_option_id: z.uuid().nullable(),
+  uid_invoice_item: ItemUid.nullable(),
 }).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a credit-note line item. */
@@ -439,13 +439,13 @@ export const CreditNoteSchema: z.ZodType<CreditNote> = z.strictObject({
   // every stored document still carrying it. Optional → empty storage → delete.
   items: z.array(CreditNoteDocLineItem).meta({ label: "Item" }),
   totals: CreditNoteDocTotalsSchema,
-  remaining_credit_cents: z.int().default(0).meta({ column: true, label: "Remaining Credit" }),
+  remaining_credit_cents: z.int().meta({ column: true, label: "Remaining Credit" }),
   // Bare `z.array(DocSource)` — the dropped `.default([])` is core#95 batch
   // 10. 13 of 13 in both projects already carry the key (`createCreditNote`
   // writes a literal `sources: []`).
   sources: z.array(DocSource),
   query_by_sources: z.array(z.string()),
-  xero_credit_note_id: z.uuid().nullable().default(null),
+  xero_credit_note_id: z.uuid().nullable(),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
