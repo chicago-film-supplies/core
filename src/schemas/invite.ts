@@ -43,9 +43,9 @@ export const InviteSchema: z.ZodType<Invite> = z.strictObject({
   ...NamePartsFields,
   name: NameField.meta({ column: true, label: "Name" }),
   // Role IDs — see `user.ts`. Retyped in core#59 for the same reason.
-  roles: z.array(RoleId).default([]).meta({ column: true, label: "Roles" }),
+  roles: z.array(RoleId).meta({ column: true, label: "Roles" }),
   invited_by: z.string().min(1),
-  used: z.boolean().default(false).meta({ column: true, label: "Used" }),
+  used: z.boolean().meta({ column: true, label: "Used" }),
   expires_at: FirestoreTimestamp,
   ...TimestampFields,
 }).meta({

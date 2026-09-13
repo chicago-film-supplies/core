@@ -9,6 +9,7 @@ const validList = {
   icon: "truck",
   color: "#3b82f6",
   position: 1000,
+  locked: [],
   created_by: { uid: "user1000000000000000", name: "Alex" },
   updated_by: { uid: "user1000000000000000", name: "Alex" },
   created_at: mockTimestamp,
@@ -50,10 +51,14 @@ Deno.test("UpdateListInput rejects missing version", () => {
   assertEquals(UpdateListInput.safeParse({ position: 1500 }).success, false);
 });
 
-Deno.test("ListSchema defaults locked to []", () => {
-  const parsed = ListSchema.safeParse(validList);
-  assertEquals(parsed.success, true);
-  if (parsed.success) assertEquals(parsed.data.locked, []);
+Deno.test("ListSchema requires locked", () => {
+  const { locked: _omitted, ...withoutLocked } = validList;
+  assertEquals(ListSchema.safeParse(withoutLocked).success, false);
+});
+
+Deno.test("ListSchema requires description", () => {
+  const { description: _omitted, ...withoutDescription } = validList;
+  assertEquals(ListSchema.safeParse(withoutDescription).success, false);
 });
 
 Deno.test("ListSchema accepts known lock keys", () => {

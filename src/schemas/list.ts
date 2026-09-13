@@ -66,11 +66,11 @@ export interface List {
 export const ListSchema: z.ZodType<List> = z.strictObject({
   uid: ListId,
   name: z.string().min(1).max(80).meta({ pii: "none", column: true, label: "Name" }),
-  description: z.string().max(500).meta({ pii: "none" }).default("").meta({ column: true, label: "Description" }),
+  description: z.string().max(500).meta({ pii: "none" }).meta({ column: true, label: "Description" }),
   icon: z.string().max(64).nullable(),
   color: z.string().max(16).nullable(),
   position: z.number().meta({ column: true, label: "Position" }),
-  locked: z.array(ListLockKeyEnum).default([]),
+  locked: z.array(ListLockKeyEnum),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),

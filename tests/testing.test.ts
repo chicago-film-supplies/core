@@ -170,7 +170,14 @@ Deno.test("required-only — omitting an input-required key is rejected on every
   // Non-vacuity, both ways: the classifier must be finding real members of
   // both classes, or "no holes" would mean nothing.
   assert(required > 400, `only ${required} required keys checked`);
-  assert(optional > 50, `only ${optional} input-optional keys found — the classifier is over-strict`);
+  // ⚠️ This floor tracks core#95's own backlog, not a fixed population. `getTestDoc`
+  // populates required-and-defaulted keys only (never bare `.optional()` ones — those
+  // never reach `key in doc` above), so `optional` here is almost entirely counting
+  // stored-schema `.default()` fields — exactly what this campaign retires batch by
+  // batch. It legitimately shrinks; lowered from 50 to 20 (measured 49 as of batch 14
+  // cluster 4) with headroom for the rest of the backlog. Re-lower with the same
+  // reasoning if a future batch trips it — never restore the default to keep it green.
+  assert(optional > 20, `only ${optional} input-optional keys found — the classifier is over-strict`);
 });
 
 Deno.test("required-only — an .optional() key is omitted, and getFullTestDoc emits it", () => {

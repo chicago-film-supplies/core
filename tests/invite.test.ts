@@ -50,13 +50,14 @@ Deno.test("InviteSchema requires last_name PRESENT — `null` is how an invite h
   assertEquals(InviteSchema.safeParse(withoutLast).success, false);
 });
 
-Deno.test("InviteSchema defaults used to false", () => {
+Deno.test("InviteSchema requires used", () => {
   const { used: _omitted, ...withoutUsed } = validInvite();
-  const result = InviteSchema.safeParse(withoutUsed);
-  assertEquals(result.success, true);
-  if (result.success) {
-    assertEquals(result.data.used, false);
-  }
+  assertEquals(InviteSchema.safeParse(withoutUsed).success, false);
+});
+
+Deno.test("InviteSchema requires roles", () => {
+  const { roles: _omitted, ...withoutRoles } = validInvite();
+  assertEquals(InviteSchema.safeParse(withoutRoles).success, false);
 });
 
 Deno.test("InviteSchema rejects additional properties", () => {
