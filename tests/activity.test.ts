@@ -103,7 +103,7 @@ Deno.test("the derivation is NOT the kebab→camel rule — two collections prov
   );
 });
 
-Deno.test("the feed stamps 22 DISTINCT permissions, 8 under Firestore's `in` cap of 30", () => {
+Deno.test("the feed stamps 25 DISTINCT permissions, 5 under Firestore's `in` cap of 30", () => {
   // 🔴 The number is asserted, not commented, because it is what has to stay
   // under the cap — and the cap binds on the ADMIN first, so the feed breaks for
   // the most privileged user. `manager/firestore.rules` gates **34 distinct
@@ -114,12 +114,15 @@ Deno.test("the feed stamps 22 DISTINCT permissions, 8 under Firestore's `in` cap
   // ⚠️ That 34 is NOT asserted here, deliberately — it lives in another repo, so
   // a ratchet on it from `core` would go red on a `manager` edit with no way to
   // fix it from this side. It is a measured aside; the ASSERTED number is the
-  // feed's own 22 below.
+  // feed's own 25 below.
   //
-  // 23 collections, 22 permissions: `templates` and `template-components` both
-  // map to `templates.read`.
-  assertEquals(FEED_COLLECTIONS.length, 23, "feed collections");
-  assertEquals(ACTIVITY_FEED_PERMISSIONS.length, 22, "distinct feed permissions");
+  // 26 collections, 25 permissions: `templates` and `template-components` both
+  // map to `templates.read`. ⚠️ The tax catalog (api-cloudrun#993) spent THREE
+  // of the spare at once — `taxes-codes`, `taxes-rates`, `taxes-classes` each
+  // gate on their own read — and hands one back when legacy `taxes` is
+  // contracted.
+  assertEquals(FEED_COLLECTIONS.length, 26, "feed collections");
+  assertEquals(ACTIVITY_FEED_PERMISSIONS.length, 25, "distinct feed permissions");
   assertEquals(
     ACTIVITY_FEED_PERMISSIONS.length <= 30,
     true,

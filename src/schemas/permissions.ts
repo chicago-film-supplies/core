@@ -115,6 +115,20 @@ export const PERMISSIONS = [
   "taxes.update",
   "taxes.delete",
 
+  // The tax catalog (api-cloudrun#993) — `taxes-codes` × `taxes-rates` ×
+  // `taxes-classes`. No `.delete` verb on any of them: a code or class is
+  // deactivated, a rate is closed by adding its successor. `taxes.*` retires at
+  // the contract step, with the legacy collection.
+  "taxCodes.create",
+  "taxCodes.read",
+  "taxCodes.update",
+  "taxRates.create",
+  "taxRates.read",
+  "taxRates.update",
+  "taxClasses.create",
+  "taxClasses.read",
+  "taxClasses.update",
+
   "suppliers.create",
   "suppliers.read",
   "suppliers.update",

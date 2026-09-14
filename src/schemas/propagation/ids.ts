@@ -111,6 +111,13 @@ export type TransactionId =
   // fulfillments.ts
   | "update-fulfillment-items"
   | "reset-fulfillment"
+  // taxes.ts
+  | "create-tax-code"
+  | "update-tax-code"
+  | "create-tax-rate"
+  | "update-tax-rate"
+  | "create-tax-class"
+  | "update-tax-class"
   // reference-data.ts
   | "create-holiday-definition"
   | "update-holiday-definition"
@@ -267,6 +274,13 @@ export type RuleId =
   | "update-tax:to-orders"
   | "supersede-tax:recompute-live-orders"
   | "supersede-tax:recompute-live-invoices"
+  | "create-tax-rate:recompute-live-orders"
+  | "create-tax-rate:recompute-live-invoices"
+  | "update-tax-class:name-to-products"
+  | "update-tax-class:name-to-webshop-products"
+  | "update-tax-class:codes-recompute-live-orders"
+  | "update-tax-class:codes-recompute-live-invoices"
+  | "update-product:tax-class-to-live-orders"
   // reference-data.ts
   | "update-tag:name-to-products"
   | "delete-tag:remove-from-products"
