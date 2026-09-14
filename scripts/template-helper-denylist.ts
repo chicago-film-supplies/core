@@ -434,6 +434,17 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "fulfillment-items": [
     "rebuildFulfillmentItems",
   ],
+  // `utils/tax-classes.ts` is CATALOG machinery (api-cloudrun#993): it validates
+  // and resolves `taxes-codes` / `taxes-rates` / `taxes-classes`. No render context
+  // holds that catalog — a document's taxes are already priced onto its lines —
+  // so every export would be a helper with nothing to call it with, and
+  // `taxClassMatrix` would print TODAY's rates beside a document billed at others.
+  "tax-classes": [
+    "lineTaxClass",
+    "resolveClassTaxes",
+    "taxClassMatrix",
+    "validateTaxSetup",
+  ],
   // The whole CUSTODY model, denylisted wholesale. A template renders a
   // document that has already been written; none of these answers a question
   // about the page. Two of them would be actively misleading in a helper panel

@@ -55,6 +55,7 @@ import * as fixturePiiUtils from "../src/utils/fixture-pii.ts";
 import * as templateLintUtils from "../src/utils/template-lint.ts";
 import * as substitutionUtils from "../src/utils/substitutions.ts";
 import * as itemPairingUtils from "../src/utils/item-pairing.ts";
+import * as taxClassUtils from "../src/utils/tax-classes.ts";
 
 import { templateHelpers } from "../src/schemas/template-helpers.generated.ts";
 import {
@@ -107,6 +108,11 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // document that has already been reconciled, so there is no second side to
   // compare against. Listed so the drift guard sees its exports.
   substitutions: substitutionUtils,
+  // And again: `utils/tax-classes.ts` answers questions about the tax CATALOG —
+  // whether its codes, rates and classes are consistent, and which rates a class
+  // resolves to. A template renders a document whose taxes are already priced
+  // and holds no catalog to ask. Listed so the drift guard sees its exports.
+  "tax-classes": taxClassUtils,
   // And once more: `utils/item-pairing.ts` answers *"which row of the NEW array
   // is the same row as this one in the OLD array?"* — a question that needs two
   // revisions of a document. A template is handed one. Listed so the drift guard

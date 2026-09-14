@@ -14803,6 +14803,86 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/utils/tax-classes",
+      "moduleDoc": "",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "ClassAppliedRate",
+          "declaration": "interface ClassAppliedRate {\n  rate: TaxRate;\n  code: TaxCode;\n  expired: boolean;\n}",
+          "doc": "A rate the line carries, with the code name `PriceModifier.name` snapshots."
+        },
+        {
+          "kind": "interface",
+          "name": "ClassTaxConsidered",
+          "declaration": "interface ClassTaxConsidered {\n  uid_tax_code: string;\n  name: string | null;\n  outcome: ClassTaxOutcome;\n  rate: TaxRate | null;\n}",
+          "doc": "One row of the explain output."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ClassTaxOutcome",
+          "declaration": "type ClassTaxOutcome = \"matched\" | \"expired\" | \"wrong_jurisdiction\" | \"no_rate\" | \"unknown_code\";",
+          "doc": "Why each code in the class did or did not contribute a rate — the explain\noutput the manager renders on a product or line, and the audits reuse.\n\n- `matched` — a rate brackets `asOf` (or the document's frozen rate).\n- `expired` — nothing brackets `asOf` but a version closed before it; priced\n  on that version and reported, never refused (`UnreviewedTaxWarning`'s rule).\n- `wrong_jurisdiction` — the code levies somewhere else. The normal case for\n  most of a class's codes.\n- `no_rate` — the code has never had a rate at or before `asOf`.\n- `unknown_code` — the class names a code the catalog does not hold."
+        },
+        {
+          "kind": "interface",
+          "name": "ClassTaxResolution",
+          "declaration": "interface ClassTaxResolution {\n  uid_tax_class: string | null;\n  base: ClassAppliedRate[];\n  applied: ClassAppliedRate[];\n  considered: ClassTaxConsidered[];\n}",
+          "doc": "The whole answer for one line."
+        },
+        {
+          "kind": "interface",
+          "name": "TaxCatalog",
+          "declaration": "interface TaxCatalog {\n  codes: readonly TaxCode[];\n  rates: readonly TaxRate[];\n  classes: readonly TaxClass[];\n}",
+          "doc": "The three catalog collections, unfiltered — historical rates included."
+        },
+        {
+          "kind": "interface",
+          "name": "TaxSetupViolation",
+          "declaration": "interface TaxSetupViolation {\n  code: TaxSetupViolationCode;\n  message: string;\n  uids: string[];\n}",
+          "doc": "One broken invariant, with every uid it involves so a writer can name them in a 400."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "TaxSetupViolationCode",
+          "declaration": "type TaxSetupViolationCode = \"duplicate_code_name\" | \"duplicate_class_name\" | \"orphan_rate\" | \"rate_type_mismatch\" | \"rate_overlap\" | \"rate_gap\" | \"unknown_code_in_class\" | \"inactive_code_in_class\" | \"multiple_percent_rates\" | \"duplicate_type_default\";",
+          "doc": "Closed vocabulary, so a caller can switch on it and an audit can count it."
+        },
+        {
+          "kind": "function",
+          "name": "lineTaxClass",
+          "signature": "lineTaxClass(item: typeLiteral): string | null",
+          "doc": "The class a line resolves: the operator's override, else the product\nsnapshot. `null` when neither is stamped — during expand the CALLER supplies\na derived class for such a line, because the legacy mapping\n(`taxed_as ?? type` plus the explicit-only bottle ref) needs the migrated\nclass uids, which only the backfill knows.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "resolveClassTaxes",
+          "signature": "resolveClassTaxes(uidTaxClass: string | null, jurisdiction: string, exempt: boolean, asOf: string, catalog: TaxCatalog, frozenRateUids?: ReadonlySet<string>): ClassTaxResolution",
+          "doc": "**Stage 3 for one line**: the class's codes, filtered to the jurisdiction\nstage 2 resolved, each taken at the rate live at `asOf`.\n\n```\ncodes = class.uid_tax_codes where code.jurisdiction === jurisdiction\nrate  = frozen rate of that code  ??  rate bracketing asOf  ??  most recently CLOSED rate (expired)\napplied = exempt ? [] : base\n```\n\n- **`jurisdiction` and `exempt` arrive already decided** — including the\n  replacement rule (origin, not exempt), which is stage 2's and keyed on\n  `line.type`, never on the class. Re-deriving either here would be a second\n  copy of stage 2.\n- **`no_nexus` matches nothing** by construction: no code can carry it.\n- **A missing or unknown class is untaxed**, not an error. The caller that\n  must refuse (a writer) refuses on `validateTaxSetup` or on the missing\n  stamp, not on a pricing throw — the tax-review outage recorded in\n  `utils/taxes.ts` is the reason pricing never throws for configuration.\n- **`frozenRateUids`**: a frozen document's stored `price.taxes[].uid`s. Where\n  one of them is a version of a matched code it wins over today's version, so\n  a completed order keeps the rate it was billed at. It replaces the legacy\n  name-keyed `frozenVersions`: a line stores the RATE uid, and a rate knows\n  its code, so no name is needed.\n\n⚠️ **\"Most recent\" means most recently CLOSED at or before `asOf`**, the same\nrule as `mostRecentClosedTax`: a document inside an interior gap gets the\nversion that ran up to the gap, never one that had not started.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "taxClassMatrix",
+          "signature": "taxClassMatrix(catalog: TaxCatalog, asOf: string): Array<typeLiteral>",
+          "doc": "**The class × jurisdiction matrix at an instant** — the settings page and the\nbody of `audit-tax-catalog.ts`. One row per ACTIVE class, one cell per\ncollecting jurisdiction, each cell the resolver's own answer (not exempt), so\nthe page can never show a combination pricing would not produce.\n\nCollecting jurisdictions only: a matrix is a statement about what CFS charges\nTODAY, and a closed registration is not somewhere a new line can land.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "validateTaxSetup",
+          "signature": "validateTaxSetup(catalog: TaxCatalog): TaxSetupViolation[]",
+          "doc": "**The cross-document invariants of the tax catalog.** An empty array is the\nhealthy answer.\n\nOne function, three callers, which is the drift resistance the plan asks for:\nevery API writer of a code, rate or class runs it on the catalog AS IT WOULD\nBE after the write and refuses on any violation; `audit-tax-catalog.ts` runs\nit on the stored catalog; and the daily watch runs it too.\n\n| code | why it is a defect |\n|---|---|\n| `multiple_percent_rates` | an active class has two percent rates live for one jurisdiction at one instant. Xero takes one TaxType per line, and it is how a line would get double sales tax |\n| `rate_overlap` | two versions of one code bracket one instant — pricing cannot pick |\n| `rate_gap` | an interior hole between two versions of one code. A schedule lapsing at the END is a review, not this; see `UnreviewedTaxWarning` |\n| `rate_type_mismatch` | a rate's `type` copy disagrees with its code's, so the unit it renders is wrong |\n| `orphan_rate` / `unknown_code_in_class` | a reference to nothing |\n| `inactive_code_in_class` | an ACTIVE class draws from a code an operator retired |\n| `duplicate_type_default` | two active classes both preselect one product type |\n| `duplicate_*_name` | a label that no longer identifies one thing (whole collection, inactive included) |\n\n⚠️ **Jurisdictions are the TAX vocabulary, not the live registrations.** A\nclosed registration (paxton) still has codes and rates, and a class listing\ntwo percent codes there is still a contradiction for the frozen documents\nthat resolve it — so every code jurisdiction is checked, not only\n`COLLECTING_JURISDICTIONS`.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/utils/templates",
       "moduleDoc": "Template helpers for the git-canonical template system — pure functions\nshared by api-cloudrun and manager.\n\n- `slugify` derives a `git_path` from a family display name (frozen at create).\n- `deriveBump` maps a conventional-commit type → semver bump level, and\n  `bumpSemver` applies that bump to the family's previous version.\n- `resolveRenderParams` validates caller-provided render params against the\n  version's declared params **strictly** — unknown params throw (the API\n  maps `RenderParamError` → HTTP 422).\n\n**No RUNTIME dependency on `@cfs/core/schemas`.** Two different techniques keep\nit that way, and which one applies depends on what is needed:\n\n- A shape a caller passes in is accepted **structurally** — `RenderParamDecl`\n  is declared here rather than imported, and `@cfs/core/schemas`'\n  `TemplateParam` is structurally compatible with it.\n- A closed union that must be named exactly is `import type`, which is erased\n  at emit and so costs a bundle nothing. `GoldenDiffVerdict` below is the one\n  such import.\n\n⚠️ **What must never appear here is a runtime VALUE import from the schemas.**\n`GOLDEN_DIFF_VERDICTS` is the tempting one — the union's own member array —\nand importing it would pull the schema barrel and all of zod into every\nconsumer that wanted a path helper. If a member list is ever needed at\nruntime, restate it locally or put the function somewhere else.",
       "symbols": [

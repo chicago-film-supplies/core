@@ -1,0 +1,432 @@
+/**
+ * The class rule against the legacy `(item type × jurisdiction)` rule, over the
+ * PROD catalog (api-cloudrun#993 step 1).
+ *
+ * The migration fixture below is the plan's class table derived exactly from
+ * today's `item_types` — the step-3 backfill must produce the same grouping.
+ * Two things the plan's own table got wrong, and this fixture corrects:
+ *
+ * - **Paxton Sales Tax is in Rental, Sale and Replacement.** Both Paxton
+ *   versions list `[rental, sale, replacement]`; the registration is closed,
+ *   not the tax, and frozen documents still resolve it.
+ * - **"No Tax" does not migrate.** It carries `jurisdiction: null`, which no
+ *   code can; the Non-Taxable class (`uid_tax_codes: []`) says the same thing.
+ */
+import { assertEquals } from "@std/assert";
+import {
+  getInitialValues,
+  JURISDICTIONS,
+  OrderDocLineItem,
+  type TaxClass,
+  TaxClassSchema,
+  type TaxCode,
+  TaxCodeSchema,
+  type TaxRate,
+  TaxRateSchema,
+} from "../src/schemas/mod.ts";
+import { assignLineTaxes, resolveLineTax } from "../src/utils/taxes.ts";
+import type { LineItem, Tax } from "../src/utils/orders.ts";
+import {
+  lineTaxClass,
+  resolveClassTaxes,
+  type TaxCatalog,
+  taxClassMatrix,
+  validateTaxSetup,
+} from "../src/utils/tax-classes.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
+
+// ── the prod catalog, 2026-09-13 (read-only MCP query of `taxes`) ─────────
+
+/** The fields of a stored `taxes` document this migration reads. */
+interface LegacyRow {
+  uid: string;
+  name: string;
+  rate: number;
+  type: "percent" | "flat";
+  jurisdiction: string | null;
+  item_types: string[];
+  applied_from: string;
+  applied_to: string | null;
+  xero_tax_type: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
+}
+
+const PROD_TAXES: LegacyRow[] = [
+  { uid: "0sfD0ca1LvwWR0pTJtqw", name: "Frankfort Sales Tax", rate: 8, type: "percent", jurisdiction: "frankfort", item_types: ["rental", "sale", "replacement"], applied_from: "2026-01-01T00:00:00.000-06:00", applied_to: "2026-08-19T00:00:00.000-05:00", xero_tax_type: "TAX007" },
+  { uid: "NJc430kShJ0GRj7uvaQZ", name: "Chicago Sales Tax", rate: 10.25, type: "percent", jurisdiction: "chicago", item_types: ["sale", "replacement"], applied_from: "2020-01-01T00:00:00.000-06:00", applied_to: "2026-08-19T00:00:00.000-05:00", xero_tax_type: "TAX001" },
+  { uid: "VDPGuO3vfCfI25V0DMW2", name: "Rantoul Sales Tax", rate: 9, type: "percent", jurisdiction: "rantoul", item_types: ["rental", "sale", "replacement"], applied_from: "2020-01-01T00:00:00.000-06:00", applied_to: "2026-12-01T00:00:00.000-06:00", xero_tax_type: "TAX004" },
+  { uid: "VEW4Ivy7VNqgxFA5eJw6", name: "Chicago Rental Tax", rate: 15, type: "percent", jurisdiction: "chicago", item_types: ["rental"], applied_from: "2026-01-01T00:00:00.000-06:00", applied_to: "2026-12-01T00:00:00.000-06:00", xero_tax_type: "TAX006" },
+  { uid: "Yh6WnEGqElp6UEO3Uyek", name: "Frankfort Sales Tax", rate: 8.25, type: "percent", jurisdiction: "frankfort", item_types: ["rental", "sale", "replacement"], applied_from: "2026-08-19T00:00:00.000-05:00", applied_to: "2026-12-01T00:00:00.000-06:00", xero_tax_type: "TAX009" },
+  { uid: "csOfsSeE2pgelplcDROu", name: "Paxton Sales Tax", rate: 6.25, type: "percent", jurisdiction: "paxton", item_types: ["rental", "sale", "replacement"], applied_from: "2020-01-01T00:00:00.000-06:00", applied_to: "2026-01-01T00:00:00.000-06:00", xero_tax_type: "TAX005" },
+  { uid: "dtTboGtD0f2iwRlDGOBH", name: "Chicago Sales Tax", rate: 10.5, type: "percent", jurisdiction: "chicago", item_types: ["sale", "replacement"], applied_from: "2026-08-19T00:00:00.000-05:00", applied_to: "2026-12-01T00:00:00.000-06:00", xero_tax_type: "TAX008" },
+  { uid: "h7YpvowCIhZscHU7YRyd", name: "No Tax", rate: 0, type: "percent", jurisdiction: null, item_types: [], applied_from: "2026-03-27T00:00:00.000-05:00", applied_to: null, xero_tax_type: "NONE" },
+  { uid: "jvsOUs8nR4DXElcVNqJc", name: "Chicago Bottled Water Tax", rate: 0.05, type: "flat", jurisdiction: "chicago", item_types: [], applied_from: "2026-03-27T00:00:00.000-05:00", applied_to: null, xero_tax_type: null, xero_account_code: 2210, xero_item_code: "619" },
+  { uid: "nH9TjML9Jfwfnm9g9G3j", name: "Chicago Rental Tax", rate: 9, type: "percent", jurisdiction: "chicago", item_types: ["rental"], applied_from: "2020-01-01T00:00:00.000-06:00", applied_to: "2025-01-01T00:00:00.000-06:00", xero_tax_type: "TAX002" },
+  { uid: "uCM5n4ZNgsVc1fyMQbHq", name: "Paxton Sales Tax", rate: 0, type: "percent", jurisdiction: "paxton", item_types: ["rental", "sale", "replacement"], applied_from: "2026-01-01T00:00:00.000-06:00", applied_to: null, xero_tax_type: "NONE" },
+  { uid: "xmxiaT32ehsEnrgrKWW8", name: "Chicago Rental Tax", rate: 11, type: "percent", jurisdiction: "chicago", item_types: ["rental"], applied_from: "2025-01-01T00:00:00.000-06:00", applied_to: "2026-01-01T00:00:00.000-06:00", xero_tax_type: "TAX003" },
+];
+const LEGACY = PROD_TAXES as unknown as Tax[];
+const BOTTLE_RATE_UID = "jvsOUs8nR4DXElcVNqJc";
+
+// ── the migration, as the backfill must perform it ───────────────────────
+
+const actor = { uid: "testuser100000000000", name: "Test User" };
+const stamps = { version: 0, created_by: actor, updated_by: actor, created_at: mockTimestamp, updated_at: mockTimestamp };
+
+const CODE_UID: Record<string, string> = {
+  "Chicago Rental Tax": "codechirental0000000",
+  "Chicago Sales Tax": "codechisales00000000",
+  "Frankfort Sales Tax": "codefrankfort0000000",
+  "Rantoul Sales Tax": "coderantoul000000000",
+  "Paxton Sales Tax": "codepaxton0000000000",
+  "Chicago Bottled Water Tax": "codebottle0000000000",
+};
+
+const MIGRATED_ROWS = PROD_TAXES.filter((t) => t.jurisdiction !== null);
+
+const CODES: TaxCode[] = Object.entries(CODE_UID).map(([name, uid]) => {
+  const first = MIGRATED_ROWS.find((t) => t.name === name)!;
+  return {
+    uid,
+    name,
+    jurisdiction: first.jurisdiction as TaxCode["jurisdiction"],
+    type: first.type,
+    xero_account_code: first.xero_account_code ?? null,
+    xero_item_code: first.xero_item_code ?? null,
+    active: true,
+    ...stamps,
+  };
+});
+
+const RATES: TaxRate[] = MIGRATED_ROWS.map((t) => ({
+  uid: t.uid,
+  uid_tax_code: CODE_UID[t.name],
+  rate: t.rate,
+  type: t.type,
+  applied_from: t.applied_from,
+  applied_from_fs: mockTimestamp,
+  applied_to: t.applied_to,
+  applied_to_fs: t.applied_to === null ? null : mockTimestamp,
+  effective_from: null,
+  xero_tax_type: t.xero_tax_type ?? null,
+  xero_components: [],
+  ...stamps,
+}));
+
+/** A class per legacy key: the codes whose versions list that key. */
+const codesListing = (key: string) =>
+  [...new Set(MIGRATED_ROWS.filter((t) => t.item_types.includes(key)).map((t) => CODE_UID[t.name]))];
+
+const cls = (uid: string, name: string, uid_tax_codes: string[], is_default_for: TaxClass["is_default_for"]): TaxClass => ({
+  uid,
+  name,
+  description: null,
+  uid_tax_codes,
+  is_default_for,
+  active: true,
+  ...stamps,
+});
+
+const CLASS_UID = {
+  rental: "classrental000000000",
+  sale: "classsale00000000000",
+  bottled: "classsalebottled0000",
+  replacement: "classreplacement0000",
+  none: "classnontaxable00000",
+} as const;
+
+const CLASSES: TaxClass[] = [
+  cls(CLASS_UID.rental, "Rental", codesListing("rental"), ["rental"]),
+  cls(CLASS_UID.sale, "Sale", codesListing("sale"), ["sale"]),
+  cls(CLASS_UID.bottled, "Sale – Bottled Water", [...codesListing("sale"), CODE_UID["Chicago Bottled Water Tax"]], []),
+  cls(CLASS_UID.replacement, "Replacement", codesListing("replacement"), ["replacement"]),
+  cls(CLASS_UID.none, "Non-Taxable", [], ["service", "surcharge", "transaction_fee"]),
+];
+
+const CATALOG: TaxCatalog = { codes: CODES, rates: RATES, classes: CLASSES };
+
+// ── the migrated catalog is valid ────────────────────────────────────────
+
+Deno.test("migration: every migrated document parses, and prod's 12 taxes become 6 codes and 11 rates", () => {
+  for (const doc of CODES) assertEquals(TaxCodeSchema.safeParse(doc).success, true, doc.name);
+  for (const doc of RATES) assertEquals(TaxRateSchema.safeParse(doc).success, true, doc.uid);
+  for (const doc of CLASSES) assertEquals(TaxClassSchema.safeParse(doc).success, true, doc.name);
+  assertEquals([CODES.length, RATES.length, CLASSES.length], [6, 11, 5]);
+});
+
+Deno.test("migration: Paxton is in Rental, Sale and Replacement — the plan's table omitted it", () => {
+  for (const uid of [CLASS_UID.rental, CLASS_UID.sale, CLASS_UID.replacement]) {
+    assertEquals(CLASSES.find((c) => c.uid === uid)!.uid_tax_codes.includes(CODE_UID["Paxton Sales Tax"]), true);
+  }
+});
+
+Deno.test("validateTaxSetup: the migrated prod catalog is clean", () => {
+  assertEquals(validateTaxSetup(CATALOG), []);
+});
+
+// ── parity: stage 3 of the class rule = the legacy rule ──────────────────
+
+const lineBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
+
+/** A legacy line: `type`, an optional `taxed_as`, and an optional explicit-only bottle ref. */
+function legacyLine(type: string, taxedAs: string | null, bottle: boolean): LineItem {
+  return {
+    ...lineBase,
+    uid: "item",
+    path: ["item"],
+    name: "Line",
+    type,
+    taxed_as: taxedAs,
+    quantity: 3,
+    price: {
+      ...(lineBase.price as Record<string, unknown>),
+      base_cents: 10000,
+      chargeable_days: 5,
+      subtotal_cents: 10000,
+      subtotal_discounted_cents: 10000,
+      total_cents: 10000,
+      taxes: bottle ? [{ uid: BOTTLE_RATE_UID, name: "Chicago Bottled Water Tax", rate: 0.05, type: "flat", amount_cents: 15 }] : [],
+    },
+  } as unknown as LineItem;
+}
+
+/** Which migrated class a legacy line maps to — the backfill's per-product rule. */
+function classForLegacy(type: string, taxedAs: string | null, bottle: boolean): string {
+  const key = taxedAs ?? type;
+  if (key === "none" || key === "service" || key === "surcharge") return CLASS_UID.none;
+  if (bottle) return CLASS_UID.bottled;
+  return CLASS_UID[key as "rental" | "sale" | "replacement"];
+}
+
+const SHAPES: Array<[type: string, taxedAs: string | null, bottle: boolean]> = [
+  ["rental", null, false],
+  ["sale", null, false],
+  ["sale", null, true],
+  ["replacement", null, false],
+  ["service", null, false],
+  ["surcharge", null, false],
+  ["rental", "none", false],
+  ["rental", "sale", false],
+  ["sale", "rental", false],
+];
+
+const AS_OFS = [
+  "2019-06-01T00:00:00.000-05:00",
+  "2020-01-01T00:00:00.000-06:00",
+  "2024-12-31T23:59:59.999-06:00",
+  "2025-01-01T00:00:00.000-06:00",
+  "2025-12-31T12:00:00.000-06:00",
+  "2026-01-01T00:00:00.000-06:00",
+  "2026-03-27T00:00:00.000-05:00",
+  "2026-08-18T23:59:59.999-05:00",
+  "2026-08-19T00:00:00.000-05:00",
+  "2026-11-30T12:00:00.000-06:00",
+  "2026-12-01T00:00:00.000-06:00", // every Chicago/Frankfort/Rantoul review lapses: fall-forward
+  "2027-06-15T00:00:00.000-05:00",
+];
+
+const sorted = (xs: string[]) => [...xs].sort();
+
+Deno.test("parity: the class rule reprices every (shape × jurisdiction × instant × exemption) like the legacy rule", () => {
+  let compared = 0;
+  const knownDifferences: string[] = [];
+
+  for (const [type, taxedAs, bottle] of SHAPES) {
+    for (const jurisdiction of JURISDICTIONS) {
+      for (const asOf of AS_OFS) {
+        for (const exempt of [false, true]) {
+          const origin = jurisdiction === "no_nexus" ? "chicago" : jurisdiction;
+          const item = legacyLine(type, taxedAs, bottle);
+          const ctx = {
+            destinations: [{ uid: null, jurisdiction, delivery: null }],
+            origin,
+            exempt,
+            taxes: LEGACY,
+            asOf,
+          } as const;
+
+          // Stage 2 comes from the legacy rule and is NOT under test here:
+          // the class resolver takes jurisdiction and exemption as inputs.
+          const stage2 = resolveLineTax(item, ctx.destinations[0], ctx);
+          assignLineTaxes([item], ctx);
+          const price = item.price as { taxes: Array<{ uid: string }>; taxes_base: Array<{ uid: string }> };
+          const legacyApplied = sorted(price.taxes.map((t) => t.uid));
+          const legacyBase = sorted(price.taxes_base.map((t) => t.uid));
+
+          const next = resolveClassTaxes(
+            classForLegacy(type, taxedAs, bottle),
+            stage2.jurisdiction,
+            stage2.exempt,
+            asOf,
+            CATALOG,
+          );
+          const nextApplied = sorted(next.applied.map((a) => a.rate.uid));
+          // Legacy `taxes_base` holds only the rule's tax, never an explicit-only ref.
+          const nextBase = sorted(next.base.filter((a) => a.code.type === "percent").map((a) => a.rate.uid));
+
+          const label = `${type}/${taxedAs}/${bottle ? "bottle" : "-"} ${jurisdiction} ${asOf} exempt=${exempt}`;
+          compared++;
+
+          // F3: the legacy explicit-only branch checks no window, so it applies
+          // the bottle levy BEFORE the levy's applied_from. The class rule does not.
+          const bottleBeforeWindow = bottle && stage2.jurisdiction === "chicago" && !exempt &&
+            Date.parse(asOf) < Date.parse("2026-03-27T00:00:00.000-05:00");
+          if (bottleBeforeWindow) {
+            assertEquals(nextApplied, legacyApplied.filter((u) => u !== BOTTLE_RATE_UID), label);
+            knownDifferences.push(label);
+          } else {
+            assertEquals(nextApplied, legacyApplied, label);
+          }
+          assertEquals(nextBase, legacyBase, label);
+        }
+      }
+    }
+  }
+
+  assertEquals(compared, SHAPES.length * JURISDICTIONS.length * AS_OFS.length * 2);
+  // Denominator for the one intended difference, so it cannot silently stop being exercised.
+  assertEquals(knownDifferences.length, 6);
+});
+
+Deno.test("parity: the lapsed-review fall-forward is reported as expired, not dropped", () => {
+  const r = resolveClassTaxes(CLASS_UID.rental, "chicago", false, "2027-06-15T00:00:00.000-05:00", CATALOG);
+  assertEquals(r.applied.map((a) => [a.rate.uid, a.expired]), [["VEW4Ivy7VNqgxFA5eJw6", true]]);
+});
+
+// ── resolveClassTaxes: explain, frozen, exempt ───────────────────────────
+
+Deno.test("resolveClassTaxes explains every code in the class, in class order", () => {
+  const r = resolveClassTaxes(CLASS_UID.bottled, "frankfort", false, "2026-09-13T00:00:00.000-05:00", CATALOG);
+  assertEquals(
+    r.considered.map((c) => [c.name, c.outcome]),
+    [
+      ["Frankfort Sales Tax", "matched"],
+      ["Chicago Sales Tax", "wrong_jurisdiction"],
+      ["Rantoul Sales Tax", "wrong_jurisdiction"],
+      ["Paxton Sales Tax", "wrong_jurisdiction"],
+      ["Chicago Bottled Water Tax", "wrong_jurisdiction"],
+    ],
+  );
+  assertEquals(r.applied.map((a) => a.rate.uid), ["Yh6WnEGqElp6UEO3Uyek"]);
+});
+
+Deno.test("resolveClassTaxes: a Chicago bottle line carries sales tax AND the levy — never compounded", () => {
+  const r = resolveClassTaxes(CLASS_UID.bottled, "chicago", false, "2026-09-13T00:00:00.000-05:00", CATALOG);
+  assertEquals(sorted(r.applied.map((a) => a.code.name)), ["Chicago Bottled Water Tax", "Chicago Sales Tax"]);
+});
+
+Deno.test("resolveClassTaxes: a frozen document keeps the rate it was billed at", () => {
+  const today = resolveClassTaxes(CLASS_UID.sale, "chicago", false, "2026-09-13T00:00:00.000-05:00", CATALOG);
+  assertEquals(today.applied.map((a) => a.rate.rate), [10.5]);
+  const frozen = resolveClassTaxes(
+    CLASS_UID.sale,
+    "chicago",
+    false,
+    "2026-09-13T00:00:00.000-05:00",
+    CATALOG,
+    new Set(["NJc430kShJ0GRj7uvaQZ"]),
+  );
+  assertEquals(frozen.applied.map((a) => a.rate.rate), [10.25]);
+});
+
+Deno.test("resolveClassTaxes: exempt keeps base and empties applied", () => {
+  const r = resolveClassTaxes(CLASS_UID.rental, "chicago", true, "2026-09-13T00:00:00.000-05:00", CATALOG);
+  assertEquals([r.base.length, r.applied.length], [1, 0]);
+});
+
+Deno.test("resolveClassTaxes: no class, an unknown class and no_nexus are all untaxed, never a throw", () => {
+  for (const [uid, j] of [[null, "chicago"], ["classmissing00000000", "chicago"], [CLASS_UID.rental, "no_nexus"]] as const) {
+    assertEquals(resolveClassTaxes(uid, j, false, "2026-09-13T00:00:00.000-05:00", CATALOG).applied, []);
+  }
+});
+
+Deno.test("lineTaxClass: the override beats the snapshot, and absence is null", () => {
+  assertEquals(lineTaxClass({ uid_tax_class: "a", uid_tax_class_override: "b" }), "b");
+  assertEquals(lineTaxClass({ uid_tax_class: "a", uid_tax_class_override: null }), "a");
+  assertEquals(lineTaxClass({}), null);
+});
+
+Deno.test("taxClassMatrix: one row per active class, a cell per collecting jurisdiction", () => {
+  const m = taxClassMatrix(CATALOG, "2026-09-13T00:00:00.000-05:00");
+  const bottled = m.find((row) => row.tax_class.uid === CLASS_UID.bottled)!;
+  assertEquals(
+    bottled.cells.map((c) => [c.jurisdiction, sorted(c.rates.map((r) => `${r.name} ${r.rate}`))]),
+    [
+      ["chicago", ["Chicago Bottled Water Tax 0.05", "Chicago Sales Tax 10.5"]],
+      ["rantoul", ["Rantoul Sales Tax 9"]],
+      ["frankfort", ["Frankfort Sales Tax 8.25"]],
+    ],
+  );
+});
+
+// ── validateTaxSetup: every planted violation is caught ──────────────────
+
+const codesOf = (violations: ReturnType<typeof validateTaxSetup>) => violations.map((v) => v.code);
+const withClass = (uid: string, patch: Partial<TaxClass>): TaxCatalog => ({
+  ...CATALOG,
+  classes: CATALOG.classes.map((c) => (c.uid === uid ? { ...c, ...patch } : c)),
+});
+
+Deno.test("validateTaxSetup: two percent codes live in one jurisdiction of one class", () => {
+  const drifted = withClass(CLASS_UID.sale, {
+    uid_tax_codes: [...CLASSES[1].uid_tax_codes, CODE_UID["Chicago Rental Tax"]],
+  });
+  assertEquals(codesOf(validateTaxSetup(drifted)), ["multiple_percent_rates"]);
+});
+
+Deno.test("validateTaxSetup: two percent codes in one jurisdiction whose windows never meet are fine", () => {
+  const retiredPaxton: TaxCode = { ...CODES[4], uid: "codepaxtonold0000000", name: "Paxton Old" };
+  const catalog: TaxCatalog = {
+    codes: [...CODES, retiredPaxton],
+    rates: [
+      ...RATES.filter((r) => r.uid !== "csOfsSeE2pgelplcDROu"),
+      { ...RATES.find((r) => r.uid === "csOfsSeE2pgelplcDROu")!, uid_tax_code: retiredPaxton.uid },
+    ],
+    classes: CATALOG.classes.map((c) =>
+      c.uid === CLASS_UID.sale ? { ...c, uid_tax_codes: [...c.uid_tax_codes, retiredPaxton.uid] } : c
+    ),
+  };
+  assertEquals(codesOf(validateTaxSetup(catalog)).includes("multiple_percent_rates"), false);
+});
+
+Deno.test("validateTaxSetup: overlapping and gapped versions of one code", () => {
+  const overlap = RATES.map((r) => (r.uid === "nH9TjML9Jfwfnm9g9G3j" ? { ...r, applied_to: "2025-06-01T00:00:00.000-05:00" } : r));
+  assertEquals(codesOf(validateTaxSetup({ ...CATALOG, rates: overlap })), ["rate_overlap"]);
+  const gap = RATES.map((r) => (r.uid === "nH9TjML9Jfwfnm9g9G3j" ? { ...r, applied_to: "2024-06-01T00:00:00.000-05:00" } : r));
+  assertEquals(codesOf(validateTaxSetup({ ...CATALOG, rates: gap })), ["rate_gap"]);
+});
+
+Deno.test("validateTaxSetup: a rate whose type disagrees with its code, and a rate naming no code", () => {
+  const wrongType = RATES.map((r) => (r.uid === BOTTLE_RATE_UID ? { ...r, type: "percent" as const } : r));
+  assertEquals(codesOf(validateTaxSetup({ ...CATALOG, rates: wrongType })), ["rate_type_mismatch"]);
+  const orphan = [...RATES, { ...RATES[0], uid: "orphanrate0000000000", uid_tax_code: "codemissing000000000" }];
+  assertEquals(codesOf(validateTaxSetup({ ...CATALOG, rates: orphan })), ["orphan_rate"]);
+});
+
+Deno.test("validateTaxSetup: unknown and inactive codes in a class", () => {
+  assertEquals(
+    codesOf(validateTaxSetup(withClass(CLASS_UID.none, { uid_tax_codes: ["codemissing000000000"] }))),
+    ["unknown_code_in_class"],
+  );
+  const retired = { ...CATALOG, codes: CODES.map((c) => (c.uid === CODE_UID["Chicago Bottled Water Tax"] ? { ...c, active: false } : c)) };
+  assertEquals(codesOf(validateTaxSetup(retired)), ["inactive_code_in_class"]);
+});
+
+Deno.test("validateTaxSetup: a product type defaulted by two active classes, and duplicate names", () => {
+  assertEquals(
+    codesOf(validateTaxSetup(withClass(CLASS_UID.bottled, { is_default_for: ["sale"] }))),
+    ["duplicate_type_default"],
+  );
+  assertEquals(codesOf(validateTaxSetup(withClass(CLASS_UID.bottled, { name: "Sale" }))), ["duplicate_class_name"]);
+  const dupeCode = { ...CATALOG, codes: [...CODES, { ...CODES[0], uid: "codedupe000000000000" }] };
+  assertEquals(codesOf(validateTaxSetup(dupeCode)), ["duplicate_code_name"]);
+});
+
+Deno.test("validateTaxSetup: an INACTIVE class is exempt from the pricing invariants", () => {
+  const inactive = withClass(CLASS_UID.sale, {
+    active: false,
+    uid_tax_codes: [...CLASSES[1].uid_tax_codes, CODE_UID["Chicago Rental Tax"]],
+  });
+  assertEquals(validateTaxSetup(inactive), []);
+});

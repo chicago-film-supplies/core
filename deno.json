@@ -86,6 +86,7 @@
     "./utils/pickSheets": "./src/utils/pickSheets.ts",
     "./utils/pick-sheet-fold": "./src/utils/pick-sheet-fold.ts",
     "./utils/taxes": "./src/utils/taxes.ts",
+    "./utils/tax-classes": "./src/utils/tax-classes.ts",
     "./utils/templates": "./src/utils/templates.ts",
     "./utils/template-lint": "./src/utils/template-lint.ts",
     "./utils/fixture-pii": "./src/utils/fixture-pii.ts",
