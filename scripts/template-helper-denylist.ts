@@ -257,6 +257,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "syncOrderToInvoiceSelective", // selective item sync
     "syncOrderItems", // whole-scope item sync
     "syncOrderDestinationsSelective", // selective destination sync
+    "syncOrderDestinationScope", // one-row destination sync (write-path, api-cloudrun#664)
     "syncScalarWithOverride", // co-write override detection
     "carryForwardOverrides", // invoice-only override carryforward
     "buildOrderScopedItems", // order → invoice projection (write-path)

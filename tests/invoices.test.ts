@@ -29,6 +29,7 @@ import {
   removeOrderScopedDestinations,
   removeOrderScopedItems,
   resyncInvoiceLines,
+  syncOrderDestinationScope,
   syncOrderDestinationsSelective,
   toInvoiceDestinationPair,
   syncOrderItems,
@@ -3494,4 +3495,125 @@ Deno.test("manager#421 stage two: the PROJECTION emits zero_priced, unconditiona
       ["zero_priced"],
     );
   });
+});
+
+// ── syncOrderDestinationScope (api-cloudrun#664) ────────────────
+//
+// A destination row is its divider AND its pair. The two selective helpers each
+// decide one half with their own override test; these tests pin that a deleted
+// destination is kept or dropped WHOLE, so the invoice always satisfies the
+// divider ⟺ pair write guard.
+
+function scopeOrder(dests: string[]): { items: LineItem[]; destinations: ReturnType<typeof makePair>[] } {
+  const items: LineItem[] = [];
+  for (const [i, d] of dests.entries()) {
+    items.push({ ...destBase, uid: d, type: "destination", name: `Site ${i}`, path: [d] } as unknown as LineItem);
+    items.push(orderShapedLine({ uid: `line${i}0000000000000000`.slice(0, 20), path: [d, `line${i}0000000000000000`.slice(0, 20)] }));
+  }
+  return { items, destinations: dests.map((d, i) => makePair(`dlv${i}`, `col${i}`, { uid: d })) };
+}
+
+function scopeInvoice(order: ReturnType<typeof scopeOrder>) {
+  return {
+    items: buildOrderScopedItems(order.items, ORDER_DIV_1),
+    destinations: order.destinations.map((p): InvoiceDestinationPair => ({ uid_order: ORDER_DIV_1, ...p })),
+  };
+}
+
+/** The write guard's biconditional, restricted to one order scope. */
+function assertJoined(items: readonly InvoiceDocItemType[], dests: readonly InvoiceDestinationPair[]) {
+  const dividers = items.filter((it) => it.type === "destination").map((it) => it.path[it.path.length - 1]).sort();
+  const pairs = dests.filter((p) => p.uid_order === ORDER_DIV_1).map((p) => p.uid).sort();
+  assertEquals(dividers, pairs, "every destination divider has exactly its pair");
+}
+
+const BOTH = { items: true, destinations: true };
+
+Deno.test("syncOrderDestinationScope: a clean delete drops divider and pair together", () => {
+  const prev = scopeOrder([DEST_1, DEST_2]);
+  const next = scopeOrder([DEST_1]);
+  const inv = scopeInvoice(prev);
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, BOTH);
+  assertJoined(r.scopedItems, r.destinations);
+  assertEquals(r.destinations.map((p) => p.uid), [DEST_1]);
+  assertEquals(r.kept, []);
+  assertEquals(r.dropped.map((d) => [d.uid, d.reason]), [[DEST_2, "removed_from_order"]]);
+});
+
+Deno.test("syncOrderDestinationScope: a RENAMED divider keeps its unedited pair when the order deletes it", () => {
+  const prev = scopeOrder([DEST_1, DEST_2]);
+  const next = scopeOrder([DEST_1]);
+  const inv = scopeInvoice(prev);
+  inv.items = inv.items.map((it) => it.type === "destination" && it.uid === DEST_2 ? { ...it, name: "Renamed" } : it);
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, BOTH);
+  assertJoined(r.scopedItems, r.destinations);
+  assertEquals(r.destinations.map((p) => p.uid).sort(), [DEST_1, DEST_2].sort());
+  assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: true, pair_overridden: false }]);
+  assertEquals(r.dropped, []);
+});
+
+Deno.test("syncOrderDestinationScope: an EDITED pair keeps its unedited divider when the order deletes it", () => {
+  const prev = scopeOrder([DEST_1, DEST_2]);
+  const next = scopeOrder([DEST_1]);
+  const inv = scopeInvoice(prev);
+  inv.destinations = inv.destinations.map((p) =>
+    p.uid === DEST_2 ? { ...p, delivery: { ...p.delivery, instructions: "manual edit" } } : p
+  );
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, BOTH);
+  assertJoined(r.scopedItems, r.destinations);
+  assertEquals(r.scopedItems.some((it) => it.type === "destination" && it.uid === DEST_2), true);
+  assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: false, pair_overridden: true }]);
+});
+
+Deno.test("syncOrderDestinationScope: a jurisdiction-only edit does NOT keep a deleted destination (unchanged ruling)", () => {
+  const prev = scopeOrder([DEST_1, DEST_2]);
+  const next = scopeOrder([DEST_1]);
+  const inv = scopeInvoice(prev);
+  inv.destinations = inv.destinations.map((p) => p.uid === DEST_2 ? { ...p, jurisdiction: "rantoul" } : p);
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, BOTH);
+  assertJoined(r.scopedItems, r.destinations);
+  assertEquals(r.destinations.map((p) => p.uid), [DEST_1]);
+  assertEquals(r.dropped.map((d) => [d.uid, d.jurisdiction]), [[DEST_2, "rantoul"]]);
+});
+
+Deno.test("syncOrderDestinationScope: a new destination arrives as divider and pair", () => {
+  const prev = scopeOrder([DEST_1]);
+  const next = scopeOrder([DEST_1, DEST_2]);
+  const inv = scopeInvoice(prev);
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, BOTH);
+  assertJoined(r.scopedItems, r.destinations);
+  assertEquals(r.destinations.map((p) => p.uid), [DEST_1, DEST_2]);
+});
+
+Deno.test("syncOrderDestinationScope: another order's pairs pass through untouched", () => {
+  const prev = scopeOrder([DEST_1, DEST_2]);
+  const next = scopeOrder([DEST_1]);
+  const inv = scopeInvoice(prev);
+  const foreign: InvoiceDestinationPair = { uid_order: ORDER_DIV_2, ...makePair("fx", "fy", { uid: DEST_2 }) };
+  const r = syncOrderDestinationScope(prev, next, inv.items, [...inv.destinations, foreign], ORDER_DIV_1, BOTH);
+  assertEquals(r.destinations.filter((p) => p.uid_order === ORDER_DIV_2), [foreign]);
+});
+
+Deno.test("syncOrderDestinationScope: sweep — every add/delete/rename/pair-edit combination stays joined", () => {
+  const all = [DEST_1, DEST_2, DEST_9];
+  const subsets = (bits: number) => all.filter((_, i) => bits & (1 << i));
+  for (let p = 0; p < 8; p++) {
+    for (let n = 0; n < 8; n++) {
+      for (let renamed = 0; renamed < 8; renamed++) {
+        for (let edited = 0; edited < 8; edited++) {
+          const prev = scopeOrder(subsets(p));
+          const next = scopeOrder(subsets(n));
+          const inv = scopeInvoice(prev);
+          const r1 = subsets(renamed);
+          const e1 = subsets(edited);
+          inv.items = inv.items.map((it) => it.type === "destination" && r1.includes(it.uid) ? { ...it, name: "Renamed" } : it);
+          inv.destinations = inv.destinations.map((d) =>
+            e1.includes(d.uid) ? { ...d, delivery: { ...d.delivery, instructions: "edit" } } : d
+          );
+          const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, BOTH);
+          assertJoined(r.scopedItems, r.destinations);
+        }
+      }
+    }
+  }
 });

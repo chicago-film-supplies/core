@@ -2551,6 +2551,161 @@ export function removeOrderScopedDestinations(
   return dests.filter((d) => d.uid_order !== uidOrder);
 }
 
+/** A destination the order deleted that the invoice kept, and which half kept it. */
+export interface KeptInvoiceDestination {
+  uid_order: string;
+  /** The destination divider's uid — the last segment of its path, and its pair's `uid`. */
+  uid: string;
+  divider_overridden: boolean;
+  pair_overridden: boolean;
+}
+
+/** What {@link syncOrderDestinationScope} returns. */
+export interface OrderDestinationScopeSyncResult {
+  /** The invoice's items scoped under the order divider, WITHOUT the divider itself. */
+  scopedItems: InvoiceDocItemType[];
+  /** The invoice's full destinations array, every order's scope included. */
+  destinations: InvoiceDestinationPair[];
+  /** Pairs removed — see {@link OrderDestinationSyncResult}; **do not discard.** */
+  dropped: DroppedInvoiceDestination[];
+  /** Destinations the order deleted that survive on the invoice because one half was overridden. */
+  kept: KeptInvoiceDestination[];
+}
+
+/**
+ * Is one destination ROW overridden on the invoice? A destination row is its
+ * divider AND its pair — the pair has no path of its own and hangs off its
+ * divider's (`pair.uid === last(divider.path)`).
+ *
+ * Each half keeps its own existing override test — {@link isItemSynced} for the
+ * divider (a name edit counts), {@link pairsMatch} for the pair (the owned
+ * `jurisdiction` does not) — and the row is overridden if EITHER half is.
+ *
+ * A half with no previous order counterpart is not an override, matching both
+ * underlying helpers: each drops an invoice row the order never had.
+ */
+function destinationRowOverridden(
+  prevDivider: LineItem | undefined,
+  prevPair: DocDestinationType | undefined,
+  invDivider: InvoiceDocItemType | undefined,
+  invPair: InvoiceDestinationPair | undefined,
+  orderDividerUid: string,
+): { divider: boolean; pair: boolean } {
+  return {
+    divider: invDivider !== undefined && prevDivider !== undefined &&
+      !isItemSynced(prevDivider, invDivider as InvoiceItem, orderDividerUid),
+    pair: invPair !== undefined && prevPair !== undefined && !pairsMatch(prevPair, invPair),
+  };
+}
+
+/**
+ * Sync one order's scope of an invoice — its items and its destination pairs —
+ * and decide each deleted destination ONCE (api-cloudrun#664).
+ *
+ * {@link syncOrderToInvoiceSelective} decides a destination divider by path and
+ * {@link syncOrderDestinationsSelective} decides its pair by `pair.uid`, each
+ * with its own override test. Run alone, they can split a destination the order
+ * deleted: a renamed divider is kept while its unedited pair is dropped, or an
+ * edited pair is kept while its unedited divider is dropped. Either result
+ * fails the divider ⟺ pair write guard, and because the invoice write is staged
+ * inside the ORDER's transaction, the order edit fails with it.
+ *
+ * So after both run, every destination the order deleted in this edit is
+ * re-decided as one row via {@link destinationRowOverridden}: overridden ⇒ both
+ * halves kept (the missing one restored from the stored invoice), otherwise both
+ * dropped. Destinations still on the order are untouched — a consistent order
+ * already adds and keeps both halves together.
+ *
+ * ⚠️ A restored divider is appended at the tail of the scope, which is where
+ * {@link syncOrderToInvoiceSelective} already places a kept removed row.
+ *
+ * @param prevOrder - The order before the edit
+ * @param nextOrder - The order after the edit
+ * @param currentScopedItems - The invoice's items under the order divider, without the divider
+ * @param currentInvoiceDests - The invoice's full destinations array (all orders)
+ * @param orderUid - The order's uid, which is also its invoice divider's uid
+ * @param flags - Which halves the edit touched; an untouched half is carried as stored
+ */
+export function syncOrderDestinationScope(
+  prevOrder: { items: LineItem[]; destinations: DocDestinationType[] },
+  nextOrder: { items: LineItem[]; destinations: DocDestinationType[] },
+  currentScopedItems: InvoiceDocItemType[],
+  currentInvoiceDests: InvoiceDestinationPair[],
+  orderUid: string,
+  flags: { items: boolean; destinations: boolean },
+): OrderDestinationScopeSyncResult {
+  let scopedItems = flags.items
+    ? syncOrderToInvoiceSelective(prevOrder.items, nextOrder.items, currentScopedItems, orderUid)
+    : [...currentScopedItems];
+  const destSync: OrderDestinationSyncResult = flags.destinations
+    ? syncOrderDestinationsSelective(prevOrder.destinations, nextOrder.destinations, currentInvoiceDests, orderUid)
+    : { destinations: [...currentInvoiceDests], dropped: [] };
+  let destinations = destSync.destinations;
+  const dropped = [...destSync.dropped];
+  const kept: KeptInvoiceDestination[] = [];
+
+  const lastOf = (path: readonly string[] | undefined): string | undefined =>
+    path && path.length > 0 ? path[path.length - 1] : undefined;
+  const isDestinationDivider = (it: { type: string }) => it.type === "destination";
+
+  const prevDividers = new Map<string, LineItem>();
+  for (const it of prevOrder.items) {
+    const uid = lastOf(it.path);
+    if (isDestinationDivider(it) && uid !== undefined) prevDividers.set(uid, it);
+  }
+  const prevPairs = new Map(prevOrder.destinations.map((p) => [p.uid, p]));
+  const nextUids = new Set<string>(nextOrder.destinations.map((p) => p.uid));
+  for (const it of nextOrder.items) {
+    const uid = lastOf(it.path);
+    if (isDestinationDivider(it) && uid !== undefined) nextUids.add(uid);
+  }
+
+  // The destinations THIS edit deleted: on the previous order, on neither half of the next.
+  const deleted = new Set<string>();
+  for (const uid of [...prevDividers.keys(), ...prevPairs.keys()]) {
+    if (!nextUids.has(uid)) deleted.add(uid);
+  }
+
+  const dividerIn = (items: readonly InvoiceDocItemType[], uid: string) =>
+    items.find((it) => isDestinationDivider(it) && lastOf(stripOrderPrefix(it.path, orderUid)) === uid);
+  const pairIn = (dests: readonly InvoiceDestinationPair[], uid: string) =>
+    dests.find((p) => p.uid_order === orderUid && p.uid === uid);
+
+  for (const uid of deleted) {
+    const invDivider = dividerIn(currentScopedItems, uid);
+    const invPair = pairIn(currentInvoiceDests, uid);
+    const overridden = destinationRowOverridden(prevDividers.get(uid), prevPairs.get(uid), invDivider, invPair, orderUid);
+
+    if (overridden.divider || overridden.pair) {
+      if (invDivider && !dividerIn(scopedItems, uid)) scopedItems = [...scopedItems, invDivider];
+      if (invPair && !pairIn(destinations, uid)) {
+        destinations = [...destinations, invPair];
+        const at = dropped.findIndex((d) => d.uid_order === orderUid && d.uid === uid);
+        if (at >= 0) dropped.splice(at, 1);
+      }
+      kept.push({ uid_order: orderUid, uid, divider_overridden: overridden.divider, pair_overridden: overridden.pair });
+      continue;
+    }
+
+    const survivingDivider = dividerIn(scopedItems, uid);
+    if (survivingDivider) scopedItems = scopedItems.filter((it) => it !== survivingDivider);
+    const survivingPair = pairIn(destinations, uid);
+    if (survivingPair) {
+      destinations = destinations.filter((p) => p !== survivingPair);
+      dropped.push({
+        uid_order: orderUid,
+        uid: survivingPair.uid ?? null,
+        delivery_uid: survivingPair.delivery?.uid ?? null,
+        collection_uid: survivingPair.collection?.uid ?? null,
+        jurisdiction: survivingPair.jurisdiction ?? null,
+        reason: prevPairs.has(uid) ? "removed_from_order" : "key_names_no_order_pair",
+      });
+    }
+  }
+
+  return { scopedItems, destinations, dropped, kept };
+}
+
 /**
  * Scalar co-write with override detection. Returns the new order value if
  * the invoice value still matches the previous order value (i.e. the invoice

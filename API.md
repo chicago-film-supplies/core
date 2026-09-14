@@ -25343,6 +25343,19 @@ interface ItemUniquenessIssue {
 }
 ```
 
+### `KeptInvoiceDestination`
+
+A destination the order deleted that the invoice kept, and which half kept it.
+
+```ts
+interface KeptInvoiceDestination {
+  uid_order: string;
+  uid: string;
+  divider_overridden: boolean;
+  pair_overridden: boolean;
+}
+```
+
 ### `LineItem`
 
 A single item in an order/invoice/fulfillment array — product, divider,
@@ -25380,6 +25393,19 @@ interface LineItem {
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
+}
+```
+
+### `OrderDestinationScopeSyncResult`
+
+What {@link syncOrderDestinationScope} returns.
+
+```ts
+interface OrderDestinationScopeSyncResult {
+  scopedItems: InvoiceDocItemType[];
+  destinations: InvoiceDestinationPair[];
+  dropped: DroppedInvoiceDestination[];
+  kept: KeptInvoiceDestination[];
 }
 ```
 
@@ -26421,6 +26447,37 @@ them and the list has six.
 
 The caller re-linearizes paths via {@link computeInvoiceItemPaths} and
 recomputes `totals` via {@link calculateInvoiceTotals} before writing.
+
+### `syncOrderDestinationScope(prevOrder: typeLiteral, nextOrder: typeLiteral, currentScopedItems: InvoiceDocItemType[], currentInvoiceDests: InvoiceDestinationPair[], orderUid: string, flags: typeLiteral): OrderDestinationScopeSyncResult`
+
+Sync one order's scope of an invoice — its items and its destination pairs —
+and decide each deleted destination ONCE (api-cloudrun#664).
+
+{@link syncOrderToInvoiceSelective} decides a destination divider by path and
+{@link syncOrderDestinationsSelective} decides its pair by `pair.uid`, each
+with its own override test. Run alone, they can split a destination the order
+deleted: a renamed divider is kept while its unedited pair is dropped, or an
+edited pair is kept while its unedited divider is dropped. Either result
+fails the divider ⟺ pair write guard, and because the invoice write is staged
+inside the ORDER's transaction, the order edit fails with it.
+
+So after both run, every destination the order deleted in this edit is
+re-decided as one row via {@link destinationRowOverridden}: overridden ⇒ both
+halves kept (the missing one restored from the stored invoice), otherwise both
+dropped. Destinations still on the order are untouched — a consistent order
+already adds and keeps both halves together.
+
+⚠️ A restored divider is appended at the tail of the scope, which is where
+{@link syncOrderToInvoiceSelective} already places a kept removed row.
+
+**Parameters**
+
+- `prevOrder` — The order before the edit
+- `nextOrder` — The order after the edit
+- `currentScopedItems` — The invoice's items under the order divider, without the divider
+- `currentInvoiceDests` — The invoice's full destinations array (all orders)
+- `orderUid` — The order's uid, which is also its invoice divider's uid
+- `flags` — Which halves the edit touched; an untouched half is carried as stored
 
 ### `syncOrderDestinationsSelective(prevOrderDests: DocDestinationType[], newOrderDests: DocDestinationType[], currentInvoiceDests: InvoiceDestinationPair[], uidOrder: string): OrderDestinationSyncResult`
 

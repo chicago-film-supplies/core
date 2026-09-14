@@ -11420,9 +11420,21 @@
         },
         {
           "kind": "interface",
+          "name": "KeptInvoiceDestination",
+          "declaration": "interface KeptInvoiceDestination {\n  uid_order: string;\n  uid: string;\n  divider_overridden: boolean;\n  pair_overridden: boolean;\n}",
+          "doc": "A destination the order deleted that the invoice kept, and which half kept it."
+        },
+        {
+          "kind": "interface",
           "name": "LineItem",
           "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
+        },
+        {
+          "kind": "interface",
+          "name": "OrderDestinationScopeSyncResult",
+          "declaration": "interface OrderDestinationScopeSyncResult {\n  scopedItems: InvoiceDocItemType[];\n  destinations: InvoiceDestinationPair[];\n  dropped: DroppedInvoiceDestination[];\n  kept: KeptInvoiceDestination[];\n}",
+          "doc": "What {@link syncOrderDestinationScope} returns."
         },
         {
           "kind": "interface",
@@ -11989,6 +12001,39 @@
           "signature": "resyncInvoiceLines(currentInvoiceItems: InvoiceDocItemType[], orderItems: LineItem[], orderDividerUid: string, targetPaths?: string[][]): InvoiceDocItemType[]",
           "doc": "Re-project an order's lines into an invoice, on demand.\n\nThe automatic `syncOrderToInvoiceSelective` (inside `updateOrder`) keeps\nnon-overridden lines current as the order changes. This is the operator's\nmanual trigger to either snap a whole order's scope back to the order after\nedits, or re-pull individual lines by `path` — the escape hatch for a line\nthat was overridden on the invoice and should now track the order again.\n\nPure: returns a fresh items array; the input is not mutated. Scoped to one\n**order divider** — a multi-order invoice loops its linked orders. The\n{@link INVOICE_ONLY_ITEM_FIELDS} are always carried forward — named by the\nlist rather than re-spelled, because the copy that stood here listed four of\nthem and the list has six.\n\n- `targetPaths` omitted → **whole**: every order-scoped line is rebuilt from\n  the order — a hard snap-to-order, so price overrides are discarded and lines\n  the order dropped are removed. Delegates to {@link syncOrderItems}.\n- `targetPaths` given → **per-line**: only lines at those full, divider-scoped\n  paths are replaced with a fresh projection of the matching order line; every\n  other line — siblings and untargeted overrides — is left untouched. A target\n  path the order no longer has is left as-is (use a whole resync to drop\n  removed lines); a target path not on the invoice is a no-op.\n\nThe caller re-linearizes paths via {@link computeInvoiceItemPaths} and\nrecomputes `totals` via {@link calculateInvoiceTotals} before writing.",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "syncOrderDestinationScope",
+          "signature": "syncOrderDestinationScope(prevOrder: typeLiteral, nextOrder: typeLiteral, currentScopedItems: InvoiceDocItemType[], currentInvoiceDests: InvoiceDestinationPair[], orderUid: string, flags: typeLiteral): OrderDestinationScopeSyncResult",
+          "doc": "Sync one order's scope of an invoice — its items and its destination pairs —\nand decide each deleted destination ONCE (api-cloudrun#664).\n\n{@link syncOrderToInvoiceSelective} decides a destination divider by path and\n{@link syncOrderDestinationsSelective} decides its pair by `pair.uid`, each\nwith its own override test. Run alone, they can split a destination the order\ndeleted: a renamed divider is kept while its unedited pair is dropped, or an\nedited pair is kept while its unedited divider is dropped. Either result\nfails the divider ⟺ pair write guard, and because the invoice write is staged\ninside the ORDER's transaction, the order edit fails with it.\n\nSo after both run, every destination the order deleted in this edit is\nre-decided as one row via {@link destinationRowOverridden}: overridden ⇒ both\nhalves kept (the missing one restored from the stored invoice), otherwise both\ndropped. Destinations still on the order are untouched — a consistent order\nalready adds and keeps both halves together.\n\n⚠️ A restored divider is appended at the tail of the scope, which is where\n{@link syncOrderToInvoiceSelective} already places a kept removed row.",
+          "paramTags": [
+            {
+              "name": "prevOrder",
+              "doc": "The order before the edit"
+            },
+            {
+              "name": "nextOrder",
+              "doc": "The order after the edit"
+            },
+            {
+              "name": "currentScopedItems",
+              "doc": "The invoice's items under the order divider, without the divider"
+            },
+            {
+              "name": "currentInvoiceDests",
+              "doc": "The invoice's full destinations array (all orders)"
+            },
+            {
+              "name": "orderUid",
+              "doc": "The order's uid, which is also its invoice divider's uid"
+            },
+            {
+              "name": "flags",
+              "doc": "Which halves the edit touched; an untouched half is carried as stored"
+            }
+          ],
           "returnsTag": null
         },
         {

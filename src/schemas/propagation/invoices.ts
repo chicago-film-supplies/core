@@ -112,7 +112,7 @@ const SELECTIVE_SYNC_SEMANTICS: EnforcementRef = {
   kind: "test",
   ref: "core/tests/invoices.test.ts::syncOrderToInvoiceSelective",
   clause:
-    "the override policy, per helper — `syncOrderToInvoiceSelective` and `syncOrderItems` (scoped replace + `carryForwardOverrides` keeping all SEVEN invoice-only fields — `coa_revenue`, `tracking_category`, `xero_id`, `xero_tracking_option_id`, `crms_id`, `crms_opportunity_id`, `path_substituted_for`; this clause said TWO, then FOUR, then SIX, each time after `INVOICE_ONLY_ITEM_FIELDS` had already moved — it is a hand-kept count of a list in another file, so RE-DERIVE it rather than trusting this number), `syncOrderDestinationsSelective` (adds tagged with `uid_order`, keeps overridden pairs, drops non-overridden removals, leaves other orders' pairs untouched), and `syncScalarWithOverride` both directions. Does NOT cover the FREEZE predicate that decides which invoices are eligible.",
+    "the override policy, per helper — `syncOrderToInvoiceSelective` and `syncOrderItems` (scoped replace + `carryForwardOverrides` keeping all SEVEN invoice-only fields — `coa_revenue`, `tracking_category`, `xero_id`, `xero_tracking_option_id`, `crms_id`, `crms_opportunity_id`, `path_substituted_for`; this clause said TWO, then FOUR, then SIX, each time after `INVOICE_ONLY_ITEM_FIELDS` had already moved — it is a hand-kept count of a list in another file, so RE-DERIVE it rather than trusting this number), `syncOrderDestinationsSelective` (adds tagged with `uid_order`, keeps overridden pairs, drops non-overridden removals, leaves other orders' pairs untouched), `syncOrderDestinationScope` (a destination the order deleted is decided as ONE row — its divider and its pair are kept together if either half is overridden, dropped together otherwise; api-cloudrun#664), and `syncScalarWithOverride` both directions. Does NOT cover the FREEZE predicate that decides which invoices are eligible.",
   gates: true,
 };
 
@@ -243,7 +243,7 @@ const updateOrderInvoiceRules: CollectionRule[] = [
         source: ["destinations"],
         target: ["destinations"],
         transform:
-          "selective sync within uid_order scope: match pairs by pair.uid (the destination divider's uid — NOT the endpoint uids, which move when an address is corrected: api-cloudrun#663) — update only non-overridden pairs, add new pairs (tagged with uid_order), remove deleted non-overridden pairs. Leaves pairs from other orders untouched.",
+          "selective sync within uid_order scope: match pairs by pair.uid (the destination divider's uid — NOT the endpoint uids, which move when an address is corrected: api-cloudrun#663) — update only non-overridden pairs, add new pairs (tagged with uid_order), remove deleted non-overridden pairs. Leaves pairs from other orders untouched. A pair is one row with its destination divider (`pair.uid` is the last segment of the divider's path): when the order deletes a destination, `syncOrderDestinationScope` keeps divider AND pair if either half is overridden (`isItemSynced` on the divider — a name edit counts; `pairsMatch` on the pair — the owned `jurisdiction` does not), and drops both otherwise, so the two halves can never be split (api-cloudrun#664).",
       },
       {
         source: ["subject"],
