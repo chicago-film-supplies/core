@@ -96,8 +96,8 @@ export const PERMISSIONS = [
   "locationTypes.delete",
 
   // ⚠️ `.delete` routes nowhere, deliberately — deactivation is a `PUT` setting
-  // `active: false`. It matches `locationTypes.delete` and `taxes.delete`, both
-  // of which exist and route nowhere for the same reason, and it is what makes
+  // `active: false`. It matches `locationTypes.delete`, which exists and routes
+  // nowhere for the same reason, and it is what makes
   // the Firestore rule expressible without minting a permission later.
   "departmentTypes.create",
   "departmentTypes.read",
@@ -110,15 +110,10 @@ export const PERMISSIONS = [
   "stores.delete",
   "stores.search",
 
-  "taxes.create",
-  "taxes.read",
-  "taxes.update",
-  "taxes.delete",
-
   // The tax catalog (api-cloudrun#993) — `taxes-codes` × `taxes-rates` ×
   // `taxes-classes`. No `.delete` verb on any of them: a code or class is
-  // deactivated, a rate is closed by adding its successor. `taxes.*` retires at
-  // the contract step, with the legacy collection.
+  // deactivated, a rate is closed by adding its successor. They replaced the
+  // legacy `taxes.*`, retired with the `taxes` collection.
   "taxCodes.create",
   "taxCodes.read",
   "taxCodes.update",

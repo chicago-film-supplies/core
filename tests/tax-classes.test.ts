@@ -17,7 +17,6 @@ import {
   getInitialValues,
   JURISDICTIONS,
   OrderDocLineItem,
-  type Tax as TaxDoc,
   type TaxClass,
   TaxClassSchema,
   type TaxCode,
@@ -30,6 +29,7 @@ import type { LineItem, Tax } from "../src/utils/orders.ts";
 import {
   deriveLineTaxClass,
   lineTaxClass,
+  type LegacyTaxRow,
   migrateLegacyTaxCatalog,
   pricingTaxesOf,
   resolveClassTaxes,
@@ -42,7 +42,7 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 // ── the prod catalog, 2026-09-13 (read-only MCP query of `taxes`) ─────────
 
 /** A prod `taxes` row as queried, completed to a stored `Tax` below. */
-type LegacyRow = Pick<TaxDoc, "uid" | "name" | "rate" | "type" | "applied_from" | "applied_to"> & {
+type LegacyRow = Pick<LegacyTaxRow, "uid" | "name" | "rate" | "type" | "applied_from" | "applied_to"> & {
   jurisdiction: string | null;
   item_types: string[];
   xero_tax_type: string | null;
@@ -64,7 +64,7 @@ const PROD_TAXES: LegacyRow[] = [
   { uid: "uCM5n4ZNgsVc1fyMQbHq", name: "Paxton Sales Tax", rate: 0, type: "percent", jurisdiction: "paxton", item_types: ["rental", "sale", "replacement"], applied_from: "2026-01-01T00:00:00.000-06:00", applied_to: null, xero_tax_type: "NONE" },
   { uid: "xmxiaT32ehsEnrgrKWW8", name: "Chicago Rental Tax", rate: 11, type: "percent", jurisdiction: "chicago", item_types: ["rental"], applied_from: "2025-01-01T00:00:00.000-06:00", applied_to: "2026-01-01T00:00:00.000-06:00", xero_tax_type: "TAX003" },
 ];
-const LEGACY: TaxDoc[] = PROD_TAXES.map((t) => ({
+const LEGACY: LegacyTaxRow[] = PROD_TAXES.map((t) => ({
   crms_id: null,
   applied_from_fs: mockTimestamp,
   applied_to_fs: t.applied_to === null ? null : mockTimestamp,
@@ -76,7 +76,7 @@ const LEGACY: TaxDoc[] = PROD_TAXES.map((t) => ({
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
   ...t,
-}) as unknown as TaxDoc);
+}) as unknown as LegacyTaxRow);
 const BOTTLE_RATE_UID = "jvsOUs8nR4DXElcVNqJc";
 
 // ── the migration: the same function the backfill runs ───────────────────
@@ -408,6 +408,29 @@ Deno.test("validateTaxSetup: a rate whose type disagrees with its code, and a ra
   assertEquals(codesOf(validateTaxSetup({ ...CATALOG, rates: wrongType })), ["rate_type_mismatch"]);
   const orphan = [...RATES, { ...RATES[0], uid: "orphanrate0000000000", uid_tax_code: "codemissing000000000" }];
   assertEquals(codesOf(validateTaxSetup({ ...CATALOG, rates: orphan })), ["orphan_rate"]);
+});
+
+Deno.test("validateTaxSetup: a percent successor rate that drops its Xero TaxType, found out of stored order", () => {
+  // Chicago Rental 11% (TAX003) → 15%. Reversed, because stored order is not applied order.
+  const lost = [...RATES].reverse().map((r) => (r.uid === "VEW4Ivy7VNqgxFA5eJw6" ? { ...r, xero_tax_type: null } : r));
+  const violations = validateTaxSetup({ ...CATALOG, rates: lost });
+  assertEquals(codesOf(violations), ["xero_tax_type_lost"]);
+  assertEquals(violations[0].uids, ["xmxiaT32ehsEnrgrKWW8", "VEW4Ivy7VNqgxFA5eJw6"]);
+  // An uncoded PREDECESSOR followed by coded successors loses nothing.
+  const firstUncoded = RATES.map((r) => (r.uid === "nH9TjML9Jfwfnm9g9G3j" ? { ...r, xero_tax_type: null } : r));
+  assertEquals(validateTaxSetup({ ...CATALOG, rates: firstUncoded }), []);
+});
+
+Deno.test("validateTaxSetup: an effective_from after applied_from", () => {
+  const late = RATES.map((r) => (r.uid === "VEW4Ivy7VNqgxFA5eJw6" ? { ...r, effective_from: "2026-07-01T00:00:00.000-05:00" } : r));
+  const violations = validateTaxSetup({ ...CATALOG, rates: late });
+  assertEquals(codesOf(violations), ["effective_after_applied"]);
+  assertEquals(violations[0].uids, ["VEW4Ivy7VNqgxFA5eJw6"]);
+  // Equal or earlier is the ordinary late discovery, not a violation.
+  const onTime = RATES.map((r) => (r.uid === "VEW4Ivy7VNqgxFA5eJw6" ? { ...r, effective_from: r.applied_from } : r));
+  assertEquals(validateTaxSetup({ ...CATALOG, rates: onTime }), []);
+  const earlier = RATES.map((r) => (r.uid === "VEW4Ivy7VNqgxFA5eJw6" ? { ...r, effective_from: "2025-12-01T00:00:00.000-06:00" } : r));
+  assertEquals(validateTaxSetup({ ...CATALOG, rates: earlier }), []);
 });
 
 Deno.test("validateTaxSetup: unknown and inactive codes in a class", () => {

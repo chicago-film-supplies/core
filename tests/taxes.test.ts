@@ -11,8 +11,7 @@ import {
   type TaxDestination,
 } from "../src/utils/taxes.ts";
 import type { LineItem, Tax } from "../src/utils/orders.ts";
-import { migrateLegacyTaxCatalog, type TaxCatalog } from "../src/utils/tax-classes.ts";
-import type { Tax as TaxDoc } from "../src/schemas/mod.ts";
+import { type LegacyTaxRow, migrateLegacyTaxCatalog, type TaxCatalog } from "../src/utils/tax-classes.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 import { priceDocument } from "../src/utils/price-document.ts";
 
@@ -200,7 +199,7 @@ function catalogOf(taxes: Tax[]): TaxCatalog {
     xero_item_code: null,
     version: 0,
     ...t,
-  }) as unknown as TaxDoc);
+  }) as unknown as LegacyTaxRow);
   return migrateLegacyTaxCatalog(docs, { codes: [], rates: [], classes: [] }, {
     actor: { uid: "testuser100000000000", name: "Test User" },
     now: mockTimestamp,

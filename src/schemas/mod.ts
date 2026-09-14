@@ -748,18 +748,6 @@ export {
   type UpdateInvoiceInputType,
 } from "./invoice.ts";
 
-export {
-  TaxSchema,
-  CreateTaxInput,
-  UpdateTaxInput,
-  SupersedeTaxInput,
-  XeroTaxComponent,
-  type Tax,
-  type CreateTaxInputType,
-  type UpdateTaxInputType,
-  type SupersedeTaxInputType,
-  type XeroTaxComponentType,
-} from "./tax.ts";
 
 export {
   TaxCodeSchema,
@@ -779,6 +767,8 @@ export {
   type TaxRateBodyType,
   type CreateTaxRateInputType,
   type UpdateTaxRateInputType,
+  XeroTaxComponent,
+  type XeroTaxComponentType,
 } from "./taxes-rate.ts";
 
 export {
@@ -1214,7 +1204,6 @@ import type { Store } from "./store.ts";
 import type { Role } from "./role.ts";
 import type { Thread } from "./thread.ts";
 import type { Tag } from "./tag.ts";
-import type { Tax } from "./tax.ts";
 import type { TaxCode } from "./taxes-code.ts";
 import type { TaxRate } from "./taxes-rate.ts";
 import type { TaxClass } from "./taxes-class.ts";
@@ -1321,7 +1310,6 @@ import { SessionSchema } from "./session.ts";
 import { StockLockSchema, StockSchema } from "./stock.ts";
 import { StoreSchema } from "./store.ts";
 import { TagSchema } from "./tag.ts";
-import { TaxSchema as TaxSchema_ } from "./tax.ts";
 import { TaxCodeSchema as TaxCodeSchema_ } from "./taxes-code.ts";
 import { TaxRateSchema as TaxRateSchema_ } from "./taxes-rate.ts";
 import { TaxClassSchema as TaxClassSchema_ } from "./taxes-class.ts";
@@ -1468,8 +1456,6 @@ export interface CollectionDocs {
   stores: Store;
   tag: Tag;
   tags: Tag;
-  tax: Tax;
-  taxes: Tax;
   // No singular aliases (api-cloudrun#993): "taxes-code" names nothing.
   "taxes-codes": TaxCode;
   "taxes-rates": TaxRate;
@@ -1564,7 +1550,6 @@ const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "stock-lock": StockLockSchema, "stock-locks": StockLockSchema,
   "store": StoreSchema, "stores": StoreSchema,
   "tag": TagSchema, "tags": TagSchema,
-  "tax": TaxSchema_, "taxes": TaxSchema_,
   "taxes-codes": TaxCodeSchema_,
   "taxes-rates": TaxRateSchema_,
   "taxes-classes": TaxClassSchema_,

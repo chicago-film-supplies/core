@@ -33,13 +33,15 @@
 import type {
   ActorRefType,
   FirestoreTimestampType,
+  JurisdictionType,
+  PreTaxItemType,
   ProductTypeType,
   RateType,
-  Tax,
   TaxClass,
   TaxCode,
   TaxJurisdictionType,
   TaxRate,
+  XeroTaxComponentType,
 } from "../schemas/mod.ts";
 
 // ⚠️ No import from `./taxes.ts`: that module prices on THIS one (the reader
@@ -84,6 +86,8 @@ export type TaxSetupViolationCode =
   | "rate_type_mismatch"
   | "rate_overlap"
   | "rate_gap"
+  | "effective_after_applied"
+  | "xero_tax_type_lost"
   | "unknown_code_in_class"
   | "inactive_code_in_class"
   | "multiple_percent_rates"
@@ -110,6 +114,8 @@ export interface TaxSetupViolation {
  * | `multiple_percent_rates` | an active class has two percent rates live for one jurisdiction at one instant. Xero takes one TaxType per line, and it is how a line would get double sales tax |
  * | `rate_overlap` | two versions of one code bracket one instant — pricing cannot pick |
  * | `rate_gap` | an interior hole between two versions of one code. A schedule lapsing at the END is a review, not this; see `UnreviewedTaxWarning` |
+ * | `effective_after_applied` | a rate's `effective_from` is after its `applied_from` — CFS priced at it before it existed in law. The ordinary late discovery is the reverse |
+ * | `xero_tax_type_lost` | a percent code's successor rate has no Xero `TaxType` where its predecessor had one, so the invoice push sends `TaxType: NONE` and Xero bills $0 tax while CFS bills the rate. Conditioned on the predecessor: a flat code never has one |
  * | `rate_type_mismatch` | a rate's `type` copy disagrees with its code's, so the unit it renders is wrong |
  * | `orphan_rate` / `unknown_code_in_class` | a reference to nothing |
  * | `inactive_code_in_class` | an ACTIVE class draws from a code an operator retired |
@@ -160,9 +166,37 @@ export function validateTaxSetup(catalog: TaxCatalog): TaxSetupViolation[] {
     ratesByCode.set(code.uid, [...(ratesByCode.get(code.uid) ?? []), rate]);
   }
 
+  for (const rate of catalog.rates) {
+    if (rate.effective_from !== null && Date.parse(rate.effective_from) > Date.parse(rate.applied_from)) {
+      const name = codeByUid.get(rate.uid_tax_code)?.name ?? rate.uid_tax_code;
+      violations.push({
+        code: "effective_after_applied",
+        message:
+          `Rate ${rate.uid} of "${name}" takes effect in law on ${rate.effective_from}, after CFS starts ` +
+          `pricing it on ${rate.applied_from}.`,
+        uids: [rate.uid],
+      });
+    }
+  }
+
   for (const [uid, rates] of ratesByCode) {
-    const name = codeByUid.get(uid)?.name ?? uid;
+    const code = codeByUid.get(uid);
+    const name = code?.name ?? uid;
     const sorted = [...rates].sort((a, b) => windowOf(a).from - windowOf(b).from);
+    if (code?.type === "percent") {
+      for (let i = 0; i + 1 < sorted.length; i++) {
+        if (sorted[i].xero_tax_type !== null && sorted[i + 1].xero_tax_type === null) {
+          violations.push({
+            code: "xero_tax_type_lost",
+            message:
+              `"${name}": ${sorted[i].uid} pushes as Xero TaxType "${sorted[i].xero_tax_type}" and its successor ` +
+              `${sorted[i + 1].uid} carries none — the invoice push would send TaxType: NONE, so Xero bills $0 tax ` +
+              `while CFS bills ${sorted[i + 1].rate}%.`,
+          uids: [sorted[i].uid, sorted[i + 1].uid],
+          });
+        }
+      }
+    }
     for (let i = 0; i < sorted.length; i++) {
       for (let j = i + 1; j < sorted.length; j++) {
         if (overlaps(sorted[i], sorted[j])) {
@@ -548,6 +582,31 @@ export interface LegacyTaxMigration extends TaxCatalog {
   skipped: Array<{ uid: string; name: string; reason: string }>;
 }
 
+/**
+ * One document of the retired `taxes` collection, as the migration read it.
+ *
+ * Kept local rather than as a schema: the collection is gone (api-cloudrun#993),
+ * and this shape now exists only so a test can build a catalog from the prod rows
+ * it was migrated from.
+ */
+export interface LegacyTaxRow {
+  uid: string;
+  name: string;
+  rate: number;
+  type: RateType;
+  jurisdiction?: JurisdictionType | null;
+  item_types: PreTaxItemType[];
+  applied_from: string;
+  applied_from_fs: FirestoreTimestampType;
+  applied_to: string | null;
+  applied_to_fs: FirestoreTimestampType | null;
+  effective_from: string | null;
+  xero_tax_type?: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
+  xero_components: XeroTaxComponentType[];
+}
+
 /** The class names the migration owns, and the legacy item type each is derived from. */
 export const MIGRATED_TAX_CLASSES = {
   rental: "Rental",
@@ -587,7 +646,7 @@ export const MIGRATED_TAX_CLASSES = {
  * when nothing else can edit a class. After it, do not run this.
  */
 export function migrateLegacyTaxCatalog(
-  legacy: readonly Tax[],
+  legacy: readonly LegacyTaxRow[],
   existing: TaxCatalog,
   ctx: LegacyTaxMigrationContext,
 ): LegacyTaxMigration {
@@ -611,7 +670,7 @@ export function migrateLegacyTaxCatalog(
     .sort((a, b) => a.name.localeCompare(b.name) || Date.parse(a.applied_from) - Date.parse(b.applied_from));
 
   // ── codes ──
-  const groups = new Map<string, Tax[]>();
+  const groups = new Map<string, LegacyTaxRow[]>();
   for (const t of migrated) groups.set(t.name, [...(groups.get(t.name) ?? []), t]);
 
   const codes: TaxCode[] = [];

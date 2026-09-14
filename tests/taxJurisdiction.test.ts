@@ -247,7 +247,7 @@ Deno.test("🔴 a MISSING bound reads as OPEN, which is why the schema requires 
   // `findTaxAt` throws `Tax catalog drift` — on the pricing path, out of a
   // CRMS task handler, retrying forever.
   //
-  // `TaxSchema` cannot produce this shape any more; the structural `Tax` in
+  // `TaxRateSchema` cannot produce this shape; the structural `Tax` in
   // `utils/orders.ts` still can, and a caller assembling a catalog by hand is
   // exactly who needs to know what it costs.
   const unbounded: Tax[] = CATALOG.map(({ applied_from: _f, applied_to: _t, ...rest }) => rest);

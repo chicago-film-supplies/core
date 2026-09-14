@@ -1,6 +1,5 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
-import type { Tax as TaxDoc } from "../src/schemas/mod.ts";
 import {
   calculateItemPrice,
   calculateReplacementTotals,
@@ -18,7 +17,7 @@ import {
   sumPricedLines,
 } from "../src/utils/price-document.ts";
 import { assignLineTaxes, type DocumentTaxContext, type TaxDestination } from "../src/utils/taxes.ts";
-import { migrateLegacyTaxCatalog, pricingTaxesOf, type TaxCatalog } from "../src/utils/tax-classes.ts";
+import { type LegacyTaxRow, migrateLegacyTaxCatalog, pricingTaxesOf, type TaxCatalog } from "../src/utils/tax-classes.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const lineItemBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
@@ -43,7 +42,7 @@ function catalogOf(taxes: Tax[]): TaxCatalog {
     xero_item_code: null,
     version: 0,
     ...t,
-  }) as unknown as TaxDoc);
+  }) as unknown as LegacyTaxRow);
   return migrateLegacyTaxCatalog(docs, { codes: [], rates: [], classes: [] }, {
     actor: { uid: "testuser100000000000", name: "Test User" },
     now: mockTimestamp,

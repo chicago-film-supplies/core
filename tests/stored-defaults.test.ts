@@ -102,7 +102,6 @@ const SENTINEL_DEFAULTS: ReadonlyMap<string, string> = new Map([
   ["stores.version", "written as `FieldValue.increment(1)`"],
   ["suppliers.version", "written as `FieldValue.increment(1)`"],
   ["tags.version", "written as `FieldValue.increment(1)`"],
-  ["taxes.version", "written as `FieldValue.increment(1)`"],
   ["taxes-classes.version", "written as `FieldValue.increment(1)`"],
   ["taxes-codes.version", "written as `FieldValue.increment(1)`"],
   ["taxes-rates.version", "written as `FieldValue.increment(1)`"],

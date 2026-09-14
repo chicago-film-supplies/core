@@ -132,8 +132,7 @@ export const CreateDepartmentTypeInput: z.ZodType<CreateDepartmentTypeInputType>
  *
  * ⚠️ **Deactivation is a `PUT` setting `active: false`, not a `DELETE`** — the
  * shape `holiday-definitions` already documents. There is no delete route, which
- * matches `locationTypes.delete` and `taxes.delete`: both permissions exist and
- * neither routes anywhere.
+ * matches `locationTypes.delete`: the permission exists and routes nowhere.
  */
 export interface UpdateDepartmentTypeInputType {
   uid: string;

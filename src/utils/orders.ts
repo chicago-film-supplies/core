@@ -33,7 +33,7 @@ import type {
   FromTotalItemType,
   RateType,
   TaxRefType,
-  Tax as SchemaTax,
+  XeroTaxComponentType,
 } from "../schemas/mod.ts";
 import isEqual from "lodash-es/isEqual";
 import { itemContract, zeroPricedFlaggedNonComponents } from "../schemas/mod.ts";
@@ -57,37 +57,39 @@ export type PriceModifier = PriceModifierType;
 export type PriceObject = OrderDocItemPriceType;
 
 /**
- * Subset of the full Tax document needed by utility functions.
+ * A tax RATE in the pricing shape — what `pricingTaxesOf` projects the
+ * `taxes-codes` × `taxes-rates` catalog to, one entry per rate named by its code.
  *
- * Only `uid`/`name`/`rate`/`type` are required — those are what the pricing
- * helpers read. Everything else is resolution metadata that only the as-of
- * resolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and
- * it stays optional so partial `Tax` literals in tests and callers keep
- * type-checking.
+ * It is structural, not a stored document: the `taxes` collection it was once a
+ * subset of is retired (api-cloudrun#993). Only `uid`/`name`/`rate`/`type` are
+ * required — those are what the pricing helpers read. Everything else is
+ * resolution metadata that only the as-of resolvers in `@cfs/core/utils/taxes`
+ * (`findTaxAt`, `findTaxFor`) touch, and it stays optional so partial `Tax`
+ * literals in tests and callers keep type-checking.
  *
  * ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
- * the document.** That is deliberate: a missing bound reads as OPEN, so every
- * version brackets every instant and {@link findTaxAt} throws `Tax catalog
- * drift` on the pricing path. A partial literal in a test is allowed to be
- * wrong that way; a stored document is not, which is why `TaxSchema` requires
- * the pair and this structural subset does not.
+ * `TaxRate`.** A missing bound reads as OPEN, so every version brackets every
+ * instant and {@link findTaxAt} throws `Tax catalog drift` on the pricing path.
+ * A partial literal in a test is allowed to be wrong that way; a stored rate is
+ * not.
  */
-export type Tax =
-  & Pick<SchemaTax, "uid" | "name" | "rate" | "type">
-  & Partial<
-    Pick<
-      SchemaTax,
-      | "applied_from"
-      | "applied_to"
-      | "effective_from"
-      | "jurisdiction"
-      | "item_types"
-      | "xero_tax_type"
-      | "xero_account_code"
-      | "xero_item_code"
-      | "xero_components"
-    >
-  >;
+export interface Tax {
+  uid: string;
+  name: string;
+  rate: number;
+  type: RateType;
+  applied_from?: string;
+  applied_to?: string | null;
+  effective_from?: string | null;
+  /** `null` = explicit-only, reachable by uid and never by `findTaxFor`. */
+  jurisdiction?: JurisdictionType | null;
+  /** Legacy line-type membership the `(jurisdiction × type)` rule reads; `[]` = explicit-only. */
+  item_types?: PreTaxItemType[];
+  xero_tax_type?: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
+  xero_components?: XeroTaxComponentType[];
+}
 
 /**
  * A single item in an order/invoice/fulfillment array — product, divider,

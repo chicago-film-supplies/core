@@ -388,7 +388,7 @@ Deno.test("T14: the discriminated rate columns are the ones that exist", () => {
   // Presence, not just consistency: both arms above pass vacuously over an empty
   // set, and an empty set is exactly what deleting `...RATE_UNIT_META` from a
   // schema produces. Four annotation sites (`PriceModifier`, `TaxRef`,
-  // `Discount`, `Tax`) fan out to these twenty columns.
+  // `Discount`, `TaxRate`) fan out to these columns.
   //
   // `invoice:items.price.taxes_base.rate` joined `order:…` here when the invoice
   // price gained the intrinsic-tax snapshot the order price already had; the two
@@ -412,7 +412,6 @@ Deno.test("T14: the discriminated rate columns are the ones that exist", () => {
     "product:component_of.price.taxes.rate",
     "product:components.price.taxes.rate",
     "product:price.taxes.rate",
-    "tax:rate",
     "taxes-rates:rate",
     "webshop-product:component_of.price.taxes.rate",
     "webshop-product:components.price.taxes.rate",

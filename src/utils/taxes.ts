@@ -147,8 +147,8 @@ export function assertCoaTaxMapCoversCore(): void {
  * merely permissive: an unbounded version brackets every instant, so two
  * versions of one name bracket the same instant and {@link findTaxAt} throws
  * `Tax catalog drift` — on the pricing path, out of a CRMS Cloud Task handler,
- * which retries forever. `TaxSchema` requires both bounds precisely so a stored
- * document cannot reach that state; the `| null` here covers the partial
+ * which retries forever. `TaxRateSchema` requires both bounds precisely so a
+ * stored rate cannot reach that state; the `| null` here covers the partial
  * literals the structural `Tax` admits.
  */
 export function taxAppliedWindow(tax: Tax): { from: string | null; to: string | null } {

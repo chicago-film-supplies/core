@@ -8,7 +8,7 @@ import {
   OrderSchema,
   ProductSchema,
   TagSchema,
-  TaxSchema,
+  TaxRateSchema,
   StoreSchema,
   TemplateSchema,
   TrackingCategorySchema,
@@ -27,7 +27,7 @@ import * as schemaExports from "../src/schemas/mod.ts";
 Deno.test("getInitialValues — produces object for every collection schema", () => {
   const schemas = [
     ContactSchema, OrganizationSchema, DestinationSchema, LocationSchema,
-    OrderSchema, ProductSchema, TagSchema, TaxSchema, TemplateSchema,
+    OrderSchema, ProductSchema, TagSchema, TaxRateSchema, TemplateSchema,
     TrackingCategorySchema, MovementSchema, UserSchema,
   ];
   for (const schema of schemas) {
@@ -80,32 +80,25 @@ Deno.test("getInitialValues — enum fields use first value", () => {
   const txResult = getInitialValues(MovementSchema);
   assertEquals(txResult.type, "prep");
 
-  const taxResult = getInitialValues(TaxSchema);
+  const taxResult = getInitialValues(TaxRateSchema);
   assertEquals(taxResult.type, "percent");
 });
 
 Deno.test("getInitialValues — defaults are used when present", () => {
-  const result = getInitialValues(TaxSchema);
-  assertEquals(result.crms_id, null);
+  const result = getInitialValues(TaxRateSchema);
+  assertEquals(result.version, 0);
   // `applied_from` was asserted here as `"1970-01-01T00:00:00Z"` and is not any
   // more — it never had a default, so it was never this arm's subject, and the
   // date branch now SKIPs it (core#107). The arm below owns that fact.
-  //
-  // `active` was asserted here and is not any more: it carries no default, it
-  // is being deleted, and liveness is derived from the applied window by
-  // `isTaxLive` (api-cloudrun#613/#618). Nothing reads the stored flag, so the
-  // value this helper synthesizes for it is not a fact worth pinning — the two
-  // siblings above are, because they DO have defaults, which is the property
-  // this arm is named for.
 });
 
 Deno.test("getInitialValues — date and datetime fields are omitted", () => {
   // 🔴 **The seed for a date is ABSENCE, not the epoch** (core#107). The epoch
   // is not nullish, so it survived every `input.x ?? <server default>` on the
   // writer side; that is how 8 prod invoices reached `due_date: 1969-12-31`, 7
-  // of them AUTHORISED in the live Xero AR ledger. `TaxSchema.applied_from` is
+  // of them AUTHORISED in the live Xero AR ledger. `TaxRateSchema.applied_from` is
   // a `chicagoStartOfDay()` pipe and is the datetime branch's witness here.
-  assertEquals("applied_from" in getInitialValues(TaxSchema), false);
+  assertEquals("applied_from" in getInitialValues(TaxRateSchema), false);
   // ...and `RecurrenceSchema.active_from` the `format === "date"` branch's,
   // which is live rather than theoretical.
   assertEquals("active_from" in getInitialValues(RecurrenceSchema), false);

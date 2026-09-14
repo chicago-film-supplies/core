@@ -1748,8 +1748,6 @@ interface CollectionDocs {
   stores: Store;
   tag: Tag;
   tags: Tag;
-  tax: Tax;
-  taxes: Tax;
   taxes-codes: TaxCode;
   taxes-rates: TaxRate;
   taxes-classes: TaxClass;
@@ -2640,41 +2638,6 @@ interface CreateTaxCodeInputType {
   xero_item_code?: string | null;
   active: boolean;
   first_rate: TaxRateBodyType;
-}
-```
-
-### `CreateTaxInput`
-
-Zod schema for CreateTaxInput.
-
-```ts
-const CreateTaxInput: z.ZodType<CreateTaxInputType>;
-```
-
-### `CreateTaxInputType`
-
-Input for creating a new tax definition.
-
-`applied_from` / `applied_to` are the APPLIED window — the bound
-{@link Tax.applied_from} documents. They take {@link chicagoStartOfDay}
-rather than an instant because **a rate boundary is a calendar date**: the
-operator authors a day, and the snap belongs in the transform rather than in
-each of the three writers that used to do it by hand.
-
-```ts
-interface CreateTaxInputType {
-  name: string;
-  rate: number;
-  type: RateType;
-  applied_from: string;
-  applied_to?: string | null;
-  jurisdiction?: JurisdictionType | null;
-  item_types?: PreTaxItemType[];
-  effective_from?: string | null;
-  xero_tax_type?: string | null;
-  xero_account_code?: number | null;
-  xero_item_code?: string | null;
-  xero_components?: XeroTaxComponentType[];
 }
 ```
 
@@ -6860,7 +6823,7 @@ type OutOfServiceUpdated = EventEnvelope<OutOfService> & typeLiteral;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `PICK_SHEET_GATES`
@@ -8927,83 +8890,6 @@ const StoreSchema: z.ZodType<Store>;
 type StoreUpdated = EventEnvelope<Store> & typeLiteral;
 ```
 
-### `SupersedeTaxInput`
-
-Zod schema for SupersedeTaxInput.
-
-```ts
-const SupersedeTaxInput: z.ZodType<SupersedeTaxInputType>;
-```
-
-### `SupersedeTaxInputType`
-
-Input for superseding a tax — closing the incumbent's window and opening its
-successor's, in one write (api-cloudrun#495).
-
-## Why this is not two calls
-
-A rate change is retroactive by nature, so the correct model is a new
-*version* rather than an edit — but the sanctioned way to reach it was
-`POST /taxes` followed by `PUT /taxes/{old}`, and **between those two calls
-both versions are open-ended**. {@link findTaxAt} does not pick one when two
-same-name docs bracket an instant, it THROWS `Tax catalog drift` — on the
-pricing path, for every order and invoice write touching that name. So the
-documented workflow had a window in which pricing was down, and the operator
-getting the order wrong was the only thing standing between the catalog and
-that throw. One transaction makes the overlap unrepresentable instead.
-
-## What is deliberately absent
-
-- **No `name`.** A supersede is by construction the next version of the same
-  tax, and `findTaxAt` matches by name — so a caller-supplied name would let
-  one call close this series and open a different one, which is two edits
-  wearing one verb.
-- **No way to deactivate the incumbent.** A closed version must stay in the
-  catalog: `getTaxDocs()` reads the collection unfiltered and `findTaxAt`
-  resolves *historical* instants off it, so retiring the incumbent would
-  re-price every past document that names it. It is also what keeps a
-  consumer holding a pinned uid working — manager pins `RENTAL_TAX_UID` as a
-  constant and `getDefaultTaxesForType` returns `[]` on a miss, so a
-  deactivated incumbent creates every new rental line **untaxed, silently**.
-  The line still prices correctly because the order writers re-resolve by
-  name at `asOf` (`resolveTaxRefsAt`); that resolution is the reason this
-  endpoint is safe to ship before manager stops pinning uids.
-
-`applied_from` is one field doing two jobs — the successor's start AND the
-incumbent's `applied_to` — because they are the same instant by definition.
-Two fields would be two chances to disagree.
-
-## `effective_from` is the OTHER date, and it is not this one
-
-`applied_from` is when **CFS** starts pricing at the new
-rate. {@link Tax.effective_from} is when the rate **legally** took effect.
-They coincided on every change before 2026-08 and nothing forced them apart;
-the NITA increase arrived in a special-district bulletin CFS read weeks late,
-so the two are genuinely different dates and the lag is a fact worth storing.
-
-⚠️ **Open the applied window at the CUTOVER, not at `effective_from`.**
-Backdating it re-rates every unsettled invoice already billed at the old rate
-on its next CRMS edit. The service refuses `effective_from > applied_from`,
-which is the only ordering that is incoherent rather than merely late.
-
-```ts
-interface SupersedeTaxInputType {
-  uid: string;
-  version: number;
-  applied_from: string;
-  rate: number;
-  type?: RateType;
-  applied_to?: string | null;
-  effective_from?: string | null;
-  xero_tax_type?: string | null;
-  xero_account_code?: number | null;
-  xero_item_code?: string | null;
-  xero_components?: XeroTaxComponentType[];
-  jurisdiction?: JurisdictionType | null;
-  item_types?: PreTaxItemType[];
-}
-```
-
 ### `Supplier`
 
 A supplier document in Firestore.
@@ -9409,36 +9295,6 @@ const TagSchema: z.ZodType<Tag>;
 type TagUpdated = EventEnvelope<Tag> & typeLiteral;
 ```
 
-### `Tax`
-
-A tax definition used for computing item-level and order-level tax amounts.
-
-```ts
-interface Tax {
-  uid: string;
-  name: string;
-  rate: number;
-  type: RateType;
-  crms_id: number | null;
-  jurisdiction?: JurisdictionType | null;
-  item_types: PreTaxItemType[];
-  applied_from: string;
-  applied_from_fs: FirestoreTimestampType;
-  applied_to: string | null;
-  applied_to_fs: FirestoreTimestampType | null;
-  effective_from: string | null;
-  xero_tax_type?: string | null;
-  xero_account_code?: number | null;
-  xero_item_code?: string | null;
-  xero_components: XeroTaxComponentType[];
-  version: number;
-  created_by: ActorRefType;
-  updated_by: ActorRefType;
-  created_at: FirestoreTimestampType;
-  updated_at: FirestoreTimestampType;
-}
-```
-
 ### `TaxClass`
 
 A tax class document in Firestore.
@@ -9591,14 +9447,6 @@ interface TaxRefType {
   rate: number;
   type: RateType;
 }
-```
-
-### `TaxSchema`
-
-Zod schema for Tax.
-
-```ts
-const TaxSchema: z.ZodType<Tax>;
 ```
 
 ### `TaxedAsEnum`
@@ -10373,8 +10221,7 @@ Input type for updating a department type.
 
 ⚠️ **Deactivation is a `PUT` setting `active: false`, not a `DELETE`** — the
 shape `holiday-definitions` already documents. There is no delete route, which
-matches `locationTypes.delete` and `taxes.delete`: both permissions exist and
-neither routes anywhere.
+matches `locationTypes.delete`: the permission exists and routes nowhere.
 
 ```ts
 interface UpdateDepartmentTypeInputType {
@@ -10815,42 +10662,6 @@ interface UpdateTaxCodeInputType {
   xero_account_code?: number | null;
   xero_item_code?: string | null;
   active?: boolean;
-}
-```
-
-### `UpdateTaxInput`
-
-Zod schema for UpdateTaxInput.
-
-```ts
-const UpdateTaxInput: z.ZodType<UpdateTaxInputType>;
-```
-
-### `UpdateTaxInputType`
-
-Input for updating an existing tax definition.
-
-`rate` and `type` are accepted here and **refused by the service** — an
-in-place rate edit re-prices history, so the sanctioned move is
-{@link SupersedeTaxInput}. They stay on the input so the refusal can name what
-the caller asked for.
-
-```ts
-interface UpdateTaxInputType {
-  uid: string;
-  name?: string;
-  rate?: number;
-  type?: RateType;
-  applied_from?: string;
-  applied_to?: string | null;
-  jurisdiction?: JurisdictionType | null;
-  item_types?: PreTaxItemType[];
-  effective_from?: string | null;
-  xero_tax_type?: string | null;
-  xero_account_code?: number | null;
-  xero_item_code?: string | null;
-  xero_components?: XeroTaxComponentType[];
-  version: number;
 }
 ```
 
@@ -11359,8 +11170,8 @@ city split a filed return reads.
 Xero's `DisplayTaxRate` and `EffectiveRate` are **readOnly**: it computes them
 from `TaxComponents[]`. So a CFS-authored rate that flattens four components
 into one total is accepted, prices correctly, and destroys the breakdown an
-ST-1 return is filed from. Carrying the components on the Tax document is what
-lets `xeroTaxRateCreate` reproduce them.
+ST-1 return is filed from. Carrying the components on the rate is what lets
+`xeroTaxRateCreate` reproduce them.
 
 `rate` states its unit outright rather than inheriting one: unlike
 `PriceModifier`, this shape has no sibling `type` to discriminate on, and a
@@ -23967,7 +23778,7 @@ const RoleSummarySchema: z.ZodType<RoleSummary>;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxes.create" | "taxes.read" | "taxes.update" | "taxes.delete" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `Permission`
@@ -25818,23 +25629,38 @@ interface StructuralItem {
 
 ### `Tax`
 
-Subset of the full Tax document needed by utility functions.
+A tax RATE in the pricing shape — what `pricingTaxesOf` projects the
+`taxes-codes` × `taxes-rates` catalog to, one entry per rate named by its code.
 
-Only `uid`/`name`/`rate`/`type` are required — those are what the pricing
-helpers read. Everything else is resolution metadata that only the as-of
-resolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and
-it stays optional so partial `Tax` literals in tests and callers keep
-type-checking.
+It is structural, not a stored document: the `taxes` collection it was once a
+subset of is retired (api-cloudrun#993). Only `uid`/`name`/`rate`/`type` are
+required — those are what the pricing helpers read. Everything else is
+resolution metadata that only the as-of resolvers in `@cfs/core/utils/taxes`
+(`findTaxAt`, `findTaxFor`) touch, and it stays optional so partial `Tax`
+literals in tests and callers keep type-checking.
 
 ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
-the document.** That is deliberate: a missing bound reads as OPEN, so every
-version brackets every instant and {@link findTaxAt} throws `Tax catalog
-drift` on the pricing path. A partial literal in a test is allowed to be
-wrong that way; a stored document is not, which is why `TaxSchema` requires
-the pair and this structural subset does not.
+`TaxRate`.** A missing bound reads as OPEN, so every version brackets every
+instant and {@link findTaxAt} throws `Tax catalog drift` on the pricing path.
+A partial literal in a test is allowed to be wrong that way; a stored rate is
+not.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
+interface Tax {
+  uid: string;
+  name: string;
+  rate: number;
+  type: RateType;
+  applied_from?: string;
+  applied_to?: string | null;
+  effective_from?: string | null;
+  jurisdiction?: JurisdictionType | null;
+  item_types?: PreTaxItemType[];
+  xero_tax_type?: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
+  xero_components?: XeroTaxComponentType[];
+}
 ```
 
 ### `TransactionFeeLineItem`
@@ -29912,23 +29738,38 @@ const TAXABLE_REVENUE_COAS: readonly number[];
 
 ### `Tax`
 
-Subset of the full Tax document needed by utility functions.
+A tax RATE in the pricing shape — what `pricingTaxesOf` projects the
+`taxes-codes` × `taxes-rates` catalog to, one entry per rate named by its code.
 
-Only `uid`/`name`/`rate`/`type` are required — those are what the pricing
-helpers read. Everything else is resolution metadata that only the as-of
-resolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and
-it stays optional so partial `Tax` literals in tests and callers keep
-type-checking.
+It is structural, not a stored document: the `taxes` collection it was once a
+subset of is retired (api-cloudrun#993). Only `uid`/`name`/`rate`/`type` are
+required — those are what the pricing helpers read. Everything else is
+resolution metadata that only the as-of resolvers in `@cfs/core/utils/taxes`
+(`findTaxAt`, `findTaxFor`) touch, and it stays optional so partial `Tax`
+literals in tests and callers keep type-checking.
 
 ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
-the document.** That is deliberate: a missing bound reads as OPEN, so every
-version brackets every instant and {@link findTaxAt} throws `Tax catalog
-drift` on the pricing path. A partial literal in a test is allowed to be
-wrong that way; a stored document is not, which is why `TaxSchema` requires
-the pair and this structural subset does not.
+`TaxRate`.** A missing bound reads as OPEN, so every version brackets every
+instant and {@link findTaxAt} throws `Tax catalog drift` on the pricing path.
+A partial literal in a test is allowed to be wrong that way; a stored rate is
+not.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
+interface Tax {
+  uid: string;
+  name: string;
+  rate: number;
+  type: RateType;
+  applied_from?: string;
+  applied_to?: string | null;
+  effective_from?: string | null;
+  jurisdiction?: JurisdictionType | null;
+  item_types?: PreTaxItemType[];
+  xero_tax_type?: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
+  xero_components?: XeroTaxComponentType[];
+}
 ```
 
 ### `TransactionFeeLineItem`
@@ -32416,23 +32257,38 @@ const TAXABLE_REVENUE_COAS: readonly number[];
 
 ### `Tax`
 
-Subset of the full Tax document needed by utility functions.
+A tax RATE in the pricing shape — what `pricingTaxesOf` projects the
+`taxes-codes` × `taxes-rates` catalog to, one entry per rate named by its code.
 
-Only `uid`/`name`/`rate`/`type` are required — those are what the pricing
-helpers read. Everything else is resolution metadata that only the as-of
-resolvers in `@cfs/core/utils/taxes` (`findTaxAt`, `findTaxFor`) touch, and
-it stays optional so partial `Tax` literals in tests and callers keep
-type-checking.
+It is structural, not a stored document: the `taxes` collection it was once a
+subset of is retired (api-cloudrun#993). Only `uid`/`name`/`rate`/`type` are
+required — those are what the pricing helpers read. Everything else is
+resolution metadata that only the as-of resolvers in `@cfs/core/utils/taxes`
+(`findTaxAt`, `findTaxFor`) touch, and it stays optional so partial `Tax`
+literals in tests and callers keep type-checking.
 
 ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
-the document.** That is deliberate: a missing bound reads as OPEN, so every
-version brackets every instant and {@link findTaxAt} throws `Tax catalog
-drift` on the pricing path. A partial literal in a test is allowed to be
-wrong that way; a stored document is not, which is why `TaxSchema` requires
-the pair and this structural subset does not.
+`TaxRate`.** A missing bound reads as OPEN, so every version brackets every
+instant and {@link findTaxAt} throws `Tax catalog drift` on the pricing path.
+A partial literal in a test is allowed to be wrong that way; a stored rate is
+not.
 
 ```ts
-type Tax = Pick<SchemaTax, "uid" | "name" | "rate" | "type"> & Partial<Pick<SchemaTax, "applied_from" | "applied_to" | "effective_from" | "jurisdiction" | "item_types" | "xero_tax_type" | "xero_account_code" | "xero_item_code" | "xero_components">>;
+interface Tax {
+  uid: string;
+  name: string;
+  rate: number;
+  type: RateType;
+  applied_from?: string;
+  applied_to?: string | null;
+  effective_from?: string | null;
+  jurisdiction?: JurisdictionType | null;
+  item_types?: PreTaxItemType[];
+  xero_tax_type?: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
+  xero_components?: XeroTaxComponentType[];
+}
 ```
 
 ### `TaxCellState`
@@ -32975,8 +32831,8 @@ read the bounds from.
 merely permissive: an unbounded version brackets every instant, so two
 versions of one name bracket the same instant and {@link findTaxAt} throws
 `Tax catalog drift` — on the pricing path, out of a CRMS Cloud Task handler,
-which retries forever. `TaxSchema` requires both bounds precisely so a stored
-document cannot reach that state; the `| null` here covers the partial
+which retries forever. `TaxRateSchema` requires both bounds precisely so a
+stored rate cannot reach that state; the `| null` here covers the partial
 literals the structural `Tax` admits.
 
 ### `taxCellState(taxes: Tax[], jurisdiction: JurisdictionType | null, itemType: string, asOf: string): TaxCellState`
@@ -33087,6 +32943,34 @@ interface LegacyTaxMigrationContext {
 }
 ```
 
+### `LegacyTaxRow`
+
+One document of the retired `taxes` collection, as the migration read it.
+
+Kept local rather than as a schema: the collection is gone (api-cloudrun#993),
+and this shape now exists only so a test can build a catalog from the prod rows
+it was migrated from.
+
+```ts
+interface LegacyTaxRow {
+  uid: string;
+  name: string;
+  rate: number;
+  type: RateType;
+  jurisdiction?: JurisdictionType | null;
+  item_types: PreTaxItemType[];
+  applied_from: string;
+  applied_from_fs: FirestoreTimestampType;
+  applied_to: string | null;
+  applied_to_fs: FirestoreTimestampType | null;
+  effective_from: string | null;
+  xero_tax_type?: string | null;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
+  xero_components: XeroTaxComponentType[];
+}
+```
+
 ### `MIGRATED_TAX_CLASSES`
 
 The class names the migration owns, and the legacy item type each is derived from.
@@ -33138,7 +33022,7 @@ interface TaxSetupViolation {
 Closed vocabulary, so a caller can switch on it and an audit can count it.
 
 ```ts
-type TaxSetupViolationCode = "duplicate_code_name" | "duplicate_class_name" | "orphan_rate" | "rate_type_mismatch" | "rate_overlap" | "rate_gap" | "unknown_code_in_class" | "inactive_code_in_class" | "multiple_percent_rates" | "duplicate_type_default";
+type TaxSetupViolationCode = "duplicate_code_name" | "duplicate_class_name" | "orphan_rate" | "rate_type_mismatch" | "rate_overlap" | "rate_gap" | "effective_after_applied" | "xero_tax_type_lost" | "unknown_code_in_class" | "inactive_code_in_class" | "multiple_percent_rates" | "duplicate_type_default";
 ```
 
 ### `deriveLineTaxClass(item: TaxClassLineFacts, catalog: TaxCatalog): string | null`
@@ -33179,7 +33063,7 @@ a derived class for such a line, because the legacy mapping
 (`taxed_as ?? type` plus the explicit-only bottle ref) needs the migrated
 class uids, which only the backfill knows.
 
-### `migrateLegacyTaxCatalog(legacy: readonly Tax[], existing: TaxCatalog, ctx: LegacyTaxMigrationContext): LegacyTaxMigration`
+### `migrateLegacyTaxCatalog(legacy: readonly LegacyTaxRow[], existing: TaxCatalog, ctx: LegacyTaxMigrationContext): LegacyTaxMigration`
 
 **`taxes` → `taxes-codes` × `taxes-rates` × `taxes-classes`** — the one mapping
 the backfill and the parity test share (api-cloudrun#993), so what the test
@@ -33276,6 +33160,8 @@ it on the stored catalog; and the daily watch runs it too.
 | `multiple_percent_rates` | an active class has two percent rates live for one jurisdiction at one instant. Xero takes one TaxType per line, and it is how a line would get double sales tax |
 | `rate_overlap` | two versions of one code bracket one instant — pricing cannot pick |
 | `rate_gap` | an interior hole between two versions of one code. A schedule lapsing at the END is a review, not this; see `UnreviewedTaxWarning` |
+| `effective_after_applied` | a rate's `effective_from` is after its `applied_from` — CFS priced at it before it existed in law. The ordinary late discovery is the reverse |
+| `xero_tax_type_lost` | a percent code's successor rate has no Xero `TaxType` where its predecessor had one, so the invoice push sends `TaxType: NONE` and Xero bills $0 tax while CFS bills the rate. Conditioned on the predecessor: a flat code never has one |
 | `rate_type_mismatch` | a rate's `type` copy disagrees with its code's, so the unit it renders is wrong |
 | `orphan_rate` / `unknown_code_in_class` | a reference to nothing |
 | `inactive_code_in_class` | an ACTIVE class draws from a code an operator retired |

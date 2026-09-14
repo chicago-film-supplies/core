@@ -25,8 +25,8 @@
  *
  * ## The window
  *
- * `[applied_from, applied_to)`, snapped to Chicago midnight — the same rules
- * `Tax.applied_from` documents in `schemas/tax.ts`, and the same two dates:
+ * `[applied_from, applied_to)`, snapped to Chicago midnight — the rules the
+ * retired `taxes` collection priced on, and the same two dates:
  * `applied_*` is when CFS prices, `effective_from` is when the rate legally took
  * effect and prices nothing.
  */
@@ -43,7 +43,33 @@ import {
   RateTypeEnum,
   TimestampFields,
 } from "./common.ts";
-import { XeroTaxComponent, type XeroTaxComponentType } from "./tax.ts";
+
+/**
+ * One component of a Xero tax rate — the state / transit-authority / county /
+ * city split a filed return reads.
+ *
+ * Xero's `DisplayTaxRate` and `EffectiveRate` are **readOnly**: it computes them
+ * from `TaxComponents[]`. So a CFS-authored rate that flattens four components
+ * into one total is accepted, prices correctly, and destroys the breakdown an
+ * ST-1 return is filed from. Carrying the components on the rate is what lets
+ * `xeroTaxRateCreate` reproduce them.
+ *
+ * `rate` states its unit outright rather than inheriting one: unlike
+ * `PriceModifier`, this shape has no sibling `type` to discriminate on, and a
+ * tax component is always a **percent**.
+ */
+export interface XeroTaxComponentType {
+  /** Xero's component name, e.g. `"Northern Illinois Transit Authority"`. */
+  name: string;
+  /** Percent, e.g. `1.25`. Never dollars — a component of a flat tax is not a thing. */
+  rate: number;
+}
+
+/** Zod schema for XeroTaxComponent. */
+export const XeroTaxComponent: z.ZodType<XeroTaxComponentType> = z.strictObject({
+  name: z.string().min(1).max(50),
+  rate: z.number(),
+});
 
 /** A tax rate document in Firestore. */
 export interface TaxRate {
