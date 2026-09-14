@@ -129,6 +129,10 @@ export interface WebshopProduct {
   query_by_components?: string[];
   query_by_component_of?: string[];
   query_by_alternates?: string[];
+  /** @see `Product.uid_tax_class` — mirrored from the source product. */
+  uid_tax_class?: string | null;
+  /** @see `Product.tax_class_name`. */
+  tax_class_name?: string | null;
   webshop: {
     available: boolean;
     description?: string | null;
@@ -230,6 +234,8 @@ export const WebshopProductSchema: z.ZodType<WebshopProduct> = z.strictObject({
   query_by_components: z.array(z.string()).optional(),
   query_by_component_of: z.array(z.string()).optional(),
   query_by_alternates: z.array(z.string()).optional(),
+  uid_tax_class: FirestoreId.nullable().optional(),
+  tax_class_name: z.string().nullable().optional(),
   webshop: z.strictObject({
     available: z.boolean(),
     description: z.string().nullable().optional(),

@@ -367,6 +367,10 @@ export interface InvoiceDocLineItemType {
    * `price.discount_percent`: 8,015 of 8,978 paired lines).
    */
   taxed_as?: TaxedAsType | null;
+  /** @see `OrderDocLineItemType.uid_tax_class` — mirrored for the same key-set reason as `taxed_as`. */
+  uid_tax_class?: string | null;
+  /** @see `OrderDocLineItemType.uid_tax_class_override`. */
+  uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   xero_id?: string | null;
   xero_tracking_option_id?: string | null;
@@ -434,6 +438,9 @@ const InvoiceDocLineItemInner = z.strictObject({
     column: true,
     label: "Taxed As",
   }),
+  // Snapshot + operator override, both optional during expand — see the interface.
+  uid_tax_class: FirestoreId.nullable().optional(),
+  uid_tax_class_override: FirestoreId.nullable().optional(),
   tracking_category: z.string().nullable().optional(),
   xero_id: z.uuid().nullable().optional(),
   xero_tracking_option_id: z.uuid().nullable().optional(),
@@ -1114,6 +1121,8 @@ export interface InvoiceItemInputLineType {
   coa_revenue?: COARevenueType | null;
   /** @see `OrderDocLineItemType.taxed_as` — operator-authored, so it is accepted here. */
   taxed_as?: TaxedAsType | null;
+  /** @see `OrderDocLineItemType.uid_tax_class_override` — operator-authored, so it is accepted here. */
+  uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   /**
    * @see `InvoiceDocLineItemType.path_substituted_for`. Operator-authored, so it
@@ -1176,6 +1185,7 @@ const InvoiceItemInputLineInner = z.object({
   path: z.array(ItemUid),
   coa_revenue: COARevenueEnum.nullable().optional(),
   taxed_as: TaxedAsEnum.nullable().optional(),
+  uid_tax_class_override: FirestoreId.nullable().optional(),
   tracking_category: z.string().nullable().optional(),
   path_substituted_for: z.array(ItemUid).optional(),
   zero_priced: z.boolean().nullable().optional(),

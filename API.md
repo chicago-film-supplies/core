@@ -2467,6 +2467,7 @@ interface CreateProductInputType {
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   uid_tracking_category?: string | null;
+  uid_tax_class?: string | null;
   uid_linked_rental?: string | null;
   uid_linked_replacement?: string | null;
   webshop: typeLiteral;
@@ -4580,6 +4581,8 @@ interface InvoiceDocLineItemType {
   zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
+  uid_tax_class?: string | null;
+  uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   xero_id?: string | null;
   xero_tracking_option_id?: string | null;
@@ -4723,6 +4726,7 @@ interface InvoiceItemInputLineType {
   path: string[];
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
+  uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   path_substituted_for?: string[];
   zero_priced?: boolean | null;
@@ -6398,6 +6402,8 @@ interface OrderDocLineItemType {
   crms_id?: number | null;
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
+  uid_tax_class?: string | null;
+  uid_tax_class_override?: string | null;
 }
 ```
 
@@ -6550,6 +6556,7 @@ interface OrderItemLineType {
   order_number?: number;
   uid_order?: string;
   taxed_as?: TaxedAsType | null;
+  uid_tax_class_override?: string | null;
 }
 ```
 
@@ -7405,6 +7412,8 @@ interface Product {
   uid_linked_rental?: string | null;
   uid_linked_replacement?: string | null;
   uid_tracking_category?: string | null;
+  uid_tax_class?: string | null;
+  tax_class_name?: string | null;
   webshop: ProductWebshop;
   images?: ProductImage[];
   query_by_images?: string[];
@@ -10621,6 +10630,7 @@ interface UpdateProductInputType {
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   uid_tracking_category?: string | null;
+  uid_tax_class?: string | null;
   uid_linked_rental?: string;
   uid_linked_replacement?: string;
   webshop?: typeLiteral;
@@ -11180,6 +11190,8 @@ interface WebshopProduct {
   query_by_components?: string[];
   query_by_component_of?: string[];
   query_by_alternates?: string[];
+  uid_tax_class?: string | null;
+  tax_class_name?: string | null;
   webshop: typeLiteral;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -15805,6 +15817,8 @@ interface InvoiceDocLineItemType {
   zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
+  uid_tax_class?: string | null;
+  uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   xero_id?: string | null;
   xero_tracking_option_id?: string | null;
@@ -15942,6 +15956,7 @@ interface InvoiceItemInputLineType {
   path: string[];
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
+  uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   path_substituted_for?: string[];
   zero_priced?: boolean | null;
@@ -17043,6 +17058,8 @@ interface OrderDocLineItemType {
   crms_id?: number | null;
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
+  uid_tax_class?: string | null;
+  uid_tax_class_override?: string | null;
 }
 ```
 
@@ -17173,6 +17190,7 @@ interface OrderItemLineType {
   order_number?: number;
   uid_order?: string;
   taxed_as?: TaxedAsType | null;
+  uid_tax_class_override?: string | null;
 }
 ```
 
@@ -18116,6 +18134,7 @@ interface CreateProductInputType {
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   uid_tracking_category?: string | null;
+  uid_tax_class?: string | null;
   uid_linked_rental?: string | null;
   uid_linked_replacement?: string | null;
   webshop: typeLiteral;
@@ -18160,6 +18179,8 @@ interface Product {
   uid_linked_rental?: string | null;
   uid_linked_replacement?: string | null;
   uid_tracking_category?: string | null;
+  uid_tax_class?: string | null;
+  tax_class_name?: string | null;
   webshop: ProductWebshop;
   images?: ProductImage[];
   query_by_images?: string[];
@@ -18329,6 +18350,7 @@ interface UpdateProductInputType {
   component_of?: ProductComponent[];
   tags?: UidNameRefType[];
   uid_tracking_category?: string | null;
+  uid_tax_class?: string | null;
   uid_linked_rental?: string;
   uid_linked_replacement?: string;
   webshop?: typeLiteral;
@@ -19980,6 +20002,8 @@ interface WebshopProduct {
   query_by_components?: string[];
   query_by_component_of?: string[];
   query_by_alternates?: string[];
+  uid_tax_class?: string | null;
+  tax_class_name?: string | null;
   webshop: typeLiteral;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;

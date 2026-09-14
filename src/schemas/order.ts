@@ -749,6 +749,8 @@ export interface OrderItemLineType {
   uid_order?: string;
   /** @see `OrderDocLineItemType.taxed_as` — operator-authored, so it is accepted here. */
   taxed_as?: TaxedAsType | null;
+  /** @see `OrderDocLineItemType.uid_tax_class_override` — operator-authored, so it is accepted here. */
+  uid_tax_class_override?: string | null;
 }
 
 // Un-annotated for `_zod.propValues` — see `_dividers.ts`. `z.object`, not
@@ -774,6 +776,7 @@ const OrderItemLineInner = z.object({
   order_number: z.int().optional(),
   uid_order: FirestoreId.optional(),
   taxed_as: TaxedAsEnum.nullable().optional(),
+  uid_tax_class_override: FirestoreId.nullable().optional(),
 }).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a billable order line (input). */
@@ -1127,6 +1130,26 @@ export interface OrderDocLineItemType {
    * re-read is destroyed — the same shape as api-cloudrun#480's uid churn.
    */
   taxed_as?: TaxedAsType | null;
+  /**
+   * The `taxes-classes` document this line is taxed as — **snapshotted from the
+   * product at build**, the way `type` is, and carried forward on items
+   * rebuilds. Server-resolved, never on input. (api-cloudrun#993)
+   *
+   * ⚠️ **Optional through the expand/contract campaign.** No line carries it
+   * yet, and a bulk stamp would bump `order.version` and re-push Xero quotes, so
+   * the class resolver DERIVES it while absent and lines pick it up on their
+   * next real write.
+   */
+  uid_tax_class?: string | null;
+  /**
+   * An operator's per-line class override (the D365 per-line item sales tax
+   * group override). `null`/absent follows `uid_tax_class`. Kept separate from
+   * the snapshot so a product re-class reaches live lines without clobbering an
+   * override, and so an override is visible as one.
+   *
+   * Replaces `taxed_as` at contract.
+   */
+  uid_tax_class_override?: string | null;
 }
 
 // Un-annotated so `_zod.propValues` survives for `z.discriminatedUnion` below;
@@ -1164,6 +1187,9 @@ const OrderDocLineItemInner = z.strictObject({
   // schema. See the interface docblock for why it is optional rather than
   // defaulted, and why a CRMS rebuild has to carry it forward.
   taxed_as: TaxedAsEnum.nullable().optional().meta({ column: true, label: "Taxed As" }),
+  // Snapshot + operator override, both optional during expand — see the interface.
+  uid_tax_class: FirestoreId.nullable().optional(),
+  uid_tax_class_override: FirestoreId.nullable().optional(),
 }).superRefine(checkItemContract).superRefine(checkZeroPricedAmount);
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;

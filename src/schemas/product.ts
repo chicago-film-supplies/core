@@ -345,6 +345,14 @@ export interface Product {
   uid_linked_rental?: string | null;
   uid_linked_replacement?: string | null;
   uid_tracking_category?: string | null;
+  /**
+   * The `taxes-classes` document this product is taxed as — one class, no union
+   * (owner, 2026-09-13). Replaces `price.taxes` at contract; optional until the
+   * backfill stamps every product. (api-cloudrun#993)
+   */
+  uid_tax_class?: string | null;
+  /** Server-derived denorm of the class name — never on input; renamed by cascade. */
+  tax_class_name?: string | null;
   webshop: ProductWebshop;
   images?: ProductImage[];
   /**
@@ -644,6 +652,8 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   uid_linked_rental: FirestoreId.nullable().optional(),
   uid_linked_replacement: FirestoreId.nullable().optional(),
   uid_tracking_category: FirestoreId.nullable().optional(),
+  uid_tax_class: FirestoreId.nullable().optional(),
+  tax_class_name: z.string().nullable().optional().meta({ column: true, label: "Tax Class" }),
   webshop: z.strictObject({
     available: z.boolean().meta({ column: true, label: "Available" }),
     // Key present on 544 of 568 prod products, always `null`; the other 24 lack
@@ -778,6 +788,8 @@ export interface CreateProductInputType {
   // was absent. Removing it breaks nobody: the input object strips unknown keys
   // rather than rejecting them, so a client still sending it is simply ignored.
   uid_tracking_category?: string | null;
+  /** The `taxes-classes` uid. `null` clears; absent leaves it alone. No `tax_class_name` — it is derived. */
+  uid_tax_class?: string | null;
   uid_linked_rental?: string | null;
   uid_linked_replacement?: string | null;
   webshop: {
@@ -854,6 +866,7 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   component_of: z.array(ComponentSchema).optional(),
   tags: z.array(UidNameRef).optional(),
   uid_tracking_category: FirestoreId.nullable().optional(),
+  uid_tax_class: FirestoreId.nullable().optional(),
   uid_linked_rental: FirestoreId.nullable().optional(),
   uid_linked_replacement: FirestoreId.nullable().optional(),
   webshop: z.object({
@@ -939,6 +952,8 @@ export interface UpdateProductInputType {
    * `xero_tracking_option_id` and unsets `tracking_category_name`.
    */
   uid_tracking_category?: string | null;
+  /** The `taxes-classes` uid. `null` clears; absent leaves it alone. No `tax_class_name` — it is derived. */
+  uid_tax_class?: string | null;
   uid_linked_rental?: string;
   uid_linked_replacement?: string;
   webshop?: {
@@ -993,6 +1008,7 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
   component_of: z.array(ComponentSchema).optional(),
   tags: z.array(UidNameRef).optional(),
   uid_tracking_category: FirestoreId.nullable().optional(),
+  uid_tax_class: FirestoreId.nullable().optional(),
   uid_linked_rental: FirestoreId.optional(),
   uid_linked_replacement: FirestoreId.optional(),
   webshop: z.object({
