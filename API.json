@@ -11048,7 +11048,7 @@
         {
           "kind": "typeAlias",
           "name": "DocumentDiffEntry",
-          "declaration": "type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry;",
+          "declaration": "type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry;",
           "doc": "One entry at one key of the viewed document. Discriminated on `kind`."
         },
         {
@@ -11060,8 +11060,8 @@
         {
           "kind": "typeAlias",
           "name": "DocumentDiffKind",
-          "declaration": "type DocumentDiffKind = \"differs\" | \"only_here\" | \"missing_here\" | \"pair_field\" | \"uninvoiced\";",
-          "doc": "- `differs` — the same path on both sides, a compared field disagrees\n- `only_here` — on the viewed document, absent from the source\n- `missing_here` — on the source, absent from the viewed document\n- `pair_field` — a destination pair's compared field disagrees\n- `uninvoiced` — an order/fulfillment line that no invoice carries"
+          "declaration": "type DocumentDiffKind = \"differs\" | \"only_here\" | \"missing_here\" | \"pair_field\" | \"uninvoiced\" | \"substituted\";",
+          "doc": "- `differs` — the same path on both sides, a compared field disagrees\n- `only_here` — on the viewed document, absent from the source\n- `missing_here` — on the source, absent from the viewed document\n- `pair_field` — a destination pair's compared field disagrees\n- `uninvoiced` — an order/fulfillment line that no invoice carries\n- `substituted` — one side carries a substitute where the other carries the line it replaced"
         },
         {
           "kind": "interface",
@@ -11090,8 +11090,14 @@
         {
           "kind": "interface",
           "name": "DocumentSourceDiffEntry",
-          "declaration": "interface DocumentSourceDiffEntry {\n  kind: Exclude<DocumentDiffKind, \"uninvoiced\">;\n  source: DocumentRef;\n  fields: DocumentDiffField[];\n}",
+          "declaration": "interface DocumentSourceDiffEntry {\n  kind: Exclude<DocumentDiffKind, \"uninvoiced\" | \"substituted\">;\n  source: DocumentRef;\n  fields: DocumentDiffField[];\n}",
           "doc": "One source's difference at one key of the viewed document."
+        },
+        {
+          "kind": "interface",
+          "name": "DocumentSubstitutionEntry",
+          "declaration": "interface DocumentSubstitutionEntry {\n  kind: \"substituted\";\n  source: DocumentRef;\n  replaced: string;\n  substitute: string;\n}",
+          "doc": "A substitution between the viewed document and one source. Filed at\nwhichever of the two lines the viewed document carries — `replaced` on the\nside without the swap, `substitute` on the side with it — so the entry always\nlands on a row. The other key names the source's line.\n\nBoth keys are in the VIEWED document's path space, like every map key."
         },
         {
           "kind": "interface",

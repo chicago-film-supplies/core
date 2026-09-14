@@ -24548,7 +24548,7 @@ interface DocumentDiffContext {
 One entry at one key of the viewed document. Discriminated on `kind`.
 
 ```ts
-type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry;
+type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry;
 ```
 
 ### `DocumentDiffField`
@@ -24570,9 +24570,10 @@ interface DocumentDiffField {
 - `missing_here` — on the source, absent from the viewed document
 - `pair_field` — a destination pair's compared field disagrees
 - `uninvoiced` — an order/fulfillment line that no invoice carries
+- `substituted` — one side carries a substitute where the other carries the line it replaced
 
 ```ts
-type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field" | "uninvoiced";
+type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field" | "uninvoiced" | "substituted";
 ```
 
 ### `DocumentDiffMap`
@@ -24631,9 +24632,27 @@ One source's difference at one key of the viewed document.
 
 ```ts
 interface DocumentSourceDiffEntry {
-  kind: Exclude<DocumentDiffKind, "uninvoiced">;
+  kind: Exclude<DocumentDiffKind, "uninvoiced" | "substituted">;
   source: DocumentRef;
   fields: DocumentDiffField[];
+}
+```
+
+### `DocumentSubstitutionEntry`
+
+A substitution between the viewed document and one source. Filed at
+whichever of the two lines the viewed document carries — `replaced` on the
+side without the swap, `substitute` on the side with it — so the entry always
+lands on a row. The other key names the source's line.
+
+Both keys are in the VIEWED document's path space, like every map key.
+
+```ts
+interface DocumentSubstitutionEntry {
+  kind: "substituted";
+  source: DocumentRef;
+  replaced: string;
+  substitute: string;
 }
 ```
 

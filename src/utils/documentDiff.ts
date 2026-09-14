@@ -70,6 +70,23 @@
  * sync badge's, reused rather than restated, so this can never report a
  * difference the badge has explained away.
  *
+ * ## A substitution is ONE difference, never a pair of presence entries
+ *
+ * A picker or an invoice can carry Y in place of the order's X
+ * (`path_substituted_for` names X's order path). Reported by presence alone,
+ * that is X `only_here` + Y `missing_here` (+ X `uninvoiced` against an
+ * invoice) — two or three unrelated-looking rows for one swap. Instead:
+ *
+ * - **the document without the swap** gets one `substituted` entry at X, and
+ *   neither X's absence, Y's presence nor either subtree's is reported;
+ * - **the document with the swap** gets one `substituted` entry at Y, and Y's
+ *   components (which exist on no order line) are not reported;
+ * - **against invoices**, an aligned invoice that substituted X covers X, so X
+ *   is not `uninvoiced`.
+ *
+ * Only when the other side carries X. A Y whose X is on neither document is an
+ * ordinary presence difference, and is reported as one.
+ *
  * Pure: no reads. A source the caller did not pass (no permission, not loaded)
  * yields no entries — never an "in sync" answer.
  */
@@ -93,7 +110,12 @@ import {
   projectOrderItemToInvoiceItem,
 } from "./invoices.ts";
 import type { LineItem } from "./orders.ts";
-import { collectSubstitutionAnchors, isRemovedBySubstitution, type SubstitutionAnchor } from "./substitutions.ts";
+import {
+  collectSubstitutionAnchors,
+  isInSubstitutedSubtree,
+  isRemovedBySubstitution,
+  type SubstitutionAnchor,
+} from "./substitutions.ts";
 
 /** The three document kinds a diff can be viewed from or sourced from. */
 export type DocumentKind = "order" | "fulfillment" | "invoice";
@@ -112,8 +134,9 @@ export interface DocumentRef {
  * - `missing_here` — on the source, absent from the viewed document
  * - `pair_field` — a destination pair's compared field disagrees
  * - `uninvoiced` — an order/fulfillment line that no invoice carries
+ * - `substituted` — one side carries a substitute where the other carries the line it replaced
  */
-export type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field" | "uninvoiced";
+export type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field" | "uninvoiced" | "substituted";
 
 /** One compared field. `here` is the viewed document's value, `there` the source's. */
 export interface DocumentDiffField {
@@ -124,7 +147,7 @@ export interface DocumentDiffField {
 
 /** One source's difference at one key of the viewed document. */
 export interface DocumentSourceDiffEntry {
-  kind: Exclude<DocumentDiffKind, "uninvoiced">;
+  kind: Exclude<DocumentDiffKind, "uninvoiced" | "substituted">;
   source: DocumentRef;
   /** Empty for `only_here` / `missing_here`. */
   fields: DocumentDiffField[];
@@ -139,8 +162,25 @@ export interface DocumentUninvoicedEntry {
   invoices: DocumentRef[];
 }
 
+/**
+ * A substitution between the viewed document and one source. Filed at
+ * whichever of the two lines the viewed document carries — `replaced` on the
+ * side without the swap, `substitute` on the side with it — so the entry always
+ * lands on a row. The other key names the source's line.
+ *
+ * Both keys are in the VIEWED document's path space, like every map key.
+ */
+export interface DocumentSubstitutionEntry {
+  kind: "substituted";
+  source: DocumentRef;
+  /** X — the line the substitution replaced. */
+  replaced: string;
+  /** Y — the line carried in its place. */
+  substitute: string;
+}
+
 /** One entry at one key of the viewed document. Discriminated on `kind`. */
-export type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry;
+export type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry;
 
 /**
  * The answer for one viewed document.
@@ -318,7 +358,14 @@ function push<K>(map: Map<K, DocumentDiffEntry[]>, k: K, entry: DocumentDiffEntr
  */
 interface InvoiceCoverage {
   keys: ReadonlySet<string>;
+  /** Every aligned invoice's substitution anchors — a substituted-away line (and its subtree) is billed as its substitute. */
+  anchors: readonly SubstitutionAnchor[];
   invoices: DocumentRef[];
+}
+
+/** Does some aligned invoice bill this order-relative line, directly or as a substitute? */
+function covers(coverage: InvoiceCoverage, rel: string): boolean {
+  return coverage.keys.has(rel) || isRemovedBySubstitution(rel.split("/"), coverage.anchors);
 }
 
 /** Compare the viewed side against one source side, within one order scope. */
@@ -340,13 +387,45 @@ function compareScope(
     push(out.lines, k, { kind: "uninvoiced", invoices: coverage.invoices });
   };
 
+  /** The anchor that makes `rel` itself a substitute on `side`, if any. */
+  const substituteAt = (side: Side, rel: string) => side.lines.anchors.find((a) => key(a.path) === rel);
+  const substituted = (at: string, replaced: string, substitute: string) =>
+    push(out.lines, viewedKey(at), { kind: "substituted", source: sourceRef, replaced: viewedKey(replaced), substitute: viewedKey(substitute) });
+  /**
+   * Is this line inside a substitution the OTHER side can see — a component of
+   * substitute Y (strictly below Y) on `side`, or X or a component of X that a
+   * substitute on `side` replaced — where `other` carries the replaced X? Such
+   * a line is explained by the one `substituted` entry and reports nothing.
+   */
+  const explainedBy = (side: Side, other: Side, rel: string): boolean => {
+    const path = rel.split("/");
+    return side.lines.anchors.some((a) =>
+      other.lines.byKey.has(key(a.substitutedFor)) &&
+      (isInSubstitutedSubtree(path, [a]) || (isRemovedBySubstitution(path, [a]) && key(a.substitutedFor) !== rel))
+    );
+  };
+
   for (const [rel, here] of viewed.lines.byKey) {
     if (!comparable(viewed, source, here)) continue;
     const there = source.lines.byKey.get(rel);
     if (there === undefined) {
+      // The viewed document carries a substitute Y where the source carries X.
+      const mine = substituteAt(viewed, rel);
+      if (mine && source.lines.byKey.has(key(mine.substitutedFor))) {
+        substituted(rel, key(mine.substitutedFor), rel);
+        continue;
+      }
+      // The source substituted this line away: one entry here, at X.
+      const theirs = source.lines.anchors.find((a) => key(a.substitutedFor) === rel);
+      if (theirs) {
+        substituted(rel, rel, key(theirs.path));
+        continue;
+      }
+      if (explainedBy(viewed, source, rel) || explainedBy(source, viewed, rel)) continue;
       if (source.kind === "invoice") {
         // Presence against invoices is a question about ALL of them.
-        if (coverage.invoices.length > 0 && !coverage.keys.has(rel)) uninvoiced(rel);
+        if (mine && covers(coverage, key(mine.substitutedFor))) continue;
+        if (coverage.invoices.length > 0 && !covers(coverage, rel)) uninvoiced(rel);
         continue;
       }
       push(out.lines, viewedKey(rel), { source: sourceRef, kind: "only_here", fields: [] });
@@ -357,11 +436,16 @@ function compareScope(
   }
   for (const [rel, there] of source.lines.byKey) {
     if (viewed.lines.byKey.has(rel) || !comparable(source, viewed, there)) continue;
-    // A line the viewed document substituted away is explained by the substitute's own `only_here`.
+    // A line the viewed document substituted away is explained by the substitute's own entry.
     if (isRemovedBySubstitution(rel.split("/"), viewed.lines.anchors)) continue;
+    // A substitute (or its component) the source carries in place of a line the
+    // viewed document has is explained by the `substituted` entry at that line.
+    const theirs = substituteAt(source, rel);
+    if (theirs && viewed.lines.byKey.has(key(theirs.substitutedFor))) continue;
+    if (explainedBy(source, viewed, rel)) continue;
     if (viewed.kind === "invoice") {
       // The order or fulfillment has it and this invoice does not: a sibling may bill it.
-      if (coverage.keys.has(rel)) continue;
+      if (covers(coverage, rel)) continue;
       if (coverage.invoices.length > 0) uninvoiced(rel);
       continue;
     }
@@ -427,15 +511,18 @@ export function computeDocumentDiffs(
   /** Every aligned invoice passed for `orderUid`, with the union of the lines they carry. */
   const coverageOf = (orderUid: string): InvoiceCoverage & { alignedInvoices: Invoice[] } => {
     const keys = new Set<string>();
+    const anchors: SubstitutionAnchor[] = [];
     const refs: DocumentRef[] = [];
     const alignedInvoices: Invoice[] = [];
     for (const invoice of invoices) {
       if (!invoiceScopes(invoice).includes(orderUid) || !aligned(invoice, orderUid)) continue;
       alignedInvoices.push(invoice);
       refs.push(refOf("invoice", invoice));
-      for (const k of scopeInvoice(invoice, orderUid).byKey.keys()) keys.add(k);
+      const scoped = scopeInvoice(invoice, orderUid);
+      for (const k of scoped.byKey.keys()) keys.add(k);
+      anchors.push(...scoped.anchors);
     }
-    return { keys, invoices: refs, alignedInvoices };
+    return { keys, anchors, invoices: refs, alignedInvoices };
   };
 
   /** An order- or fulfillment-shaped viewed side against every invoice on its order. */

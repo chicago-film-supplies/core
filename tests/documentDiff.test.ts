@@ -86,6 +86,8 @@ function summary(map: DocumentDiffMap["lines"] | DocumentDiffMap["pairs"]): Reco
     out[k] = entries.map((e) =>
       e.kind === "uninvoiced"
         ? `uninvoiced[${e.invoices.map((i) => `#${i.number}`).join(",")}]`
+        : e.kind === "substituted"
+        ? `${e.source.kind}#${e.source.number}:substituted(${e.replaced}→${e.substitute})`
         : `${e.source.kind}#${e.source.number}:${e.kind}` +
           (e.fields.length ? `(${e.fields.map((f) => `${f.field}=${JSON.stringify(f.here)}→${JSON.stringify(f.there)}`).join(",")})` : "")
     );
@@ -295,16 +297,84 @@ Deno.test("documentDiff: jurisdiction is never compared against a fulfillment, o
   assertEquals(Object.keys(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).pairs)), [D]);
 });
 
-Deno.test("documentDiff: a substituted-away line is explained by its substitute, not reported missing", () => {
+const MONOPOD = "prod-monopod";
+
+/** Replace the line at `pathKey` with a substitute `uid` at the same parent, as a picker or invoice does. */
+function substitute<T extends { path: string[] }>(rows: T[], pathKey: string, uid: string, prefix: string[] = []): void {
+  const at = rows.findIndex((it) => it.path.join("/") === pathKey);
+  if (at < 0) throw new Error(`no line at ${pathKey}`);
+  const replacedPath = rows[at].path.slice(prefix.length);
+  rows.splice(at, 1, {
+    uid, type: "rental", name: "Monopod", description: "", quantity: 1,
+    path: [...rows[at].path.slice(0, -1), uid],
+    path_substituted_for: replacedPath,
+  } as unknown as T);
+}
+
+Deno.test("documentDiff: a fulfillment substitution is ONE entry at the substitute on the fulfillment view", () => {
+  const f = fulfillment();
+  substitute(f.items as unknown as LineItem[], `${D}/${G}/${TRIPOD}`, MONOPOD);
+  const diff = computeDocumentDiffs({ orders: [order()], fulfillments: [f] }, { kind: "fulfillment", uid: O }, CONTEXT);
+  assertEquals(summary(diff.lines), { [`${D}/${G}/${MONOPOD}`]: [`order#1001:substituted(${D}/${G}/${TRIPOD}→${D}/${G}/${MONOPOD})`] });
+});
+
+Deno.test("documentDiff: a fulfillment substitution is ONE entry at the replaced line on the order view — no only_here, no missing_here", () => {
+  const f = fulfillment();
+  substitute(f.items as unknown as LineItem[], `${D}/${G}/${TRIPOD}`, MONOPOD);
+  const diff = computeDocumentDiffs({ orders: [order()], fulfillments: [f] }, { kind: "order", uid: O }, CONTEXT);
+  assertEquals(summary(diff.lines), { [`${D}/${G}/${TRIPOD}`]: [`fulfillment#1001:substituted(${D}/${G}/${TRIPOD}→${D}/${G}/${MONOPOD})`] });
+});
+
+Deno.test("documentDiff: substituting a KIT explains the replaced kit's components and the substitute's components too", () => {
+  const KIT = "prod-kit";
+  const items = [...orderItems(), line(KIT, [D, KIT], 1, 5000), line("comp-a", [D, KIT, "comp-a"], 2, 0)];
+  const f = fulfillment(items);
+  const rows = f.items as unknown as LineItem[];
+  const at = rows.findIndex((it) => it.path.join("/") === `${D}/${KIT}`);
+  // Y replaces the kit and its component; Y carries a component of its own.
+  rows.splice(at, 2,
+    { uid: "prod-alt", type: "rental", name: "Alt", description: "", quantity: 1, path: [D, "prod-alt"], path_substituted_for: [D, KIT] } as unknown as LineItem,
+    { uid: "comp-b", type: "rental", name: "B", description: "", quantity: 1, path: [D, "prod-alt", "comp-b"] } as unknown as LineItem,
+  );
+  const sources = { orders: [order(items)], fulfillments: [f] };
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
+    [`${D}/${KIT}`]: [`fulfillment#1001:substituted(${D}/${KIT}→${D}/prod-alt)`],
+  });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
+    [`${D}/prod-alt`]: [`order#1001:substituted(${D}/${KIT}→${D}/prod-alt)`],
+  });
+});
+
+Deno.test("documentDiff: an invoice substitution covers the replaced line — substituted, never uninvoiced — from the order view", () => {
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  substitute(inv.items, `${O}/${D}/${G}/${TRIPOD}`, MONOPOD, [O]);
+  const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv] }, { kind: "order", uid: O }, CONTEXT);
+  assertEquals(summary(diff.lines), { [`${D}/${G}/${TRIPOD}`]: [`invoice#2241:substituted(${D}/${G}/${TRIPOD}→${D}/${G}/${MONOPOD})`] });
+});
+
+Deno.test("documentDiff: on the invoice view a substitute is keyed in the invoice's own path space", () => {
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  substitute(inv.items, `${O}/${D}/${G}/${TRIPOD}`, MONOPOD, [O]);
+  const diff = computeDocumentDiffs({ orders: [order()], fulfillments: [fulfillment()], invoices: [inv] }, { kind: "invoice", uid: "inv-1" }, CONTEXT);
+  const entry = `${O}/${D}/${G}/${TRIPOD}→${O}/${D}/${G}/${MONOPOD}`;
+  assertEquals(summary(diff.lines), { [`${O}/${D}/${G}/${MONOPOD}`]: [`order#1001:substituted(${entry})`, `fulfillment#1001:substituted(${entry})`] });
+});
+
+Deno.test("documentDiff: a sibling invoice's substitution covers the line for every other invoice", () => {
+  const billed = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  substitute(billed.items, `${O}/${D}/${G}/${TRIPOD}`, MONOPOD, [O]);
+  const sibling = invoice("inv-2", [{ order: O, items: orderItems().filter((it) => it.uid !== TRIPOD) }], 2242);
+  const diff = computeDocumentDiffs({ orders: [order()], invoices: [billed, sibling] }, { kind: "invoice", uid: "inv-2" }, CONTEXT);
+  assertEquals(summary(diff.lines), {});
+});
+
+Deno.test("documentDiff: a substitute whose replaced line the other side does NOT carry is an ordinary presence difference", () => {
   const f = fulfillment();
   const rows = f.items as unknown as LineItem[];
-  const at = rows.findIndex((it) => it.path.join("/") === `${D}/${G}/${TRIPOD}`);
-  rows.splice(at, 1, {
-    uid: "prod-monopod", type: "rental", name: "Monopod", description: "", quantity: 1,
-    path: [D, G, "prod-monopod"], path_substituted_for: [D, G, TRIPOD],
-  } as unknown as LineItem);
-  const diff = computeDocumentDiffs({ orders: [order()], fulfillments: [f] }, { kind: "fulfillment", uid: O }, CONTEXT);
-  assertEquals(summary(diff.lines), { [`${D}/${G}/prod-monopod`]: ["order#1001:only_here"] });
+  rows.push({ uid: MONOPOD, type: "rental", name: "Monopod", description: "", quantity: 1, path: [D, MONOPOD], path_substituted_for: [D, "gone"] } as unknown as LineItem);
+  const sources = { orders: [order()], fulfillments: [f] };
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), { [`${D}/${MONOPOD}`]: ["order#1001:only_here"] });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), { [`${D}/${MONOPOD}`]: ["fulfillment#1001:missing_here"] });
 });
 
 Deno.test("documentDiff: a transaction fee is compared order ↔ invoice but never against a fulfillment", () => {
