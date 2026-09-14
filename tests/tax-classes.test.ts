@@ -24,11 +24,14 @@ import {
   TaxCodeSchema,
   TaxRateSchema,
 } from "../src/schemas/mod.ts";
-import { assignLineTaxes, resolveLineTax } from "../src/utils/taxes.ts";
+import { assignLineTaxes, COLLECTING_JURISDICTIONS } from "../src/utils/taxes.ts";
+import { legacyAssignLineTaxes, legacyResolveLineTax } from "./helpers/legacyTaxRule.ts";
 import type { LineItem, Tax } from "../src/utils/orders.ts";
 import {
+  deriveLineTaxClass,
   lineTaxClass,
   migrateLegacyTaxCatalog,
+  pricingTaxesOf,
   resolveClassTaxes,
   type TaxCatalog,
   taxClassMatrix,
@@ -215,7 +218,7 @@ const AS_OFS = [
 
 const sorted = (xs: string[]) => [...xs].sort();
 
-Deno.test("parity: the class rule reprices every (shape × jurisdiction × instant × exemption) like the legacy rule", () => {
+Deno.test("parity: the SWITCHED rule reprices every (shape × jurisdiction × instant × exemption) like the legacy rule", () => {
   let compared = 0;
   const knownDifferences: string[] = [];
 
@@ -224,48 +227,36 @@ Deno.test("parity: the class rule reprices every (shape × jurisdiction × insta
       for (const asOf of AS_OFS) {
         for (const exempt of [false, true]) {
           const origin = jurisdiction === "no_nexus" ? "chicago" : jurisdiction;
+          const shared = { destinations: [{ uid: null, jurisdiction, delivery: null }], origin, exempt, asOf } as const;
+
+          // Legacy: the pre-switch rule, frozen in tests/helpers/legacyTaxRule.ts.
+          const legacyItem = legacyLine(type, taxedAs, bottle);
+          legacyAssignLineTaxes([legacyItem], { ...shared, taxes: LEGACY as unknown as Tax[] });
+          // New: the real `assignLineTaxes`, on an UNSTAMPED line — so the class
+          // comes from `deriveLineTaxClass`, not from a mapping written here.
           const item = legacyLine(type, taxedAs, bottle);
-          const ctx = {
-            destinations: [{ uid: null, jurisdiction, delivery: null }],
-            origin,
-            exempt,
-            taxes: LEGACY as unknown as Tax[],
-            asOf,
-          } as const;
+          assignLineTaxes([item], { ...shared, catalog: CATALOG });
 
-          // Stage 2 comes from the legacy rule and is NOT under test here:
-          // the class resolver takes jurisdiction and exemption as inputs.
-          const stage2 = resolveLineTax(item, ctx.destinations[0], ctx);
-          assignLineTaxes([item], ctx);
-          const price = item.price as { taxes: Array<{ uid: string }>; taxes_base: Array<{ uid: string }> };
-          const legacyApplied = sorted(price.taxes.map((t) => t.uid));
-          const legacyBase = sorted(price.taxes_base.map((t) => t.uid));
-
-          const next = resolveClassTaxes(
-            classForLegacy(type, taxedAs, bottle),
-            stage2.jurisdiction,
-            stage2.exempt,
-            asOf,
-            CATALOG,
-          );
-          const nextApplied = sorted(next.applied.map((a) => a.rate.uid));
-          // Legacy `taxes_base` holds only the rule's tax, never an explicit-only ref.
-          const nextBase = sorted(next.base.filter((a) => a.code.type === "percent").map((a) => a.rate.uid));
-
+          type P = { taxes: Array<{ uid: string; amount_cents: number }>; taxes_base: Array<{ uid: string }>; total_cents: number };
+          const was = legacyItem.price as unknown as P;
+          const now = item.price as unknown as P;
           const label = `${type}/${taxedAs}/${bottle ? "bottle" : "-"} ${jurisdiction} ${asOf} exempt=${exempt}`;
           compared++;
 
           // F3: the legacy explicit-only branch checks no window, so it applies
           // the bottle levy BEFORE the levy's applied_from. The class rule does not.
+          const stage2 = legacyResolveLineTax(legacyLine(type, taxedAs, bottle), shared.destinations[0], { ...shared, taxes: LEGACY as unknown as Tax[] });
           const bottleBeforeWindow = bottle && stage2.jurisdiction === "chicago" && !exempt &&
             Date.parse(asOf) < Date.parse("2026-03-27T00:00:00.000-05:00");
-          if (bottleBeforeWindow) {
-            assertEquals(nextApplied, legacyApplied.filter((u) => u !== BOTTLE_RATE_UID), label);
-            knownDifferences.push(label);
-          } else {
-            assertEquals(nextApplied, legacyApplied, label);
-          }
-          assertEquals(nextBase, legacyBase, label);
+          const wasTaxes = bottleBeforeWindow ? was.taxes.filter((t) => t.uid !== BOTTLE_RATE_UID) : was.taxes;
+          if (bottleBeforeWindow) knownDifferences.push(label);
+
+          assertEquals(sorted(now.taxes.map((t) => `${t.uid}:${t.amount_cents}`)), sorted(wasTaxes.map((t) => `${t.uid}:${t.amount_cents}`)), label);
+          if (!bottleBeforeWindow) assertEquals(now.total_cents, was.total_cents, label);
+          // Legacy `taxes_base` held only the rule's percent tax; the class rule
+          // also records a flat code of the class (the levy), by design.
+          const percent = (uids: string[]) => sorted(uids.filter((u) => u !== BOTTLE_RATE_UID));
+          assertEquals(percent(now.taxes_base.map((t) => t.uid)), percent(was.taxes_base.map((t) => t.uid)), label);
         }
       }
     }
@@ -274,6 +265,34 @@ Deno.test("parity: the class rule reprices every (shape × jurisdiction × insta
   assertEquals(compared, SHAPES.length * JURISDICTIONS.length * AS_OFS.length * 2);
   // Denominator for the one intended difference, so it cannot silently stop being exercised.
   assertEquals(knownDifferences.length, 6);
+});
+
+Deno.test("deriveLineTaxClass: an unstamped line maps to the class the legacy key named", () => {
+  for (const [type, taxedAs, bottle] of SHAPES) {
+    const derived = deriveLineTaxClass(legacyLine(type, taxedAs, bottle) as never, CATALOG);
+    const expected = classForLegacy(type, taxedAs, bottle);
+    // `none` derives to no class at all; Non-Taxable prices identically ([] codes).
+    assertEquals(derived ?? CLASS_UID.none, expected, `${type}/${taxedAs}/${bottle}`);
+  }
+});
+
+Deno.test("deriveLineTaxClass: a stamp and an override win over the legacy key", () => {
+  const line = { type: "sale", uid_tax_class: CLASS_UID.rental, uid_tax_class_override: null };
+  assertEquals(deriveLineTaxClass(line, CATALOG), CLASS_UID.rental);
+  assertEquals(deriveLineTaxClass({ ...line, uid_tax_class_override: CLASS_UID.none }, CATALOG), CLASS_UID.none);
+});
+
+Deno.test("deriveLineTaxClass: an ambiguous carried code keeps the default rather than guessing", () => {
+  const twin = { ...CLASS_BY_UID(CLASS_UID.bottled), uid: "twinclass00000000000", name: "Twin" };
+  const catalog = { ...CATALOG, classes: [...CLASSES, twin] };
+  assertEquals(deriveLineTaxClass(legacyLine("sale", null, true) as never, catalog), CLASS_UID.sale);
+});
+
+Deno.test("pricingTaxesOf: one entry per rate, named by its code, legacy uids intact", () => {
+  const pricing = pricingTaxesOf(CATALOG);
+  assertEquals(pricing.length, RATES.length);
+  assertEquals(sorted(pricing.map((p) => p.uid)), sorted(LEGACY.filter((t) => t.name !== "No Tax").map((t) => t.uid)));
+  assertEquals(pricing.find((p) => p.uid === BOTTLE_RATE_UID)?.name, "Chicago Bottled Water Tax");
 });
 
 Deno.test("parity: the lapsed-review fall-forward is reported as expired, not dropped", () => {
@@ -335,7 +354,7 @@ Deno.test("lineTaxClass: the override beats the snapshot, and absence is null", 
 });
 
 Deno.test("taxClassMatrix: one row per active class, a cell per collecting jurisdiction", () => {
-  const m = taxClassMatrix(CATALOG, "2026-09-13T00:00:00.000-05:00");
+  const m = taxClassMatrix(CATALOG, "2026-09-13T00:00:00.000-05:00", COLLECTING_JURISDICTIONS);
   const bottled = m.find((row) => row.tax_class.uid === CLASS_UID.bottled)!;
   assertEquals(
     bottled.cells.map((c) => [c.jurisdiction, sorted(c.rates.map((r) => `${r.name} ${r.rate}`))]),

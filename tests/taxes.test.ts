@@ -12,6 +12,9 @@ import {
   type TaxDestination,
 } from "../src/utils/taxes.ts";
 import type { LineItem, Tax } from "../src/utils/orders.ts";
+import { migrateLegacyTaxCatalog, type TaxCatalog } from "../src/utils/tax-classes.ts";
+import type { Tax as TaxDoc } from "../src/schemas/mod.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const lineItemBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
 const priceBase = lineItemBase.price as Record<string, unknown>;
@@ -175,15 +178,48 @@ const at = (
   },
 });
 
+/**
+ * A legacy-shaped fixture catalog → the class catalog the rule reads, through
+ * the same `migrateLegacyTaxCatalog` the backfill ran. The fixtures stay
+ * readable as `(jurisdiction, item_types, window)` rows; what prices is the
+ * migrated codes × rates × classes.
+ *
+ * ⚠️ An explicit-only row with `jurisdiction: null` has no code to become, so
+ * it drops out — exactly as prod's "No Tax" did.
+ */
+function catalogOf(taxes: Tax[]): TaxCatalog {
+  let n = 0;
+  const docs = taxes.map((t) => ({
+    crms_id: null,
+    effective_from: null,
+    applied_from_fs: mockTimestamp,
+    applied_to_fs: t.applied_to == null ? null : mockTimestamp,
+    xero_components: [],
+    xero_tax_type: null,
+    xero_account_code: null,
+    xero_item_code: null,
+    version: 0,
+    ...t,
+  }) as unknown as TaxDoc);
+  return migrateLegacyTaxCatalog(docs, { codes: [], rates: [], classes: [] }, {
+    actor: { uid: "testuser100000000000", name: "Test User" },
+    now: mockTimestamp,
+    mintUid: () => `fixture${String(++n).padStart(13, "0")}`,
+  });
+}
+
 /** The context, with everything defaulted to "an ordinary Chicago document". */
-const ctx = (overrides: Partial<DocumentTaxContext> = {}): DocumentTaxContext => ({
-  destinations: [at("Chicago")],
-  origin: "chicago",
-  exempt: false,
-  taxes: CATALOG,
-  asOf: AS_OF,
-  ...overrides,
-});
+const ctx = (overrides: Partial<DocumentTaxContext> & { taxes?: Tax[] } = {}): DocumentTaxContext => {
+  const { taxes = CATALOG, ...rest } = overrides;
+  return {
+    destinations: [at("Chicago")],
+    origin: "chicago",
+    exempt: false,
+    catalog: catalogOf(taxes),
+    asOf: AS_OF,
+    ...rest,
+  };
+};
 
 Deno.test("the rule: a Chicago rental resolves Chicago Rental Tax and prices it", () => {
   const items = [makeItem()];
@@ -331,7 +367,7 @@ Deno.test("🔴 …and EXEMPTION does not reach a replacement — CFS is the buy
 
   const resolved = resolveLineTax(items[0], at("Frankfort"), ctx({ exempt: true }));
   assertEquals(resolved.exempt, false);
-  assertEquals(resolved.tax?.uid, "chi-sales-tax");
+  assertEquals(resolved.applied.map((a) => a.rate.uid), ["chi-sales-tax"]);
 });
 
 Deno.test("🔴 an out-of-state REPLACEMENT is taxed, where the old rule exempted it", () => {
@@ -402,121 +438,83 @@ Deno.test("an ABSENT coa_revenue is not a special case any more", () => {
   assertEquals(px(noCoa[0]).taxes.length, 1);
 });
 
-// ── Explicit-only refs ───────────────────────────────────────────
+// ── The bottle levy is a CLASS member now ────────────────────────
+//
+// Until the reader switch (api-cloudrun#993) the levy was an explicit-only ref
+// that had to ride every rebuild of the line. It is now a code in the migrated
+// "Sale – Bottled Water" class; an UNSTAMPED line that still carries the ref
+// derives that class (`deriveLineTaxClass`), which is what these fixtures do.
 
-Deno.test("🔴 an explicit-only tax ref on the line SURVIVES the rebuild", () => {
-  // `Water Bottle Tax` is the `jurisdiction: null` class — reachable by uid
-  // alone and invisible to `findTaxFor` by construction. It rides a line
-  // because the PRODUCT carries the ref, so rebuilding from the rule alone
-  // would silently drop a real charge.
-  const items = [makeItem({}, {
-    taxes: [
-      { uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 1500 },
-      { uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat", amount_cents: 5 },
-    ],
-  })];
-  materializeDocumentTax(items, ctx({ destinations: [at("Frankfort")] }));
-  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax", "bottle-tax"]);
-});
+/** CATALOG with the levy scoped to Chicago — the prod shape, and the only one that migrates. */
+const BOTTLED: Tax[] = CATALOG.map((t) => t.uid === "bottle-tax" ? { ...t, jurisdiction: "chicago" as const } : t);
+const bottleRef = [{ uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat" as const, amount_cents: 0 }];
 
-Deno.test("🔴 a SCOPED explicit-only tax applies only in its own jurisdiction", () => {
-  // "5¢ per bottle SOLD IN CHICAGO" — the levy is carried by the product, not
-  // found by the rule, so the scope is the only thing that can stop it being
-  // charged on a case delivered to Frankfort.
-  const scoped: Tax[] = CATALOG.map((t) =>
-    t.uid === "bottle-tax" ? { ...t, jurisdiction: "chicago" as const } : t
-  );
-  const bottleRef = [{
-    uid: "bottle-tax",
-    name: "Water Bottle Tax",
-    rate: 0.05,
-    type: "flat" as const,
-    amount_cents: 0,
-  }];
-
+Deno.test("🔴 the levy applies only in its own jurisdiction", () => {
   const chicago = [makeItem({ type: "sale", quantity: 24 }, { taxes: bottleRef })];
-  materializeDocumentTax(chicago, ctx({ taxes: scoped }));
-  assertEquals(px(chicago[0]).taxes.map((t) => t.uid), ["chi-sales-tax", "bottle-tax"]);
+  materializeDocumentTax(chicago, ctx({ taxes: BOTTLED }));
+  assertEquals(px(chicago[0]).taxes.map((t) => t.uid).sort(), ["bottle-tax", "chi-sales-tax"]);
   // 24 units × $0.05 — a flat tax reads the QUANTITY, never the subtotal.
-  assertEquals(px(chicago[0]).taxes[1].amount_cents, 120);
+  assertEquals(px(chicago[0]).taxes.find((t) => t.uid === "bottle-tax")?.amount_cents, 120);
 
   const frankfort = [makeItem({ type: "sale", quantity: 24 }, { taxes: bottleRef })];
-  materializeDocumentTax(frankfort, ctx({ taxes: scoped, destinations: [at("Frankfort")] }));
-  assertEquals(
-    px(frankfort[0]).taxes.map((t) => t.uid),
-    ["frankfort-tax"],
-    "Chicago's levy must not follow the case out of Chicago",
-  );
+  materializeDocumentTax(frankfort, ctx({ taxes: BOTTLED, destinations: [at("Frankfort")] }));
+  assertEquals(px(frankfort[0]).taxes.map((t) => t.uid), ["frankfort-tax"], "Chicago's levy must not follow the case out of Chicago");
 });
 
-Deno.test("…and an UNSCOPED explicit-only tax still applies everywhere", () => {
-  // `No Tax` and any future unscoped member: `jurisdiction: null` means "no
-  // scope", not "no jurisdiction matches".
-  const items = [makeItem({ type: "sale", quantity: 10 }, {
-    taxes: [{ uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat", amount_cents: 0 }],
-  })];
-  materializeDocumentTax(items, ctx({ destinations: [at("Frankfort")] }));
-  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax", "bottle-tax"]);
+Deno.test("🔴 …and the class, not the ref, decides — a re-rated Frankfort line regains the levy back in Chicago", () => {
+  // The legacy ref was LOST the first time a line priced outside Chicago (the
+  // rebuild wrote `taxes` without it). A stamped class cannot be lost that way.
+  const items = [makeItem({ type: "sale", quantity: 2 }, { taxes: bottleRef })];
+  const catalog = catalogOf(BOTTLED);
+  const bottled = catalog.classes.find((c) => c.name === "Sale – Bottled Water")!.uid;
+  (items[0] as unknown as { uid_tax_class: string }).uid_tax_class = bottled;
+  materializeDocumentTax(items, { ...ctx(), catalog, destinations: [at("Frankfort")] });
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax"]);
+  materializeDocumentTax(items, { ...ctx(), catalog });
+  assertEquals(px(items[0]).taxes.map((t) => t.uid).sort(), ["bottle-tax", "chi-sales-tax"]);
 });
 
-Deno.test("🔴 taxes STACK on one line — a percent and a flat, priced independently", () => {
-  // The engine has always summed every ref; what changed is that the rule now
-  // AUTHORS more than one. A $100 case of water in Chicago owes 10.5% sales tax
-  // on the price AND 5¢ per bottle on the count, and the two are computed from
-  // different inputs — `subtotal_discounted_cents` vs `quantity`.
-  const scoped: Tax[] = CATALOG.map((t) =>
-    t.uid === "bottle-tax" ? { ...t, jurisdiction: "chicago" as const } : t
-  );
+Deno.test("🔴 taxes STACK on one line — a percent and a flat, priced independently, never compounded", () => {
   // $100/unit × 24 = $2,400 — `materializeDocumentTax` REPRICES, so the
   // subtotal is recomputed from the line rather than taken from the fixture.
-  const items = [makeItem({ type: "sale", quantity: 24 }, {
-    taxes: [{ uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat", amount_cents: 0 }],
-  })];
-  materializeDocumentTax(items, ctx({ taxes: scoped }));
+  const items = [makeItem({ type: "sale", quantity: 24 }, { taxes: bottleRef })];
+  materializeDocumentTax(items, ctx({ taxes: BOTTLED }));
   assertEquals(pxFull(items[0]).subtotal_discounted_cents, 240_000);
-  const [sales, bottle] = px(items[0]).taxes;
-  assertEquals(sales.uid, "chi-sales-tax");
-  assertEquals(sales.amount_cents, 25_200, "10.5% of the $2,400 subtotal");
-  assertEquals(bottle.uid, "bottle-tax");
+  const sales = px(items[0]).taxes.find((t) => t.uid === "chi-sales-tax")!;
+  const bottle = px(items[0]).taxes.find((t) => t.uid === "bottle-tax")!;
+  assertEquals(sales.amount_cents, 25_200, "10.5% of the $2,400 subtotal — the levy is not in the base");
   assertEquals(bottle.amount_cents, 120, "24 bottles × 5¢ — the QUANTITY, not the price");
   assertEquals(px(items[0]).total_cents, 240_000 + 25_200 + 120);
 });
 
 Deno.test("…and a ZERO-PRICED line still owes the flat tax", () => {
-  // The shape the bottled-water restructure produces: the priced CASE line
-  // carries sales tax, its zero-priced BOTTLE child carries the levy. A flat
-  // tax reads the quantity, so a $0 line is not a $0 levy.
-  const scoped: Tax[] = CATALOG.map((t) =>
-    t.uid === "bottle-tax" ? { ...t, jurisdiction: "chicago" as const } : t
-  );
   const items = [makeItem({ type: "sale", quantity: 24, zero_priced: true }, {
     base_cents: 0,
     subtotal_cents: 0,
     subtotal_discounted_cents: 0,
-    taxes: [{ uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat", amount_cents: 0 }],
+    taxes: bottleRef,
   })];
-  materializeDocumentTax(items, ctx({ taxes: scoped }));
-  const bottle = px(items[0]).taxes.find((t) => t.uid === "bottle-tax");
-  assertEquals(bottle?.amount_cents, 120);
+  materializeDocumentTax(items, ctx({ taxes: BOTTLED }));
+  assertEquals(px(items[0]).taxes.find((t) => t.uid === "bottle-tax")?.amount_cents, 120);
   assertEquals(px(items[0]).total_cents, 120);
 });
 
 Deno.test("…and an exempt document drops it too — a tax is a tax", () => {
-  const items = [makeItem({}, {
-    taxes: [{ uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat", amount_cents: 5 }],
-  })];
-  materializeDocumentTax(items, ctx({ exempt: true }));
+  const items = [makeItem({ type: "sale" }, { taxes: bottleRef })];
+  materializeDocumentTax(items, ctx({ taxes: BOTTLED, exempt: true }));
   assertEquals(px(items[0]).taxes, []);
+  assertEquals(pxFull(items[0]).taxes_base, [
+    { uid: "chi-sales-tax", name: "Chicago Sales Tax", rate: 10.5, type: "percent" },
+    { uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, type: "flat" },
+  ], "taxes_base names every tax the line was exempt FROM, the levy included");
 });
 
-Deno.test("a ref naming a uid the catalog does not hold is DROPPED, not carried", () => {
-  // Unlike `resolveTaxRefsAt`, which moves a line between VERSIONS and must not
-  // decide taxability. This function IS the taxability decision, and a tax the
-  // catalog cannot answer for is not the answer.
-  const items = [makeItem({}, {
-    taxes: [{ uid: "ghost-tax", name: "Ghost", rate: 5, type: "percent", amount_cents: 500 }],
-  })];
-  materializeDocumentTax(items, ctx());
+Deno.test("a ref the line carries no longer decides anything outside its class", () => {
+  // A rental carrying the bottle ref has no class holding rental codes + the
+  // levy, so it stays Rental: the ref is not a second way in. A ghost uid is
+  // likewise just ignored.
+  const items = [makeItem({}, { taxes: [...bottleRef, { uid: "ghost-tax", name: "Ghost", rate: 5, type: "percent", amount_cents: 500 }] })];
+  materializeDocumentTax(items, ctx({ taxes: BOTTLED }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
 });
 
@@ -626,18 +624,18 @@ Deno.test("precedence: the document's entry beats the claim beats the derivation
   assertEquals(px(derived[0]).taxes.map((t) => t.uid), ["rantoul-tax"]);
 });
 
-Deno.test("🔴 resolveLineTax: `tax` is exemption-applied, `base` is not", () => {
+Deno.test("🔴 resolveLineTax: `applied` is exemption-applied, `base` is not", () => {
   // The two fields exist because one of them will be read carelessly. `tax` is
   // the answer a caller wants; `base` is the annotation that lets an exempt
   // document say which tax it was exempt from.
   const item = makeItem();
   const taxed = resolveLineTax(item, at("Chicago"), ctx());
-  assertEquals(taxed.tax?.uid, "chi-rental-tax");
-  assertEquals(taxed.base?.uid, "chi-rental-tax");
+  assertEquals(taxed.applied.map((a) => a.rate.uid), ["chi-rental-tax"]);
+  assertEquals(taxed.base.map((a) => a.rate.uid), ["chi-rental-tax"]);
 
   const exempt = resolveLineTax(item, at("Chicago"), ctx({ exempt: true }));
-  assertEquals(exempt.tax, null);
-  assertEquals(exempt.base?.uid, "chi-rental-tax", "the base survives exemption");
+  assertEquals(exempt.applied, []);
+  assertEquals(exempt.base.map((a) => a.rate.uid), ["chi-rental-tax"], "the base survives exemption");
 
   // ⚠️ The third case here used to be a non-revenue account — "not taxABLE,
   // which is a different fact from exempt, so both are null". That gate is gone
@@ -645,8 +643,9 @@ Deno.test("🔴 resolveLineTax: `tax` is exemption-applied, `base` is not", () =
   // `taxed_as`, which IS a tax-rule axis: no tax lists the key `"none"`, so
   // nothing is found and there is nothing to be exempt from.
   const untaxable = resolveLineTax(makeItem({ taxed_as: "none" }), at("Chicago"), ctx());
-  assertEquals(untaxable.tax, null);
-  assertEquals(untaxable.base, null);
+  assertEquals(untaxable.applied, []);
+  assertEquals(untaxable.base, []);
+  assertEquals(untaxable.uid_tax_class, null);
 });
 
 Deno.test("resolveLineTax reports the LEVEL that answered, for the order form", () => {
@@ -982,14 +981,14 @@ Deno.test("an EXEMPT document prices at $0 and still warns", () => {
 Deno.test("resolveLineTax reports the state, and `expired` now carries a TAX", () => {
   const expired = resolveLineTax(makeItem(), at("Chicago"), ctx({ taxes: LAPSED }));
   assertEquals(expired.state, "expired");
-  assertEquals(expired.tax?.uid, "chi-rental-tax", "expired no longer means unpriced");
-  assertEquals(expired.key, "rental");
+  assertEquals(expired.applied.map((a) => a.rate.uid), ["chi-rental-tax"], "expired no longer means unpriced");
+  assertEquals(expired.considered.map((c) => c.outcome).includes("expired"), true);
 
   const taxed = resolveLineTax(makeItem(), at("Chicago"), ctx());
   assertEquals(taxed.state, "taxed");
 
   const untaxed = resolveLineTax(makeItem({ taxed_as: "none" }), at("Chicago"), ctx({ taxes: LAPSED }));
   assertEquals(untaxed.state, "untaxed");
-  assertEquals(untaxed.tax, null);
-  assertEquals(untaxed.key, "none", "the key is the OVERRIDE when one is set");
+  assertEquals(untaxed.applied, []);
+  assertEquals(untaxed.uid_tax_class, null, "taxed_as: none derives no class");
 });

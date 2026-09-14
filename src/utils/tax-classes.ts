@@ -41,7 +41,10 @@ import type {
   TaxJurisdictionType,
   TaxRate,
 } from "../schemas/mod.ts";
-import { COLLECTING_JURISDICTIONS } from "./taxes.ts";
+
+// ⚠️ No import from `./taxes.ts`: that module prices on THIS one (the reader
+// switch), so the dependency runs taxes → tax-classes and never back.
+// `taxClassMatrix` takes its jurisdiction list from the caller for that reason.
 
 /** The three catalog collections, unfiltered — historical rates included. */
 export interface TaxCatalog {
@@ -310,6 +313,109 @@ export function lineTaxClass(
   return item.uid_tax_class_override ?? item.uid_tax_class ?? null;
 }
 
+/** What {@link deriveLineTaxClass} reads off a line. Structural, so an order, invoice or credit-note line all fit. */
+export interface TaxClassLineFacts {
+  type: string;
+  taxed_as?: string | null;
+  uid_tax_class?: string | null;
+  uid_tax_class_override?: string | null;
+  price?: {
+    taxes?: ReadonlyArray<{ uid: string }> | null;
+    taxes_base?: ReadonlyArray<{ uid: string }> | null;
+  } | null;
+}
+
+/**
+ * **The class a line prices on**, stamped or not.
+ *
+ * ```
+ * override ?? snapshot ?? legacy(taxed_as ?? type, carried rate refs)
+ * ```
+ *
+ * The legacy arm exists because order lines are NOT bulk-stamped: a stamp bumps
+ * `order.version`, which re-opens the Xero quote push against a ~1,000/day
+ * quota (api-cloudrun#993). A line picks the stamp up on its next real write,
+ * and until then this reproduces what the legacy rule decided for it:
+ *
+ * - `taxed_as: "none"` → `null`, untaxed. Exactly what the legacy `none` key
+ *   resolved to, since no tax ever listed it.
+ * - otherwise the ACTIVE class whose `is_default_for` holds the key. No such
+ *   class → `null`, which is how `service`/`surcharge`/`transaction_fee` stay
+ *   untaxed even before a Non-Taxable class exists.
+ * - **the explicit-only bottle ref.** Legacy reached the bottle levy through a
+ *   rate uid the line itself carried. When a line carries (in `taxes` or
+ *   `taxes_base`) a rate whose code is NOT in its default class, the answer is
+ *   the one active class holding the default class's codes plus those — "Sale
+ *   – Bottled Water". Zero or several such classes keep the default: guessing
+ *   between two classes would bill a combination nobody chose.
+ *
+ * ⚠️ **Derived from the CATALOG, never from class names.** An operator may
+ * rename "Sale"; `is_default_for` and code membership are what the migration
+ * made true and what `validateTaxSetup` keeps unambiguous
+ * (`duplicate_type_default`).
+ */
+export function deriveLineTaxClass(item: TaxClassLineFacts, catalog: TaxCatalog): string | null {
+  const stated = lineTaxClass(item);
+  if (stated !== null) return stated;
+
+  const key = item.taxed_as ?? item.type;
+  if (key === "none") return null;
+  const active = catalog.classes.filter((c) => c.active);
+  const fallback = active.find((c) => (c.is_default_for as readonly string[]).includes(key));
+  if (!fallback) return null;
+
+  const carriedCodes = new Set(
+    [...(item.price?.taxes ?? []), ...(item.price?.taxes_base ?? [])]
+      .map((ref) => catalog.rates.find((r) => r.uid === ref.uid)?.uid_tax_code)
+      .filter((uid): uid is string => uid !== undefined && !fallback.uid_tax_codes.includes(uid)),
+  );
+  if (carriedCodes.size === 0) return fallback.uid;
+
+  const wanted = [...fallback.uid_tax_codes, ...carriedCodes];
+  const widened = active.filter((c) => c.uid !== fallback.uid && wanted.every((uid) => c.uid_tax_codes.includes(uid)));
+  return widened.length === 1 ? widened[0].uid : fallback.uid;
+}
+
+/**
+ * The catalog in the PRICING shape `calculateItemPrice` / `calculateItemTax`
+ * look a stored `price.taxes[].uid` up in — one entry per RATE, named by its
+ * code.
+ *
+ * Rate uids are the legacy `taxes` uids (the migration keeps them), so every
+ * stored ref still resolves. `name` is the CODE's: the rate carries none, and a
+ * line's `PriceModifier.name` has always been the tax's name.
+ */
+export function pricingTaxesOf(catalog: TaxCatalog): Array<{
+  uid: string;
+  name: string;
+  rate: number;
+  type: RateType;
+  applied_from: string;
+  applied_to: string | null;
+  jurisdiction: TaxJurisdictionType;
+  xero_tax_type: string | null;
+  xero_account_code: number | null;
+  xero_item_code: string | null;
+}> {
+  const codeByUid = new Map(catalog.codes.map((c) => [c.uid, c]));
+  return catalog.rates.flatMap((rate) => {
+    const code = codeByUid.get(rate.uid_tax_code);
+    if (!code) return [];
+    return [{
+      uid: rate.uid,
+      name: code.name,
+      rate: rate.rate,
+      type: rate.type,
+      applied_from: rate.applied_from,
+      applied_to: rate.applied_to,
+      jurisdiction: code.jurisdiction,
+      xero_tax_type: rate.xero_tax_type,
+      xero_account_code: code.xero_account_code,
+      xero_item_code: code.xero_item_code,
+    }];
+  });
+}
+
 /**
  * **Stage 3 for one line**: the class's codes, filtered to the jurisdiction
  * stage 2 resolved, each taken at the rate live at `asOf`.
@@ -397,18 +503,21 @@ export function resolveClassTaxes(
  * collecting jurisdiction, each cell the resolver's own answer (not exempt), so
  * the page can never show a combination pricing would not produce.
  *
- * Collecting jurisdictions only: a matrix is a statement about what CFS charges
- * TODAY, and a closed registration is not somewhere a new line can land.
+ * Pass `COLLECTING_JURISDICTIONS` (`utils/taxes.ts`): a matrix is a statement
+ * about what CFS charges TODAY, and a closed registration is not somewhere a new
+ * line can land. Taken as an argument so this module does not import the one
+ * that prices on it.
  */
 export function taxClassMatrix(
   catalog: TaxCatalog,
   asOf: string,
+  jurisdictions: readonly string[],
 ): Array<{ tax_class: TaxClass; cells: Array<{ jurisdiction: string; rates: Array<{ name: string; rate: number; type: RateType; expired: boolean }> }> }> {
   return catalog.classes
     .filter((c) => c.active)
     .map((tax_class) => ({
       tax_class,
-      cells: COLLECTING_JURISDICTIONS.map((jurisdiction) => ({
+      cells: jurisdictions.map((jurisdiction) => ({
         jurisdiction,
         rates: resolveClassTaxes(tax_class.uid, jurisdiction, false, asOf, catalog).base.map((a) => ({
           name: a.code.name,
