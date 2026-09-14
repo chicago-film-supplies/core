@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
 import {
   assertCoaTaxMapCoversCore,
@@ -317,13 +317,21 @@ Deno.test("…but a NON-replacement line on the same document DOES take the over
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["rantoul-tax"]);
 });
 
-Deno.test("…and EXEMPTION still applies to a replacement — a different axis", () => {
-  // Exemption is a property of the CUSTOMER and zeroes tax whatever the
-  // jurisdiction. Xero agrees: every untaxed replacement line in the corpus
-  // belongs to a tax-exempt customer.
-  const items = [makeItem({ type: "replacement" }, { taxes: [] })];
-  materializeDocumentTax(items, ctx({ exempt: true }));
-  assertEquals(px(items[0]).taxes, []);
+Deno.test("🔴 …and EXEMPTION does not reach a replacement — CFS is the buyer (core#109)", () => {
+  // Owner, 2026-09-13. Exemption is a fact about the customer AS BUYER, and on
+  // a replacement the buyer is CFS. The earlier revision asserted the opposite.
+  const items = [
+    makeItem({ type: "replacement" }, { taxes: [] }),
+    makeItem({ type: "rental" }, { taxes: [] }),
+  ];
+  materializeDocumentTax(items, ctx({ destinations: [at("Frankfort")], exempt: true }));
+  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-sales-tax"], "replacement: origin, not exempt");
+  assert(px(items[0]).taxes[0].amount_cents > 0);
+  assertEquals(px(items[1]).taxes, [], "a rental on the same exempt document stays untaxed");
+
+  const resolved = resolveLineTax(items[0], at("Frankfort"), ctx({ exempt: true }));
+  assertEquals(resolved.exempt, false);
+  assertEquals(resolved.tax?.uid, "chi-sales-tax");
 });
 
 Deno.test("🔴 an out-of-state REPLACEMENT is taxed, where the old rule exempted it", () => {

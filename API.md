@@ -31423,6 +31423,7 @@ interface LineTaxResolution {
   level: JurisdictionLevel | "origin";
   key: string;
   state: TaxCellState;
+  exempt: boolean;
   tax: Tax | null;
   base: Tax | null;
 }
@@ -32111,6 +32112,13 @@ location and no document- or organization-level jurisdiction reaches it
 (owner, 2026-08-20). The live Xero ledger has been doing this all along:
 invoice 2348 (a Frankfort customer) bills its replacement at TAX001 Chicago
 Sales Tax.
+
+🔴 **For the same reason, EXEMPTION does not reach a replacement either**
+(owner, 2026-09-13; core#109). Exemption is a fact about the customer as
+buyer, and on a replacement the buyer is CFS. An earlier revision zeroed it
+("a different axis"), which billed every exempt customer's L&D line untaxed.
+Measured before the change: 0 live exempt documents carried a replacement
+line, so no live money moved; 11 settled invoices did and stay frozen.
 
 ## 🔴 The revenue ACCOUNT is not one of the rules, and used to be
 

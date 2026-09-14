@@ -982,6 +982,13 @@ export interface LineTaxResolution {
    */
   state: TaxCellState;
   /**
+   * Whether exemption applies to THIS line — `ctx.exempt`, except `false` on a
+   * `replacement`, where CFS is the buyer and the customer's exemption cannot
+   * reach (owner, 2026-09-13; core#109). Returned so {@link assignLineTaxes}
+   * reads the same answer rather than re-deriving it from `ctx.exempt`.
+   */
+  exempt: boolean;
+  /**
    * **The tax this line actually carries** — the jurisdiction's answer, zeroed
    * by exemption. `null` means untaxed, which is how `service`, `surcharge`, an
    * out-of-nexus destination and an exempt customer all stay untaxed without a
@@ -1022,6 +1029,13 @@ export interface LineTaxResolution {
  * (owner, 2026-08-20). The live Xero ledger has been doing this all along:
  * invoice 2348 (a Frankfort customer) bills its replacement at TAX001 Chicago
  * Sales Tax.
+ *
+ * 🔴 **For the same reason, EXEMPTION does not reach a replacement either**
+ * (owner, 2026-09-13; core#109). Exemption is a fact about the customer as
+ * buyer, and on a replacement the buyer is CFS. An earlier revision zeroed it
+ * ("a different axis"), which billed every exempt customer's L&D line untaxed.
+ * Measured before the change: 0 live exempt documents carried a replacement
+ * line, so no live money moved; 11 settled invoices did and stay frozen.
  *
  * ## 🔴 The revenue ACCOUNT is not one of the rules, and used to be
  *
@@ -1083,10 +1097,13 @@ export function resolveLineTax(
   };
 
   const { jurisdiction, level } = jurisdictionOf();
+  // The replacement rule's second half — CFS is the buyer, so the customer's
+  // exemption does not apply.
+  const exempt = key === "replacement" ? false : ctx.exempt;
   const resolved = findTaxFor(ctx.taxes, jurisdiction, key, ctx.asOf);
   if (resolved) {
     const base = atStoredVersion(resolved, ctx);
-    return { jurisdiction, level, key, state: "taxed", tax: ctx.exempt ? null : base, base };
+    return { jurisdiction, level, key, state: "taxed", exempt, tax: exempt ? null : base, base };
   }
 
   // Nothing brackets `asOf`. Which of the two `null`s is it?
@@ -1100,7 +1117,7 @@ export function resolveLineTax(
     // what the catalog would infer for it.
     const frozen = frozenTaxForCell(ctx, jurisdiction, key);
     if (frozen) {
-      return { jurisdiction, level, key, state: "taxed", tax: ctx.exempt ? null : frozen, base: frozen };
+      return { jurisdiction, level, key, state: "taxed", exempt, tax: exempt ? null : frozen, base: frozen };
     }
     // 🔴 **Fall forward, do not refuse.** The most recent version at or before
     // `asOf` is the rate CFS was last charging for this cell, and it is what an
@@ -1111,10 +1128,10 @@ export function resolveLineTax(
     const lapsed = mostRecentClosedTax(ctx.taxes, jurisdiction, key, ctx.asOf);
     if (lapsed) {
       const stale = atStoredVersion(lapsed, ctx);
-      return { jurisdiction, level, key, state, tax: ctx.exempt ? null : stale, base: stale };
+      return { jurisdiction, level, key, state, exempt, tax: exempt ? null : stale, base: stale };
     }
   }
-  return { jurisdiction, level, key, state, tax: null, base: null };
+  return { jurisdiction, level, key, state, exempt, tax: null, base: null };
 }
 
 /**
@@ -1233,7 +1250,7 @@ export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): Unr
   items.forEach((item, index) => {
     if (!isPreTaxItem(item)) return;
     const subtotalDiscountedCents = item.price.subtotal_discounted_cents ?? 0;
-    const { tax, base, jurisdiction, key, state } = resolveLineTax(item, destinations[index], ctx);
+    const { tax, base, jurisdiction, key, state, exempt } = resolveLineTax(item, destinations[index], ctx);
 
     // Priced on a version whose REVIEW window ran out. `base` is that version —
     // the fall-forward already happened in `resolveLineTax` — so the warning
@@ -1273,7 +1290,7 @@ export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): Unr
       .filter((doc) => doc.jurisdiction == null || doc.jurisdiction === jurisdiction);
 
     // An exempt line drops the explicit-only refs too — a tax is a tax.
-    const applied = ctx.exempt ? [] : [...(tax ? [tax] : []), ...explicitOnly];
+    const applied = exempt ? [] : [...(tax ? [tax] : []), ...explicitOnly];
     const modifiers: PriceModifier[] = applied.map((t) => ({
       uid: t.uid,
       name: t.name,
