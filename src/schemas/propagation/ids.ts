@@ -271,7 +271,6 @@ export type RuleId =
   // taxes.ts
   | "update-tax:to-products"
   | "update-tax:to-webshop-products"
-  | "update-tax:to-orders"
   | "supersede-tax:recompute-live-orders"
   | "supersede-tax:recompute-live-invoices"
   | "create-tax-rate:recompute-live-orders"

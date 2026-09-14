@@ -28,14 +28,6 @@ const TAX_TO_PRODUCTS: EnforcementRef = {
   gates: true,
 };
 
-const TAX_TO_ORDERS: EnforcementRef = {
-  kind: "test",
-  ref:
-    "api-cloudrun/tests/integration/taxes/taxes.test.ts::PUT - cascades a NAME change to incomplete orders without moving their money",
-  clause:
-    "the NAME change and the fail-closed arm — the rename reaches an incomplete order's PriceModifiers and the recompute leaves the money exactly where it was, and the sibling step `PUT - cascade rejects an order that violates the item invariants` asserts the cascade REFUSES an order it would leave violating the item invariants rather than writing it. ⚠️ **No test covers a RATE change reaching an order, and none can: `PUT /taxes/{uid}` REFUSES an in-place rate or type change with a 400 naming supersede** (`PUT - REFUSES an in-place rate or type change, pointing at supersede`). This rule's own invariant and trigger still describe that refused edit — see core#55.",
-  gates: true,
-};
 
 const updateTaxRules: CollectionRule[] = [
   {
@@ -73,41 +65,6 @@ const updateTaxRules: CollectionRule[] = [
       { source: ["name"], target: ["components", "price", "taxes", "name"] },
       { source: ["rate"], target: ["components", "price", "taxes", "rate"] },
       { source: ["type"], target: ["components", "price", "taxes", "type"] },
-    ],
-  },
-  {
-    id: "update-tax:to-orders",
-    source: "taxes",
-    target: "orders",
-    mode: "fan-out",
-    invariant:
-      "Incomplete orders embed tax data as PriceModifiers — rate changes must recompute amounts and totals",
-    enforced_by: [TAX_TO_ORDERS],
-    trigger:
-      "NAME change — post-transaction batch filtered to incomplete orders, matched by tax uid. ⚠️ See the sibling rules' trigger: rate and type are unreachable here since api-cloudrun#495, which is why the `rate`-sourced field mappings below can only ever be exercised by the recompute path, never by this one. They are kept because they describe what the cascade WOULD write, and the enforcement ref says outright that no test covers a rate change and none can.",
-    fields: [
-      { source: ["name"], target: ["items", "price", "taxes", "name"] },
-      { source: ["rate"], target: ["items", "price", "taxes", "rate"] },
-      { source: ["type"], target: ["items", "price", "taxes", "type"] },
-      {
-        source: ["rate"],
-        target: ["items", "price", "taxes", "amount_cents"],
-        transform: "recomputed from new rate × item base_cents price",
-      },
-      { source: ["name"], target: ["totals", "taxes", "name"] },
-      { source: ["rate"], target: ["totals", "taxes", "rate"] },
-      { source: ["type"], target: ["totals", "taxes", "type"] },
-      {
-        source: ["rate"],
-        target: ["totals", "taxes", "amount_cents"],
-        transform: "recomputed from new rate × subtotal_discounted_cents",
-      },
-      {
-        source: [],
-        target: ["totals", "total_cents"],
-        transform:
-          "recalculated: subtotal_discounted_cents + sum(taxes.amount_cents) + sum(transaction_fees.amount_cents)",
-      },
     ],
   },
 ];
