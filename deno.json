@@ -80,6 +80,7 @@
     "./utils/movements": "./src/utils/movements.ts",
     "./utils/order-lines": "./src/utils/order-lines.ts",
     "./utils/orders": "./src/utils/orders.ts",
+    "./utils/price-document": "./src/utils/price-document.ts",
     "./utils/organizations": "./src/utils/organizations.ts",
     "./utils/products": "./src/utils/products.ts",
     "./utils/reporting": "./src/utils/reporting.ts",

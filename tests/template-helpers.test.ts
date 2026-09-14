@@ -57,6 +57,7 @@ import * as templateLintUtils from "../src/utils/template-lint.ts";
 import * as substitutionUtils from "../src/utils/substitutions.ts";
 import * as itemPairingUtils from "../src/utils/item-pairing.ts";
 import * as taxClassUtils from "../src/utils/tax-classes.ts";
+import * as priceDocumentUtils from "../src/utils/price-document.ts";
 
 import { templateHelpers } from "../src/schemas/template-helpers.generated.ts";
 import {
@@ -117,6 +118,9 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // resolves to. A template renders a document whose taxes are already priced
   // and holds no catalog to ask. Listed so the drift guard sees its exports.
   "tax-classes": taxClassUtils,
+  // And again: `utils/price-document.ts` WRITES a document's money. A template
+  // renders money already written. Listed so the drift guard sees its exports.
+  "price-document": priceDocumentUtils,
   // And once more: `utils/item-pairing.ts` answers *"which row of the NEW array
   // is the same row as this one in the OLD array?"* — a question that needs two
   // revisions of a document. A template is handed one. Listed so the drift guard

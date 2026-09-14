@@ -699,13 +699,36 @@ const RATE_SCALE = 1_000_000n;
  */
 export function calculateItemSubtotal(
   item: PricingItem,
+  opts: LinePricingOptions = {},
 ): { subtotal_cents: number; subtotal_discounted_cents: number } {
   if (!isPreTaxPricingItem(item)) {
     throw new Error(
       "Item is not priceable: missing price object or is a destination/group/transaction_fee",
     );
   }
-  return perUnitSubtotal(item.price, item.quantity);
+  return perUnitSubtotal(item.price, item.quantity, opts);
+}
+
+/**
+ * Pricing inputs that come from the DOCUMENT rather than the line.
+ *
+ * Only `priceDocument` (`@cfs/core/utils/price-document`) derives these. A
+ * writer that prices a line on its own never passes them, which is the point:
+ * the document decides, so no per-line caller can forget to (D1 of the
+ * priceDocument campaign, api-cloudrun#997).
+ */
+export interface LinePricingOptions {
+  /**
+   * The line sits in a date-EXTENSION section (#680): it bills the days an
+   * order's window grew past what an earlier invoice billed. The value is
+   * `max(order charge days, 5) − max(billed charge days, 5)`, and it may be
+   * zero or negative (a shortened window is a credit).
+   *
+   * Priced as `× days ÷ 5` with the one-week minimum SKIPPED — the minimum was
+   * already charged on the invoice being extended — so 2→4 days is 0, 3→7 is 2
+   * and 7→4 is −2. Only a `five_day_week` line can be extended.
+   */
+  extensionDays?: number;
 }
 
 /**
@@ -716,6 +739,7 @@ export function calculateItemSubtotal(
 function perUnitSubtotal(
   price: PricingPrice,
   itemQuantity: number,
+  opts?: LinePricingOptions,
 ): { subtotal_cents: number; subtotal_discounted_cents: number } {
   const { base_cents = 0, formula, chargeable_days = null, discount } = price;
   if (formula === "percent_of_total") {
@@ -732,10 +756,17 @@ function perUnitSubtotal(
   }
 
   const quantity = BigInt(Math.round(itemQuantity * Number(QTY_SCALE)));
-  const days = Math.round(chargeable_days ?? 0);
+  const extension = opts?.extensionDays;
+  if (extension !== undefined && formula !== "five_day_week") {
+    // A fixed-price line has no day count to extend, so an extension section
+    // holding one is a defect in the section, not a price to invent.
+    throw new Error(`An extension section can only price five_day_week lines, got formula "${formula}"`);
+  }
   // `pricingFactor = Math.max(chargeable_days / 5, 1)` — so the day factor bites
   // only above the one-week floor. At exactly 5 days it is 1, as is `fixed`.
-  const useDays = formula === "five_day_week" && days > 5;
+  // An extension skips that floor: its day count is signed and always applies.
+  const days = extension !== undefined ? Math.round(extension) : Math.round(chargeable_days ?? 0);
+  const useDays = extension !== undefined || (formula === "five_day_week" && days > 5);
 
   // `base_cents` is ALREADY an integer count of cents, so this is a widening
   // and not a conversion — the `toCentsBig(base)` this replaced was the one
@@ -782,8 +813,9 @@ function perUnitSubtotal(
       dDen *= 5n;
     }
     // Subtraction is exact; a flat discount larger than the line goes negative,
-    // which is the caller's problem to surface, not ours to clamp.
-    discountedCents = subtotalCents - roundDivHalfUp(dNum, dDen);
+    // which is the caller's problem to surface, not ours to clamp. The rate is
+    // never negative, but a negative extension day count makes `dNum` so.
+    discountedCents = subtotalCents - roundDivHalfAwayFromZero(dNum, dDen);
   }
 
   return {
@@ -1012,6 +1044,7 @@ export function computeItemTaxAmountCents(
 export function calculateItemTax(
   item: PricingItem,
   taxes: Tax[],
+  opts: LinePricingOptions = {},
 ): PriceModifier[] {
   if (!isPreTaxPricingItem(item)) {
     throw new Error(
@@ -1019,13 +1052,19 @@ export function calculateItemTax(
     );
   }
 
-  const { subtotal_discounted_cents } = calculateItemSubtotal(item);
+  const { subtotal_discounted_cents } = calculateItemSubtotal(item, opts);
   const quantity = item.quantity;
 
   return (item.price.taxes ?? []).map((itemTax) => {
     const taxDoc = taxes.find((t) => t.uid === itemTax.uid);
     if (!taxDoc) {
       throw new Error("Unknown tax uid: " + itemTax.uid);
+    }
+    if (opts.extensionDays !== undefined && taxDoc.type === "flat") {
+      // A flat tax is per UNIT, not per day, so an extension would charge it a
+      // second time for units already levied. No catalog rental carries one;
+      // refuse rather than pick an answer.
+      throw new Error(`An extension line cannot carry the flat tax "${taxDoc.name}"`);
     }
 
     return {
@@ -1045,6 +1084,7 @@ export function calculateItemTax(
 export function calculateItemPrice(
   item: PricingItem,
   taxes: Tax[],
+  opts: LinePricingOptions = {},
 ): {
   subtotal_cents: number;
   subtotal_discounted_cents: number;
@@ -1058,8 +1098,8 @@ export function calculateItemPrice(
     );
   }
 
-  const { subtotal_cents, subtotal_discounted_cents } = calculateItemSubtotal(item);
-  const itemTaxes = calculateItemTax(item, taxes);
+  const { subtotal_cents, subtotal_discounted_cents } = calculateItemSubtotal(item, opts);
+  const itemTaxes = calculateItemTax(item, taxes, opts);
 
   // Integer addition over exact cent counts — currency.js has nothing left to
   // protect here, and summing through it would only re-introduce a float.
@@ -1336,8 +1376,9 @@ export function computeLineMoney(
   item: PricingItem,
   taxes: Tax[],
   label?: string,
+  opts: LinePricingOptions = {},
 ): LinePriceMoney {
-  if (isPreTaxPricingItem(item)) return calculateItemPrice(item, taxes);
+  if (isPreTaxPricingItem(item)) return calculateItemPrice(item, taxes, opts);
   if (isTransactionFeePricingItem(item)) return priceTransactionFeeLine(item);
   throw new Error(
     `Line ${label ?? "(unidentified)"} has type "${item.type}", which has no ` +
@@ -1828,6 +1869,22 @@ export function sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTota
     transaction_fees,
     total_cents: feeBasisCents + feeSumCents,
   };
+}
+
+/**
+ * **The audit oracle: document totals RE-DERIVED from line inputs**, independently
+ * of the money stored on the lines.
+ *
+ * `priceDocument` (`@cfs/core/utils/price-document`) makes totals a SUM of stored
+ * line money. The hourly totals-drift check (api-cloudrun#575) must keep asking
+ * the other question — "do the stored numbers still follow from the inputs?" —
+ * because pointing it at the sum would check the implementation against itself
+ * (D2 of api-cloudrun#997). This name is what that check should call, so that
+ * when the pricing writers stop using {@link sumDocumentTotals} the oracle has an
+ * owner that says what it is for.
+ */
+export function rederiveDocumentTotalsForAudit(items: LineItem[], taxes: Tax[]): DocumentTotalsCore {
+  return sumDocumentTotals(items, taxes);
 }
 
 /**

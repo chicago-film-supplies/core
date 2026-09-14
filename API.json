@@ -11740,7 +11740,7 @@
         {
           "kind": "function",
           "name": "calculateItemPrice",
-          "signature": "calculateItemPrice(item: PricingItem, taxes: Tax[]): typeLiteral",
+          "signature": "calculateItemPrice(item: PricingItem, taxes: Tax[], _: unknown): typeLiteral",
           "doc": "Calculate the complete price for a single line item.\nRuns the full pipeline: subtotal → discount → taxes → total.",
           "paramTags": [],
           "returnsTag": null
@@ -11748,7 +11748,7 @@
         {
           "kind": "function",
           "name": "calculateItemSubtotal",
-          "signature": "calculateItemSubtotal(item: PricingItem): typeLiteral",
+          "signature": "calculateItemSubtotal(item: PricingItem, _: unknown): typeLiteral",
           "doc": "Calculate the pre-discount and post-discount subtotals for a single line item.\n\n`subtotal = base × quantity × max(chargeable_days / 5, 1)` for `five_day_week`,\nor `base × quantity` for `fixed`. The one-week floor means the day factor only\napplies above 5 chargeable days.",
           "paramTags": [],
           "returnsTag": null
@@ -11756,7 +11756,7 @@
         {
           "kind": "function",
           "name": "calculateItemTax",
-          "signature": "calculateItemTax(item: PricingItem, taxes: Tax[]): PriceModifier[]",
+          "signature": "calculateItemTax(item: PricingItem, taxes: Tax[], _: unknown): PriceModifier[]",
           "doc": "Calculate tax amounts for a single line item from the Tax[] parameter.\nReturns a PriceModifier[] with computed amounts.\n\n**It prices the refs the line carries; it does not decide taxability.** That\ndecision is `resolveLineTax` / `assignLineTaxes`, which writes `price.taxes`\nfrom `(taxed_as ?? type, jurisdiction)`. A revenue-account gate stood here\nuntil the owner ruling of 2026-08-20 — *\"an item's tax is item type ×\njurisdiction, it has nothing to do with coa\"* — and removing it is what makes\nthe two functions answer one question instead of two.",
           "paramTags": [],
           "returnsTag": null
@@ -13597,6 +13597,12 @@
           "doc": "The money half of a stored line price — the shape {@link calculateItemPrice}\nalready returns, so a writer can swap one call for the other without\nreshaping anything around it.\n\n`taxes` is `PriceModifier[]` rather than `never[]` on the fee branch for that\nassignability — it is always empty there, and\n{@link priceTransactionFeeLine} is where that is decided, not where it is\nhoped."
         },
         {
+          "kind": "interface",
+          "name": "LinePricingOptions",
+          "declaration": "interface LinePricingOptions {\n  extensionDays?: number;\n}",
+          "doc": "Pricing inputs that come from the DOCUMENT rather than the line.\n\nOnly `priceDocument` (`@cfs/core/utils/price-document`) derives these. A\nwriter that prices a line on its own never passes them, which is the point:\nthe document decides, so no per-line caller can forget to (D1 of the\npriceDocument campaign, api-cloudrun#997)."
+        },
+        {
           "kind": "variable",
           "name": "ORDER_DECLARED_PRICE_KEYS",
           "declaration": "const ORDER_DECLARED_PRICE_KEYS: Record<DeclaredPriceKey<OrderDocItemPriceType>, true>;",
@@ -13805,7 +13811,7 @@
         {
           "kind": "function",
           "name": "calculateItemPrice",
-          "signature": "calculateItemPrice(item: PricingItem, taxes: Tax[]): typeLiteral",
+          "signature": "calculateItemPrice(item: PricingItem, taxes: Tax[], _: unknown): typeLiteral",
           "doc": "Calculate the complete price for a single line item.\nRuns the full pipeline: subtotal → discount → taxes → total.",
           "paramTags": [],
           "returnsTag": null
@@ -13813,7 +13819,7 @@
         {
           "kind": "function",
           "name": "calculateItemSubtotal",
-          "signature": "calculateItemSubtotal(item: PricingItem): typeLiteral",
+          "signature": "calculateItemSubtotal(item: PricingItem, _: unknown): typeLiteral",
           "doc": "Calculate the pre-discount and post-discount subtotals for a single line item.\n\n`subtotal = base × quantity × max(chargeable_days / 5, 1)` for `five_day_week`,\nor `base × quantity` for `fixed`. The one-week floor means the day factor only\napplies above 5 chargeable days.",
           "paramTags": [],
           "returnsTag": null
@@ -13821,7 +13827,7 @@
         {
           "kind": "function",
           "name": "calculateItemTax",
-          "signature": "calculateItemTax(item: PricingItem, taxes: Tax[]): PriceModifier[]",
+          "signature": "calculateItemTax(item: PricingItem, taxes: Tax[], _: unknown): PriceModifier[]",
           "doc": "Calculate tax amounts for a single line item from the Tax[] parameter.\nReturns a PriceModifier[] with computed amounts.\n\n**It prices the refs the line carries; it does not decide taxability.** That\ndecision is `resolveLineTax` / `assignLineTaxes`, which writes `price.taxes`\nfrom `(taxed_as ?? type, jurisdiction)`. A revenue-account gate stood here\nuntil the owner ruling of 2026-08-20 — *\"an item's tax is item type ×\njurisdiction, it has nothing to do with coa\"* — and removing it is what makes\nthe two functions answer one question instead of two.",
           "paramTags": [],
           "returnsTag": null
@@ -13877,7 +13883,7 @@
         {
           "kind": "function",
           "name": "computeLineMoney",
-          "signature": "computeLineMoney(item: PricingItem, taxes: Tax[], label?: string): LinePriceMoney",
+          "signature": "computeLineMoney(item: PricingItem, taxes: Tax[], label?: string, _: unknown): LinePriceMoney",
           "doc": "THE branch decision — the one place a new item type is taught how its money\nis computed.\n\nThree arms, and the residual one **throws**. It used to be\n`isPreTaxPricingItem(…) ? price : {…all zeros}` at one writer, read as a safe\nfallback for structural items. It is not one: a divider has already been\nfiltered out by every caller, so by here the item is a LINE, and a line with\nno price is a defect rather than a shape. Adding a fee arm beside the zeros\nwould have fixed the fee and left the next item type to zero itself the same\nway, so the branch is closed instead: priced, or refused by name.\n\n⚠️ The three arms are NOT a partition of two — an item can be neither pre-tax\nnor from-total. A `destination`/`group` divider has `pricing: \"none\"`, and an\nitem off a Firestore document can carry a type with no contract at all.",
           "paramTags": [
             {
@@ -14167,6 +14173,14 @@
         },
         {
           "kind": "function",
+          "name": "rederiveDocumentTotalsForAudit",
+          "signature": "rederiveDocumentTotalsForAudit(items: LineItem[], taxes: Tax[]): DocumentTotalsCore",
+          "doc": "**The audit oracle: document totals RE-DERIVED from line inputs**, independently\nof the money stored on the lines.\n\n`priceDocument` (`@cfs/core/utils/price-document`) makes totals a SUM of stored\nline money. The hourly totals-drift check (api-cloudrun#575) must keep asking\nthe other question — \"do the stored numbers still follow from the inputs?\" —\nbecause pointing it at the sum would check the implementation against itself\n(D2 of api-cloudrun#997). This name is what that check should call, so that\nwhen the pricing writers stop using {@link sumDocumentTotals} the oracle has an\nowner that says what it is for.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "sumDocumentTotals",
           "signature": "sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTotalsCore",
           "doc": "The two-pass totals fold shared by {@link calculateOrderTotals} and\n`calculateInvoiceTotals`: pre-tax subtotals first, then transaction fees\ncosted against `subtotal_discounted`.\n\nIt was ~35 byte-identical lines in both, which is the drift shape this\npackage exists to remove — but the two wrappers are NOT collapsible past\nthis point, and the differences are load-bearing rather than incidental:\n\n- **`calculateOrderTotals` keeps its `Array.isArray` throw.** Leading this\n  helper with the invoice path's `flattenForXero` would turn a clear\n  `Error(\"items must be an array\")` into a bare `TypeError` at the call site.\n- **`replacement_total` stays outside**, because\n  {@link calculateReplacementTotals} reads the **unfiltered** items and is\n  order-only.\n- **The invoice path pre-filters `flattenForXero(items)` and this one does\n  not**, which is safe because that filter is arithmetically inert here: it\n  keeps `itemContract(type).kind === \"line\"`, every `kind: \"divider\"` member\n  has `pricing: \"none\"` (pinned both directions at compile time by\n  `_lineParity` in `schemas/common.ts`), and every predicate below gates on\n  `pricing`. An unrecognised type is dropped by both. `filter` preserves\n  order, and the fold accumulates in integer cents, so no float\n  associativity hazard exists even if it did not.\n\nNot exported to templates — a rendered document reads its **stored**\n`totals`, and recomputing at render time is how a document comes to disagree\nwith the doc it renders.",
@@ -14242,6 +14256,52 @@
           "name": "validateZeroPricedComponents",
           "signature": "validateZeroPricedComponents(items: T[]): ZeroPricedComponentIssue[]",
           "doc": "**Invariant (2) of the `zero_priced` campaign: a flagged line is a COMPONENT.**\nOwner ruling 2026-09-07 — `path.at(-2)` must name a LINE, not a divider and not\nthe document root.\n\n⚠️ **ARRAY-LEVEL, and it cannot be anything else.** Deciding whether a line is\na component requires resolving its parent, which requires its siblings. A\nper-item refinement would turn the 29 test sites that parse a line item in\nisolation red for having no sibling array — including this campaign's own pin\nin `tests/invoices.test.ts` — and none of those failures would be about\n`zero_priced`. Invariant (1) has no such need and IS per-item\n({@link checkZeroPricedAmount}).\n\n🔴 **`isDividerItemType`, NOT `getStructuralUids`.** The obvious implementation\nreuses `getStructuralUids`, which is ORDER-shaped and does not count an\ninvoice's `order` divider — so every top-level invoice line would resolve to a\nnon-divider parent and read as a legitimate component, and the check would\npass on exactly the documents it exists to reject.\n\n⭐ **What made this reachable at all: the corpus was emptied first.** 44\nflagged top-level lines existed across both environments — all from the deleted\nCRMS ingest, which spread `zero_priced` into every line variant with no\ncomponent check — and this refinement would have made all 35 of their documents\nunwritable. They were repaired on 2026-09-07; ordering a contract behind its\ncorpus is the whole of `optional → stop the writer → empty storage → delete`\napplied to a refinement rather than a deletion.\n\n⚠️ **A DELEGATE since 2026-09-10, and it kept its name because templates call\nit** (`it.orders.validateZeroPricedComponents`). The rule itself is\n`zeroPricedFlaggedNonComponents` in `schemas/common.ts`, where the ARRAY-level\nrefinement can reach it — a schema cannot import from `utils/`, and two copies\nof one predicate is what `core#100` asked to avoid when it said to put both\ndirections in one place.\n\n⭐ **The delegate also resolves the parent by PATH rather than by uid**, which\nthis body did not. The uid form was never wrong in practice — divider uids are\nper-order UUIDs and line uids are Firestore ids, so the two sets cannot\ncollide — but `item.uid` repeats within one document in 18% of prod orders, so\npath resolution is right by construction instead of right by coincidence.\n\nReturns `[]` when every flagged line is a component.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/price-document",
+      "moduleDoc": "",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "PriceDocumentContext",
+          "declaration": "interface PriceDocumentContext {\n  document: PriceDocumentKind;\n  tax: DocumentTaxContext;\n  extensions?: readonly PriceDocumentExtension[];\n}",
+          "doc": "Everything {@link priceDocument} reads besides the items."
+        },
+        {
+          "kind": "interface",
+          "name": "PriceDocumentExtension",
+          "declaration": "interface PriceDocumentExtension {\n  divider_path: readonly string[];\n  order_charge_days: number;\n  billed_charge_days: number;\n}",
+          "doc": "A date-extension section (#680, D7): every line whose `path` starts with\n`divider_path` bills the days the order's window grew past what was billed."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PriceDocumentKind",
+          "declaration": "type PriceDocumentKind = typeLiteral | typeLiteral;",
+          "doc": "Which document is being priced, and whether it may be.\n\nAn invoice states its `status` and whether any settlement (payment or credit)\nhas been recorded against it. The refusal reads exactly what api-cloudrun's\n`updateInvoice` gate reads — `invoiceHasSettlement || paid || void` — so the\ntwo cannot disagree about what \"settled\" means."
+        },
+        {
+          "kind": "interface",
+          "name": "PricedDocument",
+          "declaration": "interface PricedDocument {\n  items: T[];\n  totals: DocumentTotalsCore;\n  replacement_total_cents: number | null;\n  warnings: UnreviewedTaxWarning[];\n}",
+          "doc": "What {@link priceDocument} returns."
+        },
+        {
+          "kind": "function",
+          "name": "extensionChargeDays",
+          "signature": "extensionChargeDays(orderChargeDays: number, billedChargeDays: number): number",
+          "doc": "The extension day count for D7: `max(order, 5) − max(billed, 5)`.\n\nBoth sides floor at the one-week minimum, because each window was (or would\nbe) charged at least a week. The difference is therefore what the extension\nadds on top, and it can be negative when the order's window shrank.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "priceDocument",
+          "signature": "priceDocument(items: readonly T[], ctx: PriceDocumentContext): PricedDocument<T>",
+          "doc": "Price a document: taxes, line money, fee amounts and totals, in one pass.",
           "paramTags": [],
           "returnsTag": null
         }

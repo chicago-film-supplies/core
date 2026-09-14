@@ -26009,12 +26009,12 @@ Calculate the discount amount, in cents, for a single line item.
 Plain integer subtraction: both operands are exact counts of cents, so there
 is nothing for currency.js to be careful about.
 
-### `calculateItemPrice(item: PricingItem, taxes: Tax[]): typeLiteral`
+### `calculateItemPrice(item: PricingItem, taxes: Tax[], _: unknown): typeLiteral`
 
 Calculate the complete price for a single line item.
 Runs the full pipeline: subtotal → discount → taxes → total.
 
-### `calculateItemSubtotal(item: PricingItem): typeLiteral`
+### `calculateItemSubtotal(item: PricingItem, _: unknown): typeLiteral`
 
 Calculate the pre-discount and post-discount subtotals for a single line item.
 
@@ -26022,7 +26022,7 @@ Calculate the pre-discount and post-discount subtotals for a single line item.
 or `base × quantity` for `fixed`. The one-week floor means the day factor only
 applies above 5 chargeable days.
 
-### `calculateItemTax(item: PricingItem, taxes: Tax[]): PriceModifier[]`
+### `calculateItemTax(item: PricingItem, taxes: Tax[], _: unknown): PriceModifier[]`
 
 Calculate tax amounts for a single line item from the Tax[] parameter.
 Returns a PriceModifier[] with computed amounts.
@@ -29673,6 +29673,21 @@ interface LinePriceMoney {
 }
 ```
 
+### `LinePricingOptions`
+
+Pricing inputs that come from the DOCUMENT rather than the line.
+
+Only `priceDocument` (`@cfs/core/utils/price-document`) derives these. A
+writer that prices a line on its own never passes them, which is the point:
+the document decides, so no per-line caller can forget to (D1 of the
+priceDocument campaign, api-cloudrun#997).
+
+```ts
+interface LinePricingOptions {
+  extensionDays?: number;
+}
+```
+
 ### `ORDER_DECLARED_PRICE_KEYS`
 
 The declared half of a stored ORDER line price, derived from
@@ -30241,12 +30256,12 @@ Calculate the discount amount, in cents, for a single line item.
 Plain integer subtraction: both operands are exact counts of cents, so there
 is nothing for currency.js to be careful about.
 
-### `calculateItemPrice(item: PricingItem, taxes: Tax[]): typeLiteral`
+### `calculateItemPrice(item: PricingItem, taxes: Tax[], _: unknown): typeLiteral`
 
 Calculate the complete price for a single line item.
 Runs the full pipeline: subtotal → discount → taxes → total.
 
-### `calculateItemSubtotal(item: PricingItem): typeLiteral`
+### `calculateItemSubtotal(item: PricingItem, _: unknown): typeLiteral`
 
 Calculate the pre-discount and post-discount subtotals for a single line item.
 
@@ -30254,7 +30269,7 @@ Calculate the pre-discount and post-discount subtotals for a single line item.
 or `base × quantity` for `fixed`. The one-week floor means the day factor only
 applies above 5 chargeable days.
 
-### `calculateItemTax(item: PricingItem, taxes: Tax[]): PriceModifier[]`
+### `calculateItemTax(item: PricingItem, taxes: Tax[], _: unknown): PriceModifier[]`
 
 Calculate tax amounts for a single line item from the Tax[] parameter.
 Returns a PriceModifier[] with computed amounts.
@@ -30397,7 +30412,7 @@ discount exceed its line rather than clamping — so the rounding is half *away
 from zero* and the tax carries the subtotal's sign, exactly as the currency.js
 form did.
 
-### `computeLineMoney(item: PricingItem, taxes: Tax[], label?: string): LinePriceMoney`
+### `computeLineMoney(item: PricingItem, taxes: Tax[], label?: string, _: unknown): LinePriceMoney`
 
 THE branch decision — the one place a new item type is taught how its money
 is computed.
@@ -30809,6 +30824,19 @@ rounds, so nothing here can round differently from the pre-tax path.
 
 - `item` — the line being priced — input shape or stored shape, either works.
 
+### `rederiveDocumentTotalsForAudit(items: LineItem[], taxes: Tax[]): DocumentTotalsCore`
+
+**The audit oracle: document totals RE-DERIVED from line inputs**, independently
+of the money stored on the lines.
+
+`priceDocument` (`@cfs/core/utils/price-document`) makes totals a SUM of stored
+line money. The hourly totals-drift check (api-cloudrun#575) must keep asking
+the other question — "do the stored numbers still follow from the inputs?" —
+because pointing it at the sum would check the implementation against itself
+(D2 of api-cloudrun#997). This name is what that check should call, so that
+when the pricing writers stop using {@link sumDocumentTotals} the oracle has an
+owner that says what it is for.
+
 ### `sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTotalsCore`
 
 The two-pass totals fold shared by {@link calculateOrderTotals} and
@@ -30997,6 +31025,71 @@ collide — but `item.uid` repeats within one document in 18% of prod orders, so
 path resolution is right by construction instead of right by coincidence.
 
 Returns `[]` when every flagged line is a component.
+
+## `@cfs/core/utils/price-document`
+
+### `PriceDocumentContext`
+
+Everything {@link priceDocument} reads besides the items.
+
+```ts
+interface PriceDocumentContext {
+  document: PriceDocumentKind;
+  tax: DocumentTaxContext;
+  extensions?: readonly PriceDocumentExtension[];
+}
+```
+
+### `PriceDocumentExtension`
+
+A date-extension section (#680, D7): every line whose `path` starts with
+`divider_path` bills the days the order's window grew past what was billed.
+
+```ts
+interface PriceDocumentExtension {
+  divider_path: readonly string[];
+  order_charge_days: number;
+  billed_charge_days: number;
+}
+```
+
+### `PriceDocumentKind`
+
+Which document is being priced, and whether it may be.
+
+An invoice states its `status` and whether any settlement (payment or credit)
+has been recorded against it. The refusal reads exactly what api-cloudrun's
+`updateInvoice` gate reads — `invoiceHasSettlement || paid || void` — so the
+two cannot disagree about what "settled" means.
+
+```ts
+type PriceDocumentKind = typeLiteral | typeLiteral;
+```
+
+### `PricedDocument`
+
+What {@link priceDocument} returns.
+
+```ts
+interface PricedDocument {
+  items: T[];
+  totals: DocumentTotalsCore;
+  replacement_total_cents: number | null;
+  warnings: UnreviewedTaxWarning[];
+}
+```
+
+### `extensionChargeDays(orderChargeDays: number, billedChargeDays: number): number`
+
+The extension day count for D7: `max(order, 5) − max(billed, 5)`.
+
+Both sides floor at the one-week minimum, because each window was (or would
+be) charged at least a week. The difference is therefore what the extension
+adds on top, and it can be negative when the order's window shrank.
+
+### `priceDocument(items: readonly T[], ctx: PriceDocumentContext): PricedDocument<T>`
+
+Price a document: taxes, line money, fee amounts and totals, in one pass.
 
 ## `@cfs/core/utils/organizations`
 

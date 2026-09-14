@@ -169,6 +169,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // carries.
     "buildDestinationPairWithDivider",
     "computeItemPaths", // canonical path computation — write-path only
+    // The totals AUDIT oracle (api-cloudrun#575): it re-derives totals from line
+    // inputs to check stored ones. A template renders the stored totals.
+    "rederiveDocumentTotalsForAudit",
     "validateItemPaths", // invariant assertion — write-path only
     "validateItemUniqueness", // invariant assertion — write-path only
     "validateItemParentage", // invariant assertion — write-path only
@@ -456,6 +459,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // holds that catalog — a document's taxes are already priced onto its lines —
   // so every export would be a helper with nothing to call it with, and
   // `taxClassMatrix` would print TODAY's rates beside a document billed at others.
+  // `utils/price-document.ts` is the WRITE-PATH author of stored line money and
+  // totals (api-cloudrun#997). A template renders stored totals, and recomputing
+  // them at render time is how a document comes to disagree with the doc it
+  // renders — so nothing here belongs in a render context.
+  "price-document": [
+    "extensionChargeDays",
+    "priceDocument",
+  ],
   "tax-classes": [
     "deriveLineTaxClass",
     "lineTaxClass",
