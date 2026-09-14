@@ -238,6 +238,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // hazard exactly: the row already carries `days_overdue` and `bucket`,
     // stamped against the run's as-of date.
     "agingOf",
+    // Order → invoice projection plumbing (api-cloudrun#993): copies tax-lever
+    // keys between two line objects, which a rendered document never does.
+    "pickLineTaxFields",
     // ── Xero integration ──
     "flattenForXero", // Xero line projection — write-path only
     "getXeroUnitAmountFromCents", // bakes duration into a per-unit price for Xero

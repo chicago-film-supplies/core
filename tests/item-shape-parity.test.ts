@@ -34,7 +34,8 @@
  * else would pass an import-based check and fail this one.
  */
 import { assert, assertEquals } from "@std/assert";
-import { LineItemCore } from "../src/schemas/_items.ts";
+import { LINE_TAX_FIELDS, LineItemCore, LineTaxCore } from "../src/schemas/_items.ts";
+import { pickLineTaxFields } from "../src/utils/invoices.ts";
 import { InvoiceDocItem, schemas } from "../src/schemas/mod.ts";
 
 const GRAINS = ["orders", "invoices", "fulfillments"] as const;
@@ -245,4 +246,33 @@ Deno.test("item shape parity: the spread's key order is identical across all thr
       `${collection}: the head must be \`type\` then the LineItemCore spread, in that order`,
     );
   }
+});
+
+// ── The PRICED grains' shared tax levers (api-cloudrun#993) ──────────────
+
+Deno.test("LineTaxCore is the SAME INSTANCE on the order and invoice line, and absent from the fulfillment line", () => {
+  const drifted: string[] = [];
+  for (const grain of ["orders", "invoices"] as const) {
+    const shape = lineArmShape(grain);
+    for (const [key, canonical] of Object.entries(LineTaxCore)) {
+      if (shape[key] !== canonical) drifted.push(`${grain}.items[].${key}`);
+    }
+  }
+  assertEquals(drifted, [], "a priced grain re-declared or omitted a LineTaxCore field:\n" + drifted.join("\n"));
+  const fulfillment = lineArmShape("fulfillments");
+  assertEquals(Object.keys(LineTaxCore).filter((k) => k in fulfillment), [], "a fulfillment line carries no price and no tax levers");
+});
+
+Deno.test("LINE_TAX_FIELDS names exactly LineTaxCore's keys, and is not vacuous", () => {
+  assertEquals([...LINE_TAX_FIELDS].sort(), Object.keys(LineTaxCore).sort());
+  assert(LINE_TAX_FIELDS.length === 3);
+});
+
+Deno.test("pickLineTaxFields preserves the source key set — present keys only, null kept", () => {
+  assertEquals(pickLineTaxFields({}), {});
+  assertEquals(pickLineTaxFields({ taxed_as: null }), { taxed_as: null });
+  assertEquals(
+    pickLineTaxFields({ uid_tax_class: "classuid00000000000a", uid_tax_class_override: null }),
+    { uid_tax_class: "classuid00000000000a", uid_tax_class_override: null },
+  );
 });

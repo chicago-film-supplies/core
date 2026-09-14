@@ -2216,6 +2216,12 @@
         },
         {
           "kind": "variable",
+          "name": "LINE_TAX_FIELDS",
+          "declaration": "const LINE_TAX_FIELDS: readonly [\"taxed_as\", \"uid_tax_class\", \"uid_tax_class_override\"];",
+          "doc": "The {@link LineTaxCore} keys, for code that copies the levers between grains."
+        },
+        {
+          "kind": "variable",
           "name": "LIVE_IN_XERO_STATUSES",
           "declaration": "const LIVE_IN_XERO_STATUSES: readonly InvoiceStatusType[];",
           "doc": "Statuses whose Xero counterpart is expected to exist and be non-VOIDED.\n\nWas three textually identical copies — `lib/xeroQuoteStatus.ts`,\n`services/invoices.ts` and `api-cloudrun/scripts/audit-xero-quotes.ts`, the last carrying\na \"keep in lockstep\" comment that nothing enforced."
@@ -2225,6 +2231,12 @@
           "name": "LeafPath",
           "declaration": "interface LeafPath {\n  path: string;\n  node: z.ZodType;\n  type: string;\n  format?: string;\n  meta: Record<string, unknown>;\n}",
           "doc": "A scalar leaf reached by {@link collectLeafPaths}."
+        },
+        {
+          "kind": "variable",
+          "name": "LineTaxCore",
+          "declaration": "const LineTaxCore: typeLiteral;",
+          "doc": "**The line's tax levers, declared once for the two PRICED grains** — an order\nline and an invoice line (api-cloudrun#993). Not a fulfillment line: it\ncarries no price, so it has nothing to tax.\n\n- `taxed_as` — the legacy per-line key, retiring at the class contract step.\n- `uid_tax_class` — the product's class, snapshotted onto the line.\n- `uid_tax_class_override` — the operator's per-line class; wins over the\n  snapshot (`deriveLineTaxClass`, `utils/tax-classes.ts`).\n\n⭐ **Shared rather than copied, for the reason `LineItemCore` is**: the invoice\nprices its OWN line through the same resolver, so an order line and the\ninvoice line projected from it must carry the same levers under the same\ndeclaration. Spread by both grains directly after `coa_revenue`, which is\nwhere both already declared these three keys, so no column moves.\n`tests/item-shape-parity.test.ts` asserts instance identity on both.\n\nAll optional: an unstamped line derives its class from `taxed_as ?? type`,\nand order lines are deliberately NOT bulk-stamped (a stamp bumps\n`order.version` and re-pushes Xero quotes)."
         },
         {
           "kind": "interface",
@@ -11546,7 +11558,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -12087,6 +12099,14 @@
         },
         {
           "kind": "function",
+          "name": "pickLineTaxFields",
+          "signature": "pickLineTaxFields(item: typeLiteral): typeLiteral",
+          "doc": "The {@link LINE_TAX_FIELDS} a line actually carries — present keys only, so a\nprojection preserves the source line's key set exactly.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "projectOrderItemToInvoiceItem",
           "signature": "projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceDocItemType",
           "doc": "Project an order item to its invoice-item shape, scoped under an order divider.\n\nOrder items carry fields (`stock_method`, `order_number`, `uid_order`,\n`inclusion_type`, `uid_delivery`/`uid_collection` on line items,\n`price.replacement`) that `InvoiceDocLineItem` (strict) rejects. Spreading\n`...orderItem` into an invoice item leaks them. Call this helper at every\norder → invoice boundary instead.\n\n⭐ **`zero_priced` is projected UNCONDITIONALLY (`?? null`), and the corpus was\nbackfilled first** — stage two of `manager#421`, landed 2026-09-10 by\n`api-cloudrun/scripts/backfill-zero-priced-projections.ts`.\n\n⚠️ **The order of those two was forced, and the reason is\n`invoiceItemDifferences` comparing top-level KEY SETS.** `buildOrderLine`\nwrites `zero_priced: null` explicitly on every order line — see its own\ncomment, *\"the server writes both as an explicit `null` so the optimistic row\nmatches the echo\"* — so the key is present on every order line without\nexception, and emitting here ahead of the backfill would have made EVERY\npaired line report a key-set difference at once. This file already records\nthat happening three times (`base_percent`, `crms_id`,\n`price.discount_percent` — 8,015 of 8,978 paired lines), which is why\n`coa_revenue`, `taxed_as` and `price.taxes_base` below are all spread\nCONDITIONALLY.\n\n🔴 **So this key is the one that must NOT be conditional, and the population\nis why.** A conditional spread on presence is vacuous — the condition is true\nfor every order line. A conditional spread on *statedness* is worse: it makes\na line's KEY SET depend on its VALUE, so clearing a component's flag in the\ncatalog would take the key off the projection while the stored line kept it,\nand that line would report `out_of_sync` forever with nothing wrong. Measured\n2026-09-10 in prod, the narrow rule saved 102 invoice documents out of 1,037 —\na tenth of the write, for a defect class. `price.base_percent` and `taxed_as`\nare spelled `?? null` in `api-cloudrun`'s `buildInvoiceItems` for the same\nreason.\n\n`destination` and `group` items share their shape with the order doc, so they\npass through. Line items (and `transaction_fee`, which is stored as a\nline-item-shaped invoice item) are narrowed to the invoice-line-item keys.\n\nThe divider/line split is `ITEM_CONTRACTS[type].kind`, not a list of type\nliterals — so a new line type projects correctly the day it is added to the\ntable, instead of silently falling through to whichever branch happened to be\nlast. The per-branch KEY sets stay hand-written on purpose: they mirror\n`InvoiceDocLineItem`'s strict shape, and deriving them from the contract\nwould make the table a second source of truth for the schema.\n\nMirrors the hand-picked mapping in `api-cloudrun/src/services/invoices.ts`\n(`createInvoice`) so sync output is shape-consistent with create output.\n\n⚠️ **Exported for probes and audits, and that is the point** (api-cloudrun#481).\nAnything asking *\"does this invoice line equal its order line?\"* has to compare\nagainst the PROJECTION, not the raw order item — the two differ by exactly the\norder-only fields this function drops. A prod probe that compared raw order\nprices invented a phantom `taxes_base: 8,360` difference across the corpus,\nbecause `taxes_base` is order-only and never reaches an invoice line. There is\nno way to reimplement this faithfully outside the module, so the answer is to\nexport it rather than to keep re-deriving it. Paired with\n{@link invoiceItemDifferences}, which is the other half a probe needs.",
@@ -12342,7 +12362,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -13567,7 +13587,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -14556,7 +14576,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  taxed_as?: TaxedAsType | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {

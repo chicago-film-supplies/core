@@ -5,7 +5,7 @@ import { z } from "zod";
 import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
-import { LineItemCore } from "./_items.ts";
+import { LineItemCore, LineTaxCore } from "./_items.ts";
 import {
   Address,
   DocumentOrganizationSnapshot,
@@ -1186,10 +1186,9 @@ const OrderDocLineItemInner = z.strictObject({
   // Operator-authored, unlike `coa_revenue` beside it — so it IS on the input
   // schema. See the interface docblock for why it is optional rather than
   // defaulted, and why a CRMS rebuild has to carry it forward.
-  taxed_as: TaxedAsEnum.nullable().optional().meta({ column: true, label: "Taxed As" }),
-  // Snapshot + operator override, both optional during expand — see the interface.
-  uid_tax_class: FirestoreId.nullable().optional(),
-  uid_tax_class_override: FirestoreId.nullable().optional(),
+  // `taxed_as` + the class snapshot + the operator's class override — one
+  // declaration shared with the invoice line (`_items.ts`).
+  ...LineTaxCore,
 }).superRefine(checkItemContract).superRefine(checkZeroPricedAmount);
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;

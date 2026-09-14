@@ -5,7 +5,7 @@ import { z } from "zod";
 import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
-import { LineItemCore } from "./_items.ts";
+import { LineItemCore, LineTaxCore } from "./_items.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
 import {
   type RenderParamsContext,
@@ -434,13 +434,9 @@ const InvoiceDocLineItemInner = z.strictObject({
   ...LineItemCore,
   price: InvoiceDocItemPrice,
   coa_revenue: COARevenueEnum.nullable().optional(),
-  taxed_as: TaxedAsEnum.nullable().optional().meta({
-    column: true,
-    label: "Taxed As",
-  }),
-  // Snapshot + operator override, both optional during expand — see the interface.
-  uid_tax_class: FirestoreId.nullable().optional(),
-  uid_tax_class_override: FirestoreId.nullable().optional(),
+  // Shared with the order line (`_items.ts`), so the projected line carries the
+  // same tax levers under the same declaration.
+  ...LineTaxCore,
   tracking_category: z.string().nullable().optional(),
   xero_id: z.uuid().nullable().optional(),
   xero_tracking_option_id: z.uuid().nullable().optional(),

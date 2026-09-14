@@ -177,6 +177,10 @@ export interface LineItem {
    * branch of its own.
    */
   taxed_as?: TaxedAsType | null;
+  /** The product's tax-class snapshot (`LineTaxCore`) — see `deriveLineTaxClass`. */
+  uid_tax_class?: string | null;
+  /** The operator's per-line tax-class override (`LineTaxCore`); wins over the snapshot. */
+  uid_tax_class_override?: string | null;
 }
 
 /**

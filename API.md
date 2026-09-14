@@ -4941,6 +4941,14 @@ Allowed values for tax jurisdiction.
 type JurisdictionType = indexedAccess;
 ```
 
+### `LINE_TAX_FIELDS`
+
+The {@link LineTaxCore} keys, for code that copies the levers between grains.
+
+```ts
+const LINE_TAX_FIELDS: readonly ["taxed_as", "uid_tax_class", "uid_tax_class_override"];
+```
+
 ### `LIVE_IN_XERO_STATUSES`
 
 Statuses whose Xero counterpart is expected to exist and be non-VOIDED.
@@ -4965,6 +4973,32 @@ interface LeafPath {
   format?: string;
   meta: Record<string, unknown>;
 }
+```
+
+### `LineTaxCore`
+
+**The line's tax levers, declared once for the two PRICED grains** — an order
+line and an invoice line (api-cloudrun#993). Not a fulfillment line: it
+carries no price, so it has nothing to tax.
+
+- `taxed_as` — the legacy per-line key, retiring at the class contract step.
+- `uid_tax_class` — the product's class, snapshotted onto the line.
+- `uid_tax_class_override` — the operator's per-line class; wins over the
+  snapshot (`deriveLineTaxClass`, `utils/tax-classes.ts`).
+
+⭐ **Shared rather than copied, for the reason `LineItemCore` is**: the invoice
+prices its OWN line through the same resolver, so an order line and the
+invoice line projected from it must carry the same levers under the same
+declaration. Spread by both grains directly after `coa_revenue`, which is
+where both already declared these three keys, so no column moves.
+`tests/item-shape-parity.test.ts` asserts instance identity on both.
+
+All optional: an unstamped line derives its class from `taxed_as ?? type`,
+and order lines are deliberately NOT bulk-stamped (a stamp bumps
+`order.version` and re-pushes Xero quotes).
+
+```ts
+const LineTaxCore: typeLiteral;
 ```
 
 ### `List`
@@ -25625,6 +25659,8 @@ interface LineItem {
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
+  uid_tax_class?: string | null;
+  uid_tax_class_override?: string | null;
 }
 ```
 
@@ -26565,6 +26601,11 @@ Check whether any line item is a rental.
 
 Check whether any pre-tax line item has taxes applied.
 
+### `pickLineTaxFields(item: typeLiteral): typeLiteral`
+
+The {@link LINE_TAX_FIELDS} a line actually carries — present keys only, so a
+projection preserves the source line's key set exactly.
+
 ### `projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceDocItemType`
 
 Project an order item to its invoice-item shape, scoped under an order divider.
@@ -27135,6 +27176,8 @@ interface LineItem {
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
+  uid_tax_class?: string | null;
+  uid_tax_class_override?: string | null;
 }
 ```
 
@@ -29604,6 +29647,8 @@ interface LineItem {
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
+  uid_tax_class?: string | null;
+  uid_tax_class_override?: string | null;
 }
 ```
 
@@ -31667,6 +31712,8 @@ interface LineItem {
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
   taxed_as?: TaxedAsType | null;
+  uid_tax_class?: string | null;
+  uid_tax_class_override?: string | null;
 }
 ```
 

@@ -93,7 +93,7 @@ import {
 } from "../schemas/mod.ts";
 import { fromCentsBig, roundDivHalfAwayFromZero } from "./money.ts";
 import { chicagoDaysBetween } from "./dates.ts";
-import { agingBucketOf, type InvoiceAging } from "../schemas/mod.ts";
+import { agingBucketOf, type InvoiceAging, LINE_TAX_FIELDS, type TaxedAsType } from "../schemas/mod.ts";
 import {
   computeItemPaths,
   isTaxableCoa,
@@ -664,15 +664,29 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
     // nested inside `price` and therefore compared — hence the two different
     // treatments of two fields added in the same pass.
     ...(item.coa_revenue !== undefined ? { coa_revenue: item.coa_revenue } : {}),
-    // The line-level tax lever mirrors onto the invoice, because the invoice is
-    // what gets billed and the rule reads `taxed_as ?? type` on whichever
-    // document it is pricing. Spread CONDITIONALLY for the `taxes_base` reason
-    // one field up: the comparator compares KEY SETS, and emitting it
-    // unconditionally would make every pre-#409 line differ from its order line
-    // on a field neither ever set.
-    ...(item.taxed_as !== undefined ? { taxed_as: item.taxed_as } : {}),
+    // The tax levers (`LineTaxCore`: `taxed_as`, `uid_tax_class`,
+    // `uid_tax_class_override`) mirror onto the invoice, because the invoice is
+    // what gets billed and it prices its OWN line through the same resolver.
+    // Copied CONDITIONALLY, key by key, for the `taxes_base` reason one field
+    // up: the comparator compares KEY SETS, so a key is present on the invoice
+    // line exactly when it is present on the order line.
+    ...pickLineTaxFields(item),
     path,
   };
+}
+
+/**
+ * The {@link LINE_TAX_FIELDS} a line actually carries — present keys only, so a
+ * projection preserves the source line's key set exactly.
+ */
+export function pickLineTaxFields(
+  item: { taxed_as?: TaxedAsType | null; uid_tax_class?: string | null; uid_tax_class_override?: string | null },
+): { taxed_as?: TaxedAsType | null; uid_tax_class?: string | null; uid_tax_class_override?: string | null } {
+  const picked: { taxed_as?: TaxedAsType | null; uid_tax_class?: string | null; uid_tax_class_override?: string | null } = {};
+  for (const key of LINE_TAX_FIELDS) {
+    if (item[key] !== undefined) (picked as Record<string, unknown>)[key] = item[key];
+  }
+  return picked;
 }
 
 /**

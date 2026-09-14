@@ -93,7 +93,8 @@
  * @module
  */
 import { z } from "zod";
-import { ItemUid } from "./_uid.ts";
+import { FirestoreId, ItemUid } from "./_uid.ts";
+import { TaxedAsEnum, type TaxedAsType } from "./common.ts";
 
 /**
  * The six fields an order line, an invoice line and a fulfillment line all
@@ -218,3 +219,41 @@ export const LineItemCore: {
     label: "Zero Priced",
   }),
 };
+
+/**
+ * **The line's tax levers, declared once for the two PRICED grains** — an order
+ * line and an invoice line (api-cloudrun#993). Not a fulfillment line: it
+ * carries no price, so it has nothing to tax.
+ *
+ * - `taxed_as` — the legacy per-line key, retiring at the class contract step.
+ * - `uid_tax_class` — the product's class, snapshotted onto the line.
+ * - `uid_tax_class_override` — the operator's per-line class; wins over the
+ *   snapshot (`deriveLineTaxClass`, `utils/tax-classes.ts`).
+ *
+ * ⭐ **Shared rather than copied, for the reason `LineItemCore` is**: the invoice
+ * prices its OWN line through the same resolver, so an order line and the
+ * invoice line projected from it must carry the same levers under the same
+ * declaration. Spread by both grains directly after `coa_revenue`, which is
+ * where both already declared these three keys, so no column moves.
+ * `tests/item-shape-parity.test.ts` asserts instance identity on both.
+ *
+ * All optional: an unstamped line derives its class from `taxed_as ?? type`,
+ * and order lines are deliberately NOT bulk-stamped (a stamp bumps
+ * `order.version` and re-pushes Xero quotes).
+ */
+export const LineTaxCore: {
+  taxed_as: z.ZodOptional<z.ZodNullable<z.ZodType<TaxedAsType>>>;
+  uid_tax_class: z.ZodOptional<z.ZodNullable<z.ZodType<string>>>;
+  uid_tax_class_override: z.ZodOptional<z.ZodNullable<z.ZodType<string>>>;
+} = {
+  taxed_as: TaxedAsEnum.nullable().optional().meta({ column: true, label: "Taxed As" }),
+  uid_tax_class: FirestoreId.nullable().optional(),
+  uid_tax_class_override: FirestoreId.nullable().optional(),
+};
+
+/** The {@link LineTaxCore} keys, for code that copies the levers between grains. */
+export const LINE_TAX_FIELDS: readonly ["taxed_as", "uid_tax_class", "uid_tax_class_override"] = [
+  "taxed_as",
+  "uid_tax_class",
+  "uid_tax_class_override",
+];
