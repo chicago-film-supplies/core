@@ -11197,6 +11197,12 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "DocumentBilledEntry",
+          "declaration": "interface DocumentBilledEntry {\n  kind: \"billed\";\n  invoices: DocumentRef[];\n  ordered: number;\n  billed: number;\n  quantity_cents: number;\n  extension_cents: number;\n}",
+          "doc": "\"Billed N of M\" — what every aligned invoice, summed, bills at one order line\nagainst what the order asks for. Like `uninvoiced` it is a statement about all\nof the invoices, so it names every one that was summed.\n\nEmitted only when something bills the line (nothing billing it is\n`uninvoiced`) and the answer is not zero on both money axes. Cents are PRE-TAX\nand signed: negative is over-billing."
+        },
+        {
+          "kind": "interface",
           "name": "DocumentDiffContext",
           "declaration": "interface DocumentDiffContext {\n  taxNameByUid: ReadonlyMap<string, string>;\n  isOrderFrozen: fnOrConstructor;\n}",
           "doc": "What the order ↔ invoice explanation arms need, per order."
@@ -11204,7 +11210,7 @@
         {
           "kind": "typeAlias",
           "name": "DocumentDiffEntry",
-          "declaration": "type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry;",
+          "declaration": "type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry | DocumentBilledEntry;",
           "doc": "One entry at one key of the viewed document. Discriminated on `kind`."
         },
         {
@@ -11216,8 +11222,8 @@
         {
           "kind": "typeAlias",
           "name": "DocumentDiffKind",
-          "declaration": "type DocumentDiffKind = \"differs\" | \"only_here\" | \"missing_here\" | \"pair_field\" | \"uninvoiced\" | \"substituted\";",
-          "doc": "- `differs` — the same path on both sides, a compared field disagrees\n- `only_here` — on the viewed document, absent from the source\n- `missing_here` — on the source, absent from the viewed document\n- `pair_field` — a destination pair's compared field disagrees\n- `uninvoiced` — an order/fulfillment line that no invoice carries\n- `substituted` — one side carries a substitute where the other carries the line it replaced"
+          "declaration": "type DocumentDiffKind = \"differs\" | \"only_here\" | \"missing_here\" | \"pair_field\" | \"uninvoiced\" | \"substituted\" | \"billed\";",
+          "doc": "- `differs` — the same path on both sides, a compared field disagrees\n- `only_here` — on the viewed document, absent from the source\n- `missing_here` — on the source, absent from the viewed document\n- `pair_field` — a destination pair's compared field disagrees\n- `uninvoiced` — an order/fulfillment line that no invoice carries\n- `substituted` — one side carries a substitute where the other carries the line it replaced\n- `billed` — the invoices, summed, bill a different quantity or chargeable days than the order"
         },
         {
           "kind": "interface",
@@ -11246,7 +11252,7 @@
         {
           "kind": "interface",
           "name": "DocumentSourceDiffEntry",
-          "declaration": "interface DocumentSourceDiffEntry {\n  kind: Exclude<DocumentDiffKind, \"uninvoiced\" | \"substituted\">;\n  source: DocumentRef;\n  fields: DocumentDiffField[];\n}",
+          "declaration": "interface DocumentSourceDiffEntry {\n  kind: Exclude<DocumentDiffKind, \"uninvoiced\" | \"substituted\" | \"billed\">;\n  source: DocumentRef;\n  fields: DocumentDiffField[];\n}",
           "doc": "One source's difference at one key of the viewed document."
         },
         {
@@ -11287,6 +11293,113 @@
             }
           ],
           "returnsTag": "Entries keyed by the viewed document's own path keys; empty when the\nviewed document is not among `sources`"
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/quantityAccounting",
+      "moduleDoc": "**Quantity accounting** — how much of an order line its invoices have billed,\nand what is left to bill (api-cloudrun#680, manager#414).\n\n## One sum, computed on read, never stored (owner decision D3, 2026-09-13)\n\n> billed quantity at an order path = Σ over non-void, aligned invoices of\n> (line quantity at that path + substitution quantities naming it)\n\nNothing stores this number, so there is no second writer and no denorm to\ndrift — the `Order.invoices[]` status-drift class. A `quantity_invoiced` field\non order lines was rejected for exactly that reason.\n\nIts readers: `computeDocumentDiffs`'s \"billed N of M\" entry, the\nremaining-invoice create mode (via {@link remainingForOrder}), and the\ncoverage census.\n\n## Substitutions, as the documents carry them today\n\nToday a substitute Y carries one `path_substituted_for` naming X's order path,\nand Y replaces X in place. So:\n\n- **Y's row quantity counts in full toward X.** Y's own path is not an order\n  path and receives nothing, and Y's components (which exist on no order\n  line) count toward nothing.\n- **X's components are credited through the ORDER's own stored ratio** —\n  `credit × component quantity ÷ kit quantity`, walked down the order's path\n  tree, rounded half-up once per level. Never the catalog: optional and\n  variable components make catalog derivation wrong (D1). A full swap credits\n  every component exactly its order quantity, so the rounding only ever bites\n  a partial swap.\n- **A spent anchor is not a substitution** — {@link liveInvoiceAnchors}\n  drops an anchor whose Y the order now carries itself, and that row then\n  counts at its own path like any other.\n\nTrack S (manager#414) replaces `path_substituted_for` with\n`substituted_for[].quantity`; only {@link billedByPath}'s substitution input\nchanges then, not this module's contract.\n\n## Dates are money, not quantity (D4)\n\nAn order whose dates were extended after it was billed has no quantity left to\nbill and still has money left to bill. That remainder is priced by running\neach billed row through the pricer twice — at the order line's CURRENT\n`chargeable_days` and at the row's own — and taking the difference.\n\n🔴 **Never price \"the extra days\" as a line of their own.** Chargeable-day\nformulas are not linear — `five_day_week` floors at one week — so\n`price(10 days) − price(7 days) ≠ price(3 days)`.\n\n⚠️ **The date input is `price.chargeable_days`, not the destination pair's\ndates.** The pair's dates are its upstream: `syncChargeDaysToItems` writes the\npair's charge days onto every line still on the default, and an operator can\noverride a line's days by hand. The pricer reads the line, so the line is what\nwas billed and the line is what the order now asks for — a hand-held line\nwhose days did not move correctly reports no extension.\n\n## Money is PRE-TAX, in integer cents\n\nEvery cent figure here is `subtotal_discounted_cents`: the invoice writer that\nbills a remainder materializes tax on the line it builds, per destination, and\npricing tax here would restate `materializeDocumentTax`. Each amount is a\ndifference of two independently-rounded pricer results, so nothing rounds\ntwice (`cfs-money`).\n\nSigned on purpose: a negative quantity or extension is OVER-billing (the order\nwent down, or its dates shortened, after billing). That is a credit-note\nquestion rather than a remainder, and it is the caller's to decide — this\nreports it rather than clamping it away.\n\nPure: no reads.",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "AccountedInvoice",
+          "declaration": "interface AccountedInvoice {\n  uid: string;\n  status: InvoiceStatusType;\n  items: InvoiceItem[];\n}",
+          "doc": "The invoice shape these functions read — every linked invoice, live or void."
+        },
+        {
+          "kind": "interface",
+          "name": "BilledAtPath",
+          "declaration": "interface BilledAtPath {\n  quantity: number;\n  rows: BilledRow[];\n}",
+          "doc": "What the invoices bill at one order-relative path."
+        },
+        {
+          "kind": "interface",
+          "name": "BilledByPath",
+          "declaration": "interface BilledByPath {\n  byPath: Map<string, BilledAtPath>;\n  compared: string[];\n  unaligned: string[];\n}",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "BilledRow",
+          "declaration": "interface BilledRow {\n  invoiceUid: string;\n  item: InvoiceItem;\n  via: \"direct\" | \"substitute\";\n}",
+          "doc": "One invoice row that bills an order path."
+        },
+        {
+          "kind": "interface",
+          "name": "LineAccount",
+          "declaration": "interface LineAccount {\n  ordered: number;\n  billed: number;\n  quantity: number;\n  quantity_cents: number;\n  extension_cents: number;\n}",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "RemainingForOrder",
+          "declaration": "interface RemainingForOrder {\n  lines: RemainingLine[];\n  compared: string[];\n  unaligned: string[];\n}",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "RemainingLine",
+          "declaration": "interface RemainingLine {\n  path: string[];\n  item: LineItem;\n  new: boolean;\n}",
+          "doc": "One order line with something left to bill, or billed beyond the order."
+        },
+        {
+          "kind": "function",
+          "name": "accountLine",
+          "signature": "accountLine(orderLine: LineItem, billed: BilledAtPath | undefined): LineAccount",
+          "doc": "Account for one order line against what the invoices bill at its path.",
+          "paramTags": [
+            {
+              "name": "orderLine",
+              "doc": "The order line, at its current quantity and `chargeable_days`"
+            },
+            {
+              "name": "billed",
+              "doc": "{@link billedByPath}'s entry for the line's path, if any"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "billedByPath",
+          "signature": "billedByPath(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[]): BilledByPath",
+          "doc": "How much each order path is billed, summed across every non-void, aligned\ninvoice (D3).\n\n⚠️ **An unaligned scope is left out of the sum and named in `unaligned`**;\nthis does not fail closed on its own, because `computeDocumentDiffs`\nreports an unaligned scope as its own entry and still compares the aligned\nones. A caller about to ACT on the sum — {@link remainingForOrder} — must\nrefuse when `unaligned` is non-empty: an unaligned scope's lines are\nuncounted, so everything it bills reads unbilled.\n\nAn invoice line at a path the order does not carry is still keyed here; it is\nthe order's absence, not the sum's, that makes it unmatched.",
+          "paramTags": [
+            {
+              "name": "orderUid",
+              "doc": "The order's uid, which is its divider's uid on every invoice"
+            },
+            {
+              "name": "orderItems",
+              "doc": "The order's CURRENT `items`, dividers included"
+            },
+            {
+              "name": "invoices",
+              "doc": "Every invoice linked to the order, live or void"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "remainingForOrder",
+          "signature": "remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[]): RemainingForOrder",
+          "doc": "What is left to bill on an order: new lines in full, quantity deltas at\nexisting paths, and date-extension money on rows already billed (D4).\n\n🔴 **Fails closed on any unaligned scope** — `lines` comes back empty and the\nuids are in `unaligned`. A remainder built over a partial sum bills again\nwhatever the unaligned invoice already billed.\n\nEvery order LINE is considered, dividers never. A line whose quantity and\nextension are both zero is omitted; a negative one (over-billing) is returned,\nfor the caller to route to a credit note rather than a remainder.",
+          "paramTags": [
+            {
+              "name": "orderUid",
+              "doc": "The order's uid"
+            },
+            {
+              "name": "orderItems",
+              "doc": "The order's CURRENT `items`, dividers included"
+            },
+            {
+              "name": "invoices",
+              "doc": "Every invoice linked to the order, live or void — ALL of them, never a page"
+            }
+          ],
+          "returnsTag": null
         }
       ]
     },
@@ -11926,6 +12039,27 @@
           "doc": "Determine whether a line item is a transaction fee.",
           "paramTags": [],
           "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "liveInvoiceAnchors",
+          "signature": "liveInvoiceAnchors(scopedInvoiceItems: readonly InvoiceItem[], orderItems: readonly LineItem[], orderDividerUid: string): SubstitutionAnchor[]",
+          "doc": "The substitutions an invoice's order-scoped lines carry, expressed in the\nORDER's path space, with SPENT anchors dropped.\n\nTwo conversions happen here and both are load-bearing:\n\n1. 🔴 **The path spaces differ.** An invoice line's stored `path` is prefixed\n   with its order divider's uid and an order line's is not, while\n   `path_substituted_for` is an ORDER path on every surface that stores it.\n   Comparing a divider-scoped path against it matches nothing, and the\n   failure is silent: every substitution reads as unexplained drift.\n2. ⭐ **An anchor is SPENT once the order carries a line at the anchor's own\n   path** — the admin has made the same substitution upstream, so there is no\n   divergence left to record. This is the invoice's half of the fulfillment\n   rule *\"cleared by the projection on graduation (admin emits at the same\n   path)\"*, and dropping the anchor here is what lets the line resume syncing\n   normally instead of being frozen by its own divergence record.\n\n⚠️ A DANGLING anchor is deliberately still live: if the admin deletes X from\nthe order without substituting, nothing resolves `substitutedFor` any more,\nbut Y is still on the invoice and the field is still the record of why.\n\n🔴 **`substitutedFor` IS re-derived, and this paragraph used to deny it.**\n{@link syncOrderToInvoiceSelective} re-points every anchor returned here at\nwherever X sits on the CURRENT order, and writes that value back. The field\nmeans *\"the replaced line's current order path\"*, not *\"its path at the moment\nof the swap\"* — the old wording was a description of an implementation, and\nfollowing it is what let an order-side reparent resurrect X\n(api-cloudrun#897). The sync is the only place that can do this: it is the one\ncaller holding both revisions of the order. Every downstream reader — the wire\nguard, `api-cloudrun/scripts/audit-fulfillment-divergence.ts`, {@link computeInvoiceSyncStatus},\n{@link computeOrderInvoiceCoverage} — sees only the current order and would have\nno way to resolve a locked value.",
+          "paramTags": [
+            {
+              "name": "scopedInvoiceItems",
+              "doc": "This order divider's invoice items"
+            },
+            {
+              "name": "orderItems",
+              "doc": "The order's CURRENT items"
+            },
+            {
+              "name": "orderDividerUid",
+              "doc": "The order divider's uid"
+            }
+          ],
+          "returnsTag": "Live anchors, in order-relative path space"
         },
         {
           "kind": "function",

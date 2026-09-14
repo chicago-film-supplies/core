@@ -280,6 +280,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // INVOICE's items, which a render context never holds (a template is
     // handed one document), and its answer is an operator advisory.
     "computeOrderInvoiceCoverage",
+    // The live substitution anchors of one invoice scope against its CURRENT
+    // order — exported for `utils/quantityAccounting.ts`. Needs the order's
+    // items beside the invoice's, which a render context never holds.
+    "liveInvoiceAnchors",
   ],
   // The line builders, denylisted whole. Every one of them CONSTRUCTS a line
   // item from a Typesense `ProductDocument` — a write-path input a render context
@@ -425,6 +429,15 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // sees its exports.
   documentDiff: [
     "computeDocumentDiffs",
+  ],
+  // `utils/quantityAccounting.ts` sums what an order's SIBLING invoices bill
+  // (api-cloudrun#680). Every export needs the order and all of its linked
+  // invoices at once; a template renders one document and holds neither half.
+  // Listed in UTIL_MODULES only so the drift guard sees its exports.
+  quantityAccounting: [
+    "accountLine",
+    "billedByPath",
+    "remainingForOrder",
   ],
   // `utils/fulfillment-items.ts` is a WRITE-PATH function shared by the API and
   // the manager — it rebuilds a fulfillment's items array from a picker

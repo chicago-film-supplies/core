@@ -304,6 +304,18 @@ const PRETAX_PRICER_SITES = new Map<string, { count: number; why: string }>([
     },
   ],
   [
+    "src/utils/quantityAccounting.ts",
+    {
+      // `subtotalCents` — `return 0`s on `!isPreTaxItem(item)` on the line
+      // above. It prices a remainder (`accountLine`): units not yet billed, and
+      // a billed row at two day counts. It does NOT go through
+      // `computeLineMoney` because it wants the pre-tax subtotal alone; tax on a
+      // remainder is the invoice writer's, per destination.
+      count: 1,
+      why: "subtotalCents in accountLine, guarded by isPreTaxItem on the line above",
+    },
+  ],
+  [
     "src/utils/taxes.ts",
     {
       // `materializeDocumentTax`'s spread-based rewrite — `continue`s on

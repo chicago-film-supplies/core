@@ -85,9 +85,11 @@ function summary(map: DocumentDiffMap["lines"] | DocumentDiffMap["pairs"]): Reco
   for (const [k, entries] of [...map].sort(([a], [b]) => a.localeCompare(b))) {
     out[k] = entries.map((e) =>
       e.kind === "uninvoiced"
-        ? `uninvoiced[${e.invoices.map((i) => `#${i.number}`).join(",")}]`
+        ? `unbilled[${e.invoices.map((i) => `#${i.number}`).join(",")}]`
         : e.kind === "substituted"
         ? `${e.source.kind}#${e.source.number}:substituted(${e.replaced}→${e.substitute})`
+        : e.kind === "billed"
+        ? `billed[${e.invoices.map((i) => `#${i.number}`).join(",")}](${e.billed} of ${e.ordered},q${e.quantity_cents},x${e.extension_cents})`
         : `${e.source.kind}#${e.source.number}:${e.kind}` +
           (e.fields.length ? `(${e.fields.map((f) => `${f.field}=${JSON.stringify(f.here)}→${JSON.stringify(f.there)}`).join(",")})` : "")
     );
@@ -162,14 +164,14 @@ Deno.test("documentDiff: a line no invoice carries is ONE uninvoiced entry on al
   const sources = { orders: [order()], fulfillments: [fulfillment()], invoices: [invoice("inv-1", [{ order: O, items: partial }])] };
 
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
-    [`${D}/${G}/${TRIPOD}`]: ["uninvoiced[#2241]"],
+    [`${D}/${G}/${TRIPOD}`]: ["unbilled[#2241]"],
   });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
-    [`${D}/${G}/${TRIPOD}`]: ["uninvoiced[#2241]"],
+    [`${D}/${G}/${TRIPOD}`]: ["unbilled[#2241]"],
   });
   // The order and the fulfillment both lack it on the invoice: one entry, not one per source.
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).lines), {
-    [`${O}/${D}/${G}/${TRIPOD}`]: ["uninvoiced[#2241]"],
+    [`${O}/${D}/${G}/${TRIPOD}`]: ["unbilled[#2241]"],
   });
 });
 
@@ -186,7 +188,7 @@ Deno.test("documentDiff: an order billed across two invoices has no presence ent
   // Without the sibling passed, invoice A cannot know B bills the Tripod — so it says so.
   assertEquals(
     summary(computeDocumentDiffs({ orders: [order()], invoices: [a] }, { kind: "invoice", uid: "inv-a" }, CONTEXT).lines),
-    { [`${O}/${D}/${G}/${TRIPOD}`]: ["uninvoiced[#2241]"], [`${O}/${D}/${LIGHT}`]: ["uninvoiced[#2241]"] },
+    { [`${O}/${D}/${G}/${TRIPOD}`]: ["unbilled[#2241]"], [`${O}/${D}/${LIGHT}`]: ["unbilled[#2241]"] },
   );
 });
 
@@ -205,23 +207,24 @@ Deno.test("documentDiff: a picker add and an invoice add of the same product are
 
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
     [invAddKey]: ["invoice#2241:missing_here"],
-    [`${D}/${TRIPOD}`]: ["order#1001:only_here", "uninvoiced[#2241]"],
+    [`${D}/${TRIPOD}`]: ["order#1001:only_here", "unbilled[#2241]"],
   });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).lines), {
     [`${O}/${invAddKey}`]: ["order#1001:only_here", "fulfillment#1001:only_here"],
-    [`${O}/${D}/${TRIPOD}`]: ["uninvoiced[#2241]"],
+    [`${O}/${D}/${TRIPOD}`]: ["unbilled[#2241]"],
   });
 });
 
-Deno.test("documentDiff: every invoice on an order is its own source, and each is numbered", () => {
+Deno.test("documentDiff: quantity against invoices is ONE billed entry over the sum, never a differs per invoice", () => {
+  // A bills the whole order; B bills the grip Light again. Both say 5 of it.
   const a = invoice("inv-a", [{ order: O, items: orderItems() }], 2241);
-  const b = invoice("inv-b", [{ order: O, items: orderItems() }], 2250);
+  const b = invoice("inv-b", [{ order: O, items: orderItems().filter((it) => it.path.join("/") !== `${D}/${G}/${TRIPOD}` && it.path.join("/") !== `${D}/${LIGHT}`) }], 2250);
   for (const inv of [a, b]) patchLine(inv.items, `${O}/${D}/${G}/${LIGHT}`, (it) => { it.quantity = 5; });
   const diff = computeDocumentDiffs({ orders: [order()], invoices: [a, b] }, { kind: "order", uid: O }, CONTEXT);
-  assertEquals(summary(diff.lines)[`${D}/${G}/${LIGHT}`], [
-    "invoice#2241:differs(quantity=2→5)",
-    "invoice#2250:differs(quantity=2→5)",
-  ]);
+  // 5 + 5 billed against 2 ordered: 8 units over, at 1000¢ each.
+  assertEquals(summary(diff.lines)[`${D}/${G}/${LIGHT}`], ["billed[#2241,#2250](10 of 2,q-8000,x0)"]);
+  // The two invoices that each bill the right quantity report nothing.
+  assertEquals(Object.keys(summary(diff.lines)), [`${D}/${G}/${LIGHT}`]);
 });
 
 Deno.test("documentDiff: a multi-order invoice compares only the scopes whose order was passed", () => {
@@ -229,7 +232,7 @@ Deno.test("documentDiff: a multi-order invoice compares only the scopes whose or
   patchLine(inv.items, `${O}/${D}/${G}/${LIGHT}`, (it) => { it.quantity = 5; });
   patchLine(inv.items, `${O2}/${D}/${G}/${LIGHT}`, (it) => { it.quantity = 6; });
   const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv] }, { kind: "invoice", uid: "inv-1" }, CONTEXT);
-  assertEquals(summary(diff.lines), { [`${O}/${D}/${G}/${LIGHT}`]: ["order#1001:differs(quantity=5→2)"] });
+  assertEquals(summary(diff.lines), { [`${O}/${D}/${G}/${LIGHT}`]: ["billed[#2241](5 of 2,q-3000,x0)"] });
 });
 
 Deno.test("documentDiff: a misaligned invoice scope is one unaligned entry, never a row per line", () => {
@@ -361,7 +364,8 @@ Deno.test("documentDiff: on the invoice view a substitute is keyed in the invoic
 });
 
 Deno.test("documentDiff: a sibling invoice's substitution covers the line for every other invoice", () => {
-  const billed = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  // inv-1 bills only the Tripod, as a Monopod; inv-2 bills everything else.
+  const billed = invoice("inv-1", [{ order: O, items: orderItems().filter((it) => it.path.join("/") === D || it.path.join("/") === `${D}/${G}` || it.uid === TRIPOD) }]);
   substitute(billed.items, `${O}/${D}/${G}/${TRIPOD}`, MONOPOD, [O]);
   const sibling = invoice("inv-2", [{ order: O, items: orderItems().filter((it) => it.uid !== TRIPOD) }], 2242);
   const diff = computeDocumentDiffs({ orders: [order()], invoices: [billed, sibling] }, { kind: "invoice", uid: "inv-2" }, CONTEXT);
@@ -391,7 +395,7 @@ Deno.test("documentDiff: a void invoice covers nothing — the line only it bill
   // The void invoice differs on money too; none of that may show.
   patchLine(dead.items, `${O}/${D}/${G}/${LIGHT}`, (it) => { (it.price as Record<string, unknown>).total_cents = 1; });
   const diff = computeDocumentDiffs({ orders: [order()], invoices: [live, dead] }, { kind: "order", uid: O }, CONTEXT);
-  assertEquals(summary(diff.lines), { [`${D}/${G}/${TRIPOD}`]: ["uninvoiced[#2242]"] });
+  assertEquals(summary(diff.lines), { [`${D}/${G}/${TRIPOD}`]: ["unbilled[#2242]"] });
   assertEquals([diff.unaligned.length, diff.status.length], [0, 0]);
 });
 
@@ -447,4 +451,48 @@ Deno.test("documentDiff: a transaction fee is compared order ↔ invoice but nev
     CONTEXT,
   );
   assertEquals(summary(diff.lines), { [`${O}/${D}/fee-1`]: ["order#1001:differs(price.total_cents=999→500)"] });
+});
+
+/** One order line, and the invoices that bill it, for the sum tests. */
+function billedOrder(quantity: number, days = 5): Order {
+  return order([DEST_ITEM, GROUP_ITEM, withDays(line(LIGHT, [D, G, LIGHT], quantity, 1000), days)]);
+}
+function withDays(item: LineItem, days: number): LineItem {
+  const price = { ...(item.price as unknown as Record<string, unknown>), chargeable_days: days };
+  return { ...item, price } as unknown as LineItem;
+}
+function billing(uid: string, number: number, quantity: number, days = 5): Invoice {
+  return invoice(uid, [{ order: O, items: [DEST_ITEM, GROUP_ITEM, withDays(line(LIGHT, [D, G, LIGHT], quantity, 1000), days)] }], number);
+}
+
+Deno.test("documentDiff: a split bill — 3 + 2 of 5 — reports nothing from any view", () => {
+  const sources = { orders: [billedOrder(5)], fulfillments: [fulfillment(billedOrder(5).items as unknown as LineItem[])], invoices: [billing("inv-a", 2241, 3), billing("inv-b", 2250, 2)] };
+  for (const viewing of [{ kind: "order", uid: O }, { kind: "fulfillment", uid: O }, { kind: "invoice", uid: "inv-a" }, { kind: "invoice", uid: "inv-b" }] as const) {
+    assertEquals(summary(computeDocumentDiffs(sources, viewing, CONTEXT).lines), {}, `${viewing.kind} ${viewing.uid}`);
+  }
+});
+
+Deno.test("documentDiff: a remainder — 4 billed of 6 — is one billed entry on the order, the fulfillment and the invoice", () => {
+  const sources = { orders: [billedOrder(6)], fulfillments: [fulfillment(billedOrder(6).items as unknown as LineItem[])], invoices: [billing("inv-a", 2241, 4)] };
+  const entry = ["billed[#2241](4 of 6,q2000,x0)"];
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), { [`${D}/${G}/${LIGHT}`]: entry });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), { [`${D}/${G}/${LIGHT}`]: entry });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-a" }, CONTEXT).lines), { [`${O}/${D}/${G}/${LIGHT}`]: entry });
+});
+
+Deno.test("documentDiff: a date extension is money on the billed entry, not a chargeable_days differs", () => {
+  // Billed 2 at 3 chargeable days (floored to one week: 2 × 1000 = 2000¢); the
+  // order now charges 7 days (2 × 1000 × 7 ÷ 5 = 2800¢). 800¢ left to bill —
+  // not price(4 days) = 2000¢, which is what pricing "the extra days" would say.
+  const sources = { orders: [billedOrder(2, 7)], invoices: [billing("inv-a", 2241, 2, 3)] };
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
+    [`${D}/${G}/${LIGHT}`]: ["billed[#2241](2 of 2,q0,x800)"],
+  });
+});
+
+Deno.test("documentDiff: a split bill still reports a base price the invoice changed", () => {
+  const a = billing("inv-a", 2241, 3);
+  patchLine(a.items, `${O}/${D}/${G}/${LIGHT}`, (it) => { (it.price as Record<string, unknown>).base_cents = 900; });
+  const diff = computeDocumentDiffs({ orders: [billedOrder(5)], invoices: [a, billing("inv-b", 2250, 2)] }, { kind: "order", uid: O }, CONTEXT);
+  assertEquals(summary(diff.lines), { [`${D}/${G}/${LIGHT}`]: ["invoice#2241:differs(price.base_cents=1000→900)"] });
 });

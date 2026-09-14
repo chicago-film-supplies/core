@@ -1130,7 +1130,7 @@ export function isItemSynced(
  * @param orderDividerUid - The order divider's uid
  * @returns Live anchors, in order-relative path space
  */
-function liveInvoiceAnchors(
+export function liveInvoiceAnchors(
   scopedInvoiceItems: readonly InvoiceItem[],
   orderItems: readonly LineItem[],
   orderDividerUid: string,

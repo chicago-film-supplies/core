@@ -198,6 +198,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "buildComponentEntries", expr: "it.products.buildComponentEntries(parentUid, sourceComponents, baseDepth, maxDepth)", desc: "Build component entries for a parent product from a component product's own `components` array. Each entry's `path` is prepended with `parentUid` so it reflects its position in the parent's tree.", returns: "T[]" },
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
+  "quantityAccounting": [
+
+  ],
   "reporting": [
     { name: "agingAccountRows", expr: "it.reporting.agingAccountRows(report)", desc: "The account × bucket matrix: one row per account, plus a residual row when the accounts do not add up to the report's own totals.", returns: "AgingAccountRow[]" },
     { name: "bucketAmountCents", expr: "it.reporting.bucketAmountCents(totals, bucket)", desc: "One bucket's amount out of an {@link AgingTotals}.", returns: "number" },

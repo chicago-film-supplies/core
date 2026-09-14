@@ -41,15 +41,24 @@
  * comparison involving a fulfillment skips `jurisdiction`, a tax fact the
  * fulfillment carries read-only and does not own.
  *
- * ## Presence against invoices is judged on the UNION of invoices
+ * ## Presence AND quantity against invoices are judged on the SUM of invoices
  *
  * An order is routinely billed across several invoices, so "invoice A lacks this
- * line" says nothing when invoice B carries it. Asked per invoice, every line of
- * a split-billed order would read `only_here` against the invoice that does not
- * bill it. So:
+ * line" says nothing when invoice B carries it, and "invoice A bills 3 of 5"
+ * says nothing when invoice B bills the other 2. Asked per invoice, every line of
+ * a split-billed order would read `only_here` or `differs(quantity)` against each
+ * invoice. So:
  *
- * - **differences in money or quantity** stay per invoice — each invoice is its
- *   own source row;
+ * - **how much is billed** is ONE `billed` entry per line — "billed N of M", with
+ *   the unbilled money for the missing units and for a date extension — computed
+ *   by `billedByPath` / `accountLine` (`utils/quantityAccounting.ts`, owner
+ *   decision D3). It is emitted only when something bills the line and the sum
+ *   disagrees with the order, on the order, fulfillment AND invoice views;
+ * - **differences in a line's TERMS** — base price, discount, taxes, formula —
+ *   stay per invoice, each invoice its own source row. Where an invoice row's
+ *   quantity or `chargeable_days` differ from the order's, its derived amounts
+ *   (subtotals, totals, discount and tax AMOUNTS) differ as a consequence and
+ *   are not reported: that money is the `billed` entry's;
  * - **a line on the order or fulfillment that NO invoice carries** is one
  *   `uninvoiced` entry naming every invoice checked — on the order, fulfillment
  *   AND invoice views;
@@ -130,6 +139,7 @@ import {
   isRemovedBySubstitution,
   type SubstitutionAnchor,
 } from "./substitutions.ts";
+import { accountLine, type AccountedInvoice, type BilledByPath, billedByPath } from "./quantityAccounting.ts";
 
 /** The three document kinds a diff can be viewed from or sourced from. */
 export type DocumentKind = "order" | "fulfillment" | "invoice";
@@ -149,8 +159,9 @@ export interface DocumentRef {
  * - `pair_field` — a destination pair's compared field disagrees
  * - `uninvoiced` — an order/fulfillment line that no invoice carries
  * - `substituted` — one side carries a substitute where the other carries the line it replaced
+ * - `billed` — the invoices, summed, bill a different quantity or chargeable days than the order
  */
-export type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field" | "uninvoiced" | "substituted";
+export type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field" | "uninvoiced" | "substituted" | "billed";
 
 /** One compared field. `here` is the viewed document's value, `there` the source's. */
 export interface DocumentDiffField {
@@ -161,7 +172,7 @@ export interface DocumentDiffField {
 
 /** One source's difference at one key of the viewed document. */
 export interface DocumentSourceDiffEntry {
-  kind: Exclude<DocumentDiffKind, "uninvoiced" | "substituted">;
+  kind: Exclude<DocumentDiffKind, "uninvoiced" | "substituted" | "billed">;
   source: DocumentRef;
   /** Empty for `only_here` / `missing_here`. */
   fields: DocumentDiffField[];
@@ -193,8 +204,30 @@ export interface DocumentSubstitutionEntry {
   substitute: string;
 }
 
+/**
+ * "Billed N of M" — what every aligned invoice, summed, bills at one order line
+ * against what the order asks for. Like `uninvoiced` it is a statement about all
+ * of the invoices, so it names every one that was summed.
+ *
+ * Emitted only when something bills the line (nothing billing it is
+ * `uninvoiced`) and the answer is not zero on both money axes. Cents are PRE-TAX
+ * and signed: negative is over-billing.
+ */
+export interface DocumentBilledEntry {
+  kind: "billed";
+  invoices: DocumentRef[];
+  /** The order line's quantity. */
+  ordered: number;
+  /** Units billed across `invoices`, substitutes counted toward the line they replaced. */
+  billed: number;
+  /** Pre-tax cents for the `ordered − billed` units, at the order line's current terms. */
+  quantity_cents: number;
+  /** Pre-tax cents the order's current chargeable days add to the rows already billed. */
+  extension_cents: number;
+}
+
 /** One entry at one key of the viewed document. Discriminated on `kind`. */
-export type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry;
+export type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry | DocumentBilledEntry;
 
 /**
  * The answer for one viewed document.
@@ -256,6 +289,21 @@ const COMPARED_LINE_FIELDS: ReadonlySet<string> = new Set([
   "price.subtotal_discounted_cents",
   "price.taxes",
   "price.total_cents",
+]);
+
+/**
+ * Line fields that follow from `quantity` and `price.chargeable_days`, so an
+ * invoice row billing a different number of units or days than the order
+ * differs in them by construction. That money is the `billed` entry's.
+ * `price.discount` and `price.taxes` carry amounts too; their TERMS are still
+ * compared ({@link termsDiffer}).
+ */
+const SPLIT_DERIVED_FIELDS: ReadonlySet<string> = new Set([
+  "price.subtotal_cents",
+  "price.subtotal_discounted_cents",
+  "price.total_cents",
+  "price.discount",
+  "price.taxes",
 ]);
 
 /** The pair keys a comparison is addressed BY, never part of what it compares. */
@@ -349,6 +397,8 @@ function lineFields(
   context: DocumentDiffContext,
 ): DocumentDiffField[] {
   const involvesFulfillment = viewed.kind === "fulfillment" || source.kind === "fulfillment";
+  // Fulfillment ↔ invoice quantity is the `billed` entry's, judged against the order.
+  if (involvesFulfillment && (viewed.kind === "invoice" || source.kind === "invoice")) return [];
   if (involvesFulfillment) {
     return here.quantity === there.quantity
       ? []
@@ -365,9 +415,35 @@ function lineFields(
     invoiceItemDifferences(expected, invoiceLine),
     { taxNameByUid: context.taxNameByUid, orderFrozen: context.isOrderFrozen(order) },
   );
+  const split = orderLine.quantity !== invoiceLine.quantity ||
+    (orderLine.price?.chargeable_days ?? null) !== (invoiceLine.price?.chargeable_days ?? null);
   return unexplained
     .filter((f) => COMPARED_LINE_FIELDS.has(f))
+    // How many units and days are billed is the `billed` entry's, over the sum.
+    .filter((f) => f !== "quantity" && f !== "price.chargeable_days")
+    .filter((f) => !split || !SPLIT_DERIVED_FIELDS.has(f) || termsDiffer(orderLine, invoiceLine, f))
     .map((field) => ({ field, here: readField(here, field), there: readField(there, field) }));
+}
+
+/**
+ * Whether a discount or tax list differs in its TERMS — type and rate, or which
+ * taxes at which rates — rather than only in the amounts a different quantity
+ * or day count produces. The other derived fields have no terms apart from
+ * their value.
+ */
+function termsDiffer(a: LineItem, b: LineItem, field: string): boolean {
+  if (field === "price.discount") {
+    const terms = (it: LineItem) => {
+      const d = it.price?.discount;
+      return d ? { type: d.type, rate: d.rate } : null;
+    };
+    return JSON.stringify(terms(a)) !== JSON.stringify(terms(b));
+  }
+  if (field === "price.taxes") {
+    const terms = (it: LineItem) => (it.price?.taxes ?? []).map((t) => ({ uid: t.uid, rate: t.rate, type: t.type }));
+    return JSON.stringify(terms(a)) !== JSON.stringify(terms(b));
+  }
+  return false;
 }
 
 function push<K>(map: Map<K, DocumentDiffEntry[]>, k: K, entry: DocumentDiffEntry): void {
@@ -377,19 +453,17 @@ function push<K>(map: Map<K, DocumentDiffEntry[]>, k: K, entry: DocumentDiffEntr
 }
 
 /**
- * The invoice coverage of one order scope: which order-relative line keys ANY
- * aligned invoice carries, and which invoices were checked.
+ * The invoice coverage of one order scope: what every aligned invoice, summed,
+ * bills at each order-relative line key, and which invoices were checked.
  */
 interface InvoiceCoverage {
-  keys: ReadonlySet<string>;
-  /** Every aligned invoice's substitution anchors — a substituted-away line (and its subtree) is billed as its substitute. */
-  anchors: readonly SubstitutionAnchor[];
+  billed: BilledByPath;
   invoices: DocumentRef[];
 }
 
 /** Does some aligned invoice bill this order-relative line, directly or as a substitute? */
 function covers(coverage: InvoiceCoverage, rel: string): boolean {
-  return coverage.keys.has(rel) || isRemovedBySubstitution(rel.split("/"), coverage.anchors);
+  return coverage.billed.byPath.has(rel);
 }
 
 /** Compare the viewed side against one source side, within one order scope. */
@@ -534,21 +608,45 @@ export function computeDocumentDiffs(
     return invoiceScopeDividersMatch(scoped as unknown as InvoiceItem[], order.items as unknown as LineItem[], orderUid);
   };
 
-  /** Every aligned invoice passed for `orderUid`, with the union of the lines they carry. */
+  /** Every aligned invoice passed for `orderUid`, with what they bill summed per line. */
   const coverageOf = (orderUid: string): InvoiceCoverage & { alignedInvoices: Invoice[] } => {
-    const keys = new Set<string>();
-    const anchors: SubstitutionAnchor[] = [];
     const refs: DocumentRef[] = [];
     const alignedInvoices: Invoice[] = [];
     for (const invoice of invoices) {
       if (!invoiceScopes(invoice).includes(orderUid) || !aligned(invoice, orderUid)) continue;
       alignedInvoices.push(invoice);
       refs.push(refOf("invoice", invoice));
-      const scoped = scopeInvoice(invoice, orderUid);
-      for (const k of scoped.byKey.keys()) keys.add(k);
-      anchors.push(...scoped.anchors);
     }
-    return { keys, anchors, invoices: refs, alignedInvoices };
+    const billed = billedByPath(
+      orderUid,
+      (orderByUid.get(orderUid)?.items ?? []) as unknown as LineItem[],
+      alignedInvoices as unknown as AccountedInvoice[],
+    );
+    return { billed, invoices: refs, alignedInvoices };
+  };
+
+  /**
+   * One `billed` entry at `viewedKey` for the order line at `rel`, when the
+   * summed invoices bill it and disagree with the order. Nothing billing it at
+   * all is `uninvoiced`, not this.
+   */
+  const billedEntry = (orderUid: string, coverage: InvoiceCoverage, rel: string, viewedKey: string) => {
+    const order = orderByUid.get(orderUid);
+    const at = coverage.billed.byPath.get(rel);
+    if (order === undefined || at === undefined) return;
+    const orderLine = scopeOrder(order).byKey.get(rel);
+    if (orderLine === undefined) return;
+    const account = accountLine(orderLine, at);
+    if (account.quantity === 0 && account.extension_cents === 0) return;
+    if (out.lines.get(viewedKey)?.some((e) => e.kind === "billed")) return;
+    push(out.lines, viewedKey, {
+      kind: "billed",
+      invoices: coverage.invoices,
+      ordered: account.ordered,
+      billed: account.billed,
+      quantity_cents: account.quantity_cents,
+      extension_cents: account.extension_cents,
+    });
   };
 
   /** An order- or fulfillment-shaped viewed side against every invoice on its order. */
@@ -569,6 +667,13 @@ export function computeDocumentDiffs(
         continue;
       }
       compareScope(out, viewed, { kind: "invoice", doc: invoice, lines: scopeInvoice(invoice, orderUid) }, orderUid, coverage, context);
+    }
+    const order = orderByUid.get(orderUid);
+    if (order === undefined || coverage.alignedInvoices.length === 0) return;
+    const orderSide: Side = { kind: "order", doc: order, lines: scopeOrder(order) };
+    for (const [rel, item] of viewed.lines.byKey) {
+      if (!comparable(viewed, orderSide, item)) continue;
+      billedEntry(orderUid, coverage, rel, rel);
     }
   };
 
@@ -613,6 +718,13 @@ export function computeDocumentDiffs(
     }
     const coverage = coverageOf(orderUid);
     compareScope(out, viewed, { kind: "order", doc: order!, lines: scopeOrder(order!) }, orderUid, coverage, context);
+    // Each row this invoice carries reports the sum for the order line it bills —
+    // its own path, or the line a substitute replaced.
+    for (const [rel, at] of coverage.billed.byPath) {
+      for (const row of at.rows) {
+        if (row.invoiceUid === invoice.uid) billedEntry(orderUid, coverage, rel, key(row.item.path));
+      }
+    }
     // Invoice ↔ fulfillment goes through the order's path space, so it needs the same alignment.
     if (fulfillment !== undefined) {
       compareScope(out, viewed, { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) }, orderUid, coverage, context);
