@@ -24,6 +24,12 @@
  *    to total it. The re-deriving form survives only as the audit oracle,
  *    `rederiveDocumentTotalsForAudit` (D2).
  *
+ * ## An issued invoice keeps its tax versions
+ *
+ * Past draft, the rate each line already carries wins over today's version of
+ * the same tax (#997 decision (a)). A draft invoice and an order price at their
+ * as-of instant.
+ *
  * ## It refuses a settled or void invoice (D3)
  *
  * A settled invoice's money is agreed; a void one's is retracted. Neither is
@@ -115,6 +121,31 @@ export function extensionChargeDays(orderChargeDays: number, billedChargeDays: n
   return Math.max(orderChargeDays, 5) - Math.max(billedChargeDays, 5);
 }
 
+/**
+ * The rate versions an issued invoice already carries (#997 decision (a)).
+ *
+ * A draft has agreed nothing, so it prices at its date. Anything past draft was
+ * sent to a customer at the rates on its lines, so a re-price must keep them:
+ * each line's `taxes_base` names the rate it was taxed on (it survives an
+ * exemption, where `taxes` is `[]`), and `taxes` covers a line stored before
+ * `taxes_base` existed. The resolver reads only the rate uids, and a frozen rate
+ * wins over the live version of the same code.
+ *
+ * Returns `undefined` for an order or a draft invoice, which is "not frozen".
+ */
+function frozenRateVersions(
+  items: readonly LineItem[],
+  document: PriceDocumentKind,
+): ReadonlyMap<string, string> | undefined {
+  if (document.kind !== "invoice" || document.status === "draft") return undefined;
+  const frozen = new Map<string, string>();
+  for (const item of items) {
+    const price = item.price as { taxes_base?: readonly { uid: string }[]; taxes?: readonly { uid: string }[] } | undefined;
+    for (const ref of price?.taxes_base ?? price?.taxes ?? []) frozen.set(ref.uid, ref.uid);
+  }
+  return frozen;
+}
+
 /** Refuse a document whose money may not move (D3). */
 function assertRepriceable(document: PriceDocumentKind): void {
   if (document.kind !== "invoice") return;
@@ -179,7 +210,10 @@ export function priceDocument<T extends LineItem>(
   );
 
   // ── Stage 1: tax refs and taxes_base ──
-  const warnings = assignLineTaxes(out, ctx.tax);
+  // An issued invoice resolves at the versions it carries, read off the INPUT
+  // before stage 1 rewrites any ref. A caller-supplied freeze wins.
+  const frozenVersions = ctx.tax.frozenVersions ?? frozenRateVersions(items, ctx.document);
+  const warnings = assignLineTaxes(out, { ...ctx.tax, frozenVersions });
   const pricing = pricingTaxesOf(ctx.tax.catalog);
 
   // ── Stages 2 + 3: per-line money, assembled ──
