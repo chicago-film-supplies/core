@@ -441,6 +441,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // `taxClassMatrix` would print TODAY's rates beside a document billed at others.
   "tax-classes": [
     "lineTaxClass",
+    "migrateLegacyTaxCatalog",
     "resolveClassTaxes",
     "taxClassMatrix",
     "validateTaxSetup",

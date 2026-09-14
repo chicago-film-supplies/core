@@ -12,22 +12,23 @@
  * - **"No Tax" does not migrate.** It carries `jurisdiction: null`, which no
  *   code can; the Non-Taxable class (`uid_tax_codes: []`) says the same thing.
  */
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
   getInitialValues,
   JURISDICTIONS,
   OrderDocLineItem,
+  type Tax as TaxDoc,
   type TaxClass,
   TaxClassSchema,
   type TaxCode,
   TaxCodeSchema,
-  type TaxRate,
   TaxRateSchema,
 } from "../src/schemas/mod.ts";
 import { assignLineTaxes, resolveLineTax } from "../src/utils/taxes.ts";
 import type { LineItem, Tax } from "../src/utils/orders.ts";
 import {
   lineTaxClass,
+  migrateLegacyTaxCatalog,
   resolveClassTaxes,
   type TaxCatalog,
   taxClassMatrix,
@@ -37,20 +38,14 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 
 // ── the prod catalog, 2026-09-13 (read-only MCP query of `taxes`) ─────────
 
-/** The fields of a stored `taxes` document this migration reads. */
-interface LegacyRow {
-  uid: string;
-  name: string;
-  rate: number;
-  type: "percent" | "flat";
+/** A prod `taxes` row as queried, completed to a stored `Tax` below. */
+type LegacyRow = Pick<TaxDoc, "uid" | "name" | "rate" | "type" | "applied_from" | "applied_to"> & {
   jurisdiction: string | null;
   item_types: string[];
-  applied_from: string;
-  applied_to: string | null;
   xero_tax_type: string | null;
   xero_account_code?: number | null;
   xero_item_code?: string | null;
-}
+};
 
 const PROD_TAXES: LegacyRow[] = [
   { uid: "0sfD0ca1LvwWR0pTJtqw", name: "Frankfort Sales Tax", rate: 8, type: "percent", jurisdiction: "frankfort", item_types: ["rental", "sale", "replacement"], applied_from: "2026-01-01T00:00:00.000-06:00", applied_to: "2026-08-19T00:00:00.000-05:00", xero_tax_type: "TAX007" },
@@ -66,83 +61,44 @@ const PROD_TAXES: LegacyRow[] = [
   { uid: "uCM5n4ZNgsVc1fyMQbHq", name: "Paxton Sales Tax", rate: 0, type: "percent", jurisdiction: "paxton", item_types: ["rental", "sale", "replacement"], applied_from: "2026-01-01T00:00:00.000-06:00", applied_to: null, xero_tax_type: "NONE" },
   { uid: "xmxiaT32ehsEnrgrKWW8", name: "Chicago Rental Tax", rate: 11, type: "percent", jurisdiction: "chicago", item_types: ["rental"], applied_from: "2025-01-01T00:00:00.000-06:00", applied_to: "2026-01-01T00:00:00.000-06:00", xero_tax_type: "TAX003" },
 ];
-const LEGACY = PROD_TAXES as unknown as Tax[];
-const BOTTLE_RATE_UID = "jvsOUs8nR4DXElcVNqJc";
-
-// ── the migration, as the backfill must perform it ───────────────────────
-
-const actor = { uid: "testuser100000000000", name: "Test User" };
-const stamps = { version: 0, created_by: actor, updated_by: actor, created_at: mockTimestamp, updated_at: mockTimestamp };
-
-const CODE_UID: Record<string, string> = {
-  "Chicago Rental Tax": "codechirental0000000",
-  "Chicago Sales Tax": "codechisales00000000",
-  "Frankfort Sales Tax": "codefrankfort0000000",
-  "Rantoul Sales Tax": "coderantoul000000000",
-  "Paxton Sales Tax": "codepaxton0000000000",
-  "Chicago Bottled Water Tax": "codebottle0000000000",
-};
-
-const MIGRATED_ROWS = PROD_TAXES.filter((t) => t.jurisdiction !== null);
-
-const CODES: TaxCode[] = Object.entries(CODE_UID).map(([name, uid]) => {
-  const first = MIGRATED_ROWS.find((t) => t.name === name)!;
-  return {
-    uid,
-    name,
-    jurisdiction: first.jurisdiction as TaxCode["jurisdiction"],
-    type: first.type,
-    xero_account_code: first.xero_account_code ?? null,
-    xero_item_code: first.xero_item_code ?? null,
-    active: true,
-    ...stamps,
-  };
-});
-
-const RATES: TaxRate[] = MIGRATED_ROWS.map((t) => ({
-  uid: t.uid,
-  uid_tax_code: CODE_UID[t.name],
-  rate: t.rate,
-  type: t.type,
-  applied_from: t.applied_from,
+const LEGACY: TaxDoc[] = PROD_TAXES.map((t) => ({
+  crms_id: null,
   applied_from_fs: mockTimestamp,
-  applied_to: t.applied_to,
   applied_to_fs: t.applied_to === null ? null : mockTimestamp,
   effective_from: null,
-  xero_tax_type: t.xero_tax_type ?? null,
   xero_components: [],
-  ...stamps,
-}));
+  version: 0,
+  created_by: { uid: "testuser100000000000", name: "Test User" },
+  updated_by: { uid: "testuser100000000000", name: "Test User" },
+  created_at: mockTimestamp,
+  updated_at: mockTimestamp,
+  ...t,
+}) as unknown as TaxDoc);
+const BOTTLE_RATE_UID = "jvsOUs8nR4DXElcVNqJc";
 
-/** A class per legacy key: the codes whose versions list that key. */
-const codesListing = (key: string) =>
-  [...new Set(MIGRATED_ROWS.filter((t) => t.item_types.includes(key)).map((t) => CODE_UID[t.name]))];
+// ── the migration: the same function the backfill runs ───────────────────
 
-const cls = (uid: string, name: string, uid_tax_codes: string[], is_default_for: TaxClass["is_default_for"]): TaxClass => ({
-  uid,
-  name,
-  description: null,
-  uid_tax_codes,
-  is_default_for,
-  active: true,
-  ...stamps,
+const actor = { uid: "testuser100000000000", name: "Test User" };
+let minted = 0;
+const EMPTY: TaxCatalog = { codes: [], rates: [], classes: [] };
+const MIGRATED = migrateLegacyTaxCatalog(LEGACY, EMPTY, {
+  actor,
+  now: mockTimestamp,
+  mintUid: () => `minted${String(++minted).padStart(14, "0")}`,
 });
+const { codes: CODES, rates: RATES, classes: CLASSES } = MIGRATED;
 
+const CODE_UID: Record<string, string> = Object.fromEntries(CODES.map((c) => [c.name, c.uid]));
+const classUid = (name: string) => CLASSES.find((c) => c.name === name)!.uid;
 const CLASS_UID = {
-  rental: "classrental000000000",
-  sale: "classsale00000000000",
-  bottled: "classsalebottled0000",
-  replacement: "classreplacement0000",
-  none: "classnontaxable00000",
+  rental: classUid("Rental"),
+  sale: classUid("Sale"),
+  bottled: classUid("Sale – Bottled Water"),
+  replacement: classUid("Replacement"),
+  none: classUid("Non-Taxable"),
 } as const;
-
-const CLASSES: TaxClass[] = [
-  cls(CLASS_UID.rental, "Rental", codesListing("rental"), ["rental"]),
-  cls(CLASS_UID.sale, "Sale", codesListing("sale"), ["sale"]),
-  cls(CLASS_UID.bottled, "Sale – Bottled Water", [...codesListing("sale"), CODE_UID["Chicago Bottled Water Tax"]], []),
-  cls(CLASS_UID.replacement, "Replacement", codesListing("replacement"), ["replacement"]),
-  cls(CLASS_UID.none, "Non-Taxable", [], ["service", "surcharge", "transaction_fee"]),
-];
+const CLASS_BY_UID = (uid: string) => CLASSES.find((c) => c.uid === uid)!;
+const namesOf = (uids: readonly string[]) => uids.map((u) => CODES.find((c) => c.uid === u)!.name).sort();
 
 const CATALOG: TaxCatalog = { codes: CODES, rates: RATES, classes: CLASSES };
 
@@ -159,6 +115,37 @@ Deno.test("migration: Paxton is in Rental, Sale and Replacement — the plan's t
   for (const uid of [CLASS_UID.rental, CLASS_UID.sale, CLASS_UID.replacement]) {
     assertEquals(CLASSES.find((c) => c.uid === uid)!.uid_tax_codes.includes(CODE_UID["Paxton Sales Tax"]), true);
   }
+});
+
+Deno.test("migration: the class table, by code name — independent of how the migration derives it", () => {
+  const sales = ["Chicago Sales Tax", "Frankfort Sales Tax", "Paxton Sales Tax", "Rantoul Sales Tax"];
+  assertEquals(namesOf(CLASS_BY_UID(CLASS_UID.rental).uid_tax_codes), ["Chicago Rental Tax", "Frankfort Sales Tax", "Paxton Sales Tax", "Rantoul Sales Tax"]);
+  assertEquals(namesOf(CLASS_BY_UID(CLASS_UID.sale).uid_tax_codes), sales);
+  assertEquals(namesOf(CLASS_BY_UID(CLASS_UID.replacement).uid_tax_codes), sales);
+  assertEquals(namesOf(CLASS_BY_UID(CLASS_UID.bottled).uid_tax_codes), ["Chicago Bottled Water Tax", ...sales].sort());
+  assertEquals(CLASS_BY_UID(CLASS_UID.none).uid_tax_codes, []);
+  assertEquals(MIGRATED.skipped.map((s) => s.name), ["No Tax"]);
+});
+
+Deno.test("migration: re-running over its own output mints nothing and changes nothing", () => {
+  const again = migrateLegacyTaxCatalog(LEGACY, CATALOG, {
+    actor: { uid: "otheruser00000000000", name: "Other" },
+    now: { seconds: 1, nanoseconds: 0 } as unknown as typeof mockTimestamp,
+    mintUid: () => { throw new Error("a re-run must not mint"); },
+  });
+  assertEquals([again.codes, again.rates, again.classes], [CODES, RATES, CLASSES]);
+});
+
+Deno.test("migration: a rate copies its stored effective_from and Xero components", () => {
+  const components = [{ name: "State", rate: 6.25 }, { name: "City", rate: 4.25 }];
+  const row = { ...LEGACY.find((t) => t.uid === "dtTboGtD0f2iwRlDGOBH")!, effective_from: "2026-07-01T00:00:00.000-05:00", xero_components: components };
+  const out = migrateLegacyTaxCatalog([row], EMPTY, { actor, now: mockTimestamp, mintUid: () => "mintedx0000000000000" });
+  assertEquals([out.rates[0].effective_from, out.rates[0].xero_components], [row.effective_from, components]);
+});
+
+Deno.test("migration: versions of one name that disagree on a code property throw rather than pick one", () => {
+  const split = LEGACY.map((t) => (t.uid === "xmxiaT32ehsEnrgrKWW8" ? { ...t, jurisdiction: "rantoul" as const } : t));
+  assertThrows(() => migrateLegacyTaxCatalog(split, EMPTY, { actor, now: mockTimestamp, mintUid: () => "mintedx0000000000000" }), Error, "disagree on jurisdiction");
 });
 
 Deno.test("validateTaxSetup: the migrated prod catalog is clean", () => {
@@ -242,7 +229,7 @@ Deno.test("parity: the class rule reprices every (shape × jurisdiction × insta
             destinations: [{ uid: null, jurisdiction, delivery: null }],
             origin,
             exempt,
-            taxes: LEGACY,
+            taxes: LEGACY as unknown as Tax[],
             asOf,
           } as const;
 
@@ -301,10 +288,10 @@ Deno.test("resolveClassTaxes explains every code in the class, in class order", 
   assertEquals(
     r.considered.map((c) => [c.name, c.outcome]),
     [
-      ["Frankfort Sales Tax", "matched"],
       ["Chicago Sales Tax", "wrong_jurisdiction"],
-      ["Rantoul Sales Tax", "wrong_jurisdiction"],
+      ["Frankfort Sales Tax", "matched"],
       ["Paxton Sales Tax", "wrong_jurisdiction"],
+      ["Rantoul Sales Tax", "wrong_jurisdiction"],
       ["Chicago Bottled Water Tax", "wrong_jurisdiction"],
     ],
   );

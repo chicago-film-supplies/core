@@ -14832,6 +14832,24 @@
         },
         {
           "kind": "interface",
+          "name": "LegacyTaxMigration",
+          "declaration": "interface LegacyTaxMigration {\n  codes: TaxCode[];\n  rates: TaxRate[];\n  classes: TaxClass[];\n  skipped: Array<typeLiteral>;\n}",
+          "doc": "The catalog the legacy `taxes` collection maps to, plus what did not map."
+        },
+        {
+          "kind": "interface",
+          "name": "LegacyTaxMigrationContext",
+          "declaration": "interface LegacyTaxMigrationContext {\n  actor: ActorRefType;\n  now: FirestoreTimestampType;\n  mintUid: fnOrConstructor;\n}",
+          "doc": "What a migration mints and stamps. Core cannot mint a Firestore id, so the caller does."
+        },
+        {
+          "kind": "variable",
+          "name": "MIGRATED_TAX_CLASSES",
+          "declaration": "const MIGRATED_TAX_CLASSES: typeLiteral;",
+          "doc": "The class names the migration owns, and the legacy item type each is derived from."
+        },
+        {
+          "kind": "interface",
           "name": "TaxCatalog",
           "declaration": "interface TaxCatalog {\n  codes: readonly TaxCode[];\n  rates: readonly TaxRate[];\n  classes: readonly TaxClass[];\n}",
           "doc": "The three catalog collections, unfiltered — historical rates included."
@@ -14853,6 +14871,14 @@
           "name": "lineTaxClass",
           "signature": "lineTaxClass(item: typeLiteral): string | null",
           "doc": "The class a line resolves: the operator's override, else the product\nsnapshot. `null` when neither is stamped — during expand the CALLER supplies\na derived class for such a line, because the legacy mapping\n(`taxed_as ?? type` plus the explicit-only bottle ref) needs the migrated\nclass uids, which only the backfill knows.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "migrateLegacyTaxCatalog",
+          "signature": "migrateLegacyTaxCatalog(legacy: readonly Tax[], existing: TaxCatalog, ctx: LegacyTaxMigrationContext): LegacyTaxMigration",
+          "doc": "**`taxes` → `taxes-codes` × `taxes-rates` × `taxes-classes`** — the one mapping\nthe backfill and the parity test share (api-cloudrun#993), so what the test\nproves prices identically is what the backfill writes.\n\n- **Codes** group legacy rows by `name`. A group whose rows disagree on\n  `jurisdiction`, `type`, `xero_account_code` or `xero_item_code` THROWS: those\n  are properties of the code, and picking one would silently re-home a rate.\n- **Rates** keep the legacy uid, so every stored `price.taxes[].uid` still names\n  its rate. Window, `effective_from` and the Xero binding are copied as stored.\n- **Classes** derive from `item_types`: Rental, Sale and Replacement list every\n  code with a version listing that type. \"Sale – Bottled Water\" is Sale plus the\n  one explicit-only code (every version `item_types: []`), which the legacy rule\n  reached by uid ref; more than one explicit-only code THROWS, because which\n  products carry which ref is not in the catalog. Non-Taxable is `[]`.\n- **\"No Tax\" is skipped**, not migrated — no code can carry `jurisdiction: null`,\n  and Non-Taxable states the same fact.\n\n## Idempotent against `existing`\n\nA code or class is matched to an existing document BY NAME and keeps its uid,\nversion and stamps; a rate by uid. So re-running over an unchanged `taxes`\ncollection returns documents deep-equal to `existing`, and the caller writes\nonly what differs. A class whose code SET is unchanged keeps its stored order.\n\n⚠️ **Re-running REPLACES migrated class membership from `item_types`.** That is\nright only while `taxes` is the source of truth — before the reader switch,\nwhen nothing else can edit a class. After it, do not run this.",
           "paramTags": [],
           "returnsTag": null
         },

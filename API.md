@@ -32651,6 +32651,39 @@ interface ClassTaxResolution {
 }
 ```
 
+### `LegacyTaxMigration`
+
+The catalog the legacy `taxes` collection maps to, plus what did not map.
+
+```ts
+interface LegacyTaxMigration {
+  codes: TaxCode[];
+  rates: TaxRate[];
+  classes: TaxClass[];
+  skipped: Array<typeLiteral>;
+}
+```
+
+### `LegacyTaxMigrationContext`
+
+What a migration mints and stamps. Core cannot mint a Firestore id, so the caller does.
+
+```ts
+interface LegacyTaxMigrationContext {
+  actor: ActorRefType;
+  now: FirestoreTimestampType;
+  mintUid: fnOrConstructor;
+}
+```
+
+### `MIGRATED_TAX_CLASSES`
+
+The class names the migration owns, and the legacy item type each is derived from.
+
+```ts
+const MIGRATED_TAX_CLASSES: typeLiteral;
+```
+
 ### `TaxCatalog`
 
 The three catalog collections, unfiltered — historical rates included.
@@ -32690,6 +32723,36 @@ snapshot. `null` when neither is stamped — during expand the CALLER supplies
 a derived class for such a line, because the legacy mapping
 (`taxed_as ?? type` plus the explicit-only bottle ref) needs the migrated
 class uids, which only the backfill knows.
+
+### `migrateLegacyTaxCatalog(legacy: readonly Tax[], existing: TaxCatalog, ctx: LegacyTaxMigrationContext): LegacyTaxMigration`
+
+**`taxes` → `taxes-codes` × `taxes-rates` × `taxes-classes`** — the one mapping
+the backfill and the parity test share (api-cloudrun#993), so what the test
+proves prices identically is what the backfill writes.
+
+- **Codes** group legacy rows by `name`. A group whose rows disagree on
+  `jurisdiction`, `type`, `xero_account_code` or `xero_item_code` THROWS: those
+  are properties of the code, and picking one would silently re-home a rate.
+- **Rates** keep the legacy uid, so every stored `price.taxes[].uid` still names
+  its rate. Window, `effective_from` and the Xero binding are copied as stored.
+- **Classes** derive from `item_types`: Rental, Sale and Replacement list every
+  code with a version listing that type. "Sale – Bottled Water" is Sale plus the
+  one explicit-only code (every version `item_types: []`), which the legacy rule
+  reached by uid ref; more than one explicit-only code THROWS, because which
+  products carry which ref is not in the catalog. Non-Taxable is `[]`.
+- **"No Tax" is skipped**, not migrated — no code can carry `jurisdiction: null`,
+  and Non-Taxable states the same fact.
+
+## Idempotent against `existing`
+
+A code or class is matched to an existing document BY NAME and keeps its uid,
+version and stamps; a rate by uid. So re-running over an unchanged `taxes`
+collection returns documents deep-equal to `existing`, and the caller writes
+only what differs. A class whose code SET is unchanged keeps its stored order.
+
+⚠️ **Re-running REPLACES migrated class membership from `item_types`.** That is
+right only while `taxes` is the source of truth — before the reader switch,
+when nothing else can edit a class. After it, do not run this.
 
 ### `resolveClassTaxes(uidTaxClass: string | null, jurisdiction: string, exempt: boolean, asOf: string, catalog: TaxCatalog, frozenRateUids?: ReadonlySet<string>): ClassTaxResolution`
 
