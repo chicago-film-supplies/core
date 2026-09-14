@@ -747,7 +747,7 @@
         {
           "kind": "interface",
           "name": "CollectionDocs",
-          "declaration": "interface CollectionDocs {\n  activity: Activity;\n  activities: Activity;\n  booking: Booking;\n  bookings: Booking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  department-type: DepartmentType;\n  department-types: DepartmentType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  statement-documents: StatementDocument;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  supplier: Supplier;\n  suppliers: Supplier;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  tax: Tax;\n  taxes: Tax;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
+          "declaration": "interface CollectionDocs {\n  activity: Activity;\n  activities: Activity;\n  booking: Booking;\n  bookings: Booking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  department-type: DepartmentType;\n  department-types: DepartmentType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  statement-documents: StatementDocument;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  supplier: Supplier;\n  suppliers: Supplier;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  tax: Tax;\n  taxes: Tax;\n  taxes-codes: TaxCode;\n  taxes-rates: TaxRate;\n  taxes-classes: TaxClass;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
           "doc": "The ONE place a collection name is bound to its document type.\n\n`schemas` below is annotated by a mapped type over this interface, so the two\ncannot drift: a key here with no entry there is an error at the object\nliteral, and an entry there with no key here is an excess property. That is\nthe compiler enforcing the parity — not a test that can go stale, and not the\n\"parity assertion between two hand-maintained lists\" the workspace rules warn\nabout. It fails at `deno task check`.\n\n⚠️ **Both halves are written out explicitly, and that is deliberate.** JSR's\nnpm declaration emit is SYNTACTIC — it writes declarations without running\ninference — so a type it has to COMPUTE from an initializer can publish\nwrongly to npm consumers while Deno consumers, this suite, `deno task check`\nand `deno publish --dry-run` all agree with the source. That is core#43: nine\n`as const` members emitted as one, and 57 phantom type errors on manager's\nnext pin bump. An interface and a written mapped-type annotation are text the\nemitter copies verbatim, so neither needs expanding.\n\n⚠️ Measured 2026-08-14, because the obvious reasoning is wrong: the\ninference-requiring form (`= {…} satisfies Record<string, z.ZodType>` plus\n`keyof typeof`) **also passes** `deno publish --dry-run`'s slow-types check.\nPassing that check is NOT evidence the emit is right. The explicit form is\nchosen because it needs no expansion at all, which is a reasoned preference\nrather than a measured one.\n\n⚠️ The line above used to add *\"core#44 closed as 'no post-publish declaration\ngate', so nothing here can see a wrong published declaration.\"* **That is no\nlonger true**: core#44 reopened on a second divergence and\n`deno task check:declarations` now runs `isolatedDeclarations` over all of\n`src/`. It is still not a check of JSR's *emitter* — it is a conservative\nover-approximation of it — so \"passing does not prove the emit is right\"\nsurvives; what does not survive is \"nothing can see it\".\n\nSingular and plural both appear because the registry has always carried both.\n⚠️ The singular half may be vestigial — there are zero literal `schemas[\"order\"]`\n-style lookups across api-cloudrun, manager and templates, and every call site\nfound passes a plural or the literal `\"events\"`. Removing them would halve this\nfile's hand-written surface, but it is a breaking change to a published API and\nwants the dynamic callers' domain established first. Not folded in here."
         },
         {
@@ -1172,6 +1172,30 @@
         },
         {
           "kind": "variable",
+          "name": "CreateTaxClassInput",
+          "declaration": "const CreateTaxClassInput: z.ZodType<CreateTaxClassInputType>;",
+          "doc": "Zod schema for CreateTaxClassInput."
+        },
+        {
+          "kind": "interface",
+          "name": "CreateTaxClassInputType",
+          "declaration": "interface CreateTaxClassInputType {\n  name: string;\n  description?: string | null;\n  uid_tax_codes: string[];\n  is_default_for?: ProductTypeType[];\n  active: boolean;\n}",
+          "doc": "Input for creating a tax class."
+        },
+        {
+          "kind": "variable",
+          "name": "CreateTaxCodeInput",
+          "declaration": "const CreateTaxCodeInput: z.ZodType<CreateTaxCodeInputType>;",
+          "doc": "Zod schema for CreateTaxCodeInput."
+        },
+        {
+          "kind": "interface",
+          "name": "CreateTaxCodeInputType",
+          "declaration": "interface CreateTaxCodeInputType {\n  name: string;\n  jurisdiction: TaxJurisdictionType;\n  type: RateType;\n  xero_account_code?: number | null;\n  xero_item_code?: string | null;\n  active: boolean;\n  first_rate: TaxRateBodyType;\n}",
+          "doc": "Input for creating a tax code.\n\nA code with no rate prices nothing and would read as an `untaxed` cell in\nevery class listing it, so the first rate is part of the create — the writer\nmints both documents in one transaction."
+        },
+        {
+          "kind": "variable",
           "name": "CreateTaxInput",
           "declaration": "const CreateTaxInput: z.ZodType<CreateTaxInputType>;",
           "doc": "Zod schema for CreateTaxInput."
@@ -1181,6 +1205,18 @@
           "name": "CreateTaxInputType",
           "declaration": "interface CreateTaxInputType {\n  name: string;\n  rate: number;\n  type: RateType;\n  applied_from: string;\n  applied_to?: string | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types?: PreTaxItemType[];\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_account_code?: number | null;\n  xero_item_code?: string | null;\n  xero_components?: XeroTaxComponentType[];\n}",
           "doc": "Input for creating a new tax definition.\n\n`applied_from` / `applied_to` are the APPLIED window — the bound\n{@link Tax.applied_from} documents. They take {@link chicagoStartOfDay}\nrather than an instant because **a rate boundary is a calendar date**: the\noperator authors a day, and the snap belongs in the transform rather than in\neach of the three writers that used to do it by hand."
+        },
+        {
+          "kind": "variable",
+          "name": "CreateTaxRateInput",
+          "declaration": "const CreateTaxRateInput: z.ZodType<CreateTaxRateInputType>;",
+          "doc": "Zod schema for CreateTaxRateInput."
+        },
+        {
+          "kind": "interface",
+          "name": "CreateTaxRateInputType",
+          "declaration": "interface CreateTaxRateInputType {\n  uid_tax_code: string;\n  version: number;\n}",
+          "doc": "Input for adding a rate to a code — `POST /taxes-codes/{uid}/rates`, which\nreplaces `SupersedeTaxInput`.\n\nThe writer closes the incumbent's window at this `applied_from` in the same\ntransaction, for the reason `SupersedeTaxInput` records: between two separate\ncalls both versions are open and pricing throws on the overlap.\n\n`version` is OCC on the CODE — the rate being added does not exist yet, and a\nconcurrent add to the same code is exactly the race to refuse."
         },
         {
           "kind": "variable",
@@ -3938,6 +3974,12 @@
         },
         {
           "kind": "variable",
+          "name": "TAX_JURISDICTIONS",
+          "declaration": "const TAX_JURISDICTIONS: \"chicago\" | \"rantoul\" | \"frankfort\" | \"paxton\"[];",
+          "doc": "**Who can LEVY a tax** — every {@link JurisdictionType} except `no_nexus`.\nThe vocabulary of `taxes-codes/{uid}.jurisdiction` (api-cloudrun#993).\n\n⚠️ **Not the live registration set, and must not be derived from it.**\n`COLLECTING_JURISDICTIONS` (`utils/taxes.ts`) omits `paxton` deliberately —\nCFS no longer delivers there — but the Paxton Sales Tax code still exists and\nfrozen documents still price on its rates. A closed registration keeps its\ncodes; it only stops being derived. So this is the storage half of the pair\n`JURISDICTIONS` / `COLLECTING_JURISDICTIONS` already draws, one level down,\nand `utils/taxes.ts` types its city table against it so a new registration\nmust be a member here first.\n\n`no_nexus` is excluded because it is an answer, not an authority: nobody\nlevies a tax under it.\n\nWritten out rather than filtered for the JSR-emit reason\n{@link PRE_TAX_ITEM_TYPES} records; `_taxJurisdictionParity` pins it."
+        },
+        {
+          "kind": "variable",
           "name": "TEMPLATE_COLLECTION_SCHEMAS",
           "declaration": "const TEMPLATE_COLLECTION_SCHEMAS: Partial<Record<TemplateCollectionType, z.ZodType>>;",
           "doc": "The document schema for each template source and target that has one.\n\n⚠️ **Not derived from `schemas` by a filter.** A filter over the collection\nregistry is what this map replaces: it silently dropped any source the\nregistry did not know, which is the whole `movement-sessions` case, and it\ndropped it in the direction that reports clean."
@@ -4037,6 +4079,66 @@
           "name": "Tax",
           "declaration": "interface Tax {\n  uid: string;\n  name: string;\n  rate: number;\n  type: RateType;\n  crms_id: number | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types: PreTaxItemType[];\n  applied_from: string;\n  applied_from_fs: FirestoreTimestampType;\n  applied_to: string | null;\n  applied_to_fs: FirestoreTimestampType | null;\n  effective_from: string | null;\n  xero_tax_type?: string | null;\n  xero_account_code?: number | null;\n  xero_item_code?: string | null;\n  xero_components: XeroTaxComponentType[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A tax definition used for computing item-level and order-level tax amounts."
+        },
+        {
+          "kind": "interface",
+          "name": "TaxClass",
+          "declaration": "interface TaxClass {\n  uid: string;\n  name: string;\n  description: string | null;\n  uid_tax_codes: string[];\n  is_default_for: ProductTypeType[];\n  active: boolean;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A tax class document in Firestore."
+        },
+        {
+          "kind": "variable",
+          "name": "TaxClassSchema",
+          "declaration": "const TaxClassSchema: z.ZodType<TaxClass>;",
+          "doc": "Zod schema for TaxClass."
+        },
+        {
+          "kind": "interface",
+          "name": "TaxCode",
+          "declaration": "interface TaxCode {\n  uid: string;\n  name: string;\n  jurisdiction: TaxJurisdictionType;\n  type: RateType;\n  xero_account_code: number | null;\n  xero_item_code: string | null;\n  active: boolean;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A tax code document in Firestore."
+        },
+        {
+          "kind": "variable",
+          "name": "TaxCodeSchema",
+          "declaration": "const TaxCodeSchema: z.ZodType<TaxCode>;",
+          "doc": "Zod schema for TaxCode."
+        },
+        {
+          "kind": "variable",
+          "name": "TaxJurisdictionEnum",
+          "declaration": "const TaxJurisdictionEnum: z.ZodType<TaxJurisdictionType>;",
+          "doc": "Zod schema for TaxJurisdictionType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "TaxJurisdictionType",
+          "declaration": "type TaxJurisdictionType = indexedAccess;",
+          "doc": "A jurisdiction that can levy a tax. @see {@link TAX_JURISDICTIONS}"
+        },
+        {
+          "kind": "interface",
+          "name": "TaxRate",
+          "declaration": "interface TaxRate {\n  uid: string;\n  uid_tax_code: string;\n  rate: number;\n  type: RateType;\n  applied_from: string;\n  applied_from_fs: FirestoreTimestampType;\n  applied_to: string | null;\n  applied_to_fs: FirestoreTimestampType | null;\n  effective_from: string | null;\n  xero_tax_type: string | null;\n  xero_components: XeroTaxComponentType[];\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A tax rate document in Firestore."
+        },
+        {
+          "kind": "variable",
+          "name": "TaxRateBody",
+          "declaration": "const TaxRateBody: z.ZodType<TaxRateBodyType>;",
+          "doc": "Zod schema for TaxRateBody."
+        },
+        {
+          "kind": "interface",
+          "name": "TaxRateBodyType",
+          "declaration": "interface TaxRateBodyType {\n  rate: number;\n  applied_from: string;\n  applied_to?: string | null;\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_components?: XeroTaxComponentType[];\n}",
+          "doc": "The dated-value half of a rate write, shared by a code's first rate\n(`CreateTaxCodeInput.first_rate`) and {@link CreateTaxRateInput}.\n\nNo `type` — the code states it and the writer copies it."
+        },
+        {
+          "kind": "variable",
+          "name": "TaxRateSchema",
+          "declaration": "const TaxRateSchema: z.ZodType<TaxRate>;",
+          "doc": "Zod schema for TaxRate."
         },
         {
           "kind": "variable",
@@ -4616,6 +4718,30 @@
         },
         {
           "kind": "variable",
+          "name": "UpdateTaxClassInput",
+          "declaration": "const UpdateTaxClassInput: z.ZodType<UpdateTaxClassInputType>;",
+          "doc": "Zod schema for UpdateTaxClassInput."
+        },
+        {
+          "kind": "interface",
+          "name": "UpdateTaxClassInputType",
+          "declaration": "interface UpdateTaxClassInputType {\n  uid: string;\n  version: number;\n  name?: string;\n  description?: string | null;\n  uid_tax_codes?: string[];\n  is_default_for?: ProductTypeType[];\n  active?: boolean;\n}",
+          "doc": "Input for updating a tax class.\n\n⚠️ A `uid_tax_codes` change is not a label edit: it reprices every live order\nwhose lines resolve this class (`update-tax-class:codes-recompute-live-orders`)."
+        },
+        {
+          "kind": "variable",
+          "name": "UpdateTaxCodeInput",
+          "declaration": "const UpdateTaxCodeInput: z.ZodType<UpdateTaxCodeInputType>;",
+          "doc": "Zod schema for UpdateTaxCodeInput."
+        },
+        {
+          "kind": "interface",
+          "name": "UpdateTaxCodeInputType",
+          "declaration": "interface UpdateTaxCodeInputType {\n  uid: string;\n  version: number;\n  name?: string;\n  xero_account_code?: number | null;\n  xero_item_code?: string | null;\n  active?: boolean;\n}",
+          "doc": "Input for updating a tax code.\n\n⚠️ **`jurisdiction` and `type` are absent, not refused-by-the-service.** A\ncode's jurisdiction and type never change — a different levy is a different\ncode — so the input cannot name them, and an object input strips them."
+        },
+        {
+          "kind": "variable",
           "name": "UpdateTaxInput",
           "declaration": "const UpdateTaxInput: z.ZodType<UpdateTaxInputType>;",
           "doc": "Zod schema for UpdateTaxInput."
@@ -4625,6 +4751,18 @@
           "name": "UpdateTaxInputType",
           "declaration": "interface UpdateTaxInputType {\n  uid: string;\n  name?: string;\n  rate?: number;\n  type?: RateType;\n  applied_from?: string;\n  applied_to?: string | null;\n  jurisdiction?: JurisdictionType | null;\n  item_types?: PreTaxItemType[];\n  effective_from?: string | null;\n  xero_tax_type?: string | null;\n  xero_account_code?: number | null;\n  xero_item_code?: string | null;\n  xero_components?: XeroTaxComponentType[];\n  version: number;\n}",
           "doc": "Input for updating an existing tax definition.\n\n`rate` and `type` are accepted here and **refused by the service** — an\nin-place rate edit re-prices history, so the sanctioned move is\n{@link SupersedeTaxInput}. They stay on the input so the refusal can name what\nthe caller asked for."
+        },
+        {
+          "kind": "variable",
+          "name": "UpdateTaxRateInput",
+          "declaration": "const UpdateTaxRateInput: z.ZodType<UpdateTaxRateInputType>;",
+          "doc": "Zod schema for UpdateTaxRateInput."
+        },
+        {
+          "kind": "interface",
+          "name": "UpdateTaxRateInputType",
+          "declaration": "interface UpdateTaxRateInputType {\n  uid: string;\n  version: number;\n  applied_to?: string | null;\n  effective_from?: string | null;\n}",
+          "doc": "Input for renewing a rate's window.\n\n⚠️ **`rate` is absent.** An in-place rate edit re-prices history; the\nsanctioned move is a new rate. What an operator legitimately edits on an\nexisting version is its review bound and its statutory date."
         },
         {
           "kind": "variable",
@@ -6056,6 +6194,24 @@
           "name": "StoreBreakdownLocationSchema",
           "declaration": "const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation>;",
           "doc": "Zod schema for StoreBreakdownLocation."
+        },
+        {
+          "kind": "variable",
+          "name": "TAX_JURISDICTIONS",
+          "declaration": "const TAX_JURISDICTIONS: \"chicago\" | \"rantoul\" | \"frankfort\" | \"paxton\"[];",
+          "doc": "**Who can LEVY a tax** — every {@link JurisdictionType} except `no_nexus`.\nThe vocabulary of `taxes-codes/{uid}.jurisdiction` (api-cloudrun#993).\n\n⚠️ **Not the live registration set, and must not be derived from it.**\n`COLLECTING_JURISDICTIONS` (`utils/taxes.ts`) omits `paxton` deliberately —\nCFS no longer delivers there — but the Paxton Sales Tax code still exists and\nfrozen documents still price on its rates. A closed registration keeps its\ncodes; it only stops being derived. So this is the storage half of the pair\n`JURISDICTIONS` / `COLLECTING_JURISDICTIONS` already draws, one level down,\nand `utils/taxes.ts` types its city table against it so a new registration\nmust be a member here first.\n\n`no_nexus` is excluded because it is an answer, not an authority: nobody\nlevies a tax under it.\n\nWritten out rather than filtered for the JSR-emit reason\n{@link PRE_TAX_ITEM_TYPES} records; `_taxJurisdictionParity` pins it."
+        },
+        {
+          "kind": "variable",
+          "name": "TaxJurisdictionEnum",
+          "declaration": "const TaxJurisdictionEnum: z.ZodType<TaxJurisdictionType>;",
+          "doc": "Zod schema for TaxJurisdictionType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "TaxJurisdictionType",
+          "declaration": "type TaxJurisdictionType = indexedAccess;",
+          "doc": "A jurisdiction that can levy a tax. @see {@link TAX_JURISDICTIONS}"
         },
         {
           "kind": "variable",

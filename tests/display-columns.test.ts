@@ -413,6 +413,7 @@ Deno.test("T14: the discriminated rate columns are the ones that exist", () => {
     "product:components.price.taxes.rate",
     "product:price.taxes.rate",
     "tax:rate",
+    "taxes-rates:rate",
     "webshop-product:component_of.price.taxes.rate",
     "webshop-product:components.price.taxes.rate",
     "webshop-product:price.taxes.rate",

@@ -672,6 +672,38 @@ export type JurisdictionType = typeof JURISDICTIONS[number];
 export const JurisdictionEnum: z.ZodType<JurisdictionType> = z.enum(JURISDICTIONS);
 
 /**
+ * **Who can LEVY a tax** — every {@link JurisdictionType} except `no_nexus`.
+ * The vocabulary of `taxes-codes/{uid}.jurisdiction` (api-cloudrun#993).
+ *
+ * ⚠️ **Not the live registration set, and must not be derived from it.**
+ * `COLLECTING_JURISDICTIONS` (`utils/taxes.ts`) omits `paxton` deliberately —
+ * CFS no longer delivers there — but the Paxton Sales Tax code still exists and
+ * frozen documents still price on its rates. A closed registration keeps its
+ * codes; it only stops being derived. So this is the storage half of the pair
+ * `JURISDICTIONS` / `COLLECTING_JURISDICTIONS` already draws, one level down,
+ * and `utils/taxes.ts` types its city table against it so a new registration
+ * must be a member here first.
+ *
+ * `no_nexus` is excluded because it is an answer, not an authority: nobody
+ * levies a tax under it.
+ *
+ * Written out rather than filtered for the JSR-emit reason
+ * {@link PRE_TAX_ITEM_TYPES} records; `_taxJurisdictionParity` pins it.
+ */
+export const TAX_JURISDICTIONS = ["chicago", "rantoul", "frankfort", "paxton"] as const;
+/** A jurisdiction that can levy a tax. @see {@link TAX_JURISDICTIONS} */
+export type TaxJurisdictionType = typeof TAX_JURISDICTIONS[number];
+/** Zod schema for TaxJurisdictionType. */
+export const TaxJurisdictionEnum: z.ZodType<TaxJurisdictionType> = z.enum(TAX_JURISDICTIONS);
+
+type _TaxJurisdictionExpected = Exclude<JurisdictionType, "no_nexus">;
+type _TaxJurisdictionParity = [TaxJurisdictionType] extends [_TaxJurisdictionExpected]
+  ? [_TaxJurisdictionExpected] extends [TaxJurisdictionType] ? true : never
+  : never;
+const _taxJurisdictionParity: _TaxJurisdictionParity = true;
+void _taxJurisdictionParity;
+
+/**
  * How a line's `price.base` becomes money.
  *
  * - `five_day_week` — `base × quantity × max(chargeable_days / 5, 1)`.

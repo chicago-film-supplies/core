@@ -111,7 +111,7 @@ function isInputOptional(node: z.ZodType): boolean {
 
 Deno.test("corpus gate — every registry schema has a minimal fixture that parses", () => {
   const all = distinctSchemas();
-  assertEquals(all.size, 60, "registry size moved; re-measure the override list");
+  assertEquals(all.size, 63, "registry size moved; re-measure the override list");
 
   const failures: string[] = [];
   for (const [name, schema] of all) {

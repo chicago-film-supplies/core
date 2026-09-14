@@ -270,6 +270,8 @@ export {
   StockMethodEnum,
   JURISDICTIONS,
   JurisdictionEnum,
+  TAX_JURISDICTIONS,
+  TaxJurisdictionEnum,
   PRE_TAX_ITEM_TYPES,
   PreTaxItemTypeEnum,
   TaxedAsEnum,
@@ -334,6 +336,7 @@ export {
   type ProductTypeType,
   type StockMethodType,
   type JurisdictionType,
+  type TaxJurisdictionType,
   type TaxedAsType,
   type PriceFormulaType,
   type ComponentPriceFormulaType,
@@ -752,6 +755,35 @@ export {
   type SupersedeTaxInputType,
   type XeroTaxComponentType,
 } from "./tax.ts";
+
+export {
+  TaxCodeSchema,
+  CreateTaxCodeInput,
+  UpdateTaxCodeInput,
+  type TaxCode,
+  type CreateTaxCodeInputType,
+  type UpdateTaxCodeInputType,
+} from "./taxes-code.ts";
+
+export {
+  TaxRateSchema,
+  TaxRateBody,
+  CreateTaxRateInput,
+  UpdateTaxRateInput,
+  type TaxRate,
+  type TaxRateBodyType,
+  type CreateTaxRateInputType,
+  type UpdateTaxRateInputType,
+} from "./taxes-rate.ts";
+
+export {
+  TaxClassSchema,
+  CreateTaxClassInput,
+  UpdateTaxClassInput,
+  type TaxClass,
+  type CreateTaxClassInputType,
+  type UpdateTaxClassInputType,
+} from "./taxes-class.ts";
 
 export {
   InventoryLedgerSchema,
@@ -1178,6 +1210,9 @@ import type { Role } from "./role.ts";
 import type { Thread } from "./thread.ts";
 import type { Tag } from "./tag.ts";
 import type { Tax } from "./tax.ts";
+import type { TaxCode } from "./taxes-code.ts";
+import type { TaxRate } from "./taxes-rate.ts";
+import type { TaxClass } from "./taxes-class.ts";
 import type { TrackingCategory } from "./tracking-category.ts";
 import type { Movement } from "./transaction.ts";
 import type { TypesenseConfig } from "./typesense-config.ts";
@@ -1282,6 +1317,9 @@ import { StockLockSchema, StockSchema } from "./stock.ts";
 import { StoreSchema } from "./store.ts";
 import { TagSchema } from "./tag.ts";
 import { TaxSchema as TaxSchema_ } from "./tax.ts";
+import { TaxCodeSchema as TaxCodeSchema_ } from "./taxes-code.ts";
+import { TaxRateSchema as TaxRateSchema_ } from "./taxes-rate.ts";
+import { TaxClassSchema as TaxClassSchema_ } from "./taxes-class.ts";
 import { ThreadSchema } from "./thread.ts";
 import { TrackingCategorySchema } from "./tracking-category.ts";
 import { MovementSchema } from "./transaction.ts";
@@ -1427,6 +1465,10 @@ export interface CollectionDocs {
   tags: Tag;
   tax: Tax;
   taxes: Tax;
+  // No singular aliases (api-cloudrun#993): "taxes-code" names nothing.
+  "taxes-codes": TaxCode;
+  "taxes-rates": TaxRate;
+  "taxes-classes": TaxClass;
   thread: Thread;
   threads: Thread;
   "tracking-category": TrackingCategory;
@@ -1518,6 +1560,9 @@ const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "store": StoreSchema, "stores": StoreSchema,
   "tag": TagSchema, "tags": TagSchema,
   "tax": TaxSchema_, "taxes": TaxSchema_,
+  "taxes-codes": TaxCodeSchema_,
+  "taxes-rates": TaxRateSchema_,
+  "taxes-classes": TaxClassSchema_,
   "thread": ThreadSchema, "threads": ThreadSchema,
   "tracking-category": TrackingCategorySchema, "tracking-categories": TrackingCategorySchema,
   "transaction": MovementSchema, "transactions": MovementSchema,

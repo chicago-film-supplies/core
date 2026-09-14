@@ -31,6 +31,7 @@ import { compareAsc, parseISO } from "date-fns";
 import {
   type JurisdictionType,
   type PreTaxItemType,
+  type TaxJurisdictionType,
   toUsStateCode,
 } from "../schemas/mod.ts";
 import {
@@ -455,7 +456,7 @@ function mostRecentClosedTax(
  * in, it is the answer when the address is in no state CFS collects in at all
  * — case 1, decided by the region and never by this table.
  */
-const COLLECTING_JURISDICTION_BY_CITY: Readonly<Record<string, JurisdictionType>> = {
+const COLLECTING_JURISDICTION_BY_CITY: Readonly<Record<string, TaxJurisdictionType>> = {
   CHICAGO: "chicago",
   RANTOUL: "rantoul",
   FRANKFORT: "frankfort",

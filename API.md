@@ -1750,6 +1750,9 @@ interface CollectionDocs {
   tags: Tag;
   tax: Tax;
   taxes: Tax;
+  taxes-codes: TaxCode;
+  taxes-rates: TaxRate;
+  taxes-classes: TaxClass;
   thread: Thread;
   threads: Thread;
   tracking-category: TrackingCategory;
@@ -2589,6 +2592,56 @@ interface CreateTagInputType {
 }
 ```
 
+### `CreateTaxClassInput`
+
+Zod schema for CreateTaxClassInput.
+
+```ts
+const CreateTaxClassInput: z.ZodType<CreateTaxClassInputType>;
+```
+
+### `CreateTaxClassInputType`
+
+Input for creating a tax class.
+
+```ts
+interface CreateTaxClassInputType {
+  name: string;
+  description?: string | null;
+  uid_tax_codes: string[];
+  is_default_for?: ProductTypeType[];
+  active: boolean;
+}
+```
+
+### `CreateTaxCodeInput`
+
+Zod schema for CreateTaxCodeInput.
+
+```ts
+const CreateTaxCodeInput: z.ZodType<CreateTaxCodeInputType>;
+```
+
+### `CreateTaxCodeInputType`
+
+Input for creating a tax code.
+
+A code with no rate prices nothing and would read as an `untaxed` cell in
+every class listing it, so the first rate is part of the create — the writer
+mints both documents in one transaction.
+
+```ts
+interface CreateTaxCodeInputType {
+  name: string;
+  jurisdiction: TaxJurisdictionType;
+  type: RateType;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
+  active: boolean;
+  first_rate: TaxRateBodyType;
+}
+```
+
 ### `CreateTaxInput`
 
 Zod schema for CreateTaxInput.
@@ -2621,6 +2674,33 @@ interface CreateTaxInputType {
   xero_account_code?: number | null;
   xero_item_code?: string | null;
   xero_components?: XeroTaxComponentType[];
+}
+```
+
+### `CreateTaxRateInput`
+
+Zod schema for CreateTaxRateInput.
+
+```ts
+const CreateTaxRateInput: z.ZodType<CreateTaxRateInputType>;
+```
+
+### `CreateTaxRateInputType`
+
+Input for adding a rate to a code — `POST /taxes-codes/{uid}/rates`, which
+replaces `SupersedeTaxInput`.
+
+The writer closes the incumbent's window at this `applied_from` in the same
+transaction, for the reason `SupersedeTaxInput` records: between two separate
+calls both versions are open and pricing throws on the overlap.
+
+`version` is OCC on the CODE — the rate being added does not exist yet, and a
+concurrent add to the same code is exactly the race to refuse.
+
+```ts
+interface CreateTaxRateInputType {
+  uid_tax_code: string;
+  version: number;
 }
 ```
 
@@ -8940,6 +9020,30 @@ Zod schema for {@link SyncErrorLogRecord}.
 const SyncErrorLogRecordSchema: z.ZodType<SyncErrorLogRecord>;
 ```
 
+### `TAX_JURISDICTIONS`
+
+**Who can LEVY a tax** — every {@link JurisdictionType} except `no_nexus`.
+The vocabulary of `taxes-codes/{uid}.jurisdiction` (api-cloudrun#993).
+
+⚠️ **Not the live registration set, and must not be derived from it.**
+`COLLECTING_JURISDICTIONS` (`utils/taxes.ts`) omits `paxton` deliberately —
+CFS no longer delivers there — but the Paxton Sales Tax code still exists and
+frozen documents still price on its rates. A closed registration keeps its
+codes; it only stops being derived. So this is the storage half of the pair
+`JURISDICTIONS` / `COLLECTING_JURISDICTIONS` already draws, one level down,
+and `utils/taxes.ts` types its city table against it so a new registration
+must be a member here first.
+
+`no_nexus` is excluded because it is an answer, not an authority: nobody
+levies a tax under it.
+
+Written out rather than filtered for the JSR-emit reason
+{@link PRE_TAX_ITEM_TYPES} records; `_taxJurisdictionParity` pins it.
+
+```ts
+const TAX_JURISDICTIONS: "chicago" | "rantoul" | "frankfort" | "paxton"[];
+```
+
 ### `TEMPLATE_COLLECTION_SCHEMAS`
 
 The document schema for each template source and target that has one.
@@ -9290,6 +9394,138 @@ interface Tax {
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
+```
+
+### `TaxClass`
+
+A tax class document in Firestore.
+
+```ts
+interface TaxClass {
+  uid: string;
+  name: string;
+  description: string | null;
+  uid_tax_codes: string[];
+  is_default_for: ProductTypeType[];
+  active: boolean;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `TaxClassSchema`
+
+Zod schema for TaxClass.
+
+```ts
+const TaxClassSchema: z.ZodType<TaxClass>;
+```
+
+### `TaxCode`
+
+A tax code document in Firestore.
+
+```ts
+interface TaxCode {
+  uid: string;
+  name: string;
+  jurisdiction: TaxJurisdictionType;
+  type: RateType;
+  xero_account_code: number | null;
+  xero_item_code: string | null;
+  active: boolean;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `TaxCodeSchema`
+
+Zod schema for TaxCode.
+
+```ts
+const TaxCodeSchema: z.ZodType<TaxCode>;
+```
+
+### `TaxJurisdictionEnum`
+
+Zod schema for TaxJurisdictionType.
+
+```ts
+const TaxJurisdictionEnum: z.ZodType<TaxJurisdictionType>;
+```
+
+### `TaxJurisdictionType`
+
+A jurisdiction that can levy a tax. @see {@link TAX_JURISDICTIONS}
+
+```ts
+type TaxJurisdictionType = indexedAccess;
+```
+
+### `TaxRate`
+
+A tax rate document in Firestore.
+
+```ts
+interface TaxRate {
+  uid: string;
+  uid_tax_code: string;
+  rate: number;
+  type: RateType;
+  applied_from: string;
+  applied_from_fs: FirestoreTimestampType;
+  applied_to: string | null;
+  applied_to_fs: FirestoreTimestampType | null;
+  effective_from: string | null;
+  xero_tax_type: string | null;
+  xero_components: XeroTaxComponentType[];
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `TaxRateBody`
+
+Zod schema for TaxRateBody.
+
+```ts
+const TaxRateBody: z.ZodType<TaxRateBodyType>;
+```
+
+### `TaxRateBodyType`
+
+The dated-value half of a rate write, shared by a code's first rate
+(`CreateTaxCodeInput.first_rate`) and {@link CreateTaxRateInput}.
+
+No `type` — the code states it and the writer copies it.
+
+```ts
+interface TaxRateBodyType {
+  rate: number;
+  applied_from: string;
+  applied_to?: string | null;
+  effective_from?: string | null;
+  xero_tax_type?: string | null;
+  xero_components?: XeroTaxComponentType[];
+}
+```
+
+### `TaxRateSchema`
+
+Zod schema for TaxRate.
+
+```ts
+const TaxRateSchema: z.ZodType<TaxRate>;
 ```
 
 ### `TaxRef`
@@ -10484,6 +10720,60 @@ interface UpdateTagInputType {
 }
 ```
 
+### `UpdateTaxClassInput`
+
+Zod schema for UpdateTaxClassInput.
+
+```ts
+const UpdateTaxClassInput: z.ZodType<UpdateTaxClassInputType>;
+```
+
+### `UpdateTaxClassInputType`
+
+Input for updating a tax class.
+
+⚠️ A `uid_tax_codes` change is not a label edit: it reprices every live order
+whose lines resolve this class (`update-tax-class:codes-recompute-live-orders`).
+
+```ts
+interface UpdateTaxClassInputType {
+  uid: string;
+  version: number;
+  name?: string;
+  description?: string | null;
+  uid_tax_codes?: string[];
+  is_default_for?: ProductTypeType[];
+  active?: boolean;
+}
+```
+
+### `UpdateTaxCodeInput`
+
+Zod schema for UpdateTaxCodeInput.
+
+```ts
+const UpdateTaxCodeInput: z.ZodType<UpdateTaxCodeInputType>;
+```
+
+### `UpdateTaxCodeInputType`
+
+Input for updating a tax code.
+
+⚠️ **`jurisdiction` and `type` are absent, not refused-by-the-service.** A
+code's jurisdiction and type never change — a different levy is a different
+code — so the input cannot name them, and an object input strips them.
+
+```ts
+interface UpdateTaxCodeInputType {
+  uid: string;
+  version: number;
+  name?: string;
+  xero_account_code?: number | null;
+  xero_item_code?: string | null;
+  active?: boolean;
+}
+```
+
 ### `UpdateTaxInput`
 
 Zod schema for UpdateTaxInput.
@@ -10517,6 +10807,31 @@ interface UpdateTaxInputType {
   xero_item_code?: string | null;
   xero_components?: XeroTaxComponentType[];
   version: number;
+}
+```
+
+### `UpdateTaxRateInput`
+
+Zod schema for UpdateTaxRateInput.
+
+```ts
+const UpdateTaxRateInput: z.ZodType<UpdateTaxRateInputType>;
+```
+
+### `UpdateTaxRateInputType`
+
+Input for renewing a rate's window.
+
+⚠️ **`rate` is absent.** An in-place rate edit re-prices history; the
+sanctioned move is a new rate. What an operator legitimately edits on an
+existing version is its review bound and its statutory date.
+
+```ts
+interface UpdateTaxRateInputType {
+  uid: string;
+  version: number;
+  applied_to?: string | null;
+  effective_from?: string | null;
 }
 ```
 
@@ -13519,6 +13834,46 @@ Zod schema for StoreBreakdownLocation.
 
 ```ts
 const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation>;
+```
+
+### `TAX_JURISDICTIONS`
+
+**Who can LEVY a tax** — every {@link JurisdictionType} except `no_nexus`.
+The vocabulary of `taxes-codes/{uid}.jurisdiction` (api-cloudrun#993).
+
+⚠️ **Not the live registration set, and must not be derived from it.**
+`COLLECTING_JURISDICTIONS` (`utils/taxes.ts`) omits `paxton` deliberately —
+CFS no longer delivers there — but the Paxton Sales Tax code still exists and
+frozen documents still price on its rates. A closed registration keeps its
+codes; it only stops being derived. So this is the storage half of the pair
+`JURISDICTIONS` / `COLLECTING_JURISDICTIONS` already draws, one level down,
+and `utils/taxes.ts` types its city table against it so a new registration
+must be a member here first.
+
+`no_nexus` is excluded because it is an answer, not an authority: nobody
+levies a tax under it.
+
+Written out rather than filtered for the JSR-emit reason
+{@link PRE_TAX_ITEM_TYPES} records; `_taxJurisdictionParity` pins it.
+
+```ts
+const TAX_JURISDICTIONS: "chicago" | "rantoul" | "frankfort" | "paxton"[];
+```
+
+### `TaxJurisdictionEnum`
+
+Zod schema for TaxJurisdictionType.
+
+```ts
+const TaxJurisdictionEnum: z.ZodType<TaxJurisdictionType>;
+```
+
+### `TaxJurisdictionType`
+
+A jurisdiction that can levy a tax. @see {@link TAX_JURISDICTIONS}
+
+```ts
+type TaxJurisdictionType = indexedAccess;
 ```
 
 ### `TaxedAsEnum`
