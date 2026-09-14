@@ -746,7 +746,11 @@ function perUnitSubtotal(
     num *= BigInt(days);
     den *= 5n;
   }
-  const subtotalCents = roundDivHalfUp(num, den);
+  // `base_cents` is unconstrained in sign (a "Rounding Adjustment" or a found-item
+  // credit line is negative), so this must round symmetrically. `roundDivHalfUp`
+  // truncated a negative numerator toward zero and lost a cent even on an exact
+  // multiple (core#88).
+  const subtotalCents = roundDivHalfAwayFromZero(num, den);
 
   if (!discount) {
     return { subtotal_cents: Number(subtotalCents), subtotal_discounted_cents: Number(subtotalCents) };
@@ -757,7 +761,8 @@ function perUnitSubtotal(
     // subtotal × (100 − rate)/100, as subtotalCents × (100·RATE_SCALE − rate·RATE_SCALE) / (100·RATE_SCALE)
     const rate = BigInt(Math.round(discount.rate * Number(RATE_SCALE)));
     const scale = 100n * RATE_SCALE;
-    discountedCents = roundDivHalfUp(subtotalCents * (scale - rate), scale);
+    // `subtotalCents` carries the base's sign, so this numerator can be negative too.
+    discountedCents = roundDivHalfAwayFromZero(subtotalCents * (scale - rate), scale);
   } else {
     // `flat`: rate is DOLLARS per unit, per pricing factor — not a line total,
     // and NOT cents.

@@ -584,6 +584,39 @@ Deno.test("calculateItemSubtotal: a flat discount larger than the line goes nega
   assertEquals(calculateItemSubtotal(item).subtotal_discounted_cents, -1500);
 });
 
+// core#88: a negative `base_cents` handed to `roundDivHalfUp` truncated toward
+// zero, losing a cent even on exact multiples. Both prod lines are pinned here.
+Deno.test("calculateItemSubtotal: a negative base is exact, not truncated toward zero (core#88)", () => {
+  // #1203 "Rounding Adjustment" and #1973 "Found D Chair": stored −1 and −22712.
+  for (const base_cents of [-1, -22712]) {
+    const r = calculateItemSubtotal(makeItem({ quantity: 1 }, { base_cents, chargeable_days: 5 }));
+    assertEquals(r.subtotal_cents, base_cents);
+    assertEquals(r.subtotal_discounted_cents, base_cents);
+  }
+  // A genuine half on a negative line rounds away from zero: −1 × 50% = −0.5 → −1.
+  const half = calculateItemSubtotal(
+    makeItem({ quantity: 1 }, { base_cents: -1, chargeable_days: 5, discount: { type: "percent", rate: 50, amount_cents: 0 } }),
+  );
+  assertEquals(half.subtotal_cents, -1);
+  assertEquals(half.subtotal_discounted_cents, -1);
+});
+
+Deno.test("calculateItemSubtotal: negating the base negates both subtotals (core#88)", () => {
+  let checked = 0;
+  for (let base = 1; base <= 400; base += 7) {
+    for (const days of [5, 6, 7, 8, 11]) {
+      for (const discount of [undefined, { type: "percent" as const, rate: 12.5, amount_cents: 0 }, { type: "percent" as const, rate: 50, amount_cents: 0 }]) {
+        const pos = calculateItemSubtotal(makeItem({ quantity: 3 }, { base_cents: base, chargeable_days: days, discount }));
+        const neg = calculateItemSubtotal(makeItem({ quantity: 3 }, { base_cents: -base, chargeable_days: days, discount }));
+        assertEquals(neg.subtotal_cents, -pos.subtotal_cents);
+        assertEquals(neg.subtotal_discounted_cents, -pos.subtotal_discounted_cents);
+        checked++;
+      }
+    }
+  }
+  assertEquals(checked > 500, true);
+});
+
 Deno.test("calculateItemSubtotal: rejects an unknown formula", () => {
   const item = makeItem({}, { formula: "nonsense" });
   let threw = false;
