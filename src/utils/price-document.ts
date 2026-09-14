@@ -54,9 +54,9 @@ import {
   isTransactionFeeItem,
   type LineItem,
   type LinePriceMoney,
-  type LinePricingOptions,
   type PriceModifier,
   type PriceObject,
+  type Tax,
 } from "./orders.ts";
 import { assignLineTaxes, type DocumentTaxContext, type UnreviewedTaxWarning } from "./taxes.ts";
 import { pricingTaxesOf } from "./tax-classes.ts";
@@ -77,9 +77,13 @@ export type PriceDocumentKind =
  * A date-extension section (#680, D7): every line whose `path` starts with
  * `divider_path` bills the days the order's window grew past what was billed.
  */
-export interface PriceDocumentExtension {
+export interface PriceDocumentExtension extends LineExtension {
   /** The path of the invoice destination divider that opens the section. */
   divider_path: readonly string[];
+}
+
+/** The two day counts a D7 extension is priced from. */
+export interface LineExtension {
   /** The ORDER's charge days for the destination being extended. */
   order_charge_days: number;
   /** The charge days already billed for it. */
@@ -160,10 +164,32 @@ function assertRepriceable(document: PriceDocumentKind): void {
   }
 }
 
+/**
+ * **Stage 2 for one line: the line pricer.** `priceDocument` prices every line
+ * through it, and so does the one reader that must price a line outside a
+ * document — `accountLine` (`./quantityAccounting.ts`), which prices a
+ * remainder and a billed row's extension (#997 D11).
+ *
+ * `extension` is D7: the line is priced for
+ * {@link extensionChargeDays}`(order, billed)` days with the one-week minimum
+ * skipped, which is what an extension section on an invoice bills.
+ *
+ * @throws Error on a line with no pricing rule, and on an extension of a line
+ *   that is not `five_day_week` or carries a flat tax.
+ */
+export function priceLine(item: LineItem, taxes: Tax[], extension?: LineExtension): LinePriceMoney {
+  return computeLineMoney(
+    item,
+    taxes,
+    item.uid,
+    extension && { extensionDays: extensionChargeDays(extension.order_charge_days, extension.billed_charge_days) },
+  );
+}
+
 function extensionFor(
   item: LineItem,
   extensions: readonly PriceDocumentExtension[] | undefined,
-): LinePricingOptions | undefined {
+): PriceDocumentExtension | undefined {
   if (!extensions?.length) return undefined;
   const match = extensions.filter((ext) =>
     ext.divider_path.length <= item.path.length &&
@@ -173,7 +199,7 @@ function extensionFor(
   if (match.length > 1) {
     throw new Error(`Line ${item.uid} falls under ${match.length} extension sections; a line extends one window`);
   }
-  return { extensionDays: extensionChargeDays(match[0].order_charge_days, match[0].billed_charge_days) };
+  return match[0];
 }
 
 /** Split a stored price into its declared half (everything that is not money or `taxes_base`). */
@@ -220,7 +246,7 @@ export function priceDocument<T extends LineItem>(
   for (const item of out) {
     if (!isPriceableItem(item)) continue;
     const price = item.price;
-    const money: LinePriceMoney = computeLineMoney(item, pricing, item.uid, extensionFor(item, ctx.extensions));
+    const money: LinePriceMoney = priceLine(item, pricing, extensionFor(item, ctx.extensions));
     // ⚠️ Stage 1 has ALREADY written `taxes_base` on every pre-tax line, so it is
     // always present here, as the deleted `materializeDocumentTax` also left it.
     // That widens the key set of a stored line that never carried it (measured

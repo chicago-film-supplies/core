@@ -40,13 +40,16 @@
  * ## Dates are money, not quantity (D4)
  *
  * An order whose dates were extended after it was billed has no quantity left to
- * bill and still has money left to bill. That remainder is priced by running
- * each billed row through the pricer twice — at the order line's CURRENT
- * `chargeable_days` and at the row's own — and taking the difference.
+ * bill and still has money left to bill. That remainder is each billed row priced
+ * as a D7 EXTENSION (api-cloudrun#997): for
+ * `max(order charge days, 5) − max(billed charge days, 5)` days with the
+ * one-week minimum skipped, through `priceDocument`'s line pricer — so it is
+ * exactly what an extension section on an invoice bills (#997 D11).
  *
- * 🔴 **Never price "the extra days" as a line of their own.** Chargeable-day
- * formulas are not linear — `five_day_week` floors at one week — so
- * `price(10 days) − price(7 days) ≠ price(3 days)`.
+ * 🔴 **Never price "the extra days" as an ordinary line.** `five_day_week` floors
+ * at one week, so `price(3 days)` charges a week the billed row already paid.
+ * The D7 day count floors each SIDE at the week instead, and skips the floor on
+ * the difference. A `fixed` row never read its days and extends by nothing.
  *
  * ⚠️ **The date input is `price.chargeable_days`, not the destination pair's
  * dates.** The pair's dates are its upstream: `syncChargeDaysToItems` writes the
@@ -59,9 +62,8 @@
  *
  * Every cent figure here is `subtotal_discounted_cents`: the invoice writer that
  * bills a remainder materializes tax on the line it builds, per destination, and
- * pricing tax here would restate `priceDocument`'s tax stage. Each amount is a
- * difference of two independently-rounded pricer results, so nothing rounds
- * twice (`cfs-money`).
+ * pricing tax here would restate `priceDocument`'s tax stage. Each amount is one
+ * pricer result, rounded once (`cfs-money`).
  *
  * Signed on purpose: a negative quantity or extension is OVER-billing (the order
  * went down, or its dates shortened, after billing). That is a credit-note
@@ -80,7 +82,8 @@ import {
   invoiceScopeDividersMatch,
   liveInvoiceAnchors,
 } from "./invoices.ts";
-import { calculateItemSubtotal, isPreTaxItem, type LineItem } from "./orders.ts";
+import { isPreTaxItem, type LineItem } from "./orders.ts";
+import { extensionChargeDays, type LineExtension, priceLine } from "./price-document.ts";
 
 /** The invoice shape these functions read — every linked invoice, live or void. */
 export interface AccountedInvoice {
@@ -230,10 +233,18 @@ export interface LineAccount {
   extension_cents: number;
 }
 
-/** `subtotal_discounted_cents` of a line, or 0 for a line that is not priced pre-tax. */
-function subtotalCents(item: LineItem): number {
+/**
+ * `subtotal_discounted_cents` of a line, or 0 for a line that is not priced
+ * pre-tax — through `priceDocument`'s line pricer (#997 D11), so a remainder is
+ * priced by the same author as the document that will bill it.
+ *
+ * The line's tax refs are dropped first: only the pre-tax subtotal is read, and
+ * the pricer resolves every ref it is handed against the catalog it is given.
+ */
+function subtotalCents(item: LineItem, extension?: LineExtension): number {
   if (!isPreTaxItem(item)) return 0;
-  return calculateItemSubtotal(item).subtotal_discounted_cents;
+  const untaxed = { ...item, price: { ...item.price, taxes: [] } } as LineItem;
+  return priceLine(untaxed, [], extension).subtotal_discounted_cents;
 }
 
 /**
@@ -252,14 +263,15 @@ export function accountLine(orderLine: LineItem, billed: BilledAtPath | undefine
   const quantityCents = quantity === 0 ? 0 : Math.sign(quantity) * subtotalCents({ ...orderLine, quantity: Math.abs(quantity) });
 
   let extensionCents = 0;
-  const orderDays = orderLine.price?.chargeable_days ?? null;
+  const orderDays = orderLine.price?.chargeable_days ?? 0;
   if (isPreTaxItem(orderLine)) {
     for (const row of billed?.rows ?? []) {
       if (!isPreTaxItem(row.item)) continue;
-      const rowDays = row.item.price?.chargeable_days ?? null;
-      if (rowDays === orderDays) continue;
-      const asOrdered = { ...row.item, price: { ...row.item.price, chargeable_days: orderDays } } as LineItem;
-      extensionCents += subtotalCents(asOrdered) - subtotalCents(row.item);
+      // A `fixed` row has no day count to extend: its price never read the days.
+      if (row.item.price.formula !== "five_day_week") continue;
+      const extension = { order_charge_days: orderDays, billed_charge_days: row.item.price.chargeable_days ?? 0 };
+      if (extensionChargeDays(extension.order_charge_days, extension.billed_charge_days) === 0) continue;
+      extensionCents += subtotalCents(row.item, extension);
     }
   }
 

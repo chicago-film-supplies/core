@@ -309,18 +309,12 @@ const PRETAX_PRICER_SITES = new Map<string, { count: number; why: string }>([
         "the audit oracle's two re-derivation loops, narrowing with isPreTaxItem on their own line",
     },
   ],
-  [
-    "src/utils/quantityAccounting.ts",
-    {
-      // `subtotalCents` — `return 0`s on `!isPreTaxItem(item)` on the line
-      // above. It prices a remainder (`accountLine`): units not yet billed, and
-      // a billed row at two day counts. It does NOT go through
-      // `computeLineMoney` because it wants the pre-tax subtotal alone; tax on a
-      // remainder is the invoice writer's, per destination.
-      count: 1,
-      why: "subtotalCents in accountLine, guarded by isPreTaxItem on the line above",
-    },
-  ],
+  // ⚠️ `src/utils/quantityAccounting.ts` is DELIBERATELY absent, and absent
+  // means 0. Its `accountLine` called `calculateItemSubtotal` once (a remainder
+  // and a billed row at two day counts) until api-cloudrun#997 D11 routed it
+  // through `priceDocument`'s line pricer, `priceLine`, which reaches the
+  // pricers only through `computeLineMoney`. Re-listing it with a count is how a
+  // second line-money author comes back.
 ]);
 
 Deno.test("moneyArithmeticCoverage — computeLineMoney is the only pre-tax branch point", async () => {
@@ -435,10 +429,12 @@ Deno.test("moneyArithmeticCoverage — the scans bite (non-vacuity)", async () =
     .filter((h) => h.file !== "src/schemas/template-helpers.generated.ts")
     .filter((h) => !PRICER_DECL_RE.test(h.text) && !/^export function/.test(h.text));
   assertEquals(
-    pricerHits.length >= 8,
+    // 7, not 8: `accountLine`'s call left at api-cloudrun#997 D11. The floor is
+    // exactly `src/utils/orders.ts`'s catalogued count, the sites that remain.
+    pricerHits.length >= 7,
     true,
-    `Ratchet E found ${pricerHits.length} pre-tax-pricer calls and there must be at least 8 ` +
-      `(computeLineMoney, the pricers composing each other, and the two totals loops). ` +
+    `Ratchet E found ${pricerHits.length} pre-tax-pricer calls and there must be at least 7 ` +
+      `(computeLineMoney, the pricers composing each other, and the audit oracle's two loops). ` +
       `A collapse to zero means the walker or the regex broke, not that core stopped ` +
       `pricing lines.`,
   );

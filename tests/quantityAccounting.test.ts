@@ -62,10 +62,10 @@ Deno.test("quantityAccounting: a line no invoice carries comes in whole and is m
   assertEquals(lines.map((l) => [l.path.join("/"), l.quantity, l.quantity_cents, l.new]), [[`${D}/prod-tripod`, 1, 3000, true]]);
 });
 
-Deno.test("quantityAccounting: a date extension is priced at both day counts, never as the extra days alone", () => {
+Deno.test("quantityAccounting: a date extension is priced as D7 extension days, never as an ordinary line of the extra days", () => {
   // Billed 2 at 3 days: five_day_week floors at a week → 2 × 1000 = 2000¢.
-  // The order now charges 7 days → 2 × 1000 × 7 ÷ 5 = 2800¢. Remainder 800¢.
-  // Pricing "the extra 4 days" as a line would floor to a week: 2000¢. Wrong.
+  // The order now charges 7 days → D7 days = max(7,5) − max(3,5) = 2 → 2 × 1000 × 2 ÷ 5 = 800¢.
+  // Pricing "the extra 4 days" as an ordinary line would floor to a week: 2000¢. Wrong.
   const { lines } = remainingForOrder(O, lightOrder(2, 7), [invoice("a", lightOrder(2, 3))]);
   assertEquals(lines.map((l) => [l.quantity, l.quantity_cents, l.extension_cents]), [[0, 0, 800]]);
 });
@@ -75,6 +75,36 @@ Deno.test("quantityAccounting: an extension across a split bill prices each bill
   // Row b: 2 at 8 days → 2 × 1000 × 8 ÷ 5 = 3200¢, at 10 days → 4000¢ (+800). Total 3800¢.
   const { lines } = remainingForOrder(O, lightOrder(5, 10), [invoice("a", lightOrder(3, 5)), invoice("b", lightOrder(2, 8))]);
   assertEquals(lines.map((l) => [l.billed, l.quantity, l.extension_cents]), [[5, 0, 3800]]);
+});
+
+Deno.test("quantityAccounting: an extension rounds ONCE, as the extension invoice line will (#997 D11)", () => {
+  // 1 unit at 333¢, billed at 6 days, the order now 7. D7 days = 7 − 6 = 1.
+  // One rounding: 333 × 1 ÷ 5 = 66.6 → 67¢ — what an extension section bills.
+  // The retired difference of two roundings gave round(466.2) − round(399.6) = 466 − 400 = 66¢.
+  const order = [DEST_ITEM, line(LIGHT, [D, LIGHT], 1, 333, 7)];
+  const billed = [DEST_ITEM, line(LIGHT, [D, LIGHT], 1, 333, 6)];
+  const { lines } = remainingForOrder(O, order, [invoice("a", billed)]);
+  assertEquals(lines.map((l) => [l.quantity, l.extension_cents]), [[0, 67]]);
+});
+
+Deno.test("quantityAccounting: a fixed-formula row extends by nothing, and does not throw", () => {
+  // A `fixed` price never read its days, so an order whose days moved adds 0¢ to it.
+  // The extension pricer refuses a non-five_day_week line, so the row must be skipped, not priced.
+  const fixed = (days: number) => [DEST_ITEM, line(LIGHT, [D, LIGHT], 2, 1000, days, {})].map((it) =>
+    it.type === "rental" ? { ...it, price: { ...it.price, formula: "fixed" } } as LineItem : it
+  );
+  assertEquals(remainingForOrder(O, fixed(10), [invoice("a", fixed(3))]).lines, []);
+});
+
+Deno.test("quantityAccounting: a billed row's tax refs do not reach the pre-tax pricer", () => {
+  // The remainder is pre-tax, so a stored tax ref the pricer has no catalog entry for must not throw.
+  // 2 units at 1000¢, billed 5 days, the order now 10: D7 days 5 → 2 × 1000 × 5 ÷ 5 = 2000¢.
+  const taxed = (days: number) => [DEST_ITEM, line(LIGHT, [D, LIGHT], 2, 1000, days)].map((it) =>
+    it.type === "rental"
+      ? { ...it, price: { ...it.price, taxes: [{ uid: "tax-x", name: "X", rate: 10, type: "percent", amount_cents: 0 }] } } as LineItem
+      : it
+  );
+  assertEquals(remainingForOrder(O, taxed(10), [invoice("a", taxed(5))]).lines.map((l) => l.extension_cents), [2000]);
 });
 
 Deno.test("quantityAccounting: over-billing is reported signed, not clamped", () => {

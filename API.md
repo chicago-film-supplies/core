@@ -25168,13 +25168,16 @@ changes then, not this module's contract.
 ## Dates are money, not quantity (D4)
 
 An order whose dates were extended after it was billed has no quantity left to
-bill and still has money left to bill. That remainder is priced by running
-each billed row through the pricer twice — at the order line's CURRENT
-`chargeable_days` and at the row's own — and taking the difference.
+bill and still has money left to bill. That remainder is each billed row priced
+as a D7 EXTENSION (api-cloudrun#997): for
+`max(order charge days, 5) − max(billed charge days, 5)` days with the
+one-week minimum skipped, through `priceDocument`'s line pricer — so it is
+exactly what an extension section on an invoice bills (#997 D11).
 
-🔴 **Never price "the extra days" as a line of their own.** Chargeable-day
-formulas are not linear — `five_day_week` floors at one week — so
-`price(10 days) − price(7 days) ≠ price(3 days)`.
+🔴 **Never price "the extra days" as an ordinary line.** `five_day_week` floors
+at one week, so `price(3 days)` charges a week the billed row already paid.
+The D7 day count floors each SIDE at the week instead, and skips the floor on
+the difference. A `fixed` row never read its days and extends by nothing.
 
 ⚠️ **The date input is `price.chargeable_days`, not the destination pair's
 dates.** The pair's dates are its upstream: `syncChargeDaysToItems` writes the
@@ -25187,9 +25190,8 @@ whose days did not move correctly reports no extension.
 
 Every cent figure here is `subtotal_discounted_cents`: the invoice writer that
 bills a remainder materializes tax on the line it builds, per destination, and
-pricing tax here would restate `priceDocument`'s tax stage. Each amount is a
-difference of two independently-rounded pricer results, so nothing rounds
-twice (`cfs-money`).
+pricing tax here would restate `priceDocument`'s tax stage. Each amount is one
+pricer result, rounded once (`cfs-money`).
 
 Signed on purpose: a negative quantity or extension is OVER-billing (the order
 went down, or its dates shortened, after billing). That is a credit-note
@@ -30925,6 +30927,17 @@ Returns `[]` when every flagged line is a component.
 
 ## `@cfs/core/utils/price-document`
 
+### `LineExtension`
+
+The two day counts a D7 extension is priced from.
+
+```ts
+interface LineExtension {
+  order_charge_days: number;
+  billed_charge_days: number;
+}
+```
+
 ### `PriceDocumentContext`
 
 Everything {@link priceDocument} reads besides the items.
@@ -30945,8 +30958,6 @@ A date-extension section (#680, D7): every line whose `path` starts with
 ```ts
 interface PriceDocumentExtension {
   divider_path: readonly string[];
-  order_charge_days: number;
-  billed_charge_days: number;
 }
 ```
 
@@ -30987,6 +30998,17 @@ adds on top, and it can be negative when the order's window shrank.
 ### `priceDocument(items: readonly T[], ctx: PriceDocumentContext): PricedDocument<T>`
 
 Price a document: taxes, line money, fee amounts and totals, in one pass.
+
+### `priceLine(item: LineItem, taxes: Tax[], extension?: LineExtension): LinePriceMoney`
+
+**Stage 2 for one line: the line pricer.** `priceDocument` prices every line
+through it, and so does the one reader that must price a line outside a
+document — `accountLine` (`./quantityAccounting.ts`), which prices a
+remainder and a billed row's extension (#997 D11).
+
+`extension` is D7: the line is priced for
+{@link extensionChargeDays}`(order, billed)` days with the one-week minimum
+skipped, which is what an extension section on an invoice bills.
 
 ### `sumPricedLines(items: readonly LineItem[]): DocumentTotalsCore`
 

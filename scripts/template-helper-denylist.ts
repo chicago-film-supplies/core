@@ -449,6 +449,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "price-document": [
     "extensionChargeDays",
     "priceDocument",
+    // Stage 2 for one line (#997 D11). Re-pricing a stored line at render time is
+    // the disagreement above, one line at a time.
+    "priceLine",
     // Stage 5 alone: totals as a sum of stored lines. A template already holds
     // the stored `totals` this would reproduce.
     "sumPricedLines",
