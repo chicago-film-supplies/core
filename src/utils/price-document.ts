@@ -295,6 +295,100 @@ export function priceDocument<T extends LineItem>(
   };
 }
 
+/** The invoice-line surface a credit is priced from (api-cloudrun#997 D4). */
+export interface CreditSourceLine {
+  uid: string;
+  type: LineItem["type"];
+  quantity: number;
+  price: {
+    base_cents: number;
+    chargeable_days: number | null;
+    formula: PriceObject["formula"];
+    discount: { rate: number; type: "percent" | "flat" } | null;
+    taxes: readonly { uid: string }[];
+  };
+}
+
+/** One invoice line to credit, and how many of it. */
+export interface CreditSelectionLine<L extends CreditSourceLine = CreditSourceLine> {
+  line: L;
+  quantity: number;
+}
+
+/** The stored price of one credit-note line: the invoice line's declared half plus money. */
+export interface CreditLinePrice extends LinePriceMoney {
+  base_cents: number;
+  chargeable_days: number | null;
+  formula: PriceObject["formula"];
+}
+
+/** What {@link priceCreditNote} returns. */
+export interface PricedCreditNote {
+  /** One price per selection entry, in selection order. */
+  prices: CreditLinePrice[];
+  /** A credit note's totals: a sum of `prices`. A credit note has no fee rows. */
+  totals: Omit<DocumentTotalsCore, "transaction_fees">;
+}
+
+/**
+ * **Price a credit note from the invoice lines it credits** (api-cloudrun#997 D4).
+ * The server stores this result, and the manager renders it as a preview.
+ *
+ * - **Stages 2 + 3 only.** Each line goes through {@link priceLine} and
+ *   {@link assembleLinePrice} at the credited quantity. Nothing scales money by
+ *   `credited ÷ billed`: that would be a float factor on cents.
+ * - **Stage 1 is deliberately skipped.** The line keeps the tax refs STORED on
+ *   the invoice line, so a credit is taxed at the rate that was charged. It never
+ *   re-resolves jurisdiction, exemption or version. An exempt line carries
+ *   `taxes: []` and credits untaxed. `taxes` must therefore be the WHOLE rate
+ *   catalog, superseded versions included.
+ * - **No D3 refusal.** Credit is raised on settled invoices as a matter of
+ *   course; crediting prices a NEW document and moves no invoice money.
+ * - **Totals are stage 5's sum** ({@link sumPricedLines}).
+ *
+ * @throws Error on a line that is not a pre-tax line (a divider or a fee has no
+ *   credit), on a quantity that is not a positive integer, and when assembled
+ *   money fails its identities.
+ */
+export function priceCreditNote(
+  selection: readonly CreditSelectionLine[],
+  taxes: Tax[],
+): PricedCreditNote {
+  const prices: CreditLinePrice[] = [];
+  const priced: LineItem[] = [];
+  for (const { line, quantity } of selection) {
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw new Error(`Credit quantity for line ${line.uid} must be a positive integer, got ${quantity}`);
+    }
+    const item = {
+      uid: line.uid,
+      path: [line.uid],
+      name: "",
+      type: line.type,
+      quantity,
+      price: {
+        base_cents: line.price.base_cents,
+        chargeable_days: line.price.chargeable_days,
+        formula: line.price.formula,
+        discount: line.price.discount,
+        taxes: [...line.price.taxes],
+      },
+    } as unknown as LineItem;
+    if (!isPreTaxItem(item)) {
+      throw new Error(`Line ${line.uid} has type "${line.type}", which cannot be credited — only a pre-tax line has a credit`);
+    }
+    const price = assembleLinePrice(
+      { base_cents: line.price.base_cents, chargeable_days: line.price.chargeable_days, formula: line.price.formula },
+      priceLine(item, taxes),
+      item,
+    ) as CreditLinePrice;
+    prices.push(price);
+    priced.push({ ...item, price } as unknown as LineItem);
+  }
+  const { transaction_fees: _fees, ...totals } = sumPricedLines(priced);
+  return { prices, totals };
+}
+
 /**
  * **Stage 5 on its own: a document's totals as the SUM of its stored line
  * money.** Nothing is re-priced.

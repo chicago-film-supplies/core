@@ -448,6 +448,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // renders — so nothing here belongs in a render context.
   "price-document": [
     "extensionChargeDays",
+    // The credit-note author (#997 D4). A credit note template renders its stored money.
+    "priceCreditNote",
     "priceDocument",
     // Stage 2 for one line (#997 D11). Re-pricing a stored line at render time is
     // the disagreement above, one line at a time.

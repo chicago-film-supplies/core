@@ -13,6 +13,7 @@ import {
 import {
   extensionChargeDays,
   type PriceDocumentContext,
+  priceCreditNote,
   priceDocument,
   sumPricedLines,
 } from "../src/utils/price-document.ts";
@@ -314,4 +315,59 @@ Deno.test("…and a fee costed on the PRE-TAX basis DOES disagree with it", () =
     if (wrong !== p(feeLine).total_cents) disagreements++;
   }
   assert(disagreements > 100, `pre-tax basis disagreed on only ${disagreements} fee documents`);
+});
+
+// ── Credit notes: priced from the invoice line (#997 D4) ──
+
+const creditSource = (over: Partial<LineItem> = {}, price: Record<string, unknown> = {}) =>
+  line(over, price) as unknown as Parameters<typeof priceCreditNote>[0][number]["line"];
+
+Deno.test("priceCreditNote: credits a discounted, taxed line at the credited quantity, with its stored tax", () => {
+  // Rental 10000 × 5 days, 10% off, Chicago Rental Tax 15%, billed 5 units; credit 2.
+  // 2 × 10000 = 20000; 10% off → 18000; 15% tax → 2700; total 20700.
+  const src = creditSource({ quantity: 5 }, {
+    discount: { type: "percent", rate: 10, amount_cents: 0 },
+    taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 0 }],
+  });
+  const r = priceCreditNote([{ line: src, quantity: 2 }], pricingTaxesOf(CAT));
+  const price = r.prices[0];
+  assertEquals(
+    [price.subtotal_cents, price.subtotal_discounted_cents, price.discount?.amount_cents, price.total_cents],
+    [20000, 18000, 2000, 20700],
+  );
+  assertEquals(price.taxes.map((t) => [t.uid, t.amount_cents]), [["chi-rental-tax", 2700]]);
+  assertEquals(Object.keys(price).sort(), [
+    "base_cents", "chargeable_days", "discount", "formula", "subtotal_cents", "subtotal_discounted_cents", "taxes", "total_cents",
+  ]);
+  assertEquals(r.totals, {
+    discount_amount_cents: 2000, subtotal_cents: 20000, subtotal_discounted_cents: 18000,
+    taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 2700 }],
+    total_cents: 20700,
+  });
+});
+
+Deno.test("priceCreditNote: keeps the charged rate VERSION, never today's, and an exempt line stays untaxed", () => {
+  const versions = pricingTaxesOf(catalogOf([
+    { uid: "chi-sales-old", name: "Chicago Sales Tax", rate: 10.25, type: "percent", jurisdiction: "chicago", item_types: ["sale"], applied_from: "2020-01-01T00:00:00.000-06:00", applied_to: "2026-06-01T00:00:00.000-05:00" },
+    { uid: "chi-sales-new", name: "Chicago Sales Tax", rate: 10.5, type: "percent", jurisdiction: "chicago", item_types: ["sale"], applied_from: "2026-06-01T00:00:00.000-05:00", applied_to: null },
+  ]));
+  const old = creditSource({ type: "sale" }, {
+    formula: "fixed", base_cents: 40000, chargeable_days: null,
+    taxes: [{ uid: "chi-sales-old", name: "Chicago Sales Tax", rate: 10.25, type: "percent", amount_cents: 4100 }],
+  });
+  const exempt = creditSource({ type: "sale" }, { formula: "fixed", base_cents: 1000, chargeable_days: null, taxes: [] });
+  const r = priceCreditNote([{ line: old, quantity: 1 }, { line: exempt, quantity: 3 }], versions);
+  assertEquals(r.prices.map((x) => x.total_cents), [44100, 3000]);
+  assertEquals(r.totals.taxes.map((t) => [t.name, t.amount_cents]), [["Chicago Sales Tax", 4100]]);
+  assertEquals(r.totals.total_cents, 47100);
+});
+
+Deno.test("priceCreditNote: refuses a divider, a fee, and a non-positive or fractional quantity", () => {
+  const taxes = pricingTaxesOf(CAT);
+  const divider = { ...line(), type: "destination" } as unknown as Parameters<typeof priceCreditNote>[0][number]["line"];
+  assertThrows(() => priceCreditNote([{ line: divider, quantity: 1 }], taxes), Error, "cannot be credited");
+  assertThrows(() => priceCreditNote([{ line: creditSource({ type: "transaction_fee" }), quantity: 1 }], taxes), Error, "cannot be credited");
+  for (const quantity of [0, -1, 1.5]) {
+    assertThrows(() => priceCreditNote([{ line: creditSource(), quantity }], taxes), Error, "positive integer");
+  }
 });

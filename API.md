@@ -30927,6 +30927,42 @@ Returns `[]` when every flagged line is a component.
 
 ## `@cfs/core/utils/price-document`
 
+### `CreditLinePrice`
+
+The stored price of one credit-note line: the invoice line's declared half plus money.
+
+```ts
+interface CreditLinePrice {
+  base_cents: number;
+  chargeable_days: number | null;
+  formula: indexedAccess;
+}
+```
+
+### `CreditSelectionLine`
+
+One invoice line to credit, and how many of it.
+
+```ts
+interface CreditSelectionLine {
+  line: L;
+  quantity: number;
+}
+```
+
+### `CreditSourceLine`
+
+The invoice-line surface a credit is priced from (api-cloudrun#997 D4).
+
+```ts
+interface CreditSourceLine {
+  uid: string;
+  type: indexedAccess;
+  quantity: number;
+  price: typeLiteral;
+}
+```
+
 ### `LineExtension`
 
 The two day counts a D7 extension is priced from.
@@ -30974,6 +31010,17 @@ two cannot disagree about what "settled" means.
 type PriceDocumentKind = typeLiteral | typeLiteral;
 ```
 
+### `PricedCreditNote`
+
+What {@link priceCreditNote} returns.
+
+```ts
+interface PricedCreditNote {
+  prices: CreditLinePrice[];
+  totals: Omit<DocumentTotalsCore, "transaction_fees">;
+}
+```
+
 ### `PricedDocument`
 
 What {@link priceDocument} returns.
@@ -30994,6 +31041,23 @@ The extension day count for D7: `max(order, 5) − max(billed, 5)`.
 Both sides floor at the one-week minimum, because each window was (or would
 be) charged at least a week. The difference is therefore what the extension
 adds on top, and it can be negative when the order's window shrank.
+
+### `priceCreditNote(selection: readonly CreditSelectionLine[], taxes: Tax[]): PricedCreditNote`
+
+**Price a credit note from the invoice lines it credits** (api-cloudrun#997 D4).
+The server stores this result, and the manager renders it as a preview.
+
+- **Stages 2 + 3 only.** Each line goes through {@link priceLine} and
+  {@link assembleLinePrice} at the credited quantity. Nothing scales money by
+  `credited ÷ billed`: that would be a float factor on cents.
+- **Stage 1 is deliberately skipped.** The line keeps the tax refs STORED on
+  the invoice line, so a credit is taxed at the rate that was charged. It never
+  re-resolves jurisdiction, exemption or version. An exempt line carries
+  `taxes: []` and credits untaxed. `taxes` must therefore be the WHOLE rate
+  catalog, superseded versions included.
+- **No D3 refusal.** Credit is raised on settled invoices as a matter of
+  course; crediting prices a NEW document and moves no invoice money.
+- **Totals are stage 5's sum** ({@link sumPricedLines}).
 
 ### `priceDocument(items: readonly T[], ctx: PriceDocumentContext): PricedDocument<T>`
 

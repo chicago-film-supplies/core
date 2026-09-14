@@ -14197,6 +14197,24 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "CreditLinePrice",
+          "declaration": "interface CreditLinePrice {\n  base_cents: number;\n  chargeable_days: number | null;\n  formula: indexedAccess;\n}",
+          "doc": "The stored price of one credit-note line: the invoice line's declared half plus money."
+        },
+        {
+          "kind": "interface",
+          "name": "CreditSelectionLine",
+          "declaration": "interface CreditSelectionLine {\n  line: L;\n  quantity: number;\n}",
+          "doc": "One invoice line to credit, and how many of it."
+        },
+        {
+          "kind": "interface",
+          "name": "CreditSourceLine",
+          "declaration": "interface CreditSourceLine {\n  uid: string;\n  type: indexedAccess;\n  quantity: number;\n  price: typeLiteral;\n}",
+          "doc": "The invoice-line surface a credit is priced from (api-cloudrun#997 D4)."
+        },
+        {
+          "kind": "interface",
           "name": "LineExtension",
           "declaration": "interface LineExtension {\n  order_charge_days: number;\n  billed_charge_days: number;\n}",
           "doc": "The two day counts a D7 extension is priced from."
@@ -14221,6 +14239,12 @@
         },
         {
           "kind": "interface",
+          "name": "PricedCreditNote",
+          "declaration": "interface PricedCreditNote {\n  prices: CreditLinePrice[];\n  totals: Omit<DocumentTotalsCore, \"transaction_fees\">;\n}",
+          "doc": "What {@link priceCreditNote} returns."
+        },
+        {
+          "kind": "interface",
           "name": "PricedDocument",
           "declaration": "interface PricedDocument {\n  items: T[];\n  totals: DocumentTotalsCore;\n  replacement_total_cents: number | null;\n  warnings: UnreviewedTaxWarning[];\n}",
           "doc": "What {@link priceDocument} returns."
@@ -14230,6 +14254,14 @@
           "name": "extensionChargeDays",
           "signature": "extensionChargeDays(orderChargeDays: number, billedChargeDays: number): number",
           "doc": "The extension day count for D7: `max(order, 5) − max(billed, 5)`.\n\nBoth sides floor at the one-week minimum, because each window was (or would\nbe) charged at least a week. The difference is therefore what the extension\nadds on top, and it can be negative when the order's window shrank.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "priceCreditNote",
+          "signature": "priceCreditNote(selection: readonly CreditSelectionLine[], taxes: Tax[]): PricedCreditNote",
+          "doc": "**Price a credit note from the invoice lines it credits** (api-cloudrun#997 D4).\nThe server stores this result, and the manager renders it as a preview.\n\n- **Stages 2 + 3 only.** Each line goes through {@link priceLine} and\n  {@link assembleLinePrice} at the credited quantity. Nothing scales money by\n  `credited ÷ billed`: that would be a float factor on cents.\n- **Stage 1 is deliberately skipped.** The line keeps the tax refs STORED on\n  the invoice line, so a credit is taxed at the rate that was charged. It never\n  re-resolves jurisdiction, exemption or version. An exempt line carries\n  `taxes: []` and credits untaxed. `taxes` must therefore be the WHOLE rate\n  catalog, superseded versions included.\n- **No D3 refusal.** Credit is raised on settled invoices as a matter of\n  course; crediting prices a NEW document and moves no invoice money.\n- **Totals are stage 5's sum** ({@link sumPricedLines}).",
           "paramTags": [],
           "returnsTag": null
         },
