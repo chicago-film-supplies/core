@@ -59,7 +59,7 @@
  *
  * Every cent figure here is `subtotal_discounted_cents`: the invoice writer that
  * bills a remainder materializes tax on the line it builds, per destination, and
- * pricing tax here would restate `materializeDocumentTax`. Each amount is a
+ * pricing tax here would restate `priceDocument`'s tax stage. Each amount is a
  * difference of two independently-rounded pricer results, so nothing rounds
  * twice (`cfs-money`).
  *

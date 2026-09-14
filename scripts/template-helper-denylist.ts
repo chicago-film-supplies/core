@@ -161,7 +161,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // The divider ↔ pair join, derived at WRITE time and then stored as
     // `destinations[i].uid`. A render context reads that field directly; a
     // template re-deriving it would be recomputing an identity the document
-    // already carries — the same trap as `sumDocumentTotals` below, on the
+    // already carries — the same trap as re-deriving `totals` at render time, on the
     // structural axis rather than the money one.
     "assignDestinationPairUids",
     // The mint side of the same join — a WRITER builds a destination pair and
@@ -184,31 +184,22 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "deriveOrderDateEnvelope", // superseded by per-destination dates; not for rendering
     "buildQueryByDates", // Typesense projection helper
     "computeItemTaxAmountCents", // single-tax building block used by calculateItemTax — not a render helper
-    // The transaction-fee pass of calculateOrderTotals/calculateInvoiceTotals.
+    // The transaction-fee pass of pricing (`priceDocument` stage 4, and the audit oracle).
     // Both need the DOCUMENT's subtotal_discounted as a basis, and both answer a
     // question the render context already has an answer to: the fee's amount is
     // stored on the line (`price.total_cents`) and rolled up in
     // `totals.transaction_fees`. Recomputing at render time would let a document
     // disagree with the doc it renders — the same trap as `allocation` above.
     "calculateTransactionFeeAmountCents", // fee arithmetic — totals pass only
-    "costTransactionFees", // fee arithmetic over an array — totals pass only
     // A fee ROW's amount for the manager's row cells. A rendered document reads
     // its stored `totals.transaction_fees`; recomputing one line's share at
     // render time is the same self-disagreement trap.
     "transactionFeeBasisCents",
     "transactionFeeLineAmountCents",
-    // The six-field fold shared by calculateOrderTotals and
-    // calculateInvoiceTotals. Same argument as the two above, one level up: a
-    // rendered document reads its STORED `totals`, and recomputing at render
-    // time is precisely how a document comes to disagree with the doc it
-    // renders. `calculateOrderTotals` / `calculateInvoiceTotals` stay visible
-    // because a template legitimately re-totals a subset (a per-destination
-    // block); this one only ever reproduces what those two already returned.
-    "sumDocumentTotals",
     // The line-price author (api-cloudrun#570). All four are WRITE-path: they
     // decide how a stored `price` object is computed and assembled, and a
     // render context already holds the object they produce. Re-running one at
-    // render time is the `sumDocumentTotals` trap at the line level — a
+    // render time is the re-derived-totals trap at the line level — a
     // document disagreeing with itself — and `assembleLinePrice` in particular
     // would advertise a helper whose first argument is a half-built price a
     // template never has.
@@ -237,6 +228,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "isTransactionFeePricingItem",
   ],
   invoices: [
+    // The invoice totals AUDIT oracle (api-cloudrun#575, #997 step 2): re-derives
+    // totals from line inputs to check stored ones. A template renders stored
+    // totals, and re-deriving them is how a document disagrees with itself.
+    "rederiveInvoiceTotalsForAudit",
     // Composes the two denylisted `dates` primitives above and inherits their
     // hazard exactly: the row already carries `days_overdue` and `bucket`,
     // stamped against the run's as-of date.
@@ -311,18 +306,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "deriveProductImageUuids",
   ],
   taxes: [
-    // Recomputes MONEY at render time. It is `overrideItemTaxesForProfile` plus
-    // a `calculateItemPrice` pass, and that second half is the whole difference:
-    // the sibling rewrites a tax amount from the line's **stored**
-    // `subtotal_discounted_cents`, while this one rebuilds `subtotal_cents` /
-    // `subtotal_discounted_cents` / `total_cents` from `base_cents × quantity ×
-    // days_factor`. A template that called it could print totals that disagree
-    // with the document it is rendering — the same trap named on
-    // `calculateTransactionFeeAmountCents` above. It also mutates its argument.
-    //
-    // That is why the sibling stays emitted and this does not; the line is
-    // "recomputes money from base inputs", not "is a write-path helper".
-    "materializeDocumentTax",
     // A RESOLVER internal, not a rendering fact. It is the one place the
     // bracket checks read a version's bounds from, exported so `findTaxAt`,
     // `findTaxFor` and api-cloudrun's window guards cannot each grow their own
@@ -466,6 +449,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "price-document": [
     "extensionChargeDays",
     "priceDocument",
+    // Stage 5 alone: totals as a sum of stored lines. A template already holds
+    // the stored `totals` this would reproduce.
+    "sumPricedLines",
   ],
   "tax-classes": [
     "deriveLineTaxClass",
@@ -509,7 +495,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // holds the parts — `it.doc.destinations[].contact.first_name` and its
   // siblings — so a template calling this would be re-deriving, from a string
   // `deriveName` produced, the very fields it was produced from. Same trap as
-  // `sumDocumentTotals` under `orders`: a document disagreeing with itself.
+  // re-deriving `totals` at render time: a document disagreeing with itself.
   "contact-name": [
     "splitFullName",
   ],

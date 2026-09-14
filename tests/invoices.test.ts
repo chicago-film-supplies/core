@@ -1,11 +1,11 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { getInitialValues, InvoiceDocLineItem, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
-import { calculateOrderTotals, computeItemPaths, sumDocumentTotals, validateItemPaths } from "../src/utils/orders.ts";
+import { computeItemPaths, rederiveDocumentTotalsForAudit, validateItemPaths } from "../src/utils/orders.ts";
 import {
   adoptOrderDividerStructure,
   buildInvoiceDestinationDivider,
   buildOrderScopedItems,
-  calculateInvoiceTotals,
+  rederiveInvoiceTotalsForAudit,
   carryForwardOverrides,
   computeInvoiceItemPaths,
   computeInvoiceSyncStatus,
@@ -683,7 +683,7 @@ Deno.test("syncOrderToInvoiceSelective projects synced items and carries forward
 Deno.test("projection: `price.taxes_base` inherits, so an invoice profile revert is lossless", () => {
   // Divergence (6): the doc-level override rewrites `taxes` and never
   // `taxes_base`, so without the snapshot an invoice reverting to `tax_applied`
-  // has nothing to restore from — `materializeDocumentTax` returns early and the
+  // has nothing to restore from — the (since deleted) tax materializer returned early and the
   // line keeps whichever override was last written.
   const prevItem = orderShapedLine();
   const withBase = orderShapedLine({
@@ -763,7 +763,7 @@ Deno.test("⚠️ projection: a NEW taxes_base makes a previously-synced line re
 Deno.test("projection: `coa_revenue` inherits but changes NO sync verdict", () => {
   // The other half of the asymmetry. `coa_revenue` is projected too — an order
   // line that carries one should hand it to the invoice rather than leaving
-  // `undefined` for `calculateInvoiceTotals` to read as "taxable" while the
+  // `undefined` for the invoice pricer to read as "taxable" while the
   // stored per-line taxes say otherwise. But it is in INVOICE_ONLY_ITEM_FIELDS,
   // so `invoiceItemsMatch` filters it out of both key sets and adding it to the
   // projection cannot flip a verdict — unlike `price.taxes_base`, which is
@@ -1112,14 +1112,14 @@ Deno.test("substitution: the divergence record is invoice-owned, so it is not dr
   );
 });
 
-// ── calculateInvoiceTotals ─────────────────────────────────────
+// ── rederiveInvoiceTotalsForAudit (formerly calculateInvoiceTotals) ─────────────────────────────────────
 
 const TAXES: Tax[] = [
   { uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent" },
   { uid: "chi-sales-tax", name: "Chicago Sales Tax", rate: 10.25, type: "percent" },
 ];
 
-Deno.test("calculateInvoiceTotals computes totals from billable items only", () => {
+Deno.test("rederiveInvoiceTotalsForAudit computes totals from billable items only", () => {
   const items: InvoiceItem[] = [
     { uid: "order-div", type: "order", name: "Order #1", path: [] },
     { uid: "dest", type: "destination", name: "Venue", path: [] },
@@ -1134,7 +1134,7 @@ Deno.test("calculateInvoiceTotals computes totals from billable items only", () 
     ),
   ];
 
-  const result = calculateInvoiceTotals(items, [], []);
+  const result = rederiveInvoiceTotalsForAudit(items, [], []);
   assertEquals(result.subtotal_cents, 50000);
   assertEquals(result.subtotal_discounted_cents, 50000);
   assertEquals(result.discount_amount_cents, 0);
@@ -1145,28 +1145,28 @@ Deno.test("calculateInvoiceTotals computes totals from billable items only", () 
   assertEquals(result.transaction_fees, []);
 });
 
-Deno.test("calculateInvoiceTotals applies discount", () => {
+Deno.test("rederiveInvoiceTotalsForAudit applies discount", () => {
   const items: InvoiceItem[] = [
     makeItem(
       { uid: "item-1", type: "rental", name: "Light" },
       { base_cents: 10000, chargeable_days: 5, discount: { type: "percent", rate: 10, amount_cents: 1000 }, subtotal_cents: 10000, subtotal_discounted_cents: 9000, total_cents: 9000 },
     ),
   ];
-  const result = calculateInvoiceTotals(items, [], []);
+  const result = rederiveInvoiceTotalsForAudit(items, [], []);
   assertEquals(result.subtotal_cents, 10000);
   assertEquals(result.subtotal_discounted_cents, 9000);
   assertEquals(result.discount_amount_cents, 1000);
   assertEquals(result.total_cents, 9000);
 });
 
-Deno.test("calculateInvoiceTotals with taxes", () => {
+Deno.test("rederiveInvoiceTotalsForAudit with taxes", () => {
   const items: InvoiceItem[] = [
     makeItem(
       { uid: "item-1", type: "rental", name: "Light" },
       { base_cents: 10000, chargeable_days: 5, taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 1500 }], subtotal_cents: 10000, subtotal_discounted_cents: 10000, total_cents: 11500 },
     ),
   ];
-  const result = calculateInvoiceTotals(items, TAXES, []);
+  const result = rederiveInvoiceTotalsForAudit(items, TAXES, []);
   assertEquals(result.subtotal_cents, 10000);
   assertEquals(result.total_cents, 11500);
   assertEquals(result.taxes.length, 1);
@@ -1174,7 +1174,7 @@ Deno.test("calculateInvoiceTotals with taxes", () => {
   assertEquals(result.taxes[0].amount_cents, 1500);
 });
 
-Deno.test("calculateInvoiceTotals with payments reduces amount_due", () => {
+Deno.test("rederiveInvoiceTotalsForAudit with payments reduces amount_due", () => {
   const items: InvoiceItem[] = [
     makeItem(
       { uid: "item-1", type: "rental", name: "Light" },
@@ -1189,15 +1189,15 @@ Deno.test("calculateInvoiceTotals with payments reduces amount_due", () => {
     S({ type: "payment_reversal", reason: "correction", amount_cents: 100_00 }),
     S({ amount_cents: 200_00 }),
   ];
-  const result = calculateInvoiceTotals(items, [], settlements);
+  const result = rederiveInvoiceTotalsForAudit(items, [], settlements);
   assertEquals(result.total_cents, 100000);
   assertEquals(result.amount_paid_cents, 60000);
   assertEquals(result.amount_credited_cents, 0);
   assertEquals(result.amount_due_cents, 40000);
 });
 
-Deno.test("calculateInvoiceTotals with empty items returns zeros", () => {
-  const result = calculateInvoiceTotals([], [], []);
+Deno.test("rederiveInvoiceTotalsForAudit with empty items returns zeros", () => {
+  const result = rederiveInvoiceTotalsForAudit([], [], []);
   assertEquals(result.subtotal_cents, 0);
   assertEquals(result.subtotal_discounted_cents, 0);
   assertEquals(result.discount_amount_cents, 0);
@@ -1206,7 +1206,7 @@ Deno.test("calculateInvoiceTotals with empty items returns zeros", () => {
   assertEquals(result.amount_due_cents, 0);
 });
 
-Deno.test("calculateInvoiceTotals with transaction fee", () => {
+Deno.test("rederiveInvoiceTotalsForAudit with transaction fee", () => {
   const items: InvoiceItem[] = [
     makeItem(
       { uid: "item-1", type: "rental", name: "Light" },
@@ -1218,7 +1218,7 @@ Deno.test("calculateInvoiceTotals with transaction fee", () => {
       { base_cents: 0, base_percent: 3, formula: "percent_of_total" },
     ),
   ];
-  const result = calculateInvoiceTotals(items, [], []);
+  const result = rederiveInvoiceTotalsForAudit(items, [], []);
   assertEquals(result.subtotal_cents, 10000);
   assertEquals(result.transaction_fees.length, 1);
   assertEquals(result.transaction_fees[0].name, "Credit Card Fee");
@@ -2341,10 +2341,10 @@ Deno.test("resyncInvoiceLines: leaves other order dividers' scopes untouched", (
 
 // ── Item 2: the shared totals fold ──────────────────────────────
 //
-// `calculateOrderTotals` and `calculateInvoiceTotals` were ~35 byte-identical
-// lines each; both now delegate to `sumDocumentTotals`. The extraction is only
-// output-identical if the ONE structural difference between the two bodies —
-// the invoice path's `flattenForXero` prefilter — is arithmetically inert.
+// The document and invoice audit oracles (formerly `calculateOrderTotals` and
+// `calculateInvoiceTotals`) share one re-derivation. They are only
+// output-identical if the ONE structural difference between them — the invoice
+// oracle's `flattenForXero` prefilter — is arithmetically inert.
 //
 // That was argued in prose (dividers are `kind: "divider"`, every divider has
 // `pricing: "none"`, every predicate in the fold gates on `pricing`) and
@@ -2436,9 +2436,9 @@ Deno.test("order and invoice totals agree on their six shared fields over 20k ra
   let disagreements = 0;
   let first: string | null = null;
   for (const doc of DOC_SWEEP) {
-    const fromOrder = core(calculateOrderTotals(doc.items, TAXES) as unknown as Record<string, unknown>);
-    const fromInvoice = core(calculateInvoiceTotals(doc.items, TAXES, []) as unknown as Record<string, unknown>);
-    const fromCore = core(sumDocumentTotals(doc.items, TAXES) as unknown as Record<string, unknown>);
+    const fromOrder = core(rederiveDocumentTotalsForAudit(doc.items, TAXES) as unknown as Record<string, unknown>);
+    const fromInvoice = core(rederiveInvoiceTotalsForAudit(doc.items, TAXES, []) as unknown as Record<string, unknown>);
+    const fromCore = core(rederiveDocumentTotalsForAudit(doc.items, TAXES) as unknown as Record<string, unknown>);
     if (fromOrder !== fromInvoice || fromOrder !== fromCore) {
       disagreements++;
       first ??= `order ${fromOrder}\ninvoice ${fromInvoice}\ncore ${fromCore}`;
@@ -2458,7 +2458,7 @@ Deno.test("…and the sweep is not vacuous — dividers, discounts, taxes, fees 
   let nonZero = 0;
   for (const doc of DOC_SWEEP) {
     if (flattenForXero(doc.items).length < doc.items.length) dropped++;
-    const t = calculateInvoiceTotals(doc.items, TAXES, []);
+    const t = rederiveInvoiceTotalsForAudit(doc.items, TAXES, []);
     if (t.discount_amount_cents !== 0) discounted++;
     if (t.taxes.length > 0) taxed++;
     if (t.transaction_fees.length > 0) feed++;
@@ -2485,8 +2485,8 @@ Deno.test("…and a prefilter that drops a PRICEABLE type DOES disagree — the 
   for (const doc of DOC_SWEEP) {
     const overFiltered = doc.items.filter((i) => i.type !== "service");
     if (
-      core(sumDocumentTotals(doc.items, TAXES) as unknown as Record<string, unknown>) !==
-        core(sumDocumentTotals(overFiltered, TAXES) as unknown as Record<string, unknown>)
+      core(rederiveDocumentTotalsForAudit(doc.items, TAXES) as unknown as Record<string, unknown>) !==
+        core(rederiveDocumentTotalsForAudit(overFiltered, TAXES) as unknown as Record<string, unknown>)
     ) disagreements++;
   }
   assertEquals(

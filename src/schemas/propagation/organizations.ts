@@ -434,23 +434,23 @@ const updateOrganizationRules: CollectionRule[] = [
         source: ["jurisdiction_claim"],
         target: ["items", "price", "taxes"],
         transform:
-          "materializeDocumentTax over `documentTaxContext({ organization, documentExempt, destinations, origin, taxes, at })` — a PURE function of (items, axes, destinations, origin, catalog, asOf), which is what makes it safe under `convergeCascade`'s idempotent-apply contract",
+          "priceDocument over `documentTaxContext({ organization, documentExempt, destinations, origin, catalog, at })` — a PURE function of (items, axes, destinations, origin, catalog, asOf), which is what makes it safe under `convergeCascade`'s idempotent-apply contract",
       },
       {
         source: ["tax_exempt"],
         target: ["items", "price", "taxes"],
         transform:
-          "the same materializeDocumentTax call — the exemption axis zeroes what the jurisdiction axis resolves, so both move the same target and neither is sufficient alone",
+          "the same priceDocument call — the exemption axis zeroes what the jurisdiction axis resolves, so both move the same target and neither is sufficient alone",
       },
       {
         source: ["jurisdiction_claim"],
         target: ["totals"],
-        transform: "calculateOrderTotals after the reprice",
+        transform: "priceDocument's totals, a sum of the re-priced lines",
       },
       {
         source: ["tax_exempt"],
         target: ["totals"],
-        transform: "calculateOrderTotals after the reprice",
+        transform: "priceDocument's totals, a sum of the re-priced lines",
       },
     ],
   },

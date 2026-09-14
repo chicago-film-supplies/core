@@ -16,7 +16,6 @@ export {
   calculateItemPrice,
   calculateItemSubtotal,
   calculateItemTax,
-  calculateItemTotalCents,
   computeItemPaths,
   getItemSubtreeRange,
   getParentProductUid,
@@ -101,7 +100,7 @@ import {
   type ItemUniquenessIssue,
   type LineItem,
   type PriceObject,
-  sumDocumentTotals,
+  rederiveDocumentTotalsForAudit,
   type Tax,
   validateItemUniqueness,
   validatePathsAgainst,
@@ -160,21 +159,22 @@ export interface InvoiceItem extends LineItem {
 export type InvoiceTotals = InvoiceDocTotalsType;
 
 /**
- * Calculate aggregated pricing totals for an invoice.
+ * **The invoice AUDIT oracle**: totals RE-DERIVED from line inputs, plus the
+ * settlement projection. It is what api-cloudrun's #575 totals-drift sweep
+ * compares a stored invoice against.
  *
- * The six-field arithmetic core is {@link sumDocumentTotals}, shared with
- * `calculateOrderTotals` — it was ~35 byte-identical lines in each, and
- * "assembled independently so invoices can diverge later" was a licence for
- * silent drift, not an insurance policy. What genuinely differs is here: the
- * `flattenForXero` prefilter (inert on the arithmetic — see
- * `sumDocumentTotals`) and the settlement projection below, which is what a
- * credit note or a partial billing actually changes.
+ * It replaced `calculateInvoiceTotals` (api-cloudrun#997 step 2). A writer no
+ * longer totals an invoice this way: `priceDocument` prices it and sums stored
+ * line money, and the writer projects settlements with
+ * {@link recomputeSettlementTotals}. Pointing the sweep at that sum would check
+ * the implementation against itself (D2), which is why re-derivation survives
+ * only under this name.
  *
  * @param items - Full invoice items array (structural items are filtered out)
  * @param taxes - Tax definitions for tax calculation
  * @param settlements - Every settlement against the invoice, reversals included
  */
-export function calculateInvoiceTotals(
+export function rederiveInvoiceTotalsForAudit(
   items: InvoiceItem[],
   taxes: Tax[],
   // 🔴 REQUIRED, and it was `settlements?:` until 2026-08-20 while this very
@@ -207,7 +207,7 @@ export function calculateInvoiceTotals(
     amount_cents: number;
   }[],
 ): InvoiceTotals {
-  const core = sumDocumentTotals(flattenForXero(items), taxes);
+  const core = rederiveDocumentTotalsForAudit(flattenForXero(items), taxes);
 
   // Settlement accounting — the projection of the journal onto this document.
   const { amount_paid_cents, amount_credited_cents, amount_void_cents, amount_due_cents } =
@@ -655,7 +655,7 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
     // contradiction — it is what makes the override an override. The invoice's
     // own value still wins (`carryForwardOverrides` re-applies it after the
     // replace); this only supplies the order's when the invoice has none,
-    // instead of leaving `undefined` for `calculateInvoiceTotals` to read as
+    // instead of leaving `undefined` for the invoice pricer to read as
     // "taxable" while the stored per-line taxes say otherwise.
     //
     // Comparator-safe by construction: `invoiceItemsMatch` filters
@@ -1852,7 +1852,7 @@ export function syncOrderItems(
  *   removed lines); a target path not on the invoice is a no-op.
  *
  * The caller re-linearizes paths via {@link computeInvoiceItemPaths} and
- * recomputes `totals` via {@link calculateInvoiceTotals} before writing.
+ * re-prices it with `priceDocument` before writing.
  */
 export function resyncInvoiceLines(
   currentInvoiceItems: InvoiceDocItemType[],

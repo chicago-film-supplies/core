@@ -1714,7 +1714,7 @@ export interface SettlementContract {
  * member — a table the schema reads, so a contradiction is reported by the
  * schema instead of restated in every consumer.
  *
- * `sums_into` is load-bearing rather than documentation: `calculateInvoiceTotals`
+ * `sums_into` is load-bearing rather than documentation: `recomputeSettlementTotals`
  * takes its settlement argument structurally, so without a declared target a
  * credit row would be silently summed into `amount_paid`. Reading the target
  * from the table removes that class entirely.

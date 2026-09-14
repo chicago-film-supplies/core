@@ -7,7 +7,7 @@
  * as `Record<namespace, TemplateHelperEntry[]>`, where each entry carries the
  * name, the call expression, the JSDoc summary, and (the point of the exercise)
  * the **return type**, so a template author can see that
- * `it.orders.getGroupTotals(...)` yields a `GroupTotalsResult` without reading
+ * `it.orders.calculateReplacementTotals(...)` yields a `ReplacementTotals` without reading
  * `@cfs/core` source.
  *
  * Every `./utils/*` entrypoint is walked, not just the injectable ones — it is
@@ -62,7 +62,7 @@ function summarize(doc: string | undefined): string {
   return firstParagraph.replace(/\s+/g, " ").trim();
 }
 
-/** `it.orders.getGroupTotals(items, index, taxes)` */
+/** `it.orders.calculateReplacementTotals(items, taxes)` */
 function callExpr(namespace: string, name: string, params: Param[]): string {
   const args = params.map((p, i) => p.name ?? `arg${i + 1}`).join(", ");
   return `it.${namespace}.${name}(${args})`;
@@ -168,7 +168,7 @@ export async function renderTemplateHelpers(
 export interface TemplateHelperEntry {
   /** Function name — matches the real \`@cfs/core/utils\` export. */
   name: string;
-  /** Expression as written in a template, e.g. \`it.orders.getGroupTotals(items, index, taxes)\`. */
+  /** Expression as written in a template, e.g. \`it.orders.calculateReplacementTotals(items, taxes)\`. */
   expr: string;
   /** One-line summary, from the function's JSDoc. */
   desc: string;

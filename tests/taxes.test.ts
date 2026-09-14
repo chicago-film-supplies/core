@@ -7,7 +7,6 @@ import {
   destinationsForItems,
   type DocumentTaxContext,
   findTaxAt,
-  materializeDocumentTax,
   resolveLineTax,
   type TaxDestination,
 } from "../src/utils/taxes.ts";
@@ -15,6 +14,7 @@ import type { LineItem, Tax } from "../src/utils/orders.ts";
 import { migrateLegacyTaxCatalog, type TaxCatalog } from "../src/utils/tax-classes.ts";
 import type { Tax as TaxDoc } from "../src/schemas/mod.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
+import { priceDocument } from "../src/utils/price-document.ts";
 
 const lineItemBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
 const priceBase = lineItemBase.price as Record<string, unknown>;
@@ -221,16 +221,29 @@ const ctx = (overrides: Partial<DocumentTaxContext> & { taxes?: Tax[] } = {}): D
   };
 };
 
+/**
+ * The tax rule as a writer now runs it: `priceDocument`, whose stage 1 is
+ * `assignLineTaxes` and whose stages 2–3 re-price and assemble each line
+ * (api-cloudrun#997 step 2 deleted `materializeDocumentTax`). The rule is
+ * document-kind agnostic, so these tests price as an order; the result is
+ * written back into `items` so the assertions below read the priced lines.
+ */
+function materialize(items: LineItem[], taxCtx: DocumentTaxContext) {
+  const priced = priceDocument(items, { document: { kind: "order" }, tax: taxCtx });
+  items.splice(0, items.length, ...priced.items);
+  return priced.warnings;
+}
+
 Deno.test("the rule: a Chicago rental resolves Chicago Rental Tax and prices it", () => {
   const items = [makeItem()];
-  materializeDocumentTax(items, ctx());
+  materialize(items, ctx());
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
   assertEquals(px(items[0]).total_cents, 11500);
 });
 
 Deno.test("the rule: a Frankfort destination taxes the SAME line at 8%", () => {
   const items = [makeItem()];
-  materializeDocumentTax(items, ctx({ destinations: [at("Frankfort")] }));
+  materialize(items, ctx({ destinations: [at("Frankfort")] }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax"]);
   assertEquals(px(items[0]).taxes[0].amount_cents, 800);
   assertEquals(px(items[0]).total_cents, 10800);
@@ -247,7 +260,7 @@ Deno.test("🔴 a MIXED document prices each destination's lines differently", (
     { ...makeItem(), uid: "l2", path: ["d2", "l2"] },
   ] as LineItem[];
 
-  materializeDocumentTax(items, ctx({
+  materialize(items, ctx({
     destinations: [
       at("Chicago", "IL", { uid: "d1", delivery_uid: "dest-chi" }),
       at("Frankfort", "IL", { uid: "d2", delivery_uid: "dest-frk" }),
@@ -269,7 +282,7 @@ Deno.test("🔴 …and a MIXED Illinois/out-of-state document taxes only the Ill
     { ...makeItem(), uid: "l2", path: ["d2", "l2"] },
   ] as LineItem[];
 
-  materializeDocumentTax(items, ctx({
+  materialize(items, ctx({
     destinations: [
       at("Chicago", "IL", { uid: "d1", delivery_uid: "dest-chi" }),
       at("Los Angeles", "CA", { uid: "d2", delivery_uid: "dest-ca" }),
@@ -283,7 +296,7 @@ Deno.test("🔴 …and a MIXED Illinois/out-of-state document taxes only the Ill
 
 Deno.test("the rule: an entirely out-of-state document is untaxed, via no_nexus", () => {
   const items = [makeItem()];
-  materializeDocumentTax(items, ctx({ destinations: [at("St. Louis", "MO")] }));
+  materialize(items, ctx({ destinations: [at("St. Louis", "MO")] }));
   assertEquals(px(items[0]).taxes, []);
   // …and it is a JURISDICTION, not an exemption: the line records what it
   // would have paid nowhere, so `taxes_base` is empty too.
@@ -292,7 +305,7 @@ Deno.test("the rule: an entirely out-of-state document is untaxed, via no_nexus"
 
 Deno.test("the rule: an unresolvable region keeps the tax (origin sourcing)", () => {
   const items = [makeItem()];
-  materializeDocumentTax(items, ctx({ destinations: [at("Somewhere", "Freedonia")] }));
+  materialize(items, ctx({ destinations: [at("Somewhere", "Freedonia")] }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
 });
 
@@ -300,7 +313,7 @@ Deno.test("the rule: an unresolvable region keeps the tax (origin sourcing)", ()
 
 Deno.test("exemption empties taxes and sets total to subtotal_discounted", () => {
   const items = [makeItem()];
-  materializeDocumentTax(items, ctx({ exempt: true }));
+  materialize(items, ctx({ exempt: true }));
   assertEquals(px(items[0]).taxes, []);
   assertEquals(px(items[0]).total_cents, 10000);
 });
@@ -311,7 +324,7 @@ Deno.test("🔴 an exempt line still records WHICH tax it was exempt from", () =
   // audited against Xero, and #2197 is the live cost of the alternative: 25
   // lines whose jurisdiction is now unrecoverable from the document.
   const items = [makeItem()];
-  materializeDocumentTax(items, ctx({ destinations: [at("Frankfort")], exempt: true }));
+  materialize(items, ctx({ destinations: [at("Frankfort")], exempt: true }));
   assertEquals(px(items[0]).taxes, []);
   assertEquals(px(items[0]).taxes_base?.map((t) => t.uid), ["frankfort-tax"]);
 });
@@ -319,7 +332,7 @@ Deno.test("🔴 an exempt line still records WHICH tax it was exempt from", () =
 Deno.test("exemption beats a jurisdiction, whichever level supplied it", () => {
   for (const destinations of [[at("Frankfort")], [at("Chicago", "IL", { jurisdiction: "rantoul" })]]) {
     const items = [makeItem()];
-    materializeDocumentTax(items, ctx({ destinations, exempt: true }));
+    materialize(items, ctx({ destinations, exempt: true }));
     assertEquals(px(items[0]).taxes, []);
   }
 });
@@ -332,7 +345,7 @@ Deno.test("🔴 a REPLACEMENT sources to the ORIGIN, not to its destination", ()
   // by the live Xero ledger: invoice 2348, a Frankfort customer, bills its
   // replacement at TAX001 Chicago Sales Tax.
   const items = [makeItem({ type: "replacement" }, { taxes: [] })];
-  materializeDocumentTax(items, ctx({ destinations: [at("Frankfort")] }));
+  materialize(items, ctx({ destinations: [at("Frankfort")] }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-sales-tax"]);
 });
 
@@ -342,14 +355,14 @@ Deno.test("…and no level reaches it — not the document's own entry, not the 
     { organizationClaim: "rantoul" as const },
   ]) {
     const items = [makeItem({ type: "replacement" }, { taxes: [] })];
-    materializeDocumentTax(items, ctx(overrides));
+    materialize(items, ctx(overrides));
     assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-sales-tax"]);
   }
 });
 
 Deno.test("…but a NON-replacement line on the same document DOES take the override", () => {
   const items = [makeItem({ type: "sale" }, { taxes: [] })];
-  materializeDocumentTax(items, ctx({ organizationClaim: "rantoul" }));
+  materialize(items, ctx({ organizationClaim: "rantoul" }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["rantoul-tax"]);
 });
 
@@ -360,7 +373,7 @@ Deno.test("🔴 …and EXEMPTION does not reach a replacement — CFS is the buy
     makeItem({ type: "replacement" }, { taxes: [] }),
     makeItem({ type: "rental" }, { taxes: [] }),
   ];
-  materializeDocumentTax(items, ctx({ destinations: [at("Frankfort")], exempt: true }));
+  materialize(items, ctx({ destinations: [at("Frankfort")], exempt: true }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-sales-tax"], "replacement: origin, not exempt");
   assert(px(items[0]).taxes[0].amount_cents > 0);
   assertEquals(px(items[1]).taxes, [], "a rental on the same exempt document stays untaxed");
@@ -375,7 +388,7 @@ Deno.test("🔴 an out-of-state REPLACEMENT is taxed, where the old rule exempte
   // disagree. Measured 2026-08-20 at 8 lines corpus-wide, none repriceable,
   // $0.00 either way — which is why it was decided here rather than deferred.
   const items = [makeItem({ type: "replacement" }, { taxes: [] })];
-  materializeDocumentTax(items, ctx({ destinations: [at("St. Louis", "MO")] }));
+  materialize(items, ctx({ destinations: [at("St. Louis", "MO")] }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-sales-tax"]);
 });
 
@@ -383,7 +396,7 @@ Deno.test("🔴 an out-of-state REPLACEMENT is taxed, where the old rule exempte
 
 Deno.test("taxed_as overrides the line's own type for tax, and only for tax", () => {
   const items = [makeItem({ type: "sale", taxed_as: "rental" }, { taxes: [] })];
-  materializeDocumentTax(items, ctx());
+  materialize(items, ctx());
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
   assertEquals(items[0].type, "sale");
 });
@@ -392,14 +405,14 @@ Deno.test('taxed_as: "none" is untaxed outright, with no branch of its own', () 
   // It needs none: no tax lists "none" in `item_types`, so the ordinary lookup
   // answers null. That is the same mechanism that keeps `service` untaxed.
   const items = [makeItem({ type: "rental", taxed_as: "none" })];
-  materializeDocumentTax(items, ctx());
+  materialize(items, ctx());
   assertEquals(px(items[0]).taxes, []);
 });
 
 Deno.test("a type no tax lists is untaxed — service and surcharge, by the rule", () => {
   for (const type of ["service", "surcharge"] as const) {
     const items = [makeItem({ type }, { taxes: [] })];
-    materializeDocumentTax(items, ctx());
+    materialize(items, ctx());
     assertEquals(px(items[0]).taxes, [], type);
   }
 });
@@ -418,7 +431,7 @@ Deno.test("🔴 the revenue COA does not change what a line is taxed", () => {
   for (const destinations of [[at("Chicago")], [at("Frankfort")], [at("Rantoul")]]) {
     const answers = ([4000, 4700, undefined] as const).map((coa_revenue) => {
       const items = [makeItem({ coa_revenue })];
-      materializeDocumentTax(items, ctx({ destinations }));
+      materialize(items, ctx({ destinations }));
       return px(items[0]).taxes.map((t) => t.uid);
     });
     assertEquals(answers[0].length, 1);
@@ -434,7 +447,7 @@ Deno.test("an ABSENT coa_revenue is not a special case any more", () => {
   // absent are simply not consulted.
   const noCoa = [makeItem()];
   assertEquals(noCoa[0].coa_revenue ?? null, null);
-  materializeDocumentTax(noCoa, ctx());
+  materialize(noCoa, ctx());
   assertEquals(px(noCoa[0]).taxes.length, 1);
 });
 
@@ -451,13 +464,13 @@ const bottleRef = [{ uid: "bottle-tax", name: "Water Bottle Tax", rate: 0.05, ty
 
 Deno.test("🔴 the levy applies only in its own jurisdiction", () => {
   const chicago = [makeItem({ type: "sale", quantity: 24 }, { taxes: bottleRef })];
-  materializeDocumentTax(chicago, ctx({ taxes: BOTTLED }));
+  materialize(chicago, ctx({ taxes: BOTTLED }));
   assertEquals(px(chicago[0]).taxes.map((t) => t.uid).sort(), ["bottle-tax", "chi-sales-tax"]);
   // 24 units × $0.05 — a flat tax reads the QUANTITY, never the subtotal.
   assertEquals(px(chicago[0]).taxes.find((t) => t.uid === "bottle-tax")?.amount_cents, 120);
 
   const frankfort = [makeItem({ type: "sale", quantity: 24 }, { taxes: bottleRef })];
-  materializeDocumentTax(frankfort, ctx({ taxes: BOTTLED, destinations: [at("Frankfort")] }));
+  materialize(frankfort, ctx({ taxes: BOTTLED, destinations: [at("Frankfort")] }));
   assertEquals(px(frankfort[0]).taxes.map((t) => t.uid), ["frankfort-tax"], "Chicago's levy must not follow the case out of Chicago");
 });
 
@@ -468,17 +481,17 @@ Deno.test("🔴 …and the class, not the ref, decides — a re-rated Frankfort 
   const catalog = catalogOf(BOTTLED);
   const bottled = catalog.classes.find((c) => c.name === "Sale – Bottled Water")!.uid;
   (items[0] as unknown as { uid_tax_class: string }).uid_tax_class = bottled;
-  materializeDocumentTax(items, { ...ctx(), catalog, destinations: [at("Frankfort")] });
+  materialize(items, { ...ctx(), catalog, destinations: [at("Frankfort")] });
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax"]);
-  materializeDocumentTax(items, { ...ctx(), catalog });
+  materialize(items, { ...ctx(), catalog });
   assertEquals(px(items[0]).taxes.map((t) => t.uid).sort(), ["bottle-tax", "chi-sales-tax"]);
 });
 
 Deno.test("🔴 taxes STACK on one line — a percent and a flat, priced independently, never compounded", () => {
-  // $100/unit × 24 = $2,400 — `materializeDocumentTax` REPRICES, so the
+  // $100/unit × 24 = $2,400 — pricing REPRICES, so the
   // subtotal is recomputed from the line rather than taken from the fixture.
   const items = [makeItem({ type: "sale", quantity: 24 }, { taxes: bottleRef })];
-  materializeDocumentTax(items, ctx({ taxes: BOTTLED }));
+  materialize(items, ctx({ taxes: BOTTLED }));
   assertEquals(pxFull(items[0]).subtotal_discounted_cents, 240_000);
   const sales = px(items[0]).taxes.find((t) => t.uid === "chi-sales-tax")!;
   const bottle = px(items[0]).taxes.find((t) => t.uid === "bottle-tax")!;
@@ -494,14 +507,14 @@ Deno.test("…and a ZERO-PRICED line still owes the flat tax", () => {
     subtotal_discounted_cents: 0,
     taxes: bottleRef,
   })];
-  materializeDocumentTax(items, ctx({ taxes: BOTTLED }));
+  materialize(items, ctx({ taxes: BOTTLED }));
   assertEquals(px(items[0]).taxes.find((t) => t.uid === "bottle-tax")?.amount_cents, 120);
   assertEquals(px(items[0]).total_cents, 120);
 });
 
 Deno.test("…and an exempt document drops it too — a tax is a tax", () => {
   const items = [makeItem({ type: "sale" }, { taxes: bottleRef })];
-  materializeDocumentTax(items, ctx({ taxes: BOTTLED, exempt: true }));
+  materialize(items, ctx({ taxes: BOTTLED, exempt: true }));
   assertEquals(px(items[0]).taxes, []);
   assertEquals(pxFull(items[0]).taxes_base, [
     { uid: "chi-sales-tax", name: "Chicago Sales Tax", rate: 10.5, type: "percent" },
@@ -514,7 +527,7 @@ Deno.test("a ref the line carries no longer decides anything outside its class",
   // levy, so it stays Rental: the ref is not a second way in. A ghost uid is
   // likewise just ignored.
   const items = [makeItem({}, { taxes: [...bottleRef, { uid: "ghost-tax", name: "Ghost", rate: 5, type: "percent", amount_cents: 500 }] })];
-  materializeDocumentTax(items, ctx({ taxes: BOTTLED }));
+  materialize(items, ctx({ taxes: BOTTLED }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
 });
 
@@ -587,7 +600,7 @@ Deno.test("destinationsForItems: NO destinations resolves null — and sources t
   const items = [makeItem({ uid: "l1", path: ["l1"] })];
   assertEquals(destinationsForItems(items, [])[0], null);
 
-  materializeDocumentTax(items, ctx({ destinations: [] }));
+  materialize(items, ctx({ destinations: [] }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
 });
 
@@ -609,18 +622,18 @@ Deno.test("destinationsForItems: the walk is DEPTH-agnostic — invoices nest on
 
 Deno.test("precedence: the document's entry beats the claim beats the derivation", () => {
   const items = [makeItem({ type: "sale" }, { taxes: [] })];
-  materializeDocumentTax(items, ctx({
+  materialize(items, ctx({
     destinations: [at("Chicago", "IL", { jurisdiction: "frankfort" })],
     organizationClaim: "rantoul",
   }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["frankfort-tax"]);
 
   const claimed = [makeItem({ type: "sale" }, { taxes: [] })];
-  materializeDocumentTax(claimed, ctx({ organizationClaim: "rantoul" }));
+  materialize(claimed, ctx({ organizationClaim: "rantoul" }));
   assertEquals(px(claimed[0]).taxes.map((t) => t.uid), ["rantoul-tax"]);
 
   const derived = [makeItem({ type: "sale" }, { taxes: [] })];
-  materializeDocumentTax(derived, ctx({ destinations: [at("Rantoul")] }));
+  materialize(derived, ctx({ destinations: [at("Rantoul")] }));
   assertEquals(px(derived[0]).taxes.map((t) => t.uid), ["rantoul-tax"]);
 });
 
@@ -686,7 +699,7 @@ Deno.test("🔴 a frozen document keeps the rate VERSION it already stores", () 
     },
   ];
   const items = [makeItem()];
-  materializeDocumentTax(items, ctx({
+  materialize(items, ctx({
     taxes: versioned,
     frozenVersions: new Map([["Chicago Rental Tax", "chi-rental-tax-old"]]),
   }));
@@ -699,7 +712,7 @@ Deno.test("…and a frozen NAME the document never carried resolves at asOf", ()
   // jurisdiction-correction case: the rule moves the line to a tax the frozen
   // map has no entry for.
   const items = [makeItem({ type: "sale" }, { taxes: [] })];
-  materializeDocumentTax(items, ctx({
+  materialize(items, ctx({
     frozenVersions: new Map([["Chicago Rental Tax", "chi-rental-tax"]]),
   }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-sales-tax"]);
@@ -719,23 +732,23 @@ Deno.test("assignLineTaxes rewrites the tax WITHOUT repricing the subtotal", () 
   assertEquals(px(items[0]).total_cents, 5400);
 });
 
-Deno.test("materializeDocumentTax REPRICES — the subtotal is recomputed from the line", () => {
+Deno.test("pricing REPRICES — the subtotal is recomputed from the line", () => {
   const items = [makeItem({}, { subtotal_discounted_cents: 5000, subtotal_cents: 5000 })];
-  materializeDocumentTax(items, ctx());
+  materialize(items, ctx());
   assertEquals(pxFull(items[0]).subtotal_discounted_cents, 10000);
   assertEquals(px(items[0]).total_cents, 11500);
 });
 
 Deno.test("materialize: preserves every price key it does not compute", () => {
   const items = [makeItem({}, { replacement_cents: 250000, base_percent: null, chargeable_days: 3 })];
-  materializeDocumentTax(items, ctx());
+  materialize(items, ctx());
   assertEquals(pxFull(items[0]).replacement_cents, 250000);
   assertEquals(pxFull(items[0]).chargeable_days, 3);
 });
 
 Deno.test("materialize: never writes an `undefined` price key (Firestore rejects one)", () => {
   const items = [makeItem()];
-  materializeDocumentTax(items, ctx());
+  materialize(items, ctx());
   for (const [key, value] of Object.entries(pxFull(items[0]))) {
     assertEquals(value === undefined, false, `price.${key} is undefined`);
   }
@@ -745,7 +758,7 @@ Deno.test("materialize: skips non-priceable items instead of throwing on them", 
   const divider = { ...makeItem(), uid: "g1", type: "group", path: ["g1"] } as LineItem;
   const before = JSON.stringify(divider);
   const items = [divider, makeItem()];
-  materializeDocumentTax(items, ctx());
+  materialize(items, ctx());
   assertEquals(JSON.stringify(items[0]), before);
 });
 
@@ -884,11 +897,11 @@ Deno.test("🔴 a healthy catalog reports NOTHING — the empty array is the sig
   // warning for a live cell, every document in the corpus reads as stale and
   // the surface stops being read.
   assertEquals(assignLineTaxes([makeItem()], ctx()), []);
-  assertEquals(materializeDocumentTax([makeItem()], ctx()), []);
+  assertEquals(materialize([makeItem()], ctx()), []);
 });
 
-Deno.test("materializeDocumentTax passes the warnings straight through", () => {
-  const warnings = materializeDocumentTax([makeItem()], ctx({ taxes: LAPSED }));
+Deno.test("priceDocument passes the tax warnings straight through", () => {
+  const warnings = materialize([makeItem()], ctx({ taxes: LAPSED }));
   assertEquals(warnings.length, 1);
   assertEquals(warnings[0].tax_uid, "chi-rental-tax");
 });

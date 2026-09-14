@@ -4,7 +4,7 @@
 export interface TemplateHelperEntry {
   /** Function name — matches the real `@cfs/core/utils` export. */
   name: string;
-  /** Expression as written in a template, e.g. `it.orders.getGroupTotals(items, index, taxes)`. */
+  /** Expression as written in a template, e.g. `it.orders.calculateReplacementTotals(items, taxes)`. */
   expr: string;
   /** One-line summary, from the function's JSDoc. */
   desc: string;
@@ -95,12 +95,10 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "invoices": [
     { name: "buildInvoiceDestinationDivider", expr: "it.invoices.buildInvoiceDestinationDivider(source, arg2)", desc: "Build an invoice destination divider from a source order's destination item. Single source of truth for the divider shape — reused by `projectOrderItemToInvoiceItem` (order→invoice projection), the CRMS invoice webhook (`createUpdateInvoiceFromCrms`), and the destination-divider backfill.", returns: "OrderDocDestinationItemType" },
-    { name: "calculateInvoiceTotals", expr: "it.invoices.calculateInvoiceTotals(items, taxes, settlements)", desc: "Calculate aggregated pricing totals for an invoice.", returns: "InvoiceTotals" },
     { name: "calculateItemDiscountCents", expr: "it.invoices.calculateItemDiscountCents(item)", desc: "Calculate the discount amount, in cents, for a single line item.", returns: "number" },
     { name: "calculateItemPrice", expr: "it.invoices.calculateItemPrice(item, taxes, arg3)", desc: "Calculate the complete price for a single line item. Runs the full pipeline: subtotal → discount → taxes → total.", returns: "typeLiteral" },
     { name: "calculateItemSubtotal", expr: "it.invoices.calculateItemSubtotal(item, arg2)", desc: "Calculate the pre-discount and post-discount subtotals for a single line item.", returns: "typeLiteral" },
     { name: "calculateItemTax", expr: "it.invoices.calculateItemTax(item, taxes, arg3)", desc: "Calculate tax amounts for a single line item from the Tax[] parameter. Returns a PriceModifier[] with computed amounts.", returns: "PriceModifier[]" },
-    { name: "calculateItemTotalCents", expr: "it.invoices.calculateItemTotalCents(item, taxes)", desc: "Calculate the total (subtotal_discounted + taxes) for a single line item.", returns: "number" },
     { name: "derivePaymentStatus", expr: "it.invoices.derivePaymentStatus(currentStatus, amountPaidCents, amountDueCents, arg4)", desc: "Derive invoice status from settlement amounts. Pure function — does not mutate the invoice.", returns: "InvoiceStatusType" },
     { name: "getDestinationsLegend", expr: "it.invoices.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
     { name: "getOrderScopedItems", expr: "it.invoices.getOrderScopedItems(items, orderDividerUid)", desc: "Get all invoice items scoped to a specific order divider. Returns the order divider itself plus all items whose path starts with the order divider's uid.", returns: "T[]" },
@@ -146,8 +144,6 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "calculateItemPrice", expr: "it.orders.calculateItemPrice(item, taxes, arg3)", desc: "Calculate the complete price for a single line item. Runs the full pipeline: subtotal → discount → taxes → total.", returns: "typeLiteral" },
     { name: "calculateItemSubtotal", expr: "it.orders.calculateItemSubtotal(item, arg2)", desc: "Calculate the pre-discount and post-discount subtotals for a single line item.", returns: "typeLiteral" },
     { name: "calculateItemTax", expr: "it.orders.calculateItemTax(item, taxes, arg3)", desc: "Calculate tax amounts for a single line item from the Tax[] parameter. Returns a PriceModifier[] with computed amounts.", returns: "PriceModifier[]" },
-    { name: "calculateItemTotalCents", expr: "it.orders.calculateItemTotalCents(item, taxes)", desc: "Calculate the total (subtotal_discounted + taxes) for a single line item.", returns: "number" },
-    { name: "calculateOrderTotals", expr: "it.orders.calculateOrderTotals(items, taxes)", desc: "Calculate aggregated pricing totals for an entire order. Owns the two-pass computation: pre-tax items first, then transaction fees.", returns: "OrderTotals" },
     { name: "calculateReplacementTotals", expr: "it.orders.calculateReplacementTotals(items, taxes)", desc: "Calculate the total replacement cost across all pre-tax items that carry a NON-ZERO replacement value on their price object.", returns: "ReplacementTotals" },
     { name: "consolidateItems", expr: "it.orders.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities. The seed a `bookings` document is built from.", returns: "ConsolidatedItem[]" },
     { name: "getDefaultChargeDays", expr: "it.orders.getDefaultChargeDays(dates, holidays)", desc: "Compute default chargeable days from order dates and holidays. Returns null if required dates are missing.", returns: "number | null" },
@@ -155,9 +151,6 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "getDestinationsLegend", expr: "it.orders.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
     { name: "getGroupItems", expr: "it.orders.getGroupItems(items, index)", desc: "Collect the child product items belonging to a collapsible section.", returns: "LineItem[]" },
     { name: "getGroupPath", expr: "it.orders.getGroupPath(items, index)", desc: "Walk backwards from `index` to determine which destination and group an item belongs to. Both are the DIVIDER's own `uid` (not its display name, and not the endpoint it ships to) — keying on uid lets display names be edited without losing collapse state, and stops two sections that happen to deliver to one address from sharing a collapse key.", returns: "GroupPath" },
-    { name: "getGroupTotals", expr: "it.orders.getGroupTotals(items, index, taxes)", desc: "Get count and pricing totals for a collapsed section.", returns: "GroupTotalsResult" },
-    { name: "getTaxTotals", expr: "it.orders.getTaxTotals(items, taxes)", desc: "Aggregate tax PriceModifiers by name across all pre-tax items.", returns: "PriceModifier[]" },
-    { name: "getTotalDiscountCents", expr: "it.orders.getTotalDiscountCents(items)", desc: "Calculate the total discount amount, in cents, across all pre-tax items.", returns: "number" },
     { name: "getTransactionFeeTotals", expr: "it.orders.getTransactionFeeTotals(items)", desc: "Aggregate priced fee lines into the document-level `transaction_fees` rollup.", returns: "PriceModifier[]" },
     { name: "groupByDestination", expr: "it.orders.groupByDestination(items, destinations, fallbackDeliveryUid, fallbackCollectionUid)", desc: "Slice the flat items array into destination sections, each carrying the endpoints its PAIR names.", returns: "DestinationGroup[]" },
     { name: "isPreTaxItem", expr: "it.orders.isPreTaxItem(item)", desc: "Determine whether a line item participates in subtotal/discount/tax calculations. Standalone predicate (not composed) because TS doesn't support negated predicates.", returns: "item is PreTaxLineItem" },

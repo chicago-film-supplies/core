@@ -277,8 +277,8 @@ export interface InvoiceDocItemPriceType {
    * nothing to restore from. `tax_profile` is deleted and the jurisdiction rule
    * is total — `assignLineTaxes` writes both fields on every document write —
    * so the field now carries the meaning it always described: the tax this line
-   * would attract were the customer not exempt. (`materializeDocumentTax` also
-   * has no early return any more; it reprices unconditionally.)
+   * would attract were the customer not exempt. (`priceDocument` has no early
+   * return either; it reprices unconditionally.)
    *
    * Optional, and it will stay optional: no invoice line written before
    * 2026-08 carries one.

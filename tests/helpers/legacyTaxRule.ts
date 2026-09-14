@@ -298,7 +298,7 @@ function atStoredVersion(tax: Tax, ctx: LegacyTaxContext): Tax {
  *
  * This is the half a `charge_total`-authoritative caller needs on its own: the
  * CRMS invoice webhook must call THIS and never
- * {@link materializeDocumentTax}, because a reprice would recompute its
+ * the reprice, because a reprice would recompute its
  * subtotals from `base_cents × quantity × days_factor` and under-bill by a
  * measured 28.6% on a real line (api-cloudrun#236).
  *
@@ -426,8 +426,8 @@ export function legacyAssignLineTaxes(items: LineItem[], ctx: LegacyTaxContext):
 /**
  * **The one tax materializer.** {@link assignLineTaxes} plus the reprice —
  * the pair every write path that owns its own line prices needs. Mutates
- * `items` in place; callers run `calculateOrderTotals` /
- * `calculateInvoiceTotals` afterwards.
+ * `items` in place; callers total the result with the audit oracle
+ * (`rederiveDocumentTotalsForAudit`).
  *
  * Three consumers, one implementation: api-cloudrun's order write paths, its
  * `createInvoice`/`updateInvoice`, and the manager's optimistic recompute. The

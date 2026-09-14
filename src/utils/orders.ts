@@ -1,29 +1,10 @@
 /**
  * Shared order utility functions for CFS applications.
  * Includes pricing calculations, item consolidation, and destination grouping.
- * All arithmetic uses currency.js for safe floating-point calculations.
  *
- * ```ts
- * import { calculateOrderTotals } from "@cfs/core/utils/orders";
- *
- * const items = [
- *   {
- *     type: "rental",
- *     quantity: 1,
- *     price: {
- *       base: 100,
- *       formula: "five_day_week",
- *       chargeable_days: 5,
- *       discount: null,
- *       taxes: [],
- *       subtotal: 100,
- *       subtotal_discounted: 100,
- *     },
- *   },
- * ];
- * const totals = calculateOrderTotals(items, []);
- * console.log(totals.total); // 100
- * ```
+ * Stored money is integer cents. A document is priced by `priceDocument`
+ * (`@cfs/core/utils/price-document`); this module holds the per-line pricers it
+ * composes, and the audit oracle {@link rederiveDocumentTotalsForAudit}.
  *
  * @module
  */
@@ -204,7 +185,7 @@ export interface PreTaxLineItem extends LineItem {
  * ordinary line whose `price.formula` is `percent_of_total`, not a second price
  * shape. It differs from a `PreTaxLineItem` only in that it is priced FROM the
  * document total rather than into it, which is why it has its own predicate and
- * its own pass in `calculateOrderTotals`.
+ * its own stage in `priceDocument`.
  */
 export interface TransactionFeeLineItem extends LineItem {
   type: FromTotalItemType;
@@ -668,7 +649,7 @@ export function isTransactionFeePricingItem(item: PricingItem): item is Transact
 //
 // Line subtotals are computed as exact rationals in BigInt and rounded to cents
 // exactly once, at the end. currency.js is still the right tool for *summing*
-// money (see `calculateOrderTotals`), but it is the wrong tool for applying a
+// money (see `sumPricedLines`), but it is the wrong tool for applying a
 // factor, because it quantizes every intermediate at its precision — including
 // intermediates that are not money.
 //
@@ -873,7 +854,7 @@ export function calculateTransactionFeeAmountCents(item: PricingItem, basisCents
  * The basis a document's `transaction_fee` lines are costed against:
  * `subtotal_discounted + Σ tax`, read off a document's `totals`.
  *
- * {@link sumDocumentTotals} costs its fees through this same function, so a
+ * The audit oracle costs its fees through this same function, so a
  * reader that needs ONE fee line's amount (a row cell, where a percent line's
  * stored `total_cents` is 0 by contract) gets the number the totals pass used
  * rather than a second derivation of it.
@@ -1126,31 +1107,6 @@ export function calculateItemPrice(
   };
 }
 
-/**
- * Calculate the total (subtotal_discounted + taxes) for a single line item.
- *
- * A `transaction_fee` reports its stored `price.total_cents`: it is priced from
- * the document, so the only correct value is the one the totals pass already
- * wrote. Recomputing it here would need a basis this function does not have.
- */
-export function calculateItemTotalCents(
-  item: LineItem,
-  taxes: Tax[],
-): number {
-  if (!isPriceableItem(item)) {
-    throw new Error(
-      "Item is not priceable: missing price object or is a destination/group",
-    );
-  }
-
-  if (isTransactionFeeItem(item)) {
-    return item.price.total_cents;
-  }
-
-  const { total_cents } = calculateItemPrice(item, taxes);
-  return total_cents;
-}
-
 // ── The one line-price author ────────────────────────────────────
 //
 // Assembling a stored line's `price` object used to be one copy per writer —
@@ -1229,9 +1185,9 @@ export function isFromTotalItemType(type: string): boolean {
  * drift about. The rate authority moves at cutover, not here.
  *
  * ## ⚠️ `subtotal_cents` is load-bearing for Xero, and this is where it differs
- * ## from {@link costTransactionFees}
+ * ## from the totals rollup
  *
- * {@link costTransactionFees} writes the SAME discounted amount into all three
+ * The totals rollup costs a fee into the SAME discounted amount in all three
  * of `subtotal_cents` / `subtotal_discounted_cents` / `total_cents`. That is
  * right for what it feeds — {@link getTransactionFeeTotals} reads only
  * `total_cents` — but it is the wrong thing to STORE, because `xeroLineMoney`
@@ -1244,9 +1200,8 @@ export function isFromTotalItemType(type: string): boolean {
  *
  * So this returns the pre-discount subtotal in `subtotal_cents`, exactly as
  * {@link calculateItemPrice} does for every other line type. The totals rollup
- * is unaffected either way: {@link sumDocumentTotals} costs fees through
- * {@link costTransactionFees}, which recomputes from `base_cents`/`quantity`
- * and never reads the stored subtotal.
+ * is unaffected either way: it reads a fee's `total_cents` (the discounted
+ * amount), never the stored subtotal.
  *
  * ⚠️ **The two now sit ~330 lines apart in one file, deliberately disagreeing
  * about what `subtotal_cents` means for a fee.** They used to be held apart by
@@ -1282,18 +1237,18 @@ export function priceTransactionFeeLine(item: PricingItem): LinePriceMoney {
       "Item is not a transaction fee: wrong type, or missing price/quantity",
     );
   }
-  // ── The percent arm stores NO money, and that is the contract ──────
+  // ── The percent arm returns NO money: the document supplies it ──────
   //
   // A `percent_of_total` fee's amount is a property of the DOCUMENT, not of
-  // the line: it is not knowable until every pre-tax line has been summed, and
-  // {@link costTransactionFees} is where it is computed, once, in the totals
-  // pass. So the stored line carries the RATE (`base_percent`) and nothing
-  // else, and every reader takes the amount from `totals.transaction_fees`.
+  // the line: it is not knowable until every pre-tax line has been summed. So
+  // this returns zeros as a placeholder, and `priceDocument` stage 4 overwrites
+  // them with the costed amount, which it STORES on the line (D6 of
+  // api-cloudrun#997). A fee line stored before D6 still carries the zeros.
   //
   // This used to throw, on the reasoning that storing a zero would be dropped
   // from the rollup and would push `UnitAmount: 0` to Xero. The first half was
   // never true — {@link getTransactionFeeTotals} runs on the COPIES
-  // `costTransactionFees` returns, never on the stored line, so a stored zero
+  // the totals pass produces, never on the stored line, so a stored zero
   // is invisible to it. The second half was true and is now the Xero seam's
   // job: it reads the rollup for a percent fee and the stored pre-discount
   // `subtotal_cents` for a flat one. Reading the rollup for BOTH would hand
@@ -1608,7 +1563,7 @@ function assertLineMoneyIdentities(money: LinePriceMoney, type: string): void {
 /**
  * Calculate the total discount amount, in cents, across all pre-tax items.
  */
-export function getTotalDiscountCents(items: LineItem[]): number {
+function getTotalDiscountCents(items: LineItem[]): number {
   if (!Array.isArray(items)) {
     throw new Error("items must be an array");
   }
@@ -1625,7 +1580,7 @@ export function getTotalDiscountCents(items: LineItem[]): number {
 /**
  * Aggregate tax PriceModifiers by name across all pre-tax items.
  */
-export function getTaxTotals(
+function getTaxTotals(
   items: LineItem[],
   taxes: Tax[],
 ): PriceModifier[] {
@@ -1665,7 +1620,7 @@ export function getTaxTotals(
  * Aggregate priced fee lines into the document-level `transaction_fees` rollup.
  *
  * Input is fee ITEMS carrying a costed `price` (as produced by the second pass
- * of `calculateOrderTotals` / `calculateInvoiceTotals`); output is a
+ * of the audit oracle, or `priceDocument`'s stored fee lines); output is a
  * `PriceModifier[]` — a rate-and-amount summary, which is a genuinely different
  * shape from a line and stays one. The fee's identity comes from the item
  * itself now that the price no longer carries a nested `{uid, name}`: a line
@@ -1718,7 +1673,7 @@ export function getTransactionFeeTotals(items: LineItem[]): PriceModifier[] {
  * two byte-identical loops, and the invoice copy was reading `price.rate` /
  * `price.type` off a shape invoice line items have never had.
  */
-export function costTransactionFees(items: LineItem[], basisCents: number): LineItem[] {
+function costTransactionFees(items: LineItem[], basisCents: number): LineItem[] {
   const costed: LineItem[] = [];
   for (const item of items) {
     if (!isTransactionFeeItem(item)) continue;
@@ -1774,22 +1729,17 @@ export type DocumentTotalsCore = Pick<
 >;
 
 /**
- * The two-pass totals fold shared by {@link calculateOrderTotals} and
- * `calculateInvoiceTotals`: pre-tax subtotals first, then transaction fees
- * costed against `subtotal_discounted`.
+ * The two-pass totals RE-DERIVATION behind the audit oracle: pre-tax subtotals
+ * re-priced from each line's inputs, then transaction fees costed against
+ * `subtotal_discounted` + tax. Private: since api-cloudrun#997 step 2 a writer
+ * never totals this way — `priceDocument` sums stored line money — and the only
+ * question left for re-derivation is the audit one.
  *
- * It was ~35 byte-identical lines in both, which is the drift shape this
- * package exists to remove — but the two wrappers are NOT collapsible past
- * this point, and the differences are load-bearing rather than incidental:
- *
- * - **`calculateOrderTotals` keeps its `Array.isArray` throw.** Leading this
- *   helper with the invoice path's `flattenForXero` would turn a clear
- *   `Error("items must be an array")` into a bare `TypeError` at the call site.
  * - **`replacement_total` stays outside**, because
  *   {@link calculateReplacementTotals} reads the **unfiltered** items and is
  *   order-only.
- * - **The invoice path pre-filters `flattenForXero(items)` and this one does
- *   not**, which is safe because that filter is arithmetically inert here: it
+ * - **The invoice oracle pre-filters `flattenForXero(items)` and the document
+ *   one does not**, which is safe because that filter is arithmetically inert here: it
  *   keeps `itemContract(type).kind === "line"`, every `kind: "divider"` member
  *   has `pricing: "none"` (pinned both directions at compile time by
  *   `_lineParity` in `schemas/common.ts`), and every predicate below gates on
@@ -1801,7 +1751,7 @@ export type DocumentTotalsCore = Pick<
  * `totals`, and recomputing at render time is how a document comes to disagree
  * with the doc it renders.
  */
-export function sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTotalsCore {
+function rederiveTotalsFromInputs(items: LineItem[], taxes: Tax[]): DocumentTotalsCore {
   // Pass 1: compute subtotals from pre-tax items.
   //
   // Plain `+=` over integer cents. currency.js was here to make summing money
@@ -1879,30 +1829,12 @@ export function sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTota
  * line money. The hourly totals-drift check (api-cloudrun#575) must keep asking
  * the other question — "do the stored numbers still follow from the inputs?" —
  * because pointing it at the sum would check the implementation against itself
- * (D2 of api-cloudrun#997). This name is what that check should call, so that
- * when the pricing writers stop using {@link sumDocumentTotals} the oracle has an
- * owner that says what it is for.
+ * (D2 of api-cloudrun#997). Since step 2 of that campaign it is the ONLY way
+ * core re-derives totals; the writers' `calculateOrderTotals` /
+ * `calculateInvoiceTotals` are deleted.
  */
 export function rederiveDocumentTotalsForAudit(items: LineItem[], taxes: Tax[]): DocumentTotalsCore {
-  return sumDocumentTotals(items, taxes);
-}
-
-/**
- * Calculate aggregated pricing totals for an entire order.
- * Owns the two-pass computation: pre-tax items first, then transaction fees.
- */
-export function calculateOrderTotals(
-  items: LineItem[],
-  taxes: Tax[],
-): OrderTotals {
-  if (!Array.isArray(items)) {
-    throw new Error("items must be an array");
-  }
-
-  const core = sumDocumentTotals(items, taxes);
-  const replacement = calculateReplacementTotals(items, taxes);
-
-  return { ...core, replacement_total_cents: replacement.total_cents };
+  return rederiveTotalsFromInputs(items, taxes);
 }
 
 // ── Order inspection helpers ─────────────────────────────────────
@@ -3182,34 +3114,6 @@ export function getRemovalIndices(items: LineItem[], index: number): number[] {
   const result: number[] = [];
   for (let i = range.startIndex; i <= range.endIndex; i++) result.push(i);
   return result;
-}
-
-/** Count and pricing totals for a collapsed destination or group section. */
-export interface GroupTotalsResult {
-  count: number;
-  subtotal_cents: number;
-  subtotal_discounted_cents: number;
-  total_cents: number;
-}
-
-/**
- * Get count and pricing totals for a collapsed section.
- */
-export function getGroupTotals(
-  items: LineItem[],
-  index: number,
-  taxes: Tax[],
-): GroupTotalsResult {
-  const children = getGroupItems(items, index);
-  if (children.length === 0) {
-    return { count: 0, subtotal_cents: 0, subtotal_discounted_cents: 0, total_cents: 0 };
-  }
-
-  const { subtotal_cents, subtotal_discounted_cents, total_cents } = calculateOrderTotals(
-    children,
-    taxes,
-  );
-  return { count: children.length, subtotal_cents, subtotal_discounted_cents, total_cents };
 }
 
 /** An expanded packing list entry preserving group context. */

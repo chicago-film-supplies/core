@@ -17,7 +17,7 @@ import { type BookingDocument, bookings } from "jsr:@cfs/core/schemas/typesense"
 
 // Utils — one entrypoint per module.
 import { toChicagoStartOfDay, countCfsBusinessDays } from "jsr:@cfs/core/utils/dates";
-import { calculateOrderTotals, consolidateItems } from "jsr:@cfs/core/utils/orders";
+import { priceDocument } from "jsr:@cfs/core/utils/price-document";
 
 // Validate a Firestore document
 const contact: Contact = ContactSchema.parse(firestoreDoc);
@@ -28,8 +28,8 @@ const input = CreateOrderInput.parse(requestBody);
 // Access Typesense collection config
 console.log(bookings.schema.name); // "bookings"
 
-// Compute order pricing totals
-const totals = calculateOrderTotals(items, taxes);
+// Price an order: line money, fee amounts and totals
+const { items: priced, totals } = priceDocument(items, { document: { kind: "order" }, tax: taxContext });
 ```
 
 ## Setup

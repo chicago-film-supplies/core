@@ -292,15 +292,21 @@ const PRETAX_PRICER_SITES = new Map<string, { count: number; why: string }>([
     "src/utils/orders.ts",
     {
       // 1 — `computeLineMoney`, THE branch point (the whole reason for this arm).
-      // 5 — internal composition: `calculateItemDiscountCents`,
-      //     `calculateItemTax`, `calculateItemPrice` (×2 — subtotal and tax),
-      //     `calculateItemTotalCents`, all of which narrow through
-      //     `isPreTaxPricingItem` inside the callee before any arithmetic.
-      // 2 — the totals pass: `getTaxTotals` and `sumDocumentTotals`, each of
-      //     which `continue`s on `!isPreTaxItem(item)` on the line above.
-      count: 8,
+      // 4 — internal composition: `calculateItemDiscountCents`,
+      //     `calculateItemTax`, `calculateItemPrice` (×2 — subtotal and tax), all
+      //     of which narrow through `isPreTaxPricingItem` inside the callee.
+      // 2 — the AUDIT ORACLE's re-derivation (`getTaxTotals` and
+      //     `rederiveTotalsFromInputs`, both private to
+      //     `rederiveDocumentTotalsForAudit`), each `continue`ing on
+      //     `!isPreTaxItem(item)` on the line above.
+      //
+      // ⚠️ Since api-cloudrun#997 step 2 there is no WRITER totals path here at
+      // all: `calculateOrderTotals`, `sumDocumentTotals` and
+      // `calculateItemTotalCents` are deleted, and a document is priced by
+      // `priceDocument`, which reaches the pricers only through `computeLineMoney`.
+      count: 7,
       why: "the branch point itself, plus the pricers composing each other and " +
-        "the two totals loops that narrow with isPreTaxItem on their own line",
+        "the audit oracle's two re-derivation loops, narrowing with isPreTaxItem on their own line",
     },
   ],
   [
@@ -313,17 +319,6 @@ const PRETAX_PRICER_SITES = new Map<string, { count: number; why: string }>([
       // remainder is the invoice writer's, per destination.
       count: 1,
       why: "subtotalCents in accountLine, guarded by isPreTaxItem on the line above",
-    },
-  ],
-  [
-    "src/utils/taxes.ts",
-    {
-      // `materializeDocumentTax`'s spread-based rewrite — `continue`s on
-      // `!isPreTaxItem(item)` immediately above. It legitimately does NOT go
-      // through `computeLineMoney`: it re-prices lines it has just re-taxed,
-      // and a fee is not one of them by construction.
-      count: 1,
-      why: "materializeDocumentTax, guarded by isPreTaxItem on the line above",
     },
   ],
 ]);

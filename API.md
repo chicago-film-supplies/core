@@ -8332,7 +8332,7 @@ The per-type settlement contract, one entry per {@link SETTLEMENT_TYPES}
 member — a table the schema reads, so a contradiction is reported by the
 schema instead of restated in every consumer.
 
-`sums_into` is load-bearing rather than documentation: `calculateInvoiceTotals`
+`sums_into` is load-bearing rather than documentation: `recomputeSettlementTotals`
 takes its settlement argument structurally, so without a declared target a
 credit row would be silently summed into `amount_paid`. Reading the target
 from the table removes that class entirely.
@@ -13741,7 +13741,7 @@ The per-type settlement contract, one entry per {@link SETTLEMENT_TYPES}
 member — a table the schema reads, so a contradiction is reported by the
 schema instead of restated in every consumer.
 
-`sums_into` is load-bearing rather than documentation: `calculateInvoiceTotals`
+`sums_into` is load-bearing rather than documentation: `recomputeSettlementTotals`
 takes its settlement argument structurally, so without a declared target a
 credit row would be silently summed into `amount_paid`. Reading the target
 from the table removes that class entirely.
@@ -18621,7 +18621,7 @@ one whose seam is its documented failure source.
 for, the Xero push targets a different endpoint, and `Discount.amount` is
 `.min(0)` with sign-naive item math — so Odoo's positive-amount-with-a-type
 trick would mean threading a direction sign through `calculateItemSubtotal`
-and `getTaxTotals`. Against ~4 notes a year, a union would make all 962
+and the totals sum. Against ~4 notes a year, a union would make all 962
 invoices carry credit-note columns.
 
 **`credit-notes`, not `credits`.** Both fit the kebab-case-plural convention,
@@ -25187,7 +25187,7 @@ whose days did not move correctly reports no extension.
 
 Every cent figure here is `subtotal_discounted_cents`: the invoice writer that
 bills a remainder materializes tax on the line it builds, per destination, and
-pricing tax here would restate `materializeDocumentTax`. Each amount is a
+pricing tax here would restate `priceDocument`'s tax stage. Each amount is a
 difference of two independently-rounded pricer results, so nothing rounds
 twice (`cfs-money`).
 
@@ -25843,7 +25843,7 @@ Carries the same `PriceObject` every other line carries — a fee is an
 ordinary line whose `price.formula` is `percent_of_total`, not a second price
 shape. It differs from a `PreTaxLineItem` only in that it is priced FROM the
 document total rather than into it, which is why it has its own predicate and
-its own pass in `calculateOrderTotals`.
+its own stage in `priceDocument`.
 
 ```ts
 interface TransactionFeeLineItem {
@@ -25984,24 +25984,6 @@ divider uid to its path.
 
 **Returns** — Items projected to invoice shape with path prepended by orderDividerUid
 
-### `calculateInvoiceTotals(items: InvoiceItem[], taxes: Tax[], settlements: readonly typeLiteral[]): InvoiceTotals`
-
-Calculate aggregated pricing totals for an invoice.
-
-The six-field arithmetic core is {@link sumDocumentTotals}, shared with
-`calculateOrderTotals` — it was ~35 byte-identical lines in each, and
-"assembled independently so invoices can diverge later" was a licence for
-silent drift, not an insurance policy. What genuinely differs is here: the
-`flattenForXero` prefilter (inert on the arithmetic — see
-`sumDocumentTotals`) and the settlement projection below, which is what a
-credit note or a partial billing actually changes.
-
-**Parameters**
-
-- `items` — Full invoice items array (structural items are filtered out)
-- `taxes` — Tax definitions for tax calculation
-- `settlements` — Every settlement against the invoice, reversals included
-
 ### `calculateItemDiscountCents(item: LineItem): number`
 
 Calculate the discount amount, in cents, for a single line item.
@@ -26033,14 +26015,6 @@ from `(taxed_as ?? type, jurisdiction)`. A revenue-account gate stood here
 until the owner ruling of 2026-08-20 — *"an item's tax is item type ×
 jurisdiction, it has nothing to do with coa"* — and removing it is what makes
 the two functions answer one question instead of two.
-
-### `calculateItemTotalCents(item: LineItem, taxes: Tax[]): number`
-
-Calculate the total (subtotal_discounted + taxes) for a single line item.
-
-A `transaction_fee` reports its stored `price.total_cents`: it is priced from
-the document, so the only correct value is the one the totals pass already
-wrote. Recomputing it here would need a basis this function does not have.
 
 ### `canonicalizePayload(value: unknown): unknown`
 
@@ -26718,6 +26692,25 @@ about it, instead of a quiet mis-route at every site that reads the result.
 
 **Returns** — The four projected totals plus a per-reason breakdown, in cents
 
+### `rederiveInvoiceTotalsForAudit(items: InvoiceItem[], taxes: Tax[], settlements: readonly typeLiteral[]): InvoiceTotals`
+
+**The invoice AUDIT oracle**: totals RE-DERIVED from line inputs, plus the
+settlement projection. It is what api-cloudrun's #575 totals-drift sweep
+compares a stored invoice against.
+
+It replaced `calculateInvoiceTotals` (api-cloudrun#997 step 2). A writer no
+longer totals an invoice this way: `priceDocument` prices it and sums stored
+line money, and the writer projects settlements with
+{@link recomputeSettlementTotals}. Pointing the sweep at that sum would check
+the implementation against itself (D2), which is why re-derivation survives
+only under this name.
+
+**Parameters**
+
+- `items` — Full invoice items array (structural items are filtered out)
+- `taxes` — Tax definitions for tax calculation
+- `settlements` — Every settlement against the invoice, reversals included
+
 ### `removeOrderScopedDestinations(dests: InvoiceDestinationPair[], uidOrder: string): InvoiceDestinationPair[]`
 
 Remove all destination pairs scoped to a specific order.
@@ -26762,7 +26755,7 @@ them and the list has six.
   removed lines); a target path not on the invoice is a no-op.
 
 The caller re-linearizes paths via {@link computeInvoiceItemPaths} and
-recomputes `totals` via {@link calculateInvoiceTotals} before writing.
+re-prices it with `priceDocument` before writing.
 
 ### `syncOrderDestinationScope(prevOrder: typeLiteral, nextOrder: typeLiteral, currentScopedItems: InvoiceDocItemType[], currentInvoiceDests: InvoiceDestinationPair[], orderUid: string, flags: typeLiteral): OrderDestinationScopeSyncResult`
 
@@ -29371,29 +29364,10 @@ is the sole author of a stored `path`.
 
 Shared order utility functions for CFS applications.
 Includes pricing calculations, item consolidation, and destination grouping.
-All arithmetic uses currency.js for safe floating-point calculations.
 
-```ts
-import { calculateOrderTotals } from "@cfs/core/utils/orders";
-
-const items = [
-  {
-    type: "rental",
-    quantity: 1,
-    price: {
-      base: 100,
-      formula: "five_day_week",
-      chargeable_days: 5,
-      discount: null,
-      taxes: [],
-      subtotal: 100,
-      subtotal_discounted: 100,
-    },
-  },
-];
-const totals = calculateOrderTotals(items, []);
-console.log(totals.total); // 100
-```
+Stored money is integer cents. A document is priced by `priceDocument`
+(`@cfs/core/utils/price-document`); this module holds the per-line pricers it
+composes, and the audit oracle {@link rederiveDocumentTotalsForAudit}.
 
 ### `ConsolidatedItem`
 
@@ -29537,19 +29511,6 @@ type DocumentTotalsCore = Pick<OrderDocTotalsType, "discount_amount_cents" | "su
 
 ```ts
 type GroupPath = GroupPathType;
-```
-
-### `GroupTotalsResult`
-
-Count and pricing totals for a collapsed destination or group section.
-
-```ts
-interface GroupTotalsResult {
-  count: number;
-  subtotal_cents: number;
-  subtotal_discounted_cents: number;
-  total_cents: number;
-}
 ```
 
 ### `INVOICE_DECLARED_PRICE_KEYS`
@@ -29976,7 +29937,7 @@ Carries the same `PriceObject` every other line carries — a fee is an
 ordinary line whose `price.formula` is `percent_of_total`, not a second price
 shape. It differs from a `PreTaxLineItem` only in that it is priced FROM the
 document total rather than into it, which is why it has its own predicate and
-its own pass in `calculateOrderTotals`.
+its own stage in `priceDocument`.
 
 ```ts
 interface TransactionFeeLineItem {
@@ -30281,19 +30242,6 @@ until the owner ruling of 2026-08-20 — *"an item's tax is item type ×
 jurisdiction, it has nothing to do with coa"* — and removing it is what makes
 the two functions answer one question instead of two.
 
-### `calculateItemTotalCents(item: LineItem, taxes: Tax[]): number`
-
-Calculate the total (subtotal_discounted + taxes) for a single line item.
-
-A `transaction_fee` reports its stored `price.total_cents`: it is priced from
-the document, so the only correct value is the one the totals pass already
-wrote. Recomputing it here would need a basis this function does not have.
-
-### `calculateOrderTotals(items: LineItem[], taxes: Tax[]): OrderTotals`
-
-Calculate aggregated pricing totals for an entire order.
-Owns the two-pass computation: pre-tax items first, then transaction fees.
-
 ### `calculateReplacementTotals(items: LineItem[], taxes: Tax[]): ReplacementTotals`
 
 Calculate the total replacement cost across all pre-tax items that carry a
@@ -30468,15 +30416,6 @@ residual IS real money because Xero recomputes `LineAmount = UnitAmount ×
 Quantity` on the other side of a wire; that one stays, and the two must not be
 swept into each other.
 
-### `costTransactionFees(items: LineItem[], basisCents: number): LineItem[]`
-
-Cost every `transaction_fee` line against a document subtotal, returning
-copies with the computed amount written into `price`.
-
-Shared by the order and invoice totals so the two cannot drift — they were
-two byte-identical loops, and the invoice copy was reading `price.rate` /
-`price.type` off a shape invoice line items have never had.
-
 ### `declaredInvoicePrice(price: DeclaredPriceInput): InvoiceDeclaredPrice`
 
 Copy exactly {@link INVOICE_DECLARED_PRICE_KEYS} — see {@link declaredOrderPrice}.
@@ -30559,10 +30498,6 @@ field itself is deleted from the divider at the end of that campaign. This
 value is only ever a UI collapse key, so nothing durable was keyed on the
 old spelling.
 
-### `getGroupTotals(items: LineItem[], index: number, taxes: Tax[]): GroupTotalsResult`
-
-Get count and pricing totals for a collapsed section.
-
 ### `getItemSubtreeRange(items: T[], index: number): typeLiteral`
 
 Return the contiguous index range covering an item and every descendant of it,
@@ -30599,20 +30534,12 @@ own two-type test rather than reading `ITEM_CONTRACTS[type].kind`: switching
 to the contract would silently make `order` dividers structural here, for
 every invoice caller.
 
-### `getTaxTotals(items: LineItem[], taxes: Tax[]): PriceModifier[]`
-
-Aggregate tax PriceModifiers by name across all pre-tax items.
-
-### `getTotalDiscountCents(items: LineItem[]): number`
-
-Calculate the total discount amount, in cents, across all pre-tax items.
-
 ### `getTransactionFeeTotals(items: LineItem[]): PriceModifier[]`
 
 Aggregate priced fee lines into the document-level `transaction_fees` rollup.
 
 Input is fee ITEMS carrying a costed `price` (as produced by the second pass
-of `calculateOrderTotals` / `calculateInvoiceTotals`); output is a
+of the audit oracle, or `priceDocument`'s stored fee lines); output is a
 `PriceModifier[]` — a rate-and-amount summary, which is a genuinely different
 shape from a line and stays one. The fee's identity comes from the item
 itself now that the price no longer carries a nested `{uid, name}`: a line
@@ -30779,9 +30706,9 @@ of the fee amount and CFS computes nothing, so there is nothing for the two to
 drift about. The rate authority moves at cutover, not here.
 
 ## ⚠️ `subtotal_cents` is load-bearing for Xero, and this is where it differs
-## from {@link costTransactionFees}
+## from the totals rollup
 
-{@link costTransactionFees} writes the SAME discounted amount into all three
+The totals rollup costs a fee into the SAME discounted amount in all three
 of `subtotal_cents` / `subtotal_discounted_cents` / `total_cents`. That is
 right for what it feeds — {@link getTransactionFeeTotals} reads only
 `total_cents` — but it is the wrong thing to STORE, because `xeroLineMoney`
@@ -30794,9 +30721,8 @@ with no dev tenant.
 
 So this returns the pre-discount subtotal in `subtotal_cents`, exactly as
 {@link calculateItemPrice} does for every other line type. The totals rollup
-is unaffected either way: {@link sumDocumentTotals} costs fees through
-{@link costTransactionFees}, which recomputes from `base_cents`/`quantity`
-and never reads the stored subtotal.
+is unaffected either way: it reads a fee's `total_cents` (the discounted
+amount), never the stored subtotal.
 
 ⚠️ **The two now sit ~330 lines apart in one file, deliberately disagreeing
 about what `subtotal_cents` means for a fee.** They used to be held apart by
@@ -30833,38 +30759,9 @@ of the money stored on the lines.
 line money. The hourly totals-drift check (api-cloudrun#575) must keep asking
 the other question — "do the stored numbers still follow from the inputs?" —
 because pointing it at the sum would check the implementation against itself
-(D2 of api-cloudrun#997). This name is what that check should call, so that
-when the pricing writers stop using {@link sumDocumentTotals} the oracle has an
-owner that says what it is for.
-
-### `sumDocumentTotals(items: LineItem[], taxes: Tax[]): DocumentTotalsCore`
-
-The two-pass totals fold shared by {@link calculateOrderTotals} and
-`calculateInvoiceTotals`: pre-tax subtotals first, then transaction fees
-costed against `subtotal_discounted`.
-
-It was ~35 byte-identical lines in both, which is the drift shape this
-package exists to remove — but the two wrappers are NOT collapsible past
-this point, and the differences are load-bearing rather than incidental:
-
-- **`calculateOrderTotals` keeps its `Array.isArray` throw.** Leading this
-  helper with the invoice path's `flattenForXero` would turn a clear
-  `Error("items must be an array")` into a bare `TypeError` at the call site.
-- **`replacement_total` stays outside**, because
-  {@link calculateReplacementTotals} reads the **unfiltered** items and is
-  order-only.
-- **The invoice path pre-filters `flattenForXero(items)` and this one does
-  not**, which is safe because that filter is arithmetically inert here: it
-  keeps `itemContract(type).kind === "line"`, every `kind: "divider"` member
-  has `pricing: "none"` (pinned both directions at compile time by
-  `_lineParity` in `schemas/common.ts`), and every predicate below gates on
-  `pricing`. An unrecognised type is dropped by both. `filter` preserves
-  order, and the fold accumulates in integer cents, so no float
-  associativity hazard exists even if it did not.
-
-Not exported to templates — a rendered document reads its **stored**
-`totals`, and recomputing at render time is how a document comes to disagree
-with the doc it renders.
+(D2 of api-cloudrun#997). Since step 2 of that campaign it is the ONLY way
+core re-derives totals; the writers' `calculateOrderTotals` /
+`calculateInvoiceTotals` are deleted.
 
 ### `syncChargeDaysToItems(items: LineItem[], previousDefault: number | null, newDefault: number | null): void`
 
@@ -30876,7 +30773,7 @@ Skips structural items, items without a price, and manual overrides.
 The basis a document's `transaction_fee` lines are costed against:
 `subtotal_discounted + Σ tax`, read off a document's `totals`.
 
-{@link sumDocumentTotals} costs its fees through this same function, so a
+The audit oracle costs its fees through this same function, so a
 reader that needs ONE fee line's amount (a row cell, where a percent line's
 stored `total_cents` is 0 by contract) gets the number the totals pass used
 rather than a second derivation of it.
@@ -31090,6 +30987,26 @@ adds on top, and it can be negative when the order's window shrank.
 ### `priceDocument(items: readonly T[], ctx: PriceDocumentContext): PricedDocument<T>`
 
 Price a document: taxes, line money, fee amounts and totals, in one pass.
+
+### `sumPricedLines(items: readonly LineItem[]): DocumentTotalsCore`
+
+**Stage 5 on its own: a document's totals as the SUM of its stored line
+money.** Nothing is re-priced.
+
+`priceDocument` calls it after pricing. It is exported for the reader that
+must total a document without pricing it — the manager when no tax catalog is
+loaded, where the contract is "fold the stored lines, never re-price".
+
+- `subtotal_cents`, `subtotal_discounted_cents` and the discount are summed
+  over PRE-TAX lines only, as the totals always have been.
+- `taxes` aggregates each pre-tax line's stored taxes by NAME, in first-seen
+  order, dropping zero amounts.
+- `transaction_fees` aggregates fee lines' stored `total_cents`.
+- `total_cents` = `subtotal_discounted` + Σ tax + Σ fees.
+
+⚠️ A percent fee line stored before D6 carries `total_cents: 0`, so a document
+not yet re-priced by `priceDocument` folds with no fee. Re-pricing it stores
+the amount (api-cloudrun#997 step 7 re-prices the two live ones).
 
 ## `@cfs/core/utils/organizations`
 
@@ -32338,7 +32255,7 @@ manager#297):
 
 That second direction is the larger population and the one nobody had looked
 at. ⚠️ **Both directions are now moot as a CLIENT hazard**, and the reason is
-worth keeping: `materializeDocumentTax` no longer reads a client's
+worth keeping: `priceDocument` no longer reads a client's
 `price.taxes` refs at all — `assignLineTaxes` rebuilds the array from
 `(taxed_as ?? type, jurisdiction)`, so a client that seeds the wrong tax, or
 none, is corrected on save either way. This table survives as the DEFAULT a
@@ -32549,7 +32466,7 @@ computes no subtotal.
 
 This is the half a `charge_total`-authoritative caller needs on its own: a
 writer that supplies its own subtotals must call THIS and never
-{@link materializeDocumentTax}, because a reprice would recompute its
+`priceDocument`, because a reprice would recompute its
 subtotals from `base_cents × quantity × days_factor` and under-bill by a
 measured 28.6% on a real line (api-cloudrun#236).
 
@@ -32865,25 +32782,6 @@ reproduce the rule that ran — not a tidier one.
 ⚠️ Do not reintroduce it as a taxability test. The class it was really
 covering — a TAX billed as a line, the CRMS bottled-water levy at coa 2210 —
 is said on the axis the rule reads now: `taxed_as: "none"`.
-
-### `materializeDocumentTax(items: LineItem[], ctx: DocumentTaxContext): UnreviewedTaxWarning[]`
-
-**The one tax materializer.** {@link assignLineTaxes} plus the reprice —
-the pair every write path that owns its own line prices needs. Mutates
-`items` in place; callers run `calculateOrderTotals` /
-`calculateInvoiceTotals` afterwards (with {@link pricingTaxesOf} of the same
-catalog).
-
-Three consumers, one implementation: api-cloudrun's order write paths, its
-`createInvoice`/`updateInvoice`, and the manager's optimistic recompute. The
-manager consumer is why this lives in `core` — a client-side
-reimplementation would recreate, on the client, exactly the order/invoice
-divergence this function exists to close.
-
-**Pure** — `asOf` is injected rather than defaulted to now.
-
-**Returns** — 's unreviewed-rate warnings, passed straight
-through. A dropped return value makes the lapse invisible.
 
 ### `resolveJurisdiction(levels: JurisdictionLevels): ResolvedJurisdiction`
 

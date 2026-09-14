@@ -13,7 +13,7 @@
  * for, the Xero push targets a different endpoint, and `Discount.amount` is
  * `.min(0)` with sign-naive item math — so Odoo's positive-amount-with-a-type
  * trick would mean threading a direction sign through `calculateItemSubtotal`
- * and `getTaxTotals`. Against ~4 notes a year, a union would make all 962
+ * and the totals sum. Against ~4 notes a year, a union would make all 962
  * invoices carry credit-note columns.
  *
  * **`credit-notes`, not `credits`.** Both fit the kebab-case-plural convention,

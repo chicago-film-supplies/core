@@ -79,8 +79,8 @@ Deno.test("getSettlementMultiplier is DERIVED from the contract, never declared"
 });
 
 Deno.test("every settlement type routes to exactly one invoice total", () => {
-  // `sums_into` is load-bearing, not documentation: `calculateInvoiceTotals`
-  // takes its settlement argument structurally, so without a declared target a
+  // `sums_into` is load-bearing, not documentation: `recomputeSettlementTotals`
+  // (which every invoice total goes through) takes its settlement argument structurally, so without a declared target a
   // credit row would be silently summed into `amount_paid`.
   assertEquals(SETTLEMENT_CONTRACTS.payment.sums_into, "amount_paid_cents");
   assertEquals(SETTLEMENT_CONTRACTS.payment_reversal.sums_into, "amount_paid_cents");

@@ -31,14 +31,12 @@ import {
   computeItemTaxAmountCents,
   isTaxableCoa,
   TAXABLE_REVENUE_COAS,
-  calculateItemTotalCents,
   calculateTransactionFeeAmountCents,
   transactionFeeBasisCents,
   transactionFeeLineAmountCents,
-  calculateOrderTotals,
   calculateReplacementTotals,
+  rederiveDocumentTotalsForAudit,
   computeLineMoney,
-  costTransactionFees,
   buildPackingList,
   buildPackingListForLeg,
   buildQueryByDates,
@@ -51,14 +49,11 @@ import {
   validateComponentUniqueness,
   getGroupItems,
   getGroupPath,
-  getGroupTotals,
   getItemSubtreeRange,
   getParentProductUid,
   getRemovalIndices,
   getStructuralUids,
   getTransactionFeeTotals,
-  getTaxTotals,
-  getTotalDiscountCents,
   groupByDestination,
   assignDestinationPairUids,
   buildDestinationPairWithDivider,
@@ -118,6 +113,16 @@ function makeItem(
     },
   } as LineItem;
 }
+
+// The re-derivation these tests pin lives on only as the audit oracle
+// (api-cloudrun#997 step 2 deleted the writers' totals functions). These are
+// readable names for its fields, not a second implementation.
+const oracleTotals = (items: LineItem[], taxes: Tax[] = TAXES) => ({
+  ...rederiveDocumentTotalsForAudit(items, taxes),
+  replacement_total_cents: calculateReplacementTotals(items, taxes).total_cents,
+});
+const oracleDiscountCents = (items: LineItem[]) => rederiveDocumentTotalsForAudit(items, TAXES).discount_amount_cents;
+const oracleTaxTotals = (items: LineItem[], taxes: Tax[]) => rederiveDocumentTotalsForAudit(items, taxes).taxes;
 
 function makeFeeItem(
   overrides: Partial<LineItem> = {},
@@ -802,26 +807,6 @@ Deno.test("calculateItemPrice with no discount", () => {
   assertEquals(result.total_cents, 11025);
 });
 
-// ── calculateItemTotalCents ───────────────────────────────────────────
-
-Deno.test("calculateItemTotalCents no tax", () => {
-  assertEquals(calculateItemTotalCents(makeItem(), TAXES), 10000);
-});
-
-Deno.test("calculateItemTotalCents with tax", () => {
-  assertEquals(
-    calculateItemTotalCents(makeItem({}, { taxes: [{ uid: "chi-sales-tax" }] }), TAXES),
-    11025,
-  );
-});
-
-Deno.test("calculateItemTotalCents for transaction fee item reports the stored total", () => {
-  // A fee is priced from the DOCUMENT, so the only correct value here is the one
-  // the totals pass already wrote — there is no basis to recompute from.
-  const fee = makeFeeItem({}, { total_cents: 4250 });
-  assertEquals(calculateItemTotalCents(fee, TAXES), 4250);
-});
-
 // ── calculateItemDiscountCents ────────────────────────────────────────
 
 Deno.test("calculateItemDiscountCents returns 0 for no discount", () => {
@@ -859,7 +844,7 @@ Deno.test("getTotalDiscountCents sums all item discounts", () => {
     makeItem({}, { discount: { rate: 10, type: "percent", amount_cents: 0 } }),
     makeItem({}, { discount: { rate: 20, type: "percent", amount_cents: 0 } }),
   ];
-  assertEquals(getTotalDiscountCents(items), 3000);
+  assertEquals(oracleDiscountCents(items), 3000);
 });
 
 Deno.test("getTotalDiscountCents skips non-priceable items", () => {
@@ -867,7 +852,7 @@ Deno.test("getTotalDiscountCents skips non-priceable items", () => {
     makeItem({}, { discount: { rate: 10, type: "percent", amount_cents: 0 } }),
     { type: "destination" } as LineItem,
   ];
-  assertEquals(getTotalDiscountCents(items), 1000);
+  assertEquals(oracleDiscountCents(items), 1000);
 });
 
 Deno.test("getTotalDiscountCents skips transaction fee items", () => {
@@ -875,7 +860,7 @@ Deno.test("getTotalDiscountCents skips transaction fee items", () => {
     makeItem({}, { discount: { rate: 10, type: "percent", amount_cents: 0 } }),
     makeFeeItem(),
   ];
-  assertEquals(getTotalDiscountCents(items), 1000);
+  assertEquals(oracleDiscountCents(items), 1000);
 });
 
 // ── getTaxTotals ─────────────────────────────────────────────────
@@ -887,7 +872,7 @@ Deno.test("getTaxTotals groups by tax name", () => {
     makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] }),
     makeItem(),
   ];
-  const result = getTaxTotals(items, TAXES);
+  const result = oracleTaxTotals(items, TAXES);
   const salesTax = result.find((t) => t.name === "Chicago Sales Tax");
   const rentalTax = result.find((t) => t.name === "Chicago Rental Tax");
   assertEquals(salesTax?.amount_cents, 2050);
@@ -915,7 +900,7 @@ Deno.test("calculateOrderTotals computes all totals", () => {
     makeItem({}, { taxes: [{ uid: "chi-sales-tax" }], discount: { rate: 10, type: "percent", amount_cents: 0 } }),
     makeItem({}, { formula: "fixed", base_cents: 5000 }),
   ];
-  const result = calculateOrderTotals(items, TAXES);
+  const result = oracleTotals(items, TAXES);
   assertEquals(result.subtotal_cents, 15000); // 100 + 50
   assertEquals(result.subtotal_discounted_cents, 14000); // 90 + 50
   assertEquals(result.discount_amount_cents, 1000);
@@ -928,7 +913,7 @@ Deno.test("calculateOrderTotals two-pass with transaction fee — basis is the C
     makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] }),
     makeFeeItem({}, { base_percent: 3, formula: "percent_of_total" }),
   ];
-  const result = calculateOrderTotals(items, TAXES);
+  const result = oracleTotals(items, TAXES);
   // subtotal = 100, subtotal_discounted = 100
   // tax = 100 * 0.15 = 15
   // fee = (100 + 15) * 0.03 = 3.45 — a card processor charges on what it
@@ -946,11 +931,11 @@ Deno.test("calculateOrderTotals transaction fee is not itself taxed — no circu
   // pass. If a fee ever became taxable this assertion breaks, which is the
   // intended signal — the expression would then be genuinely circular and needs
   // a different shape rather than a bigger one.
-  const withFee = calculateOrderTotals([
+  const withFee = oracleTotals([
     makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] }),
     makeFeeItem({}, { base_percent: 3, formula: "percent_of_total" }),
   ], TAXES);
-  const withoutFee = calculateOrderTotals([
+  const withoutFee = oracleTotals([
     makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] }),
   ], TAXES);
 
@@ -972,7 +957,7 @@ Deno.test("calculateOrderTotals fee basis nets the DISCOUNT and includes the tax
     }),
     makeFeeItem({}, { base_percent: 3, formula: "percent_of_total" }),
   ];
-  const result = calculateOrderTotals(items, TAXES);
+  const result = oracleTotals(items, TAXES);
   // subtotal = 100, subtotal_discounted = 80
   // tax = 80 * 0.15 = 12
   // fee = (80 + 12) * 0.03 = 2.76
@@ -991,7 +976,7 @@ Deno.test("transactionFeeLineAmountCents gives each fee ROW its own amount from 
   const feeA = makeFeeItem({}, { base_percent: 3, formula: "percent_of_total" });
   const feeB = makeFeeItem({}, { base_percent: 1, formula: "percent_of_total" });
   const flat = makeFeeItem({ quantity: 2 }, { base_cents: 500, base_percent: null, formula: "fixed" });
-  const totals = calculateOrderTotals([makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] }), feeA, feeB, flat], TAXES);
+  const totals = oracleTotals([makeItem({}, { taxes: [{ uid: "chi-rental-tax" }] }), feeA, feeB, flat], TAXES);
   // basis = 100 + 15 = 115
   assertEquals(transactionFeeBasisCents(totals), 11500);
   assertEquals(transactionFeeLineAmountCents(feeA, totals), 345); // 3% of 115
@@ -1004,7 +989,7 @@ Deno.test("calculateOrderTotals flat transaction fee", () => {
     makeItem(),
     makeFeeItem({ quantity: 2 }, { base_cents: 500, base_percent: null, formula: "fixed" }),
   ];
-  const result = calculateOrderTotals(items, TAXES);
+  const result = oracleTotals(items, TAXES);
   // fee = 5 * 2 = 10
   assertEquals(result.transaction_fees[0].amount_cents, 1000);
   assertEquals(result.total_cents, 11000); // 100 + 0 + 10
@@ -1015,7 +1000,7 @@ Deno.test("calculateOrderTotals includes replacement_total", () => {
     makeItem({ quantity: 1 }, { replacement_cents: 50000, taxes: [{ uid: "chi-sales-tax" }] }),
     makeItem({ quantity: 2 }, { replacement_cents: 30000 }),
   ];
-  const result = calculateOrderTotals(items, TAXES);
+  const result = oracleTotals(items, TAXES);
   // replacement subtotal = 500 + 600 = 1100
   // replacement tax = 500 * 0.1025 = 51.25
   // replacement total = 1100 + 51.25 = 1151.25
@@ -1024,7 +1009,7 @@ Deno.test("calculateOrderTotals includes replacement_total", () => {
 
 Deno.test("calculateOrderTotals replacement_total is 0 when no replacement values", () => {
   const items = [makeItem(), makeItem()];
-  const result = calculateOrderTotals(items, TAXES);
+  const result = oracleTotals(items, TAXES);
   assertEquals(result.replacement_total_cents, 0);
 });
 
@@ -1403,33 +1388,6 @@ Deno.test("getGroupItems collects all direct children for product", () => {
   ];
   const result = getGroupItems(items, 0);
   assertEquals(result.length, 2);
-});
-
-// ── getGroupTotals ───────────────────────────────────────────────
-
-Deno.test("getGroupTotals returns count and pricing", () => {
-  const items: LineItem[] = [
-    { type: "group", uid: "g1", name: "G1", path: ["d1", "g1"] },
-    makeItem({ uid: "p1", path: ["d1", "g1", "p1"] }),
-    makeItem({ uid: "p2", path: ["d1", "g1", "p2"] }),
-  ];
-  const result = getGroupTotals(items, 0, TAXES);
-  assertEquals(result.count, 2);
-  assertEquals(result.subtotal_cents, 20000);
-  assertEquals(result.subtotal_discounted_cents, 20000);
-  assertEquals(result.total_cents, 20000);
-});
-
-Deno.test("getGroupTotals returns zeros for empty group", () => {
-  const items: LineItem[] = [
-    { type: "group", uid: "g1", name: "G1", path: ["d1", "g1"] },
-    { type: "group", uid: "g2", name: "G2", path: ["d1", "g2"] },
-  ];
-  const result = getGroupTotals(items, 0, TAXES);
-  assertEquals(result.count, 0);
-  assertEquals(result.subtotal_cents, 0);
-  assertEquals(result.subtotal_discounted_cents, 0);
-  assertEquals(result.total_cents, 0);
 });
 
 // ── buildPackingList ────────────────────────────────────────────
@@ -3803,7 +3761,10 @@ Deno.test("priceTransactionFeeLine — a percent fee's stored ZERO does not reac
     },
   };
   // 4% of $250.00 = $10.00.
-  const rollup = getTransactionFeeTotals(costTransactionFees([feeLine], 25_000));
+  // The oracle costs a percent fee against subtotal_discounted + tax; a $250.00
+  // rental line with no tax gives the same $250.00 basis.
+  const rental = makeItem({}, { base_cents: 25_000 });
+  const rollup = rederiveDocumentTotalsForAudit([rental, feeLine], TAXES).transaction_fees;
   assertEquals(rollup.length, 1);
   assertEquals(rollup[0].amount_cents, 1_000);
   assertEquals(rollup[0].rate, 4);
@@ -4127,7 +4088,7 @@ Deno.test("assembleLinePrice — it ASSERTS the money it is handed (Seam F)", ()
   assertEquals(ok.total_cents, 992);
 });
 
-Deno.test("priceTransactionFeeLine and costTransactionFees deliberately DISAGREE about subtotal_cents", () => {
+Deno.test("priceTransactionFeeLine and the totals rollup deliberately DISAGREE about a flat fee's subtotal", () => {
   // 🔴 They used to be held apart by living in different repos. They now sit
   // ~330 lines apart in one file, and this is what stops the next reader
   // "tidying" one into the other.
@@ -4162,14 +4123,13 @@ Deno.test("priceTransactionFeeLine and costTransactionFees deliberately DISAGREE
       total_cents: 9_000,
     },
   };
-  const costedPrice = costTransactionFees([feeLine], 0)[0]?.price;
-  if (!costedPrice) throw new Error("costTransactionFees dropped the fee line");
-  assertEquals(costedPrice.subtotal_cents, 9_000, "ROLLUP: discounted, in all three");
-  assertEquals(costedPrice.subtotal_discounted_cents, 9_000);
-  assertEquals(costedPrice.total_cents, 9_000);
+  // The rollup (the audit oracle's, and `sumPricedLines`' over the stored line)
+  // carries the DISCOUNTED amount as the fee's money.
+  const rolled = rederiveDocumentTotalsForAudit([feeLine], TAXES).transaction_fees;
+  assertEquals(rolled.map((f) => f.amount_cents), [9_000], "ROLLUP: discounted");
 
   // The disagreement, named. If this line ever passes, one of them was tidied.
-  assertEquals(stored.subtotal_cents === costedPrice.subtotal_cents, false);
+  assertEquals(stored.subtotal_cents === rolled[0].amount_cents, false);
 });
 
 Deno.test("THE MIGRATION INVARIANT — retyping sale -> transaction_fee does not move totals.total_cents", () => {
@@ -4230,8 +4190,8 @@ Deno.test("THE MIGRATION INVARIANT — retyping sale -> transaction_fee does not
     },
   ];
 
-  const before = calculateOrderTotals(items("sale"), [chicagoRental]);
-  const after = calculateOrderTotals(items("transaction_fee"), [chicagoRental]);
+  const before = oracleTotals(items("sale"), [chicagoRental]);
+  const after = oracleTotals(items("transaction_fee"), [chicagoRental]);
 
   // The whole point: the same money, differently modelled.
   assertEquals(after.total_cents, before.total_cents);

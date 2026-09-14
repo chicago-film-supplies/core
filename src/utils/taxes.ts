@@ -35,7 +35,6 @@ import {
   toUsStateCode,
 } from "../schemas/mod.ts";
 import {
-  calculateItemPrice,
   computeItemTaxAmountCents,
   isPreTaxItem,
   isTaxableCoa,
@@ -48,7 +47,6 @@ import {
   type ClassAppliedRate,
   type ClassTaxConsidered,
   deriveLineTaxClass,
-  pricingTaxesOf,
   resolveClassTaxes,
   type TaxCatalog,
 } from "./tax-classes.ts";
@@ -90,7 +88,7 @@ export { isTaxableCoa, TAXABLE_REVENUE_COAS };
  *
  * That second direction is the larger population and the one nobody had looked
  * at. ⚠️ **Both directions are now moot as a CLIENT hazard**, and the reason is
- * worth keeping: `materializeDocumentTax` no longer reads a client's
+ * worth keeping: `priceDocument` no longer reads a client's
  * `price.taxes` refs at all — `assignLineTaxes` rebuilds the array from
  * `(taxed_as ?? type, jurisdiction)`, so a client that seeds the wrong tax, or
  * none, is corrected on save either way. This table survives as the DEFAULT a
@@ -1080,7 +1078,7 @@ export function resolveLineTax(
  *
  * This is the half a `charge_total`-authoritative caller needs on its own: a
  * writer that supplies its own subtotals must call THIS and never
- * {@link materializeDocumentTax}, because a reprice would recompute its
+ * `priceDocument`, because a reprice would recompute its
  * subtotals from `base_cents × quantity × days_factor` and under-bill by a
  * measured 28.6% on a real line (api-cloudrun#236).
  *
@@ -1158,46 +1156,3 @@ export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): Unr
   return [...stale.values()];
 }
 
-/**
- * **The one tax materializer.** {@link assignLineTaxes} plus the reprice —
- * the pair every write path that owns its own line prices needs. Mutates
- * `items` in place; callers run `calculateOrderTotals` /
- * `calculateInvoiceTotals` afterwards (with {@link pricingTaxesOf} of the same
- * catalog).
- *
- * Three consumers, one implementation: api-cloudrun's order write paths, its
- * `createInvoice`/`updateInvoice`, and the manager's optimistic recompute. The
- * manager consumer is why this lives in `core` — a client-side
- * reimplementation would recreate, on the client, exactly the order/invoice
- * divergence this function exists to close.
- *
- * **Pure** — `asOf` is injected rather than defaulted to now.
- *
- * @returns {@link assignLineTaxes}'s unreviewed-rate warnings, passed straight
- * through. A dropped return value makes the lapse invisible.
- */
-export function materializeDocumentTax(
-  items: LineItem[],
-  ctx: DocumentTaxContext,
-): UnreviewedTaxWarning[] {
-  const stale = assignLineTaxes(items, ctx);
-  const pricing = pricingTaxesOf(ctx.catalog);
-
-  for (const item of items) {
-    if (!isPreTaxItem(item)) continue;
-    const computed = calculateItemPrice(item, pricing);
-    // A SPREAD, not a field-by-field rebuild, so preservation is not opt-in:
-    // an order price carries `replacement_cents`, a strict-schema key the
-    // invoice rejects, and it is not named here.
-    item.price = {
-      ...item.price,
-      subtotal_cents: computed.subtotal_cents,
-      subtotal_discounted_cents: computed.subtotal_discounted_cents,
-      discount: computed.discount,
-      taxes: computed.taxes,
-      total_cents: computed.total_cents,
-    };
-  }
-
-  return stale;
-}

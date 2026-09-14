@@ -2,9 +2,9 @@
  * # `priceDocument` — the one author of stored line money and document totals
  *
  * The priceDocument campaign (api-cloudrun#997) collapses every path that turns
- * price inputs into stored money — `materializeDocumentTax`'s reprice, the
- * totals functions, order→invoice copies, credit-note money — into this one
- * function. It lands BESIDE those paths first; nothing calls it yet.
+ * price inputs into stored money — the deleted `materializeDocumentTax` reprice
+ * and totals functions, order→invoice copies, credit-note money — into this one
+ * function.
  *
  * ## The five stages, in this order
  *
@@ -222,7 +222,7 @@ export function priceDocument<T extends LineItem>(
     const price = item.price;
     const money: LinePriceMoney = computeLineMoney(item, pricing, item.uid, extensionFor(item, ctx.extensions));
     // ⚠️ Stage 1 has ALREADY written `taxes_base` on every pre-tax line, so it is
-    // always present here, exactly as `materializeDocumentTax` leaves it today.
+    // always present here, as the deleted `materializeDocumentTax` also left it.
     // That widens the key set of a stored line that never carried it (measured
     // on 3 live prod invoices, api-cloudrun#997 step 3). A fee line's key is
     // untouched by stage 1, so presence there still reflects what was stored.
@@ -236,25 +236,10 @@ export function priceDocument<T extends LineItem>(
   }
 
   // ── Stage 4: percent fee lines store their costed amount ──
-  let subtotalCents = 0;
-  let subtotalDiscountedCents = 0;
-  const taxTotals = new Map<string, PriceModifier>();
-  for (const item of out) {
-    if (!isPreTaxItem(item)) continue;
-    subtotalCents += item.price.subtotal_cents;
-    subtotalDiscountedCents += item.price.subtotal_discounted_cents;
-    for (const tax of item.price.taxes) {
-      if (tax.amount_cents === 0) continue;
-      const entry = taxTotals.get(tax.name);
-      if (entry) entry.amount_cents += tax.amount_cents;
-      else taxTotals.set(tax.name, { uid: tax.uid, name: tax.name, rate: tax.rate, type: tax.type, amount_cents: tax.amount_cents });
-    }
-  }
-  const taxes = [...taxTotals.values()];
-  let taxSumCents = 0;
-  for (const tax of taxes) taxSumCents += tax.amount_cents;
-  const feeBasisCents = subtotalDiscountedCents + taxSumCents;
-
+  // The basis is stage 5's own sum over the pre-tax lines just priced; a fee
+  // line is not pre-tax, so its stale stored amount cannot feed its own basis.
+  const basis = sumPricedLines(out);
+  const feeBasisCents = basis.subtotal_discounted_cents + basis.taxes.reduce((sum, tax) => sum + tax.amount_cents, 0);
   for (const item of out) {
     if (!isTransactionFeeItem(item) || item.price.formula !== "percent_of_total") continue;
     if (item.quantity !== 1) {
@@ -274,23 +259,64 @@ export function priceDocument<T extends LineItem>(
   }
 
   // ── Stage 5: totals are a sum of what is stored ──
-  const transaction_fees = getTransactionFeeTotals(out);
-  let feeSumCents = 0;
-  for (const fee of transaction_fees) feeSumCents += fee.amount_cents;
-
   return {
     items: out,
-    totals: {
-      discount_amount_cents: subtotalCents - subtotalDiscountedCents,
-      subtotal_cents: subtotalCents,
-      subtotal_discounted_cents: subtotalDiscountedCents,
-      taxes,
-      transaction_fees,
-      total_cents: feeBasisCents + feeSumCents,
-    },
+    totals: sumPricedLines(out),
     replacement_total_cents: ctx.document.kind === "order"
       ? calculateReplacementTotals(out, pricing).total_cents
       : null,
     warnings,
+  };
+}
+
+/**
+ * **Stage 5 on its own: a document's totals as the SUM of its stored line
+ * money.** Nothing is re-priced.
+ *
+ * `priceDocument` calls it after pricing. It is exported for the reader that
+ * must total a document without pricing it — the manager when no tax catalog is
+ * loaded, where the contract is "fold the stored lines, never re-price".
+ *
+ * - `subtotal_cents`, `subtotal_discounted_cents` and the discount are summed
+ *   over PRE-TAX lines only, as the totals always have been.
+ * - `taxes` aggregates each pre-tax line's stored taxes by NAME, in first-seen
+ *   order, dropping zero amounts.
+ * - `transaction_fees` aggregates fee lines' stored `total_cents`.
+ * - `total_cents` = `subtotal_discounted` + Σ tax + Σ fees.
+ *
+ * ⚠️ A percent fee line stored before D6 carries `total_cents: 0`, so a document
+ * not yet re-priced by `priceDocument` folds with no fee. Re-pricing it stores
+ * the amount (api-cloudrun#997 step 7 re-prices the two live ones).
+ */
+export function sumPricedLines(items: readonly LineItem[]): DocumentTotalsCore {
+  let subtotalCents = 0;
+  let subtotalDiscountedCents = 0;
+  const taxTotals = new Map<string, PriceModifier>();
+  for (const item of items) {
+    if (!isPreTaxItem(item)) continue;
+    subtotalCents += item.price.subtotal_cents;
+    subtotalDiscountedCents += item.price.subtotal_discounted_cents;
+    for (const tax of item.price.taxes) {
+      if (tax.amount_cents === 0) continue;
+      const entry = taxTotals.get(tax.name);
+      if (entry) entry.amount_cents += tax.amount_cents;
+      else taxTotals.set(tax.name, { uid: tax.uid, name: tax.name, rate: tax.rate, type: tax.type, amount_cents: tax.amount_cents });
+    }
+  }
+  const taxes = [...taxTotals.values()];
+  let taxSumCents = 0;
+  for (const tax of taxes) taxSumCents += tax.amount_cents;
+
+  const transaction_fees = getTransactionFeeTotals([...items]);
+  let feeSumCents = 0;
+  for (const fee of transaction_fees) feeSumCents += fee.amount_cents;
+
+  return {
+    discount_amount_cents: subtotalCents - subtotalDiscountedCents,
+    subtotal_cents: subtotalCents,
+    subtotal_discounted_cents: subtotalDiscountedCents,
+    taxes,
+    transaction_fees,
+    total_cents: subtotalDiscountedCents + taxSumCents + feeSumCents,
   };
 }

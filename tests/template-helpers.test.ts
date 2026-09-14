@@ -202,7 +202,7 @@ function fnExports(mod: Record<string, unknown>): string[] {
 
 /**
  * Count the args written in an emitted expr, e.g.
- * `it.orders.getGroupTotals(items, index, taxes)` → 3.
+ * `it.orders.calculateReplacementTotals(items, taxes)` → 2.
  */
 function exprArgCount(expr: string): number {
   const open = expr.indexOf("(");
@@ -353,7 +353,6 @@ const RENDER_USEFUL_REEXPORTS = [
   "calculateItemPrice",
   "calculateItemSubtotal",
   "calculateItemTax",
-  "calculateItemTotalCents",
   "isPriceableItem",
   "isPreTaxItem",
   "isTransactionFeeItem",

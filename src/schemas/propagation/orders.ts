@@ -53,9 +53,9 @@ const ORG_SNAPSHOT_REFRESH: EnforcementRef = {
 
 const ORDER_TOTALS_MATH: EnforcementRef = {
   kind: "test",
-  ref: "core/tests/orders.test.ts::calculateOrderTotals",
+  ref: "core/tests/price-document.test.ts::priceDocument: totals equal the legacy reprice + the audit oracle on 20k documents",
   clause:
-    "the `totals` half — seven `calculateOrderTotals` cases including the two-pass transaction fee off `subtotal_discounted`, over a `calculateItemSubtotal` verified against exact rational arithmetic on 300k random lines",
+    "the `totals` half — `priceDocument` sums stored line money after costing percent fees off `subtotal_discounted` + tax, swept over 20k generated documents against the audit oracle's independent re-derivation, over a `calculateItemSubtotal` verified against exact rational arithmetic on 300k random lines",
   gates: true,
 };
 
@@ -337,7 +337,7 @@ const createOrderRules: CollectionRule[] = [
         source: ["items"],
         target: ["totals"],
         transform:
-          "calculateOrderTotals(items, taxes) → {subtotal, subtotal_discounted, discount_amount, taxes, transaction_fees, total}. Two-pass: computes pre-tax items first, then transaction fees from subtotal_discounted. transaction_fee items excluded from bookings/stock.",
+          "priceDocument(items, ctx).totals → {subtotal, subtotal_discounted, discount_amount, taxes, transaction_fees, total}, a sum of stored line money. Percent fee lines are costed from subtotal_discounted + tax and store their amount. transaction_fee items excluded from bookings/stock.",
       },
       {
         source: ["items"],
@@ -668,7 +668,7 @@ const updateOrderRules: CollectionRule[] = [
         source: ["items"],
         target: ["totals"],
         transform:
-          "calculateOrderTotals(items, taxes) → {subtotal, subtotal_discounted, discount_amount, taxes, transaction_fees, total}",
+          "priceDocument(items, ctx).totals → {subtotal, subtotal_discounted, discount_amount, taxes, transaction_fees, total}, a sum of stored line money",
       },
       {
         source: ["items"],

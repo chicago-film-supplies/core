@@ -2,17 +2,21 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
 import type { Tax as TaxDoc } from "../src/schemas/mod.ts";
 import {
-  calculateOrderTotals,
+  calculateItemPrice,
+  calculateReplacementTotals,
   calculateTransactionFeeAmountCents,
+  isPreTaxItem,
   type LineItem,
+  rederiveDocumentTotalsForAudit,
   type Tax,
 } from "../src/utils/orders.ts";
 import {
   extensionChargeDays,
   type PriceDocumentContext,
   priceDocument,
+  sumPricedLines,
 } from "../src/utils/price-document.ts";
-import { type DocumentTaxContext, materializeDocumentTax, type TaxDestination } from "../src/utils/taxes.ts";
+import { assignLineTaxes, type DocumentTaxContext, type TaxDestination } from "../src/utils/taxes.ts";
 import { migrateLegacyTaxCatalog, pricingTaxesOf, type TaxCatalog } from "../src/utils/tax-classes.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -222,6 +226,28 @@ function lcg(seed: number) {
   };
 }
 
+/**
+ * The pricing path `priceDocument` replaced, frozen here as a test oracle
+ * (api-cloudrun#997 step 2 deleted `materializeDocumentTax` and the totals
+ * functions): tax refs, then each pre-tax line re-priced by spread, then totals
+ * RE-DERIVED from line inputs by the audit oracle. It shares the line pricer
+ * with `priceDocument`, deliberately — what the sweep tests is the document
+ * layer (stage order, fee costing, totals as a sum), not the line arithmetic,
+ * which has its own exact-rational sweep in `orders.test.ts`.
+ */
+function legacyPrice(items: LineItem[], taxCtx: DocumentTaxContext) {
+  const out = structuredClone(items);
+  assignLineTaxes(out, taxCtx);
+  const pricing = pricingTaxesOf(taxCtx.catalog);
+  for (const item of out) {
+    if (!isPreTaxItem(item)) continue;
+    const computed = calculateItemPrice(item, pricing);
+    item.price = { ...item.price, ...computed };
+  }
+  const totals = rederiveDocumentTotalsForAudit(out, pricing);
+  return { items: out, totals, replacement_total_cents: calculateReplacementTotals(out, pricing).total_cents };
+}
+
 function generateDocument(rand: (n: number) => number): { items: LineItem[]; city: string; exempt: boolean } {
   const items: LineItem[] = [];
   const count = 1 + rand(8);
@@ -242,25 +268,24 @@ function generateDocument(rand: (n: number) => number): { items: LineItem[]; cit
   return { items, city: ["Chicago", "Frankfort", "Rantoul"][rand(3)], exempt: rand(6) === 0 };
 }
 
-Deno.test("priceDocument: totals equal today's materializeDocumentTax + calculateOrderTotals on 20k documents", () => {
+Deno.test("priceDocument: totals equal the legacy reprice + the audit oracle on 20k documents", () => {
   const rand = lcg(997);
-  const pricing = pricingTaxesOf(CAT);
   let docs = 0, withPercentFee = 0, withDiscount = 0, taxedDocs = 0;
   for (let n = 0; n < 20000; n++) {
     const { items, city, exempt } = generateDocument(rand);
-    const today = structuredClone(items);
-    materializeDocumentTax(today, taxCtx(city, exempt));
-    const expected = calculateOrderTotals(today, pricing);
+    const legacy = legacyPrice(items, taxCtx(city, exempt));
+    const expected = legacy.totals;
 
     const r = priceDocument(items, ctx({ tax: taxCtx(city, exempt) }));
-    const { replacement_total_cents, ...core } = expected;
-    assertEquals(r.totals, core, `document ${n}`);
-    assertEquals(r.replacement_total_cents, replacement_total_cents, `document ${n} replacement`);
+    assertEquals(r.totals, expected, `document ${n}`);
+    assertEquals(r.replacement_total_cents, legacy.replacement_total_cents, `document ${n} replacement`);
+    // Stage 5 alone over the priced lines is the same sum.
+    assertEquals(sumPricedLines(r.items), r.totals, `document ${n} sumPricedLines`);
 
-    // Pre-tax line money is byte-identical to today's reprice.
+    // Pre-tax line money is byte-identical to the legacy reprice.
     r.items.forEach((it, i) => {
       if (it.type === "transaction_fee") return;
-      assertEquals(it.price, today[i].price, `document ${n} line ${i}`);
+      assertEquals(it.price, legacy.items[i].price, `document ${n} line ${i}`);
     });
 
     docs++;
