@@ -11222,7 +11222,7 @@
         {
           "kind": "interface",
           "name": "DocumentDiffMap",
-          "declaration": "interface DocumentDiffMap {\n  lines: Map<string, DocumentDiffEntry[]>;\n  pairs: Map<string, DocumentDiffEntry[]>;\n  unaligned: Array<typeLiteral>;\n}",
+          "declaration": "interface DocumentDiffMap {\n  lines: Map<string, DocumentDiffEntry[]>;\n  pairs: Map<string, DocumentDiffEntry[]>;\n  unaligned: Array<typeLiteral>;\n  status: Array<typeLiteral>;\n}",
           "doc": "The answer for one viewed document.\n\nKeys are `path.join(\"/\")` in the VIEWED document's own path space, so a row\nlooks itself up by its own stored path: an invoice line's key carries its\norder-divider prefix, an order or fulfillment line's does not. A destination\npair is keyed by its destination divider's path key, in the same space."
         },
         {
@@ -11248,6 +11248,12 @@
           "name": "DocumentSourceDiffEntry",
           "declaration": "interface DocumentSourceDiffEntry {\n  kind: Exclude<DocumentDiffKind, \"uninvoiced\" | \"substituted\">;\n  source: DocumentRef;\n  fields: DocumentDiffField[];\n}",
           "doc": "One source's difference at one key of the viewed document."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "DocumentStatusIssue",
+          "declaration": "type DocumentStatusIssue = \"live_invoice_on_canceled_order\";",
+          "doc": "A lifecycle mismatch no per-line comparison can show."
         },
         {
           "kind": "interface",

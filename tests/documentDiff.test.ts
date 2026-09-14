@@ -377,6 +377,65 @@ Deno.test("documentDiff: a substitute whose replaced line the other side does NO
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), { [`${D}/${MONOPOD}`]: ["fulfillment#1001:missing_here"] });
 });
 
+/** `status` as `issue:kind#number` strings. */
+function statusSummary(map: DocumentDiffMap): string[] {
+  return map.status.map((s) => `${s.issue}:${s.source.kind}#${s.source.number}`);
+}
+
+const voided = (inv: Invoice): Invoice => ({ ...inv, status: "void" }) as Invoice;
+const canceled = (o: Order): Order => ({ ...o, status: "canceled" }) as Order;
+
+Deno.test("documentDiff: a void invoice covers nothing — the line only it billed is uninvoiced against the live invoice", () => {
+  const live = invoice("inv-live", [{ order: O, items: orderItems().filter((it) => it.uid !== TRIPOD) }], 2242);
+  const dead = voided(invoice("inv-void", [{ order: O, items: orderItems() }], 2241));
+  // The void invoice differs on money too; none of that may show.
+  patchLine(dead.items, `${O}/${D}/${G}/${LIGHT}`, (it) => { (it.price as Record<string, unknown>).total_cents = 1; });
+  const diff = computeDocumentDiffs({ orders: [order()], invoices: [live, dead] }, { kind: "order", uid: O }, CONTEXT);
+  assertEquals(summary(diff.lines), { [`${D}/${G}/${TRIPOD}`]: ["uninvoiced[#2242]"] });
+  assertEquals([diff.unaligned.length, diff.status.length], [0, 0]);
+});
+
+Deno.test("documentDiff: an order whose only invoice is void is treated as not yet invoiced — no line entries", () => {
+  const diff = computeDocumentDiffs(
+    { orders: [order()], invoices: [voided(invoice("inv-void", [{ order: O, items: orderItems().slice(0, 3) }]))] },
+    { kind: "order", uid: O },
+    CONTEXT,
+  );
+  assertEquals([diff.lines.size, diff.pairs.size, diff.unaligned.length, diff.status.length], [0, 0, 0, 0]);
+});
+
+Deno.test("documentDiff: viewing a void invoice compares nothing", () => {
+  const dead = voided(invoice("inv-void", [{ order: O, items: orderItems().slice(0, 3) }]));
+  const diff = computeDocumentDiffs({ orders: [order()], fulfillments: [fulfillment()], invoices: [dead] }, { kind: "invoice", uid: "inv-void" }, CONTEXT);
+  assertEquals([diff.lines.size, diff.pairs.size, diff.unaligned.length, diff.status.length], [0, 0, 0, 0]);
+});
+
+Deno.test("documentDiff: a live invoice on a canceled order is ONE status entry from every view, and no line entries", () => {
+  const inv = invoice("inv-1", [{ order: O, items: orderItems().slice(0, 3) }]);
+  patchLine(inv.items, `${O}/${D}/${G}/${LIGHT}`, (it) => { (it.price as Record<string, unknown>).total_cents = 1; });
+  const sources = { orders: [canceled(order())], fulfillments: [fulfillment()], invoices: [inv] };
+
+  const onOrder = computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT);
+  assertEquals(statusSummary(onOrder), ["live_invoice_on_canceled_order:invoice#2241"]);
+  assertEquals(summary(onOrder.lines), {});
+
+  const onFulfillment = computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT);
+  assertEquals(statusSummary(onFulfillment), ["live_invoice_on_canceled_order:invoice#2241"]);
+  assertEquals(summary(onFulfillment.lines), {});
+
+  const onInvoice = computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT);
+  assertEquals(statusSummary(onInvoice), ["live_invoice_on_canceled_order:order#1001"]);
+  assertEquals([onInvoice.lines.size, onInvoice.pairs.size, onInvoice.unaligned.length], [0, 0, 0]);
+});
+
+Deno.test("documentDiff: a canceled order with only a void invoice is consistent — nothing from any view", () => {
+  const sources = { orders: [canceled(order())], fulfillments: [fulfillment()], invoices: [voided(invoice("inv-void", [{ order: O, items: orderItems() }]))] };
+  for (const viewing of [{ kind: "order", uid: O }, { kind: "fulfillment", uid: O }] as const) {
+    const diff = computeDocumentDiffs(sources, viewing, CONTEXT);
+    assertEquals([diff.lines.size, diff.pairs.size, diff.unaligned.length, diff.status.length], [0, 0, 0, 0], viewing.kind);
+  }
+});
+
 Deno.test("documentDiff: a transaction fee is compared order ↔ invoice but never against a fulfillment", () => {
   const fee = { ...line("fee-1", [D, "fee-1"], 1, 500), type: "transaction_fee" } as unknown as LineItem;
   const items = [...orderItems(), fee];

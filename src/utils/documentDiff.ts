@@ -87,6 +87,20 @@
  * Only when the other side carries X. A Y whose X is on neither document is an
  * ordinary presence difference, and is reported as one.
  *
+ * ## Lifecycle: void invoices are not compared, and a canceled order is not billed
+ *
+ * - **A `void` invoice is dropped before anything is compared**: it bills
+ *   nothing, covers nothing, and produces no line, pair or unaligned entry —
+ *   the same rule `computeOrderInvoiceCoverage` follows. Viewing a void invoice
+ *   therefore yields an empty map; the caller says so rather than showing a
+ *   clean table.
+ * - **A canceled order is not compared against its invoices** — no line
+ *   differences, no `uninvoiced`. There is nothing left to bill, and every line
+ *   of a live invoice still matches the order's items, so a per-line comparison
+ *   would read as in sync. Instead each live invoice on it is ONE
+ *   `live_invoice_on_canceled_order` entry in `status`, from whichever side is
+ *   viewed. (A canceled order with only void invoices is consistent: nothing.)
+ *
  * Pure: no reads. A source the caller did not pass (no permission, not loaded)
  * yields no entries — never an "in sync" answer.
  */
@@ -199,7 +213,17 @@ export interface DocumentDiffMap {
    * a row per line. `scope` is the order divider uid.
    */
   unaligned: Array<{ scope: string; source: DocumentRef }>;
+  /**
+   * Lifecycle mismatches between the viewed document and a source — a live
+   * invoice on a canceled order. One entry per (document, source) pair, never a
+   * row per line: every line may still match. `source` is the invoice on the
+   * order and fulfillment views, and the order on the invoice view.
+   */
+  status: Array<{ issue: DocumentStatusIssue; source: DocumentRef }>;
 }
+
+/** A lifecycle mismatch no per-line comparison can show. */
+export type DocumentStatusIssue = "live_invoice_on_canceled_order";
 
 /** Documents the caller holds. Any may be absent or partial. */
 export interface DocumentDiffSources {
@@ -493,10 +517,12 @@ export function computeDocumentDiffs(
   viewing: { kind: DocumentKind; uid: string },
   context: DocumentDiffContext,
 ): DocumentDiffMap {
-  const out: DocumentDiffMap = { lines: new Map(), pairs: new Map(), unaligned: [] };
+  const out: DocumentDiffMap = { lines: new Map(), pairs: new Map(), unaligned: [], status: [] };
   const orders = sources.orders ?? [];
   const fulfillments = sources.fulfillments ?? [];
-  const invoices = sources.invoices ?? [];
+  // A void invoice bills nothing: dropped before any comparison (see the module doc).
+  const invoices = (sources.invoices ?? []).filter((i) => i.status !== "void");
+  const isCanceled = (order: Order | undefined) => order?.status === "canceled";
   const orderByUid = new Map(orders.map((o) => [o.uid, o]));
   const fulfillmentByUid = new Map(fulfillments.map((f) => [f.uid, f]));
 
@@ -527,6 +553,14 @@ export function computeDocumentDiffs(
 
   /** An order- or fulfillment-shaped viewed side against every invoice on its order. */
   const againstInvoices = (viewed: Side, orderUid: string) => {
+    if (isCanceled(orderByUid.get(orderUid))) {
+      for (const invoice of invoices) {
+        if (invoiceScopes(invoice).includes(orderUid)) {
+          out.status.push({ issue: "live_invoice_on_canceled_order", source: refOf("invoice", invoice) });
+        }
+      }
+      return;
+    }
     const coverage = coverageOf(orderUid);
     for (const invoice of invoices) {
       if (!invoiceScopes(invoice).includes(orderUid)) continue;
@@ -568,6 +602,10 @@ export function computeDocumentDiffs(
     const viewed: Side = { kind: "invoice", doc: invoice, lines: scopeInvoice(invoice, orderUid) };
     const order = orderByUid.get(orderUid);
     const fulfillment = fulfillmentByUid.get(orderUid);
+    if (order !== undefined && isCanceled(order)) {
+      out.status.push({ issue: "live_invoice_on_canceled_order", source: refOf("order", order) });
+      continue;
+    }
     if (!aligned(invoice, orderUid)) {
       if (order !== undefined) out.unaligned.push({ scope: orderUid, source: refOf("order", order) });
       if (fulfillment !== undefined) out.unaligned.push({ scope: orderUid, source: refOf("fulfillment", fulfillment) });

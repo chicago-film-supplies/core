@@ -24969,6 +24969,7 @@ interface DocumentDiffMap {
   lines: Map<string, DocumentDiffEntry[]>;
   pairs: Map<string, DocumentDiffEntry[]>;
   unaligned: Array<typeLiteral>;
+  status: Array<typeLiteral>;
 }
 ```
 
@@ -25015,6 +25016,14 @@ interface DocumentSourceDiffEntry {
   source: DocumentRef;
   fields: DocumentDiffField[];
 }
+```
+
+### `DocumentStatusIssue`
+
+A lifecycle mismatch no per-line comparison can show.
+
+```ts
+type DocumentStatusIssue = "live_invoice_on_canceled_order";
 ```
 
 ### `DocumentSubstitutionEntry`
