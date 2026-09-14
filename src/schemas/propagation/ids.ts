@@ -150,9 +150,9 @@ export type TransactionId =
 /**
  * Every `CollectionRule.id` in the catalog.
  *
- * A rule id is NOT always prefixed with the transaction that fires it — 19 rules
+ * A rule id is NOT always prefixed with the transaction that fires it — many rules
  * are standalone single-rule cascades with no transaction at all
- * (`update-tax:*`, `holiday-*`, `generate-*-pdf:*`), and several prefixes are
+ * (`update-tax-class:*`, `holiday-*`, `generate-*-pdf:*`), and several prefixes are
  * deliberately shorter than the transaction name (`create-org:*` under
  * `create-organization`). Read the prefix as a namespace, never as a join key.
  */
@@ -269,10 +269,6 @@ export type RuleId =
   | "update-fulfillment-items:items-self"
   | "reset-fulfillment:rebuild-from-order"
   // taxes.ts
-  | "update-tax:to-products"
-  | "update-tax:to-webshop-products"
-  | "supersede-tax:recompute-live-orders"
-  | "supersede-tax:recompute-live-invoices"
   | "create-tax-rate:recompute-live-orders"
   | "create-tax-rate:recompute-live-invoices"
   | "update-tax-class:name-to-products"

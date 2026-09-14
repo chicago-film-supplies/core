@@ -26,8 +26,8 @@ function tax(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     applied_to_fs: null,
     // Both required as of Wave 5b, and both stated here rather than left to an
     // override so every negative case below still fails for the reason it
-    // names. `null` and `[]` are the values both writers stamp
-    // (`api-cloudrun/src/services/taxes.ts`), not placeholders.
+    // names. `null` and `[]` are the values both legacy writers stamped
+    // (api-cloudrun's, deleted at the #993 cutover), not placeholders.
     effective_from: null,
     xero_components: [],
     version: 0,

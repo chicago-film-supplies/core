@@ -107,7 +107,7 @@ export interface Tax {
    *
    * Required and NULLABLE as of Wave 5b: `null` is the real answer ("no
    * statutory date recorded"), and it is what `createTax` and `supersedeTax`
-   * (`api-cloudrun/src/services/taxes.ts`) write when the caller omits one
+   * (api-cloudrun's legacy tax writers, deleted at the #993 cutover) wrote when the caller omits one
    * (`input.effective_from ?? null`). **11 of 11 taxes in prod and dev carry
    * the key** (measured 2026-08-23, `orderBy` key-presence). The three input
    * schemas keep their `?` — the writer is what supplies the value, and that
@@ -150,7 +150,7 @@ export interface Tax {
    * @see {@link XeroTaxComponentType} — must sum to {@link Tax.rate}.
    *
    * Required as of Wave 5b. `createTax` and `supersedeTax`
-   * (`api-cloudrun/src/services/taxes.ts`) both write `input.xero_components ??
+   * (api-cloudrun's legacy tax writers, deleted at the #993 cutover) both wrote `input.xero_components ??
    * []`, so the key is stamped on every write whether or not the caller sends
    * one, and **all 11 taxes in prod and dev carry it** (measured 2026-08-23 by
    * `orderBy` key-presence — every one as `[]`, which is what confirmed empty
