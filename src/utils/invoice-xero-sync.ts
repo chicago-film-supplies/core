@@ -41,7 +41,7 @@ import { isInvoiceLineItem } from "../schemas/mod.ts";
  * `name`, `quantity`, `coa_revenue`, `price.subtotal_cents`, `price.discount`,
  * and each tax's `uid` and `amount_cents`. Comparing `items` whole made every
  * key-only change a real Xero POST (api-cloudrun#993). api-cloudrun's
- * `tests/unit/xeroInvoiceEdit.test.ts` perturbs every leaf of a real line through
+ * `api-cloudrun/tests/unit/xeroInvoiceEdit.test.ts` perturbs every leaf of a real line through
  * the real assembler, so a field the body starts reading cannot be missing here
  * unnoticed.
  */
