@@ -22,6 +22,9 @@ export const products: TypesenseCollectionConfig = {
       { name: "eligible_in_store_pickup", type: "bool", sort: true, facet: true },
       { name: "eligible_shipping_ground", type: "bool", sort: true, facet: true },
       { name: "eligible_shipping_air", type: "bool", sort: true, facet: true },
+      // The class this product is taxed as — what a line built from the hit
+      // stamps, replacing the copied `price.taxes` refs (api-cloudrun#993).
+      { name: "uid_tax_class", type: "string", facet: true, optional: true },
       { name: "price", type: "object", optional: true },
       { name: "price.base_cents", type: "int64", optional: true, money: true },
       // A RATE, not an amount: the `percent_of_total` percentage at 4dp. Without
@@ -76,6 +79,7 @@ export const products: TypesenseCollectionConfig = {
       { name: "components.crms_accessory_id", type: "int64[]", optional: true },
       { name: "components.description", type: "string[]", optional: true },
       { name: "components.inclusion_type", type: "string[]", facet: true, optional: true },
+      { name: "components.uid_tax_class", type: "string[]", optional: true },
       { name: "components.zero_priced", type: "bool[]", facet: true, optional: true },
       { name: "components.price", type: "object[]", optional: true },
       { name: "components.price.base_cents", type: "int64[]", optional: true, money: true },
@@ -100,6 +104,7 @@ export const products: TypesenseCollectionConfig = {
       { name: "component_of.crms_accessory_id", type: "int64[]", optional: true },
       { name: "component_of.description", type: "string[]", optional: true },
       { name: "component_of.inclusion_type", type: "string[]", facet: true, optional: true },
+      { name: "component_of.uid_tax_class", type: "string[]", optional: true },
       { name: "component_of.zero_priced", type: "bool[]", facet: true, optional: true },
       { name: "component_of.price", type: "object[]", optional: true },
       { name: "component_of.price.base_cents", type: "int64[]", optional: true, money: true },

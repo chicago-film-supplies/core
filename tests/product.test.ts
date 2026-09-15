@@ -654,7 +654,12 @@ for (const path of ["alternates", "components", "component_of"] as const) {
   });
 }
 
-for (const leaf of ["taxes", "discountable"] as const) {
+Deno.test("ProductSchema accepts a price with no taxes (api-cloudrun#993)", () => {
+  const { taxes: _omit, ...price } = validProduct.price as Record<string, unknown>;
+  assertEquals(ProductSchema.safeParse({ ...validProduct, price }).success, true);
+});
+
+for (const leaf of ["discountable"] as const) {
   Deno.test(`ProductSchema requires price.${leaf} (core#95 batch 9)`, () => {
     const { [leaf]: _omit, ...price } = validProduct.price as Record<string, unknown>;
     const parsed = ProductSchema.safeParse({ ...validProduct, price });
@@ -697,27 +702,19 @@ Deno.test("CreateProductInput does NOT default the four array keys — the write
   }
 });
 
-// 🔴 **`price.taxes` is REQUIRED on both inputs, and this is the anti-erasure
-// gate.** `price` is a whole-object replacement, so a `.default([])` here does
-// not protect an omission — it converts one into a silent deletion of the
-// product's tax profile. That is the same defect the `coa_revenue` docblock one
-// line above records ("an update that omitted this erased the stored account"),
-// and this key was the half that repair missed.
-//
-// Asserted on BOTH inputs so they cannot drift back into disagreeing about who
-// authors the key, and by ISSUE PATH rather than by `success: false` — a parse
-// that failed for some other reason would otherwise pass this test.
+// ⭐ **`price.taxes` is OPTIONAL on both inputs and on storage — api-cloudrun#993.**
+// It used to be required as the anti-erasure gate for a whole-object `price`
+// replacement. The class catalog (`uid_tax_class`) now decides tax, so erasing
+// the key is the migration's intent: readers stopped, then the writer, then the
+// corpus purge, then the field goes. Asserted on BOTH inputs and on storage so
+// the three cannot disagree during the purge window.
 for (const [label, schema] of [
   ["CreateProductInput", CreateProductInput],
   ["UpdateProductInput", UpdateProductInput],
 ] as const) {
-  Deno.test(`${label} REFUSES a price that omits taxes — it is a whole-object replacement`, () => {
+  Deno.test(`${label} accepts a price that omits taxes (api-cloudrun#993)`, () => {
     const { taxes: _drop, ...price } = validCreateInput.price as Record<string, unknown>;
-    const parsed = schema.safeParse({ ...validCreateInput, price, version: 1 });
-    assertEquals(parsed.success, false);
-    if (!parsed.success) {
-      assertEquals(parsed.error.issues.map((i) => i.path.join(".")), ["price.taxes"]);
-    }
+    assertEquals(schema.safeParse({ ...validCreateInput, price, version: 1 }).success, true);
   });
 
   Deno.test(`${label} still accepts an explicitly EMPTY taxes array`, () => {

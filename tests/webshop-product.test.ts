@@ -117,13 +117,9 @@ for (const path of ["alternates", "components", "component_of"] as const) {
   });
 }
 
-Deno.test("WebshopProductSchema requires price.taxes (core#95 batch 9)", () => {
+Deno.test("WebshopProductSchema accepts a price with no taxes (api-cloudrun#993)", () => {
   const { taxes: _omit, ...price } = validWebshopProduct.price as Record<string, unknown>;
-  const parsed = WebshopProductSchema.safeParse({ ...validWebshopProduct, price });
-  assertEquals(parsed.success, false);
-  if (!parsed.success) {
-    assertEquals(parsed.error.issues.map((i) => i.path.join(".")), ["price.taxes"]);
-  }
+  assertEquals(WebshopProductSchema.safeParse({ ...validWebshopProduct, price }).success, true);
 });
 
 Deno.test("WebshopProductSchema requires webshop.available (core#95 batch 9)", () => {
@@ -139,7 +135,7 @@ Deno.test("WebshopProductSchema requires webshop.available (core#95 batch 9)", (
 // reached at two positions, so the requirement is asserted at both — a single
 // declaration can still be unreached through one of its embeddings.
 for (const arm of ["components", "component_of"] as const) {
-  Deno.test(`WebshopProductSchema requires ${arm}[].price.taxes (core#95 batch 9)`, () => {
+  Deno.test(`WebshopProductSchema accepts ${arm}[].price with no taxes (api-cloudrun#993)`, () => {
     const component = {
       uid: "testwpc000000000000a",
       path: [],
@@ -148,10 +144,6 @@ for (const arm of ["components", "component_of"] as const) {
       quantity: 1,
       price: { base_cents: 0, formula: "fixed", discountable: false },
     };
-    const parsed = WebshopProductSchema.safeParse({ ...validWebshopProduct, [arm]: [component] });
-    assertEquals(parsed.success, false);
-    if (!parsed.success) {
-      assertEquals(parsed.error.issues.map((i) => i.path.join(".")), [`${arm}.0.price.taxes`]);
-    }
+    assertEquals(WebshopProductSchema.safeParse({ ...validWebshopProduct, [arm]: [component] }).success, true);
   });
 }

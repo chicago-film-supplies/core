@@ -307,12 +307,6 @@ const createOrderRules: CollectionRule[] = [
         transform: "fallback — used only when input omits replacement",
       },
       {
-        source: ["price", "taxes"],
-        target: ["items", "price", "taxes"],
-        transform:
-          "fallback — denormalized TaxRef[] from product catalog, used when input omits taxes",
-      },
-      {
         source: ["name"],
         target: ["items", "name"],
         transform: "fallback — input name takes precedence",

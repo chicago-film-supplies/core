@@ -167,6 +167,9 @@ export function buildOrderLineFromProduct(
     // both as an explicit `null` — so the optimistic row matches the echo.
     inclusion_type: null,
     zero_priced: null,
+    // The class the product is taxed as, so the optimistic reprice resolves
+    // what the server will stamp. Absent on a hit indexed before the field.
+    ...(doc.uid_tax_class ? { uid_tax_class: doc.uid_tax_class } : {}),
     price: {
       base_cents: isPercent ? 0 : doc.price?.base_cents ?? 0,
       base_percent: isPercent ? (doc.price?.base_percent ?? null) : null,
@@ -404,6 +407,7 @@ export function buildOrderComponentLines(
         path: docPath,
         inclusion_type: comp.inclusion_type as OrderDocLineItemType["inclusion_type"],
         zero_priced: comp.zero_priced ?? null,
+        ...(comp.uid_tax_class ? { uid_tax_class: comp.uid_tax_class } : {}),
         price: {
           base_cents: comp.zero_priced ? 0 : (comp.price?.base_cents ?? 0),
           replacement_cents: comp.price?.replacement_cents ?? null,

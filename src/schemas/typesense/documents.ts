@@ -655,6 +655,8 @@ export interface ProductDocumentComponent {
   description?: string;
   inclusion_type?: string;
   zero_priced?: boolean;
+  /** @see `ProductComponent.uid_tax_class`. */
+  uid_tax_class?: string;
   price?: {
     base_cents?: number;
     replacement_cents?: number;
@@ -680,6 +682,8 @@ export interface ProductDocument {
   eligible_in_store_pickup?: boolean;
   eligible_shipping_ground?: boolean;
   eligible_shipping_air?: boolean;
+  /** @see `Product.uid_tax_class`. */
+  uid_tax_class?: string | null;
   price?: {
     base_cents?: number;
     /** The `percent_of_total` percentage at 4dp — a rate, not cents. */

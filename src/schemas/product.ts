@@ -69,6 +69,15 @@ export interface ProductComponent {
   inclusion_type?: InclusionTypeType;
   quantity: number;
   zero_priced?: boolean;
+  /**
+   * The component PRODUCT's `uid_tax_class`, mirrored — so a line built from this
+   * entry on the client (the manager's optimistic reprice) knows the class
+   * without a catalog read. DERIVED by the writer from the component product,
+   * never authored by the parent: a parent cannot re-class its component.
+   * Replaces `price.taxes` on the twin (api-cloudrun#993). Optional until the
+   * backfill stamps every twin.
+   */
+  uid_tax_class?: string;
   price: {
     base_cents: number;
     /**
@@ -85,7 +94,8 @@ export interface ProductComponent {
     base_percent?: number | null;
     replacement_cents?: number | null;
     coa_revenue?: COARevenueType;
-    taxes: TaxRefType[];
+    /** @deprecated api-cloudrun#993 — the class catalog decides tax; optional until the purge, then deleted. */
+    taxes?: TaxRefType[];
     formula: ComponentPriceFormulaType;
     discountable: boolean;
   };
@@ -218,7 +228,8 @@ export interface ProductPrice {
    * because the public catalogue has no business carrying a ledger account.
    */
   coa_revenue: COARevenueType;
-  taxes: TaxRefType[];
+  /** @deprecated api-cloudrun#993 — the class catalog decides tax; optional until the purge, then deleted. */
+  taxes?: TaxRefType[];
   formula: PriceFormulaType;
   discountable: boolean;
 }
@@ -417,6 +428,9 @@ const ComponentObject = z.strictObject({
   inclusion_type: InclusionTypeEnum.optional().meta({ label: "Inclusion" }),
   quantity: z.number().meta({ label: "Quantity" }),
   zero_priced: z.boolean().optional().meta({ label: "Zero Priced" }),
+  // `.optional()`, not `.nullable()`: the writer omits the key when the component
+  // product has no class, so absent is the one "unknown" state.
+  uid_tax_class: FirestoreId.optional(),
   price: z.strictObject({
     base_cents: z.int().meta({ label: "Base Price" }),
     // 🔴 **Declared here because a component price is a COPY of a product
@@ -450,7 +464,7 @@ const ComponentObject = z.strictObject({
     base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional().meta({ label: "Replacement" }),
     coa_revenue: COARevenueEnum.optional(),
-    taxes: z.array(TaxRef).meta({ label: "Tax" }),
+    taxes: z.array(TaxRef).optional().meta({ label: "Tax" }),
     formula: ComponentPriceFormulaEnum,
     discountable: z.boolean(),
   }).superRefine(checkPriceBaseUnit),
@@ -607,7 +621,7 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     base_percent: z.number().nullable().optional(),
     replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement Price" }),
     coa_revenue: COARevenueEnum,
-    taxes: z.array(TaxRef).meta({ label: "Tax" }),
+    taxes: z.array(TaxRef).optional().meta({ label: "Tax" }),
     formula: PriceFormulaEnum.meta({ column: true, label: "Price Formula" }),
     // `.meta({ initial })` rather than `.default(true)`, for the reason stated on
     // `active` above — and here the annotation is load-bearing rather than
@@ -764,7 +778,8 @@ export interface CreateProductInputType {
     replacement_cents?: number | null;
     /** Required — see {@link ProductPrice.coa_revenue}. */
     coa_revenue: COARevenueType;
-    taxes: TaxRefType[];
+    /** @deprecated api-cloudrun#993 — the class catalog decides tax; optional until the purge, then deleted. */
+    taxes?: TaxRefType[];
     formula: PriceFormulaType;
     discountable: boolean;
   };
@@ -829,7 +844,7 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     // Required — see the note on `UpdateProductInput.price.taxes` below. The
     // create half carries no default either, so the two inputs cannot disagree
     // about who authors this key.
-    taxes: z.array(TaxRef).meta({ label: "Tax" }),
+    taxes: z.array(TaxRef).optional().meta({ label: "Tax" }),
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
   }).superRefine(checkPriceBaseUnit),
@@ -928,7 +943,8 @@ export interface UpdateProductInputType {
      * {@link ProductPrice.coa_revenue}.
      */
     coa_revenue: COARevenueType;
-    taxes: TaxRefType[];
+    /** @deprecated api-cloudrun#993 — the class catalog decides tax; optional until the purge, then deleted. */
+    taxes?: TaxRefType[];
     formula: PriceFormulaType;
     discountable: boolean;
   };
@@ -991,7 +1007,7 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
     // 2026-09-11: 30 of 570 prod products hold an empty `price.taxes`, and while
     // `service` (15/15) and `surcharge` (11/11) are legitimately untaxed, three
     // RENTALS of 219 are each the only untaxed member of their own family.
-    taxes: z.array(TaxRef).meta({ label: "Tax" }),
+    taxes: z.array(TaxRef).optional().meta({ label: "Tax" }),
     formula: PriceFormulaEnum,
     discountable: z.boolean(),
   }).superRefine(checkPriceBaseUnit).optional(),

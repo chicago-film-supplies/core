@@ -310,6 +310,27 @@ Deno.test("a zero-priced component prices at 0 regardless of its catalog base", 
   assertEquals(buildOrderComponentLines(doc, OPTS)[0].price.base_cents, 0);
 });
 
+// ── uid_tax_class: the class travels with the hit (api-cloudrun#993) ──
+
+Deno.test("lines built from a hit carry the product's and each component's uid_tax_class", () => {
+  // The optimistic reprice resolves tax from the line's class; without the stamp
+  // it falls back to the type default, and a bottled-water component would show
+  // plain sales tax until the server echo.
+  const doc = product({
+    uid_tax_class: "classRental",
+    components: [
+      comp("water", ["A"], { type: "sale", uid_tax_class: "classWater" }),
+      comp("plain", ["A"]),
+    ],
+  });
+  assertEquals(buildOrderLineFromProduct(doc, OPTS).uid_tax_class, "classRental");
+  const byUid = new Map(buildOrderComponentLines(doc, OPTS).map((l) => [l.uid, l]));
+  assertEquals(byUid.get("water")!.uid_tax_class, "classWater");
+  // Absent on the row → absent on the line, never a guessed class.
+  assertEquals("uid_tax_class" in byUid.get("plain")!, false);
+  assertEquals("uid_tax_class" in buildOrderLineFromProduct(product(), OPTS), false);
+});
+
 // ── buildOrderComponentLines: fields the seed used to invent ────────
 
 Deno.test("component lines read stock_method off the component row, not a seed default", () => {

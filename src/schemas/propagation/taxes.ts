@@ -137,6 +137,32 @@ const classCatalogRules: CollectionRule[] = [
       ...RECOMPUTE_FIELDS.slice(0, 1),
     ],
   },
+  {
+    id: "update-product:tax-class-to-components",
+    source: "products",
+    target: "products",
+    mode: "fan-out",
+    invariant:
+      "A `components` / `component_of` entry mirrors its component product's `uid_tax_class`, so a line built from the entry on the client knows its class without a catalog read. Unconditional, unlike the price cascade: a parent cannot author its component's class, so there is no override to preserve. Replaces the `price.taxes` rows of `update-product:price-to-components` (api-cloudrun#993).",
+    trigger:
+      "a product write that moves `uid_tax_class` — post-commit fan-out over the TARGETS' reverse indexes (query_by_components / query_by_component_of); a parent write stamps its own entries from the component products",
+    fields: [
+      { source: ["uid_tax_class"], target: ["components", "uid_tax_class"] },
+      { source: ["uid_tax_class"], target: ["component_of", "uid_tax_class"] },
+    ],
+  },
+  {
+    id: "update-product:tax-class-to-webshop-components",
+    source: "products",
+    target: "webshop-products",
+    mode: "fan-out",
+    invariant: "The webshop mirror's component entries carry the same `uid_tax_class` as the product's",
+    trigger: "a product write that moves `uid_tax_class` — follows update-product:tax-class-to-components on products carrying a webshop mirror",
+    fields: [
+      { source: ["uid_tax_class"], target: ["components", "uid_tax_class"] },
+      { source: ["uid_tax_class"], target: ["component_of", "uid_tax_class"] },
+    ],
+  },
 ];
 
 const classCatalogTransactions: TransactionDefinition[] = [

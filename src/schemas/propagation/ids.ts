@@ -276,6 +276,8 @@ export type RuleId =
   | "update-tax-class:codes-recompute-live-orders"
   | "update-tax-class:codes-recompute-live-invoices"
   | "update-product:tax-class-to-live-orders"
+  | "update-product:tax-class-to-components"
+  | "update-product:tax-class-to-webshop-components"
   // reference-data.ts
   | "update-tag:name-to-products"
   | "delete-tag:remove-from-products"

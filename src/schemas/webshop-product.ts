@@ -32,10 +32,13 @@ export interface WebshopProductComponent {
   inclusion_type?: InclusionTypeType;
   quantity: number;
   zero_priced?: boolean;
+  /** @see `ProductComponent.uid_tax_class` — mirrored from the component product. */
+  uid_tax_class?: string;
   price: {
     base_cents: number;
     replacement_cents?: number | null;
-    taxes: TaxRefType[];
+    /** @deprecated api-cloudrun#993 — optional until the purge, then deleted. */
+    taxes?: TaxRefType[];
     formula: ComponentPriceFormulaType;
     discountable: boolean;
   };
@@ -116,7 +119,8 @@ export interface WebshopProduct {
   price: {
     base_cents: number;
     replacement_cents?: number | null;
-    taxes: TaxRefType[];
+    /** @deprecated api-cloudrun#993 — optional until the purge, then deleted. */
+    taxes?: TaxRefType[];
     formula: ComponentPriceFormulaType;
     discountable: boolean;
   };
@@ -152,6 +156,7 @@ const WebshopComponentSchema: z.ZodType<WebshopProductComponent> = z.strictObjec
   inclusion_type: InclusionTypeEnum.optional(),
   quantity: z.number(),
   zero_priced: z.boolean().optional(),
+  uid_tax_class: FirestoreId.optional(),
   /**
    * ⚠️ **Narrower than `Product.price` — `ComponentPriceFormulaType`, not
    * `PriceFormulaType`** (core#89). Two independent reasons, and the second is
@@ -173,7 +178,7 @@ const WebshopComponentSchema: z.ZodType<WebshopProductComponent> = z.strictObjec
   price: z.strictObject({
     base_cents: z.int(),
     replacement_cents: z.int().nullable().optional(),
-    taxes: z.array(TaxRef).meta({ label: "Tax" }),
+    taxes: z.array(TaxRef).optional().meta({ label: "Tax" }),
     formula: ComponentPriceFormulaEnum,
     discountable: z.boolean(),
   }),
@@ -214,7 +219,7 @@ export const WebshopProductSchema: z.ZodType<WebshopProduct> = z.strictObject({
   price: z.strictObject({
     base_cents: z.int(),
     replacement_cents: z.int().nullable().optional(),
-    taxes: z.array(TaxRef).meta({ label: "Tax" }),
+    taxes: z.array(TaxRef).optional().meta({ label: "Tax" }),
     formula: ComponentPriceFormulaEnum,
     discountable: z.boolean(),
   }),
