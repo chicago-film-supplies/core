@@ -93,6 +93,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "has", expr: "it.icons.has(name)", desc: "Whether `name` is a known icon (following aliases).", returns: "boolean" },
     { name: "svg", expr: "it.icons.svg(name, arg2)", desc: "Inline SVG markup for a lucide icon. Emit raw: `<%~ it.icons.svg(\"truck\") %>`.", returns: "string" },
   ],
+  "invoice-xero-sync": [
+
+  ],
   "invoices": [
     { name: "buildInvoiceDestinationDivider", expr: "it.invoices.buildInvoiceDestinationDivider(source, arg2)", desc: "Build an invoice destination divider from a source order's destination item. Single source of truth for the divider shape — reused by `projectOrderItemToInvoiceItem` (order→invoice projection), the CRMS invoice webhook (`createUpdateInvoiceFromCrms`), and the destination-divider backfill.", returns: "OrderDocDestinationItemType" },
     { name: "calculateItemDiscountCents", expr: "it.invoices.calculateItemDiscountCents(item)", desc: "Calculate the discount amount, in cents, for a single line item.", returns: "number" },

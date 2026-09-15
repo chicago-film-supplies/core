@@ -12347,6 +12347,58 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/utils/invoice-xero-sync",
+      "moduleDoc": "**Is this issued invoice's Xero twin up to date?** — answered from the invoice\nand its `invoices/{uid}/xero-sync/state` watermark alone, with no Xero call.\n\n## Why it exists (api-cloudrun#1009, gate (c) of the order-propagation plan)\n\nAn edit to an issued invoice reaches Xero through `/tasks/push-xero-invoice`.\nWhen that push does not land — Xero refuses the payload (the task is dropped),\nCloud Tasks exhausts its retries, the day budget defers it to abandonment, or\nthe invoice needs manual intervention (payments applied) — the only record was\na log line. The invoice looked fine.\n\nSo the state is DERIVED rather than recorded: the watermark's `pushed_hash` holds\nthe hash of {@link invoiceXeroProjection} as of the last push that SUCCEEDED, and the invoice\nis out of sync whenever its current projection hashes differently. Every failure\nmode above leaves the watermark behind, so every one shows, including those no\nhandler ever observes (a dropped task, a retry exhausted after the process died).\n\n## One author for the projection\n\nThe projection is also what decides whether a write enqueues an edit push\n(`api-cloudrun/src/lib/xeroInvoiceEdit.ts` `shouldEnqueueInvoiceEditPush`). It\nlives here so the push trigger and the out-of-sync badge cannot disagree about\nwhat \"the part Xero carries\" means: a change that should have pushed and did not\nis exactly a change this reports.",
+      "symbols": [
+        {
+          "kind": "typeAlias",
+          "name": "InvoiceXeroSyncStatus",
+          "declaration": "type InvoiceXeroSyncStatus = \"in_sync\" | \"out_of_sync\" | \"unknown\" | \"not_applicable\";",
+          "doc": "- `in_sync` — the invoice's Xero-carried fields are what was last pushed.\n- `out_of_sync` — they have changed since, and no push has landed.\n- `unknown` — linked and live, but no push has recorded a projection hash: no\n  sidecar, or one written before this carried a hash (its `pushed_hash` is the\n  old `v<version>` spelling). Not a claim either way.\n- `not_applicable` — no Xero twin to keep in step: a draft, a void, a paid\n  invoice (exempt by owner rule), or an invoice with no `xero_id`."
+        },
+        {
+          "kind": "function",
+          "name": "canonicalJson",
+          "signature": "canonicalJson(value: unknown): string",
+          "doc": "Stable JSON: object keys sorted recursively, arrays in order. An object with\n`toJSON` (a Firestore `Timestamp`) serializes through it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "hash48",
+          "signature": "hash48(input: string): string",
+          "doc": "48-bit FNV-1a of a string, base36. Deterministic, dependency-free, browser-safe.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "invoiceXeroProjection",
+          "signature": "invoiceXeroProjection(invoice: Partial<Invoice>): unknown",
+          "doc": "The part of an invoice that the Xero update body is built from.\n\n⚠️ **Money totals and `status` are deliberately absent.** A settlement writer\nadvances `version` and moves `status` / `amount_*_cents` without touching a\nline, and Xero learns of a payment from its own ledger, not from a push.\n\n⚠️ **Lines are projected to what the body reads, never compared whole.**\napi-cloudrun's `assembleXeroInvoiceUpdateBody` reads, per billable line: `uid`,\n`name`, `quantity`, `coa_revenue`, `price.subtotal_cents`, `price.discount`,\nand each tax's `uid` and `amount_cents`. Comparing `items` whole made every\nkey-only change a real Xero POST (api-cloudrun#993). api-cloudrun's\n`tests/unit/xeroInvoiceEdit.test.ts` perturbs every leaf of a real line through\nthe real assembler, so a field the body starts reading cannot be missing here\nunnoticed.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "invoiceXeroProjectionHash",
+          "signature": "invoiceXeroProjectionHash(invoice: Partial<Invoice>): string",
+          "doc": "The hash a successful push records as the invoice sidecar's `pushed_hash`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "invoiceXeroSyncStatus",
+          "signature": "invoiceXeroSyncStatus(invoice: Pick<Invoice, \"status\" | \"xero_id\"> & Partial<Invoice>, state: Pick<XeroSyncState, \"pushed_hash\"> | null): InvoiceXeroSyncStatus",
+          "doc": "See {@link InvoiceXeroSyncStatus}. `state` is the watermark, or `null` when absent.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/utils/fulfillments",
       "moduleDoc": "Shared fulfillment utility functions for CFS applications.\n\nA thin namespace over `./orders.ts`, and deliberately so: a fulfillment's\n`items[]` is the same structural shape an order's is — every member of\n`FulfillmentItemType` is assignable to {@link LineItem} — and its\n`destinations[]` is the same `DocDestinationType`. So the helpers a packing\nlist needs are already written; what was missing was a namespace to reach\nthem under.\n\n```ts\nimport { buildPackingList } from \"@cfs/core/utils/fulfillments\";\n\nconst toPick = buildPackingList(fulfillment.items);\n```\n\n## Why this module exists at all\n\n`fulfillments` became a template SOURCE collection so a packing list can be\nrendered from what was actually PICKED rather than from what was ordered — a\nfulfillment line carries `quantity` beside `quantity_order`, and\n`path_substituted_for` when a picker swapped one item for another. None of\nthat exists on the order, so an order-sourced packing list can only ever\ndescribe intent.\n\nA template's `it.*` namespaces are resolved from its collections\n(`availableUtilNamespaces`), so a fulfillments-sourced family gets\n`it.fulfillments` and **no `it.orders`**. Without this module it would get no\ndocument helpers at all.\n\n⚠️ **Re-exports, never reimplementations.** The alternative — mapping\n`fulfillments` to the string `\"orders\"` in `TEMPLATE_COLLECTION_UTILS` — would\nput `it.orders` on a document that is not an order, which is exactly the\nconfusion the per-collection namespaces exist to remove. And a hand-written\ncopy would drift; `tests/template-helpers.test.ts` asserts these are the SAME\nfunction objects as the orders bindings, so a copy fails rather than diverges.",
       "symbols": [

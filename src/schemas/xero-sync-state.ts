@@ -41,6 +41,13 @@ export interface XeroSyncState {
    * `hash48(version|targetStatus|invoiceSig)` of the order state whose push to
    * Xero last **succeeded** — the same projection `xeroQuoteTaskName` addresses
    * its Cloud Task by. Advances only after a successful push.
+   *
+   * ⚠️ **On an INVOICE sidecar (`invoices/{uid}/xero-sync/state`) it is a different
+   * projection of the same idea**: `invoiceXeroProjectionHash`
+   * (`utils/invoice-xero-sync.ts`) of the invoice as of its last successful issue or
+   * edit push, which `invoiceXeroSyncStatus` compares with the current invoice to
+   * make a push that never landed visible (api-cloudrun#1009). Sidecars written
+   * before that carry `v<version>`, which reads as `unknown`, never as a hash.
    */
   pushed_hash: string;
   /**

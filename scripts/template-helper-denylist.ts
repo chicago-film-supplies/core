@@ -401,6 +401,16 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   documentDiff: [
     "computeDocumentDiffs",
   ],
+  // `utils/invoice-xero-sync.ts` answers whether an issued invoice's Xero twin is
+  // current, from the invoice and its `xero-sync/state` sidecar (api-cloudrun#1009).
+  // A template renders the document alone and holds no sidecar.
+  "invoice-xero-sync": [
+    "canonicalJson",
+    "hash48",
+    "invoiceXeroProjection",
+    "invoiceXeroProjectionHash",
+    "invoiceXeroSyncStatus",
+  ],
   // `utils/shared-fields.ts` classifies how each key an order shares with an
   // invoice or fulfillment propagates (api-cloudrun#890). It reads two Zod
   // SCHEMAS for the order → downstream sync; a template renders one document

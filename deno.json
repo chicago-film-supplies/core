@@ -68,6 +68,7 @@
     "./utils/quantityAccounting": "./src/utils/quantityAccounting.ts",
     "./utils/icons": "./src/utils/icons.ts",
     "./utils/invoices": "./src/utils/invoices.ts",
+    "./utils/invoice-xero-sync": "./src/utils/invoice-xero-sync.ts",
     "./utils/fulfillments": "./src/utils/fulfillments.ts",
     "./utils/fulfillment-items": "./src/utils/fulfillment-items.ts",
     "./utils/item-pairing": "./src/utils/item-pairing.ts",
