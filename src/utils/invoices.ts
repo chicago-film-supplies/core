@@ -86,12 +86,16 @@ import { mapPathsAcrossRebuild, pairItemsByUidOccurrence } from "./item-pairing.
 import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
+  InvoiceSchema,
   isDividerItemType,
   isLineItemType,
+  OrderSchema,
   SETTLEMENT_CONTRACTS,
 } from "../schemas/mod.ts";
 import { fromCentsBig, roundDivHalfAwayFromZero } from "./money.ts";
-import { chicagoDaysBetween } from "./dates.ts";
+import { chicagoDaysBetween, getDuration, isNonTerminatingWindow } from "./dates.ts";
+import { classifySharedFields, fieldsUnder, mergeSharedFields, sameSharedValue, type SharedField } from "./shared-fields.ts";
+import { resolveDownstreamChargeDays } from "./orders.ts";
 import { agingBucketOf, type InvoiceAging } from "../schemas/mod.ts";
 import {
   computeItemPaths,
@@ -1249,6 +1253,185 @@ function withoutSubstitutionAnchor<T extends InvoiceDocItemType>(item: T): T {
   return copy as T;
 }
 
+// ── Per-field sync — the opt-in mode (api-cloudrun#890) ─────────
+
+/**
+ * The fields an order shares with an invoice, split by the unit the merge runs
+ * on. Read from the two schemas by {@link classifySharedFields}, so there is no
+ * field list here to drift.
+ */
+export interface OrderInvoiceSharedFields {
+  /** One `items[]` row, paths relative to the row. */
+  line: readonly SharedField[];
+  /** One `destinations[]` pair, paths relative to the pair. */
+  pair: readonly SharedField[];
+  /** The document itself, every row excluded. */
+  doc: readonly SharedField[];
+}
+
+let orderInvoiceSharedFieldsMemo: OrderInvoiceSharedFields | undefined;
+
+/**
+ * {@link OrderInvoiceSharedFields}, classified once per process.
+ *
+ * @throws Error when the classification reports a node it could not interpret —
+ *   the merge would otherwise silently skip that field.
+ */
+export function orderInvoiceSharedFields(): OrderInvoiceSharedFields {
+  if (orderInvoiceSharedFieldsMemo) return orderInvoiceSharedFieldsMemo;
+  const c = classifySharedFields(OrderSchema, InvoiceSchema);
+  if (c.unhandled.length > 0) {
+    throw new Error(`order → invoice shared fields unclassified: ${JSON.stringify(c.unhandled)}`);
+  }
+  orderInvoiceSharedFieldsMemo = {
+    line: fieldsUnder(c, "items[]"),
+    pair: fieldsUnder(c, "destinations[]"),
+    doc: fieldsUnder(c, ""),
+  };
+  return orderInvoiceSharedFieldsMemo;
+}
+
+/**
+ * Opt into the per-field rule on the order → invoice sync.
+ *
+ * Without it, a line or a pair is compared WHOLE: one differing field (derived
+ * money included) freezes every field of the row (G1, G2, G6, G7). With it,
+ * each shared field follows the order unless the invoice's value differs from
+ * the order's PREVIOUS value — `mergeSharedFields`, one matched row at a time.
+ *
+ * ⚠️ Additive on purpose: consumers sweep onto the latest beta, so the row mode
+ * stays the default until the per-field mode has shipped to prod.
+ */
+export interface OrderInvoiceFieldSync {
+  perField: true;
+  /**
+   * The holiday dates a pair's day counts are recomputed with, when its merged
+   * window is neither the order's nor the invoice's (some leaves from each).
+   */
+  holidays: readonly string[];
+}
+
+/** Is any shared field of this invoice row different from the previous order row? */
+function lineOverridden(prevOrderItem: LineItem, invoiceItem: InvoiceDocItemType, orderDividerUid: string): boolean {
+  const prev = projectOrderItemToInvoiceItem(prevOrderItem, orderDividerUid);
+  return mergeSharedFields(orderInvoiceSharedFields().line, prev, prev, invoiceItem).overridden.length > 0;
+}
+
+/** The three-way rule on one matched invoice row. Invoice-only keys are kept by construction. */
+function mergeLine(
+  prevOrderItem: LineItem,
+  newOrderItem: LineItem,
+  invoiceItem: InvoiceDocItemType,
+  orderDividerUid: string,
+): InvoiceDocItemType {
+  return mergeSharedFields(
+    orderInvoiceSharedFields().line,
+    projectOrderItemToInvoiceItem(prevOrderItem, orderDividerUid),
+    projectOrderItemToInvoiceItem(newOrderItem, orderDividerUid),
+    invoiceItem,
+  ).merged;
+}
+
+/** The six ISO boundaries of a pair's `dates`, each with a `_fs` companion. */
+const PAIR_DATE_BOUNDARIES = [
+  "delivery_start",
+  "delivery_end",
+  "collection_start",
+  "collection_end",
+  "charge_start",
+  "charge_end",
+] as const;
+
+/** Is any shared field of this invoice pair different from the previous order pair? */
+function pairOverridden(prev: DocDestinationType, inv: InvoiceDestinationPair, uidOrder: string): boolean {
+  const p = toInvoiceDestinationPair(uidOrder, prev);
+  return mergeSharedFields(orderInvoiceSharedFields().pair, p, p, inv).overridden.length > 0;
+}
+
+/**
+ * The three-way rule on one matched pair, then its window's derived fields.
+ *
+ * The merge runs per `dates` leaf and leaves the derived `_fs` mirrors and day
+ * counts as the invoice had them. So afterwards:
+ * - window unchanged from the invoice's → nothing to recompute;
+ * - window equal to the new order's → take the order's `dates` whole, whose
+ *   derived fields were computed from exactly those boundaries;
+ * - a mix of the two → each `_fs` from the side its boundary came from, and the
+ *   day counts recomputed with `holidays`.
+ *
+ * 🔴 A mixed window can be invalid (the invoice moved delivery later, the order
+ * moved collection earlier). Then the invoice keeps its WHOLE `dates` object and
+ * the pair diff shows it. An invalid window is never written.
+ */
+function mergePair(
+  prev: DocDestinationType,
+  next: DocDestinationType,
+  inv: InvoiceDestinationPair,
+  uidOrder: string,
+  holidays: readonly string[],
+): InvoiceDestinationPair {
+  const nextPair = toInvoiceDestinationPair(uidOrder, next);
+  const { merged } = mergeSharedFields(
+    orderInvoiceSharedFields().pair,
+    toInvoiceDestinationPair(uidOrder, prev),
+    nextPair,
+    inv,
+  );
+
+  type DateRecord = Record<string, unknown>;
+  const isRecord = (v: unknown): v is DateRecord => v !== null && typeof v === "object" && !Array.isArray(v);
+  const m = merged.dates as unknown;
+  const n = nextPair.dates as unknown;
+  const s = inv.dates as unknown;
+  if (!isRecord(m)) return merged;
+
+  const windowOf = (other: unknown) =>
+    isRecord(other) && PAIR_DATE_BOUNDARIES.every((b) => sameSharedValue(m[b], other[b]));
+  if (windowOf(s)) return merged;
+  if (windowOf(n)) return { ...merged, dates: nextPair.dates };
+
+  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  const nonTerminating = (start: string | null, end: string | null) =>
+    start !== null && end !== null && isNonTerminatingWindow(start, end);
+  const keepStored = { ...merged, dates: inv.dates };
+  if (
+    nonTerminating(str(m.delivery_start), str(m.collection_start)) ||
+    nonTerminating(str(m.charge_start) ?? str(m.delivery_start), str(m.charge_end) ?? str(m.collection_start))
+  ) return keepStored;
+
+  const dates: DateRecord = { ...m };
+  for (const b of PAIR_DATE_BOUNDARIES) {
+    const fromStored = isRecord(s) && sameSharedValue(m[b], s[b]);
+    dates[`${b}_fs`] = (fromStored ? (s as DateRecord)[`${b}_fs`] : isRecord(n) ? n[`${b}_fs`] : null) ?? null;
+  }
+  const deliveryStart = str(m.delivery_start);
+  const collectionStart = str(m.collection_start);
+  if (deliveryStart !== null && collectionStart !== null) {
+    try {
+      const duration = getDuration(
+        { delivery_start: deliveryStart, collection_start: collectionStart, charge_start: str(m.charge_start), charge_end: str(m.charge_end) },
+        [...holidays],
+      );
+      dates.days_active = duration.activeDays;
+      dates.days_charged = duration.chargeDays;
+    } catch {
+      return keepStored;
+    }
+  } else {
+    dates.days_active = null;
+    dates.days_charged = null;
+  }
+  return { ...merged, dates: dates as unknown as InvoiceDestinationPair["dates"] };
+}
+
+/** One emitted scope row and where it came from — what the charge-day pass reads. */
+interface ScopedRowOrigin {
+  /** The stored invoice row it was merged into or kept as, if any. */
+  stored?: InvoiceDocItemType;
+  /** The new order line at its path, if any. */
+  source?: LineItem;
+}
+
 /**
  * Selectively sync order items into an invoice, respecting invoice-side overrides.
  *
@@ -1316,7 +1499,20 @@ function withoutSubstitutionAnchor<T extends InvoiceDocItemType>(item: T): T {
  * @param prevOrderItems - Items from the previous version of the order
  * @param newOrderItems - Items from the new version of the order
  * @param currentInvoiceItems - Items scoped to this order in the current invoice (without order divider)
+ * ## Per-field mode ({@link OrderInvoiceFieldSync})
+ *
+ * Every whole-row decision above becomes a per-field one: a matched row is
+ * {@link mergeSharedFields}'d rather than replaced-or-kept, and a removed row is
+ * dropped only when no shared field was overridden. Derived money is never
+ * compared, so it can neither freeze a line nor keep a removed one.
+ *
+ * And a LINE the order moved to a new path, which the invoice carried at the old
+ * one, moves with it and keeps every invoice-only field (G3). The row mode
+ * projects it fresh at the new path and, when overridden, also keeps the old row
+ * — one line billed twice.
+ *
  * @param orderDividerUid - The uid of the order divider in the invoice
+ * @param mode - Omit for the row mode; see {@link OrderInvoiceFieldSync}
  * @returns Updated invoice items (scoped under the order divider, ready for insertion)
  */
 export function syncOrderToInvoiceSelective(
@@ -1324,7 +1520,26 @@ export function syncOrderToInvoiceSelective(
   newOrderItems: LineItem[],
   currentInvoiceItems: InvoiceDocItemType[],
   orderDividerUid: string,
+  mode?: OrderInvoiceFieldSync,
 ): InvoiceDocItemType[] {
+  return syncScopedItems(prevOrderItems, newOrderItems, currentInvoiceItems, orderDividerUid, mode).items;
+}
+
+/** {@link syncOrderToInvoiceSelective}, plus each emitted row's origin. */
+function syncScopedItems(
+  prevOrderItems: LineItem[],
+  newOrderItems: LineItem[],
+  currentInvoiceItems: InvoiceDocItemType[],
+  orderDividerUid: string,
+  mode: OrderInvoiceFieldSync | undefined,
+): { items: InvoiceDocItemType[]; origins: Map<InvoiceDocItemType, ScopedRowOrigin> } {
+  const perField = mode?.perField === true;
+  const origins = new Map<InvoiceDocItemType, ScopedRowOrigin>();
+  const emit = (row: InvoiceDocItemType, origin: ScopedRowOrigin) => {
+    origins.set(row, origin);
+    result.push(row);
+  };
+  const newPathKeys = new Set(newOrderItems.map((it) => itemPathKey(it.path)));
   // Index prev order items by path key
   const prevByPath = new Map<string, LineItem>();
   for (const item of prevOrderItems) {
@@ -1420,7 +1635,7 @@ export function syncOrderToInvoiceSelective(
           const relKey = itemPathKey(stripOrderPrefix(row.path, orderDividerUid));
           if (emittedSubstituted.has(relKey)) continue;
           emittedSubstituted.add(relKey);
-          result.push(reanchor(row, anchor));
+          emit(reanchor(row, anchor), { stored: row });
         }
       }
       continue;
@@ -1437,20 +1652,42 @@ export function syncOrderToInvoiceSelective(
       // otherwise this is the invoice's own line following a reparent.
       if (isLineItemType(newItem.type)) {
         const movedFrom = prevItem ? undefined : moved.fromPath(newItem.path);
-        const carriedBefore = movedFrom !== undefined && invoiceByPath.has(itemPathKey(movedFrom));
+        const movedFromKey = movedFrom !== undefined ? itemPathKey(movedFrom) : undefined;
+        const carriedBefore = movedFromKey !== undefined && invoiceByPath.has(movedFromKey);
         if (prevItem || (movedFrom !== undefined && !carriedBefore)) continue;
+
+        // Per field, the invoice's own row moves with the line and keeps every
+        // field (G3). Only when no order line took over the old path — then that
+        // row belongs to the line there, and the row mode's projection stands.
+        const movedPrev = movedFromKey !== undefined ? prevByPath.get(movedFromKey) : undefined;
+        if (perField && carriedBefore && movedPrev && !newPathKeys.has(movedFromKey!)) {
+          const stored = invoiceByPath.get(movedFromKey!)!;
+          processedInvoicePaths.add(movedFromKey!);
+          const row = {
+            ...mergeLine(movedPrev, newItem, stored, orderDividerUid),
+            path: [orderDividerUid, ...newItem.path],
+          } as InvoiceDocItemType;
+          emit(withoutSubstitutionAnchor(row), { stored, source: newItem });
+          continue;
+        }
       }
       // New item — project to invoice shape, scoped under the order divider
-      result.push(withoutSubstitutionAnchor(projectOrderItemToInvoiceItem(newItem, orderDividerUid)));
-    } else if (prevItem && isItemSynced(prevItem, invoiceItem, orderDividerUid)) {
+      emit(withoutSubstitutionAnchor(projectOrderItemToInvoiceItem(newItem, orderDividerUid)), { source: newItem });
+    } else if (perField && prevItem) {
+      // Each shared field follows the order unless the invoice overrode it.
+      emit(withoutSubstitutionAnchor(mergeLine(prevItem, newItem, invoiceItem, orderDividerUid)), {
+        stored: invoiceItem,
+        source: newItem,
+      });
+    } else if (!perField && prevItem && isItemSynced(prevItem, invoiceItem, orderDividerUid)) {
       // Not overridden — replace with projected order item, carry forward invoice-only fields
-      result.push(withoutSubstitutionAnchor({
+      emit(withoutSubstitutionAnchor({
         ...projectOrderItemToInvoiceItem(newItem, orderDividerUid),
         ...pickInvoiceOnlyFields(invoiceItem),
-      }));
+      }), { stored: invoiceItem, source: newItem });
     } else {
       // Overridden or no prev item — keep invoice item unchanged
-      result.push(withoutSubstitutionAnchor(invoiceItem));
+      emit(withoutSubstitutionAnchor(invoiceItem), { stored: invoiceItem, source: newItem });
     }
   }
 
@@ -1469,20 +1706,23 @@ export function syncOrderToInvoiceSelective(
     // `emittedSubstituted`; what reaches here is X genuinely deleted, and "only its
     // position is lost" is the most this function can know about that.
     if (isSubstitutionRow(stripOrderPrefix(invoiceItem.path, orderDividerUid), anchors)) {
-      result.push(invoiceItem);
+      emit(invoiceItem, { stored: invoiceItem });
       continue;
     }
 
     const prevItem = prevByPath.get(pathKey);
-    if (prevItem && !isItemSynced(prevItem, invoiceItem, orderDividerUid)) {
+    const overridden = prevItem !== undefined && (perField
+      ? lineOverridden(prevItem, invoiceItem, orderDividerUid)
+      : !isItemSynced(prevItem, invoiceItem, orderDividerUid));
+    if (overridden) {
       // Overridden — keep it even though it's been removed from the order
-      result.push(invoiceItem);
+      emit(invoiceItem, { stored: invoiceItem });
     }
     // Else: synced and removed from order — drop it
   }
 
-  result.push(...extensionRows);
-  return result;
+  for (const row of extensionRows) emit(row, { stored: row });
+  return { items: result, origins };
 }
 
 // ── Invoice path computation ─────────────────────────────────────
@@ -2613,6 +2853,13 @@ export interface OrderDestinationSyncResult {
  *   construction, so they are kept verbatim rather than dropped as
  *   `key_names_no_order_pair`. Empty when the invoice has no order divider,
  *   because no section can hang under one.
+ * @param mode - Omit for the whole-pair mode. With {@link OrderInvoiceFieldSync}
+ *   a matched pair is merged per field — every `dates` leaf, each endpoint atom,
+ *   `jurisdiction`, the customer flags — and its window's derived fields settled
+ *   by {@link mergePair}; a pair the order deleted is dropped only when no shared
+ *   field was overridden. `PAIR_MATCH_EXCLUDED` and the owned-field carry are not
+ *   consulted: `dates` is compared like any other field, and `jurisdiction` is
+ *   just another shared field.
  * @returns `{ destinations, dropped }` — the updated full invoice destinations
  *   array, and every pair this call removed, each with the reason it went. See
  *   {@link OrderDestinationSyncResult}; **do not discard `dropped`.**
@@ -2623,6 +2870,7 @@ export function syncOrderDestinationsSelective(
   currentInvoiceDests: InvoiceDestinationPair[],
   uidOrder: string,
   extensionPairUids: ReadonlySet<string>,
+  mode?: OrderInvoiceFieldSync,
 ): OrderDestinationSyncResult {
   // Index prev order pairs by key (scoped to uidOrder).
   const prevByKey = new Map<string, DocDestinationType>();
@@ -2655,7 +2903,9 @@ export function syncOrderDestinationsSelective(
     if (!inv) {
       // New pair — add tagged with uid_order.
       synced.push(toInvoiceDestinationPair(uidOrder, newPair));
-    } else if (prev && pairsMatch(prev, inv)) {
+    } else if (mode && prev) {
+      synced.push(mergePair(prev, newPair, inv, uidOrder, mode.holidays));
+    } else if (!mode && prev && pairsMatch(prev, inv)) {
       // Not overridden on any COMPARED field — replace with the new order pair,
       // then reconcile the fields the invoice owns.
       synced.push(
@@ -2675,7 +2925,7 @@ export function syncOrderDestinationsSelective(
       continue;
     }
     const prev = prevByKey.get(key);
-    if (prev && !pairsMatch(prev, inv)) {
+    if (prev && (mode ? pairOverridden(prev, inv, uidOrder) : !pairsMatch(prev, inv))) {
       // Overridden — keep even though removed from order.
       synced.push(inv);
       continue;
@@ -2748,11 +2998,15 @@ function destinationRowOverridden(
   invDivider: InvoiceDocItemType | undefined,
   invPair: InvoiceDestinationPair | undefined,
   orderDividerUid: string,
+  perField: boolean,
 ): { divider: boolean; pair: boolean } {
   return {
-    divider: invDivider !== undefined && prevDivider !== undefined &&
-      !isItemSynced(prevDivider, invDivider as InvoiceItem, orderDividerUid),
-    pair: invPair !== undefined && prevPair !== undefined && !pairsMatch(prevPair, invPair),
+    divider: invDivider !== undefined && prevDivider !== undefined && (perField
+      ? lineOverridden(prevDivider, invDivider, orderDividerUid)
+      : !isItemSynced(prevDivider, invDivider as InvoiceItem, orderDividerUid)),
+    pair: invPair !== undefined && prevPair !== undefined && (perField
+      ? pairOverridden(prevPair, invPair, orderDividerUid)
+      : !pairsMatch(prevPair, invPair)),
   };
 }
 
@@ -2782,7 +3036,12 @@ function destinationRowOverridden(
  * @param currentScopedItems - The invoice's items under the order divider, without the divider
  * @param currentInvoiceDests - The invoice's full destinations array (all orders)
  * @param orderUid - The order's uid, which is also its invoice divider's uid
- * @param flags - Which halves the edit touched; an untouched half is carried as stored
+ * @param flags - Which halves the edit touched; an untouched half is carried as stored.
+ *   Ignored in per-field mode, which always runs both: a field the order did not
+ *   change merges to what the invoice already has.
+ * @param mode - Omit for the whole-row mode. With {@link OrderInvoiceFieldSync}
+ *   both halves merge per field, and each line's `chargeable_days` is then
+ *   settled against its OWN invoice pair ({@link resolveDownstreamChargeDays}).
  */
 export function syncOrderDestinationScope(
   prevOrder: { items: LineItem[]; destinations: DocDestinationType[] },
@@ -2791,17 +3050,21 @@ export function syncOrderDestinationScope(
   currentInvoiceDests: InvoiceDestinationPair[],
   orderUid: string,
   flags: { items: boolean; destinations: boolean },
+  mode?: OrderInvoiceFieldSync,
 ): OrderDestinationScopeSyncResult {
-  let scopedItems = flags.items
-    ? syncOrderToInvoiceSelective(prevOrder.items, nextOrder.items, currentScopedItems, orderUid)
-    : [...currentScopedItems];
-  const destSync: OrderDestinationSyncResult = flags.destinations
+  const perField = mode?.perField === true;
+  const itemSync = perField || flags.items
+    ? syncScopedItems(prevOrder.items, nextOrder.items, currentScopedItems, orderUid, mode)
+    : undefined;
+  let scopedItems = itemSync ? itemSync.items : [...currentScopedItems];
+  const destSync: OrderDestinationSyncResult = perField || flags.destinations
     ? syncOrderDestinationsSelective(
       prevOrder.destinations,
       nextOrder.destinations,
       currentInvoiceDests,
       orderUid,
       new Set(extensionSectionTargets(currentScopedItems as InvoiceItem[], orderUid).keys()),
+      mode,
     )
     : { destinations: [...currentInvoiceDests], dropped: [] };
   let destinations = destSync.destinations;
@@ -2838,7 +3101,7 @@ export function syncOrderDestinationScope(
   for (const uid of deleted) {
     const invDivider = dividerIn(currentScopedItems, uid);
     const invPair = pairIn(currentInvoiceDests, uid);
-    const overridden = destinationRowOverridden(prevDividers.get(uid), prevPairs.get(uid), invDivider, invPair, orderUid);
+    const overridden = destinationRowOverridden(prevDividers.get(uid), prevPairs.get(uid), invDivider, invPair, orderUid, perField);
 
     if (overridden.divider || overridden.pair) {
       if (invDivider && !dividerIn(scopedItems, uid)) scopedItems = [...scopedItems, invDivider];
@@ -2867,7 +3130,84 @@ export function syncOrderDestinationScope(
     }
   }
 
+  if (perField && itemSync) {
+    scopedItems = settleScopedChargeDays(scopedItems, itemSync.origins, {
+      orderUid,
+      nextOrderPairs: nextOrder.destinations,
+      storedPairs: currentInvoiceDests,
+      mergedPairs: destinations,
+      extensionTargets: extensionSectionTargets(currentScopedItems as InvoiceItem[], orderUid),
+    });
+  }
+
   return { scopedItems, destinations, dropped, kept };
+}
+
+/**
+ * Settle each scoped line's `chargeable_days` against its own invoice pair, after
+ * both halves of the scope have merged (Target model D).
+ *
+ * A line's destination is the first path segment naming one of this order's
+ * invoice pairs. Rows in a date-extension section are skipped: their pair is the
+ * invoice's own and the order has nothing to say about it.
+ *
+ * - A row merged from a stored row → {@link resolveDownstreamChargeDays}.
+ * - A row added from the order → it follows the invoice pair's default when the
+ *   order line follows the order pair's; otherwise it takes the order's value.
+ */
+function settleScopedChargeDays(
+  rows: InvoiceDocItemType[],
+  origins: ReadonlyMap<InvoiceDocItemType, ScopedRowOrigin>,
+  ctx: {
+    orderUid: string;
+    nextOrderPairs: readonly DocDestinationType[];
+    storedPairs: readonly InvoiceDestinationPair[];
+    mergedPairs: readonly InvoiceDestinationPair[];
+    extensionTargets: ReadonlyMap<string, readonly string[]>;
+  },
+): InvoiceDocItemType[] {
+  const daysOf = (pair: { dates?: unknown } | undefined): number | null =>
+    ((pair?.dates ?? null) as { days_charged?: number | null } | null)?.days_charged ?? null;
+  const scoped = (pairs: readonly InvoiceDestinationPair[]) =>
+    new Map(pairs.filter((p) => p.uid_order === ctx.orderUid && p.uid).map((p) => [p.uid!, p]));
+  const merged = scoped(ctx.mergedPairs);
+  const stored = scoped(ctx.storedPairs);
+  const nextOrder = new Map(ctx.nextOrderPairs.map((p) => [p.uid, p]));
+  const daysOfRow = (row: InvoiceDocItemType | LineItem | undefined): number | null =>
+    ((row as { price?: { chargeable_days?: number | null } | null } | undefined)?.price?.chargeable_days) ?? null;
+
+  return rows.map((row) => {
+    if (isDividerItemType(row.type)) return row;
+    const price = (row as { price?: { chargeable_days?: number | null } | null }).price;
+    if (!price) return row;
+    if (isInExtensionSection(row.path, ctx.orderUid, ctx.extensionTargets)) return row;
+    const dest = row.path.find((seg) => merged.has(seg));
+    if (dest === undefined) return row;
+
+    const origin = origins.get(row) ?? {};
+    const mergedDays = price.chargeable_days ?? null;
+    const nextSourceDays = daysOfRow(origin.source);
+    const nextSourceDefault = daysOf(nextOrder.get(dest));
+    const nextDownstreamDefault = daysOf(merged.get(dest));
+
+    let days: number | null;
+    if (!origin.stored) {
+      days = origin.source && nextSourceDays !== null && nextSourceDays === nextSourceDefault
+        ? nextDownstreamDefault
+        : mergedDays;
+    } else {
+      days = resolveDownstreamChargeDays({
+        nextSourceDays,
+        nextSourceDefault,
+        storedDays: daysOfRow(origin.stored),
+        mergedDays,
+        prevDownstreamDefault: daysOf(stored.get(dest)),
+        nextDownstreamDefault,
+      });
+    }
+    if (days === mergedDays) return row;
+    return { ...row, price: { ...price, chargeable_days: days } } as InvoiceDocItemType;
+  });
 }
 
 /**

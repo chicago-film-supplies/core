@@ -11573,6 +11573,18 @@
         },
         {
           "kind": "interface",
+          "name": "OrderInvoiceFieldSync",
+          "declaration": "interface OrderInvoiceFieldSync {\n  perField: true;\n  holidays: readonly string[];\n}",
+          "doc": "Opt into the per-field rule on the order → invoice sync.\n\nWithout it, a line or a pair is compared WHOLE: one differing field (derived\nmoney included) freezes every field of the row (G1, G2, G6, G7). With it,\neach shared field follows the order unless the invoice's value differs from\nthe order's PREVIOUS value — `mergeSharedFields`, one matched row at a time.\n\n⚠️ Additive on purpose: consumers sweep onto the latest beta, so the row mode\nstays the default until the per-field mode has shipped to prod."
+        },
+        {
+          "kind": "interface",
+          "name": "OrderInvoiceSharedFields",
+          "declaration": "interface OrderInvoiceSharedFields {\n  line: readonly SharedField[];\n  pair: readonly SharedField[];\n  doc: readonly SharedField[];\n}",
+          "doc": "The fields an order shares with an invoice, split by the unit the merge runs\non. Read from the two schemas by {@link classifySharedFields}, so there is no\nfield list here to drift."
+        },
+        {
+          "kind": "interface",
           "name": "PreTaxLineItem",
           "declaration": "interface PreTaxLineItem {\n  type: PreTaxItemType;\n  quantity: number;\n  price: PriceObject;\n}",
           "doc": "A pre-tax line item with a full price object — every type the contract table\nmarks `pricing: \"pre_tax\"`.\n\nThe member list is DERIVED from `ITEM_CONTRACTS`, not written out. It used to\nbe the literal `\"rental\" | \"sale\" | \"service\" | \"surcharge\" | \"replacement\"`,\nwhich made this a sixth place to remember when an item type was added."
@@ -12087,6 +12099,14 @@
         },
         {
           "kind": "function",
+          "name": "orderInvoiceSharedFields",
+          "signature": "orderInvoiceSharedFields(): OrderInvoiceSharedFields",
+          "doc": "{@link OrderInvoiceSharedFields}, classified once per process.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "pickLineTaxFields",
           "signature": "pickLineTaxFields(item: typeLiteral): typeLiteral",
           "doc": "The `LINE_TAX_FIELDS` a line carries, for a projection onto another\ngrain. `uid_tax_class` is required on every priced line (api-cloudrun#993),\nso a source line without one is refused loudly rather than projected into a\ndocument the schema would 400; `uid_tax_class_override` is copied only when\npresent, so the projection preserves the source line's key set.",
@@ -12175,7 +12195,7 @@
         {
           "kind": "function",
           "name": "syncOrderDestinationScope",
-          "signature": "syncOrderDestinationScope(prevOrder: typeLiteral, nextOrder: typeLiteral, currentScopedItems: InvoiceDocItemType[], currentInvoiceDests: InvoiceDestinationPair[], orderUid: string, flags: typeLiteral): OrderDestinationScopeSyncResult",
+          "signature": "syncOrderDestinationScope(prevOrder: typeLiteral, nextOrder: typeLiteral, currentScopedItems: InvoiceDocItemType[], currentInvoiceDests: InvoiceDestinationPair[], orderUid: string, flags: typeLiteral, mode?: OrderInvoiceFieldSync): OrderDestinationScopeSyncResult",
           "doc": "Sync one order's scope of an invoice — its items and its destination pairs —\nand decide each deleted destination ONCE (api-cloudrun#664).\n\n{@link syncOrderToInvoiceSelective} decides a destination divider by path and\n{@link syncOrderDestinationsSelective} decides its pair by `pair.uid`, each\nwith its own override test. Run alone, they can split a destination the order\ndeleted: a renamed divider is kept while its unedited pair is dropped, or an\nedited pair is kept while its unedited divider is dropped. Either result\nfails the divider ⟺ pair write guard, and because the invoice write is staged\ninside the ORDER's transaction, the order edit fails with it.\n\nSo after both run, every destination the order deleted in this edit is\nre-decided as one row via {@link destinationRowOverridden}: overridden ⇒ both\nhalves kept (the missing one restored from the stored invoice), otherwise both\ndropped. Destinations still on the order are untouched — a consistent order\nalready adds and keeps both halves together.\n\n⚠️ A restored divider is appended at the tail of the scope, which is where\n{@link syncOrderToInvoiceSelective} already places a kept removed row.",
           "paramTags": [
             {
@@ -12200,7 +12220,11 @@
             },
             {
               "name": "flags",
-              "doc": "Which halves the edit touched; an untouched half is carried as stored"
+              "doc": "Which halves the edit touched; an untouched half is carried as stored.\nIgnored in per-field mode, which always runs both: a field the order did not\nchange merges to what the invoice already has."
+            },
+            {
+              "name": "mode",
+              "doc": "Omit for the whole-row mode. With {@link OrderInvoiceFieldSync}\nboth halves merge per field, and each line's `chargeable_days` is then\nsettled against its OWN invoice pair ({@link resolveDownstreamChargeDays})."
             }
           ],
           "returnsTag": null
@@ -12208,7 +12232,7 @@
         {
           "kind": "function",
           "name": "syncOrderDestinationsSelective",
-          "signature": "syncOrderDestinationsSelective(prevOrderDests: DocDestinationType[], newOrderDests: DocDestinationType[], currentInvoiceDests: InvoiceDestinationPair[], uidOrder: string, extensionPairUids: ReadonlySet<string>): OrderDestinationSyncResult",
+          "signature": "syncOrderDestinationsSelective(prevOrderDests: DocDestinationType[], newOrderDests: DocDestinationType[], currentInvoiceDests: InvoiceDestinationPair[], uidOrder: string, extensionPairUids: ReadonlySet<string>, mode?: OrderInvoiceFieldSync): OrderDestinationSyncResult",
           "doc": "Selectively sync one order's destination pairs into an invoice's destinations,\nrespecting invoice-side overrides. Per-pair matching is by\n`(uid_order, pair.uid)` — see {@link destPairKey}, and note that it was the\nENDPOINT uids until api-cloudrun#663, where the key itself moved whenever an\naddress was corrected. Only pairs scoped to `uidOrder` are touched — pairs\nfrom other orders pass through unchanged.\n\nPolicy per pair:\n- Not in invoice (new in order) → add, tagged with `uid_order`.\n- In invoice AND prev order matches current invoice → replace with new order\n  pair, **carrying the invoice-owned fields forward**\n  ({@link carryOverridablePairFields}).\n- In invoice BUT prev order ≠ invoice → overridden, keep invoice version.\n- In invoice but not in new order:\n  - prev matches invoice → deleted from order, drop.\n  - prev ≠ invoice → overridden, keep.\n\n⚠️ **\"Matches\" here is {@link pairsMatch}, which no longer sees the\n{@link INVOICE_OVERRIDABLE_PAIR_FIELDS}.** So an override on one of those is\nno longer a whole-pair freeze: the pair keeps syncing everything else and the\nowned field is carried. Two consequences worth stating, because they are the\nbehaviour change: the rest of the pair (address, contact, instructions,\n`customer_collecting`/`returning`) now tracks the order again, and a pair the\nORDER has deleted is dropped even when the invoice set a jurisdiction on it —\nan owned-field edit is not a claim that the destination still exists.",
           "paramTags": [
             {
@@ -12230,6 +12254,10 @@
             {
               "name": "extensionPairUids",
               "doc": "Pairs of this order's date-extension sections\n({@link extensionSectionTargets}'s keys). They name no order pair by\nconstruction, so they are kept verbatim rather than dropped as\n`key_names_no_order_pair`. Empty when the invoice has no order divider,\nbecause no section can hang under one."
+            },
+            {
+              "name": "mode",
+              "doc": "Omit for the whole-pair mode. With {@link OrderInvoiceFieldSync}\na matched pair is merged per field — every `dates` leaf, each endpoint atom,\n`jurisdiction`, the customer flags — and its window's derived fields settled\nby {@link mergePair}; a pair the order deleted is dropped only when no shared\nfield was overridden. `PAIR_MATCH_EXCLUDED` and the owned-field carry are not\nconsulted: `dates` is compared like any other field, and `jurisdiction` is\njust another shared field."
             }
           ],
           "returnsTag": "`{ destinations, dropped }` — the updated full invoice destinations\narray, and every pair this call removed, each with the reason it went. See\n{@link OrderDestinationSyncResult}; **do not discard `dropped`.**"
@@ -12258,7 +12286,7 @@
         {
           "kind": "function",
           "name": "syncOrderToInvoiceSelective",
-          "signature": "syncOrderToInvoiceSelective(prevOrderItems: LineItem[], newOrderItems: LineItem[], currentInvoiceItems: InvoiceDocItemType[], orderDividerUid: string): InvoiceDocItemType[]",
+          "signature": "syncOrderToInvoiceSelective(prevOrderItems: LineItem[], newOrderItems: LineItem[], currentInvoiceItems: InvoiceDocItemType[], orderDividerUid: string, mode?: OrderInvoiceFieldSync): InvoiceDocItemType[]",
           "doc": "Selectively sync order items into an invoice, respecting invoice-side overrides.\n\nItems are matched by **path** (not uid), since the same product can appear at\nmultiple positions in the items array. For each item:\n\n- **Synced** (prev order matches current invoice, minus invoice-only fields):\n  replaced with the new order item, carrying forward invoice-only overrides\n- **Overridden** (invoice item differs from prev order): left unchanged\n- **New** (in new order, not in prev): added under the order divider\n- **Left out** (a LINE in prev and new, never on the invoice): stays out\n- **Removed** (in prev order, not in new): removed only if synced, kept if overridden\n- **Extension sections** ({@link extensionSectionTargets}): passed through\n  verbatim, at the tail of the scope\n- **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed\n  and Y's is emitted in its place — see below\n\n## 🔴 Why the substitution arm exists: without it a substitution lasts until\nthe next order save\n\nMeasured against this function before the arm was added, with the order\nUNCHANGED (`prev === new`) and the invoice holding Y in X's place:\n\n```\nBEFORE  invoice lines: [ \"Light Y\" ]\nAFTER   invoice lines: [ \"Light X\" ]\n```\n\nBoth halves of the path match fail, and each fails toward undoing the\noperator's edit: X's order path has no invoice line, so the `!invoiceItem`\nbranch re-projects X; Y's path has no PREV ORDER line, so the removed-items\npass drops it as a synced line the order no longer carries. **Neither branch\nis wrong on its own** — the pair is only wrong because nothing told this\nfunction the two rows are the same row, and `path_substituted_for` is what\nsays so.\n\n⭐ That is Increment 2's lesson on a third surface. A projection undoes any\ndownstream override not stored in a form the projection HONOURS, and being\n*stored* is not enough — `path_substituted_for` was already a stored field on\nfulfillments and this function had never heard of it.\n\n## 🔴 A line the invoice LEFT OUT stays out (api-cloudrun#680 R1, owner 2026-09-15)\n\nThe documented rule above was always \"new = in new order, not in prev\", and the\ncode projected EVERY order line the invoice lacked. So an unsettled partial\ninvoice was refilled with the whole order on its next save, and an \"invoice\nremaining\" invoice re-billed lines another invoice had already billed. A line\ncounts as new only when the previous order had no line at its path and no line\nthat moved there. Dividers are still projected when missing: they are the\nskeleton alignment reads, not something an operator bills.\n\n## Extension sections are billing, not order structure\n\nAn extension section's divider names no order path of its own, so without its\nown arm the removed-items pass would drop the divider and every line under it\nas \"synced and removed from the order\". They are emitted untouched after\neverything else.\n\n⚠️ **The whole-scope {@link syncOrderItems} deliberately does NOT get this\narm.** It is the operator's hard snap-to-order, documented to discard\noverrides and drop lines the order no longer has; a substitution is an\noverride, so discarding it is what the operator asked for. Only the automatic\nper-save sync has to be non-destructive.",
           "paramTags": [
             {
@@ -12271,11 +12299,15 @@
             },
             {
               "name": "currentInvoiceItems",
-              "doc": "Items scoped to this order in the current invoice (without order divider)"
+              "doc": "Items scoped to this order in the current invoice (without order divider)\n## Per-field mode ({@link OrderInvoiceFieldSync})\n\nEvery whole-row decision above becomes a per-field one: a matched row is\n{@link mergeSharedFields}'d rather than replaced-or-kept, and a removed row is\ndropped only when no shared field was overridden. Derived money is never\ncompared, so it can neither freeze a line nor keep a removed one.\n\nAnd a LINE the order moved to a new path, which the invoice carried at the old\none, moves with it and keeps every invoice-only field (G3). The row mode\nprojects it fresh at the new path and, when overridden, also keeps the old row\n— one line billed twice."
             },
             {
               "name": "orderDividerUid",
               "doc": "The uid of the order divider in the invoice"
+            },
+            {
+              "name": "mode",
+              "doc": "Omit for the row mode; see {@link OrderInvoiceFieldSync}"
             }
           ],
           "returnsTag": "Updated invoice items (scoped under the order divider, ready for insertion)"
