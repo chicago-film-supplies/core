@@ -29407,6 +29407,17 @@ Stored money is integer cents. A document is priced by `priceDocument`
 (`@cfs/core/utils/price-document`); this module holds the per-line pricers it
 composes, and the audit oracle {@link rederiveDocumentTotalsForAudit}.
 
+### `ChargeDaysPair`
+
+The minimum a destination pair needs for a day-count reconcile.
+
+```ts
+interface ChargeDaysPair {
+  uid: string;
+  dates: typeLiteral | null;
+}
+```
+
 ### `ConsolidatedItem`
 
 ```ts
@@ -30797,6 +30808,24 @@ rounds, so nothing here can round differently from the pre-tax path.
 
 - `item` — the line being priced — input shape or stored shape, either works.
 
+### `reconcileChargeDaysByDestination(items: readonly T[], prevPairs: readonly ChargeDaysPair[], nextPairs: readonly ChargeDaysPair[]): T[]`
+
+Pure, per-destination form of {@link syncChargeDaysToItems}: when a pair's
+`days_charged` moves, every priced line under THAT destination still at the
+previous default takes the new one. A hand-set day count is left alone.
+
+The destination a line belongs to is read from its `path` — a destination
+divider's uid is its pair's `uid`, so the first path segment naming a pair is
+the line's destination. That makes it independent of divider positions, and the
+same function serves an order (`[dest, …]`) and an invoice (`[order, dest, …]`).
+
+⚠️ **A previous default of `null` moves nothing**, exactly as the mutating
+version: with no earlier default there is no way to tell a line that followed
+it from one that was set by hand, and on a money field leaving the days alone
+is the visible failure.
+
+Returns a new array; lines it changes are copied, the rest are shared.
+
 ### `rederiveDocumentTotalsForAudit(items: LineItem[], taxes: Tax[]): DocumentTotalsCore`
 
 **The audit oracle: document totals RE-DERIVED from line inputs**, independently
@@ -30809,6 +30838,31 @@ because pointing it at the sum would check the implementation against itself
 (D2 of api-cloudrun#997). Since step 2 of that campaign it is the ONLY way
 core re-derives totals; the writers' `calculateOrderTotals` /
 `calculateInvoiceTotals` are deleted.
+
+### `resolveDownstreamChargeDays(args: typeLiteral): number | null`
+
+A downstream line's `chargeable_days` after an order edit, when the downstream
+document (an invoice) has its OWN destination dates.
+
+`chargeable_days` is not a plain value: a line at its pair's default FOLLOWS that
+default, and only a line set to something else carries a value of its own. The
+plain three-way merge (`mergeSharedFields`) cannot see that, and gets one case
+wrong in the dangerous direction:
+
+> The order's dates move, so its default-following line goes 5 → 7. The invoice
+> overrode its dates and still charges 5 days. The merge sees the invoice line
+> at 5 = the order's previous 5 and takes 7 — billing seven days against a
+> five-day invoice window.
+
+So, in order:
+1. The stored line did NOT follow its own pair's default → it is a value; the
+   merge's answer stands.
+2. The new order line follows ITS default → the order is saying "follow the
+   dates", so the downstream line follows the DOWNSTREAM pair's new default.
+3. The merge took a new value from the order → the order hand-set one; take it.
+4. Otherwise → keep following the downstream pair's new default.
+
+`mergedDays` is what `mergeSharedFields` produced for the field.
 
 ### `syncChargeDaysToItems(items: LineItem[], previousDefault: number | null, newDefault: number | null): void`
 

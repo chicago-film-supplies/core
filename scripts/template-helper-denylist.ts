@@ -181,6 +181,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "getItemSubtreeRange", // path machinery
     "getRemovalIndices", // editor delete machinery
     "syncChargeDaysToItems", // mutates items in place — write-path only
+    "reconcileChargeDaysByDestination", // pure per-destination form of the above — write-path only
+    "resolveDownstreamChargeDays", // order → invoice day-count sync rule — write-path only
     "deriveOrderDateEnvelope", // superseded by per-destination dates; not for rendering
     "buildQueryByDates", // Typesense projection helper
     "computeItemTaxAmountCents", // single-tax building block used by calculateItemTax — not a render helper

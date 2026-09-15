@@ -381,6 +381,89 @@ export function syncChargeDaysToItems(
   }
 }
 
+/** The minimum a destination pair needs for a day-count reconcile. */
+export interface ChargeDaysPair {
+  uid: string;
+  dates: { days_charged?: number | null } | null;
+}
+
+/**
+ * Pure, per-destination form of {@link syncChargeDaysToItems}: when a pair's
+ * `days_charged` moves, every priced line under THAT destination still at the
+ * previous default takes the new one. A hand-set day count is left alone.
+ *
+ * The destination a line belongs to is read from its `path` — a destination
+ * divider's uid is its pair's `uid`, so the first path segment naming a pair is
+ * the line's destination. That makes it independent of divider positions, and the
+ * same function serves an order (`[dest, …]`) and an invoice (`[order, dest, …]`).
+ *
+ * ⚠️ **A previous default of `null` moves nothing**, exactly as the mutating
+ * version: with no earlier default there is no way to tell a line that followed
+ * it from one that was set by hand, and on a money field leaving the days alone
+ * is the visible failure.
+ *
+ * Returns a new array; lines it changes are copied, the rest are shared.
+ */
+export function reconcileChargeDaysByDestination<T extends { type: string; path?: string[]; price?: unknown }>(
+  items: readonly T[],
+  prevPairs: readonly ChargeDaysPair[],
+  nextPairs: readonly ChargeDaysPair[],
+): T[] {
+  const prevDefault = new Map(prevPairs.map((p) => [p.uid, p.dates?.days_charged ?? null]));
+  const nextDefault = new Map(nextPairs.map((p) => [p.uid, p.dates?.days_charged ?? null]));
+  return items.map((item) => {
+    if (item.type === "destination" || item.type === "group" || item.type === "order") return item;
+    const price = item.price as PriceObject | null | undefined;
+    if (!price || price.chargeable_days === null || price.chargeable_days === undefined) return item;
+    const dest = (item.path ?? []).find((seg) => prevDefault.has(seg));
+    if (dest === undefined || !nextDefault.has(dest)) return item;
+    const before = prevDefault.get(dest) ?? null;
+    const after = nextDefault.get(dest) ?? null;
+    if (before === null || before === after || price.chargeable_days !== before) return item;
+    return { ...item, price: { ...price, chargeable_days: after } };
+  });
+}
+
+/**
+ * A downstream line's `chargeable_days` after an order edit, when the downstream
+ * document (an invoice) has its OWN destination dates.
+ *
+ * `chargeable_days` is not a plain value: a line at its pair's default FOLLOWS that
+ * default, and only a line set to something else carries a value of its own. The
+ * plain three-way merge (`mergeSharedFields`) cannot see that, and gets one case
+ * wrong in the dangerous direction:
+ *
+ * > The order's dates move, so its default-following line goes 5 → 7. The invoice
+ * > overrode its dates and still charges 5 days. The merge sees the invoice line
+ * > at 5 = the order's previous 5 and takes 7 — billing seven days against a
+ * > five-day invoice window.
+ *
+ * So, in order:
+ * 1. The stored line did NOT follow its own pair's default → it is a value; the
+ *    merge's answer stands.
+ * 2. The new order line follows ITS default → the order is saying "follow the
+ *    dates", so the downstream line follows the DOWNSTREAM pair's new default.
+ * 3. The merge took a new value from the order → the order hand-set one; take it.
+ * 4. Otherwise → keep following the downstream pair's new default.
+ *
+ * `mergedDays` is what `mergeSharedFields` produced for the field.
+ */
+export function resolveDownstreamChargeDays(args: {
+  nextSourceDays: number | null;
+  nextSourceDefault: number | null;
+  storedDays: number | null;
+  mergedDays: number | null;
+  prevDownstreamDefault: number | null;
+  nextDownstreamDefault: number | null;
+}): number | null {
+  const { nextSourceDays, nextSourceDefault, storedDays, mergedDays, prevDownstreamDefault, nextDownstreamDefault } = args;
+  const storedFollows = storedDays !== null && storedDays === prevDownstreamDefault;
+  if (!storedFollows) return mergedDays;
+  if (nextSourceDays !== null && nextSourceDays === nextSourceDefault) return nextDownstreamDefault;
+  if (mergedDays !== storedDays) return mergedDays;
+  return nextDownstreamDefault;
+}
+
 // ── Per-destination date rollups ─────────────────────────────────
 
 /**
