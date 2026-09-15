@@ -4,9 +4,22 @@
  * produced by the code under test.
  */
 import { assertEquals } from "@std/assert";
-import { buildOrderScopedItems, computeOrderInvoiceCoverage, type InvoiceItem } from "../src/utils/invoices.ts";
+import {
+  buildOrderScopedItems,
+  computeOrderInvoiceCoverage,
+  type InvoiceItem,
+  validateInvoiceItemPaths,
+  validateInvoiceItemUniqueness,
+} from "../src/utils/invoices.ts";
 import type { LineItem } from "../src/utils/orders.ts";
-import { type AccountedInvoice, accountLine, billedByPath, remainingForOrder } from "../src/utils/quantityAccounting.ts";
+import {
+  type AccountedInvoice,
+  accountLine,
+  billedByPath,
+  buildRemainingInvoice,
+  remainingForOrder,
+  type RemainingInvoiceSource,
+} from "../src/utils/quantityAccounting.ts";
 
 const O = "order-1";
 const D = "dest-1";
@@ -256,4 +269,120 @@ Deno.test("computeOrderInvoiceCoverage: extension lines neither cover a line nor
   assertEquals(onlyExtension.uninvoiced.map((l) => l.uid), [LIGHT]);
   const both = computeOrderInvoiceCoverage(O, order, [invoice("a", lightOrder(2, 3)), extensionInvoice("b", 2, 2)]);
   assertEquals([both.uninvoiced, both.unmatched], [[], []]);
+});
+
+// ── The remainder invoice (api-cloudrun#680 R1) ──
+
+const PAIR = {
+  uid: D,
+  dates: { charge_start: "2026-09-07T00:00:00.000-05:00", charge_end: "2026-09-21T00:00:00.000-05:00", days_charged: 10 },
+} as unknown as import("../src/schemas/mod.ts").DocDestinationType;
+
+function orderSource(items: LineItem[]) {
+  return { uid: O, number: 1012, items, destinations: [PAIR] };
+}
+
+/** A billed invoice whose D section charged through `chargeEnd`. */
+function billedWithPair(uid: string, items: LineItem[], chargeEnd: string): RemainingInvoiceSource {
+  return {
+    ...invoice(uid, items, "issued"),
+    destinations: [{ ...PAIR, uid_order: O, dates: { ...(PAIR as { dates: object }).dates, charge_end: chargeEnd } }] as never,
+  };
+}
+
+let minted = 0;
+const mint = () => `ext-${++minted}`;
+
+/** The remainder, stored as an invoice — what the next remainder reads back. */
+function asInvoice(uid: string, built: ReturnType<typeof buildRemainingInvoice>): RemainingInvoiceSource {
+  return { uid, status: "draft", items: built.items as unknown as InvoiceItem[], destinations: built.destinations };
+}
+
+Deno.test("buildRemainingInvoice: a new line, a quantity increase and an extension, built once, leave nothing to bill", () => {
+  // Billed: 2 lights at 3 days. Order now: 3 lights at 7 days, plus a tripod.
+  // Remainder: 1 light at 7 days (full window), the tripod whole, and an
+  // extension section billing 2 lights at max(7,5) − max(3,5) = 2 added days.
+  // Canonical order: a destination's own lines before its groups.
+  const order = [DEST_ITEM, line("prod-tripod", [D, "prod-tripod"], 1, 3000, 7), GROUP_ITEM, line(LIGHT, [D, G, LIGHT], 3, 1000, 7)];
+  const billed = [billedWithPair("a", lightOrder(2, 3), "2026-09-09T00:00:00.000-05:00")];
+  const built = buildRemainingInvoice(orderSource(order), billed, mint);
+
+  const rows = built.items.map((it) => [it.path.join("/"), it.type, (it as { quantity?: number }).quantity ?? null, (it as { price?: { chargeable_days: number } }).price?.chargeable_days ?? null]);
+  const E = built.items.find((it) => (it as { path_extension_for?: string[] }).path_extension_for)!.uid;
+  assertEquals(rows, [
+    [O, "order", null, null],
+    [`${O}/${D}`, "destination", null, null],
+    [`${O}/${D}/prod-tripod`, "rental", 1, 7],
+    [`${O}/${D}/${G}`, "group", null, null],
+    [`${O}/${D}/${G}/${LIGHT}`, "rental", 1, 7],
+    [`${O}/${E}`, "destination", null, null],
+    [`${O}/${E}/${G}`, "group", null, null],
+    [`${O}/${E}/${G}/${LIGHT}`, "rental", 2, 2],
+  ]);
+  // The section's pair charges from the day after the billed window ended.
+  const pair = built.destinations.find((p) => p.uid === E)!;
+  assertEquals([pair.dates.charge_start, pair.dates.charge_end, pair.dates.days_charged], [
+    "2026-09-10T00:00:00.000-05:00",
+    "2026-09-21T00:00:00.000-05:00",
+    2,
+  ]);
+  assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)]).lines, []);
+  // What the API's write guards assert: paths are what the one author computes, and rows are unique.
+  assertEquals(validateInvoiceItemPaths(built.items as unknown as InvoiceItem[]), []);
+  assertEquals(validateInvoiceItemUniqueness(built.items as unknown as InvoiceItem[]), []);
+});
+
+Deno.test("buildRemainingInvoice: a component increase carries its kit at quantity 0, so the component bills its own path", () => {
+  // Order: 2 kits of 8 stakes, now 10 stakes. Billed: the kits and 8 stakes.
+  const kitOrder = (stakes: number) => [DEST_ITEM, line(KIT, [D, KIT], 2, 5000), line(STAKE, [D, KIT, STAKE], stakes, 100)];
+  const order = kitOrder(10);
+  const billed = [billedWithPair("a", kitOrder(8), "2026-09-21T00:00:00.000-05:00")];
+  const built = buildRemainingInvoice(orderSource(order), billed, mint);
+  assertEquals(
+    built.items.filter((it) => it.type === "rental").map((it) => [it.path.join("/"), (it as { quantity: number }).quantity]),
+    [[`${O}/${D}/${KIT}`, 0], [`${O}/${D}/${KIT}/${STAKE}`, 2]],
+  );
+  assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)]).lines, []);
+});
+
+Deno.test("buildRemainingInvoice: units billed at different days extend in one section per billed window", () => {
+  // 3 at 5 days on a, 2 at 8 days on b; the order now 10 days.
+  // Sections: 3 units at 10 − 5 = 5 added days, 2 units at 10 − 8 = 2.
+  const order = lightOrder(5, 10);
+  const billed = [
+    billedWithPair("a", lightOrder(3, 5), "2026-09-11T00:00:00.000-05:00"),
+    billedWithPair("b", lightOrder(2, 8), "2026-09-16T00:00:00.000-05:00"),
+  ];
+  const built = buildRemainingInvoice(orderSource(order), billed, mint);
+  const extensions = built.items.filter((it) => it.type === "rental").map((it) => [(it as { quantity: number }).quantity, (it as { price: { chargeable_days: number } }).price.chargeable_days]);
+  assertEquals(extensions, [[3, 5], [2, 2]]);
+  assertEquals(built.destinations.slice(1).map((p) => p.dates.charge_start), ["2026-09-12T00:00:00.000-05:00", "2026-09-17T00:00:00.000-05:00"]);
+  assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)]).lines, []);
+});
+
+Deno.test("buildRemainingInvoice: a second extension extends from the days the first one billed", () => {
+  // 2 at 3 days, extended to 7 by a first remainder (2 added), then the order
+  // goes to 12: the second remainder adds 12 − 7 = 5 days, not 12 − 5 = 7.
+  const billed = [billedWithPair("a", lightOrder(2, 3), "2026-09-09T00:00:00.000-05:00")];
+  const first = asInvoice("r1", buildRemainingInvoice(orderSource(lightOrder(2, 7)), billed, mint));
+  const order = lightOrder(2, 12);
+  const second = buildRemainingInvoice(orderSource(order), [...billed, first], mint);
+  assertEquals(second.items.filter((it) => it.type === "rental").map((it) => (it as { price: { chargeable_days: number } }).price.chargeable_days), [5]);
+  assertEquals(remainingForOrder(O, order, [...billed, first, asInvoice("r2", second)]).lines, []);
+});
+
+Deno.test("buildRemainingInvoice: over-billing is returned for a credit note, never netted into the remainder", () => {
+  // Billed 3 at 7 days; the order is now 2 at 3 days. Nothing remains to bill.
+  const built = buildRemainingInvoice(orderSource(lightOrder(2, 3)), [billedWithPair("a", lightOrder(3, 7), "2026-09-15T00:00:00.000-05:00")], mint);
+  assertEquals(built.items, []);
+  assertEquals(built.overbilled, [
+    { path: [D, G, LIGHT], quantity: -1, extension_days: 0 },
+    { path: [D, G, LIGHT], quantity: 3, extension_days: -2 },
+  ]);
+});
+
+Deno.test("buildRemainingInvoice: an unaligned scope fails closed", () => {
+  const stray = invoice("a", [{ ...DEST_ITEM, uid: "dest-other", path: ["dest-other"] } as LineItem, line(LIGHT, ["dest-other", LIGHT], 1, 1000)]);
+  const built = buildRemainingInvoice(orderSource(lightOrder(3)), [stray], mint);
+  assertEquals([built.items, built.unaligned], [[], ["a"]]);
 });

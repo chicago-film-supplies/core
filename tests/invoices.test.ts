@@ -1904,6 +1904,15 @@ Deno.test("validateInvoiceItemUniqueness flags duplicates within one order divid
   assertEquals(issues[0].parentUid, "g1");
 });
 
+Deno.test("validateInvoiceItemUniqueness keys on the parent PATH: an extension section repeats a group subtree (api-cloudrun#680 R1)", () => {
+  const row = (uid: string, type: string, path: string[]) => ({ uid, type, name: uid, path }) as unknown as InvoiceItem;
+  const section = (d: string) => [row(d, "destination", ["o", d]), row("g", "group", ["o", d, "g"]), row("p", "rental", ["o", d, "g", "p"])];
+  assertEquals(validateInvoiceItemUniqueness([row("o", "order", ["o"]), ...section("d"), ...section("e")]), []);
+  // The collapse it guards still collides: the same full path twice.
+  const doubled = [row("o", "order", ["o"]), ...section("d"), row("p", "rental", ["o", "d", "g", "p"])];
+  assertEquals(validateInvoiceItemUniqueness(doubled).map((i) => [i.index, i.uid, i.parentUid]), [[4, "p", "g"]]);
+});
+
 Deno.test("validateInvoiceItemUniqueness allows same product in two different order scopes", () => {
   // Same product line inside order divider 1 and order divider 2 — not a violation.
   const items: InvoiceItem[] = [

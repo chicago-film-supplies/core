@@ -198,7 +198,8 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
   "quantityAccounting": [
-
+    { name: "buildRemainingInvoice", expr: "it.quantityAccounting.buildRemainingInvoice(order, invoices, arg3)", desc: "Build the invoice that bills what is left on an order: new lines whole, quantity increases at their own path, and each extension of dates as a date-extension section (owner decisions, 2026-09-13 and 2026-09-15).", returns: "RemainingInvoice" },
+    { name: "extensionGroups", expr: "it.quantityAccounting.extensionGroups(orderLine, billed)", desc: "The extension still owed on an order line, as groups of billed units that share their terms and their cumulative billed days (api-cloudrun#680 R1).", returns: "ExtensionGroup[]" },
   ],
   "reporting": [
     { name: "agingAccountRows", expr: "it.reporting.agingAccountRows(report)", desc: "The account × bucket matrix: one row per account, plus a residual row when the accounts do not add up to the report's own totals.", returns: "AgingAccountRow[]" },

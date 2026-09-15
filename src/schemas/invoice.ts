@@ -1350,6 +1350,14 @@ const InvoiceItemInputSchema: z.ZodType<InvoiceItemInputType> = z
 export interface CreateInvoiceInputType {
   uid: string;
   query_by_orders: string[];
+  /**
+   * **Bill what is left on this order** (api-cloudrun#680 R1). The server
+   * builds the items and destinations with `buildRemainingInvoice`
+   * (`@cfs/core/utils/quantityAccounting`) from the order and EVERY invoice
+   * linked to it, and ignores `items` and `destinations` on the input.
+   * `query_by_orders` must be exactly `[remaining_of_order]`.
+   */
+  remaining_of_order?: string;
   organization: { uid: string };
   /**
    * **The only tax fact a draft states.** `tax_profile` left this input at
@@ -1387,6 +1395,7 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
     1,
     "At least one source order is required",
   ),
+  remaining_of_order: FirestoreId.optional(),
   organization: z.object({ uid: FirestoreId }),
   tax_exempt: z.boolean().optional(),
   uid_store: FirestoreId.nullable().optional(),

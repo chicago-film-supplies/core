@@ -2276,6 +2276,7 @@ Input schema for POST /invoices — create an invoice from orders.
 interface CreateInvoiceInputType {
   uid: string;
   query_by_orders: string[];
+  remaining_of_order?: string;
   organization: typeLiteral;
   tax_exempt?: boolean;
   uid_store?: string | null;
@@ -2853,6 +2854,7 @@ interface CreditNoteDocLineItem {
   xero_id: string | null;
   xero_tracking_option_id: string | null;
   uid_invoice_item: string | null;
+  path_invoice_item?: string[];
 }
 ```
 
@@ -15489,6 +15491,7 @@ Input schema for POST /invoices — create an invoice from orders.
 interface CreateInvoiceInputType {
   uid: string;
   query_by_orders: string[];
+  remaining_of_order?: string;
   organization: typeLiteral;
   tax_exempt?: boolean;
   uid_store?: string | null;
@@ -18607,6 +18610,7 @@ interface CreditNoteDocLineItem {
   xero_id: string | null;
   xero_tracking_option_id: string | null;
   uid_invoice_item: string | null;
+  path_invoice_item?: string[];
 }
 ```
 
@@ -25103,6 +25107,21 @@ interface BilledRow {
 }
 ```
 
+### `ExtensionGroup`
+
+Units billed at one cumulative day count, still owed (or over-billed) an extension.
+
+```ts
+interface ExtensionGroup {
+  item: LineItem;
+  via: "direct" | "substitute";
+  quantity: number;
+  billed_days: number;
+  extension_days: number;
+  section: [string, string];
+}
+```
+
 ### `LineAccount`
 
 ```ts
@@ -25125,6 +25144,28 @@ interface RemainingForOrder {
 }
 ```
 
+### `RemainingInvoice`
+
+```ts
+interface RemainingInvoice {
+  items: InvoiceDocItemType[];
+  destinations: InvoiceDocDestinationType[];
+  overbilled: typeLiteral[];
+  compared: string[];
+  unaligned: string[];
+}
+```
+
+### `RemainingInvoiceSource`
+
+An invoice as {@link buildRemainingInvoice} reads it: its lines, and the pairs that date its sections.
+
+```ts
+interface RemainingInvoiceSource {
+  destinations?: readonly InvoiceDocDestinationType[];
+}
+```
+
 ### `RemainingLine`
 
 One order line with something left to bill, or billed beyond the order.
@@ -25134,6 +25175,19 @@ interface RemainingLine {
   path: string[];
   item: LineItem;
   new: boolean;
+}
+```
+
+### `RemainingOrderSource`
+
+The order fields {@link buildRemainingInvoice} reads.
+
+```ts
+interface RemainingOrderSource {
+  uid: string;
+  number: number;
+  items: readonly LineItem[];
+  destinations: readonly DocDestinationType[];
 }
 ```
 
@@ -25166,6 +25220,53 @@ the order's absence, not the sum's, that makes it unmatched.
 - `orderUid` — The order's uid, which is its divider's uid on every invoice
 - `orderItems` — The order's CURRENT `items`, dividers included
 - `invoices` — Every invoice linked to the order, live or void
+
+### `buildRemainingInvoice(order: RemainingOrderSource, invoices: readonly RemainingInvoiceSource[], _: unknown): RemainingInvoice`
+
+Build the invoice that bills what is left on an order: new lines whole,
+quantity increases at their own path, and each extension of dates as a
+date-extension section (owner decisions, 2026-09-13 and 2026-09-15).
+
+The one builder, shared by `POST /invoices { remaining_of_order }` (which
+rebuilds it from EVERY sibling invoice and ignores the client's items) and the
+manager's preview.
+
+- **Every order divider is carried**, empty or not: alignment compares the
+  whole divider skeleton, so a remainder without it would be unaligned and
+  bill everything again on the next remainder.
+- **An ancestor of a billed line is carried at quantity 0** when it has
+  nothing of its own left (owner, 2026-09-15). `path` is resolved from the
+  parent, so a component without its kit would bill a different path.
+- **One extension section per billed window**: per order destination, the
+  groups of {@link extensionGroups} that share their billed days. Its divider
+  is a new uid carrying `path_extension_for`; each line in it is the billed
+  row's terms at the group's added days. A path already in the section (the
+  same product billed on different terms) opens another section.
+- **Its pair** is the order's pair re-keyed to the section, charging from the
+  day after the billed window's `charge_end` to the order's. The `_fs`
+  companion of a moved `charge_start` is `null` here: the writer stamps it,
+  because a utility cannot mint a Firestore Timestamp.
+- **Over-billing is never netted in.** A negative quantity or extension is
+  returned in `overbilled`, for the credit-note flow.
+
+🔴 Fails closed on an unaligned scope, exactly as {@link remainingForOrder}.
+
+### `extensionGroups(orderLine: LineItem, billed: BilledAtPath | undefined): ExtensionGroup[]`
+
+The extension still owed on an order line, as groups of billed units that
+share their terms and their cumulative billed days (api-cloudrun#680 R1).
+
+The walk: every `five_day_week` unit row starts a group at its own
+`chargeable_days`. Each extension row then moves its quantity from the groups
+with the FEWEST billed days, in invoice order, to
+`max(days, 5) + added days`. A remainder invoice brings every group to the
+order's days at once, so a later remainder always extends from a single
+cumulative count per window; the fewest-first rule only has to choose for an
+extension built by hand. Extension quantity beyond the units billed is
+ignored.
+
+A `fixed` row never read its days, so it forms no group. A group whose
+extension is zero is dropped.
 
 ### `remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[]): RemainingForOrder`
 
@@ -26914,9 +27015,15 @@ Returns `[]` when every path is clean and order is canonical.
 
 Within-parent uniqueness check for invoice items.
 
-Reuses {@link validateItemUniqueness}'s logic — the parent uid is the
-second-to-last `path` segment, which for invoice items naturally captures
-each scope:
+🔴 **Keyed on the parent's full PATH, not its uid — unlike
+{@link validateItemUniqueness}.** A date-extension section (api-cloudrun#680
+R1) repeats the divider subtree of the order destination it extends under a
+new section divider: `[O, D, G, L]` and `[O, E, G, L]` are two rows, and the
+group `G` keeps its uid because alignment reads `[O, E, G]` as the order's
+`[D, G]`. Keyed on the parent uid they collide. A doubled tree — the collapse
+this guards — repeats the full path, so it is still refused.
+
+The scopes, by what the parent path ends in:
  - top-level destination/group/product under an order divider →
    parentUid is the order divider uid (first segment),
  - product under a destination → parentUid is the destination uid,

@@ -239,6 +239,20 @@ export interface CreditNoteDocLineItem {
   xero_tracking_option_id: string | null;
   /** The invoice line this credits, when the credit was raised from one. */
   uid_invoice_item: string | null;
+  /**
+   * The `path` of the invoice line this credits — its row identity on that
+   * invoice (api-cloudrun#680 R1).
+   *
+   * `uid_invoice_item` alone is ambiguous: `item.uid` repeats within one
+   * document, and an invoice holding a product in a full-window section and in
+   * a date-extension section carries it twice. A credit selects and caps by
+   * this path when present.
+   *
+   * ⚠️ Absent on every note stored before 2026-09-15; readers fall back to
+   * `uid_invoice_item`. No writer may set it until prod API and prod manager
+   * both run the beta that declares it (the schema is strict).
+   */
+  path_invoice_item?: string[];
 }
 
 const CreditNoteDocLineItemInner = z.strictObject({
@@ -263,6 +277,7 @@ const CreditNoteDocLineItemInner = z.strictObject({
   xero_id: z.uuid().nullable(),
   xero_tracking_option_id: z.uuid().nullable(),
   uid_invoice_item: ItemUid.nullable(),
+  path_invoice_item: z.array(ItemUid).min(1).optional(),
 }).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a credit-note line item. */

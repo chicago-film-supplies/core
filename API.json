@@ -1023,7 +1023,7 @@
         {
           "kind": "interface",
           "name": "CreateInvoiceInputType",
-          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n}",
+          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  remaining_of_order?: string;\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n}",
           "doc": "Input schema for POST /invoices — create an invoice from orders."
         },
         {
@@ -1263,7 +1263,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocLineItem",
-          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType | null;\n  coa_posting: number;\n  tracking_category: string | null;\n  xero_id: string | null;\n  xero_tracking_option_id: string | null;\n  uid_invoice_item: string | null;\n}",
+          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType | null;\n  coa_posting: number;\n  tracking_category: string | null;\n  xero_id: string | null;\n  xero_tracking_option_id: string | null;\n  uid_invoice_item: string | null;\n  path_invoice_item?: string[];\n}",
           "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**No dividers.** A credit note has no destinations and bills no orders, so the\nwhole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`\nmachinery that goes with it — has nothing to organize here. Lines are flat.\n\n## `coa_revenue` and `coa_posting` are TWO facts, and a line has both\n\nThey are routinely different, and collapsing them loses real information.\nMeasured on the live tenant: CN-1009 writes off 35 lines whose products are\nrentals — `product.price.coa_revenue` 4000 Rental Income — and every one of\nthem posts to **6900 Bad Debt**. Store only the posting account and the\nrevenue attribution that tracking-category rollups and the tax tables depend\non is gone; store only the revenue account and the write-off is invisible.\n\n- **`coa_revenue`** — the revenue account of the *thing being credited*.\n  Product-sourced, same vocabulary as the invoice line it mirrors. Never the\n  account the credit posts to, and — since the owner ruling of 2026-08-20 —\n  never an input to what the line is taxed either.\n- **`coa_posting`** — where this credit lands in the ledger. Any account in\n  the `chart-of-accounts` catalog, including the expense range, which is\n  exactly why it cannot be `COARevenueEnum`: that enum is shared with\n  `Product.price.coa_revenue`, and widening it would make a catalog product\n  whose revenue account is Bad Debt Expense representable."
         },
         {
@@ -7056,7 +7056,7 @@
         {
           "kind": "interface",
           "name": "CreateInvoiceInputType",
-          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n}",
+          "declaration": "interface CreateInvoiceInputType {\n  uid: string;\n  query_by_orders: string[];\n  remaining_of_order?: string;\n  organization: typeLiteral;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n}",
           "doc": "Input schema for POST /invoices — create an invoice from orders."
         },
         {
@@ -8386,7 +8386,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocLineItem",
-          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType | null;\n  coa_posting: number;\n  tracking_category: string | null;\n  xero_id: string | null;\n  xero_tracking_option_id: string | null;\n  uid_invoice_item: string | null;\n}",
+          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType | null;\n  coa_posting: number;\n  tracking_category: string | null;\n  xero_id: string | null;\n  xero_tracking_option_id: string | null;\n  uid_invoice_item: string | null;\n  path_invoice_item?: string[];\n}",
           "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**No dividers.** A credit note has no destinations and bills no orders, so the\nwhole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`\nmachinery that goes with it — has nothing to organize here. Lines are flat.\n\n## `coa_revenue` and `coa_posting` are TWO facts, and a line has both\n\nThey are routinely different, and collapsing them loses real information.\nMeasured on the live tenant: CN-1009 writes off 35 lines whose products are\nrentals — `product.price.coa_revenue` 4000 Rental Income — and every one of\nthem posts to **6900 Bad Debt**. Store only the posting account and the\nrevenue attribution that tracking-category rollups and the tax tables depend\non is gone; store only the revenue account and the write-off is invisible.\n\n- **`coa_revenue`** — the revenue account of the *thing being credited*.\n  Product-sourced, same vocabulary as the invoice line it mirrors. Never the\n  account the credit posts to, and — since the owner ruling of 2026-08-20 —\n  never an input to what the line is taxed either.\n- **`coa_posting`** — where this credit lands in the ledger. Any account in\n  the `chart-of-accounts` catalog, including the expense range, which is\n  exactly why it cannot be `COARevenueEnum`: that enum is shared with\n  `Product.price.coa_revenue`, and widening it would make a catalog product\n  whose revenue account is Bad Debt Expense representable."
         },
         {
@@ -11290,6 +11290,12 @@
         },
         {
           "kind": "interface",
+          "name": "ExtensionGroup",
+          "declaration": "interface ExtensionGroup {\n  item: LineItem;\n  via: \"direct\" | \"substitute\";\n  quantity: number;\n  billed_days: number;\n  extension_days: number;\n  section: [string, string];\n}",
+          "doc": "Units billed at one cumulative day count, still owed (or over-billed) an extension."
+        },
+        {
+          "kind": "interface",
           "name": "LineAccount",
           "declaration": "interface LineAccount {\n  ordered: number;\n  billed: number;\n  quantity: number;\n  quantity_cents: number;\n  extension_cents: number;\n}",
           "doc": ""
@@ -11302,9 +11308,27 @@
         },
         {
           "kind": "interface",
+          "name": "RemainingInvoice",
+          "declaration": "interface RemainingInvoice {\n  items: InvoiceDocItemType[];\n  destinations: InvoiceDocDestinationType[];\n  overbilled: typeLiteral[];\n  compared: string[];\n  unaligned: string[];\n}",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "RemainingInvoiceSource",
+          "declaration": "interface RemainingInvoiceSource {\n  destinations?: readonly InvoiceDocDestinationType[];\n}",
+          "doc": "An invoice as {@link buildRemainingInvoice} reads it: its lines, and the pairs that date its sections."
+        },
+        {
+          "kind": "interface",
           "name": "RemainingLine",
           "declaration": "interface RemainingLine {\n  path: string[];\n  item: LineItem;\n  new: boolean;\n}",
           "doc": "One order line with something left to bill, or billed beyond the order."
+        },
+        {
+          "kind": "interface",
+          "name": "RemainingOrderSource",
+          "declaration": "interface RemainingOrderSource {\n  uid: string;\n  number: number;\n  items: readonly LineItem[];\n  destinations: readonly DocDestinationType[];\n}",
+          "doc": "The order fields {@link buildRemainingInvoice} reads."
         },
         {
           "kind": "function",
@@ -11342,6 +11366,22 @@
               "doc": "Every invoice linked to the order, live or void"
             }
           ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "buildRemainingInvoice",
+          "signature": "buildRemainingInvoice(order: RemainingOrderSource, invoices: readonly RemainingInvoiceSource[], _: unknown): RemainingInvoice",
+          "doc": "Build the invoice that bills what is left on an order: new lines whole,\nquantity increases at their own path, and each extension of dates as a\ndate-extension section (owner decisions, 2026-09-13 and 2026-09-15).\n\nThe one builder, shared by `POST /invoices { remaining_of_order }` (which\nrebuilds it from EVERY sibling invoice and ignores the client's items) and the\nmanager's preview.\n\n- **Every order divider is carried**, empty or not: alignment compares the\n  whole divider skeleton, so a remainder without it would be unaligned and\n  bill everything again on the next remainder.\n- **An ancestor of a billed line is carried at quantity 0** when it has\n  nothing of its own left (owner, 2026-09-15). `path` is resolved from the\n  parent, so a component without its kit would bill a different path.\n- **One extension section per billed window**: per order destination, the\n  groups of {@link extensionGroups} that share their billed days. Its divider\n  is a new uid carrying `path_extension_for`; each line in it is the billed\n  row's terms at the group's added days. A path already in the section (the\n  same product billed on different terms) opens another section.\n- **Its pair** is the order's pair re-keyed to the section, charging from the\n  day after the billed window's `charge_end` to the order's. The `_fs`\n  companion of a moved `charge_start` is `null` here: the writer stamps it,\n  because a utility cannot mint a Firestore Timestamp.\n- **Over-billing is never netted in.** A negative quantity or extension is\n  returned in `overbilled`, for the credit-note flow.\n\n🔴 Fails closed on an unaligned scope, exactly as {@link remainingForOrder}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "extensionGroups",
+          "signature": "extensionGroups(orderLine: LineItem, billed: BilledAtPath | undefined): ExtensionGroup[]",
+          "doc": "The extension still owed on an order line, as groups of billed units that\nshare their terms and their cumulative billed days (api-cloudrun#680 R1).\n\nThe walk: every `five_day_week` unit row starts a group at its own\n`chargeable_days`. Each extension row then moves its quantity from the groups\nwith the FEWEST billed days, in invoice order, to\n`max(days, 5) + added days`. A remainder invoice brings every group to the\norder's days at once, so a later remainder always extends from a single\ncumulative count per window; the fewest-first rule only has to choose for an\nextension built by hand. Extension quantity beyond the units billed is\nignored.\n\nA `fixed` row never read its days, so it forms no group. A group whose\nextension is zero is dropped.",
+          "paramTags": [],
           "returnsTag": null
         },
         {
@@ -12284,7 +12324,7 @@
           "kind": "function",
           "name": "validateInvoiceItemUniqueness",
           "signature": "validateInvoiceItemUniqueness(items: T[]): ItemUniquenessIssue[]",
-          "doc": "Within-parent uniqueness check for invoice items.\n\nReuses {@link validateItemUniqueness}'s logic — the parent uid is the\nsecond-to-last `path` segment, which for invoice items naturally captures\neach scope:\n - top-level destination/group/product under an order divider →\n   parentUid is the order divider uid (first segment),\n - product under a destination → parentUid is the destination uid,\n - product under a group → parentUid is the group uid,\n - component → parentUid is the parent product line uid.\n\nSo the `(parentUid, uid)` key naturally scopes per order divider for\ntop-level entries, and per parent product for nested ones.\n\nReturns `[]` when uniqueness holds.",
+          "doc": "Within-parent uniqueness check for invoice items.\n\n🔴 **Keyed on the parent's full PATH, not its uid — unlike\n{@link validateItemUniqueness}.** A date-extension section (api-cloudrun#680\nR1) repeats the divider subtree of the order destination it extends under a\nnew section divider: `[O, D, G, L]` and `[O, E, G, L]` are two rows, and the\ngroup `G` keeps its uid because alignment reads `[O, E, G]` as the order's\n`[D, G]`. Keyed on the parent uid they collide. A doubled tree — the collapse\nthis guards — repeats the full path, so it is still refused.\n\nThe scopes, by what the parent path ends in:\n - top-level destination/group/product under an order divider →\n   parentUid is the order divider uid (first segment),\n - product under a destination → parentUid is the destination uid,\n - product under a group → parentUid is the group uid,\n - component → parentUid is the parent product line uid.\n\nSo the `(parentUid, uid)` key naturally scopes per order divider for\ntop-level entries, and per parent product for nested ones.\n\nReturns `[]` when uniqueness holds.",
           "paramTags": [],
           "returnsTag": null
         },
