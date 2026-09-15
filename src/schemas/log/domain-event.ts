@@ -229,6 +229,20 @@ export const DOMAIN_EVENT_MSGS = [
   // what tell a human where it was going.
   "invoice_destination_override_dropped",
 
+  // An order→invoice sync would have moved an ISSUED, Xero-linked invoice to an
+  // organization with a different Xero ContactID, and did not (api-cloudrun#890,
+  // G14). Owner ruling 2026-09-15: whether Xero accepts a contact change on an
+  // AUTHORISED invoice could not be settled by a read, so the invoice keeps its
+  // organization and moving it is a deliberate operator act. Drafts and unlinked
+  // invoices follow; a same-uid snapshot update (same ContactID) still flows.
+  //
+  // `info`, not `warn`: the sync did what the ruling says. The record exists so
+  // the kept organization is findable rather than silent.
+  //
+  // `{ operation, invoice_uid, invoice_number, order_uid, kept_organization_uid,
+  // order_organization_uid }`.
+  "invoice_sync_organization_kept",
+
   // A document was written whose destination DIVIDERS and destination PAIRS
   // could not be joined — `assignDestinationPairUids` (`@cfs/core/utils/orders`)
   // left a divider with no pair, or a pair no divider names.
