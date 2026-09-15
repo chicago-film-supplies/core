@@ -92,7 +92,7 @@ import {
 } from "../schemas/mod.ts";
 import { fromCentsBig, roundDivHalfAwayFromZero } from "./money.ts";
 import { chicagoDaysBetween } from "./dates.ts";
-import { agingBucketOf, type InvoiceAging, LINE_TAX_FIELDS, type TaxedAsType } from "../schemas/mod.ts";
+import { agingBucketOf, type InvoiceAging, LINE_TAX_FIELDS } from "../schemas/mod.ts";
 import {
   computeItemPaths,
   isTaxableCoa,
@@ -615,7 +615,7 @@ export function buildInvoiceDestinationDivider(
  * paired line report a key-set difference at once. This file already records
  * that happening three times (`base_percent`, `crms_id`,
  * `price.discount_percent` — 8,015 of 8,978 paired lines), which is why
- * `coa_revenue`, `taxed_as` and `price.taxes_base` below are all spread
+ * `coa_revenue`, the tax-class levers and `price.taxes_base` below are all spread
  * CONDITIONALLY.
  *
  * 🔴 **So this key is the one that must NOT be conditional, and the population
@@ -625,9 +625,8 @@ export function buildInvoiceDestinationDivider(
  * catalog would take the key off the projection while the stored line kept it,
  * and that line would report `out_of_sync` forever with nothing wrong. Measured
  * 2026-09-10 in prod, the narrow rule saved 102 invoice documents out of 1,037 —
- * a tenth of the write, for a defect class. `price.base_percent` and `taxed_as`
- * are spelled `?? null` in `api-cloudrun`'s `buildInvoiceItems` for the same
- * reason.
+ * a tenth of the write, for a defect class. `price.base_percent` is spelled
+ * `?? null` in `api-cloudrun`'s `buildInvoiceItems` for the same reason.
  *
  * `destination` and `group` items share their shape with the order doc, so they
  * pass through. Line items (and `transaction_fee`, which is stored as a
@@ -721,8 +720,7 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
     // nested inside `price` and therefore compared — hence the two different
     // treatments of two fields added in the same pass.
     ...(item.coa_revenue !== undefined ? { coa_revenue: item.coa_revenue } : {}),
-    // The tax levers (`LineTaxCore`: `taxed_as`, `uid_tax_class`,
-    // `uid_tax_class_override`) mirror onto the invoice, because the invoice is
+    // The tax levers (`LineTaxCore`: `uid_tax_class`, `uid_tax_class_override`) mirror onto the invoice, because the invoice is
     // what gets billed and it prices its OWN line through the same resolver.
     // Copied CONDITIONALLY, key by key, for the `taxes_base` reason one field
     // up: the comparator compares KEY SETS, so a key is present on the invoice
@@ -737,9 +735,9 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
  * projection preserves the source line's key set exactly.
  */
 export function pickLineTaxFields(
-  item: { taxed_as?: TaxedAsType | null; uid_tax_class?: string | null; uid_tax_class_override?: string | null },
-): { taxed_as?: TaxedAsType | null; uid_tax_class?: string | null; uid_tax_class_override?: string | null } {
-  const picked: { taxed_as?: TaxedAsType | null; uid_tax_class?: string | null; uid_tax_class_override?: string | null } = {};
+  item: { uid_tax_class?: string | null; uid_tax_class_override?: string | null },
+): { uid_tax_class?: string | null; uid_tax_class_override?: string | null } {
+  const picked: { uid_tax_class?: string | null; uid_tax_class_override?: string | null } = {};
   for (const key of LINE_TAX_FIELDS) {
     if (item[key] !== undefined) (picked as Record<string, unknown>)[key] = item[key];
   }

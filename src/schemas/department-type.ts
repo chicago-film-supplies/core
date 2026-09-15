@@ -67,7 +67,7 @@ export interface DepartmentType {
    * it from the `active` flag `taxes` deleted.** The rule that deletion
    * establishes is not *"a boolean soft-delete is an anti-pattern"* — it is
    * *a stored flag duplicating a fact some other field already determines will
-   * drift from it*. `findTaxFor` selects by `[applied_from, applied_to)` alone,
+   * drift from it*. The tax resolver selected by `[applied_from, applied_to)` alone,
    * so a tax's `active` recorded what an operator believed and nothing about
    * what got billed, and two prod documents sat `active: true` on a closed
    * window. There is no window here, and no usage-based answer either — you

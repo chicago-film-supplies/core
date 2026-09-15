@@ -7,7 +7,6 @@ import {
   isPreTaxItem,
   type LineItem,
   rederiveDocumentTotalsForAudit,
-  type Tax,
 } from "../src/utils/orders.ts";
 import {
   extensionChargeDays,
@@ -18,19 +17,20 @@ import {
   sumPricedLines,
 } from "../src/utils/price-document.ts";
 import { assignLineTaxes, type DocumentTaxContext, type TaxDestination } from "../src/utils/taxes.ts";
-import { type LegacyTaxRow, migrateLegacyTaxCatalog, pricingTaxesOf, type TaxCatalog } from "../src/utils/tax-classes.ts";
+import { pricingTaxesOf, type TaxCatalog } from "../src/utils/tax-classes.ts";
+import { type LegacyTax, type LegacyTaxRow, migrateLegacyTaxCatalog } from "./helpers/legacyTaxCatalog.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const lineItemBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
 const priceBase = lineItemBase.price as Record<string, unknown>;
 
-const CATALOG: Tax[] = [
+const CATALOG: LegacyTax[] = [
   { uid: "frankfort-tax", name: "Frankfort Sales Tax", rate: 8, type: "percent", jurisdiction: "frankfort", item_types: ["rental", "sale", "replacement"], applied_from: "2026-01-01T00:00:00.000-06:00", applied_to: null },
   { uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", jurisdiction: "chicago", item_types: ["rental"], applied_from: "2026-01-01T00:00:00.000-06:00", applied_to: null },
   { uid: "chi-sales-tax", name: "Chicago Sales Tax", rate: 10.5, type: "percent", jurisdiction: "chicago", item_types: ["sale", "replacement"], applied_from: "2020-01-01T00:00:00.000-06:00", applied_to: null },
 ];
 
-function catalogOf(taxes: Tax[]): TaxCatalog {
+function catalogOf(taxes: LegacyTax[]): TaxCatalog {
   let n = 0;
   const docs = taxes.map((t) => ({
     crms_id: null,

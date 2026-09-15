@@ -28,7 +28,7 @@
  * ## What is compared (owner decision, 2026-09-13)
  *
  * **Money, quantity and dates only.** Labels (`name`, `description`), `type`,
- * `taxed_as` and `price.taxes_base` never produce an entry: on prod the label
+ * the tax-class levers and `price.taxes_base` never produce an entry: on prod the label
  * differences alone put rows on hundreds of settled invoices whose catalog names
  * moved after invoicing, and `taxes_base` is not money. A fulfillment carries no
  * price, so every comparison with a fulfillment is quantity and existence only.

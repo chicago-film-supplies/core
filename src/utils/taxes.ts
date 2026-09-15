@@ -3,15 +3,15 @@
  * rule**, so the API (order + invoice write paths, the CRMS webhooks) and the
  * manager (optimistic recompute) reach the same answer.
  *
- * The rule is `(item type × jurisdiction)`, zeroed by exemption, resolved
+ * The rule is `(tax class × jurisdiction)`, zeroed by exemption, resolved
  * **per line** through the destination it is billed under:
  *
  * ```
- * key          = item.taxed_as ?? item.type
+ * class        = line override ?? line snapshot ?? default class for its type
  * jurisdiction = destinations[i].jurisdiction        ← WINS
  *                  ?? organization.jurisdiction_claim
  *                  ?? deriveJurisdiction(address, origin)   // TOTAL
- * tax          = findTaxFor(catalog, jurisdiction, key, asOf)
+ * rates        = resolveClassTaxes(class, jurisdiction, exempt, asOf)
  * ```
  *
  * ⚠️ **This replaced a doc-level `tax_profile` enum** that welded exemption to
@@ -30,7 +30,6 @@
 import { compareAsc, parseISO } from "date-fns";
 import {
   type JurisdictionType,
-  type PreTaxItemType,
   type TaxJurisdictionType,
   toUsStateCode,
 } from "../schemas/mod.ts";
@@ -90,7 +89,7 @@ export { isTaxableCoa, TAXABLE_REVENUE_COAS };
  * at. ⚠️ **Both directions are now moot as a CLIENT hazard**, and the reason is
  * worth keeping: `priceDocument` no longer reads a client's
  * `price.taxes` refs at all — `assignLineTaxes` rebuilds the array from
- * `(taxed_as ?? type, jurisdiction)`, so a client that seeds the wrong tax, or
+ * `(tax class, jurisdiction)`, so a client that seeds the wrong tax, or
  * none, is corrected on save either way. This table survives as the DEFAULT a
  * restatement tool needs when it is reconstructing what a historical line
  * carried, not as a rule any writer consults.
@@ -105,9 +104,8 @@ export { isTaxableCoa, TAXABLE_REVENUE_COAS };
  * account.
  *
  * ⚠️ **Its consumers are restatement tools, not writers.** The live default is
- * `findTaxFor(catalog, jurisdiction, taxed_as ?? type, asOf)` — the same
- * `(item type × jurisdiction)` rule everything else resolves by, which answers
- * for a custom line too. A companion type-keyed table (`defaultTaxNameForLine`
+ * the line's tax class resolved in its jurisdiction ({@link resolveLineTax}),
+ * which answers for a custom line too. A companion type-keyed table (`defaultTaxNameForLine`
  * / `DEFAULT_TAX_NAME_BY_TYPE`) was DELETED rather than kept: it was a second
  * encoding of a rule that already exists, and an earlier revision of this
  * docblock records a *third* (`chart-of-accounts.default_tax_profile`) deleted
@@ -171,27 +169,6 @@ function windowContains(tax: Tax, t: number): boolean {
   return true;
 }
 
-/**
- * **The derived `active`.** Is this version the one CFS collects at `asOf`?
- *
- * This replaced a STORED `active` boolean, and the reason is that nothing ever
- * read the stored one: `findTaxFor` and `findTaxAt` have always selected by
- * window alone, so a flag disagreeing with the window changed nothing about
- * what got billed and everything about what an operator believed. Two prod
- * documents sat `active: true` with a window that had already closed
- * (api-cloudrun#613). One clause, derived on demand, cannot drift from the
- * bound that actually prices.
- *
- * ⚠️ **"Live" is a claim about the WINDOW, not about reachability.** The
- * explicit-only class (`item_types: []`) is reached by uid and is never
- * window-checked by {@link assignLineTaxes}, so `isTaxLive` is not the
- * question to ask of `No Tax` or `Water Bottle Tax` — their windows stay
- * open-ended precisely because an expiry on them would be inert.
- */
-export function isTaxLive(tax: Tax, asOf: string): boolean {
-  return windowContains(tax, new Date(asOf).getTime());
-}
-
 /** `uid@[from,to)` for a drift message. */
 function windowLabel(tax: Tax): string {
   const { from, to } = taxAppliedWindow(tax);
@@ -224,80 +201,9 @@ export function findTaxAt(
 }
 
 /**
- * **The tax rule: `(jurisdiction × item type)`, as of a date.**
- *
- * Pick the one Tax covering `itemType` in `jurisdiction` whose applied window
- * contains `asOf`. `null` means *this line is untaxed*, which is a real answer
- * rather than a miss — a line is untaxed **iff no tax in its jurisdiction lists
- * its type**.
- *
- * ⚠️ **`null` has a second cause, and this function cannot tell you which.** A
- * cell whose window has LAPSED also returns `null` here, and that is a
- * configuration failure rather than a rate of zero. {@link taxCellState}
- * separates the two; this function is deliberately left as the two-valued
- * lookup because its read-only consumers (`ilTaxRateCheck`, the audits) must
- * not throw.
- *
- * One mechanism, which is the point. What this replaces was two: a
- * `coa_revenue` permissive gate (`isTaxableCoa`) and a separate name-keyed
- * default table, each of which could say "taxable" while the other said
- * "untaxed". api-cloudrun#409 measured that drift at 19 invoices and $2,741.78
- * of phantom receivable — CFS taxing lines it told Xero were `TaxType: NONE`.
- *
- * ⚠️ **A `null` jurisdiction is NEVER a wildcard, on either side.**
- * - A `null` ARGUMENT means *no nexus* (delivered outside Illinois): nothing is
- *   collected, so the answer is `null` without consulting the catalog.
- * - A `null` on a tax DOCUMENT marks the **explicit-only** class — a tax
- *   reachable by uid alone, never by this rule. Prod has exactly two (`No Tax`
- *   and `Water Bottle Tax`), and treating either as matching every jurisdiction
- *   would apply a $0.05/unit bottle tax to every line in the corpus.
- *
- * Throws on catalog drift, for the same reason {@link findTaxAt} does: two
- * taxes covering one `(jurisdiction, type, instant)` is a configuration error
- * with no correct silent resolution, and picking either one bills a number
- * nobody chose.
- *
- * @param taxes The `taxes` collection, unfiltered — historical versions
- *   included, since the window is what selects among them.
- * @param jurisdiction Where the goods went, already resolved through the
- *   destination → organization → {@link deriveJurisdiction} precedence.
- * @param itemType The line's `taxed_as ?? type`. A type no tax lists is
- *   untaxed, which is how `service`, `surcharge` and `transaction_fee` stay
- *   untaxed without a second rule naming them.
- * @param asOf Instant to resolve the catalog at.
- */
-export function findTaxFor(
-  taxes: Tax[],
-  jurisdiction: JurisdictionType | null,
-  itemType: string,
-  asOf: string,
-): Tax | null {
-  // No nexus — nothing is collected, and no catalog lookup can change that.
-  if (jurisdiction === null) return null;
-
-  const t = new Date(asOf).getTime();
-  const matches = taxes.filter((tax) => {
-    // Skips the explicit-only class by construction: `null !== jurisdiction`
-    // for every real jurisdiction, so it can never read as a wildcard.
-    if (tax.jurisdiction !== jurisdiction) return false;
-    if (!tax.item_types?.includes(itemType as PreTaxItemType)) return false;
-    return windowContains(tax, t);
-  });
-
-  if (matches.length === 0) return null;
-  if (matches.length > 1) {
-    throw new Error(
-      `Tax catalog drift: multiple taxes cover (${jurisdiction}, ${itemType}) ` +
-        `at ${asOf}: ${matches.map((m) => `${m.name} ${windowLabel(m)}`).join(", ")}`,
-    );
-  }
-  return matches[0];
-}
-
-/**
- * What the catalog has to say about one `(jurisdiction × item type)` cell at an
- * instant. Three states, because two could not tell the two ways of getting
- * `null` out of {@link findTaxFor} apart.
+ * What the catalog has to say about one line's taxes at an instant — the
+ * `state` of a {@link LineTaxResolution}. Three states, because "no rate" has two
+ * causes that must not be confused:
  *
  * - `taxed` — a version brackets `asOf`.
  * - `untaxed` — **nothing has ever covered this cell**, so `null` is the rule's
@@ -307,52 +213,6 @@ export function findTaxFor(
  *   replacing it. That is a configuration failure, not a rate of zero.
  */
 export type TaxCellState = "taxed" | "untaxed" | "expired";
-
-/**
- * **The third state.** Is this cell taxed, genuinely untaxed, or EXPIRED?
- *
- * A cell is `expired` iff no version brackets `asOf` **and** some version of
- * that cell closed before it. A deliberate deregistration is expressed as a
- * successor at 0% with an open window, never as a closed window with no
- * successor — so "the last thing we said about this cell was a rate, and it has
- * run out" is unambiguous.
- *
- * ⚠️ **`untaxed` is the answer that must NOT widen.** A Chicago `service` line
- * is `untaxed` and always has been: no tax has ever listed that type, so there
- * is no lapsed version to find. If this returned `expired` for it, every
- * service line in the corpus would be reported as pricing on a lapsed rate —
- * and, worse, would fall forward onto a tax that never covered it. That
- * distinction is the safety property the whole design turns on; see
- * {@link UnreviewedTaxWarning}.
- *
- * ⚠️ A `null` jurisdiction is `untaxed`, never `expired`: no-nexus means no
- * catalog lookup happens at all, which is a decision rather than a lapse.
- *
- * @param taxes The `taxes` collection, unfiltered — historical versions are
- *   what make the lapse visible.
- */
-export function taxCellState(
-  taxes: Tax[],
-  jurisdiction: JurisdictionType | null,
-  itemType: string,
-  asOf: string,
-): TaxCellState {
-  if (jurisdiction === null) return "untaxed";
-
-  const t = new Date(asOf).getTime();
-  const cell = taxes.filter((tax) =>
-    tax.jurisdiction === jurisdiction &&
-    (tax.item_types?.includes(itemType as PreTaxItemType) ?? false)
-  );
-
-  if (cell.some((tax) => windowContains(tax, t))) return "taxed";
-  return cell.some((tax) => {
-    const { to } = taxAppliedWindow(tax);
-    return to != null && new Date(to).getTime() <= t;
-  })
-    ? "expired"
-    : "untaxed";
-}
 
 /**
  * **One line priced on a rate whose REVIEW has lapsed**, reported by
@@ -368,9 +228,8 @@ export function taxCellState(
  *
  * ## Why a warning rather than a refusal
  *
- * An earlier revision THREW here, on the reasoning that a closed window makes
- * {@link findTaxFor} return `null`, `null` already means *"this line is
- * untaxed"*, and an unreviewed Chicago Rental Tax would therefore silently
+ * An earlier revision THREW here, on the reasoning that a closed window leaves
+ * no rate to price on, no rate already means *"this line is untaxed"*, and an unreviewed Chicago Rental Tax would therefore silently
  * zero-rate **70% of all tax CFS has ever collected**. The zero-rating problem
  * is real and this design still fixes it — by falling forward to the most
  * recent version rather than to nothing.
@@ -393,7 +252,7 @@ export function taxCellState(
 export interface UnreviewedTaxWarning {
   /** The jurisdiction whose cell has lapsed. */
   jurisdiction: JurisdictionType;
-  /** The line key that resolved it — `item.taxed_as ?? item.type`. */
+  /** The line's type. */
   item_type: string;
   /** The version being used — the most recent one at or before `as_of`. */
   tax_uid: string;
@@ -604,8 +463,8 @@ export interface ResolvedJurisdiction {
  * ```
  *
  * **TOTAL: it always returns a jurisdiction**, because level 3 does. A caller
- * never has to decide what "no answer" means, and `findTaxFor` gets a value it
- * can look up — `no_nexus` simply matches no tax, which is the untaxed result
+ * never has to decide what "no answer" means, and the class resolver gets a value
+ * it can look up — `no_nexus` simply matches no tax code, which is the untaxed result
  * expressed as data rather than as a missing case.
  *
  * ## There is deliberately NO destination-master level
@@ -938,8 +797,8 @@ export interface LineTaxResolution {
   level: JurisdictionLevel | "origin";
   /**
    * The class the line priced on — {@link deriveLineTaxClass}: the operator's
-   * override, the product snapshot, or (for an unstamped line) the class the
-   * legacy `taxed_as ?? type` key maps to. `null` is untaxed.
+   * override, the product snapshot, or (for a line not yet stamped) the default
+   * class for its type. `null` is untaxed.
    */
   uid_tax_class: string | null;
   /**
@@ -988,8 +847,8 @@ export interface LineTaxResolution {
  * 3. SELECT    resolveClassTaxes(deriveLineTaxClass(item), jurisdiction, exempt, asOf)
  * ```
  *
- * ⚠️ **The reader switch (api-cloudrun#993).** Stage 3 used to be
- * `findTaxFor(taxes, jurisdiction, taxed_as ?? type, asOf)` plus the
+ * ⚠️ **The reader switch (api-cloudrun#993).** Stage 3 used to be a lookup of
+ * the retired `taxes` collection by `(taxed_as ?? type, jurisdiction)`, plus the
  * explicit-only uid refs the line carried. Both are gone: what a product IS for
  * tax is its class, and the bottle levy is a code in "Sale – Bottled Water"
  * rather than a ref that had to survive every rebuild. The one intended money
@@ -1012,8 +871,7 @@ export interface LineTaxResolution {
  * ⚠️ **Keyed on the line's TYPE, never on its class** — `replacement` already
  * means L&D everywhere (pricing, Xero accounts, bookings), and a rule keyed on
  * the class would let a re-class or a line override silently strip CFS's
- * end-user status. The legacy rule keyed on `taxed_as ?? type`; no stored line
- * carries `taxed_as: "replacement"`, so the move changes no document.
+ * end-user status.
  *
  * ## 🔴 The revenue ACCOUNT is not one of the rules, and used to be
  *

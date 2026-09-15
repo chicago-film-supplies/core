@@ -11,21 +11,23 @@ import {
   type TaxDestination,
 } from "../src/utils/taxes.ts";
 import type { LineItem, Tax } from "../src/utils/orders.ts";
-import { type LegacyTaxRow, migrateLegacyTaxCatalog, type TaxCatalog } from "../src/utils/tax-classes.ts";
+import type { TaxCatalog } from "../src/utils/tax-classes.ts";
+import { type LegacyTax, type LegacyTaxRow, migrateLegacyTaxCatalog } from "./helpers/legacyTaxCatalog.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 import { priceDocument } from "../src/utils/price-document.ts";
 
 const lineItemBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
 const priceBase = lineItemBase.price as Record<string, unknown>;
 
-// The catalog the rule resolves against: a `(jurisdiction, item_types, window)`
-// triple per version, mirroring prod's shape. Other `Tax` fields are omitted
+// The catalog the rule resolves against, written as retired `taxes` rows — a
+// `(jurisdiction, item_types, window)` triple per version, mirroring prod's
+// shape — and migrated to codes × rates × classes by `catalogOf` below. Other `Tax` fields are omitted
 // deliberately, to exercise the widened optional type.
 //
 // ⚠️ Under Rantoul and Frankfort there is NO rental/sales split — one tax
 // covers every taxed type — while Chicago splits rental from sale. That
 // asymmetry is the model, not a fixture convenience.
-const CATALOG: Tax[] = [
+const CATALOG: LegacyTax[] = [
   {
     uid: "frankfort-tax",
     name: "Frankfort Sales Tax",
@@ -186,7 +188,7 @@ const at = (
  * ⚠️ An explicit-only row with `jurisdiction: null` has no code to become, so
  * it drops out — exactly as prod's "No Tax" did.
  */
-function catalogOf(taxes: Tax[]): TaxCatalog {
+function catalogOf(taxes: LegacyTax[]): TaxCatalog {
   let n = 0;
   const docs = taxes.map((t) => ({
     crms_id: null,
@@ -208,7 +210,7 @@ function catalogOf(taxes: Tax[]): TaxCatalog {
 }
 
 /** The context, with everything defaulted to "an ordinary Chicago document". */
-const ctx = (overrides: Partial<DocumentTaxContext> & { taxes?: Tax[] } = {}): DocumentTaxContext => {
+const ctx = (overrides: Partial<DocumentTaxContext> & { taxes?: LegacyTax[] } = {}): DocumentTaxContext => {
   const { taxes = CATALOG, ...rest } = overrides;
   return {
     destinations: [at("Chicago")],
@@ -389,23 +391,6 @@ Deno.test("🔴 an out-of-state REPLACEMENT is taxed, where the old rule exempte
   const items = [makeItem({ type: "replacement" }, { taxes: [] })];
   materialize(items, ctx({ destinations: [at("St. Louis", "MO")] }));
   assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-sales-tax"]);
-});
-
-// ── The key: `taxed_as ?? type` ──────────────────────────────────
-
-Deno.test("taxed_as overrides the line's own type for tax, and only for tax", () => {
-  const items = [makeItem({ type: "sale", taxed_as: "rental" }, { taxes: [] })];
-  materialize(items, ctx());
-  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
-  assertEquals(items[0].type, "sale");
-});
-
-Deno.test('taxed_as: "none" is untaxed outright, with no branch of its own', () => {
-  // It needs none: no tax lists "none" in `item_types`, so the ordinary lookup
-  // answers null. That is the same mechanism that keeps `service` untaxed.
-  const items = [makeItem({ type: "rental", taxed_as: "none" })];
-  materialize(items, ctx());
-  assertEquals(px(items[0]).taxes, []);
 });
 
 Deno.test("a type no tax lists is untaxed — service and surcharge, by the rule", () => {
@@ -651,13 +636,13 @@ Deno.test("🔴 resolveLineTax: `applied` is exemption-applied, `base` is not", 
 
   // ⚠️ The third case here used to be a non-revenue account — "not taxABLE,
   // which is a different fact from exempt, so both are null". That gate is gone
-  // (see the COA block above), and the fact it expressed now travels on
-  // `taxed_as`, which IS a tax-rule axis: no tax lists the key `"none"`, so
-  // nothing is found and there is nothing to be exempt from.
-  const untaxable = resolveLineTax(makeItem({ taxed_as: "none" }), at("Chicago"), ctx());
+  // (see the COA block above), and the fact it expressed now travels on the
+  // line's tax CLASS: Non-Taxable lists no codes, so nothing is found and there
+  // is nothing to be exempt from.
+  const untaxable = resolveLineTax(makeItem({ type: "service" }), at("Chicago"), ctx());
   assertEquals(untaxable.applied, []);
   assertEquals(untaxable.base, []);
-  assertEquals(untaxable.uid_tax_class, null);
+  assertEquals(ctx().catalog.classes.find((c) => c.uid === untaxable.uid_tax_class)?.uid_tax_codes, []);
 });
 
 Deno.test("resolveLineTax reports the LEVEL that answered, for the order form", () => {
@@ -684,7 +669,7 @@ Deno.test("🔴 a frozen document keeps the rate VERSION it already stores", () 
   // completed order re-priced on a later CRMS event must keep the rate it was
   // billed at — and `applied_from` alone does not give that, because it is set
   // to the CUTOVER, which precedes a future delivery date.
-  const versioned: Tax[] = [
+  const versioned: LegacyTax[] = [
     ...CATALOG,
     {
       uid: "chi-rental-tax-old",
@@ -999,8 +984,12 @@ Deno.test("resolveLineTax reports the state, and `expired` now carries a TAX", (
   const taxed = resolveLineTax(makeItem(), at("Chicago"), ctx());
   assertEquals(taxed.state, "taxed");
 
-  const untaxed = resolveLineTax(makeItem({ taxed_as: "none" }), at("Chicago"), ctx({ taxes: LAPSED }));
+  const untaxed = resolveLineTax(makeItem({ type: "service" }), at("Chicago"), ctx({ taxes: LAPSED }));
   assertEquals(untaxed.state, "untaxed");
   assertEquals(untaxed.applied, []);
-  assertEquals(untaxed.uid_tax_class, null, "taxed_as: none derives no class");
+  assertEquals(
+    ctx({ taxes: LAPSED }).catalog.classes.find((c) => c.uid === untaxed.uid_tax_class)?.uid_tax_codes,
+    [],
+    "a service line derives the class with no codes",
+  );
 });

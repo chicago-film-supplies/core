@@ -1,6 +1,8 @@
 /**
- * The `(jurisdiction × item type)` tax rule — `findTaxFor`, `deriveJurisdiction`
- * and the `applied_*` window (api-cloudrun#409).
+ * The tax rule's jurisdiction half — `deriveJurisdiction`, `resolveJurisdiction`,
+ * `findTaxAt` and the `applied_*` window (api-cloudrun#409). The legacy
+ * `(taxed_as ?? type) × jurisdiction` lookup and its cell states are retired
+ * with the `taxes` collection (api-cloudrun#993).
  */
 import { assertEquals, assertThrows } from "@std/assert";
 import { JURISDICTIONS } from "../src/schemas/common.ts";
@@ -8,18 +10,13 @@ import {
   COLLECTING_JURISDICTIONS,
   deriveJurisdiction,
   findTaxAt,
-  findTaxFor,
-  isTaxLive,
   resolveJurisdiction,
   taxAppliedWindow,
-  taxCellState,
 } from "../src/utils/taxes.ts";
 import type { Tax } from "../src/utils/orders.ts";
 
 /**
- * The catalog as the contracted schema requires it: `applied_*` populated,
- * `item_types` set from the RULE rather than from the corpus (there are no
- * taxed services, and prod's are frozen mistakes).
+ * The catalog as the contracted schema requires it: `applied_*` populated.
  */
 const CATALOG: Tax[] = [
   {
@@ -28,7 +25,6 @@ const CATALOG: Tax[] = [
     rate: 15,
     type: "percent",
     jurisdiction: "chicago",
-    item_types: ["rental"],
     applied_from: "2026-01-01T00:00:00.000-06:00",
     applied_to: null,
   },
@@ -38,7 +34,6 @@ const CATALOG: Tax[] = [
     rate: 11,
     type: "percent",
     jurisdiction: "chicago",
-    item_types: ["rental"],
     applied_from: "2025-01-01T00:00:00.000-06:00",
     applied_to: "2026-01-01T00:00:00.000-06:00",
   },
@@ -48,7 +43,6 @@ const CATALOG: Tax[] = [
     rate: 10.25,
     type: "percent",
     jurisdiction: "chicago",
-    item_types: ["sale", "replacement"],
     applied_from: "2020-01-01T00:00:00.000-06:00",
     applied_to: null,
   },
@@ -60,7 +54,6 @@ const CATALOG: Tax[] = [
     rate: 9,
     type: "percent",
     jurisdiction: "rantoul",
-    item_types: ["rental", "sale", "replacement"],
     applied_from: "2026-01-01T00:00:00.000-06:00",
     applied_to: null,
   },
@@ -70,7 +63,6 @@ const CATALOG: Tax[] = [
     rate: 8,
     type: "percent",
     jurisdiction: "frankfort",
-    item_types: ["rental", "sale", "replacement"],
     applied_from: "2026-01-01T00:00:00.000-06:00",
     applied_to: null,
   },
@@ -81,7 +73,6 @@ const CATALOG: Tax[] = [
     rate: 0.05,
     type: "flat",
     jurisdiction: null,
-    item_types: [],
     applied_from: "2026-03-27T00:00:00.000-05:00",
     applied_to: null,
   },
@@ -91,124 +82,12 @@ const CATALOG: Tax[] = [
     rate: 0,
     type: "percent",
     jurisdiction: null,
-    item_types: [],
     applied_from: "2026-03-27T00:00:00.000-05:00",
     applied_to: null,
   },
 ];
 
 const NOW = "2026-08-18T12:00:00.000-05:00";
-
-// ── findTaxFor: the jurisdiction × item-type grid ─────────────────
-
-Deno.test("findTaxFor: Chicago splits rental from sale, and each resolves alone", () => {
-  assertEquals(findTaxFor(CATALOG, "chicago", "rental", NOW)?.uid, "chi-rental-v3");
-  assertEquals(findTaxFor(CATALOG, "chicago", "sale", NOW)?.uid, "chi-sales");
-  assertEquals(findTaxFor(CATALOG, "chicago", "replacement", NOW)?.uid, "chi-sales");
-});
-
-Deno.test("findTaxFor: Rantoul and Frankfort have NO rental/sales split", () => {
-  for (const type of ["rental", "sale", "replacement"]) {
-    assertEquals(findTaxFor(CATALOG, "rantoul", type, NOW)?.uid, "rantoul", type);
-    assertEquals(findTaxFor(CATALOG, "frankfort", type, NOW)?.uid, "frankfort", type);
-  }
-});
-
-Deno.test("findTaxFor: a type no tax lists is untaxed — that is the WHOLE rule", () => {
-  // No second gate names these. They are untaxed because no tax's `item_types`
-  // mentions them, which is what makes the COA gate redundant.
-  for (const jurisdiction of ["chicago", "rantoul", "frankfort"] as const) {
-    assertEquals(findTaxFor(CATALOG, jurisdiction, "service", NOW), null, jurisdiction);
-    assertEquals(findTaxFor(CATALOG, jurisdiction, "surcharge", NOW), null, jurisdiction);
-    assertEquals(
-      findTaxFor(CATALOG, jurisdiction, "transaction_fee", NOW),
-      null,
-      jurisdiction,
-    );
-  }
-});
-
-Deno.test("findTaxFor: a null jurisdiction ARGUMENT is no-nexus, not a wildcard", () => {
-  // Out of state. Answered without consulting the catalog at all — so it cannot
-  // accidentally match the explicit-only docs, which also carry `null`.
-  assertEquals(findTaxFor(CATALOG, null, "rental", NOW), null);
-  assertEquals(findTaxFor(CATALOG, null, "sale", NOW), null);
-});
-
-Deno.test("findTaxFor: the explicit-only class is SKIPPED, never matched", () => {
-  // The live hazard: reading a `null` on the DOCUMENT as "applies everywhere"
-  // would attach a $0.05/unit bottle tax to every line in the corpus.
-  for (const jurisdiction of ["chicago", "rantoul", "frankfort", "paxton"] as const) {
-    for (const type of ["rental", "sale", "replacement", "service"]) {
-      const hit = findTaxFor(CATALOG, jurisdiction, type, NOW);
-      assertEquals(hit?.uid === "bottle", false, `${jurisdiction}/${type} matched the bottle tax`);
-      assertEquals(hit?.uid === "no-tax", false, `${jurisdiction}/${type} matched No Tax`);
-    }
-  }
-});
-
-Deno.test("findTaxFor: a jurisdiction with no catalog entry is untaxed, not a throw", () => {
-  // `paxton` is a live enum member with its window closed; nothing covers it.
-  assertEquals(findTaxFor(CATALOG, "paxton", "rental", NOW), null);
-});
-
-Deno.test("findTaxFor: resolves the version live at asOf, not the newest", () => {
-  const mid2025 = "2025-06-01T00:00:00.000-05:00";
-  assertEquals(findTaxFor(CATALOG, "chicago", "rental", mid2025)?.rate, 11);
-  assertEquals(findTaxFor(CATALOG, "chicago", "rental", NOW)?.rate, 15);
-});
-
-Deno.test("findTaxFor: the window is half-open — the boundary instant is the SUCCESSOR's", () => {
-  const boundary = "2026-01-01T00:00:00.000-06:00";
-  const oneMsBefore = new Date(new Date(boundary).getTime() - 1).toISOString();
-  assertEquals(findTaxFor(CATALOG, "chicago", "rental", boundary)?.rate, 15);
-  assertEquals(findTaxFor(CATALOG, "chicago", "rental", oneMsBefore)?.rate, 11);
-});
-
-Deno.test("findTaxFor: Rantoul either side of its 2026-01-01 open", () => {
-  assertEquals(findTaxFor(CATALOG, "rantoul", "rental", "2025-12-31T23:00:00.000-06:00"), null);
-  assertEquals(
-    findTaxFor(CATALOG, "rantoul", "rental", "2026-01-01T00:00:00.000-06:00")?.uid,
-    "rantoul",
-  );
-});
-
-Deno.test("findTaxFor: two taxes covering one (jurisdiction, type, instant) THROWS", () => {
-  // No correct silent resolution exists — picking either bills a number nobody
-  // chose. Same posture as `findTaxAt`'s same-name drift.
-  const drifted: Tax[] = [
-    ...CATALOG,
-    {
-      uid: "chi-rental-dup",
-      name: "Chicago Rental Tax (duplicate)",
-      rate: 12,
-      type: "percent",
-      jurisdiction: "chicago",
-      item_types: ["rental"],
-      applied_from: "2026-01-01T00:00:00.000-06:00",
-      applied_to: null,
-    },
-  ];
-  assertThrows(
-    () => findTaxFor(drifted, "chicago", "rental", NOW),
-    Error,
-    "Tax catalog drift",
-  );
-});
-
-Deno.test("findTaxFor: a tax with NO item_types matches nothing", () => {
-  // The half-migrated shape. It must be inert rather than a wildcard.
-  const halfMigrated: Tax[] = [{
-    uid: "half",
-    name: "Half Migrated",
-    rate: 5,
-    type: "percent",
-    jurisdiction: "chicago",
-    applied_from: "2020-01-01T00:00:00.000-06:00",
-    applied_to: null,
-  }];
-  assertEquals(findTaxFor(halfMigrated, "chicago", "rental", NOW), null);
-});
 
 // ── The applied window ───────────────────────────────────────────
 
@@ -430,90 +309,10 @@ Deno.test("resolveJurisdiction: no_nexus is an ANSWER and STOPS the chain", () =
   );
 });
 
-Deno.test("resolveJurisdiction: no_nexus resolves to NO TAX, and is not an exemption", () => {
-  // The jurisdiction axis zeroes the tax by matching nothing in the catalog —
-  // exemption is the separate customer axis, and the two must stay distinct.
-  assertEquals(findTaxFor(CATALOG, "no_nexus", "rental", "2026-06-01T12:00:00.000-05:00"), null);
-  assertEquals(findTaxFor(CATALOG, "no_nexus", "sale", "2026-06-01T12:00:00.000-05:00"), null);
-});
-
 Deno.test("resolveJurisdiction is TOTAL — every input resolves to a jurisdiction", () => {
   // Level 4 always answers, so no caller ever has to handle "no answer".
   const resolved = resolveJurisdiction({ address: null, origin: "chicago" });
   assertEquals(resolved, { jurisdiction: "chicago", level: "derived" });
-});
-
-// ── The lifecycle: isTaxLive, and the THIRD state ────────────────
-//
-// `active` was a stored boolean nothing read. These arms are what replaced it:
-// liveness is one clause over the window that actually prices, and an expired
-// cell is distinguishable from a never-taxed one — which is the entire safety
-// property of the expiry design (api-cloudrun#613/#618).
-
-Deno.test("isTaxLive: the derived `active` is exactly the applied window", () => {
-  const v3 = CATALOG.find((t) => t.uid === "chi-rental-v3")!;
-  const v2 = CATALOG.find((t) => t.uid === "chi-rental-v2")!;
-
-  assertEquals(isTaxLive(v3, NOW), true);
-  assertEquals(isTaxLive(v2, NOW), false, "superseded — its window closed");
-  // Half-open `[from, to)`: the successor owns the boundary instant, not both.
-  assertEquals(isTaxLive(v2, "2026-01-01T00:00:00.000-06:00"), false);
-  assertEquals(isTaxLive(v3, "2026-01-01T00:00:00.000-06:00"), true);
-  // And it is a claim about an INSTANT, so a past date makes the old one live.
-  assertEquals(isTaxLive(v2, "2025-06-01T12:00:00.000-05:00"), true);
-});
-
-Deno.test("🔴 taxCellState: a lapsed cell is `expired`, a never-taxed one is `untaxed`", () => {
-  // The distinction that decides whether the pricing engine refuses. Getting it
-  // wrong in either direction is fatal: `untaxed` where `expired` is true
-  // silently zero-rates 70% of the tax CFS collects; `expired` where `untaxed`
-  // is true refuses every service line in the corpus.
-  const lapsed = CATALOG.map((t) =>
-    t.uid === "chi-rental-v3"
-      ? { ...t, applied_to: "2026-08-01T00:00:00.000-05:00" }
-      : t
-  );
-
-  assertEquals(taxCellState(CATALOG, "chicago", "rental", NOW), "taxed");
-  assertEquals(taxCellState(lapsed, "chicago", "rental", NOW), "expired");
-
-  // No tax has EVER listed these types, so there is no lapsed version to find.
-  for (const type of ["service", "surcharge"]) {
-    assertEquals(taxCellState(CATALOG, "chicago", type, NOW), "untaxed", type);
-    assertEquals(taxCellState(lapsed, "chicago", type, NOW), "untaxed", type);
-  }
-});
-
-Deno.test("taxCellState: a supersede is `taxed` — the successor is what makes it so", () => {
-  // v2 closed on 2026-01-01 and v3 opened on it. The cell never lapsed, so the
-  // closed window of v2 must not read as an expiry.
-  assertEquals(taxCellState(CATALOG, "chicago", "rental", NOW), "taxed");
-  // …and at an instant inside v2's own window, v2 answers.
-  assertEquals(taxCellState(CATALOG, "chicago", "rental", "2025-06-01T12:00:00.000-05:00"), "taxed");
-});
-
-Deno.test("taxCellState: before the first version is `untaxed`, not `expired`", () => {
-  // Frankfort's earliest doc opens 2026-01-01. A 2025 order predates the
-  // registration entirely — nothing lapsed, CFS simply was not collecting yet.
-  assertEquals(taxCellState(CATALOG, "frankfort", "rental", "2025-06-01T12:00:00.000-05:00"), "untaxed");
-});
-
-Deno.test("taxCellState: no_nexus is `untaxed` — a decision, never a lapse", () => {
-  // A null jurisdiction short-circuits before the catalog is consulted, so
-  // there is no window to have closed.
-  assertEquals(taxCellState(CATALOG, null, "rental", NOW), "untaxed");
-  assertEquals(taxCellState(CATALOG, "no_nexus", "rental", NOW), "untaxed");
-});
-
-Deno.test("taxCellState: the explicit-only class is `untaxed` at every instant", () => {
-  // `Water Bottle Tax` and `No Tax` carry `jurisdiction: null` + `item_types: []`
-  // and are reached by uid alone, so a window on them is inert — which is why
-  // the migration leaves their `applied_to` open-ended.
-  const expiredBottle = CATALOG.map((t) =>
-    t.uid === "bottle" ? { ...t, applied_to: "2026-01-01T00:00:00.000-06:00" } : t
-  );
-  assertEquals(taxCellState(expiredBottle, "chicago", "rental", NOW), "taxed");
-  assertEquals(taxCellState(expiredBottle, "chicago", "sale", NOW), "taxed");
 });
 
 // ── COLLECTING_JURISDICTIONS — the exported registration set (api-cloudrun#845) ──

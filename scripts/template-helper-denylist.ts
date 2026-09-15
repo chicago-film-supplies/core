@@ -307,8 +307,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   ],
   taxes: [
     // A RESOLVER internal, not a rendering fact. It is the one place the
-    // bracket checks read a version's bounds from, exported so `findTaxAt`,
-    // `findTaxFor` and api-cloudrun's window guards cannot each grow their own
+    // bracket checks read a version's bounds from, exported so `findTaxAt` and
+    // api-cloudrun's window guards cannot each grow their own
     // answer to "which field is the bound" — a template asking a tax for its
     // own window should read the fields.
     //
@@ -461,7 +461,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "tax-classes": [
     "deriveLineTaxClass",
     "lineTaxClass",
-    "migrateLegacyTaxCatalog",
     "pricingTaxesOf",
     "resolveClassTaxes",
     "taxClassMatrix",

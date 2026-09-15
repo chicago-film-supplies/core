@@ -265,12 +265,12 @@ Deno.test("LineTaxCore is the SAME INSTANCE on the order and invoice line, and a
 
 Deno.test("LINE_TAX_FIELDS names exactly LineTaxCore's keys, and is not vacuous", () => {
   assertEquals([...LINE_TAX_FIELDS].sort(), Object.keys(LineTaxCore).sort());
-  assert(LINE_TAX_FIELDS.length === 3);
+  assert(LINE_TAX_FIELDS.length === 2);
 });
 
 Deno.test("pickLineTaxFields preserves the source key set — present keys only, null kept", () => {
   assertEquals(pickLineTaxFields({}), {});
-  assertEquals(pickLineTaxFields({ taxed_as: null }), { taxed_as: null });
+  assertEquals(pickLineTaxFields({ uid_tax_class_override: null }), { uid_tax_class_override: null });
   assertEquals(
     pickLineTaxFields({ uid_tax_class: "classuid00000000000a", uid_tax_class_override: null }),
     { uid_tax_class: "classuid00000000000a", uid_tax_class_override: null },

@@ -907,7 +907,7 @@ void _itemTypeParity;
  *
  * - **no `taxable` axis.** Every line type carries taxes on some rows and not
  *   others (surcharges: 149 of 151 order rows ARE taxed). Whether a line is
- *   taxed is `findTaxFor(catalog, jurisdiction, taxed_as ?? type, asOf)` — a
+ *   taxed is the line's tax class resolved in its jurisdiction — a
  *   property of WHERE the goods went as much as of the line, so it is not a
  *   type invariant. (This bullet named `tax_class` and `tax_profile` until
  *   2026-08-22; neither is a field any more.)
@@ -1463,35 +1463,6 @@ type _PreTaxParity = [_PreTaxListed] extends [PreTaxItemType]
   : never;
 const _preTaxParity: _PreTaxParity = true;
 void _preTaxParity;
-
-/**
- * What a line is TAXED AS — the pre-tax types plus `"none"`.
- *
- * The value of `items[].taxed_as`, a per-line override of the type the tax
- * engine keys on. `null`/absent means *use `item.type`*; `"none"` means *this
- * line is untaxed regardless of what its type would attract*, which is the one
- * answer `item.type` cannot express without lying about what the line is.
- *
- * ⚠️ **It overrides the TYPE used for tax, never the tax itself.** There is
- * deliberately no per-line tax reference: a line naming its own tax uid is a
- * second copy of the catalog that drifts from the jurisdiction rule, which is
- * the api-cloudrun#409 class ($2,741.78 of phantom receivable) in miniature.
- *
- * Written out rather than spread for the same JSR-emit reason as
- * {@link PRE_TAX_ITEM_TYPES}; `_taxedAsParity` pins it.
- */
-const TAXED_AS = ["rental", "replacement", "sale", "service", "surcharge", "none"] as const;
-/** Allowed values for a line's tax-type override. */
-export type TaxedAsType = typeof TAXED_AS[number];
-/** Zod schema for TaxedAsType. */
-export const TaxedAsEnum: z.ZodType<TaxedAsType> = z.enum(TAXED_AS);
-
-type _TaxedAsListed = Exclude<TaxedAsType, "none">;
-type _TaxedAsParity = [_TaxedAsListed] extends [PreTaxItemType]
-  ? [PreTaxItemType] extends [_TaxedAsListed] ? true : never
-  : never;
-const _taxedAsParity: _TaxedAsParity = true;
-void _taxedAsParity;
 
 /**
  * The `pricing: "from_total"` members — priced FROM the document total rather

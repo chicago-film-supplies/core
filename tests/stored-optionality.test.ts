@@ -147,7 +147,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["invoices.destinations[].jurisdiction", "array-member-uncensusable"],
   ["invoices.items[].coa_revenue", "array-member-uncensusable"],
   ["invoices.items[].price.base_percent", "array-member-uncensusable"],
-  ["invoices.items[].taxed_as", "array-member-uncensusable"],
   ["invoices.items[].tracking_category", "array-member-uncensusable"],
   ["invoices.items[].xero_id", "array-member-uncensusable"],
   ["invoices.items[].xero_tracking_option_id", "array-member-uncensusable"],
@@ -160,7 +159,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["orders.items[].inclusion_type", "array-member-uncensusable"],
   ["orders.items[].price.base_percent", "array-member-uncensusable"],
   ["orders.items[].price.replacement_cents", "array-member-uncensusable"],
-  ["orders.items[].taxed_as", "array-member-uncensusable"],
   ["orders.items[].zero_priced", "array-member-uncensusable"],
   // Mirrored onto the invoice and fulfillment grains so the three item shapes
   // agree (`manager#421`). Same reason as the order's, and same SHAPE on

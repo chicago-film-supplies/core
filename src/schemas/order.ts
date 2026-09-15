@@ -38,8 +38,6 @@ import {
   type RateType,
   StockMethodEnum,
   type StockMethodType,
-  TaxedAsEnum,
-  type TaxedAsType,
   type InvoiceStatusType,
   InvoiceStatusEnum,
   NameField,
@@ -747,8 +745,6 @@ export interface OrderItemLineType {
   zero_priced?: boolean | null;
   order_number?: number;
   uid_order?: string;
-  /** @see `OrderDocLineItemType.taxed_as` — operator-authored, so it is accepted here. */
-  taxed_as?: TaxedAsType | null;
   /** @see `OrderDocLineItemType.uid_tax_class_override` — operator-authored, so it is accepted here. */
   uid_tax_class_override?: string | null;
 }
@@ -775,7 +771,6 @@ const OrderItemLineInner = z.object({
   zero_priced: z.boolean().nullable().optional(),
   order_number: z.int().optional(),
   uid_order: FirestoreId.optional(),
-  taxed_as: TaxedAsEnum.nullable().optional(),
   uid_tax_class_override: FirestoreId.nullable().optional(),
 }).superRefine(checkItemPriceFormula);
 
@@ -1111,34 +1106,14 @@ export interface OrderDocLineItemType {
    */
   coa_revenue?: COARevenueType | null;
   /**
-   * Per-line override of the item TYPE the tax engine keys on. Absent/`null`
-   * means *use `type`*; `"none"` means *this line is untaxed* regardless of
-   * what its type would attract.
-   *
-   * ⚠️ **It overrides the TYPE, never the tax.** There is deliberately no
-   * per-line tax reference — a line naming its own tax uid is a second copy of
-   * the catalog, free to drift from the jurisdiction rule, which is the
-   * api-cloudrun#409 class ($2,741.78 of phantom receivable) in miniature.
-   *
-   * ⚠️ **`.optional()`, never `.default(null)`** — ~9,300 existing prod lines
-   * are genuinely absent, and `validateBeforeWrite` persists the RAW doc, so a
-   * `.default()` would never materialize while the published type promised one.
-   *
-   * ⚠️ **A CRMS rebuild must CARRY THIS FORWARD from the stored row.**
-   * `createUpdateInvoiceFromCrms` and the opportunity webhook rebuild `items`
-   * from scratch on every event, so a CFS-authored line fact that is not
-   * re-read is destroyed — the same shape as api-cloudrun#480's uid churn.
-   */
-  taxed_as?: TaxedAsType | null;
-  /**
    * The `taxes-classes` document this line is taxed as — **snapshotted from the
    * product at build**, the way `type` is, and carried forward on items
    * rebuilds. Server-resolved, never on input. (api-cloudrun#993)
    *
-   * ⚠️ **Optional through the expand/contract campaign.** No line carries it
-   * yet, and a bulk stamp would bump `order.version` and re-push Xero quotes, so
-   * the class resolver DERIVES it while absent and lines pick it up on their
-   * next real write.
+   * ⚠️ **Optional in the schema.** Every stored priceable line carries it since
+   * the 2026-09-15 backfill and the API stamps it on every build; a line built on
+   * the client before that derives its class from its type
+   * (`deriveLineTaxClass`).
    */
   uid_tax_class?: string | null;
   /**
@@ -1147,7 +1122,8 @@ export interface OrderDocLineItemType {
    * the snapshot so a product re-class reaches live lines without clobbering an
    * override, and so an override is visible as one.
    *
-   * Replaces `taxed_as` at contract.
+   * It replaced the retired `taxed_as` type override: the 2026-09-15 backfill
+   * translated `taxed_as: "none"` into the Non-Taxable class here.
    */
   uid_tax_class_override?: string | null;
 }
@@ -1183,11 +1159,8 @@ const OrderDocLineItemInner = z.strictObject({
   // never materializes, and every line written before beta.120 is genuinely
   // absent rather than null.
   coa_revenue: COARevenueEnum.nullable().optional(),
-  // Operator-authored, unlike `coa_revenue` beside it — so it IS on the input
-  // schema. See the interface docblock for why it is optional rather than
-  // defaulted, and why a CRMS rebuild has to carry it forward.
-  // `taxed_as` + the class snapshot + the operator's class override — one
-  // declaration shared with the invoice line (`_items.ts`).
+  // The class snapshot + the operator's class override — one declaration
+  // shared with the invoice line (`_items.ts`).
   ...LineTaxCore,
 }).superRefine(checkItemContract).superRefine(checkZeroPricedAmount);
 

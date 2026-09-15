@@ -32,8 +32,6 @@ import {
   isLineItemType,
   PriceFormulaEnum,
   type PriceFormulaType,
-  TaxedAsEnum,
-  type TaxedAsType,
   TimestampFields,
 } from "./common.ts";
 import {
@@ -360,15 +358,11 @@ export interface InvoiceDocLineItemType {
   zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
   /**
-   * @see `OrderDocLineItemType.taxed_as`. Mirrored onto the invoice so an
+   * @see `OrderDocLineItemType.uid_tax_class`. Mirrored onto the invoice so an
    * order→invoice projection round-trips it, and so `invoiceItemsMatch` can
    * compare it rather than report every affected line `out_of_sync` forever —
-   * that comparator matches on KEY SETS, and a comparable field present on one
-   * side only has caused exactly that three times (`base_percent`, `crms_id`,
-   * `price.discount_percent`: 8,015 of 8,978 paired lines).
+   * that comparator matches on KEY SETS.
    */
-  taxed_as?: TaxedAsType | null;
-  /** @see `OrderDocLineItemType.uid_tax_class` — mirrored for the same key-set reason as `taxed_as`. */
   uid_tax_class?: string | null;
   /** @see `OrderDocLineItemType.uid_tax_class_override`. */
   uid_tax_class_override?: string | null;
@@ -1154,8 +1148,6 @@ export interface InvoiceItemInputLineType {
   price?: InvoiceItemInputPriceType;
   path: string[];
   coa_revenue?: COARevenueType | null;
-  /** @see `OrderDocLineItemType.taxed_as` — operator-authored, so it is accepted here. */
-  taxed_as?: TaxedAsType | null;
   /** @see `OrderDocLineItemType.uid_tax_class_override` — operator-authored, so it is accepted here. */
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;
@@ -1219,7 +1211,6 @@ const InvoiceItemInputLineInner = z.object({
   price: InvoiceItemInputPrice.optional(),
   path: z.array(ItemUid),
   coa_revenue: COARevenueEnum.nullable().optional(),
-  taxed_as: TaxedAsEnum.nullable().optional(),
   uid_tax_class_override: FirestoreId.nullable().optional(),
   tracking_category: z.string().nullable().optional(),
   path_substituted_for: z.array(ItemUid).optional(),

@@ -4582,7 +4582,6 @@ interface InvoiceDocLineItemType {
   path: string[];
   zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
-  taxed_as?: TaxedAsType | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;
@@ -4728,7 +4727,6 @@ interface InvoiceItemInputLineType {
   price?: InvoiceItemInputPriceType;
   path: string[];
   coa_revenue?: COARevenueType | null;
-  taxed_as?: TaxedAsType | null;
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   path_substituted_for?: string[];
@@ -4842,7 +4840,7 @@ draft proposed are absent because the corpus refutes them:
 
 - **no `taxable` axis.** Every line type carries taxes on some rows and not
   others (surcharges: 149 of 151 order rows ARE taxed). Whether a line is
-  taxed is `findTaxFor(catalog, jurisdiction, taxed_as ?? type, asOf)` — a
+  taxed is the line's tax class resolved in its jurisdiction — a
   property of WHERE the goods went as much as of the line, so it is not a
   type invariant. (This bullet named `tax_class` and `tax_profile` until
   2026-08-22; neither is a field any more.)
@@ -4949,7 +4947,7 @@ type JurisdictionType = indexedAccess;
 The {@link LineTaxCore} keys, for code that copies the levers between grains.
 
 ```ts
-const LINE_TAX_FIELDS: readonly ["taxed_as", "uid_tax_class", "uid_tax_class_override"];
+const LINE_TAX_FIELDS: readonly ["uid_tax_class", "uid_tax_class_override"];
 ```
 
 ### `LIVE_IN_XERO_STATUSES`
@@ -4984,7 +4982,6 @@ interface LeafPath {
 line and an invoice line (api-cloudrun#993). Not a fulfillment line: it
 carries no price, so it has nothing to tax.
 
-- `taxed_as` — the legacy per-line key, retiring at the class contract step.
 - `uid_tax_class` — the product's class, snapshotted onto the line.
 - `uid_tax_class_override` — the operator's per-line class; wins over the
   snapshot (`deriveLineTaxClass`, `utils/tax-classes.ts`).
@@ -4993,12 +4990,14 @@ carries no price, so it has nothing to tax.
 prices its OWN line through the same resolver, so an order line and the
 invoice line projected from it must carry the same levers under the same
 declaration. Spread by both grains directly after `coa_revenue`, which is
-where both already declared these three keys, so no column moves.
+where both already declared these keys, so no column moves.
 `tests/item-shape-parity.test.ts` asserts instance identity on both.
 
-All optional: an unstamped line derives its class from `taxed_as ?? type`,
-and order lines are deliberately NOT bulk-stamped (a stamp bumps
-`order.version` and re-pushes Xero quotes).
+Optional in the schema. Every stored priceable line carries `uid_tax_class`
+since the 2026-09-15 backfill, and the API stamps it on every build; a line
+built on the client before that derives its class from its type
+(`deriveLineTaxClass`). The legacy `taxed_as` key was translated into
+`uid_tax_class_override` by that backfill and removed from the schema.
 
 ```ts
 const LineTaxCore: typeLiteral;
@@ -6438,7 +6437,6 @@ interface OrderDocLineItemType {
   zero_priced?: boolean | null;
   crms_id?: number | null;
   coa_revenue?: COARevenueType | null;
-  taxed_as?: TaxedAsType | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }
@@ -6592,7 +6590,6 @@ interface OrderItemLineType {
   zero_priced?: boolean | null;
   order_number?: number;
   uid_order?: string;
-  taxed_as?: TaxedAsType | null;
   uid_tax_class_override?: string | null;
 }
 ```
@@ -9487,22 +9484,6 @@ interface TaxRefType {
   rate: number;
   type: RateType;
 }
-```
-
-### `TaxedAsEnum`
-
-Zod schema for TaxedAsType.
-
-```ts
-const TaxedAsEnum: z.ZodType<TaxedAsType>;
-```
-
-### `TaxedAsType`
-
-Allowed values for a line's tax-type override.
-
-```ts
-type TaxedAsType = indexedAccess;
 ```
 
 ### `Template`
@@ -12977,7 +12958,7 @@ draft proposed are absent because the corpus refutes them:
 
 - **no `taxable` axis.** Every line type carries taxes on some rows and not
   others (surcharges: 149 of 151 order rows ARE taxed). Whether a line is
-  taxed is `findTaxFor(catalog, jurisdiction, taxed_as ?? type, asOf)` — a
+  taxed is the line's tax class resolved in its jurisdiction — a
   property of WHERE the goods went as much as of the line, so it is not a
   type invariant. (This bullet named `tax_class` and `tax_profile` until
   2026-08-22; neither is a field any more.)
@@ -13771,22 +13752,6 @@ A jurisdiction that can levy a tax. @see {@link TAX_JURISDICTIONS}
 
 ```ts
 type TaxJurisdictionType = indexedAccess;
-```
-
-### `TaxedAsEnum`
-
-Zod schema for TaxedAsType.
-
-```ts
-const TaxedAsEnum: z.ZodType<TaxedAsType>;
-```
-
-### `TaxedAsType`
-
-Allowed values for a line's tax-type override.
-
-```ts
-type TaxedAsType = indexedAccess;
 ```
 
 ### `ThreadId`
@@ -15740,7 +15705,6 @@ interface InvoiceDocLineItemType {
   path: string[];
   zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
-  taxed_as?: TaxedAsType | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;
@@ -15880,7 +15844,6 @@ interface InvoiceItemInputLineType {
   price?: InvoiceItemInputPriceType;
   path: string[];
   coa_revenue?: COARevenueType | null;
-  taxed_as?: TaxedAsType | null;
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   path_substituted_for?: string[];
@@ -16982,7 +16945,6 @@ interface OrderDocLineItemType {
   zero_priced?: boolean | null;
   crms_id?: number | null;
   coa_revenue?: COARevenueType | null;
-  taxed_as?: TaxedAsType | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }
@@ -17114,7 +17076,6 @@ interface OrderItemLineType {
   zero_priced?: boolean | null;
   order_number?: number;
   uid_order?: string;
-  taxed_as?: TaxedAsType | null;
   uid_tax_class_override?: string | null;
 }
 ```
@@ -25558,7 +25519,6 @@ interface LineItem {
   order_number?: number;
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
-  taxed_as?: TaxedAsType | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }
@@ -25722,8 +25682,8 @@ A tax RATE in the pricing shape — what `pricingTaxesOf` projects the
 It is structural, not a stored document: the `taxes` collection it was once a
 subset of is retired (api-cloudrun#993). Only `uid`/`name`/`rate`/`type` are
 required — those are what the pricing helpers read. Everything else is
-resolution metadata that only the as-of resolvers in `@cfs/core/utils/taxes`
-(`findTaxAt`, `findTaxFor`) touch, and it stays optional so partial `Tax`
+resolution metadata that only the as-of resolver in `@cfs/core/utils/taxes`
+(`findTaxAt`) and the Xero boundary touch, and it stays optional so partial `Tax`
 literals in tests and callers keep type-checking.
 
 ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
@@ -25742,7 +25702,6 @@ interface Tax {
   applied_to?: string | null;
   effective_from?: string | null;
   jurisdiction?: JurisdictionType | null;
-  item_types?: PreTaxItemType[];
   xero_tax_type?: string | null;
   xero_account_code?: number | null;
   xero_item_code?: string | null;
@@ -25926,7 +25885,7 @@ Returns a PriceModifier[] with computed amounts.
 
 **It prices the refs the line carries; it does not decide taxability.** That
 decision is `resolveLineTax` / `assignLineTaxes`, which writes `price.taxes`
-from `(taxed_as ?? type, jurisdiction)`. A revenue-account gate stood here
+from `(tax class, jurisdiction)`. A revenue-account gate stood here
 until the owner ruling of 2026-08-20 — *"an item's tax is item type ×
 jurisdiction, it has nothing to do with coa"* — and removing it is what makes
 the two functions answer one question instead of two.
@@ -26538,7 +26497,7 @@ exception, and emitting here ahead of the backfill would have made EVERY
 paired line report a key-set difference at once. This file already records
 that happening three times (`base_percent`, `crms_id`,
 `price.discount_percent` — 8,015 of 8,978 paired lines), which is why
-`coa_revenue`, `taxed_as` and `price.taxes_base` below are all spread
+`coa_revenue`, the tax-class levers and `price.taxes_base` below are all spread
 CONDITIONALLY.
 
 🔴 **So this key is the one that must NOT be conditional, and the population
@@ -26548,9 +26507,8 @@ a line's KEY SET depend on its VALUE, so clearing a component's flag in the
 catalog would take the key off the projection while the stored line kept it,
 and that line would report `out_of_sync` forever with nothing wrong. Measured
 2026-09-10 in prod, the narrow rule saved 102 invoice documents out of 1,037 —
-a tenth of the write, for a defect class. `price.base_percent` and `taxed_as`
-are spelled `?? null` in `api-cloudrun`'s `buildInvoiceItems` for the same
-reason.
+a tenth of the write, for a defect class. `price.base_percent` is spelled
+`?? null` in `api-cloudrun`'s `buildInvoiceItems` for the same reason.
 
 `destination` and `group` items share their shape with the order doc, so they
 pass through. Line items (and `transaction_fee`, which is stored as a
@@ -27134,7 +27092,6 @@ interface LineItem {
   order_number?: number;
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
-  taxed_as?: TaxedAsType | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }
@@ -29573,7 +29530,6 @@ interface LineItem {
   order_number?: number;
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
-  taxed_as?: TaxedAsType | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }
@@ -29882,8 +29838,8 @@ A tax RATE in the pricing shape — what `pricingTaxesOf` projects the
 It is structural, not a stored document: the `taxes` collection it was once a
 subset of is retired (api-cloudrun#993). Only `uid`/`name`/`rate`/`type` are
 required — those are what the pricing helpers read. Everything else is
-resolution metadata that only the as-of resolvers in `@cfs/core/utils/taxes`
-(`findTaxAt`, `findTaxFor`) touch, and it stays optional so partial `Tax`
+resolution metadata that only the as-of resolver in `@cfs/core/utils/taxes`
+(`findTaxAt`) and the Xero boundary touch, and it stays optional so partial `Tax`
 literals in tests and callers keep type-checking.
 
 ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
@@ -29902,7 +29858,6 @@ interface Tax {
   applied_to?: string | null;
   effective_from?: string | null;
   jurisdiction?: JurisdictionType | null;
-  item_types?: PreTaxItemType[];
   xero_tax_type?: string | null;
   xero_account_code?: number | null;
   xero_item_code?: string | null;
@@ -30218,7 +30173,7 @@ Returns a PriceModifier[] with computed amounts.
 
 **It prices the refs the line carries; it does not decide taxability.** That
 decision is `resolveLineTax` / `assignLineTaxes`, which writes `price.taxes`
-from `(taxed_as ?? type, jurisdiction)`. A revenue-account gate stood here
+from `(tax class, jurisdiction)`. A revenue-account gate stood here
 until the owner ruling of 2026-08-20 — *"an item's tax is item type ×
 jurisdiction, it has nothing to do with coa"* — and removing it is what makes
 the two functions answer one question instead of two.
@@ -30633,7 +30588,7 @@ reproduce the rule that ran — not a tidier one.
 
 ⚠️ Do not reintroduce it as a taxability test. The class it was really
 covering — a TAX billed as a line, the CRMS bottled-water levy at coa 2210 —
-is said on the axis the rule reads now: `taxed_as: "none"`.
+is said on the axis the rule reads now: the line's tax class (Non-Taxable).
 
 ### `isTransactionFeeItem(item: LineItem): item is TransactionFeeLineItem`
 
@@ -31803,7 +31758,6 @@ interface LineItem {
   order_number?: number;
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
-  taxed_as?: TaxedAsType | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }
@@ -32179,15 +32133,15 @@ Shared tax rules for CFS applications — **the single home for the pricing
 rule**, so the API (order + invoice write paths, the CRMS webhooks) and the
 manager (optimistic recompute) reach the same answer.
 
-The rule is `(item type × jurisdiction)`, zeroed by exemption, resolved
+The rule is `(tax class × jurisdiction)`, zeroed by exemption, resolved
 **per line** through the destination it is billed under:
 
 ```
-key          = item.taxed_as ?? item.type
+class        = line override ?? line snapshot ?? default class for its type
 jurisdiction = destinations[i].jurisdiction        ← WINS
                  ?? organization.jurisdiction_claim
                  ?? deriveJurisdiction(address, origin)   // TOTAL
-tax          = findTaxFor(catalog, jurisdiction, key, asOf)
+rates        = resolveClassTaxes(class, jurisdiction, exempt, asOf)
 ```
 
 ⚠️ **This replaced a doc-level `tax_profile` enum** that welded exemption to
@@ -32339,7 +32293,7 @@ That second direction is the larger population and the one nobody had looked
 at. ⚠️ **Both directions are now moot as a CLIENT hazard**, and the reason is
 worth keeping: `priceDocument` no longer reads a client's
 `price.taxes` refs at all — `assignLineTaxes` rebuilds the array from
-`(taxed_as ?? type, jurisdiction)`, so a client that seeds the wrong tax, or
+`(tax class, jurisdiction)`, so a client that seeds the wrong tax, or
 none, is corrected on save either way. This table survives as the DEFAULT a
 restatement tool needs when it is reconstructing what a historical line
 carried, not as a rule any writer consults.
@@ -32354,9 +32308,8 @@ oracle and not a rule: it can only answer for the lines that carry an
 account.
 
 ⚠️ **Its consumers are restatement tools, not writers.** The live default is
-`findTaxFor(catalog, jurisdiction, taxed_as ?? type, asOf)` — the same
-`(item type × jurisdiction)` rule everything else resolves by, which answers
-for a custom line too. A companion type-keyed table (`defaultTaxNameForLine`
+the line's tax class resolved in its jurisdiction ({@link resolveLineTax}),
+which answers for a custom line too. A companion type-keyed table (`defaultTaxNameForLine`
 / `DEFAULT_TAX_NAME_BY_TYPE`) was DELETED rather than kept: it was a second
 encoding of a rule that already exists, and an earlier revision of this
 docblock records a *third* (`chart-of-accounts.default_tax_profile`) deleted
@@ -32418,8 +32371,8 @@ A tax RATE in the pricing shape — what `pricingTaxesOf` projects the
 It is structural, not a stored document: the `taxes` collection it was once a
 subset of is retired (api-cloudrun#993). Only `uid`/`name`/`rate`/`type` are
 required — those are what the pricing helpers read. Everything else is
-resolution metadata that only the as-of resolvers in `@cfs/core/utils/taxes`
-(`findTaxAt`, `findTaxFor`) touch, and it stays optional so partial `Tax`
+resolution metadata that only the as-of resolver in `@cfs/core/utils/taxes`
+(`findTaxAt`) and the Xero boundary touch, and it stays optional so partial `Tax`
 literals in tests and callers keep type-checking.
 
 ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
@@ -32438,7 +32391,6 @@ interface Tax {
   applied_to?: string | null;
   effective_from?: string | null;
   jurisdiction?: JurisdictionType | null;
-  item_types?: PreTaxItemType[];
   xero_tax_type?: string | null;
   xero_account_code?: number | null;
   xero_item_code?: string | null;
@@ -32448,9 +32400,9 @@ interface Tax {
 
 ### `TaxCellState`
 
-What the catalog has to say about one `(jurisdiction × item type)` cell at an
-instant. Three states, because two could not tell the two ways of getting
-`null` out of {@link findTaxFor} apart.
+What the catalog has to say about one line's taxes at an instant — the
+`state` of a {@link LineTaxResolution}. Three states, because "no rate" has two
+causes that must not be confused:
 
 - `taxed` — a version brackets `asOf`.
 - `untaxed` — **nothing has ever covered this cell**, so `null` is the rule's
@@ -32513,9 +32465,8 @@ report of a defect, and everything downstream is levelled accordingly: a
 
 ## Why a warning rather than a refusal
 
-An earlier revision THREW here, on the reasoning that a closed window makes
-{@link findTaxFor} return `null`, `null` already means *"this line is
-untaxed"*, and an unreviewed Chicago Rental Tax would therefore silently
+An earlier revision THREW here, on the reasoning that a closed window leaves
+no rate to price on, no rate already means *"this line is untaxed"*, and an unreviewed Chicago Rental Tax would therefore silently
 zero-rate **70% of all tax CFS has ever collected**. The zero-rating problem
 is real and this design still fixes it — by falling forward to the most
 recent version rather than to nothing.
@@ -32786,70 +32737,6 @@ Pick the Tax whose applied window contains `asOf`, matched by exact `name`.
 Returns null when nothing matches (e.g. `asOf` before any historical doc).
 Throws on catalog drift (two same-name docs bracket the same instant).
 
-### `findTaxFor(taxes: Tax[], jurisdiction: JurisdictionType | null, itemType: string, asOf: string): Tax | null`
-
-**The tax rule: `(jurisdiction × item type)`, as of a date.**
-
-Pick the one Tax covering `itemType` in `jurisdiction` whose applied window
-contains `asOf`. `null` means *this line is untaxed*, which is a real answer
-rather than a miss — a line is untaxed **iff no tax in its jurisdiction lists
-its type**.
-
-⚠️ **`null` has a second cause, and this function cannot tell you which.** A
-cell whose window has LAPSED also returns `null` here, and that is a
-configuration failure rather than a rate of zero. {@link taxCellState}
-separates the two; this function is deliberately left as the two-valued
-lookup because its read-only consumers (`ilTaxRateCheck`, the audits) must
-not throw.
-
-One mechanism, which is the point. What this replaces was two: a
-`coa_revenue` permissive gate (`isTaxableCoa`) and a separate name-keyed
-default table, each of which could say "taxable" while the other said
-"untaxed". api-cloudrun#409 measured that drift at 19 invoices and $2,741.78
-of phantom receivable — CFS taxing lines it told Xero were `TaxType: NONE`.
-
-⚠️ **A `null` jurisdiction is NEVER a wildcard, on either side.**
-- A `null` ARGUMENT means *no nexus* (delivered outside Illinois): nothing is
-  collected, so the answer is `null` without consulting the catalog.
-- A `null` on a tax DOCUMENT marks the **explicit-only** class — a tax
-  reachable by uid alone, never by this rule. Prod has exactly two (`No Tax`
-  and `Water Bottle Tax`), and treating either as matching every jurisdiction
-  would apply a $0.05/unit bottle tax to every line in the corpus.
-
-Throws on catalog drift, for the same reason {@link findTaxAt} does: two
-taxes covering one `(jurisdiction, type, instant)` is a configuration error
-with no correct silent resolution, and picking either one bills a number
-nobody chose.
-
-**Parameters**
-
-- `taxes` — The `taxes` collection, unfiltered — historical versions
-included, since the window is what selects among them.
-- `jurisdiction` — Where the goods went, already resolved through the
-destination → organization → {@link deriveJurisdiction} precedence.
-- `itemType` — The line's `taxed_as ?? type`. A type no tax lists is
-untaxed, which is how `service`, `surcharge` and `transaction_fee` stay
-untaxed without a second rule naming them.
-- `asOf` — Instant to resolve the catalog at.
-
-### `isTaxLive(tax: Tax, asOf: string): boolean`
-
-**The derived `active`.** Is this version the one CFS collects at `asOf`?
-
-This replaced a STORED `active` boolean, and the reason is that nothing ever
-read the stored one: `findTaxFor` and `findTaxAt` have always selected by
-window alone, so a flag disagreeing with the window changed nothing about
-what got billed and everything about what an operator believed. Two prod
-documents sat `active: true` with a window that had already closed
-(api-cloudrun#613). One clause, derived on demand, cannot drift from the
-bound that actually prices.
-
-⚠️ **"Live" is a claim about the WINDOW, not about reachability.** The
-explicit-only class (`item_types: []`) is reached by uid and is never
-window-checked by {@link assignLineTaxes}, so `isTaxLive` is not the
-question to ask of `No Tax` or `Water Bottle Tax` — their windows stay
-open-ended precisely because an expiry on them would be inert.
-
 ### `isTaxableCoa(coaRevenue: number | null | undefined): boolean`
 
 Was a line with this revenue COA subject to tax **under the retired
@@ -32878,7 +32765,7 @@ reproduce the rule that ran — not a tidier one.
 
 ⚠️ Do not reintroduce it as a taxability test. The class it was really
 covering — a TAX billed as a line, the CRMS bottled-water levy at coa 2210 —
-is said on the axis the rule reads now: `taxed_as: "none"`.
+is said on the axis the rule reads now: the line's tax class (Non-Taxable).
 
 ### `resolveJurisdiction(levels: JurisdictionLevels): ResolvedJurisdiction`
 
@@ -32893,8 +32780,8 @@ order/invoice.destinations[i].jurisdiction   the document's own value   ← WINS
 ```
 
 **TOTAL: it always returns a jurisdiction**, because level 3 does. A caller
-never has to decide what "no answer" means, and `findTaxFor` gets a value it
-can look up — `no_nexus` simply matches no tax, which is the untaxed result
+never has to decide what "no answer" means, and the class resolver gets a value
+it can look up — `no_nexus` simply matches no tax code, which is the untaxed result
 expressed as data rather than as a missing case.
 
 ## There is deliberately NO destination-master level
@@ -32938,8 +32825,8 @@ prevent. One call answers both.
 3. SELECT    resolveClassTaxes(deriveLineTaxClass(item), jurisdiction, exempt, asOf)
 ```
 
-⚠️ **The reader switch (api-cloudrun#993).** Stage 3 used to be
-`findTaxFor(taxes, jurisdiction, taxed_as ?? type, asOf)` plus the
+⚠️ **The reader switch (api-cloudrun#993).** Stage 3 used to be a lookup of
+the retired `taxes` collection by `(taxed_as ?? type, jurisdiction)`, plus the
 explicit-only uid refs the line carried. Both are gone: what a product IS for
 tax is its class, and the bottle levy is a code in "Sale – Bottled Water"
 rather than a ref that had to survive every rebuild. The one intended money
@@ -32962,8 +32849,7 @@ buyer, and on a replacement the buyer is CFS.
 ⚠️ **Keyed on the line's TYPE, never on its class** — `replacement` already
 means L&D everywhere (pricing, Xero accounts, bookings), and a rule keyed on
 the class would let a re-class or a line override silently strip CFS's
-end-user status. The legacy rule keyed on `taxed_as ?? type`; no stored line
-carries `taxed_as: "replacement"`, so the move changes no document.
+end-user status.
 
 ## 🔴 The revenue ACCOUNT is not one of the rules, and used to be
 
@@ -32989,32 +32875,6 @@ versions of one name bracket the same instant and {@link findTaxAt} throws
 which retries forever. `TaxRateSchema` requires both bounds precisely so a
 stored rate cannot reach that state; the `| null` here covers the partial
 literals the structural `Tax` admits.
-
-### `taxCellState(taxes: Tax[], jurisdiction: JurisdictionType | null, itemType: string, asOf: string): TaxCellState`
-
-**The third state.** Is this cell taxed, genuinely untaxed, or EXPIRED?
-
-A cell is `expired` iff no version brackets `asOf` **and** some version of
-that cell closed before it. A deliberate deregistration is expressed as a
-successor at 0% with an open window, never as a closed window with no
-successor — so "the last thing we said about this cell was a rate, and it has
-run out" is unambiguous.
-
-⚠️ **`untaxed` is the answer that must NOT widen.** A Chicago `service` line
-is `untaxed` and always has been: no tax has ever listed that type, so there
-is no lapsed version to find. If this returned `expired` for it, every
-service line in the corpus would be reported as pricing on a lapsed rate —
-and, worse, would fall forward onto a tax that never covered it. That
-distinction is the safety property the whole design turns on; see
-{@link UnreviewedTaxWarning}.
-
-⚠️ A `null` jurisdiction is `untaxed`, never `expired`: no-nexus means no
-catalog lookup happens at all, which is a decision rather than a lapse.
-
-**Parameters**
-
-- `taxes` — The `taxes` collection, unfiltered — historical versions are
-what make the lapse visible.
 
 ## `@cfs/core/utils/tax-classes`
 
@@ -33073,67 +32933,6 @@ interface ClassTaxResolution {
 }
 ```
 
-### `LegacyTaxMigration`
-
-The catalog the legacy `taxes` collection maps to, plus what did not map.
-
-```ts
-interface LegacyTaxMigration {
-  codes: TaxCode[];
-  rates: TaxRate[];
-  classes: TaxClass[];
-  skipped: Array<typeLiteral>;
-}
-```
-
-### `LegacyTaxMigrationContext`
-
-What a migration mints and stamps. Core cannot mint a Firestore id, so the caller does.
-
-```ts
-interface LegacyTaxMigrationContext {
-  actor: ActorRefType;
-  now: FirestoreTimestampType;
-  mintUid: fnOrConstructor;
-}
-```
-
-### `LegacyTaxRow`
-
-One document of the retired `taxes` collection, as the migration read it.
-
-Kept local rather than as a schema: the collection is gone (api-cloudrun#993),
-and this shape now exists only so a test can build a catalog from the prod rows
-it was migrated from.
-
-```ts
-interface LegacyTaxRow {
-  uid: string;
-  name: string;
-  rate: number;
-  type: RateType;
-  jurisdiction?: JurisdictionType | null;
-  item_types: PreTaxItemType[];
-  applied_from: string;
-  applied_from_fs: FirestoreTimestampType;
-  applied_to: string | null;
-  applied_to_fs: FirestoreTimestampType | null;
-  effective_from: string | null;
-  xero_tax_type?: string | null;
-  xero_account_code?: number | null;
-  xero_item_code?: string | null;
-  xero_components: XeroTaxComponentType[];
-}
-```
-
-### `MIGRATED_TAX_CLASSES`
-
-The class names the migration owns, and the legacy item type each is derived from.
-
-```ts
-const MIGRATED_TAX_CLASSES: typeLiteral;
-```
-
 ### `TaxCatalog`
 
 The three catalog collections, unfiltered — historical rates included.
@@ -33153,7 +32952,6 @@ What {@link deriveLineTaxClass} reads off a line. Structural, so an order, invoi
 ```ts
 interface TaxClassLineFacts {
   type: string;
-  taxed_as?: string | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
   price?: typeLiteral | null;
@@ -33185,68 +32983,37 @@ type TaxSetupViolationCode = "duplicate_code_name" | "duplicate_class_name" | "o
 **The class a line prices on**, stamped or not.
 
 ```
-override ?? snapshot ?? legacy(taxed_as ?? type, carried rate refs)
+override ?? snapshot ?? default class for the line's type (+ carried rate refs)
 ```
 
-The legacy arm exists because order lines are NOT bulk-stamped: a stamp bumps
-`order.version`, which re-opens the Xero quote push against a ~1,000/day
-quota (api-cloudrun#993). A line picks the stamp up on its next real write,
-and until then this reproduces what the legacy rule decided for it:
+Every stored priceable line carries its snapshot since the 2026-09-15 backfill
+(api-cloudrun#993), so the fallback serves lines built on the CLIENT before the
+API stamps them — the manager's optimistic reprice of a line it just added:
 
-- `taxed_as: "none"` → `null`, untaxed. Exactly what the legacy `none` key
-  resolved to, since no tax ever listed it.
-- otherwise the ACTIVE class whose `is_default_for` holds the key. No such
-  class → `null`, which is how `service`/`surcharge`/`transaction_fee` stay
-  untaxed even before a Non-Taxable class exists.
-- **the explicit-only bottle ref.** Legacy reached the bottle levy through a
-  rate uid the line itself carried. When a line carries (in `taxes` or
-  `taxes_base`) a rate whose code is NOT in its default class, the answer is
-  the one active class holding the default class's codes plus those — "Sale
-  – Bottled Water". Zero or several such classes keep the default: guessing
-  between two classes would bill a combination nobody chose.
+- the ACTIVE class whose `is_default_for` holds the line's `type`. No such
+  class → `null`, untaxed.
+- **carried FLAT rate refs.** When the line carries (in `taxes` or
+  `taxes_base`) a flat rate whose code is NOT in its default class, the answer
+  is the one active class holding the default class's codes plus those —
+  "Sale – Bottled Water". Zero or several such classes keep the default:
+  guessing between two classes would bill a combination nobody chose.
+
+⚠️ **Flat codes only.** The widening exists for the per-unit levy, which the
+legacy rule reached through a ref the line carried. A carried PERCENT ref is
+a stale price, not a statement of what the line is: a `service` line still
+holding a Chicago Rental ref would otherwise widen from Non-Taxable to Rental
+and be taxed — which `taxed_as: "none"` used to short-circuit before it was
+retired.
 
 ⚠️ **Derived from the CATALOG, never from class names.** An operator may
-rename "Sale"; `is_default_for` and code membership are what the migration
-made true and what `validateTaxSetup` keeps unambiguous
-(`duplicate_type_default`).
+rename "Sale"; `is_default_for` and code membership are what
+`validateTaxSetup` keeps unambiguous (`duplicate_type_default`).
 
 ### `lineTaxClass(item: typeLiteral): string | null`
 
-The class a line resolves: the operator's override, else the product
-snapshot. `null` when neither is stamped — during expand the CALLER supplies
-a derived class for such a line, because the legacy mapping
-(`taxed_as ?? type` plus the explicit-only bottle ref) needs the migrated
-class uids, which only the backfill knows.
-
-### `migrateLegacyTaxCatalog(legacy: readonly LegacyTaxRow[], existing: TaxCatalog, ctx: LegacyTaxMigrationContext): LegacyTaxMigration`
-
-**`taxes` → `taxes-codes` × `taxes-rates` × `taxes-classes`** — the one mapping
-the backfill and the parity test share (api-cloudrun#993), so what the test
-proves prices identically is what the backfill writes.
-
-- **Codes** group legacy rows by `name`. A group whose rows disagree on
-  `jurisdiction`, `type`, `xero_account_code` or `xero_item_code` THROWS: those
-  are properties of the code, and picking one would silently re-home a rate.
-- **Rates** keep the legacy uid, so every stored `price.taxes[].uid` still names
-  its rate. Window, `effective_from` and the Xero binding are copied as stored.
-- **Classes** derive from `item_types`: Rental, Sale and Replacement list every
-  code with a version listing that type. "Sale – Bottled Water" is Sale plus the
-  one explicit-only code (every version `item_types: []`), which the legacy rule
-  reached by uid ref; more than one explicit-only code THROWS, because which
-  products carry which ref is not in the catalog. Non-Taxable is `[]`.
-- **"No Tax" is skipped**, not migrated — no code can carry `jurisdiction: null`,
-  and Non-Taxable states the same fact.
-
-## Idempotent against `existing`
-
-A code or class is matched to an existing document BY NAME and keeps its uid,
-version and stamps; a rate by uid. So re-running over an unchanged `taxes`
-collection returns documents deep-equal to `existing`, and the caller writes
-only what differs. A class whose code SET is unchanged keeps its stored order.
-
-⚠️ **Re-running REPLACES migrated class membership from `item_types`.** That is
-right only while `taxes` is the source of truth — before the reader switch,
-when nothing else can edit a class. After it, do not run this.
+The class a line states: the operator's override, else the product snapshot.
+`null` when neither is stamped — {@link deriveLineTaxClass} answers for such a
+line from the catalog.
 
 ### `pricingTaxesOf(catalog: TaxCatalog): Array<typeLiteral>`
 

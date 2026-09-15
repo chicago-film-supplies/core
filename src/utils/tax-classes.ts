@@ -3,13 +3,11 @@
  * → the `taxes-rates` version live at an instant (api-cloudrun#993, plan
  * `api-cloudrun/.claude/plans/tax-classes.md`).
  *
- * ⚠️ **Until the reader switch this runs BESIDE `utils/taxes.ts`, and nothing
- * prices on it yet.** There is no dual-write (owner, 2026-09-13): `taxes` stays
- * the source of truth, {@link migrateLegacyTaxCatalog} projects it into the new
- * collections as often as needed, and the cutover freezes the legacy writers. It exists now so the step-3 property check —
- * *every live line reprices identically under both rules* — has something to
- * run, and so the manager's matrix can be built against the real resolver
- * rather than a sketch. At the reader switch it becomes the only path.
+ * The only tax rule since the reader switch (api-cloudrun#993): `utils/taxes.ts`
+ * resolves the jurisdiction (stage 2) and prices each line through
+ * {@link resolveClassTaxes}. The legacy `taxes` collection, its
+ * `(taxed_as ?? type) × jurisdiction` resolver and the one-shot migration are
+ * gone.
  *
  * ## The four stages, and which one this module owns
  *
@@ -30,19 +28,7 @@
  * Pure and db-free: the catalog is injected, `asOf` is injected.
  */
 
-import type {
-  ActorRefType,
-  FirestoreTimestampType,
-  JurisdictionType,
-  PreTaxItemType,
-  ProductTypeType,
-  RateType,
-  TaxClass,
-  TaxCode,
-  TaxJurisdictionType,
-  TaxRate,
-  XeroTaxComponentType,
-} from "../schemas/mod.ts";
+import type { ProductTypeType, RateType, TaxClass, TaxCode, TaxJurisdictionType, TaxRate } from "../schemas/mod.ts";
 
 // ⚠️ No import from `./taxes.ts`: that module prices on THIS one (the reader
 // switch), so the dependency runs taxes → tax-classes and never back.
@@ -335,11 +321,9 @@ export interface ClassTaxResolution {
 }
 
 /**
- * The class a line resolves: the operator's override, else the product
- * snapshot. `null` when neither is stamped — during expand the CALLER supplies
- * a derived class for such a line, because the legacy mapping
- * (`taxed_as ?? type` plus the explicit-only bottle ref) needs the migrated
- * class uids, which only the backfill knows.
+ * The class a line states: the operator's override, else the product snapshot.
+ * `null` when neither is stamped — {@link deriveLineTaxClass} answers for such a
+ * line from the catalog.
  */
 export function lineTaxClass(
   item: { uid_tax_class?: string | null; uid_tax_class_override?: string | null },
@@ -350,7 +334,6 @@ export function lineTaxClass(
 /** What {@link deriveLineTaxClass} reads off a line. Structural, so an order, invoice or credit-note line all fit. */
 export interface TaxClassLineFacts {
   type: string;
-  taxed_as?: string | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
   price?: {
@@ -363,45 +346,45 @@ export interface TaxClassLineFacts {
  * **The class a line prices on**, stamped or not.
  *
  * ```
- * override ?? snapshot ?? legacy(taxed_as ?? type, carried rate refs)
+ * override ?? snapshot ?? default class for the line's type (+ carried rate refs)
  * ```
  *
- * The legacy arm exists because order lines are NOT bulk-stamped: a stamp bumps
- * `order.version`, which re-opens the Xero quote push against a ~1,000/day
- * quota (api-cloudrun#993). A line picks the stamp up on its next real write,
- * and until then this reproduces what the legacy rule decided for it:
+ * Every stored priceable line carries its snapshot since the 2026-09-15 backfill
+ * (api-cloudrun#993), so the fallback serves lines built on the CLIENT before the
+ * API stamps them — the manager's optimistic reprice of a line it just added:
  *
- * - `taxed_as: "none"` → `null`, untaxed. Exactly what the legacy `none` key
- *   resolved to, since no tax ever listed it.
- * - otherwise the ACTIVE class whose `is_default_for` holds the key. No such
- *   class → `null`, which is how `service`/`surcharge`/`transaction_fee` stay
- *   untaxed even before a Non-Taxable class exists.
- * - **the explicit-only bottle ref.** Legacy reached the bottle levy through a
- *   rate uid the line itself carried. When a line carries (in `taxes` or
- *   `taxes_base`) a rate whose code is NOT in its default class, the answer is
- *   the one active class holding the default class's codes plus those — "Sale
- *   – Bottled Water". Zero or several such classes keep the default: guessing
- *   between two classes would bill a combination nobody chose.
+ * - the ACTIVE class whose `is_default_for` holds the line's `type`. No such
+ *   class → `null`, untaxed.
+ * - **carried FLAT rate refs.** When the line carries (in `taxes` or
+ *   `taxes_base`) a flat rate whose code is NOT in its default class, the answer
+ *   is the one active class holding the default class's codes plus those —
+ *   "Sale – Bottled Water". Zero or several such classes keep the default:
+ *   guessing between two classes would bill a combination nobody chose.
+ *
+ * ⚠️ **Flat codes only.** The widening exists for the per-unit levy, which the
+ * legacy rule reached through a ref the line carried. A carried PERCENT ref is
+ * a stale price, not a statement of what the line is: a `service` line still
+ * holding a Chicago Rental ref would otherwise widen from Non-Taxable to Rental
+ * and be taxed — which `taxed_as: "none"` used to short-circuit before it was
+ * retired.
  *
  * ⚠️ **Derived from the CATALOG, never from class names.** An operator may
- * rename "Sale"; `is_default_for` and code membership are what the migration
- * made true and what `validateTaxSetup` keeps unambiguous
- * (`duplicate_type_default`).
+ * rename "Sale"; `is_default_for` and code membership are what
+ * `validateTaxSetup` keeps unambiguous (`duplicate_type_default`).
  */
 export function deriveLineTaxClass(item: TaxClassLineFacts, catalog: TaxCatalog): string | null {
   const stated = lineTaxClass(item);
   if (stated !== null) return stated;
 
-  const key = item.taxed_as ?? item.type;
-  if (key === "none") return null;
   const active = catalog.classes.filter((c) => c.active);
-  const fallback = active.find((c) => (c.is_default_for as readonly string[]).includes(key));
+  const fallback = active.find((c) => (c.is_default_for as readonly string[]).includes(item.type));
   if (!fallback) return null;
 
+  const flatCodes = new Set(catalog.codes.filter((c) => c.type === "flat").map((c) => c.uid));
   const carriedCodes = new Set(
     [...(item.price?.taxes ?? []), ...(item.price?.taxes_base ?? [])]
       .map((ref) => catalog.rates.find((r) => r.uid === ref.uid)?.uid_tax_code)
-      .filter((uid): uid is string => uid !== undefined && !fallback.uid_tax_codes.includes(uid)),
+      .filter((uid): uid is string => uid !== undefined && flatCodes.has(uid) && !fallback.uid_tax_codes.includes(uid)),
   );
   if (carriedCodes.size === 0) return fallback.uid;
 
@@ -561,196 +544,4 @@ export function taxClassMatrix(
         })),
       })),
     }));
-}
-
-// ── migrateLegacyTaxCatalog ──────────────────────────────────────────────
-
-/** What a migration mints and stamps. Core cannot mint a Firestore id, so the caller does. */
-export interface LegacyTaxMigrationContext {
-  actor: ActorRefType;
-  now: FirestoreTimestampType;
-  /** A fresh document id for a code or class that does not exist yet. */
-  mintUid: () => string;
-}
-
-/** The catalog the legacy `taxes` collection maps to, plus what did not map. */
-export interface LegacyTaxMigration extends TaxCatalog {
-  codes: TaxCode[];
-  rates: TaxRate[];
-  classes: TaxClass[];
-  /** Legacy rows with no code to belong to — today only "No Tax" (`jurisdiction: null`). */
-  skipped: Array<{ uid: string; name: string; reason: string }>;
-}
-
-/**
- * One document of the retired `taxes` collection, as the migration read it.
- *
- * Kept local rather than as a schema: the collection is gone (api-cloudrun#993),
- * and this shape now exists only so a test can build a catalog from the prod rows
- * it was migrated from.
- */
-export interface LegacyTaxRow {
-  uid: string;
-  name: string;
-  rate: number;
-  type: RateType;
-  jurisdiction?: JurisdictionType | null;
-  item_types: PreTaxItemType[];
-  applied_from: string;
-  applied_from_fs: FirestoreTimestampType;
-  applied_to: string | null;
-  applied_to_fs: FirestoreTimestampType | null;
-  effective_from: string | null;
-  xero_tax_type?: string | null;
-  xero_account_code?: number | null;
-  xero_item_code?: string | null;
-  xero_components: XeroTaxComponentType[];
-}
-
-/** The class names the migration owns, and the legacy item type each is derived from. */
-export const MIGRATED_TAX_CLASSES = {
-  rental: "Rental",
-  sale: "Sale",
-  replacement: "Replacement",
-  bottled: "Sale – Bottled Water",
-  none: "Non-Taxable",
-} as const;
-
-/**
- * **`taxes` → `taxes-codes` × `taxes-rates` × `taxes-classes`** — the one mapping
- * the backfill and the parity test share (api-cloudrun#993), so what the test
- * proves prices identically is what the backfill writes.
- *
- * - **Codes** group legacy rows by `name`. A group whose rows disagree on
- *   `jurisdiction`, `type`, `xero_account_code` or `xero_item_code` THROWS: those
- *   are properties of the code, and picking one would silently re-home a rate.
- * - **Rates** keep the legacy uid, so every stored `price.taxes[].uid` still names
- *   its rate. Window, `effective_from` and the Xero binding are copied as stored.
- * - **Classes** derive from `item_types`: Rental, Sale and Replacement list every
- *   code with a version listing that type. "Sale – Bottled Water" is Sale plus the
- *   one explicit-only code (every version `item_types: []`), which the legacy rule
- *   reached by uid ref; more than one explicit-only code THROWS, because which
- *   products carry which ref is not in the catalog. Non-Taxable is `[]`.
- * - **"No Tax" is skipped**, not migrated — no code can carry `jurisdiction: null`,
- *   and Non-Taxable states the same fact.
- *
- * ## Idempotent against `existing`
- *
- * A code or class is matched to an existing document BY NAME and keeps its uid,
- * version and stamps; a rate by uid. So re-running over an unchanged `taxes`
- * collection returns documents deep-equal to `existing`, and the caller writes
- * only what differs. A class whose code SET is unchanged keeps its stored order.
- *
- * ⚠️ **Re-running REPLACES migrated class membership from `item_types`.** That is
- * right only while `taxes` is the source of truth — before the reader switch,
- * when nothing else can edit a class. After it, do not run this.
- */
-export function migrateLegacyTaxCatalog(
-  legacy: readonly LegacyTaxRow[],
-  existing: TaxCatalog,
-  ctx: LegacyTaxMigrationContext,
-): LegacyTaxMigration {
-  const stamps = { version: 0, created_by: ctx.actor, updated_by: ctx.actor, created_at: ctx.now, updated_at: ctx.now };
-  const identity = <T extends { uid: string; version: number; created_by: ActorRefType; updated_by: ActorRefType; created_at: FirestoreTimestampType; updated_at: FirestoreTimestampType }>(
-    prior: T | undefined,
-  ) =>
-    prior
-      ? { uid: prior.uid, version: prior.version, created_by: prior.created_by, updated_by: prior.updated_by, created_at: prior.created_at, updated_at: prior.updated_at }
-      : { uid: ctx.mintUid(), ...stamps };
-
-  const skipped: LegacyTaxMigration["skipped"] = [];
-  const migrated = [...legacy]
-    .filter((t) => {
-      if (t.jurisdiction == null || t.jurisdiction === "no_nexus") {
-        skipped.push({ uid: t.uid, name: t.name, reason: "no jurisdiction — the Non-Taxable class states this" });
-        return false;
-      }
-      return true;
-    })
-    .sort((a, b) => a.name.localeCompare(b.name) || Date.parse(a.applied_from) - Date.parse(b.applied_from));
-
-  // ── codes ──
-  const groups = new Map<string, LegacyTaxRow[]>();
-  for (const t of migrated) groups.set(t.name, [...(groups.get(t.name) ?? []), t]);
-
-  const codes: TaxCode[] = [];
-  const codeUidByName = new Map<string, string>();
-  for (const [name, rows] of groups) {
-    const first = rows[0];
-    for (const key of ["jurisdiction", "type", "xero_account_code", "xero_item_code"] as const) {
-      const values = new Set(rows.map((r) => r[key] ?? null));
-      if (values.size > 1) {
-        throw new Error(
-          `migrateLegacyTaxCatalog: the versions of "${name}" disagree on ${key} (${[...values].join(", ")}) — ` +
-            `a code carries one, so fix the taxes documents before migrating.`,
-        );
-      }
-    }
-    const prior = existing.codes.find((c) => c.name === name);
-    const code: TaxCode = {
-      ...identity(prior),
-      name,
-      jurisdiction: first.jurisdiction as TaxJurisdictionType,
-      type: first.type,
-      xero_account_code: first.xero_account_code ?? null,
-      xero_item_code: first.xero_item_code ?? null,
-      active: prior?.active ?? true,
-    };
-    codes.push(code);
-    codeUidByName.set(name, code.uid);
-  }
-
-  // ── rates ──
-  const rates: TaxRate[] = migrated.map((t) => {
-    const prior = existing.rates.find((r) => r.uid === t.uid);
-    return {
-      ...identity(prior),
-      uid: t.uid,
-      uid_tax_code: codeUidByName.get(t.name)!,
-      rate: t.rate,
-      type: t.type,
-      applied_from: t.applied_from,
-      applied_from_fs: t.applied_from_fs,
-      applied_to: t.applied_to,
-      applied_to_fs: t.applied_to_fs,
-      effective_from: t.effective_from,
-      xero_tax_type: t.xero_tax_type ?? null,
-      xero_components: t.xero_components,
-    };
-  });
-
-  // ── classes ──
-  const listing = (key: string) => [...new Set(migrated.filter((t) => t.item_types.includes(key as never)).map((t) => codeUidByName.get(t.name)!))];
-  const explicitOnly = [...groups].filter(([, rows]) => rows.every((r) => r.item_types.length === 0)).map(([name]) => codeUidByName.get(name)!);
-  if (explicitOnly.length > 1) {
-    throw new Error(
-      `migrateLegacyTaxCatalog: ${explicitOnly.length} explicit-only codes. Only the bottle levy has a known class ` +
-        `("${MIGRATED_TAX_CLASSES.bottled}"); name a class for the others before migrating.`,
-    );
-  }
-
-  const planned: Array<[name: string, codes: string[], defaults: ProductTypeType[]]> = [
-    [MIGRATED_TAX_CLASSES.rental, listing("rental"), ["rental"]],
-    [MIGRATED_TAX_CLASSES.sale, listing("sale"), ["sale"]],
-    ...(explicitOnly.length === 1
-      ? [[MIGRATED_TAX_CLASSES.bottled, [...listing("sale"), explicitOnly[0]], []] as [string, string[], ProductTypeType[]]]
-      : []),
-    [MIGRATED_TAX_CLASSES.replacement, listing("replacement"), ["replacement"]],
-    [MIGRATED_TAX_CLASSES.none, [], ["service", "surcharge", "transaction_fee"]],
-  ];
-
-  const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x) => b.includes(x));
-  const classes: TaxClass[] = planned.map(([name, uid_tax_codes, is_default_for]) => {
-    const prior = existing.classes.find((c) => c.name === name);
-    return {
-      ...identity(prior),
-      name,
-      description: prior?.description ?? null,
-      uid_tax_codes: prior && sameSet(prior.uid_tax_codes, uid_tax_codes) ? [...prior.uid_tax_codes] : uid_tax_codes,
-      is_default_for: prior && sameSet(prior.is_default_for, is_default_for) ? [...prior.is_default_for] : is_default_for,
-      active: prior?.active ?? true,
-    };
-  });
-
-  return { codes, rates, classes, skipped };
 }

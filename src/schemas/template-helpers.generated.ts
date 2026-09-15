@@ -230,12 +230,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "destinationJurisdictions", expr: "it.taxes.destinationJurisdictions(ctx)", desc: "**The jurisdiction each of a document's destinations resolves to**, with the level that answered — one entry per `destinations[]` entry, in document order.", returns: "ResolvedJurisdiction[]" },
     { name: "destinationsForItems", expr: "it.taxes.destinationsForItems(items, destinations)", desc: "The `destinations[]` entry each item is billed under — **one array, parallel to `items`**, so the caller walks the document once rather than per line.", returns: "Array<TaxDestination | null>" },
     { name: "findTaxAt", expr: "it.taxes.findTaxAt(taxes, name, asOf)", desc: "Pick the Tax whose applied window contains `asOf`, matched by exact `name`. Returns null when nothing matches (e.g. `asOf` before any historical doc). Throws on catalog drift (two same-name docs bracket the same instant).", returns: "Tax | null" },
-    { name: "findTaxFor", expr: "it.taxes.findTaxFor(taxes, jurisdiction, itemType, asOf)", desc: "**The tax rule: `(jurisdiction × item type)`, as of a date.**", returns: "Tax | null" },
-    { name: "isTaxLive", expr: "it.taxes.isTaxLive(tax, asOf)", desc: "**The derived `active`.** Is this version the one CFS collects at `asOf`?", returns: "boolean" },
     { name: "isTaxableCoa", expr: "it.taxes.isTaxableCoa(coaRevenue)", desc: "Was a line with this revenue COA subject to tax **under the retired account-keyed gate**?", returns: "boolean" },
     { name: "resolveJurisdiction", expr: "it.taxes.resolveJurisdiction(levels)", desc: "**Resolve which jurisdiction a destination's lines are taxed in.** The one implementation of the precedence — per DESTINATION, never per document, which is what lets one order carry two jurisdictions.", returns: "ResolvedJurisdiction" },
     { name: "resolveLineTax", expr: "it.taxes.resolveLineTax(item, destination, ctx)", desc: "**The pricing rule, for one line.**", returns: "LineTaxResolution" },
-    { name: "taxCellState", expr: "it.taxes.taxCellState(taxes, jurisdiction, itemType, asOf)", desc: "**The third state.** Is this cell taxed, genuinely untaxed, or EXPIRED?", returns: "TaxCellState" },
   ],
   "template-lint": [
 

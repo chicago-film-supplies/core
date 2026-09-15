@@ -11,7 +11,6 @@
 
 import type {
   COARevenueType,
-  TaxedAsType,
   DiscountType,
   PriceModifierType,
   OrderDocTotalsType,
@@ -63,8 +62,8 @@ export type PriceObject = OrderDocItemPriceType;
  * It is structural, not a stored document: the `taxes` collection it was once a
  * subset of is retired (api-cloudrun#993). Only `uid`/`name`/`rate`/`type` are
  * required — those are what the pricing helpers read. Everything else is
- * resolution metadata that only the as-of resolvers in `@cfs/core/utils/taxes`
- * (`findTaxAt`, `findTaxFor`) touch, and it stays optional so partial `Tax`
+ * resolution metadata that only the as-of resolver in `@cfs/core/utils/taxes`
+ * (`findTaxAt`) and the Xero boundary touch, and it stays optional so partial `Tax`
  * literals in tests and callers keep type-checking.
  *
  * ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
@@ -81,10 +80,8 @@ export interface Tax {
   applied_from?: string;
   applied_to?: string | null;
   effective_from?: string | null;
-  /** `null` = explicit-only, reachable by uid and never by `findTaxFor`. */
+  /** The code's jurisdiction (`pricingTaxesOf`). */
   jurisdiction?: JurisdictionType | null;
-  /** Legacy line-type membership the `(jurisdiction × type)` rule reads; `[]` = explicit-only. */
-  item_types?: PreTaxItemType[];
   xero_tax_type?: string | null;
   xero_account_code?: number | null;
   xero_item_code?: string | null;
@@ -148,18 +145,6 @@ export interface LineItem {
    * of `number`, so a `LineItem` still satisfies `PricingItem`.
    */
   coa_revenue?: COARevenueType | null;
-  /**
-   * **The type this line is TAXED as**, overriding {@link LineItem.type} for
-   * the tax rule alone (`taxed_as ?? type` — see `resolveLineTax`).
-   *
-   * The escape hatch for a line whose billing type and tax treatment
-   * legitimately differ, and the reason the tax key is not simply `type`: a
-   * `custom-` line has no product to inherit an account from, so its author
-   * picks the nearest billing type and the tax rule would otherwise follow that
-   * choice. `"none"` means untaxed outright — no tax lists it, so it needs no
-   * branch of its own.
-   */
-  taxed_as?: TaxedAsType | null;
   /** The product's tax-class snapshot (`LineTaxCore`) — see `deriveLineTaxClass`. */
   uid_tax_class?: string | null;
   /** The operator's per-line tax-class override (`LineTaxCore`); wins over the snapshot. */
@@ -960,7 +945,7 @@ export const TAXABLE_REVENUE_COAS: readonly number[] = [4000, 4140, 4200, 4210];
  *
  * ⚠️ Do not reintroduce it as a taxability test. The class it was really
  * covering — a TAX billed as a line, the CRMS bottled-water levy at coa 2210 —
- * is said on the axis the rule reads now: `taxed_as: "none"`.
+ * is said on the axis the rule reads now: the line's tax class (Non-Taxable).
  */
 export function isTaxableCoa(coaRevenue: number | null | undefined): boolean {
   if (coaRevenue === null || coaRevenue === undefined) return true;
@@ -1019,7 +1004,7 @@ export function computeItemTaxAmountCents(
  *
  * **It prices the refs the line carries; it does not decide taxability.** That
  * decision is `resolveLineTax` / `assignLineTaxes`, which writes `price.taxes`
- * from `(taxed_as ?? type, jurisdiction)`. A revenue-account gate stood here
+ * from `(tax class, jurisdiction)`. A revenue-account gate stood here
  * until the owner ruling of 2026-08-20 — *"an item's tax is item type ×
  * jurisdiction, it has nothing to do with coa"* — and removing it is what makes
  * the two functions answer one question instead of two.
