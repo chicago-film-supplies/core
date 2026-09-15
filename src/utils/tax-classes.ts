@@ -1,7 +1,6 @@
 /**
  * **The class-based tax rule** — `taxes-classes` × jurisdiction → `taxes-codes`
- * → the `taxes-rates` version live at an instant (api-cloudrun#993, plan
- * `api-cloudrun/.claude/plans/tax-classes.md`).
+ * → the `taxes-rates` version live at an instant (api-cloudrun#993).
  *
  * The only tax rule since the reader switch (api-cloudrun#993): `utils/taxes.ts`
  * resolves the jurisdiction (stage 2) and prices each line through

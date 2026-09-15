@@ -4,7 +4,7 @@
  * **The identity of one tax** — the D365 "sales tax code", the SAP "tax code".
  * Its dated values live in `taxes-rates` (`schemas/taxes-rate.ts`), and the
  * item side that lists codes lives in `taxes-classes` (`schemas/taxes-class.ts`).
- * api-cloudrun#993; plan `api-cloudrun/.claude/plans/tax-classes.md`.
+ * api-cloudrun#993.
  *
  * ## Why a real document, and not the first version's uid or a slug
  *
