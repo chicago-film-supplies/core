@@ -49,6 +49,7 @@ import * as reportingUtils from "../src/utils/reporting.ts";
 import * as pickSheetUtils from "../src/utils/pickSheets.ts";
 import * as pickSheetFoldUtils from "../src/utils/pick-sheet-fold.ts";
 import * as sessionUtils from "../src/utils/sessions.ts";
+import * as sharedFieldUtils from "../src/utils/shared-fields.ts";
 import * as taxUtils from "../src/utils/taxes.ts";
 import * as templateUtils from "../src/utils/templates.ts";
 import * as citationUtils from "../src/utils/citations.ts";
@@ -156,6 +157,10 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // day its family resolves the namespace.
   reporting: reportingUtils,
   sessions: sessionUtils,
+  // Same exception as `documentDiff`: `utils/shared-fields.ts` classifies how an
+  // order field propagates to its downstream documents — sync machinery reading
+  // two SCHEMAS, with nothing to render. Listed so the drift guard sees its exports.
+  "shared-fields": sharedFieldUtils,
   taxes: taxUtils,
   templates: templateUtils,
   stock: stockUtils,

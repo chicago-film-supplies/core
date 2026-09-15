@@ -214,6 +214,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "sessionItemPlaces", expr: "it.sessions.sessionItemPlaces(lines)", desc: "The distinct places a row's units moved between, as `{from, to}` labels.", returns: "Array<typeLiteral>" },
     { name: "sessionQuantity", expr: "it.sessions.sessionQuantity(items)", desc: "Total units across a set of rows.", returns: "number" },
   ],
+  "shared-fields": [
+
+  ],
   "stock": [
 
   ],

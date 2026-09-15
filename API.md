@@ -31679,6 +31679,113 @@ Sums `quantity`, the movement's own count, and **not** the absolute value of
 its lines: a row that moves units between two places carries one quantity and
 two line sides, so summing lines would double it.
 
+## `@cfs/core/utils/shared-fields`
+
+Which fields does a downstream document SHARE with its order, and how does each
+one propagate?
+
+The order → invoice / fulfillment sync is moving to one per-field rule
+(api-cloudrun#890, api-cloudrun#989):
+
+```
+downstream' = isEqual(downstream, prevOrder) ? nextOrder : downstream
+```
+
+followed by re-running the derivations on the downstream document. Applying that
+rule needs to know, for every field, which of four structural cases it is in.
+This module answers that from the two Zod schemas, so there is no hand-maintained
+field list to drift (see the plan's "Is a hand-maintained field list a
+mistake?").
+
+| kind | what it is | how the merge treats it |
+|---|---|---|
+| `propagated` | a value both documents carry with the same meaning | the three-way rule |
+| `derived` | written by a derivation (`priceDocument`, `getDuration`, the `_fs` mirrors) | skipped, then recomputed |
+| `homonym` | same key, different meaning (`status`, `xero_id`, …) | skipped |
+| `atom` | a snapshot of another document (an object carrying its own `uid`) | the three-way rule, on the WHOLE object |
+
+Plus two structural containers the merge descends rather than compares:
+
+- **rows** — an array whose element carries a `uid` (`items[]`, `destinations[]`).
+  Rows are matched by identity first. `uid` and `path` inside a row are its
+  IDENTITY, not values, so they are not reported.
+- **value objects** — an object with no `uid` (`dates`, `price`, `discount`).
+  Recursed into, leaf by leaf.
+
+A key present on only one schema is not reported at all. "Not in the order
+schema" IS the definition of downstream-only.
+
+## Where the kinds come from
+
+`derived` and `homonym` are DECLARED on the schema field, as
+`.meta({ derived: true })` and `.meta({ propagate: false })`. A tag on either
+schema counts. `atom` and the containers are read from the shape.
+
+⚠️ **`propagate: false` has the unsafe default** — an untagged new homonym is
+reported `propagated`. The guard is the snapshot of this function's output in
+`tests/shared-fields.test.ts`: a new shared key at any level fails it until
+someone looks.
+
+## It fails closed
+
+A node type the walker does not recognise is reported in `unhandled` rather than
+guessed at. Callers assert it is empty.
+
+### `DERIVED_META_KEY`
+
+The meta key that marks a field as written by a derivation.
+
+```ts
+const DERIVED_META_KEY: "derived";
+```
+
+### `PROPAGATE_META_KEY`
+
+The meta key that marks a homonym: `.meta({ propagate: false })`.
+
+```ts
+const PROPAGATE_META_KEY: "propagate";
+```
+
+### `SharedField`
+
+One shared field.
+
+```ts
+interface SharedField {
+  path: string;
+  kind: SharedFieldKind;
+}
+```
+
+### `SharedFieldClassification`
+
+Result of {@link classifySharedFields}.
+
+```ts
+interface SharedFieldClassification {
+  fields: SharedField[];
+  rows: string[];
+  unhandled: Array<typeLiteral>;
+}
+```
+
+### `SharedFieldKind`
+
+How one shared field propagates — see the module docs.
+
+```ts
+type SharedFieldKind = "propagated" | "derived" | "homonym" | "atom";
+```
+
+### `classifySharedFields(source: z.ZodType, downstream: z.ZodType): SharedFieldClassification`
+
+Classify every field `source` (the order) shares with `downstream` (an invoice
+or a fulfillment). See the module docs for the kinds.
+
+Pure and deterministic, and cheap enough to call per sync, but callers should
+compute it once per schema pair.
+
 ## `@cfs/core/utils/pickSheets`
 
 Pure helpers over a PICK SHEET — the document a multi-order packing list

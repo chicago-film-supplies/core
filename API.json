@@ -14621,6 +14621,50 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/utils/shared-fields",
+      "moduleDoc": "Which fields does a downstream document SHARE with its order, and how does each\none propagate?\n\nThe order → invoice / fulfillment sync is moving to one per-field rule\n(api-cloudrun#890, api-cloudrun#989):\n\n```\ndownstream' = isEqual(downstream, prevOrder) ? nextOrder : downstream\n```\n\nfollowed by re-running the derivations on the downstream document. Applying that\nrule needs to know, for every field, which of four structural cases it is in.\nThis module answers that from the two Zod schemas, so there is no hand-maintained\nfield list to drift (see the plan's \"Is a hand-maintained field list a\nmistake?\").\n\n| kind | what it is | how the merge treats it |\n|---|---|---|\n| `propagated` | a value both documents carry with the same meaning | the three-way rule |\n| `derived` | written by a derivation (`priceDocument`, `getDuration`, the `_fs` mirrors) | skipped, then recomputed |\n| `homonym` | same key, different meaning (`status`, `xero_id`, …) | skipped |\n| `atom` | a snapshot of another document (an object carrying its own `uid`) | the three-way rule, on the WHOLE object |\n\nPlus two structural containers the merge descends rather than compares:\n\n- **rows** — an array whose element carries a `uid` (`items[]`, `destinations[]`).\n  Rows are matched by identity first. `uid` and `path` inside a row are its\n  IDENTITY, not values, so they are not reported.\n- **value objects** — an object with no `uid` (`dates`, `price`, `discount`).\n  Recursed into, leaf by leaf.\n\nA key present on only one schema is not reported at all. \"Not in the order\nschema\" IS the definition of downstream-only.\n\n## Where the kinds come from\n\n`derived` and `homonym` are DECLARED on the schema field, as\n`.meta({ derived: true })` and `.meta({ propagate: false })`. A tag on either\nschema counts. `atom` and the containers are read from the shape.\n\n⚠️ **`propagate: false` has the unsafe default** — an untagged new homonym is\nreported `propagated`. The guard is the snapshot of this function's output in\n`tests/shared-fields.test.ts`: a new shared key at any level fails it until\nsomeone looks.\n\n## It fails closed\n\nA node type the walker does not recognise is reported in `unhandled` rather than\nguessed at. Callers assert it is empty.",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "DERIVED_META_KEY",
+          "declaration": "const DERIVED_META_KEY: \"derived\";",
+          "doc": "The meta key that marks a field as written by a derivation."
+        },
+        {
+          "kind": "variable",
+          "name": "PROPAGATE_META_KEY",
+          "declaration": "const PROPAGATE_META_KEY: \"propagate\";",
+          "doc": "The meta key that marks a homonym: `.meta({ propagate: false })`."
+        },
+        {
+          "kind": "interface",
+          "name": "SharedField",
+          "declaration": "interface SharedField {\n  path: string;\n  kind: SharedFieldKind;\n}",
+          "doc": "One shared field."
+        },
+        {
+          "kind": "interface",
+          "name": "SharedFieldClassification",
+          "declaration": "interface SharedFieldClassification {\n  fields: SharedField[];\n  rows: string[];\n  unhandled: Array<typeLiteral>;\n}",
+          "doc": "Result of {@link classifySharedFields}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SharedFieldKind",
+          "declaration": "type SharedFieldKind = \"propagated\" | \"derived\" | \"homonym\" | \"atom\";",
+          "doc": "How one shared field propagates — see the module docs."
+        },
+        {
+          "kind": "function",
+          "name": "classifySharedFields",
+          "signature": "classifySharedFields(source: z.ZodType, downstream: z.ZodType): SharedFieldClassification",
+          "doc": "Classify every field `source` (the order) shares with `downstream` (an invoice\nor a fulfillment). See the module docs for the kinds.\n\nPure and deterministic, and cheap enough to call per sync, but callers should\ncompute it once per schema pair.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/utils/pickSheets",
       "moduleDoc": "Pure helpers over a PICK SHEET — the document a multi-order packing list\nrenders.\n\n```ts\nimport { buildPackingList } from \"@cfs/core/utils/pickSheets\";\n```\n\nA pick sheet is every open line at one destination, or with one organization,\n**across orders** (`schemas/pick-sheet.ts`). This namespace is what\n`it.pickSheets` resolves to for a `pick-sheets`-sourced template.\n\n⚠️ **This entrypoint is camelCase where every sibling is kebab, and it is\nforced rather than a style choice.** The generated helper catalogue keys on\nthe entrypoint BASENAME, while injection keys on the\n{@link TEMPLATE_COLLECTION_UTILS} value, which must be a valid `it.<ns>`\nidentifier. Those two coincide for every existing namespace only because none\nwas ever multi-word — `movement-sessions` maps to the single word `sessions`.\n`pick-sheets` is the first that is, and `it.pick-sheets` does not parse, so a\nkebab entrypoint would satisfy one guard and fail the other. Renaming the\nFILE is what keeps both true with no third mapping to drift.\n\n## Why this namespace exists\n\nA template's `it.*` namespaces are resolved from its collections\n(`availableUtilNamespaces`), so a pick-sheets-sourced family gets\n`it.pickSheets` and **no `it.orders`**. Without this module it would get no\ndocument helpers at all.\n\n⚠️ **Re-exports, never reimplementations** — the same rule\n`utils/fulfillments.ts` states. Mapping `pick-sheets` to the string\n`\"orders\"` in `TEMPLATE_COLLECTION_UTILS` would put `it.orders` on a document\nthat is not an order, and a hand-written copy would drift;\n`tests/template-helpers.test.ts` asserts these are the SAME function objects\nas the orders bindings, so a copy fails rather than diverges.\n\n## What is deliberately NOT here\n\n⭐ **No \"units for this line\" helper, because that question's obvious answer\nis N× wrong.** {@link PickSheetItem.uid_booking} legitimately repeats across\nlines — a booking is aggregate per `(order, product, destination)`, so a\npriced principal beside its zero-priced accessories, a `splitItem`, or a\nproduct appearing both standalone and as a kit component all name the same\nbooking. Summing it per line overstates the leg.\n\nFor a leg's own totals a template never needs to ask at all:\n{@link PickSheetDestination.quantity} is that leg's total and\n{@link PickSheetDestination.breakdown} its seven buckets, both computed once in\nthe fold over the whole membership slice. Read the section total; do not\nre-derive it.\n\n⭐ **What IS here is {@link pickSheetLineBooking}, and it is the same rule\nrather than an exception to it.** A packing list with a state column per\nbucket needs per-ROW numbers, which the section totals cannot supply — so the\nfold designates one owner occurrence per booking\n({@link PickSheetItem.owner_path}) and this helper hands back a booking only\nfor that row. Every other occurrence gets `null`. The arithmetic with a wrong\nobvious form is not offered more safely; it is made unrepresentable, because a\nnon-owner has nothing to sum.\n\n## 🔴 The hazard a caller must handle — this document is PAGED\n\n{@link PickSheet.orders} is *the orders on THIS PAGE*; `order_count`,\n`destination_count`, `quantity` and `organizations` describe the whole SCOPE.\nThat split is right for a screen and is a trap for a printed document: a\npacking list rendered from a default page is **silently short**, showing a\npage of orders under a scope-wide total that disagrees with them.\n\n⚠️ **So a render caller must assemble every page before it renders, and must\nnot paper over it by rendering the counts alone.** Nothing in this namespace\ncan enforce that — by the time a template runs, a short document is\nindistinguishable from a small one. It belongs to whatever builds the `doc`,\nwhich is the same place `PickSheet.missing_order_uids` has to be surfaced\nrather than dropped.",
       "symbols": [

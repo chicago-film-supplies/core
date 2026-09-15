@@ -189,19 +189,19 @@ export interface OrderDocDatesType {
  */
 export const OrderDocDates: z.ZodType<OrderDocDatesType> = z.strictObject({
   delivery_start: chicagoInstant().nullable(),
-  delivery_start_fs: FirestoreTimestamp.nullable(),
+  delivery_start_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
   delivery_end: chicagoInstant().nullable(),
-  delivery_end_fs: FirestoreTimestamp.nullable(),
+  delivery_end_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
   collection_start: chicagoInstant().nullable(),
-  collection_start_fs: FirestoreTimestamp.nullable(),
+  collection_start_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
   collection_end: chicagoInstant().nullable(),
-  collection_end_fs: FirestoreTimestamp.nullable(),
+  collection_end_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
   charge_start: chicagoInstant().nullable(),
-  charge_start_fs: FirestoreTimestamp.nullable(),
+  charge_start_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
   charge_end: chicagoInstant().nullable(),
-  charge_end_fs: FirestoreTimestamp.nullable(),
-  days_active: z.int().nullable(),
-  days_charged: z.int().nullable(),
+  charge_end_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
+  days_active: z.int().nullable().meta({ derived: true }),
+  days_charged: z.int().nullable().meta({ derived: true }),
 });
 
 /**
@@ -672,7 +672,7 @@ function checkDiscountRate(
 export const Discount: z.ZodType<DiscountType> = z.strictObject({
   rate: z.number().meta({ column: true, label: "Rate", ...RATE_UNIT_META }),
   type: RateTypeEnum,
-  amount_cents: z.int().min(0).meta({ column: true, label: "Amount" }),
+  amount_cents: z.int().min(0).meta({ column: true, label: "Amount", derived: true }),
 }).superRefine(checkDiscountRate);
 
 /** Discount input — rate and type only. Amount is computed by calculateItemPrice. */
@@ -1031,16 +1031,16 @@ export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObjec
   replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
   chargeable_days: z.number().int().nullable().meta({ column: true, label: "Chargeable Days" }),
   formula: PriceFormulaEnum.meta({ column: true, label: "Formula" }),
-  subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
-  subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal" }),
+  subtotal_cents: z.int().meta({ column: true, label: "Subtotal", derived: true }),
+  subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal", derived: true }),
   discount: Discount.nullable().meta({ label: "Discount" }),
-  taxes: z.array(PriceModifier).meta({ label: "Tax" }),
+  taxes: z.array(PriceModifier).meta({ label: "Tax", derived: true }),
   // Labelled although nothing here is a column in its own right: `TaxRef`'s
   // `name` and `rate` ARE columns (the product catalog offers them), so every
   // key holding a `TaxRef` inherits two columns and needs to name them. Without
   // this the pre-override snapshot would collide with the live `taxes`.
-  taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax" }),
-  total_cents: z.int().meta({ column: true, label: "Total" }),
+  taxes_base: z.array(TaxRef).optional().meta({ label: "Base Tax", derived: true }),
+  total_cents: z.int().meta({ column: true, label: "Total", derived: true }),
 }).superRefine(checkPriceBaseUnit);
 
 /**
@@ -1153,7 +1153,8 @@ const OrderDocLineItemInner = z.strictObject({
   order_number: z.int().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
   inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional().meta({ column: true, label: "Inclusion" }),
-  crms_id: z.int().nullable().optional(),
+  // `propagate: false` — the CRMS line id is a different record on each document.
+  crms_id: z.int().nullable().optional().meta({ propagate: false }),
   // Denormalized from the product at write time — see the interface docblock for
   // why this is on the DOC line and not the input one. `.optional()` rather than
   // defaulted: `validateBeforeWrite` persists the RAW doc, so a `.default()`
@@ -1527,9 +1528,17 @@ export interface Order {
 
 /** Zod schema for the full order Firestore document. */
 export const OrderSchema: z.ZodType<Order> = z.strictObject({
-  uid: FirestoreId,
-  number: z.int().meta({ column: true, label: "#", linkTo: "orderDetail" }),
-  status: OrderStatus.meta({ column: true, label: "Status" }),
+  // ── `propagate: false` / `derived: true` ──
+  // Read by `classifySharedFields` (`utils/shared-fields.ts`), which decides how
+  // the order → invoice / fulfillment sync treats every key the documents share.
+  // `propagate: false` marks a HOMONYM: the downstream document carries the same
+  // key with a different meaning (its own uid, number, status, Xero record).
+  // `derived: true` marks a key a derivation writes, so the sync recomputes it
+  // rather than comparing it. A tag on either schema counts; these live on the
+  // order because the order is the source of every sync.
+  uid: FirestoreId.meta({ propagate: false }),
+  number: z.int().meta({ column: true, label: "#", linkTo: "orderDetail", propagate: false }),
+  status: OrderStatus.meta({ column: true, label: "Status", propagate: false }),
   organization: OrderDocOrganization.meta({ label: "Organization" }),
   destinations: z.array(DocDestination).min(1),
   // "Item" prefixes every column under here, which is what keeps
@@ -1562,16 +1571,16 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // not dead. `null`/absent already means the default store, and
   // `api-cloudrun/src/lib/locationIntegrity.ts` reasons about exactly that.
   uid_store: FirestoreId.nullable().optional(),
-  totals: OrderDocTotals,
+  totals: OrderDocTotals.meta({ derived: true }),
   invoices: z.array(z.strictObject({
     uid: FirestoreId,
     number: z.int().meta({ column: true, label: "#" }),
     status: InvoiceStatusEnum.meta({ column: true, label: "Status" }),
   })).meta({ label: "Invoice" }),
-  query_by_invoices: z.array(z.string()),
-  query_by_items: z.array(z.string()),
-  query_by_contacts: z.array(z.string()),
-  query_by_dates: z.array(z.string()),
+  query_by_invoices: z.array(z.string()).meta({ derived: true }),
+  query_by_items: z.array(z.string()).meta({ derived: true }),
+  query_by_contacts: z.array(z.string()).meta({ derived: true }),
+  query_by_dates: z.array(z.string()).meta({ derived: true }),
   bookings_breakdown: z.strictObject({
     quoted: z.number(),
     reserved: z.number(),
@@ -1581,7 +1590,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
     lost: z.number(),
     damaged: z.number(),
   }),
-  crms_id: z.int().nullable(),
+  crms_id: z.int().nullable().meta({ propagate: false }),
   // NOT tightened — see the interface. 995/995 is a fact about the CRMS
   // webhook, the only writer; `createOrder` stamps no `crms_status` at all.
   crms_status: z.string().optional(),
@@ -1614,9 +1623,9 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // ever assigns a string-or-null), so nothing produced the absence the
   // declaration allowed.
   reference: z.string().max(255).nullable().meta({ column: true, label: "Reference", linkTo: "orderDetail" }),
-  xero_id: z.uuid().nullable(),
-  uid_thread: ThreadId,
-  version: z.int().min(0).default(0),
+  xero_id: z.uuid().nullable().meta({ propagate: false }),
+  uid_thread: ThreadId.meta({ propagate: false }),
+  version: z.int().min(0).default(0).meta({ propagate: false }),
   // Both actor fields — see the interface for why each is optional rather than
   // backfilled, and why `updated_by` arrived only once CRMS was switched off.
   // They put `orders` into the user-rename cascade, which is safe ONLY because
@@ -1625,9 +1634,10 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // would be a schema change rather than a schema change plus a guard nobody
   // remembers to write. `api-cloudrun/tests/unit/actorRefPaths.test.ts` asserts
   // every order ActorRef path appears in that set, so the two cannot drift.
-  created_by: ActorRef.nullable().optional().meta({ column: true, label: "Created By" }),
-  updated_by: ActorRef.nullable().optional().meta({ column: true, label: "Updated By" }),
-  ...TimestampFields,
+  created_by: ActorRef.nullable().optional().meta({ column: true, label: "Created By", propagate: false }),
+  updated_by: ActorRef.nullable().optional().meta({ column: true, label: "Updated By", propagate: false }),
+  created_at: TimestampFields.created_at.meta({ propagate: false }),
+  updated_at: TimestampFields.updated_at.meta({ propagate: false }),
 }).meta({
   title: "Order",
   collection: "orders",

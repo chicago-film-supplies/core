@@ -399,6 +399,13 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   documentDiff: [
     "computeDocumentDiffs",
   ],
+  // `utils/shared-fields.ts` classifies how each key an order shares with an
+  // invoice or fulfillment propagates (api-cloudrun#890). It reads two Zod
+  // SCHEMAS for the order → downstream sync; a template renders one document
+  // and has no schema pair to classify.
+  "shared-fields": [
+    "classifySharedFields",
+  ],
   // `utils/quantityAccounting.ts` sums what an order's SIBLING invoices bill
   // (api-cloudrun#680). Every export needs the order and all of its linked
   // invoices at once; a template renders one document and holds neither half.
