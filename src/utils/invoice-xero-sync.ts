@@ -100,12 +100,16 @@ export function invoiceXeroProjectionHash(invoice: Partial<Invoice>): string {
 
 /**
  * - `in_sync` — the invoice's Xero-carried fields are what was last pushed.
- * - `out_of_sync` — they have changed since, and no push has landed.
+ * - `out_of_sync` — they have changed since, and no push has landed; OR the invoice
+ *   is issued and has no `xero_id` at all, because the issue POST never landed
+ *   (a non-throttle refusal is logged and the status flip is not rolled back). For
+ *   the moment between the status commit and the POST this reads out of sync too,
+ *   which is true.
  * - `unknown` — linked and live, but no push has recorded a projection hash: no
  *   sidecar, or one written before this carried a hash (its `pushed_hash` is the
  *   old `v<version>` spelling). Not a claim either way.
- * - `not_applicable` — no Xero twin to keep in step: a draft, a void, a paid
- *   invoice (exempt by owner rule), or an invoice with no `xero_id`.
+ * - `not_applicable` — no Xero twin to keep in step: a draft, a void, or a paid
+ *   invoice (exempt by owner rule).
  */
 export type InvoiceXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" | "not_applicable";
 
@@ -124,7 +128,8 @@ export function invoiceXeroSyncStatus(
   invoice: Pick<Invoice, "status" | "xero_id"> & Partial<Invoice>,
   state: Pick<XeroSyncState, "pushed_hash"> | null,
 ): InvoiceXeroSyncStatus {
-  if (!TRACKED_STATUSES.has(invoice.status) || !invoice.xero_id) return "not_applicable";
+  if (!TRACKED_STATUSES.has(invoice.status)) return "not_applicable";
+  if (!invoice.xero_id) return "out_of_sync";
   const pushed = state?.pushed_hash ?? null;
   if (pushed === null || LEGACY_VERSION_WATERMARK.test(pushed)) return "unknown";
   return pushed === invoiceXeroProjectionHash(invoice) ? "in_sync" : "out_of_sync";

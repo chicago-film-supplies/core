@@ -40,10 +40,11 @@ Deno.test("invoiceXeroSyncStatus: settlement and bookkeeping writes do not read 
   assertEquals(invoiceXeroSyncStatus(moved, state), "in_sync");
 });
 
-Deno.test("invoiceXeroSyncStatus: unknown without a recorded hash; not_applicable off the live, linked set", () => {
+Deno.test("invoiceXeroSyncStatus: unknown without a recorded hash; out of sync when issued but unlinked; not_applicable off the live set", () => {
   assertEquals(invoiceXeroSyncStatus(invoice(), null), "unknown");
   assertEquals(invoiceXeroSyncStatus(invoice(), { pushed_hash: "v7" }), "unknown", "the pre-hash spelling");
-  for (const over of [{ status: "draft" }, { status: "paid" }, { status: "void" }, { xero_id: null }]) {
+  assertEquals(invoiceXeroSyncStatus(invoice({ xero_id: null }), null), "out_of_sync", "issued, never reached Xero");
+  for (const over of [{ status: "draft" }, { status: "paid" }, { status: "void" }]) {
     assertEquals(invoiceXeroSyncStatus(invoice(over), { pushed_hash: "x" }), "not_applicable", JSON.stringify(over));
   }
 });

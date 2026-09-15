@@ -12354,7 +12354,7 @@
           "kind": "typeAlias",
           "name": "InvoiceXeroSyncStatus",
           "declaration": "type InvoiceXeroSyncStatus = \"in_sync\" | \"out_of_sync\" | \"unknown\" | \"not_applicable\";",
-          "doc": "- `in_sync` — the invoice's Xero-carried fields are what was last pushed.\n- `out_of_sync` — they have changed since, and no push has landed.\n- `unknown` — linked and live, but no push has recorded a projection hash: no\n  sidecar, or one written before this carried a hash (its `pushed_hash` is the\n  old `v<version>` spelling). Not a claim either way.\n- `not_applicable` — no Xero twin to keep in step: a draft, a void, a paid\n  invoice (exempt by owner rule), or an invoice with no `xero_id`."
+          "doc": "- `in_sync` — the invoice's Xero-carried fields are what was last pushed.\n- `out_of_sync` — they have changed since, and no push has landed; OR the invoice\n  is issued and has no `xero_id` at all, because the issue POST never landed\n  (a non-throttle refusal is logged and the status flip is not rolled back). For\n  the moment between the status commit and the POST this reads out of sync too,\n  which is true.\n- `unknown` — linked and live, but no push has recorded a projection hash: no\n  sidecar, or one written before this carried a hash (its `pushed_hash` is the\n  old `v<version>` spelling). Not a claim either way.\n- `not_applicable` — no Xero twin to keep in step: a draft, a void, or a paid\n  invoice (exempt by owner rule)."
         },
         {
           "kind": "function",
