@@ -31,6 +31,7 @@ const docLine = (over: Record<string, unknown> = {}) => ({
   description: "",
   quantity: 1,
   stock_method: "none",
+  uid_tax_class: "TaxC1assDefau1tAAAAA",
   price: priceBase,
   path: [],
   ...over,
@@ -569,6 +570,7 @@ Deno.test("OrderSchema validates a complete document", () => {
         description: "",
         path: ["550e8400-e29b-41d4-a716-446655440000", "550e8400-e29b-41d4-a716-446655440001"],
         quantity: 2,
+        uid_tax_class: "TaxC1assDefau1tAAAAA",
         price: {
           ...priceBase,
           base_cents: 10000,
@@ -1059,6 +1061,7 @@ const feeLine = {
   // A fee holds no stock, and W5 requires every line type to say so rather than
   // exempting the fee with a contract axis. `"none"` is the honest value.
   stock_method: "none",
+  uid_tax_class: "TaxC1assDefau1tAAAAA",
   // A `percent_of_total` fee carries its rate in `base_percent` (a 4dp
   // percentage), never in `base_cents` — D1's split, enforced by
   // `checkPriceBaseUnit`. 3% here, not $3.00.

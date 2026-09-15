@@ -92,7 +92,7 @@ import {
 } from "../schemas/mod.ts";
 import { fromCentsBig, roundDivHalfAwayFromZero } from "./money.ts";
 import { chicagoDaysBetween } from "./dates.ts";
-import { agingBucketOf, type InvoiceAging, LINE_TAX_FIELDS } from "../schemas/mod.ts";
+import { agingBucketOf, type InvoiceAging } from "../schemas/mod.ts";
 import {
   computeItemPaths,
   isTaxableCoa,
@@ -721,26 +721,33 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
     ...(item.coa_revenue !== undefined ? { coa_revenue: item.coa_revenue } : {}),
     // The tax levers (`LineTaxCore`: `uid_tax_class`, `uid_tax_class_override`) mirror onto the invoice, because the invoice is
     // what gets billed and it prices its OWN line through the same resolver.
-    // Copied CONDITIONALLY, key by key, for the `taxes_base` reason one field
-    // up: the comparator compares KEY SETS, so a key is present on the invoice
-    // line exactly when it is present on the order line.
+    // The class is required on both grains; the override is copied only when
+    // present, for the `taxes_base` reason one field up — the comparator
+    // compares KEY SETS.
     ...pickLineTaxFields(item),
     path,
   };
 }
 
 /**
- * The {@link LINE_TAX_FIELDS} a line actually carries — present keys only, so a
- * projection preserves the source line's key set exactly.
+ * The `LINE_TAX_FIELDS` a line carries, for a projection onto another
+ * grain. `uid_tax_class` is required on every priced line (api-cloudrun#993),
+ * so a source line without one is refused loudly rather than projected into a
+ * document the schema would 400; `uid_tax_class_override` is copied only when
+ * present, so the projection preserves the source line's key set.
+ *
+ * @throws Error when the line has no `uid_tax_class`.
  */
 export function pickLineTaxFields(
-  item: { uid_tax_class?: string | null; uid_tax_class_override?: string | null },
-): { uid_tax_class?: string | null; uid_tax_class_override?: string | null } {
-  const picked: { uid_tax_class?: string | null; uid_tax_class_override?: string | null } = {};
-  for (const key of LINE_TAX_FIELDS) {
-    if (item[key] !== undefined) (picked as Record<string, unknown>)[key] = item[key];
+  item: { uid: string; uid_tax_class?: string | null; uid_tax_class_override?: string | null },
+): { uid_tax_class: string; uid_tax_class_override?: string | null } {
+  if (!item.uid_tax_class) {
+    throw new Error(`Line ${item.uid} has no uid_tax_class — every priced line must carry its tax class`);
   }
-  return picked;
+  return {
+    uid_tax_class: item.uid_tax_class,
+    ...(item.uid_tax_class_override !== undefined ? { uid_tax_class_override: item.uid_tax_class_override } : {}),
+  };
 }
 
 /**

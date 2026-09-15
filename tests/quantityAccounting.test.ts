@@ -31,7 +31,7 @@ const STAKE = "prod-stake";
 function line(uid: string, path: string[], quantity: number, baseCents: number, days = 5, extra: Record<string, unknown> = {}): LineItem {
   return {
     uid, type: "rental", name: uid, description: "", quantity, path,
-    stock_method: "reserve", zero_priced: false,
+    stock_method: "reserve", zero_priced: false, uid_tax_class: "TaxC1assDefau1tAAAAA",
     price: {
       base_cents: baseCents, chargeable_days: days, formula: "five_day_week",
       subtotal_cents: 0, subtotal_discounted_cents: 0, discount: null, taxes: [], total_cents: 0, replacement_cents: 1000,

@@ -1110,12 +1110,13 @@ export interface OrderDocLineItemType {
    * product at build**, the way `type` is, and carried forward on items
    * rebuilds. Server-resolved, never on input. (api-cloudrun#993)
    *
-   * ⚠️ **Optional in the schema.** Every stored priceable line carries it since
-   * the 2026-09-15 backfill and the API stamps it on every build; a line built on
-   * the client before that derives its class from its type
-   * (`deriveLineTaxClass`).
+   * **Required.** Every stored priceable line carried it after the 2026-09-15
+   * backfill (census 0 absent / 0 null in both envs), and the API stamps it on
+   * every build: the product's class, else the active class defaulting the
+   * line's type — which `validateTaxSetup` (`missing_type_default`) guarantees
+   * exists, so the stamp cannot be null.
    */
-  uid_tax_class?: string | null;
+  uid_tax_class: string;
   /**
    * An operator's per-line class override (the D365 per-line item sales tax
    * group override). `null`/absent follows `uid_tax_class`. Kept separate from

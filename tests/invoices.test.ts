@@ -73,7 +73,9 @@ const NO_DOC_DATES: OrderDocDatesType = {
 
 // ── Schema bases ────────────────────────────────────────────────
 
-const lineItemBase = getInitialValues(InvoiceDocLineItem);
+/** A priced line's required tax class (api-cloudrun#993); these tests price no tax from it. */
+const TAX_CLASS = "TaxC1assDefau1tAAAAA";
+const lineItemBase = { ...getInitialValues(InvoiceDocLineItem), uid_tax_class: TAX_CLASS };
 const priceBase = lineItemBase.price;
 const orderDividerBase = getInitialValues(InvoiceDocOrderItem);
 const destBase = getInitialValues(OrderDocDestinationItem);
@@ -159,7 +161,7 @@ const destItem: InvoiceDocItemType = {
 const lineItem1: InvoiceDocItemType = {
   ...lineItemBase,
   uid: ITEM_1,
-  type: "rental",
+  type: "rental", uid_tax_class: TAX_CLASS,
   name: "Spot Light",
   quantity: 2,
   price: {
@@ -178,7 +180,7 @@ const lineItem1: InvoiceDocItemType = {
 const lineItem2: InvoiceDocItemType = {
   ...lineItemBase,
   uid: ITEM_2,
-  type: "sale",
+  type: "sale", uid_tax_class: TAX_CLASS,
   name: "Tripod",
   quantity: 1,
   price: {
@@ -203,7 +205,7 @@ const orderDivider2: InvoiceDocItemType = {
 const lineItem3: InvoiceDocItemType = {
   ...lineItemBase,
   uid: ITEM_3,
-  type: "rental",
+  type: "rental", uid_tax_class: TAX_CLASS,
   name: "Camera",
   quantity: 1,
   price: {
@@ -233,8 +235,8 @@ Deno.test("flattenForXero removes destination, group, and order dividers", () =>
     { type: "order", uid: "o1", name: "Order", path: [] },
     { type: "destination", uid: "d1", name: "Venue", path: [] },
     { type: "group", uid: "g1", name: "Lighting", path: [] },
-    { type: "rental", uid: "i1", name: "Light", quantity: 1, path: [] },
-    { type: "sale", uid: "i2", name: "Tripod", quantity: 1, path: [] },
+    { type: "rental", uid_tax_class: TAX_CLASS, uid: "i1", name: "Light", quantity: 1, path: [] },
+    { type: "sale", uid_tax_class: TAX_CLASS, uid: "i2", name: "Tripod", quantity: 1, path: [] },
   ];
   const result = flattenForXero(items);
   assertEquals(result.length, 2);
@@ -284,8 +286,8 @@ Deno.test("removeOrderScopedItems removes order-div-2 scope, keeps order-div-1",
 Deno.test("buildOrderScopedItems prepends order divider uid to path", () => {
   const orderItems: LineItem[] = [
     { uid: "dest-1", type: "destination", name: "Venue", path: ["dest-1"] },
-    { uid: "item-1", type: "rental", name: "Light", path: ["dest-1", "item-1"] },
-    { uid: "item-2", type: "rental", name: "Camera", path: ["dest-1", "item-2"] },
+    { uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light", path: ["dest-1", "item-1"] },
+    { uid: "item-2", type: "rental", uid_tax_class: TAX_CLASS, name: "Camera", path: ["dest-1", "item-2"] },
   ];
   const result = buildOrderScopedItems(orderItems, "order-div-1");
   assertEquals(result[0].path, ["order-div-1", "dest-1"]);
@@ -298,7 +300,7 @@ Deno.test("buildOrderScopedItems projects order-only fields off line items", () 
   const orderItems: LineItem[] = [
     {
       uid: ITEM_1,
-      type: "rental",
+      type: "rental", uid_tax_class: TAX_CLASS,
       name: "Light",
       quantity: 2,
       path: [DEST_1, ITEM_1],
@@ -381,12 +383,12 @@ Deno.test("buildOrderScopedItems preserves group shape via OrderDocGroupItem", (
 
 Deno.test("carryForwardOverrides preserves coa_revenue and xero_id from existing items", () => {
   const rebuilt: InvoiceDocItemType[] = [
-    { ...lineItemBase, uid: "item-1", type: "rental", name: "Light Updated", quantity: 3, path: [] },
-    { ...lineItemBase, uid: "item-new", type: "sale", name: "New Item", quantity: 1, path: [] },
+    { ...lineItemBase, uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light Updated", quantity: 3, path: [] },
+    { ...lineItemBase, uid: "item-new", type: "sale", uid_tax_class: TAX_CLASS, name: "New Item", quantity: 1, path: [] },
   ] as InvoiceDocItemType[];
   const existing: InvoiceItem[] = [
-    { uid: "item-1", type: "rental", name: "Light", coa_revenue: 4100, xero_id: "00000000-0000-4000-8000-000000000001", path: [] },
-    { uid: "item-removed", type: "sale", name: "Gone", coa_revenue: 4200, path: [] },
+    { uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light", coa_revenue: 4100, xero_id: "00000000-0000-4000-8000-000000000001", path: [] },
+    { uid: "item-removed", type: "sale", uid_tax_class: TAX_CLASS, name: "Gone", coa_revenue: 4200, path: [] },
   ];
   const result = carryForwardOverrides(rebuilt, existing);
   assertEquals(result[0].name, "Light Updated"); // rebuilt field
@@ -416,10 +418,10 @@ const ALL_SIX_OVERRIDES = {
 
 Deno.test("carryForwardOverrides carries ALL SIX invoice-only fields, not just the original four", () => {
   const rebuilt = [
-    { ...lineItemBase, uid: "item-1", type: "rental", name: "Light Updated", quantity: 3, path: [] },
+    { ...lineItemBase, uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light Updated", quantity: 3, path: [] },
   ] as InvoiceDocItemType[];
   const existing: InvoiceItem[] = [
-    { uid: "item-1", type: "rental", name: "Light", path: [], ...ALL_SIX_OVERRIDES },
+    { uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light", path: [], ...ALL_SIX_OVERRIDES },
   ];
 
   const out = carryForwardOverrides(rebuilt, existing)[0] as unknown as Record<string, unknown>;
@@ -443,7 +445,7 @@ Deno.test("carryForwardOverrides leaves the rebuilt value alone where the existi
     {
       ...lineItemBase,
       uid: "item-1",
-      type: "rental",
+      type: "rental", uid_tax_class: TAX_CLASS,
       name: "Light",
       quantity: 1,
       path: [],
@@ -452,7 +454,7 @@ Deno.test("carryForwardOverrides leaves the rebuilt value alone where the existi
     },
   ] as InvoiceDocItemType[];
   // Only `crms_id` is carried; every other invoice-only key is `undefined` here.
-  const existing: InvoiceItem[] = [{ uid: "item-1", type: "rental", name: "Light", path: [], crms_id: 8812 }];
+  const existing: InvoiceItem[] = [{ uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light", path: [], crms_id: 8812 }];
 
   const out = carryForwardOverrides(rebuilt, existing)[0] as unknown as Record<string, unknown>;
   assertEquals(out.crms_id, 8812); // carried forward
@@ -476,10 +478,10 @@ Deno.test("fail-closed companion: the pre-2026-08-10 FOUR-field carry-forward di
   });
 
   const rebuilt = [
-    { ...lineItemBase, uid: "item-1", type: "rental", name: "Light", quantity: 1, path: [] },
+    { ...lineItemBase, uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light", quantity: 1, path: [] },
   ] as InvoiceDocItemType[];
   const existing: InvoiceItem[] = [
-    { uid: "item-1", type: "rental", name: "Light", path: [], ...ALL_SIX_OVERRIDES },
+    { uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light", path: [], ...ALL_SIX_OVERRIDES },
   ];
 
   const right = carryForwardOverrides(rebuilt, existing)[0] as unknown as Record<string, unknown>;
@@ -507,8 +509,8 @@ Deno.test("fail-closed companion: the pre-2026-08-10 FOUR-field carry-forward di
 Deno.test("syncOrderItems replaces scoped items and carries forward overrides", () => {
   const newOrderItems: LineItem[] = [
     { uid: DEST_1, type: "destination", name: "Venue Renamed", path: [DEST_1] },
-    { uid: ITEM_1, type: "rental", name: "Spot Light v2", quantity: 5, path: [DEST_1, ITEM_1] },
-    { uid: ITEM_NEW, type: "service", name: "Setup Fee", quantity: 1, path: [DEST_1, ITEM_NEW] },
+    { uid: ITEM_1, type: "rental", uid_tax_class: TAX_CLASS, name: "Spot Light v2", quantity: 5, path: [DEST_1, ITEM_1] },
+    { uid: ITEM_NEW, type: "service", uid_tax_class: TAX_CLASS, name: "Setup Fee", quantity: 1, path: [DEST_1, ITEM_NEW] },
   ];
 
   const result = syncOrderItems(multiOrderInvoiceItems, newOrderItems, ORDER_DIV_1);
@@ -551,7 +553,7 @@ Deno.test("syncOrderItems projects order-only fields off new items (strict schem
     },
     {
       uid: ITEM_1,
-      type: "rental",
+      type: "rental", uid_tax_class: TAX_CLASS,
       name: "Light",
       quantity: 1,
       path: [DEST_1, ITEM_1],
@@ -576,10 +578,10 @@ Deno.test("syncOrderItems projects order-only fields off new items (strict schem
 
 Deno.test("syncOrderItems preserves order when divider not found (appends)", () => {
   const items: InvoiceDocItemType[] = [
-    { ...lineItemBase, uid: "existing", type: "rental", name: "Existing Item", quantity: 1, path: ["existing"] },
+    { ...lineItemBase, uid: "existing", type: "rental", uid_tax_class: TAX_CLASS, name: "Existing Item", quantity: 1, path: ["existing"] },
   ] as InvoiceDocItemType[];
   const orderItems: LineItem[] = [
-    { uid: "new-item", type: "sale", name: "New", quantity: 1, path: ["new-item"] },
+    { uid: "new-item", type: "sale", uid_tax_class: TAX_CLASS, name: "New", quantity: 1, path: ["new-item"] },
   ];
   const result = syncOrderItems(items, orderItems, "unknown-divider");
   assertEquals(result.length, 2);
@@ -594,7 +596,7 @@ Deno.test("syncOrderToInvoiceSelective projects new items to invoice-line-item s
   const newOrderItems: LineItem[] = [
     {
       uid: ITEM_1,
-      type: "rental",
+      type: "rental", uid_tax_class: TAX_CLASS,
       name: "Light",
       quantity: 1,
       path: [DEST_1, ITEM_1],
@@ -623,7 +625,7 @@ Deno.test("syncOrderToInvoiceSelective projects new items to invoice-line-item s
 function orderShapedLine(overrides: Partial<LineItem> = {}): LineItem {
   return {
     uid: ITEM_1,
-    type: "rental",
+    type: "rental", uid_tax_class: TAX_CLASS,
     name: "Light",
     description: "",
     quantity: 1,
@@ -1125,11 +1127,11 @@ Deno.test("rederiveInvoiceTotalsForAudit computes totals from billable items onl
     { uid: "dest", type: "destination", name: "Venue", path: [] },
     { uid: "group", type: "group", name: "Lighting", path: [] },
     makeItem(
-      { uid: "item-1", type: "rental", name: "Spot Light", quantity: 2 },
+      { uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Spot Light", quantity: 2 },
       { base_cents: 10000, chargeable_days: 5, subtotal_cents: 20000, subtotal_discounted_cents: 20000, total_cents: 20000 },
     ),
     makeItem(
-      { uid: "item-2", type: "sale", name: "Tripod", quantity: 1 },
+      { uid: "item-2", type: "sale", uid_tax_class: TAX_CLASS, name: "Tripod", quantity: 1 },
       { base_cents: 30000, formula: "fixed", subtotal_cents: 30000, subtotal_discounted_cents: 30000, total_cents: 30000 },
     ),
   ];
@@ -1148,7 +1150,7 @@ Deno.test("rederiveInvoiceTotalsForAudit computes totals from billable items onl
 Deno.test("rederiveInvoiceTotalsForAudit applies discount", () => {
   const items: InvoiceItem[] = [
     makeItem(
-      { uid: "item-1", type: "rental", name: "Light" },
+      { uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light" },
       { base_cents: 10000, chargeable_days: 5, discount: { type: "percent", rate: 10, amount_cents: 1000 }, subtotal_cents: 10000, subtotal_discounted_cents: 9000, total_cents: 9000 },
     ),
   ];
@@ -1162,7 +1164,7 @@ Deno.test("rederiveInvoiceTotalsForAudit applies discount", () => {
 Deno.test("rederiveInvoiceTotalsForAudit with taxes", () => {
   const items: InvoiceItem[] = [
     makeItem(
-      { uid: "item-1", type: "rental", name: "Light" },
+      { uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light" },
       { base_cents: 10000, chargeable_days: 5, taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 1500 }], subtotal_cents: 10000, subtotal_discounted_cents: 10000, total_cents: 11500 },
     ),
   ];
@@ -1177,7 +1179,7 @@ Deno.test("rederiveInvoiceTotalsForAudit with taxes", () => {
 Deno.test("rederiveInvoiceTotalsForAudit with payments reduces amount_due", () => {
   const items: InvoiceItem[] = [
     makeItem(
-      { uid: "item-1", type: "rental", name: "Light" },
+      { uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light" },
       { base_cents: 100000, formula: "fixed", subtotal_cents: 100000, subtotal_discounted_cents: 100000, total_cents: 100000 },
     ),
   ];
@@ -1209,12 +1211,12 @@ Deno.test("rederiveInvoiceTotalsForAudit with empty items returns zeros", () => 
 Deno.test("rederiveInvoiceTotalsForAudit with transaction fee", () => {
   const items: InvoiceItem[] = [
     makeItem(
-      { uid: "item-1", type: "rental", name: "Light" },
+      { uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light" },
       { base_cents: 10000, formula: "fixed", subtotal_cents: 10000, subtotal_discounted_cents: 10000, total_cents: 10000 },
     ),
     // An ordinary line item — `percent_of_total` is what makes it a fee.
     makeItem(
-      { uid: "fee-1", type: "transaction_fee", name: "Credit Card Fee" },
+      { uid: "fee-1", type: "transaction_fee", uid_tax_class: TAX_CLASS, name: "Credit Card Fee" },
       { base_cents: 0, base_percent: 3, formula: "percent_of_total" },
     ),
   ];
@@ -1981,7 +1983,7 @@ const RESYNC_DEST: LineItem = {
   description: "", path: [DEST_1],
 };
 const RESYNC_LINE_A: LineItem = {
-  uid: ITEM_1, type: "rental", name: "Spot Light", quantity: 2, path: [DEST_1, ITEM_1],
+  uid: ITEM_1, type: "rental", uid_tax_class: TAX_CLASS, name: "Spot Light", quantity: 2, path: [DEST_1, ITEM_1],
   stock_method: "reserve", order_number: 1001, uid_order: ORDER_ID_1, zero_priced: false,
   price: {
     base_cents: 10000, chargeable_days: 5, formula: "five_day_week",
@@ -1989,7 +1991,7 @@ const RESYNC_LINE_A: LineItem = {
   },
 } as unknown as LineItem;
 const RESYNC_LINE_B: LineItem = {
-  uid: ITEM_2, type: "sale", name: "Tripod", quantity: 1, path: [DEST_1, ITEM_2],
+  uid: ITEM_2, type: "sale", uid_tax_class: TAX_CLASS, name: "Tripod", quantity: 1, path: [DEST_1, ITEM_2],
   stock_method: "reserve", order_number: 1001, uid_order: ORDER_ID_1, zero_priced: false,
   price: {
     base_cents: 30000, chargeable_days: null, formula: "fixed",
@@ -2091,7 +2093,7 @@ const ITEM_C = "Item000000000000000C";
 
 /** A third order line, so one invoice can bill a strict subset of the order. */
 const RESYNC_LINE_C: LineItem = {
-  uid: ITEM_C, type: "replacement", name: "Replacement: Spot Light", quantity: 1, path: [DEST_1, ITEM_C],
+  uid: ITEM_C, type: "replacement", uid_tax_class: TAX_CLASS, name: "Replacement: Spot Light", quantity: 1, path: [DEST_1, ITEM_C],
   stock_method: "reserve", order_number: 1001, uid_order: ORDER_ID_1, zero_priced: false,
   price: {
     base_cents: 50000, chargeable_days: null, formula: "fixed",
@@ -2240,7 +2242,7 @@ Deno.test("computeOrderInvoiceCoverage: a transaction_fee on the invoice is neve
   const fee = {
     ...lineItemBase,
     uid: "Item00000000000000FEE",
-    type: "transaction_fee",
+    type: "transaction_fee", uid_tax_class: TAX_CLASS,
     name: "Card Fee",
     quantity: 1,
     path: [ORDER_DIV_1, "Item00000000000000FEE"],
@@ -2259,7 +2261,7 @@ Deno.test("computeOrderInvoiceCoverage: an invoice-only product line IS unmatche
   const extra = {
     ...lineItemBase,
     uid: "custom-0000000000000001",
-    type: "service",
+    type: "service", uid_tax_class: TAX_CLASS,
     name: "Shipping",
     quantity: 1,
     path: [ORDER_DIV_1, DEST_1, "custom-0000000000000001"],
@@ -2398,7 +2400,7 @@ function sweepDocs(count: number): SweepDoc[] {
         continue;
       }
       if (rand(8) === 0) {
-        items.push(makeItem({ uid: `f-${d}-${i}`, type: "transaction_fee", quantity: 1 }, {
+        items.push(makeItem({ uid: `f-${d}-${i}`, type: "transaction_fee", uid_tax_class: TAX_CLASS, quantity: 1 }, {
           formula: "percent_of_total",
           // A PERCENTAGE (0–6%), in its own field. Drawing this into
           // `base_cents` is the 100× D1 exists to prevent, and it would make
@@ -2515,7 +2517,7 @@ Deno.test("validateInvoiceItemPaths still recomputes at INVOICE depth after the 
   const items: InvoiceItem[] = [
     { ...orderDivider, path: [ORDER_DIV_1] } as InvoiceItem,
     { ...destItem, path: [ORDER_DIV_1, DEST_1] } as InvoiceItem,
-    makeItem({ uid: ITEM_1, type: "rental", path: [ORDER_DIV_1, DEST_1, ITEM_1] }),
+    makeItem({ uid: ITEM_1, type: "rental", uid_tax_class: TAX_CLASS, path: [ORDER_DIV_1, DEST_1, ITEM_1] }),
   ];
   assertEquals(validateInvoiceItemPaths(items), []);
   // The same array judged at ORDER depth: `order` is not one of
@@ -2906,7 +2908,7 @@ Deno.test("adoptOrderDividerStructure: an invoice-only line is KEPT, at the root
   const order = groupedOrderItems();
   const custom = makeItem({
     uid: "custom-00000000-0000-4000-8000-00000000c001",
-    type: "sale",
+    type: "sale", uid_tax_class: TAX_CLASS,
     name: "Rush fee",
     path: [ORDER_DIV_1, "custom-00000000-0000-4000-8000-00000000c001"],
   }) as unknown as InvoiceDocItemType;
@@ -2927,7 +2929,7 @@ Deno.test("invoiceScopeDividersMatch: compares divider paths, NOT all paths", ()
   const order = groupedOrderItems();
   const custom = makeItem({
     uid: "custom-00000000-0000-4000-8000-00000000c002",
-    type: "sale",
+    type: "sale", uid_tax_class: TAX_CLASS,
     name: "Invoice-only",
     path: [ORDER_DIV_1, "custom-00000000-0000-4000-8000-00000000c002"],
   }) as unknown as InvoiceDocItemType;
@@ -3039,7 +3041,7 @@ Deno.test("adoptOrderDividerStructure: reads a parent from a PRE-NORMALIZED path
   const preNormalized: InvoiceDocItemType[] = [
     ...buildOrderScopedItems([{ ...RESYNC_LINE_A, path: [] } as LineItem], ORDER_DIV_1)
       .map((it) => ({ ...it, path: [] })),
-    makeItem({ uid: accessoryUid, type: "sale", name: "Bulb", path: [principalUid] }) as unknown as InvoiceDocItemType,
+    makeItem({ uid: accessoryUid, type: "sale", uid_tax_class: TAX_CLASS, name: "Bulb", path: [principalUid] }) as unknown as InvoiceDocItemType,
   ];
   const { items } = adoptOrderDividerStructure(preNormalized, order, ORDER_DIV_1);
   assertEquals(

@@ -363,7 +363,7 @@ export interface InvoiceDocLineItemType {
    * compare it rather than report every affected line `out_of_sync` forever —
    * that comparator matches on KEY SETS.
    */
-  uid_tax_class?: string | null;
+  uid_tax_class: string;
   /** @see `OrderDocLineItemType.uid_tax_class_override`. */
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;

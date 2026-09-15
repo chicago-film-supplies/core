@@ -4584,7 +4584,7 @@ interface InvoiceDocLineItemType {
   path: string[];
   zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
-  uid_tax_class?: string | null;
+  uid_tax_class: string;
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   xero_id?: string | null;
@@ -4995,11 +4995,12 @@ declaration. Spread by both grains directly after `coa_revenue`, which is
 where both already declared these keys, so no column moves.
 `tests/item-shape-parity.test.ts` asserts instance identity on both.
 
-Optional in the schema. Every stored priceable line carries `uid_tax_class`
-since the 2026-09-15 backfill, and the API stamps it on every build; a line
-built on the client before that derives its class from its type
-(`deriveLineTaxClass`). The legacy `taxed_as` key was translated into
-`uid_tax_class_override` by that backfill and removed from the schema.
+`uid_tax_class` is REQUIRED (api-cloudrun#993): every stored priceable line
+carried it after the 2026-09-15 backfill, the API stamps it on every build,
+and `validateTaxSetup`'s `missing_type_default` keeps the stamp's type-default
+fallback from resolving to nothing. A line built on the client resolves it
+the same way (`deriveLineTaxClass`). The legacy `taxed_as` key was translated
+into `uid_tax_class_override` by that backfill and removed from the schema.
 
 ```ts
 const LineTaxCore: typeLiteral;
@@ -6439,7 +6440,7 @@ interface OrderDocLineItemType {
   zero_priced?: boolean | null;
   crms_id?: number | null;
   coa_revenue?: COARevenueType | null;
-  uid_tax_class?: string | null;
+  uid_tax_class: string;
   uid_tax_class_override?: string | null;
 }
 ```
@@ -15709,7 +15710,7 @@ interface InvoiceDocLineItemType {
   path: string[];
   zero_priced?: boolean | null;
   coa_revenue?: COARevenueType | null;
-  uid_tax_class?: string | null;
+  uid_tax_class: string;
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   xero_id?: string | null;
@@ -16949,7 +16950,7 @@ interface OrderDocLineItemType {
   zero_priced?: boolean | null;
   crms_id?: number | null;
   coa_revenue?: COARevenueType | null;
-  uid_tax_class?: string | null;
+  uid_tax_class: string;
   uid_tax_class_override?: string | null;
 }
 ```
@@ -26576,8 +26577,11 @@ Check whether any pre-tax line item has taxes applied.
 
 ### `pickLineTaxFields(item: typeLiteral): typeLiteral`
 
-The {@link LINE_TAX_FIELDS} a line actually carries — present keys only, so a
-projection preserves the source line's key set exactly.
+The `LINE_TAX_FIELDS` a line carries, for a projection onto another
+grain. `uid_tax_class` is required on every priced line (api-cloudrun#993),
+so a source line without one is refused loudly rather than projected into a
+document the schema would 400; `uid_tax_class_override` is copied only when
+present, so the projection preserves the source line's key set.
 
 ### `projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: string): InvoiceDocItemType`
 
@@ -29296,6 +29300,7 @@ interface CustomLineBuildOptions {
   formula?: PriceFormulaType;
   chargeDays: number | null;
   taxes: ReadonlyArray<typeLiteral>;
+  uid_tax_class: string;
   uidOrder?: string;
 }
 ```
@@ -29319,6 +29324,7 @@ interface OrderLineBuildOptions {
   chargeDays: number | null;
   inheritedAncestry?: string[];
   uidOrder?: string;
+  taxClassForType: fnOrConstructor;
 }
 ```
 
@@ -33085,7 +33091,7 @@ interface TaxSetupViolation {
 Closed vocabulary, so a caller can switch on it and an audit can count it.
 
 ```ts
-type TaxSetupViolationCode = "duplicate_code_name" | "duplicate_class_name" | "orphan_rate" | "rate_type_mismatch" | "rate_overlap" | "rate_gap" | "effective_after_applied" | "xero_tax_type_lost" | "unknown_code_in_class" | "inactive_code_in_class" | "multiple_percent_rates" | "duplicate_type_default";
+type TaxSetupViolationCode = "duplicate_code_name" | "duplicate_class_name" | "orphan_rate" | "rate_type_mismatch" | "rate_overlap" | "rate_gap" | "effective_after_applied" | "xero_tax_type_lost" | "unknown_code_in_class" | "inactive_code_in_class" | "multiple_percent_rates" | "duplicate_type_default" | "missing_type_default";
 ```
 
 ### `deriveLineTaxClass(item: TaxClassLineFacts, catalog: TaxCatalog): string | null`
@@ -33124,6 +33130,11 @@ rename "Sale"; `is_default_for` and code membership are what
 The class a line states: the operator's override, else the product snapshot.
 `null` when neither is stamped — {@link deriveLineTaxClass} answers for such a
 line from the catalog.
+
+⚠️ **An empty string states nothing.** `uid_tax_class` is a required string, so
+`getInitialValues(OrderDocLineItem)` seeds it as `""`; read with `??` that
+seed would count as a class and skip the type default, pricing the line at no
+tax until the server stamps it. No stored line can hold `""` (`FirestoreId`).
 
 ### `pricingTaxesOf(catalog: TaxCatalog): Array<typeLiteral>`
 
@@ -33198,6 +33209,7 @@ it on the stored catalog; and the daily watch runs it too.
 | `orphan_rate` / `unknown_code_in_class` | a reference to nothing |
 | `inactive_code_in_class` | an ACTIVE class draws from a code an operator retired |
 | `duplicate_type_default` | two active classes both preselect one product type |
+| `missing_type_default` | no active class is the default for a line type, so a line with no product class (a custom line, or a product whose class is null) stamps `uid_tax_class: null` — which the line schema refuses, so every order or invoice write carrying one would 400 |
 | `duplicate_*_name` | a label that no longer identifies one thing (whole collection, inactive included) |
 
 ⚠️ **Jurisdictions are the TAX vocabulary, not the live registrations.** A

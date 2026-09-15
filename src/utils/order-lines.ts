@@ -112,6 +112,16 @@ export interface OrderLineBuildOptions {
    * whole-object cast this module used to end every builder with.
    */
   uidOrder?: string;
+  /**
+   * The class a line whose product carries no `uid_tax_class` is stamped with —
+   * the active class defaulting its `type`, the same fallback the API's
+   * `stampLineTaxClasses` takes. A search hit or component row indexed before
+   * the field existed has no class of its own, and a stored line must carry one
+   * (api-cloudrun#993). `validateTaxSetup`'s `missing_type_default` keeps every
+   * type resolvable; a caller whose catalog cannot resolve one should throw
+   * rather than invent a class.
+   */
+  taxClassForType: (type: DocLineItemTypeType) => string;
 }
 
 /**
@@ -147,8 +157,9 @@ export function buildOrderLineFromProduct(
     inclusion_type: null,
     zero_priced: null,
     // The class the product is taxed as, so the optimistic reprice resolves
-    // what the server will stamp. Absent on a hit indexed before the field.
-    ...(doc.uid_tax_class ? { uid_tax_class: doc.uid_tax_class } : {}),
+    // what the server will stamp; a hit indexed before the field takes its
+    // type's default, which is the server's fallback too.
+    uid_tax_class: doc.uid_tax_class || opts.taxClassForType(type),
     price: {
       base_cents: isPercent ? 0 : doc.price?.base_cents ?? 0,
       base_percent: isPercent ? (doc.price?.base_percent ?? null) : null,
@@ -181,6 +192,12 @@ export interface CustomLineBuildOptions {
   formula?: PriceFormulaType;
   chargeDays: number | null;
   taxes: ReadonlyArray<{ uid: string; name: string; rate: number; type: RateType }>;
+  /**
+   * The line's tax class. A custom line has no product to snapshot one from, so
+   * the caller passes the class it will be taxed as — the type's default unless
+   * the operator picked another (api-cloudrun#993).
+   */
+  uid_tax_class: string;
   /** @see {@link OrderLineBuildOptions.uidOrder} */
   uidOrder?: string;
 }
@@ -206,6 +223,7 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
     path: [],
     inclusion_type: null,
     zero_priced: null,
+    uid_tax_class: opts.uid_tax_class,
     price: {
       base_cents: opts.base_cents ?? 0,
       replacement_cents: isRental ? 0 : null,
@@ -244,6 +262,7 @@ export function buildCustomInvoiceLine(
     type: opts.type,
     quantity: opts.quantity ?? 1,
     path: [],
+    uid_tax_class: opts.uid_tax_class,
     price: {
       base_cents: opts.base_cents ?? 0,
       chargeable_days: isRental ? opts.chargeDays : null,
@@ -387,7 +406,7 @@ export function buildOrderComponentLines(
         path: docPath,
         inclusion_type: comp.inclusion_type as OrderDocLineItemType["inclusion_type"],
         zero_priced: comp.zero_priced ?? null,
-        ...(comp.uid_tax_class ? { uid_tax_class: comp.uid_tax_class } : {}),
+        uid_tax_class: comp.uid_tax_class || opts.taxClassForType(type),
         price: {
           base_cents: comp.zero_priced ? 0 : (comp.price?.base_cents ?? 0),
           replacement_cents: comp.price?.replacement_cents ?? null,

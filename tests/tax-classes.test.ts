@@ -134,6 +134,8 @@ Deno.test("validateTaxSetup: the migrated prod catalog is clean", () => {
 
 // ── deriveLineTaxClass: a line the API has not stamped yet ──────────────
 
+// `getInitialValues` seeds the required `uid_tax_class` as "", which states no
+// class (`lineTaxClass`), so these lines still derive from `type`.
 const lineBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
 
 /** An unstamped line: `type`, and an optional bottle levy ref it carries. */
@@ -364,5 +366,25 @@ Deno.test("validateTaxSetup: an INACTIVE class is exempt from the pricing invari
     active: false,
     uid_tax_codes: [...CLASSES[1].uid_tax_codes, CODE_UID["Chicago Rental Tax"]],
   });
-  assertEquals(validateTaxSetup(inactive), []);
+  // Deactivating Sale leaves "sale" with no default — that, and only that, is reported.
+  assertEquals(codesOf(validateTaxSetup(inactive)), ["missing_type_default"]);
+});
+
+Deno.test("validateTaxSetup: a line type with no active default class", () => {
+  const cleared = withClass(CLASS_UID.none, { is_default_for: [] });
+  const violations = validateTaxSetup(cleared);
+  assertEquals(codesOf(violations), ["missing_type_default", "missing_type_default", "missing_type_default"]);
+  assertEquals(violations.map((v) => v.message), [
+    'No active tax class is the default for "service" lines.',
+    'No active tax class is the default for "surcharge" lines.',
+    'No active tax class is the default for "transaction_fee" lines.',
+  ]);
+  assertEquals(validateTaxSetup(CATALOG), []);
+});
+
+Deno.test("lineTaxClass: an empty string (the form seed) states no class", () => {
+  assertEquals(lineTaxClass({ uid_tax_class: "" }), null);
+  assertEquals(lineTaxClass({ uid_tax_class: "", uid_tax_class_override: "" }), null);
+  assertEquals(lineTaxClass({ uid_tax_class: "classA", uid_tax_class_override: "" }), "classA");
+  assertEquals(lineTaxClass({ uid_tax_class: "classA", uid_tax_class_override: "classB" }), "classB");
 });

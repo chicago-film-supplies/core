@@ -28,6 +28,7 @@
  * Pure and db-free: the catalog is injected, `asOf` is injected.
  */
 
+import { DOC_LINE_ITEM_TYPES } from "../schemas/mod.ts";
 import type { ProductTypeType, RateType, TaxClass, TaxCode, TaxJurisdictionType, TaxRate } from "../schemas/mod.ts";
 
 // ⚠️ No import from `./taxes.ts`: that module prices on THIS one (the reader
@@ -77,7 +78,8 @@ export type TaxSetupViolationCode =
   | "unknown_code_in_class"
   | "inactive_code_in_class"
   | "multiple_percent_rates"
-  | "duplicate_type_default";
+  | "duplicate_type_default"
+  | "missing_type_default";
 
 /** One broken invariant, with every uid it involves so a writer can name them in a 400. */
 export interface TaxSetupViolation {
@@ -106,6 +108,7 @@ export interface TaxSetupViolation {
  * | `orphan_rate` / `unknown_code_in_class` | a reference to nothing |
  * | `inactive_code_in_class` | an ACTIVE class draws from a code an operator retired |
  * | `duplicate_type_default` | two active classes both preselect one product type |
+ * | `missing_type_default` | no active class is the default for a line type, so a line with no product class (a custom line, or a product whose class is null) stamps `uid_tax_class: null` — which the line schema refuses, so every order or invoice write carrying one would 400 |
  * | `duplicate_*_name` | a label that no longer identifies one thing (whole collection, inactive included) |
  *
  * ⚠️ **Jurisdictions are the TAX vocabulary, not the live registrations.** A
@@ -270,6 +273,15 @@ export function validateTaxSetup(catalog: TaxCatalog): TaxSetupViolation[] {
       });
     }
   }
+  for (const type of DOC_LINE_ITEM_TYPES) {
+    if (!defaults.has(type)) {
+      violations.push({
+        code: "missing_type_default",
+        message: `No active tax class is the default for "${type}" lines.`,
+        uids: [],
+      });
+    }
+  }
 
   return violations;
 }
@@ -324,11 +336,16 @@ export interface ClassTaxResolution {
  * The class a line states: the operator's override, else the product snapshot.
  * `null` when neither is stamped — {@link deriveLineTaxClass} answers for such a
  * line from the catalog.
+ *
+ * ⚠️ **An empty string states nothing.** `uid_tax_class` is a required string, so
+ * `getInitialValues(OrderDocLineItem)` seeds it as `""`; read with `??` that
+ * seed would count as a class and skip the type default, pricing the line at no
+ * tax until the server stamps it. No stored line can hold `""` (`FirestoreId`).
  */
 export function lineTaxClass(
   item: { uid_tax_class?: string | null; uid_tax_class_override?: string | null },
 ): string | null {
-  return item.uid_tax_class_override ?? item.uid_tax_class ?? null;
+  return item.uid_tax_class_override || item.uid_tax_class || null;
 }
 
 /** What {@link deriveLineTaxClass} reads off a line. Structural, so an order, invoice or credit-note line all fit. */

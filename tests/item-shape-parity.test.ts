@@ -33,7 +33,7 @@
  * parse with. A grain that shared the instance internally and exported something
  * else would pass an import-based check and fail this one.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { LINE_TAX_FIELDS, LineItemCore, LineTaxCore } from "../src/schemas/_items.ts";
 import { pickLineTaxFields } from "../src/utils/invoices.ts";
 import { InvoiceDocItem, schemas } from "../src/schemas/mod.ts";
@@ -155,6 +155,7 @@ Deno.test("checkZeroPricedAmount now runs when an INVOICE DOCUMENT parses", () =
     description: "",
     quantity: 1,
     path: ["abcdefghij0123456789"],
+    uid_tax_class: "TaxC1assDefau1tAAAAA",
     price: {
       base_cents: 1000,
       formula: "five_day_week",
@@ -268,11 +269,14 @@ Deno.test("LINE_TAX_FIELDS names exactly LineTaxCore's keys, and is not vacuous"
   assert(LINE_TAX_FIELDS.length === 2);
 });
 
-Deno.test("pickLineTaxFields preserves the source key set — present keys only, null kept", () => {
-  assertEquals(pickLineTaxFields({}), {});
-  assertEquals(pickLineTaxFields({ uid_tax_class_override: null }), { uid_tax_class_override: null });
+Deno.test("pickLineTaxFields: the class is required, the override keeps its key set", () => {
+  assertThrows(() => pickLineTaxFields({ uid: "line1" }), Error, "has no uid_tax_class");
+  assertThrows(() => pickLineTaxFields({ uid: "line1", uid_tax_class: null }), Error, "has no uid_tax_class");
+  assertEquals(pickLineTaxFields({ uid: "line1", uid_tax_class: "classuid00000000000a" }), {
+    uid_tax_class: "classuid00000000000a",
+  });
   assertEquals(
-    pickLineTaxFields({ uid_tax_class: "classuid00000000000a", uid_tax_class_override: null }),
+    pickLineTaxFields({ uid: "line1", uid_tax_class: "classuid00000000000a", uid_tax_class_override: null }),
     { uid_tax_class: "classuid00000000000a", uid_tax_class_override: null },
   );
 });

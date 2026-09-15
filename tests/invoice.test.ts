@@ -8,7 +8,7 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 // `""`, which it rejects. Supply a real id, as every prod doc carries one.
 const invoiceBase = { ...getInitialValues(InvoiceSchema), uid_thread: "testthread0000000001" } as Record<string, unknown>;
 const totalsBase = invoiceBase.totals as Record<string, unknown>;
-const lineItemBase = getInitialValues(InvoiceDocLineItem) as Record<string, unknown>;
+const lineItemBase = { ...getInitialValues(InvoiceDocLineItem), uid_tax_class: "TaxC1assDefau1tAAAAA" } as Record<string, unknown>;
 const priceBase = (lineItemBase as { price: Record<string, unknown> }).price;
 
 const validDocDates = {

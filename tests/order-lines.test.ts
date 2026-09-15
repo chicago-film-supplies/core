@@ -48,7 +48,11 @@ function product(over: Partial<ProductDocument> = {}): ProductDocument {
   };
 }
 
-const OPTS = { quantity: 1, chargeDays: 5 };
+// A real 20-char id, so the test that parses a built line against the stored
+// schema passes `FirestoreId`. Keyed by type so a test can see which it took.
+const DEFAULT_CLASS = "TaxC1assDefau1tAAAAA";
+const taxClassForType = (type: string) => (type === "sale" ? "TaxC1assSa1eAAAAAAAA" : DEFAULT_CLASS);
+const OPTS = { quantity: 1, chargeDays: 5, taxClassForType };
 
 /** The pre-refactor path expression: the catalog chain, concatenated verbatim. */
 function catalogConcatPath(
@@ -322,9 +326,11 @@ Deno.test("lines built from a hit carry the product's and each component's uid_t
   assertEquals(buildOrderLineFromProduct(doc, OPTS).uid_tax_class, "classRental");
   const byUid = new Map(buildOrderComponentLines(doc, OPTS).map((l) => [l.uid, l]));
   assertEquals(byUid.get("water")!.uid_tax_class, "classWater");
-  // Absent on the row → absent on the line, never a guessed class.
-  assertEquals("uid_tax_class" in byUid.get("plain")!, false);
-  assertEquals("uid_tax_class" in buildOrderLineFromProduct(product(), OPTS), false);
+  // Absent on the row → the type's default class, which is the server's
+  // fallback (`stampLineTaxClasses`). A stored line must carry one.
+  assertEquals(byUid.get("plain")!.uid_tax_class, DEFAULT_CLASS);
+  assertEquals(buildOrderLineFromProduct(product(), OPTS).uid_tax_class, DEFAULT_CLASS);
+  assertEquals(buildOrderLineFromProduct(product({ type: "sale" }), OPTS).uid_tax_class, "TaxC1assSa1eAAAAAAAA");
 });
 
 // ── buildOrderComponentLines: fields the seed used to invent ────────
@@ -407,6 +413,7 @@ Deno.test("buildCustomOrderLine stamps the custom- uid prefix", () => {
     type: "rental",
     chargeDays: 5,
     taxes: CUSTOM_TAXES,
+    uid_tax_class: DEFAULT_CLASS,
     uidOrder: "order1",
   });
   // Part of the data contract, not a UI hint: api-cloudrun's `buildOrderLineItem`
@@ -425,23 +432,23 @@ Deno.test("buildCustomOrderLine stamps the custom- uid prefix", () => {
 });
 
 Deno.test("buildCustomOrderLine defaults formula and replacement by type", () => {
-  const sale = buildCustomOrderLine({ type: "sale", chargeDays: 5, taxes: [] });
+  const sale = buildCustomOrderLine({ type: "sale", chargeDays: 5, taxes: [], uid_tax_class: DEFAULT_CLASS });
   assertEquals(sale.price.formula, "fixed");
   assertEquals(sale.price.replacement_cents, null);
   assertEquals(sale.price.chargeable_days, null);
 
-  const explicit = buildCustomOrderLine({ type: "sale", chargeDays: null, taxes: [], formula: "five_day_week" });
+  const explicit = buildCustomOrderLine({ type: "sale", chargeDays: null, taxes: [], uid_tax_class: DEFAULT_CLASS, formula: "five_day_week" });
   assertEquals(explicit.price.formula, "five_day_week");
 });
 
 Deno.test("buildCustomOrderLine mints a distinct uid per call", () => {
-  const a = buildCustomOrderLine({ type: "rental", chargeDays: null, taxes: [] });
-  const b = buildCustomOrderLine({ type: "rental", chargeDays: null, taxes: [] });
+  const a = buildCustomOrderLine({ type: "rental", chargeDays: null, taxes: [], uid_tax_class: DEFAULT_CLASS });
+  const b = buildCustomOrderLine({ type: "rental", chargeDays: null, taxes: [], uid_tax_class: DEFAULT_CLASS });
   assert(a.uid !== b.uid);
 });
 
 Deno.test("buildCustomInvoiceLine emits no order-only field", () => {
-  const line = buildCustomInvoiceLine({ type: "rental", chargeDays: 5, taxes: CUSTOM_TAXES });
+  const line = buildCustomInvoiceLine({ type: "rental", chargeDays: 5, taxes: CUSTOM_TAXES, uid_tax_class: DEFAULT_CLASS });
 
   // The old docblock claimed it "strips order-only fields" while the `initial`
   // spread put `stock_method: "bulk"`, `order_number: 0` and `uid_order: ""`

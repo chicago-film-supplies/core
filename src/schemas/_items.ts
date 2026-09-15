@@ -235,17 +235,18 @@ export const LineItemCore: {
  * where both already declared these keys, so no column moves.
  * `tests/item-shape-parity.test.ts` asserts instance identity on both.
  *
- * Optional in the schema. Every stored priceable line carries `uid_tax_class`
- * since the 2026-09-15 backfill, and the API stamps it on every build; a line
- * built on the client before that derives its class from its type
- * (`deriveLineTaxClass`). The legacy `taxed_as` key was translated into
- * `uid_tax_class_override` by that backfill and removed from the schema.
+ * `uid_tax_class` is REQUIRED (api-cloudrun#993): every stored priceable line
+ * carried it after the 2026-09-15 backfill, the API stamps it on every build,
+ * and `validateTaxSetup`'s `missing_type_default` keeps the stamp's type-default
+ * fallback from resolving to nothing. A line built on the client resolves it
+ * the same way (`deriveLineTaxClass`). The legacy `taxed_as` key was translated
+ * into `uid_tax_class_override` by that backfill and removed from the schema.
  */
 export const LineTaxCore: {
-  uid_tax_class: z.ZodOptional<z.ZodNullable<z.ZodType<string>>>;
+  uid_tax_class: z.ZodType<string>;
   uid_tax_class_override: z.ZodOptional<z.ZodNullable<z.ZodType<string>>>;
 } = {
-  uid_tax_class: FirestoreId.nullable().optional(),
+  uid_tax_class: FirestoreId,
   uid_tax_class_override: FirestoreId.nullable().optional(),
 };
 

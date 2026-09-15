@@ -210,12 +210,10 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["invoices.organization.jurisdiction_claim", "mid-expand"],
   ["orders.organization.jurisdiction_claim", "mid-expand"],
   ["organizations.jurisdiction_claim", "mid-expand"],
-  // Tax classes (api-cloudrun#993) — expand step. No stored document carries these
-  // yet; the backfill stamps products, and lines pick theirs up on their next
-  // real write (a bulk stamp re-pushes Xero quotes). Contract narrows them.
-  ["invoices.items[].uid_tax_class", "mid-expand"],
+  // Tax classes (api-cloudrun#993) — expand step. Line `uid_tax_class` has been
+  // contracted to required (both grains); the override and the product-side
+  // fields are still in transit.
   ["invoices.items[].uid_tax_class_override", "mid-expand"],
-  ["orders.items[].uid_tax_class", "mid-expand"],
   ["orders.items[].uid_tax_class_override", "mid-expand"],
   ["products.tax_class_name", "mid-expand"],
   ["products.uid_tax_class", "mid-expand"],

@@ -21,7 +21,7 @@ const CONTEXT: DocumentDiffContext = { taxNameByUid: new Map(), isOrderFrozen: (
 function line(uid: string, path: string[], quantity: number, baseCents: number, extra: Record<string, unknown> = {}): LineItem {
   return {
     uid, type: "rental", name: uid, description: "", quantity, path,
-    stock_method: "reserve", zero_priced: false,
+    stock_method: "reserve", zero_priced: false, uid_tax_class: "TaxC1assDefau1tAAAAA",
     price: {
       base_cents: baseCents, chargeable_days: 5, formula: "five_day_week",
       subtotal_cents: baseCents * quantity, subtotal_discounted_cents: baseCents * quantity,
