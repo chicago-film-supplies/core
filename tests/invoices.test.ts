@@ -1658,7 +1658,7 @@ Deno.test("syncOrderDestinationsSelective adds new pairs tagged with uid_order",
   const prev = [makePair("d1", "c1")];
   const next = [makePair("d1", "c1"), makePair("d2", "c2")];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1") }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(result.length, 2);
   assertEquals(result[1].delivery.uid, "d2");
   assertEquals(result[1].uid_order, "o1");
@@ -1668,7 +1668,7 @@ Deno.test("syncOrderDestinationsSelective replaces synced pairs with new order d
   const prev = [makePair("d1", "c1", { delivery: { instructions: "old" } })];
   const next = [makePair("d1", "c1", { delivery: { instructions: "new" } })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { delivery: { instructions: "old" } }) }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(result.length, 1);
   assertEquals(result[0].delivery.instructions, "new");
 });
@@ -1677,7 +1677,7 @@ Deno.test("syncOrderDestinationsSelective keeps overridden pairs (invoice differ
   const prev = [makePair("d1", "c1", { delivery: { instructions: "orig" } })];
   const next = [makePair("d1", "c1", { delivery: { instructions: "new" } })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { delivery: { instructions: "manual edit" } }) }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(result.length, 1);
   assertEquals(result[0].delivery.instructions, "manual edit");
 });
@@ -1689,7 +1689,7 @@ Deno.test("syncOrderDestinationsSelective drops removed pairs when not overridde
     { uid_order: "o1", ...makePair("d1", "c1") },
     { uid_order: "o1", ...makePair("d2", "c2") },
   ];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(result.length, 1);
   assertEquals(result[0].delivery.uid, "d1");
 });
@@ -1701,7 +1701,7 @@ Deno.test("syncOrderDestinationsSelective keeps removed pairs when overridden", 
     { uid_order: "o1", ...makePair("d1", "c1") },
     { uid_order: "o1", ...makePair("d2", "c2", { delivery: { instructions: "manual edit" } }) },
   ];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(result.length, 2);
   assertEquals(result[1].delivery.instructions, "manual edit");
 });
@@ -1725,7 +1725,7 @@ Deno.test("syncOrderDestinationsSelective: prev MISSING + still on the order ⇒
   const invoice: InvoiceDestinationPair[] = [
     { uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: "rantoul" }) },
   ];
-  const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(destinations.length, 1);
   assertEquals(destinations[0].jurisdiction, "rantoul", "the invoice's own value survives");
   assertEquals(dropped.length, 0);
@@ -1740,7 +1740,7 @@ Deno.test("syncOrderDestinationsSelective: prev MISSING + NOT on the order ⇒ l
     { uid_order: "o1", ...makePair("d1", "c1") },
     { uid_order: "o1", ...makePair("d-other", "c-other", { jurisdiction: "rantoul" }) },
   ];
-  const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
 
   assertEquals(destinations.length, 1, "the unmatched invoice pair is gone");
   assertEquals(destinations[0].delivery.uid, "d1");
@@ -1762,7 +1762,7 @@ Deno.test("syncOrderDestinationsSelective: an ORDINARY removal reports a differe
     { uid_order: "o1", ...makePair("d1", "c1") },
     { uid_order: "o1", ...makePair("d2", "c2") },
   ];
-  const { dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(dropped.length, 1);
   assertEquals(dropped[0].reason, "removed_from_order");
   assertEquals(dropped[0].jurisdiction, null);
@@ -1778,7 +1778,7 @@ Deno.test("syncOrderDestinationsSelective: a dropped pair from ANOTHER order is 
     { uid_order: "o1", ...makePair("d1", "c1") },
     { uid_order: "o2", ...makePair("d9", "c9", { jurisdiction: "rantoul" }) },
   ];
-  const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(destinations.length, 2);
   assertEquals(dropped.length, 0);
 });
@@ -1790,7 +1790,7 @@ Deno.test("syncOrderDestinationsSelective leaves out-of-scope (other-order) pair
     { uid_order: "o1", ...makePair("d1", "c1") },
     { uid_order: "o2", ...makePair("dX", "cX") },
   ];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(result.length, 1);
   assertEquals(result[0].uid_order, "o2");
   assertEquals(result[0].delivery.uid, "dX");
@@ -3222,7 +3222,7 @@ Deno.test("syncOrderDestinationsSelective carries jurisdiction onto a NEW invoic
   // allowed to have, unlike the equality check below.
   const prev: ReturnType<typeof makePair>[] = [];
   const next = [makePair("d1", "c1", { jurisdiction: "frankfort" })];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, [], "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, [], "o1", new Set());
   assertEquals(result.length, 1);
   assertEquals(result[0].jurisdiction, "frankfort");
 });
@@ -3231,7 +3231,7 @@ Deno.test("syncOrderDestinationsSelective carries a CHANGED jurisdiction on an u
   const prev = [makePair("d1", "c1", { jurisdiction: "chicago" })];
   const next = [makePair("d1", "c1", { jurisdiction: "frankfort" })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: "chicago" }) }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(result[0].jurisdiction, "frankfort");
 });
 
@@ -3249,7 +3249,7 @@ Deno.test("syncOrderDestinationsSelective PRESERVES an invoice-side jurisdiction
   const prev = [makePair("d1", "c1", { jurisdiction: "chicago" })];
   const next = [makePair("d1", "c1", { jurisdiction: "chicago" })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: "rantoul" }) }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(result[0].jurisdiction, "rantoul");
 });
 
@@ -3268,7 +3268,7 @@ Deno.test("a jurisdiction override does NOT freeze the rest of the pair", () => 
     uid_order: "o1",
     ...makePair("d1", "c1", { jurisdiction: "rantoul", delivery: { instructions: "old" } }),
   }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(result[0].jurisdiction, "rantoul", "the owned field is still the override");
   assertEquals(result[0].delivery.instructions, "new", "…and everything else resumed syncing");
   assertEquals(result[0].customer_collecting, true);
@@ -3289,7 +3289,7 @@ Deno.test("an INHERITED pair still accepts the order's changed jurisdiction — 
   const prev = [prevNoKey as ReturnType<typeof makePair>];
   const next = [makePair("d1", "c1", { jurisdiction: "frankfort" })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: null }) }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(result[0].jurisdiction, "frankfort");
 });
 
@@ -3300,7 +3300,7 @@ Deno.test("an owned-field edit does not keep a pair the ORDER deleted", () => {
   // whole-pair freeze this pair survived its own deletion.
   const prev = [makePair("d1", "c1", { jurisdiction: "chicago" })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: "rantoul" }) }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, [], invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, [], invoice, "o1", new Set());
   assertEquals(result.length, 0);
 });
 
@@ -3313,7 +3313,7 @@ Deno.test("pairsMatch: null, undefined and absent jurisdiction are ONE state", (
   const prev = [withNull];
   const next = [makePair("d1", "c1", { delivery: { instructions: "new" } })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...withAbsent } as InvoiceDestinationPair];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
   assertEquals(result[0].delivery.instructions, "new", "absent must not read as an override of null");
 });
 
@@ -3328,7 +3328,7 @@ Deno.test("pairsMatch is insensitive to KEY ORDER", () => {
   ) as ReturnType<typeof makePair>;
   const next = [makePair("d1", "c1", { jurisdiction: "chicago", delivery: { instructions: "new" } })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...reordered }];
-  const { destinations: result } = syncOrderDestinationsSelective([built], next, invoice, "o1");
+  const { destinations: result } = syncOrderDestinationsSelective([built], next, invoice, "o1", new Set());
   assertEquals(result[0].delivery.instructions, "new");
 });
 
@@ -3367,6 +3367,7 @@ Deno.test("syncOrderDestinationsSelective never emits an UNDEFINED field", () =>
     [noJurisdiction as ReturnType<typeof makePair>],
     [],
     "o1",
+    new Set(),
   );
   assertEquals(result.length, 1);
   for (const [key, value] of Object.entries(result[0])) {
@@ -3616,4 +3617,86 @@ Deno.test("syncOrderDestinationScope: sweep — every add/delete/rename/pair-edi
       }
     }
   }
+});
+
+// ── Left-out lines and date-extension sections (api-cloudrun#680 R1) ──
+
+const EXT_DIV = "00000000-0000-4000-8000-0000000de5e1";
+const destDivider = (): LineItem => ({ uid: DEST_1, type: "destination", name: "Venue", description: "", path: [DEST_1] } as unknown as LineItem);
+
+/** An extension section of DEST_1 on the invoice: divider + one line billing 2 added days. */
+function extensionSection(): InvoiceDocItemType[] {
+  return [
+    { uid: EXT_DIV, type: "destination", name: "Venue", description: "", path: [ORDER_DIV_1, EXT_DIV], path_extension_for: [DEST_1] },
+    {
+      ...buildOrderScopedItems([orderShapedLine({ price: { chargeable_days: 2 } as unknown as LineItem["price"] })], ORDER_DIV_1)[0],
+      path: [ORDER_DIV_1, EXT_DIV, ITEM_1],
+    },
+  ] as InvoiceDocItemType[];
+}
+
+Deno.test("syncOrderToInvoiceSelective: a line the prev order had and the invoice left out STAYS out; a new line is added", () => {
+  const light = orderShapedLine();
+  const tripod = orderShapedLine({ uid: ITEM_2, name: "Tripod", path: [DEST_1, ITEM_2] });
+  const added = orderShapedLine({ uid: "Item0000000000000003", name: "Stand", path: [DEST_1, "Item0000000000000003"] });
+  const prev = [destDivider(), light, tripod];
+  // The invoice bills the light only: the tripod was left off on purpose.
+  const invoice = buildOrderScopedItems([destDivider(), light], ORDER_DIV_1);
+  const result = syncOrderToInvoiceSelective(prev, [...prev, added], invoice, ORDER_DIV_1);
+  assertEquals(result.map((it) => it.uid), [DEST_1, ITEM_1, "Item0000000000000003"]);
+});
+
+Deno.test("syncOrderToInvoiceSelective: a missing DIVIDER is still projected — it is the skeleton alignment reads", () => {
+  const light = orderShapedLine();
+  const invoice = buildOrderScopedItems([light], ORDER_DIV_1);
+  const result = syncOrderToInvoiceSelective([destDivider(), light], [destDivider(), light], invoice, ORDER_DIV_1);
+  assertEquals(result.map((it) => it.uid).sort(), [DEST_1, ITEM_1].sort());
+});
+
+Deno.test("syncOrderToInvoiceSelective: an invoice line whose order line MOVED follows it", () => {
+  const DEST_2 = "00000000-0000-4000-8000-0000000de502";
+  const dest2 = { uid: DEST_2, type: "destination", name: "Other", description: "", path: [DEST_2] } as unknown as LineItem;
+  const before = orderShapedLine();
+  const after = orderShapedLine({ path: [DEST_2, ITEM_1] });
+  const invoice = buildOrderScopedItems([destDivider(), dest2, before], ORDER_DIV_1);
+  const result = syncOrderToInvoiceSelective([destDivider(), dest2, before], [destDivider(), dest2, after], invoice, ORDER_DIV_1);
+  assertEquals(result.filter((it) => it.uid === ITEM_1).map((it) => it.path), [[ORDER_DIV_1, DEST_2, ITEM_1]]);
+});
+
+Deno.test("syncOrderToInvoiceSelective: an extension section passes through untouched, at the tail", () => {
+  const light = orderShapedLine({ price: { chargeable_days: 7 } as unknown as LineItem["price"] });
+  const order = [destDivider(), light];
+  const invoice = [...buildOrderScopedItems(order, ORDER_DIV_1), ...extensionSection()];
+  const result = syncOrderToInvoiceSelective(order, order, invoice, ORDER_DIV_1);
+  assertEquals(result.slice(-2), extensionSection());
+  assertEquals(result.length, 4);
+});
+
+Deno.test("syncOrderDestinationsSelective: an extension section's pair is kept, not dropped as naming no order pair", () => {
+  const orderPair = makePair("d1", "c1");
+  const extPair = { uid_order: "o1", ...makePair("d1", "c1", { uid: "ext-pair" }) };
+  const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...orderPair }, extPair];
+  const kept = syncOrderDestinationsSelective([orderPair], [orderPair], invoice, "o1", new Set(["ext-pair"]));
+  assertEquals([kept.destinations.map((p) => p.uid), kept.dropped], [[orderPair.uid, "ext-pair"], []]);
+  const unaware = syncOrderDestinationsSelective([orderPair], [orderPair], invoice, "o1", new Set());
+  assertEquals(unaware.dropped.map((d) => [d.uid, d.reason]), [["ext-pair", "key_names_no_order_pair"]]);
+});
+
+Deno.test("invoiceScopeDividersMatch: an extension section reads as the divider it extends", () => {
+  const order = [destDivider(), orderShapedLine()];
+  const withBoth = [...buildOrderScopedItems(order, ORDER_DIV_1), ...extensionSection()] as unknown as InvoiceItem[];
+  assertEquals(invoiceScopeDividersMatch(withBoth, order, ORDER_DIV_1), true);
+  const onlyExtension = extensionSection() as unknown as InvoiceItem[];
+  assertEquals(invoiceScopeDividersMatch(onlyExtension, order, ORDER_DIV_1), true);
+  const dangling = extensionSection().map((it) => it.type === "destination" ? { ...it, path_extension_for: ["gone"] } : it) as unknown as InvoiceItem[];
+  assertEquals(invoiceScopeDividersMatch(dangling, order, ORDER_DIV_1), false);
+});
+
+Deno.test("computeInvoiceSyncStatus: an extension section is what the invoice was asked to bill, not drift", () => {
+  const order = [destDivider(), orderShapedLine()];
+  const invoice = [...buildOrderScopedItems(order, ORDER_DIV_1), ...extensionSection()] as unknown as InvoiceItem[];
+  const status = computeInvoiceSyncStatus(invoice, order, ORDER_DIV_1, NO_EXPLANATIONS);
+  assertEquals(status.get([ORDER_DIV_1, EXT_DIV].join("/")), "in_sync");
+  assertEquals(status.get([ORDER_DIV_1, EXT_DIV, ITEM_1].join("/")), "in_sync");
+  assertEquals([...status.values()].filter((s) => s === "out_of_sync").length, 0);
 });

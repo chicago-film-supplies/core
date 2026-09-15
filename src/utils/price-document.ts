@@ -76,10 +76,32 @@ export type PriceDocumentKind =
 /**
  * A date-extension section (#680, D7): every line whose `path` starts with
  * `divider_path` bills the days the order's window grew past what was billed.
+ *
+ * The day count is the LINE's own `chargeable_days` — the ADDED days, computed
+ * once by the writer that builds the section (owner, 2026-09-15) — priced with
+ * the one-week floor skipped. The section supplies only the rule, never a count,
+ * so a re-price reads nothing beyond the document. Derive the sections with
+ * {@link invoiceExtensionSections}.
  */
-export interface PriceDocumentExtension extends LineExtension {
+export interface PriceDocumentExtension {
   /** The path of the invoice destination divider that opens the section. */
   divider_path: readonly string[];
+}
+
+/**
+ * The date-extension sections of an invoice's items: one per destination
+ * divider carrying `path_extension_for`.
+ *
+ * The one derivation of {@link PriceDocumentContext.extensions}, shared by every
+ * invoice writer and the manager's optimistic recompute — a caller that forgets
+ * to pass it re-prices extension lines at the one-week floor.
+ */
+export function invoiceExtensionSections(
+  items: readonly { type: string; path: readonly string[]; path_extension_for?: readonly string[] }[],
+): PriceDocumentExtension[] {
+  return items
+    .filter((it) => it.type === "destination" && (it.path_extension_for?.length ?? 0) > 0)
+    .map((it) => ({ divider_path: [...it.path] }));
 }
 
 /** The two day counts a D7 extension is priced from. */
@@ -170,20 +192,30 @@ function assertRepriceable(document: PriceDocumentKind): void {
  * document — `accountLine` (`./quantityAccounting.ts`), which prices a
  * remainder and a billed row's extension (#997 D11).
  *
- * `extension` is D7: the line is priced for
- * {@link extensionChargeDays}`(order, billed)` days with the one-week minimum
- * skipped, which is what an extension section on an invoice bills.
+ * `extensionDays` is D7: the line is priced for that many days with the
+ * one-week minimum skipped, which is what an extension section on an invoice
+ * bills. A document line passes its own `chargeable_days`; `accountLine` passes
+ * {@link extensionChargeDays}`(order, billed)` for a billed row.
  *
  * @throws Error on a line with no pricing rule, and on an extension of a line
  *   that is not `five_day_week` or carries a flat tax.
  */
-export function priceLine(item: LineItem, taxes: Tax[], extension?: LineExtension): LinePriceMoney {
+export function priceLine(item: LineItem, taxes: Tax[], extensionDays?: number): LinePriceMoney {
   return computeLineMoney(
     item,
     taxes,
     item.uid,
-    extension && { extensionDays: extensionChargeDays(extension.order_charge_days, extension.billed_charge_days) },
+    extensionDays === undefined ? undefined : { extensionDays },
   );
+}
+
+/** The added days an extension line bills: its own `chargeable_days`, which it must state. */
+function extensionDaysOf(item: LineItem): number {
+  const days = item.price?.chargeable_days;
+  if (typeof days !== "number") {
+    throw new Error(`Line ${item.uid} sits in an extension section and states no chargeable_days to extend by`);
+  }
+  return days;
 }
 
 function extensionFor(
@@ -246,7 +278,8 @@ export function priceDocument<T extends LineItem>(
   for (const item of out) {
     if (!isPriceableItem(item)) continue;
     const price = item.price;
-    const money: LinePriceMoney = priceLine(item, pricing, extensionFor(item, ctx.extensions));
+    const extension = extensionFor(item, ctx.extensions);
+    const money: LinePriceMoney = priceLine(item, pricing, extension && extensionDaysOf(item));
     // ⚠️ Stage 1 has ALREADY written `taxes_base` on every pre-tax line, so it is
     // always present here, as the deleted `materializeDocumentTax` also left it.
     // That widens the key set of a stored line that never carried it (measured
@@ -298,6 +331,8 @@ export function priceDocument<T extends LineItem>(
 /** The invoice-line surface a credit is priced from (api-cloudrun#997 D4). */
 export interface CreditSourceLine {
   uid: string;
+  /** The line's path on the invoice — what places it in a date-extension section. */
+  path: readonly string[];
   type: LineItem["type"];
   quantity: number;
   price: {
@@ -353,6 +388,7 @@ export interface PricedCreditNote {
 export function priceCreditNote(
   selection: readonly CreditSelectionLine[],
   taxes: Tax[],
+  extensions: readonly PriceDocumentExtension[],
 ): PricedCreditNote {
   const prices: CreditLinePrice[] = [];
   const priced: LineItem[] = [];
@@ -360,6 +396,10 @@ export function priceCreditNote(
     if (!Number.isInteger(quantity) || quantity <= 0) {
       throw new Error(`Credit quantity for line ${line.uid} must be a positive integer, got ${quantity}`);
     }
+    // A line in an extension section is credited as it was billed: at its own
+    // added days with the week minimum skipped. Priced as an ordinary line it
+    // would be floored to a week and credit more than the invoice charged.
+    const extension = extensionFor({ uid: line.uid, path: [...line.path] } as LineItem, extensions);
     const item = {
       uid: line.uid,
       path: [line.uid],
@@ -379,7 +419,7 @@ export function priceCreditNote(
     }
     const price = assembleLinePrice(
       { base_cents: line.price.base_cents, chargeable_days: line.price.chargeable_days, formula: line.price.formula },
-      priceLine(item, taxes),
+      priceLine(item, taxes, extension && extensionDaysOf(item)),
       item,
     ) as CreditLinePrice;
     prices.push(price);

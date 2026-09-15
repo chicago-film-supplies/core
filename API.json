@@ -1999,6 +1999,18 @@
           "doc": ""
         },
         {
+          "kind": "variable",
+          "name": "InvoiceDocDestinationItem",
+          "declaration": "const InvoiceDocDestinationItem: z.ZodType<InvoiceDocDestinationItemType>;",
+          "doc": "Zod schema for an invoice destination divider."
+        },
+        {
+          "kind": "interface",
+          "name": "InvoiceDocDestinationItemType",
+          "declaration": "interface InvoiceDocDestinationItemType {\n  path_extension_for?: string[];\n}",
+          "doc": "An invoice destination divider: the order's divider, plus the one key only an\ninvoice can carry.\n\n`path_extension_for` marks a **date-extension section** (api-cloudrun#680 R1).\nOwner decisions, 2026-09-13:\n\n- **Dates and destinations ride together**, so a second date range is a second\n  destination section even at the same address. An extension section bills\n  from the previously billed end + 1 to the order's current end, and its pair\n  (`destinations[i].uid === this divider's uid`) states that window.\n- **The link is by PATH**: the value is the ORDER-relative path of the order\n  destination divider this section extends. Alignment and `billedByPath`\n  read an extension section as that divider, so its lines bill the order's\n  lines there.\n- **The no-minimum rule is DERIVED from the section, never stored on the\n  line.** `priceDocument` prices every line under an extension section at the\n  line's own `chargeable_days` — the ADDED days — with the one-week floor\n  skipped (`invoiceExtensionSections`, `@cfs/core/utils/price-document`).\n\n⚠️ Absent on every divider stored before 2026-09-15, and on every full-window\nsection after it. There is no `null`: a divider either extends a section or\nit does not."
+        },
+        {
           "kind": "interface",
           "name": "InvoiceDocDestinationType",
           "declaration": "interface InvoiceDocDestinationType {\n  uid_order: string;\n}",
@@ -2019,7 +2031,7 @@
         {
           "kind": "typeAlias",
           "name": "InvoiceDocItemType",
-          "declaration": "type InvoiceDocItemType = InvoiceDocLineItemType | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;",
+          "declaration": "type InvoiceDocItemType = InvoiceDocLineItemType | OrderDocGroupItemType | InvoiceDocDestinationItemType | InvoiceDocOrderItemType;",
           "doc": "Union of all item types stored in an invoice document."
         },
         {
@@ -2067,7 +2079,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputDestinationType",
-          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
+          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n  path_extension_for?: string[];\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -7090,6 +7102,18 @@
           "doc": ""
         },
         {
+          "kind": "variable",
+          "name": "InvoiceDocDestinationItem",
+          "declaration": "const InvoiceDocDestinationItem: z.ZodType<InvoiceDocDestinationItemType>;",
+          "doc": "Zod schema for an invoice destination divider."
+        },
+        {
+          "kind": "interface",
+          "name": "InvoiceDocDestinationItemType",
+          "declaration": "interface InvoiceDocDestinationItemType {\n  path_extension_for?: string[];\n}",
+          "doc": "An invoice destination divider: the order's divider, plus the one key only an\ninvoice can carry.\n\n`path_extension_for` marks a **date-extension section** (api-cloudrun#680 R1).\nOwner decisions, 2026-09-13:\n\n- **Dates and destinations ride together**, so a second date range is a second\n  destination section even at the same address. An extension section bills\n  from the previously billed end + 1 to the order's current end, and its pair\n  (`destinations[i].uid === this divider's uid`) states that window.\n- **The link is by PATH**: the value is the ORDER-relative path of the order\n  destination divider this section extends. Alignment and `billedByPath`\n  read an extension section as that divider, so its lines bill the order's\n  lines there.\n- **The no-minimum rule is DERIVED from the section, never stored on the\n  line.** `priceDocument` prices every line under an extension section at the\n  line's own `chargeable_days` — the ADDED days — with the one-week floor\n  skipped (`invoiceExtensionSections`, `@cfs/core/utils/price-document`).\n\n⚠️ Absent on every divider stored before 2026-09-15, and on every full-window\nsection after it. There is no `null`: a divider either extends a section or\nit does not."
+        },
+        {
           "kind": "interface",
           "name": "InvoiceDocDestinationType",
           "declaration": "interface InvoiceDocDestinationType {\n  uid_order: string;\n}",
@@ -7110,7 +7134,7 @@
         {
           "kind": "typeAlias",
           "name": "InvoiceDocItemType",
-          "declaration": "type InvoiceDocItemType = InvoiceDocLineItemType | OrderDocGroupItemType | OrderDocDestinationItemType | InvoiceDocOrderItemType;",
+          "declaration": "type InvoiceDocItemType = InvoiceDocLineItemType | OrderDocGroupItemType | InvoiceDocDestinationItemType | InvoiceDocOrderItemType;",
           "doc": "Union of all item types stored in an invoice document."
         },
         {
@@ -7152,7 +7176,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputDestinationType",
-          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n}",
+          "declaration": "interface InvoiceItemInputDestinationType {\n  uid: string;\n  type: \"destination\";\n  name?: string;\n  description?: string;\n  path: string[];\n  path_extension_for?: string[];\n}",
           "doc": "A destination divider as a client sends it."
         },
         {
@@ -11262,7 +11286,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/quantityAccounting",
-      "moduleDoc": "**Quantity accounting** — how much of an order line its invoices have billed,\nand what is left to bill (api-cloudrun#680, manager#414).\n\n## One sum, computed on read, never stored (owner decision D3, 2026-09-13)\n\n> billed quantity at an order path = Σ over non-void, aligned invoices of\n> (line quantity at that path + substitution quantities naming it)\n\nNothing stores this number, so there is no second writer and no denorm to\ndrift — the `Order.invoices[]` status-drift class. A `quantity_invoiced` field\non order lines was rejected for exactly that reason.\n\nIts readers: `computeDocumentDiffs`'s \"billed N of M\" entry, the\nremaining-invoice create mode (via {@link remainingForOrder}), and the\ncoverage census.\n\n## Substitutions, as the documents carry them today\n\nToday a substitute Y carries one `path_substituted_for` naming X's order path,\nand Y replaces X in place. So:\n\n- **Y's row quantity counts in full toward X.** Y's own path is not an order\n  path and receives nothing, and Y's components (which exist on no order\n  line) count toward nothing.\n- **X's components are credited through the ORDER's own stored ratio** —\n  `credit × component quantity ÷ kit quantity`, walked down the order's path\n  tree, rounded half-up once per level. Never the catalog: optional and\n  variable components make catalog derivation wrong (D1). A full swap credits\n  every component exactly its order quantity, so the rounding only ever bites\n  a partial swap.\n- **A spent anchor is not a substitution** — {@link liveInvoiceAnchors}\n  drops an anchor whose Y the order now carries itself, and that row then\n  counts at its own path like any other.\n\nTrack S (manager#414) replaces `path_substituted_for` with\n`substituted_for[].quantity`; only {@link billedByPath}'s substitution input\nchanges then, not this module's contract.\n\n## Dates are money, not quantity (D4)\n\nAn order whose dates were extended after it was billed has no quantity left to\nbill and still has money left to bill. That remainder is each billed row priced\nas a D7 EXTENSION (api-cloudrun#997): for\n`max(order charge days, 5) − max(billed charge days, 5)` days with the\none-week minimum skipped, through `priceDocument`'s line pricer — so it is\nexactly what an extension section on an invoice bills (#997 D11).\n\n🔴 **Never price \"the extra days\" as an ordinary line.** `five_day_week` floors\nat one week, so `price(3 days)` charges a week the billed row already paid.\nThe D7 day count floors each SIDE at the week instead, and skips the floor on\nthe difference. A `fixed` row never read its days and extends by nothing.\n\n⚠️ **The date input is `price.chargeable_days`, not the destination pair's\ndates.** The pair's dates are its upstream: `syncChargeDaysToItems` writes the\npair's charge days onto every line still on the default, and an operator can\noverride a line's days by hand. The pricer reads the line, so the line is what\nwas billed and the line is what the order now asks for — a hand-held line\nwhose days did not move correctly reports no extension.\n\n## Money is PRE-TAX, in integer cents\n\nEvery cent figure here is `subtotal_discounted_cents`: the invoice writer that\nbills a remainder materializes tax on the line it builds, per destination, and\npricing tax here would restate `priceDocument`'s tax stage. Each amount is one\npricer result, rounded once (`cfs-money`).\n\nSigned on purpose: a negative quantity or extension is OVER-billing (the order\nwent down, or its dates shortened, after billing). That is a credit-note\nquestion rather than a remainder, and it is the caller's to decide — this\nreports it rather than clamping it away.\n\nPure: no reads.",
+      "moduleDoc": "**Quantity accounting** — how much of an order line its invoices have billed,\nand what is left to bill (api-cloudrun#680, manager#414).\n\n## One sum, computed on read, never stored (owner decision D3, 2026-09-13)\n\n> billed quantity at an order path = Σ over non-void, aligned invoices of\n> (line quantity at that path + substitution quantities naming it)\n\nNothing stores this number, so there is no second writer and no denorm to\ndrift — the `Order.invoices[]` status-drift class. A `quantity_invoiced` field\non order lines was rejected for exactly that reason.\n\nIts readers: `computeDocumentDiffs`'s \"billed N of M\" entry, the\nremaining-invoice create mode (via {@link remainingForOrder}), and the\ncoverage census.\n\n## Substitutions, as the documents carry them today\n\nToday a substitute Y carries one `path_substituted_for` naming X's order path,\nand Y replaces X in place. So:\n\n- **Y's row quantity counts in full toward X.** Y's own path is not an order\n  path and receives nothing, and Y's components (which exist on no order\n  line) count toward nothing.\n- **X's components are credited through the ORDER's own stored ratio** —\n  `credit × component quantity ÷ kit quantity`, walked down the order's path\n  tree, rounded half-up once per level. Never the catalog: optional and\n  variable components make catalog derivation wrong (D1). A full swap credits\n  every component exactly its order quantity, so the rounding only ever bites\n  a partial swap.\n- **A spent anchor is not a substitution** — {@link liveInvoiceAnchors}\n  drops an anchor whose Y the order now carries itself, and that row then\n  counts at its own path like any other.\n\nTrack S (manager#414) replaces `path_substituted_for` with\n`substituted_for[].quantity`; only {@link billedByPath}'s substitution input\nchanges then, not this module's contract.\n\n## Dates are money, not quantity (D4)\n\nAn order whose dates were extended after it was billed has no quantity left to\nbill and still has money left to bill. That remainder is each billed row priced\nas a D7 EXTENSION (api-cloudrun#997): for\n`max(order charge days, 5) − max(billed charge days, 5)` days with the\none-week minimum skipped, through `priceDocument`'s line pricer — so it is\nexactly what an extension section on an invoice bills (#997 D11).\n\n🔴 **Never price \"the extra days\" as an ordinary line.** `five_day_week` floors\nat one week, so `price(3 days)` charges a week the billed row already paid.\nThe D7 day count floors each SIDE at the week instead, and skips the floor on\nthe difference. A `fixed` row never read its days and extends by nothing.\n\n**A bill of the extension nets it out.** A line in an invoice's\ndate-extension section (`path_extension_for`) reaches {@link billedByPath} as\nan `extension` row at the path it extends: it adds no units, and\n{@link accountLine} subtracts its money, priced at its own added days, from\nwhat the order's days add to the unit rows.\n\n⚠️ **The date input is `price.chargeable_days`, not the destination pair's\ndates.** The pair's dates are its upstream: `syncChargeDaysToItems` writes the\npair's charge days onto every line still on the default, and an operator can\noverride a line's days by hand. The pricer reads the line, so the line is what\nwas billed and the line is what the order now asks for — a hand-held line\nwhose days did not move correctly reports no extension.\n\n## Money is PRE-TAX, in integer cents\n\nEvery cent figure here is `subtotal_discounted_cents`: the invoice writer that\nbills a remainder materializes tax on the line it builds, per destination, and\npricing tax here would restate `priceDocument`'s tax stage. Each amount is one\npricer result, rounded once (`cfs-money`).\n\nSigned on purpose: a negative quantity or extension is OVER-billing (the order\nwent down, or its dates shortened, after billing). That is a credit-note\nquestion rather than a remainder, and it is the caller's to decide — this\nreports it rather than clamping it away.\n\nPure: no reads.",
       "symbols": [
         {
           "kind": "interface",
@@ -11285,7 +11309,7 @@
         {
           "kind": "interface",
           "name": "BilledRow",
-          "declaration": "interface BilledRow {\n  invoiceUid: string;\n  item: InvoiceItem;\n  via: \"direct\" | \"substitute\";\n}",
+          "declaration": "interface BilledRow {\n  invoiceUid: string;\n  item: InvoiceItem;\n  via: \"direct\" | \"substitute\" | \"extension\";\n}",
           "doc": "One invoice row that bills an order path."
         },
         {
@@ -11462,7 +11486,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItem",
-          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  path_substituted_for?: string[];\n}",
+          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  path_substituted_for?: string[];\n  path_extension_for?: string[];\n}",
           "doc": "An invoice item with optional order-scoping and invoice-specific fields.\nExtends LineItem with properties that should be carried forward during sync\nand fields needed for Xero mapping.\n\n`price` accepts both the utility's intermediate PriceObject and the full\nInvoiceDocItemPriceType from schemas to avoid type drift."
         },
         {
@@ -11797,6 +11821,23 @@
         },
         {
           "kind": "function",
+          "name": "extensionSectionTargets",
+          "signature": "extensionSectionTargets(scopedItems: readonly InvoiceItem[], orderDividerUid: string): Map<string, string[]>",
+          "doc": "The date-extension sections in one order scope of an invoice: each extension\ndivider's uid → the ORDER-relative path of the order destination divider it\nextends (`path_extension_for`).\n\nAn extension section bills MONEY on lines another invoice already billed, so\nevery order-relative reader has to decide what to do with it: alignment and\n`billedByPath` read it as the divider it extends ({@link toOrderRelativePath}),\nwhile the line-drift readers skip it ({@link isInExtensionSection}).",
+          "paramTags": [
+            {
+              "name": "scopedItems",
+              "doc": "Items of one order scope, or a whole invoice"
+            },
+            {
+              "name": "orderDividerUid",
+              "doc": "The order divider's uid"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "flattenForXero",
           "signature": "flattenForXero(items: LineItem[]): LineItem[]",
           "doc": "Filter out structural items (group/destination/order dividers) and return only\nbillable line items suitable for Xero sync or totals calculation.\n\nThe membership test is `ITEM_CONTRACTS[type].kind`. It used to be a local\n`STRUCTURAL_TYPES` set — a thirteenth hand-written copy of the divider list,\nand the only one that answered \"billable\" for a type it had never heard of.",
@@ -11911,6 +11952,14 @@
           "name": "invoiceScopeDividersMatch",
           "signature": "invoiceScopeDividersMatch(scopedInvoiceItems: InvoiceItem[], orderItems: LineItem[], orderDividerUid: string): boolean",
           "doc": "Is one order-scope of an invoice hung on the same divider skeleton as its\norder? The alignment predicate {@link adoptOrderDividerStructure} drives\ntoward, and the one definition of \"aligned\" the audit and the endpoint share.\n\n⚠️ **It compares DIVIDER paths, not all paths.** Full path-set equality is\nthe wrong criterion and would never go green: measured 2026-08-10, 15 of the\n102 prod pairs carrying a custom line carry a legitimate invoice-only line,\nwhich makes the path sets differ forever while the tree shapes agree\nperfectly. A line the order lacks is **line-level drift**, correctly reported\n`out_of_sync` by {@link computeInvoiceSyncStatus}; conflating it with a\nstructural misalignment would make the two indistinguishable and the\nstructural repair unfinishable.\n\nThe invoice's own `order` divider is excluded — it has no order-side\ncounterpart by construction (`isDividerItemType(\"order\")` is `true`).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isInExtensionSection",
+          "signature": "isInExtensionSection(path: readonly string[], orderDividerUid: string, targets: ReadonlyMap<string, readonly string[]>): boolean",
+          "doc": "Is this invoice item an extension divider, or anywhere beneath one?",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12143,7 +12192,7 @@
         {
           "kind": "function",
           "name": "syncOrderDestinationsSelective",
-          "signature": "syncOrderDestinationsSelective(prevOrderDests: DocDestinationType[], newOrderDests: DocDestinationType[], currentInvoiceDests: InvoiceDestinationPair[], uidOrder: string): OrderDestinationSyncResult",
+          "signature": "syncOrderDestinationsSelective(prevOrderDests: DocDestinationType[], newOrderDests: DocDestinationType[], currentInvoiceDests: InvoiceDestinationPair[], uidOrder: string, extensionPairUids: ReadonlySet<string>): OrderDestinationSyncResult",
           "doc": "Selectively sync one order's destination pairs into an invoice's destinations,\nrespecting invoice-side overrides. Per-pair matching is by\n`(uid_order, pair.uid)` — see {@link destPairKey}, and note that it was the\nENDPOINT uids until api-cloudrun#663, where the key itself moved whenever an\naddress was corrected. Only pairs scoped to `uidOrder` are touched — pairs\nfrom other orders pass through unchanged.\n\nPolicy per pair:\n- Not in invoice (new in order) → add, tagged with `uid_order`.\n- In invoice AND prev order matches current invoice → replace with new order\n  pair, **carrying the invoice-owned fields forward**\n  ({@link carryOverridablePairFields}).\n- In invoice BUT prev order ≠ invoice → overridden, keep invoice version.\n- In invoice but not in new order:\n  - prev matches invoice → deleted from order, drop.\n  - prev ≠ invoice → overridden, keep.\n\n⚠️ **\"Matches\" here is {@link pairsMatch}, which no longer sees the\n{@link INVOICE_OVERRIDABLE_PAIR_FIELDS}.** So an override on one of those is\nno longer a whole-pair freeze: the pair keeps syncing everything else and the\nowned field is carried. Two consequences worth stating, because they are the\nbehaviour change: the rest of the pair (address, contact, instructions,\n`customer_collecting`/`returning`) now tracks the order again, and a pair the\nORDER has deleted is dropped even when the invoice set a jurisdiction on it —\nan owned-field edit is not a claim that the destination still exists.",
           "paramTags": [
             {
@@ -12161,6 +12210,10 @@
             {
               "name": "uidOrder",
               "doc": "The order uid this sync is scoped to"
+            },
+            {
+              "name": "extensionPairUids",
+              "doc": "Pairs of this order's date-extension sections\n({@link extensionSectionTargets}'s keys). They name no order pair by\nconstruction, so they are kept verbatim rather than dropped as\n`key_names_no_order_pair`. Empty when the invoice has no order divider,\nbecause no section can hang under one."
             }
           ],
           "returnsTag": "`{ destinations, dropped }` — the updated full invoice destinations\narray, and every pair this call removed, each with the reason it went. See\n{@link OrderDestinationSyncResult}; **do not discard `dropped`.**"
@@ -12190,7 +12243,7 @@
           "kind": "function",
           "name": "syncOrderToInvoiceSelective",
           "signature": "syncOrderToInvoiceSelective(prevOrderItems: LineItem[], newOrderItems: LineItem[], currentInvoiceItems: InvoiceDocItemType[], orderDividerUid: string): InvoiceDocItemType[]",
-          "doc": "Selectively sync order items into an invoice, respecting invoice-side overrides.\n\nItems are matched by **path** (not uid), since the same product can appear at\nmultiple positions in the items array. For each item:\n\n- **Synced** (prev order matches current invoice, minus invoice-only fields):\n  replaced with the new order item, carrying forward invoice-only overrides\n- **Overridden** (invoice item differs from prev order): left unchanged\n- **New** (in new order, not in prev): added under the order divider\n- **Removed** (in prev order, not in new): removed only if synced, kept if overridden\n- **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed\n  and Y's is emitted in its place — see below\n\n## 🔴 Why the substitution arm exists: without it a substitution lasts until\nthe next order save\n\nMeasured against this function before the arm was added, with the order\nUNCHANGED (`prev === new`) and the invoice holding Y in X's place:\n\n```\nBEFORE  invoice lines: [ \"Light Y\" ]\nAFTER   invoice lines: [ \"Light X\" ]\n```\n\nBoth halves of the path match fail, and each fails toward undoing the\noperator's edit: X's order path has no invoice line, so the `!invoiceItem`\nbranch re-projects X; Y's path has no PREV ORDER line, so the removed-items\npass drops it as a synced line the order no longer carries. **Neither branch\nis wrong on its own** — the pair is only wrong because nothing told this\nfunction the two rows are the same row, and `path_substituted_for` is what\nsays so.\n\n⭐ That is Increment 2's lesson on a third surface. A projection undoes any\ndownstream override not stored in a form the projection HONOURS, and being\n*stored* is not enough — `path_substituted_for` was already a stored field on\nfulfillments and this function had never heard of it.\n\n⚠️ **The whole-scope {@link syncOrderItems} deliberately does NOT get this\narm.** It is the operator's hard snap-to-order, documented to discard\noverrides and drop lines the order no longer has; a substitution is an\noverride, so discarding it is what the operator asked for. Only the automatic\nper-save sync has to be non-destructive.",
+          "doc": "Selectively sync order items into an invoice, respecting invoice-side overrides.\n\nItems are matched by **path** (not uid), since the same product can appear at\nmultiple positions in the items array. For each item:\n\n- **Synced** (prev order matches current invoice, minus invoice-only fields):\n  replaced with the new order item, carrying forward invoice-only overrides\n- **Overridden** (invoice item differs from prev order): left unchanged\n- **New** (in new order, not in prev): added under the order divider\n- **Left out** (a LINE in prev and new, never on the invoice): stays out\n- **Removed** (in prev order, not in new): removed only if synced, kept if overridden\n- **Extension sections** ({@link extensionSectionTargets}): passed through\n  verbatim, at the tail of the scope\n- **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed\n  and Y's is emitted in its place — see below\n\n## 🔴 Why the substitution arm exists: without it a substitution lasts until\nthe next order save\n\nMeasured against this function before the arm was added, with the order\nUNCHANGED (`prev === new`) and the invoice holding Y in X's place:\n\n```\nBEFORE  invoice lines: [ \"Light Y\" ]\nAFTER   invoice lines: [ \"Light X\" ]\n```\n\nBoth halves of the path match fail, and each fails toward undoing the\noperator's edit: X's order path has no invoice line, so the `!invoiceItem`\nbranch re-projects X; Y's path has no PREV ORDER line, so the removed-items\npass drops it as a synced line the order no longer carries. **Neither branch\nis wrong on its own** — the pair is only wrong because nothing told this\nfunction the two rows are the same row, and `path_substituted_for` is what\nsays so.\n\n⭐ That is Increment 2's lesson on a third surface. A projection undoes any\ndownstream override not stored in a form the projection HONOURS, and being\n*stored* is not enough — `path_substituted_for` was already a stored field on\nfulfillments and this function had never heard of it.\n\n## 🔴 A line the invoice LEFT OUT stays out (api-cloudrun#680 R1, owner 2026-09-15)\n\nThe documented rule above was always \"new = in new order, not in prev\", and the\ncode projected EVERY order line the invoice lacked. So an unsettled partial\ninvoice was refilled with the whole order on its next save, and an \"invoice\nremaining\" invoice re-billed lines another invoice had already billed. A line\ncounts as new only when the previous order had no line at its path and no line\nthat moved there. Dividers are still projected when missing: they are the\nskeleton alignment reads, not something an operator bills.\n\n## Extension sections are billing, not order structure\n\nAn extension section's divider names no order path of its own, so without its\nown arm the removed-items pass would drop the divider and every line under it\nas \"synced and removed from the order\". They are emitted untouched after\neverything else.\n\n⚠️ **The whole-scope {@link syncOrderItems} deliberately does NOT get this\narm.** It is the operator's hard snap-to-order, documented to discard\noverrides and drop lines the order no longer has; a substitution is an\noverride, so discarding it is what the operator asked for. Only the automatic\nper-save sync has to be non-destructive.",
           "paramTags": [
             {
               "name": "prevOrderItems",
@@ -12224,6 +12277,14 @@
           "name": "toInvoiceDestinationPair",
           "signature": "toInvoiceDestinationPair(uidOrder: string, pair: DocDestinationType): InvoiceDestinationPair",
           "doc": "**The ONE author of an invoice destination pair.** Project an order's pair\ninto the invoice's, tagged with the order it is scoped to.\n\n⚠️ **A projection enumerates what it TAKES, so every hand-written one is a\nplace a new field gets dropped.** There were FIVE of them — the two below,\n`createInvoice` and the CRMS invoice webhook in api-cloudrun, and the schema\nliteral itself — and adding `jurisdiction` (api-cloudrun#591) had to touch\nevery one. Two were missed on the first pass: one surfaced as six failing\ntests, the other as a type error. Hence one author.\n\n**Nullish is normalized to `null`, never left `undefined`.** Firestore\nREFUSES an undefined value — the write fails, it does not drop the key — so a\npair whose optional field is simply absent would make the invoice\nunwritable. `null` and absent mean the same thing on every field of this\npair, and `pairsMatch` canonicalizes the two together, so this costs no\ninformation and no override detection.\n\n⚠️ The spread is deliberate and is what makes a NEW pair field carried by\nconstruction. Do not \"tidy\" it into an explicit field list — that is the\ndefect this function exists to remove.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "toOrderRelativePath",
+          "signature": "toOrderRelativePath(path: readonly string[], orderDividerUid: string, targets: ReadonlyMap<string, readonly string[]>): string[]",
+          "doc": "An invoice item's path in the ORDER's path space, reading an extension\nsection as the order divider it extends: `[O, E, …rest]` → `[…target, …rest]`.\nAny other item is {@link stripOrderPrefix}.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14162,7 +14223,7 @@
         {
           "kind": "interface",
           "name": "CreditSourceLine",
-          "declaration": "interface CreditSourceLine {\n  uid: string;\n  type: indexedAccess;\n  quantity: number;\n  price: typeLiteral;\n}",
+          "declaration": "interface CreditSourceLine {\n  uid: string;\n  path: readonly string[];\n  type: indexedAccess;\n  quantity: number;\n  price: typeLiteral;\n}",
           "doc": "The invoice-line surface a credit is priced from (api-cloudrun#997 D4)."
         },
         {
@@ -14181,7 +14242,7 @@
           "kind": "interface",
           "name": "PriceDocumentExtension",
           "declaration": "interface PriceDocumentExtension {\n  divider_path: readonly string[];\n}",
-          "doc": "A date-extension section (#680, D7): every line whose `path` starts with\n`divider_path` bills the days the order's window grew past what was billed."
+          "doc": "A date-extension section (#680, D7): every line whose `path` starts with\n`divider_path` bills the days the order's window grew past what was billed.\n\nThe day count is the LINE's own `chargeable_days` — the ADDED days, computed\nonce by the writer that builds the section (owner, 2026-09-15) — priced with\nthe one-week floor skipped. The section supplies only the rule, never a count,\nso a re-price reads nothing beyond the document. Derive the sections with\n{@link invoiceExtensionSections}."
         },
         {
           "kind": "typeAlias",
@@ -14211,8 +14272,16 @@
         },
         {
           "kind": "function",
+          "name": "invoiceExtensionSections",
+          "signature": "invoiceExtensionSections(items: readonly typeLiteral[]): PriceDocumentExtension[]",
+          "doc": "The date-extension sections of an invoice's items: one per destination\ndivider carrying `path_extension_for`.\n\nThe one derivation of {@link PriceDocumentContext.extensions}, shared by every\ninvoice writer and the manager's optimistic recompute — a caller that forgets\nto pass it re-prices extension lines at the one-week floor.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "priceCreditNote",
-          "signature": "priceCreditNote(selection: readonly CreditSelectionLine[], taxes: Tax[]): PricedCreditNote",
+          "signature": "priceCreditNote(selection: readonly CreditSelectionLine[], taxes: Tax[], extensions: readonly PriceDocumentExtension[]): PricedCreditNote",
           "doc": "**Price a credit note from the invoice lines it credits** (api-cloudrun#997 D4).\nThe server stores this result, and the manager renders it as a preview.\n\n- **Stages 2 + 3 only.** Each line goes through {@link priceLine} and\n  {@link assembleLinePrice} at the credited quantity. Nothing scales money by\n  `credited ÷ billed`: that would be a float factor on cents.\n- **Stage 1 is deliberately skipped.** The line keeps the tax refs STORED on\n  the invoice line, so a credit is taxed at the rate that was charged. It never\n  re-resolves jurisdiction, exemption or version. An exempt line carries\n  `taxes: []` and credits untaxed. `taxes` must therefore be the WHOLE rate\n  catalog, superseded versions included.\n- **No D3 refusal.** Credit is raised on settled invoices as a matter of\n  course; crediting prices a NEW document and moves no invoice money.\n- **Totals are stage 5's sum** ({@link sumPricedLines}).",
           "paramTags": [],
           "returnsTag": null
@@ -14228,8 +14297,8 @@
         {
           "kind": "function",
           "name": "priceLine",
-          "signature": "priceLine(item: LineItem, taxes: Tax[], extension?: LineExtension): LinePriceMoney",
-          "doc": "**Stage 2 for one line: the line pricer.** `priceDocument` prices every line\nthrough it, and so does the one reader that must price a line outside a\ndocument — `accountLine` (`./quantityAccounting.ts`), which prices a\nremainder and a billed row's extension (#997 D11).\n\n`extension` is D7: the line is priced for\n{@link extensionChargeDays}`(order, billed)` days with the one-week minimum\nskipped, which is what an extension section on an invoice bills.",
+          "signature": "priceLine(item: LineItem, taxes: Tax[], extensionDays?: number): LinePriceMoney",
+          "doc": "**Stage 2 for one line: the line pricer.** `priceDocument` prices every line\nthrough it, and so does the one reader that must price a line outside a\ndocument — `accountLine` (`./quantityAccounting.ts`), which prices a\nremainder and a billed row's extension (#997 D11).\n\n`extensionDays` is D7: the line is priced for that many days with the\none-week minimum skipped, which is what an extension section on an invoice\nbills. A document line passes its own `chargeable_days`; `accountLine` passes\n{@link extensionChargeDays}`(order, billed)` for a billed row.",
           "paramTags": [],
           "returnsTag": null
         },

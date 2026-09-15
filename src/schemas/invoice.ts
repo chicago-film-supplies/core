@@ -5,6 +5,7 @@ import { z } from "zod";
 import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
+import { extendChecked } from "./_extend.ts";
 import { LineItemCore, LineTaxCore } from "./_items.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
 import {
@@ -501,11 +502,49 @@ export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> =
 
 // ── Item union ──────────────────────────────────────────────────
 
+// ── Destination divider (invoice grain) ─────────────────────────
+
+/**
+ * An invoice destination divider: the order's divider, plus the one key only an
+ * invoice can carry.
+ *
+ * `path_extension_for` marks a **date-extension section** (api-cloudrun#680 R1).
+ * Owner decisions, 2026-09-13:
+ *
+ * - **Dates and destinations ride together**, so a second date range is a second
+ *   destination section even at the same address. An extension section bills
+ *   from the previously billed end + 1 to the order's current end, and its pair
+ *   (`destinations[i].uid === this divider's uid`) states that window.
+ * - **The link is by PATH**: the value is the ORDER-relative path of the order
+ *   destination divider this section extends. Alignment and `billedByPath`
+ *   read an extension section as that divider, so its lines bill the order's
+ *   lines there.
+ * - **The no-minimum rule is DERIVED from the section, never stored on the
+ *   line.** `priceDocument` prices every line under an extension section at the
+ *   line's own `chargeable_days` — the ADDED days — with the one-week floor
+ *   skipped (`invoiceExtensionSections`, `@cfs/core/utils/price-document`).
+ *
+ * ⚠️ Absent on every divider stored before 2026-09-15, and on every full-window
+ * section after it. There is no `null`: a divider either extends a section or
+ * it does not.
+ */
+export interface InvoiceDocDestinationItemType extends OrderDocDestinationItemType {
+  /** The order-relative path of the order destination divider this section extends. */
+  path_extension_for?: string[];
+}
+
+const InvoiceDestinationDividerArm = extendChecked(DestinationDividerArm, {
+  path_extension_for: z.array(ItemUid).min(1).optional(),
+});
+
+/** Zod schema for an invoice destination divider. */
+export const InvoiceDocDestinationItem: z.ZodType<InvoiceDocDestinationItemType> = InvoiceDestinationDividerArm;
+
 /** Union of all item types stored in an invoice document. */
 export type InvoiceDocItemType =
   | InvoiceDocLineItemType
   | OrderDocGroupItemType
-  | OrderDocDestinationItemType
+  | InvoiceDocDestinationItemType
   | InvoiceDocOrderItemType;
 
 /**
@@ -519,7 +558,7 @@ export const InvoiceDocItem: z.ZodType<InvoiceDocItemType> = z
   .discriminatedUnion("type", [
     InvoiceDocLineItemInner,
     GroupDividerArm,
-    DestinationDividerArm,
+    InvoiceDestinationDividerArm,
     InvoiceDocOrderItemInner,
   ]);
 
@@ -1198,6 +1237,8 @@ export interface InvoiceItemInputDestinationType {
   name?: string;
   description?: string;
   path: string[];
+  /** See {@link InvoiceDocDestinationItemType.path_extension_for}. */
+  path_extension_for?: string[];
 }
 
 // `z.strictObject`, unlike the line arm above — see the note on
@@ -1211,6 +1252,7 @@ const InvoiceItemInputDestinationInner = z.strictObject({
   name: z.string().meta({ pii: "none" }).optional(),
   description: z.string().meta({ pii: "none" }).optional(),
   path: z.array(ItemUid),
+  path_extension_for: z.array(ItemUid).min(1).optional(),
   // `.nullable()`, not merely `.optional()` (api-cloudrun#492). The divider
   // BUILDER writes `?? null`, so the stored shape carries an explicit `null`
   // whenever the client omitted the id — and the manager drafts an invoice from

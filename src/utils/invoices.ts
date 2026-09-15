@@ -151,6 +151,8 @@ export interface InvoiceItem extends LineItem {
    * `crms_opportunity_id` line above records the absence of.
    */
   path_substituted_for?: string[];
+  /** @see `InvoiceDocDestinationItemType.path_extension_for` — a destination divider's only. */
+  path_extension_for?: string[];
 }
 
 // ── Invoice totals ──────────────────────────────────────────────
@@ -504,6 +506,61 @@ function stripOrderPrefix(path: string[], orderDividerUid: string): string[] {
   if (path.length === 0) return [];
   if (path[0] === orderDividerUid) return path.slice(1);
   return path;
+}
+
+// ── Date-extension sections (api-cloudrun#680 R1) ───────────────
+
+/**
+ * The date-extension sections in one order scope of an invoice: each extension
+ * divider's uid → the ORDER-relative path of the order destination divider it
+ * extends (`path_extension_for`).
+ *
+ * An extension section bills MONEY on lines another invoice already billed, so
+ * every order-relative reader has to decide what to do with it: alignment and
+ * `billedByPath` read it as the divider it extends ({@link toOrderRelativePath}),
+ * while the line-drift readers skip it ({@link isInExtensionSection}).
+ *
+ * @param scopedItems - Items of one order scope, or a whole invoice
+ * @param orderDividerUid - The order divider's uid
+ */
+export function extensionSectionTargets(
+  scopedItems: readonly InvoiceItem[],
+  orderDividerUid: string,
+): Map<string, string[]> {
+  const targets = new Map<string, string[]>();
+  for (const it of scopedItems) {
+    if (it.type !== "destination" || !it.path_extension_for?.length) continue;
+    const path = it.path ?? [];
+    if (path[0] !== orderDividerUid) continue;
+    targets.set(it.uid, [...it.path_extension_for]);
+  }
+  return targets;
+}
+
+/**
+ * An invoice item's path in the ORDER's path space, reading an extension
+ * section as the order divider it extends: `[O, E, …rest]` → `[…target, …rest]`.
+ * Any other item is {@link stripOrderPrefix}.
+ */
+export function toOrderRelativePath(
+  path: readonly string[],
+  orderDividerUid: string,
+  targets: ReadonlyMap<string, readonly string[]>,
+): string[] {
+  const rel = stripOrderPrefix([...path], orderDividerUid);
+  const target = rel.length > 0 ? targets.get(rel[0]) : undefined;
+  return target ? [...target, ...rel.slice(1)] : rel;
+}
+
+/** Is this invoice item an extension divider, or anywhere beneath one? */
+export function isInExtensionSection(
+  path: readonly string[],
+  orderDividerUid: string,
+  targets: ReadonlyMap<string, readonly string[]>,
+): boolean {
+  if (targets.size === 0) return false;
+  const rel = stripOrderPrefix([...path], orderDividerUid);
+  return rel.length > 0 && targets.has(rel[0]);
 }
 
 /**
@@ -1197,7 +1254,10 @@ function withoutSubstitutionAnchor<T extends InvoiceDocItemType>(item: T): T {
  *   replaced with the new order item, carrying forward invoice-only overrides
  * - **Overridden** (invoice item differs from prev order): left unchanged
  * - **New** (in new order, not in prev): added under the order divider
+ * - **Left out** (a LINE in prev and new, never on the invoice): stays out
  * - **Removed** (in prev order, not in new): removed only if synced, kept if overridden
+ * - **Extension sections** ({@link extensionSectionTargets}): passed through
+ *   verbatim, at the tail of the scope
  * - **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed
  *   and Y's is emitted in its place — see below
  *
@@ -1225,6 +1285,23 @@ function withoutSubstitutionAnchor<T extends InvoiceDocItemType>(item: T): T {
  * *stored* is not enough — `path_substituted_for` was already a stored field on
  * fulfillments and this function had never heard of it.
  *
+ * ## 🔴 A line the invoice LEFT OUT stays out (api-cloudrun#680 R1, owner 2026-09-15)
+ *
+ * The documented rule above was always "new = in new order, not in prev", and the
+ * code projected EVERY order line the invoice lacked. So an unsettled partial
+ * invoice was refilled with the whole order on its next save, and an "invoice
+ * remaining" invoice re-billed lines another invoice had already billed. A line
+ * counts as new only when the previous order had no line at its path and no line
+ * that moved there. Dividers are still projected when missing: they are the
+ * skeleton alignment reads, not something an operator bills.
+ *
+ * ## Extension sections are billing, not order structure
+ *
+ * An extension section's divider names no order path of its own, so without its
+ * own arm the removed-items pass would drop the divider and every line under it
+ * as "synced and removed from the order". They are emitted untouched after
+ * everything else.
+ *
  * ⚠️ **The whole-scope {@link syncOrderItems} deliberately does NOT get this
  * arm.** It is the operator's hard snap-to-order, documented to discard
  * overrides and drop lines the order no longer has; a substitution is an
@@ -1249,9 +1326,15 @@ export function syncOrderToInvoiceSelective(
     prevByPath.set(itemPathKey(item.path), item);
   }
 
+  // Extension sections bill money on lines another invoice billed; they pass
+  // through untouched and take no part in the path match below.
+  const extensionTargets = extensionSectionTargets(currentInvoiceItems as InvoiceItem[], orderDividerUid);
+  const extensionRows = currentInvoiceItems.filter((it) => isInExtensionSection(it.path, orderDividerUid, extensionTargets));
+
   // Index current invoice items by order-relative path key
   const invoiceByPath = new Map<string, InvoiceDocItemType>();
   for (const item of currentInvoiceItems) {
+    if (isInExtensionSection(item.path, orderDividerUid, extensionTargets)) continue;
     const relPath = stripOrderPrefix(item.path, orderDividerUid);
     invoiceByPath.set(itemPathKey(relPath), item);
   }
@@ -1343,6 +1426,15 @@ export function syncOrderToInvoiceSelective(
     processedInvoicePaths.add(pathKey);
 
     if (!invoiceItem) {
+      // A LINE the previous order already had that the invoice does not carry
+      // was left out on purpose: keep it out. A line that MOVED here counts as
+      // left out only if the invoice did not carry it at its old path either —
+      // otherwise this is the invoice's own line following a reparent.
+      if (isLineItemType(newItem.type)) {
+        const movedFrom = prevItem ? undefined : moved.fromPath(newItem.path);
+        const carriedBefore = movedFrom !== undefined && invoiceByPath.has(itemPathKey(movedFrom));
+        if (prevItem || (movedFrom !== undefined && !carriedBefore)) continue;
+      }
       // New item — project to invoice shape, scoped under the order divider
       result.push(withoutSubstitutionAnchor(projectOrderItemToInvoiceItem(newItem, orderDividerUid)));
     } else if (prevItem && isItemSynced(prevItem, invoiceItem, orderDividerUid)) {
@@ -1384,6 +1476,7 @@ export function syncOrderToInvoiceSelective(
     // Else: synced and removed from order — drop it
   }
 
+  result.push(...extensionRows);
   return result;
 }
 
@@ -1722,10 +1815,16 @@ export function invoiceScopeDividersMatch(
   orderItems: LineItem[],
   orderDividerUid: string,
 ): boolean {
+  // An extension section reads as the order divider it extends, so a scope
+  // holding both that divider and its extension collapses to one key, and a
+  // scope holding only the extension still names the order's divider. A
+  // `path_extension_for` naming no order divider leaves a key the order lacks,
+  // which is exactly an unaligned scope.
+  const targets = extensionSectionTargets(scopedInvoiceItems, orderDividerUid);
   const invoice = new Set<string>();
   for (const it of scopedInvoiceItems) {
     if (it.type === "order" || !isDividerItemType(it.type)) continue;
-    invoice.add(itemPathKey(stripOrderPrefix(it.path ?? [], orderDividerUid)));
+    invoice.add(itemPathKey(toOrderRelativePath(it.path ?? [], orderDividerUid, targets)));
   }
   const order = new Set<string>();
   for (const it of orderItems) {
@@ -1946,9 +2045,16 @@ export function computeInvoiceSyncStatus(
 
   // Index this divider's invoice lines by order-relative path key.
   const invoiceByRelPath = new Map<string, InvoiceItem>();
+  // An extension section extends lines the order has, at dates the order has:
+  // it is what the invoice was asked to bill, not drift from the order.
+  const extensionTargets = extensionSectionTargets(currentInvoiceItems, orderDividerUid);
   for (const item of currentInvoiceItems) {
     if (item.type === "order" && item.uid === orderDividerUid) continue;
     if (item.path[0] !== orderDividerUid) continue;
+    if (isInExtensionSection(item.path, orderDividerUid, extensionTargets)) {
+      status.set(itemPathKey(item.path), "in_sync");
+      continue;
+    }
     invoiceByRelPath.set(itemPathKey(stripOrderPrefix(item.path, orderDividerUid)), item);
   }
 
@@ -2113,8 +2219,12 @@ export function computeOrderInvoiceCoverage(
     compared.push(invoice.uid);
     const anchors = liveInvoiceAnchors(scoped, orderItems, orderUid);
     allAnchors.push(...anchors);
+    const extensionTargets = extensionSectionTargets(scoped, orderUid);
     for (const item of scoped) {
       if (!isLineItemType(item.type)) continue;
+      // An extension line bills days on a line billed elsewhere; it neither
+      // covers that line nor stands unmatched.
+      if (isInExtensionSection(item.path ?? [], orderUid, extensionTargets)) continue;
       const relPath = stripOrderPrefix(item.path ?? [], orderUid);
       const relKey = itemPathKey(relPath);
       covered.add(relKey);
@@ -2474,6 +2584,11 @@ export interface OrderDestinationSyncResult {
  * @param newOrderDests - Pairs from the new version of the order
  * @param currentInvoiceDests - Current full invoice destinations array (all orders)
  * @param uidOrder - The order uid this sync is scoped to
+ * @param extensionPairUids - Pairs of this order's date-extension sections
+ *   ({@link extensionSectionTargets}'s keys). They name no order pair by
+ *   construction, so they are kept verbatim rather than dropped as
+ *   `key_names_no_order_pair`. Empty when the invoice has no order divider,
+ *   because no section can hang under one.
  * @returns `{ destinations, dropped }` — the updated full invoice destinations
  *   array, and every pair this call removed, each with the reason it went. See
  *   {@link OrderDestinationSyncResult}; **do not discard `dropped`.**
@@ -2483,6 +2598,7 @@ export function syncOrderDestinationsSelective(
   newOrderDests: DocDestinationType[],
   currentInvoiceDests: InvoiceDestinationPair[],
   uidOrder: string,
+  extensionPairUids: ReadonlySet<string>,
 ): OrderDestinationSyncResult {
   // Index prev order pairs by key (scoped to uidOrder).
   const prevByKey = new Map<string, DocDestinationType>();
@@ -2530,6 +2646,10 @@ export function syncOrderDestinationsSelective(
   // Handle pairs present in invoice but not in new order.
   for (const [key, inv] of inScope) {
     if (processedKeys.has(key)) continue;
+    if (inv.uid !== undefined && extensionPairUids.has(inv.uid)) {
+      synced.push(inv);
+      continue;
+    }
     const prev = prevByKey.get(key);
     if (prev && !pairsMatch(prev, inv)) {
       // Overridden — keep even though removed from order.
@@ -2652,7 +2772,13 @@ export function syncOrderDestinationScope(
     ? syncOrderToInvoiceSelective(prevOrder.items, nextOrder.items, currentScopedItems, orderUid)
     : [...currentScopedItems];
   const destSync: OrderDestinationSyncResult = flags.destinations
-    ? syncOrderDestinationsSelective(prevOrder.destinations, nextOrder.destinations, currentInvoiceDests, orderUid)
+    ? syncOrderDestinationsSelective(
+      prevOrder.destinations,
+      nextOrder.destinations,
+      currentInvoiceDests,
+      orderUid,
+      new Set(extensionSectionTargets(currentScopedItems as InvoiceItem[], orderUid).keys()),
+    )
     : { destinations: [...currentInvoiceDests], dropped: [] };
   let destinations = destSync.destinations;
   const dropped = [...destSync.dropped];

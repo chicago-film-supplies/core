@@ -51,6 +51,12 @@
  * The D7 day count floors each SIDE at the week instead, and skips the floor on
  * the difference. A `fixed` row never read its days and extends by nothing.
  *
+ * **A bill of the extension nets it out.** A line in an invoice's
+ * date-extension section (`path_extension_for`) reaches {@link billedByPath} as
+ * an `extension` row at the path it extends: it adds no units, and
+ * {@link accountLine} subtracts its money, priced at its own added days, from
+ * what the order's days add to the unit rows.
+ *
  * ⚠️ **The date input is `price.chargeable_days`, not the destination pair's
  * dates.** The pair's dates are its upstream: `syncChargeDaysToItems` writes the
  * pair's charge days onto every line still on the default, and an operator can
@@ -77,13 +83,16 @@
 import type { InvoiceStatusType } from "../schemas/mod.ts";
 import { isLineItemType } from "../schemas/mod.ts";
 import {
+  extensionSectionTargets,
   getOrderScopedItems,
   type InvoiceItem,
   invoiceScopeDividersMatch,
+  isInExtensionSection,
   liveInvoiceAnchors,
+  toOrderRelativePath,
 } from "./invoices.ts";
 import { isPreTaxItem, type LineItem } from "./orders.ts";
-import { extensionChargeDays, type LineExtension, priceLine } from "./price-document.ts";
+import { extensionChargeDays, priceLine } from "./price-document.ts";
 
 /** The invoice shape these functions read — every linked invoice, live or void. */
 export interface AccountedInvoice {
@@ -98,9 +107,11 @@ export interface BilledRow {
   item: InvoiceItem;
   /**
    * `direct` — the row sits at the order path itself. `substitute` — the row is
-   * a substitute Y whose live anchor names this order path.
+   * a substitute Y whose live anchor names this order path. `extension` — the
+   * row sits in a date-extension section extending this path: it bills DAYS on
+   * units other rows billed, so it adds no quantity (api-cloudrun#680 R1).
    */
-  via: "direct" | "substitute";
+  via: "direct" | "substitute" | "extension";
 }
 
 /** What the invoices bill at one order-relative path. */
@@ -167,8 +178,17 @@ export function billedByPath(
     }
     compared.push(invoice.uid);
     const anchors = liveInvoiceAnchors(scoped, orderItems, orderUid);
+    const extensionTargets = extensionSectionTargets(scoped, orderUid);
     for (const item of scoped) {
       if (!isLineItemType(item.type)) continue;
+      if (isInExtensionSection(item.path ?? [], orderUid, extensionTargets)) {
+        at(key(toOrderRelativePath(item.path ?? [], orderUid, extensionTargets))).rows.push({
+          invoiceUid: invoice.uid,
+          item,
+          via: "extension",
+        });
+        continue;
+      }
       const rel = (item.path ?? []).slice(1);
       const anchor = anchors.find((a) => key(a.path) === key(rel));
       if (anchor) {
@@ -241,10 +261,10 @@ export interface LineAccount {
  * The line's tax refs are dropped first: only the pre-tax subtotal is read, and
  * the pricer resolves every ref it is handed against the catalog it is given.
  */
-function subtotalCents(item: LineItem, extension?: LineExtension): number {
+function subtotalCents(item: LineItem, extensionDays?: number): number {
   if (!isPreTaxItem(item)) return 0;
   const untaxed = { ...item, price: { ...item.price, taxes: [] } } as LineItem;
-  return priceLine(untaxed, [], extension).subtotal_discounted_cents;
+  return priceLine(untaxed, [], extensionDays).subtotal_discounted_cents;
 }
 
 /**
@@ -262,6 +282,10 @@ export function accountLine(orderLine: LineItem, billed: BilledAtPath | undefine
   // priced at its magnitude and given back its sign.
   const quantityCents = quantity === 0 ? 0 : Math.sign(quantity) * subtotalCents({ ...orderLine, quantity: Math.abs(quantity) });
 
+  // What the order's days add to the rows that billed units, less what
+  // extension sections already billed for those days. A section extending a
+  // 3-day bill to 7 stores 2 added days, which prices exactly what the unit row
+  // is owed, so the two cancel.
   let extensionCents = 0;
   const orderDays = orderLine.price?.chargeable_days ?? 0;
   if (isPreTaxItem(orderLine)) {
@@ -269,9 +293,13 @@ export function accountLine(orderLine: LineItem, billed: BilledAtPath | undefine
       if (!isPreTaxItem(row.item)) continue;
       // A `fixed` row has no day count to extend: its price never read the days.
       if (row.item.price.formula !== "five_day_week") continue;
-      const extension = { order_charge_days: orderDays, billed_charge_days: row.item.price.chargeable_days ?? 0 };
-      if (extensionChargeDays(extension.order_charge_days, extension.billed_charge_days) === 0) continue;
-      extensionCents += subtotalCents(row.item, extension);
+      if (row.via === "extension") {
+        extensionCents -= subtotalCents(row.item, row.item.price.chargeable_days ?? 0);
+        continue;
+      }
+      const days = extensionChargeDays(orderDays, row.item.price.chargeable_days ?? 0);
+      if (days === 0) continue;
+      extensionCents += subtotalCents(row.item, days);
     }
   }
 

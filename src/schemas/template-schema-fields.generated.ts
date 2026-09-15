@@ -352,6 +352,7 @@ export const templateSchemaFields: Partial<
     { path: "items[] (type: destination).name", type: "string" },
     { path: "items[] (type: destination).path", type: "union[]" },
     { path: "items[] (type: destination).description", type: "string" },
+    { path: "items[] (type: destination).path_extension_for", type: "union[]?" },
     { path: "items[] (type: order).uid", type: "union" },
     { path: "items[] (type: order).type", type: "order" },
     { path: "items[] (type: order).name", type: "string" },

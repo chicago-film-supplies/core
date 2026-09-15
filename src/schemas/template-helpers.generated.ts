@@ -100,8 +100,10 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "calculateItemSubtotal", expr: "it.invoices.calculateItemSubtotal(item, arg2)", desc: "Calculate the pre-discount and post-discount subtotals for a single line item.", returns: "typeLiteral" },
     { name: "calculateItemTax", expr: "it.invoices.calculateItemTax(item, taxes, arg3)", desc: "Calculate tax amounts for a single line item from the Tax[] parameter. Returns a PriceModifier[] with computed amounts.", returns: "PriceModifier[]" },
     { name: "derivePaymentStatus", expr: "it.invoices.derivePaymentStatus(currentStatus, amountPaidCents, amountDueCents, arg4)", desc: "Derive invoice status from settlement amounts. Pure function — does not mutate the invoice.", returns: "InvoiceStatusType" },
+    { name: "extensionSectionTargets", expr: "it.invoices.extensionSectionTargets(scopedItems, orderDividerUid)", desc: "The date-extension sections in one order scope of an invoice: each extension divider's uid → the ORDER-relative path of the order destination divider it extends (`path_extension_for`).", returns: "Map<string, string[]>" },
     { name: "getDestinationsLegend", expr: "it.invoices.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
     { name: "getOrderScopedItems", expr: "it.invoices.getOrderScopedItems(items, orderDividerUid)", desc: "Get all invoice items scoped to a specific order divider. Returns the order divider itself plus all items whose path starts with the order divider's uid.", returns: "T[]" },
+    { name: "isInExtensionSection", expr: "it.invoices.isInExtensionSection(path, orderDividerUid, targets)", desc: "Is this invoice item an extension divider, or anywhere beneath one?", returns: "boolean" },
     { name: "isPreTaxItem", expr: "it.invoices.isPreTaxItem(item)", desc: "Determine whether a line item participates in subtotal/discount/tax calculations. Standalone predicate (not composed) because TS doesn't support negated predicates.", returns: "item is PreTaxLineItem" },
     { name: "isPriceableItem", expr: "it.invoices.isPriceableItem(item)", desc: "Determine whether a line item is priceable (has a price object, not a structural item).", returns: "item is PriceableLineItem" },
     { name: "isSameAsDeliveryDates", expr: "it.invoices.isSameAsDeliveryDates(dates)", desc: "Whether charge dates match the delivery/collection dates (i.e. no custom charge period has been set).", returns: "boolean" },
@@ -110,6 +112,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "orderHasRentals", expr: "it.invoices.orderHasRentals(items)", desc: "Check whether any line item is a rental.", returns: "boolean" },
     { name: "orderHasTax", expr: "it.invoices.orderHasTax(items)", desc: "Check whether any pre-tax line item has taxes applied.", returns: "boolean" },
     { name: "toInvoiceDestinationPair", expr: "it.invoices.toInvoiceDestinationPair(uidOrder, pair)", desc: "**The ONE author of an invoice destination pair.** Project an order's pair into the invoice's, tagged with the order it is scoped to.", returns: "InvoiceDestinationPair" },
+    { name: "toOrderRelativePath", expr: "it.invoices.toOrderRelativePath(path, orderDividerUid, targets)", desc: "An invoice item's path in the ORDER's path space, reading an extension section as the order divider it extends: `[O, E, …rest]` → `[…target, …rest]`. Any other item is {@link stripOrderPrefix}.", returns: "string[]" },
   ],
   "item-pairing": [
 
@@ -188,7 +191,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "pickSheetLineBooking", expr: "it.pickSheets.pickSheetLineBooking(destination, item)", desc: "The booking whose quantities THIS line may state — or `null`.", returns: "PickSheetBooking | null" },
   ],
   "price-document": [
-
+    { name: "invoiceExtensionSections", expr: "it.price-document.invoiceExtensionSections(items)", desc: "The date-extension sections of an invoice's items: one per destination divider carrying `path_extension_for`.", returns: "PriceDocumentExtension[]" },
   ],
   "products": [
     { name: "buildComponentEntries", expr: "it.products.buildComponentEntries(parentUid, sourceComponents, baseDepth, maxDepth)", desc: "Build component entries for a parent product from a component product's own `components` array. Each entry's `path` is prepended with `parentUid` so it reflects its position in the parent's tree.", returns: "T[]" },

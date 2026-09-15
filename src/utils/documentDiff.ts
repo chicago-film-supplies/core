@@ -127,9 +127,11 @@ import { isDividerItemType, isFulfillableItemType } from "../schemas/mod.ts";
 import {
   canonicalizePayload,
   explainInvoiceItemDifferences,
+  extensionSectionTargets,
   type InvoiceItem,
   invoiceItemDifferences,
   invoiceScopeDividersMatch,
+  isInExtensionSection,
   projectOrderItemToInvoiceItem,
 } from "./invoices.ts";
 import type { LineItem } from "./orders.ts";
@@ -363,8 +365,13 @@ function scopeFulfillment(fulfillment: Fulfillment): ScopedLines {
 function scopeInvoice(invoice: Invoice, orderUid: string): ScopedLines {
   const byKey = new Map<string, LineItem>();
   const rel: Array<{ path: string[]; path_substituted_for?: string[] }> = [];
+  // A date-extension section bills days on lines the order has; its money is
+  // the `billed` entry's (through `billedByPath`), so its lines are no line
+  // comparison's subject.
+  const extensionTargets = extensionSectionTargets(invoice.items as unknown as InvoiceItem[], orderUid);
   for (const it of invoice.items as readonly InvoiceDocItemType[]) {
     if (it.path[0] !== orderUid || isDividerItemType(it.type)) continue;
+    if (isInExtensionSection(it.path, orderUid, extensionTargets)) continue;
     const relPath = it.path.slice(1);
     byKey.set(key(relPath), it as unknown as LineItem);
     rel.push({ path: relPath, path_substituted_for: (it as InvoiceItem).path_substituted_for });

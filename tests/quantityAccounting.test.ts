@@ -206,3 +206,54 @@ Deno.test("quantityAccounting: the coverage census and the sum agree on which li
   assertEquals(unbilledBySum, [`${D}/prod-tripod`]);
   assertEquals(uninvoiced, unbilledBySum);
 });
+
+// ── Date-extension sections (api-cloudrun#680 R1) ──
+
+const E = "dest-ext";
+
+/** An invoice holding only an extension section of D: its lines bill ADDED days. */
+function extensionInvoice(uid: string, quantity: number, addedDays: number, target: string[] = [D]): AccountedInvoice {
+  const items = [
+    { uid: O, type: "order", name: "Order", description: "", path: [O] },
+    { uid: E, type: "destination", name: "Venue", description: "", path: [O, E], path_extension_for: target },
+    { uid: G, type: "group", name: "Grip", description: "", path: [O, E, G] },
+    line(LIGHT, [O, E, G, LIGHT], quantity, 1000, addedDays),
+  ] as unknown as InvoiceItem[];
+  return { uid, status: "draft", items };
+}
+
+Deno.test("quantityAccounting: an extension section bills days, not units, and nets the extension to nothing", () => {
+  // Billed 2 at 3 days; the order now charges 7. D7 days = max(7,5) − max(3,5) = 2,
+  // so the unit row is owed 2 × 1000 × 2 ÷ 5 = 800¢. The section stores 2 added
+  // days on 2 units: 2 × 1000 × 2 ÷ 5 = 800¢, floor skipped. 800 − 800 = 0.
+  const order = lightOrder(2, 7);
+  const invoices = [invoice("a", lightOrder(2, 3)), extensionInvoice("b", 2, 2)];
+  const billed = billedByPath(O, order, invoices);
+  assertEquals(billed.compared, ["a", "b"]);
+  assertEquals(billed.unaligned, []);
+  assertEquals(billed.byPath.get(lightKey)?.quantity, 2);
+  assertEquals(billed.byPath.get(lightKey)?.rows.map((r) => [r.invoiceUid, r.via]), [["a", "direct"], ["b", "extension"]]);
+  assertEquals(remainingForOrder(O, order, invoices).lines, []);
+});
+
+Deno.test("quantityAccounting: an extension section short of the order's days leaves the rest", () => {
+  // Billed 2 at 3 days, order now 10: owed 2 × 1000 × (10 − 5) ÷ 5 = 2000¢.
+  // A section extending by 2 billed 800¢, so 1200¢ remains.
+  const { lines } = remainingForOrder(O, lightOrder(2, 10), [invoice("a", lightOrder(2, 3)), extensionInvoice("b", 2, 2)]);
+  assertEquals(lines.map((l) => [l.quantity, l.quantity_cents, l.extension_cents]), [[0, 0, 1200]]);
+});
+
+Deno.test("quantityAccounting: an extension naming no order divider is an unaligned scope, and fails closed", () => {
+  const invoices = [invoice("a", lightOrder(2, 3)), extensionInvoice("b", 2, 2, ["dest-gone"])];
+  const result = remainingForOrder(O, lightOrder(2, 7), invoices);
+  assertEquals([result.lines, result.unaligned], [[], ["b"]]);
+});
+
+Deno.test("computeOrderInvoiceCoverage: extension lines neither cover a line nor stand unmatched", () => {
+  const order = lightOrder(2, 7);
+  const onlyExtension = computeOrderInvoiceCoverage(O, order, [extensionInvoice("b", 2, 2)]);
+  assertEquals([onlyExtension.compared, onlyExtension.unaligned, onlyExtension.unmatched], [["b"], [], []]);
+  assertEquals(onlyExtension.uninvoiced.map((l) => l.uid), [LIGHT]);
+  const both = computeOrderInvoiceCoverage(O, order, [invoice("a", lightOrder(2, 3)), extensionInvoice("b", 2, 2)]);
+  assertEquals([both.uninvoiced, both.unmatched], [[], []]);
+});

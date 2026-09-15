@@ -11,6 +11,7 @@ import {
 } from "../src/utils/orders.ts";
 import {
   extensionChargeDays,
+  invoiceExtensionSections,
   type PriceDocumentContext,
   priceCreditNote,
   priceDocument,
@@ -122,28 +123,54 @@ Deno.test("priceDocument: a split bill — two invoices at 2 and 3 units total t
   assertEquals(inv(2).replacement_total_cents, null);
 });
 
-Deno.test("priceDocument: extension days skip the week minimum — 2→4 is 0, 3→7 is 2, 7→4 is −2 (D7)", () => {
+Deno.test("priceDocument: an extension line bills its OWN added days with the week minimum skipped (D7)", () => {
   assertEquals([extensionChargeDays(4, 2), extensionChargeDays(7, 3), extensionChargeDays(4, 7)], [0, 2, -2]);
-  const section = (order: number, billed: number) => {
-    const divider = { ...lineItemBase, uid: "dest-ext", type: "destination", name: "Extension", path: ["dest-ext"] } as unknown as LineItem;
-    const rental = line({ path: ["dest-ext", "r1"] }, { base_cents: 10000, chargeable_days: order });
-    return priceDocument([divider, rental], ctx({
+  const section = (addedDays: number | null) => {
+    const divider = {
+      ...lineItemBase,
+      uid: "dest-ext",
+      type: "destination",
+      name: "Extension",
+      path: ["dest-ext"],
+      path_extension_for: ["dest-order"],
+    } as unknown as LineItem;
+    const rental = line({ path: ["dest-ext", "r1"] }, { base_cents: 10000, chargeable_days: addedDays });
+    const items = [divider, rental];
+    return priceDocument(items, ctx({
       document: { kind: "invoice", status: "draft", has_settlement: false },
-      extensions: [{ divider_path: ["dest-ext"], order_charge_days: order, billed_charge_days: billed }],
+      extensions: invoiceExtensionSections(items as unknown as Parameters<typeof invoiceExtensionSections>[0]),
     }));
   };
-  // 10000 × days ÷ 5, then 15% tax.
-  assertEquals(p(section(4, 2).items[1]).total_cents, 0);
-  assertEquals([p(section(7, 3).items[1]).subtotal_cents, p(section(7, 3).items[1]).total_cents], [4000, 4600]);
-  assertEquals([p(section(4, 7).items[1]).subtotal_cents, p(section(4, 7).items[1]).total_cents], [-4000, -4600]);
-  assertEquals(section(4, 7).totals.total_cents, -4600);
-  // The same line outside the section is charged its week minimum: 3 days → 10000.
-  assertEquals(p(priceDocument([line({}, { chargeable_days: 3 })], ctx()).items[0]).subtotal_cents, 10000);
+  // 10000 × days ÷ 5, then 15% tax. Billed 3 days, order now 7: the writer stored 2.
+  assertEquals([p(section(2).items[1]).subtotal_cents, p(section(2).items[1]).total_cents], [4000, 4600]);
+  assertEquals(section(2).totals.total_cents, 4600);
+  // Idempotent: a re-price of the stored line reproduces the same money.
+  assertEquals(p(priceDocument(section(2).items, ctx({
+    document: { kind: "invoice", status: "draft", has_settlement: false },
+    extensions: [{ divider_path: ["dest-ext"] }],
+  })).items[1]).subtotal_cents, 4000);
+  // The same line outside a section is charged its week minimum: 2 days → 10000.
+  assertEquals(p(priceDocument([line({}, { chargeable_days: 2 })], ctx()).items[0]).subtotal_cents, 10000);
+  // A section line with no day count has nothing to extend by.
+  assertThrows(() => section(null), Error, "chargeable_days");
+});
+
+Deno.test("invoiceExtensionSections: only destination dividers carrying path_extension_for open a section", () => {
+  assertEquals(
+    invoiceExtensionSections([
+      { type: "order", path: ["o"] },
+      { type: "destination", path: ["o", "d"] },
+      { type: "destination", path: ["o", "e"], path_extension_for: ["d"] },
+      { type: "destination", path: ["o", "f"], path_extension_for: [] },
+      { type: "rental", path: ["o", "e", "r"] },
+    ]),
+    [{ divider_path: ["o", "e"] }],
+  );
 });
 
 Deno.test("priceDocument: an extension section refuses a fixed-formula line", () => {
   assertThrows(
-    () => priceDocument([line({ type: "sale", path: ["dx", "s"] }, { formula: "fixed" })], ctx({ extensions: [{ divider_path: ["dx"], order_charge_days: 7, billed_charge_days: 5 }] })),
+    () => priceDocument([line({ type: "sale", path: ["dx", "s"] }, { formula: "fixed", chargeable_days: 2 })], ctx({ extensions: [{ divider_path: ["dx"] }] })),
     Error,
     "five_day_week",
   );
@@ -328,7 +355,7 @@ Deno.test("priceCreditNote: credits a discounted, taxed line at the credited qua
     discount: { type: "percent", rate: 10, amount_cents: 0 },
     taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 0 }],
   });
-  const r = priceCreditNote([{ line: src, quantity: 2 }], pricingTaxesOf(CAT));
+  const r = priceCreditNote([{ line: src, quantity: 2 }], pricingTaxesOf(CAT), []);
   const price = r.prices[0];
   assertEquals(
     [price.subtotal_cents, price.subtotal_discounted_cents, price.discount?.amount_cents, price.total_cents],
@@ -355,18 +382,32 @@ Deno.test("priceCreditNote: keeps the charged rate VERSION, never today's, and a
     taxes: [{ uid: "chi-sales-old", name: "Chicago Sales Tax", rate: 10.25, type: "percent", amount_cents: 4100 }],
   });
   const exempt = creditSource({ type: "sale" }, { formula: "fixed", base_cents: 1000, chargeable_days: null, taxes: [] });
-  const r = priceCreditNote([{ line: old, quantity: 1 }, { line: exempt, quantity: 3 }], versions);
+  const r = priceCreditNote([{ line: old, quantity: 1 }, { line: exempt, quantity: 3 }], versions, []);
   assertEquals(r.prices.map((x) => x.total_cents), [44100, 3000]);
   assertEquals(r.totals.taxes.map((t) => [t.name, t.amount_cents]), [["Chicago Sales Tax", 4100]]);
   assertEquals(r.totals.total_cents, 47100);
 });
 
+Deno.test("priceCreditNote: an extension line is credited at its own added days, never floored to a week", () => {
+  // Billed in an extension section: 10000 × 2 added days ÷ 5 = 4000, 15% tax → 4600.
+  // Priced as an ordinary line, 2 days floors to a week: 10000 → 11500 credited.
+  const ext = creditSource({ path: ["o", "dest-ext", "r1"] }, {
+    base_cents: 10000,
+    chargeable_days: 2,
+    taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 0 }],
+  });
+  const inSection = priceCreditNote([{ line: ext, quantity: 1 }], pricingTaxesOf(CAT), [{ divider_path: ["o", "dest-ext"] }]);
+  assertEquals([inSection.prices[0].subtotal_cents, inSection.totals.total_cents], [4000, 4600]);
+  const floored = priceCreditNote([{ line: ext, quantity: 1 }], pricingTaxesOf(CAT), []);
+  assertEquals(floored.prices[0].subtotal_cents, 10000);
+});
+
 Deno.test("priceCreditNote: refuses a divider, a fee, and a non-positive or fractional quantity", () => {
   const taxes = pricingTaxesOf(CAT);
   const divider = { ...line(), type: "destination" } as unknown as Parameters<typeof priceCreditNote>[0][number]["line"];
-  assertThrows(() => priceCreditNote([{ line: divider, quantity: 1 }], taxes), Error, "cannot be credited");
-  assertThrows(() => priceCreditNote([{ line: creditSource({ type: "transaction_fee" }), quantity: 1 }], taxes), Error, "cannot be credited");
+  assertThrows(() => priceCreditNote([{ line: divider, quantity: 1 }], taxes, []), Error, "cannot be credited");
+  assertThrows(() => priceCreditNote([{ line: creditSource({ type: "transaction_fee" }), quantity: 1 }], taxes, []), Error, "cannot be credited");
   for (const quantity of [0, -1, 1.5]) {
-    assertThrows(() => priceCreditNote([{ line: creditSource(), quantity }], taxes), Error, "positive integer");
+    assertThrows(() => priceCreditNote([{ line: creditSource(), quantity }], taxes, []), Error, "positive integer");
   }
 });
