@@ -31778,6 +31778,17 @@ How one shared field propagates — see the module docs.
 type SharedFieldKind = "propagated" | "derived" | "homonym" | "atom";
 ```
 
+### `SharedFieldMerge`
+
+Result of {@link mergeSharedFields}.
+
+```ts
+interface SharedFieldMerge {
+  merged: T;
+  overridden: string[];
+}
+```
+
 ### `classifySharedFields(source: z.ZodType, downstream: z.ZodType): SharedFieldClassification`
 
 Classify every field `source` (the order) shares with `downstream` (an invoice
@@ -31785,6 +31796,53 @@ or a fulfillment). See the module docs for the kinds.
 
 Pure and deterministic, and cheap enough to call per sync, but callers should
 compute it once per schema pair.
+
+### `fieldsUnder(c: SharedFieldClassification, row: string): SharedField[]`
+
+The fields of one row (or of the document itself), relative to it.
+
+`fieldsUnder(c, "items[]")` gives `name`, `price.base_cents`, … — the unit
+{@link mergeSharedFields} merges one matched row with. `fieldsUnder(c, "")`
+gives the document-level fields and excludes everything inside a row, because
+rows are matched by identity before their fields are merged.
+
+### `mergeSharedFields(fields: readonly SharedField[], prev: T, next: T, downstream: T): SharedFieldMerge<T>`
+
+Apply the three-way rule to every propagating field of ONE matched row or
+document:
+
+```
+merged.F = sameSharedValue(downstream.F, prev.F) ? next.F : downstream.F
+```
+
+🔴 **All three arguments must already be in the DOWNSTREAM document's shape.**
+Project the order's previous and next row first (`projectOrderItemToInvoiceItem`,
+`toInvoiceDestinationPair`). Comparing an order-shaped row against an
+invoice-shaped one is how every paired line once read as out of sync on
+`stock_method` alone (core#52): a key one shape carries and the other never can
+is not an override.
+
+What it does NOT touch, by construction:
+- `derived` fields — left as `downstream` has them. The caller re-runs the
+  derivation afterwards (`priceDocument`, the day count), which is what stops an
+  invoice's own tax context reading as an override (G2).
+- `homonym` fields, and every key the classification does not name (the
+  downstream document's own fields: `xero_id`, `quantity_order`, …).
+
+`atom` fields (another document's snapshot) are taken or kept WHOLE.
+
+⚠️ **A null parent collapses its children into one unit.** If a value object
+(`price.discount`) is `null` or absent on any of the three sides, its fields
+cannot be merged one by one — there is nothing to write a `rate` into — so the
+rule runs once on the whole object instead. An operator who removed a discount
+the order still has keeps `null`; an order that removes one reaches an
+unedited row.
+
+Pure: returns a new value, never mutates its arguments.
+
+### `sameSharedValue(a: unknown, b: unknown): boolean`
+
+Do two values state the same thing? Absent and `null` are the same statement.
 
 ## `@cfs/core/utils/pickSheets`
 

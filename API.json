@@ -14655,10 +14655,40 @@
           "doc": "How one shared field propagates — see the module docs."
         },
         {
+          "kind": "interface",
+          "name": "SharedFieldMerge",
+          "declaration": "interface SharedFieldMerge {\n  merged: T;\n  overridden: string[];\n}",
+          "doc": "Result of {@link mergeSharedFields}."
+        },
+        {
           "kind": "function",
           "name": "classifySharedFields",
           "signature": "classifySharedFields(source: z.ZodType, downstream: z.ZodType): SharedFieldClassification",
           "doc": "Classify every field `source` (the order) shares with `downstream` (an invoice\nor a fulfillment). See the module docs for the kinds.\n\nPure and deterministic, and cheap enough to call per sync, but callers should\ncompute it once per schema pair.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "fieldsUnder",
+          "signature": "fieldsUnder(c: SharedFieldClassification, row: string): SharedField[]",
+          "doc": "The fields of one row (or of the document itself), relative to it.\n\n`fieldsUnder(c, \"items[]\")` gives `name`, `price.base_cents`, … — the unit\n{@link mergeSharedFields} merges one matched row with. `fieldsUnder(c, \"\")`\ngives the document-level fields and excludes everything inside a row, because\nrows are matched by identity before their fields are merged.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "mergeSharedFields",
+          "signature": "mergeSharedFields(fields: readonly SharedField[], prev: T, next: T, downstream: T): SharedFieldMerge<T>",
+          "doc": "Apply the three-way rule to every propagating field of ONE matched row or\ndocument:\n\n```\nmerged.F = sameSharedValue(downstream.F, prev.F) ? next.F : downstream.F\n```\n\n🔴 **All three arguments must already be in the DOWNSTREAM document's shape.**\nProject the order's previous and next row first (`projectOrderItemToInvoiceItem`,\n`toInvoiceDestinationPair`). Comparing an order-shaped row against an\ninvoice-shaped one is how every paired line once read as out of sync on\n`stock_method` alone (core#52): a key one shape carries and the other never can\nis not an override.\n\nWhat it does NOT touch, by construction:\n- `derived` fields — left as `downstream` has them. The caller re-runs the\n  derivation afterwards (`priceDocument`, the day count), which is what stops an\n  invoice's own tax context reading as an override (G2).\n- `homonym` fields, and every key the classification does not name (the\n  downstream document's own fields: `xero_id`, `quantity_order`, …).\n\n`atom` fields (another document's snapshot) are taken or kept WHOLE.\n\n⚠️ **A null parent collapses its children into one unit.** If a value object\n(`price.discount`) is `null` or absent on any of the three sides, its fields\ncannot be merged one by one — there is nothing to write a `rate` into — so the\nrule runs once on the whole object instead. An operator who removed a discount\nthe order still has keeps `null`; an order that removes one reaches an\nunedited row.\n\nPure: returns a new value, never mutates its arguments.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "sameSharedValue",
+          "signature": "sameSharedValue(a: unknown, b: unknown): boolean",
+          "doc": "Do two values state the same thing? Absent and `null` are the same statement.",
           "paramTags": [],
           "returnsTag": null
         }

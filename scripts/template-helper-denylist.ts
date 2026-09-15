@@ -405,6 +405,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // and has no schema pair to classify.
   "shared-fields": [
     "classifySharedFields",
+    "fieldsUnder",
+    "mergeSharedFields",
+    "sameSharedValue",
   ],
   // `utils/quantityAccounting.ts` sums what an order's SIBLING invoices bill
   // (api-cloudrun#680). Every export needs the order and all of its linked

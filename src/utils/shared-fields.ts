@@ -271,3 +271,173 @@ export function classifySharedFields(
   }
   return { fields, rows, unhandled };
 }
+
+/**
+ * The fields of one row (or of the document itself), relative to it.
+ *
+ * `fieldsUnder(c, "items[]")` gives `name`, `price.base_cents`, … — the unit
+ * {@link mergeSharedFields} merges one matched row with. `fieldsUnder(c, "")`
+ * gives the document-level fields and excludes everything inside a row, because
+ * rows are matched by identity before their fields are merged.
+ */
+export function fieldsUnder(c: SharedFieldClassification, row: string): SharedField[] {
+  if (row === "") {
+    return c.fields.filter((f) => !f.path.includes("[]"));
+  }
+  const prefix = `${row}.`;
+  return c.fields
+    .filter((f) => f.path.startsWith(prefix) && !f.path.slice(prefix.length).includes("[]"))
+    .map((f) => ({ path: f.path.slice(prefix.length), kind: f.kind }));
+}
+
+// ── The three-way merge ─────────────────────────────────────────────────────
+
+/** Result of {@link mergeSharedFields}. */
+export interface SharedFieldMerge<T> {
+  /** The downstream value with every propagating field resolved. */
+  merged: T;
+  /**
+   * Fields where the downstream value differed from the PREVIOUS source value, so
+   * it was kept. These are the overrides the manager shows as a diff. Sorted.
+   */
+  overridden: string[];
+}
+
+/** Absent ≡ null, recursively — two values that say the same thing compare equal. */
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object") return value;
+  // A Firestore Timestamp (or anything with its own representation) compares by
+  // its seconds/nanoseconds, which Object.keys reaches, so no special case.
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    const v = (value as Record<string, unknown>)[key];
+    if (v === null || v === undefined) continue;
+    out[key] = canonical(v);
+  }
+  return out;
+}
+
+/** Do two values state the same thing? Absent and `null` are the same statement. */
+export function sameSharedValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * Apply the three-way rule to every propagating field of ONE matched row or
+ * document:
+ *
+ * ```
+ * merged.F = sameSharedValue(downstream.F, prev.F) ? next.F : downstream.F
+ * ```
+ *
+ * 🔴 **All three arguments must already be in the DOWNSTREAM document's shape.**
+ * Project the order's previous and next row first (`projectOrderItemToInvoiceItem`,
+ * `toInvoiceDestinationPair`). Comparing an order-shaped row against an
+ * invoice-shaped one is how every paired line once read as out of sync on
+ * `stock_method` alone (core#52): a key one shape carries and the other never can
+ * is not an override.
+ *
+ * What it does NOT touch, by construction:
+ * - `derived` fields — left as `downstream` has them. The caller re-runs the
+ *   derivation afterwards (`priceDocument`, the day count), which is what stops an
+ *   invoice's own tax context reading as an override (G2).
+ * - `homonym` fields, and every key the classification does not name (the
+ *   downstream document's own fields: `xero_id`, `quantity_order`, …).
+ *
+ * `atom` fields (another document's snapshot) are taken or kept WHOLE.
+ *
+ * ⚠️ **A null parent collapses its children into one unit.** If a value object
+ * (`price.discount`) is `null` or absent on any of the three sides, its fields
+ * cannot be merged one by one — there is nothing to write a `rate` into — so the
+ * rule runs once on the whole object instead. An operator who removed a discount
+ * the order still has keeps `null`; an order that removes one reaches an
+ * unedited row.
+ *
+ * Pure: returns a new value, never mutates its arguments.
+ */
+export function mergeSharedFields<T>(
+  fields: readonly SharedField[],
+  prev: T,
+  next: T,
+  downstream: T,
+): SharedFieldMerge<T> {
+  const merged = copyPlain(downstream) as Record<string, unknown>;
+  const overridden = new Set<string>();
+  const done = new Set<string>();
+
+  const at = (root: unknown, segs: readonly string[]): unknown => {
+    let v: unknown = root;
+    for (const s of segs) {
+      if (!isPlainObject(v)) return undefined;
+      v = v[s];
+    }
+    return v;
+  };
+
+  for (const field of fields) {
+    if (field.kind === "derived" || field.kind === "homonym") continue;
+    const segs = field.path.split(".");
+
+    // Collapse to the shallowest ancestor that is not an object on some side.
+    let unit = segs.length;
+    for (let i = 1; i < segs.length; i++) {
+      const parent = segs.slice(0, i);
+      if (
+        !isPlainObject(at(prev, parent)) || !isPlainObject(at(next, parent)) ||
+        !isPlainObject(at(downstream, parent))
+      ) {
+        unit = i;
+        break;
+      }
+    }
+    const unitSegs = segs.slice(0, unit);
+    const unitPath = unitSegs.join(".");
+    if (done.has(unitPath)) continue;
+    done.add(unitPath);
+
+    const d = at(downstream, unitSegs);
+    if (!sameSharedValue(d, at(prev, unitSegs))) {
+      overridden.add(unitPath);
+      continue;
+    }
+    const n = at(next, unitSegs);
+    // Already says the same thing: keep the downstream's own spelling. Writing
+    // `null` over an absent key changes nothing it states and widens the stored
+    // key set — which, on an invoice line, is what re-pushes it to Xero.
+    if (sameSharedValue(d, n)) continue;
+    // The parent exists on all three sides (that is what the collapse ensured),
+    // so it exists on `merged`, which is a copy of `downstream`.
+    const parent = unitSegs.slice(0, -1).reduce<Record<string, unknown>>(
+      (o, s) => o[s] as Record<string, unknown>,
+      merged,
+    );
+    const key = unitSegs[unitSegs.length - 1];
+    if (n === undefined) delete parent[key];
+    else parent[key] = copyPlain(n);
+  }
+
+  return { merged: merged as T, overridden: [...overridden].sort() };
+}
+
+/**
+ * Deep copy that keeps class instances (a Firestore `Timestamp`) by reference.
+ *
+ * ⚠️ Not `structuredClone`: it drops the prototype, so a `Timestamp` becomes a
+ * plain `{ _seconds, _nanoseconds }` map and is written back to Firestore as one.
+ * Only plain objects and arrays are copied; everything else is shared, which is
+ * safe because nothing here mutates a leaf.
+ */
+function copyPlain(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(copyPlain);
+  if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = copyPlain(v);
+    return out;
+  }
+  return value;
+}

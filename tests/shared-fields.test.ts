@@ -1,13 +1,43 @@
 import { assert, assertEquals } from "@std/assert";
-import { FulfillmentSchema, getInitialValues, InvoiceSchema, OrderDocLineItem, OrderSchema } from "../src/schemas/mod.ts";
+import {
+  FulfillmentSchema,
+  getInitialValues,
+  type InvoiceDocLineItemType,
+  InvoiceSchema,
+  OrderDocLineItem,
+  OrderSchema,
+} from "../src/schemas/mod.ts";
 import type { LineItem } from "../src/utils/orders.ts";
 import { type PriceDocumentContext, priceDocument } from "../src/utils/price-document.ts";
-import { classifySharedFields, type SharedFieldClassification } from "../src/utils/shared-fields.ts";
+import { projectOrderItemToInvoiceItem } from "../src/utils/invoices.ts";
+import {
+  classifySharedFields,
+  fieldsUnder,
+  mergeSharedFields,
+  type SharedField,
+  type SharedFieldClassification,
+} from "../src/utils/shared-fields.ts";
 import type { TaxCatalog } from "../src/utils/tax-classes.ts";
 import { type LegacyTax, type LegacyTaxRow, migrateLegacyTaxCatalog } from "./helpers/legacyTaxCatalog.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const render = (c: SharedFieldClassification) => c.fields.map((f) => `${f.kind} ${f.path}`);
+
+/** An order line built from the schema seed, with explicit overrides. */
+function line(over: Partial<LineItem>, price: Partial<NonNullable<LineItem["price"]>>): LineItem {
+  const seed = getInitialValues(OrderDocLineItem) as LineItem;
+  return {
+    ...seed,
+    uid: "line-1",
+    type: "rental",
+    name: "Chair",
+    quantity: 3,
+    path: ["line-1"],
+    uid_tax_class: "class-rental",
+    ...over,
+    price: { ...seed.price, base_cents: 10000, base_percent: null, chargeable_days: 5, formula: "five_day_week", taxes: [], ...price },
+  } as LineItem;
+}
 
 // ── The snapshot: every key the order shares, and how it propagates ──────────
 //
@@ -223,4 +253,170 @@ Deno.test("classifySharedFields: companion — the derived check FAILS when a ta
 
   const extra = new Set(tagged).add("base_cents");
   assertEquals(derivedMismatches(extra).unwritten, ["base_cents"]);
+});
+
+// ── mergeSharedFields: the three-way rule on one matched row ─────────────────
+
+const INVOICE_CLASS = classifySharedFields(OrderSchema, InvoiceSchema);
+const LINE_FIELDS = fieldsUnder(INVOICE_CLASS, "items[]");
+const PAIR_FIELDS = fieldsUnder(INVOICE_CLASS, "destinations[]");
+const DOC_FIELDS = fieldsUnder(INVOICE_CLASS, "");
+
+/** Seeded LCG — never Math.random. */
+function lcg(seed: number) {
+  let s = seed >>> 0;
+  return () => (s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 2 ** 32;
+}
+
+// The merge addresses fields by runtime path strings, so these two helpers are the
+// one place the test reads and writes by path; everything else is typed.
+const get = (o: object, path: string): unknown =>
+  path.split(".").reduce<unknown>((v, k) => (v !== null && typeof v === "object" ? (v as { [k: string]: unknown })[k] : undefined), o);
+
+function set(o: object, path: string, value: unknown): void {
+  const segs = path.split(".");
+  const parent = get(o, segs.slice(0, -1).join(".")) ?? o;
+  (segs.length === 1 ? o : parent as object as { [k: string]: unknown })[segs[segs.length - 1] as never] = value as never;
+}
+
+/** A different value of the same type, or undefined when the leaf cannot be varied. */
+function vary(v: unknown, r: () => number): unknown {
+  if (typeof v === "number") return v + 1 + Math.floor(r() * 50);
+  if (typeof v === "string") return `${v}~${Math.floor(r() * 1000)}`;
+  if (typeof v === "boolean") return !v;
+  return undefined;
+}
+
+/** An invoice line with a non-null discount, so its leaves are mergeable. */
+function invoiceLine(r: () => number): InvoiceDocLineItemType {
+  const projected = projectOrderItemToInvoiceItem(
+    line(
+      { name: `Chair ${Math.floor(r() * 100)}`, description: "folding", quantity: 1 + Math.floor(r() * 9), zero_priced: false, path: ["dest-1", "line-1"] },
+      { base_cents: 1000 + Math.floor(r() * 9000), chargeable_days: 1 + Math.floor(r() * 10), discount: { type: "percent", rate: Math.floor(r() * 50), amount_cents: 0 } },
+    ),
+    "order-1",
+  ) as InvoiceDocLineItemType;
+  return { ...projected, coa_revenue: 4000, xero_id: "inv-line-xero", crms_id: 77 };
+}
+
+/** The mergeable leaf paths: propagated, and holding a value on the row. */
+const mergeableLeaves = (fields: readonly SharedField[], row: object) =>
+  fields.filter((f) => f.kind === "propagated" && vary(get(row, f.path), () => 0) !== undefined).map((f) => f.path);
+
+Deno.test("mergeSharedFields: an unedited line takes every propagating field from the new order line", () => {
+  const r = lcg(1);
+  for (let i = 0; i < 500; i++) {
+    const prev = invoiceLine(r);
+    const next = structuredClone(prev);
+    for (const path of mergeableLeaves(LINE_FIELDS, prev)) if (r() < 0.5) set(next, path, vary(get(prev, path), r));
+    const down: InvoiceDocLineItemType = { ...structuredClone(prev), xero_id: "kept", tracking_category: "kept" };
+
+    const { merged, overridden } = mergeSharedFields(LINE_FIELDS, prev, next, down);
+    assertEquals(overridden, []);
+    for (const f of LINE_FIELDS) {
+      const want = f.kind === "propagated" || f.kind === "atom" ? get(next, f.path) : get(down, f.path);
+      assertEquals(get(merged, f.path), want, f.path);
+    }
+    // Downstream-only keys are never touched.
+    assertEquals([merged.xero_id, merged.tracking_category], ["kept", "kept"]);
+  }
+});
+
+Deno.test("mergeSharedFields: an override on ONE field keeps that field and lets every other field follow", () => {
+  const r = lcg(2);
+  const overriddenFields = new Set<string>();
+  for (let i = 0; i < 2000; i++) {
+    const prev = invoiceLine(r);
+    const leaves = mergeableLeaves(LINE_FIELDS, prev);
+    const pick = leaves[Math.floor(r() * leaves.length)];
+
+    const next = structuredClone(prev);
+    for (const path of leaves) set(next, path, vary(get(prev, path), r));
+    const down = structuredClone(prev);
+    set(down, pick, vary(get(prev, pick), r));
+
+    const { merged, overridden } = mergeSharedFields(LINE_FIELDS, prev, next, down);
+    assertEquals(overridden, [pick]);
+    assertEquals(get(merged, pick), get(down, pick), `the override on ${pick} is kept`);
+    for (const path of leaves) {
+      if (path !== pick) assertEquals(get(merged, path), get(next, path), `${path} follows the order despite ${pick}`);
+    }
+    // Derived money is left for the reprice, never taken from the order.
+    assertEquals(merged.price.total_cents, down.price.total_cents);
+    overriddenFields.add(pick);
+  }
+  // Anti-vacuity: the sweep overrode quantity, a price input, a label and a nested leaf.
+  for (const f of ["quantity", "price.base_cents", "name", "price.discount.rate"]) {
+    assert(overriddenFields.has(f), `never overrode ${f}: ${[...overriddenFields]}`);
+  }
+});
+
+Deno.test("mergeSharedFields: when the order did not change, the row comes back byte-identical", () => {
+  const r = lcg(3);
+  for (let i = 0; i < 500; i++) {
+    const prev = invoiceLine(r);
+    const down = structuredClone(prev);
+    for (const path of mergeableLeaves(LINE_FIELDS, prev)) if (r() < 0.3) set(down, path, vary(get(prev, path), r));
+    // The order spells "nothing" as an absent key where the invoice stores null.
+    const prevSparse = structuredClone(prev);
+    delete prevSparse.price.base_percent;
+    const { merged } = mergeSharedFields(LINE_FIELDS, prevSparse, structuredClone(prevSparse), down);
+    assertEquals(merged, down);
+    assertEquals(Object.keys(merged.price).sort(), Object.keys(down.price).sort());
+  }
+});
+
+Deno.test("mergeSharedFields: a null value object is one unit — removed or kept whole", () => {
+  const prev = invoiceLine(lcg(4));
+
+  // The operator removed the discount; the order changes its rate. Kept as null.
+  const edited = structuredClone(prev);
+  edited.price.discount = null;
+  const rateMoved = structuredClone(prev);
+  rateMoved.price.discount = { type: "percent", rate: 42, amount_cents: 0 };
+  const kept = mergeSharedFields(LINE_FIELDS, prev, rateMoved, edited);
+  assertEquals(kept.overridden, ["price.discount"]);
+  assertEquals(kept.merged.price.discount, null);
+
+  // The order removes the discount; an unedited line follows.
+  const removed = structuredClone(prev);
+  removed.price.discount = null;
+  const followed = mergeSharedFields(LINE_FIELDS, prev, removed, structuredClone(prev));
+  assertEquals(followed.overridden, []);
+  assertEquals(followed.merged.price.discount, null);
+});
+
+Deno.test("mergeSharedFields: a snapshot atom is taken or kept WHOLE, never leaf by leaf", () => {
+  const org = (uid: string, exempt: boolean) => ({ uid, path: [{ uid, name: uid }], tax_exempt: exempt });
+  const prev = { subject: "Shoot", organization: org("root", false) };
+  const next = { subject: "Shoot", organization: org("dept", true) };
+
+  // An invoice moved to another org whose tax_exempt happens to match the old one.
+  const moved = { subject: "Shoot", organization: org("other", false) };
+  const kept = mergeSharedFields(DOC_FIELDS, prev, next, moved);
+  assertEquals(kept.overridden, ["organization"]);
+  assertEquals(kept.merged.organization, org("other", false), "no chimera of other's uid and dept's axes");
+
+  const unedited = mergeSharedFields(DOC_FIELDS, prev, next, structuredClone(prev));
+  assertEquals(unedited.merged.organization, org("dept", true));
+});
+
+Deno.test("mergeSharedFields: pair dates merge per leaf and never touch the derived day counts", () => {
+  const dates = (d: string, c: string, days: number) => ({
+    delivery_start: d, delivery_start_fs: null, delivery_end: d, delivery_end_fs: null,
+    collection_start: c, collection_start_fs: null, collection_end: c, collection_end_fs: null,
+    charge_start: null, charge_start_fs: null, charge_end: null, charge_end_fs: null,
+    days_active: days, days_charged: days,
+  });
+  const pair = (dd: ReturnType<typeof dates>) => ({ uid: "dest-1", uid_order: "order-1", dates: dd, delivery: null, collection: null, customer_collecting: false, customer_returning: false, jurisdiction: null });
+  const prev = pair(dates("2026-10-01T00:00:00.000-05:00", "2026-10-05T00:00:00.000-05:00", 4));
+  const next = pair(dates("2026-10-03T00:00:00.000-05:00", "2026-10-07T00:00:00.000-05:00", 4));
+  // The invoice extended collection only.
+  const down = pair({ ...prev.dates, collection_start: "2026-10-09T00:00:00.000-05:00", collection_end: "2026-10-09T00:00:00.000-05:00", days_charged: 6 });
+
+  const { merged, overridden } = mergeSharedFields(PAIR_FIELDS, prev, next, down);
+  assertEquals(overridden, ["dates.collection_end", "dates.collection_start"]);
+  assertEquals(merged.dates.delivery_start, "2026-10-03T00:00:00.000-05:00");
+  assertEquals(merged.dates.collection_start, "2026-10-09T00:00:00.000-05:00");
+  assertEquals(merged.dates.days_charged, 6, "derived, left for the day count to recompute");
 });
