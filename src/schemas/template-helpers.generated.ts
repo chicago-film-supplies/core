@@ -224,13 +224,11 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
 
   ],
   "taxes": [
-    { name: "assertCoaTaxMapCoversCore", expr: "it.taxes.assertCoaTaxMapCoversCore()", desc: "Fail closed if the taxable-COA set has grown past {@link TAXABLE_COA_TO_TAX_NAME}.", returns: "void" },
     { name: "assignLineTaxes", expr: "it.taxes.assignLineTaxes(items, ctx)", desc: "**Write the rule's answer onto every priceable line** — `price.taxes`, `price.taxes_base` and a refreshed `price.total_cents`. Mutates in place; computes no subtotal.", returns: "UnreviewedTaxWarning[]" },
     { name: "deriveJurisdiction", expr: "it.taxes.deriveJurisdiction(address, origin)", desc: "**Where a delivery address sources to** — the bottom of the three-level jurisdiction precedence ({@link resolveJurisdiction}), below the document's own destination entry and the organization's `jurisdiction_claim`.", returns: "JurisdictionType" },
     { name: "deriveOrderTaxAsOf", expr: "it.taxes.deriveOrderTaxAsOf(destinations, now)", desc: "As-of instant for resolving an order's taxes: the earliest destination delivery start, falling back to `now`.", returns: "string" },
     { name: "destinationJurisdictions", expr: "it.taxes.destinationJurisdictions(ctx)", desc: "**The jurisdiction each of a document's destinations resolves to**, with the level that answered — one entry per `destinations[]` entry, in document order.", returns: "ResolvedJurisdiction[]" },
     { name: "destinationsForItems", expr: "it.taxes.destinationsForItems(items, destinations)", desc: "The `destinations[]` entry each item is billed under — **one array, parallel to `items`**, so the caller walks the document once rather than per line.", returns: "Array<TaxDestination | null>" },
-    { name: "findTaxAt", expr: "it.taxes.findTaxAt(taxes, name, asOf)", desc: "Pick the Tax whose applied window contains `asOf`, matched by exact `name`. Returns null when nothing matches (e.g. `asOf` before any historical doc). Throws on catalog drift (two same-name docs bracket the same instant).", returns: "Tax | null" },
     { name: "isTaxableCoa", expr: "it.taxes.isTaxableCoa(coaRevenue)", desc: "Was a line with this revenue COA subject to tax **under the retired account-keyed gate**?", returns: "boolean" },
     { name: "resolveJurisdiction", expr: "it.taxes.resolveJurisdiction(levels)", desc: "**Resolve which jurisdiction a destination's lines are taxed in.** The one implementation of the precedence — per DESTINATION, never per document, which is what lets one order carry two jurisdictions.", returns: "ResolvedJurisdiction" },
     { name: "resolveLineTax", expr: "it.taxes.resolveLineTax(item, destination, ctx)", desc: "**The pricing rule, for one line.**", returns: "LineTaxResolution" },

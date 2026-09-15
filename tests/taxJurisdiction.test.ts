@@ -1,144 +1,18 @@
 /**
- * The tax rule's jurisdiction half — `deriveJurisdiction`, `resolveJurisdiction`,
- * `findTaxAt` and the `applied_*` window (api-cloudrun#409). The legacy
+ * The tax rule's jurisdiction half — `deriveJurisdiction` and `resolveJurisdiction`
+ * (api-cloudrun#409). The name-keyed `findTaxAt` / `taxAppliedWindow` are deleted
+ * (2026-09-15); rate windows are read off `taxes-rates` by the class resolver. The legacy
  * `(taxed_as ?? type) × jurisdiction` lookup and its cell states are retired
  * with the `taxes` collection (api-cloudrun#993).
  */
-import { assertEquals, assertThrows } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { JURISDICTIONS } from "../src/schemas/common.ts";
 import {
   COLLECTING_JURISDICTIONS,
   deriveJurisdiction,
-  findTaxAt,
   resolveJurisdiction,
-  taxAppliedWindow,
 } from "../src/utils/taxes.ts";
-import type { Tax } from "../src/utils/orders.ts";
 
-/**
- * The catalog as the contracted schema requires it: `applied_*` populated.
- */
-const CATALOG: Tax[] = [
-  {
-    uid: "chi-rental-v3",
-    name: "Chicago Rental Tax",
-    rate: 15,
-    type: "percent",
-    jurisdiction: "chicago",
-    applied_from: "2026-01-01T00:00:00.000-06:00",
-    applied_to: null,
-  },
-  {
-    uid: "chi-rental-v2",
-    name: "Chicago Rental Tax",
-    rate: 11,
-    type: "percent",
-    jurisdiction: "chicago",
-    applied_from: "2025-01-01T00:00:00.000-06:00",
-    applied_to: "2026-01-01T00:00:00.000-06:00",
-  },
-  {
-    uid: "chi-sales",
-    name: "Chicago Sales Tax",
-    rate: 10.25,
-    type: "percent",
-    jurisdiction: "chicago",
-    applied_from: "2020-01-01T00:00:00.000-06:00",
-    applied_to: null,
-  },
-  {
-    // No rental-vs-sales split outside Chicago — one tax covers every taxed
-    // type, which is what the old `overrideItemTaxesForProfile` did by hand.
-    uid: "rantoul",
-    name: "Rantoul Sales Tax",
-    rate: 9,
-    type: "percent",
-    jurisdiction: "rantoul",
-    applied_from: "2026-01-01T00:00:00.000-06:00",
-    applied_to: null,
-  },
-  {
-    uid: "frankfort",
-    name: "Frankfort Sales Tax",
-    rate: 8,
-    type: "percent",
-    jurisdiction: "frankfort",
-    applied_from: "2026-01-01T00:00:00.000-06:00",
-    applied_to: null,
-  },
-  {
-    // The explicit-only class: reachable by uid, never by the rule.
-    uid: "bottle",
-    name: "Water Bottle Tax",
-    rate: 0.05,
-    type: "flat",
-    jurisdiction: null,
-    applied_from: "2026-03-27T00:00:00.000-05:00",
-    applied_to: null,
-  },
-  {
-    uid: "no-tax",
-    name: "No Tax",
-    rate: 0,
-    type: "percent",
-    jurisdiction: null,
-    applied_from: "2026-03-27T00:00:00.000-05:00",
-    applied_to: null,
-  },
-];
-
-const NOW = "2026-08-18T12:00:00.000-05:00";
-
-// ── The applied window ───────────────────────────────────────────
-
-Deno.test("taxAppliedWindow reads applied_* and nothing else", () => {
-  assertEquals(
-    taxAppliedWindow({
-      uid: "x",
-      name: "X",
-      rate: 1,
-      type: "percent",
-      applied_from: "2025-01-01T00:00:00.000-06:00",
-      applied_to: "2026-01-01T00:00:00.000-06:00",
-    }),
-    { from: "2025-01-01T00:00:00.000-06:00", to: "2026-01-01T00:00:00.000-06:00" },
-  );
-});
-
-Deno.test("taxAppliedWindow: applied_to null is OPEN-ENDED", () => {
-  assertEquals(
-    taxAppliedWindow({
-      uid: "x",
-      name: "X",
-      rate: 1,
-      type: "percent",
-      applied_from: "2025-01-01T00:00:00.000-06:00",
-      applied_to: null,
-    }).to,
-    null,
-  );
-});
-
-Deno.test("🔴 a MISSING bound reads as OPEN, which is why the schema requires it", () => {
-  // The property the required-ness protects, asserted directly rather than
-  // inferred from the field being required. A version with no bounds brackets
-  // every instant, so both Chicago Rental versions match one instant and
-  // `findTaxAt` throws `Tax catalog drift` — on the pricing path, out of a
-  // CRMS task handler, retrying forever.
-  //
-  // `TaxRateSchema` cannot produce this shape; the structural `Tax` in
-  // `utils/orders.ts` still can, and a caller assembling a catalog by hand is
-  // exactly who needs to know what it costs.
-  const unbounded: Tax[] = CATALOG.map(({ applied_from: _f, applied_to: _t, ...rest }) => rest);
-  assertThrows(
-    () => findTaxAt(unbounded, "Chicago Rental Tax", NOW),
-    Error,
-    "drift",
-  );
-
-  // The same catalog WITH its bounds resolves to exactly one version.
-  assertEquals(findTaxAt(CATALOG, "Chicago Rental Tax", NOW)?.uid, "chi-rental-v3");
-});
 
 // ── deriveJurisdiction: three cases, three legal reasons ─────────
 

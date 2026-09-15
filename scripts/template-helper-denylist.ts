@@ -305,26 +305,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // invoices and quotes).
     "deriveProductImageUuids",
   ],
-  taxes: [
-    // A RESOLVER internal, not a rendering fact. It is the one place the
-    // bracket checks read a version's bounds from, exported so `findTaxAt` and
-    // api-cloudrun's window guards cannot each grow their own
-    // answer to "which field is the bound" — a template asking a tax for its
-    // own window should read the fields.
-    //
-    // ⚠️ This entry said it was a "MIGRATION-WINDOW internal … deleted with the
-    // fallback in Phase 2". Phase 2 landed on 2026-08-22 (core#63): the
-    // `?? valid_from` fallback and the old field pair are gone, and the
-    // function SURVIVED them — pinned by `tests/taxJurisdiction.test.ts`
-    // ("reads applied_* and nothing else"). The denylist verdict was right for
-    // a reason that has expired; the reason above is the durable one.
-    //
-    // It also returns an anonymous object type, which the generator can only
-    // describe as `typeLiteral`. That is a symptom rather than the reason:
-    // naming the type would make it emit cleanly and it would still be an
-    // internal.
-    "taxAppliedWindow",
-  ],
   // 🔴 **Denylisted WHOLE, and for a different reason from everything else in
   // this file.** Every other entry hides a helper that is real domain code
   // aimed at the wrong surface. `utils/citations.ts` is not domain code at all

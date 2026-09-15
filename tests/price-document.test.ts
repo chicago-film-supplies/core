@@ -201,15 +201,15 @@ Deno.test("priceDocument: the input items are not mutated", () => {
   assertEquals(items, before);
 });
 
-// ── The freeze: an issued invoice keeps the tax version it carries (#997 decision a) ──
+// ── No freeze: every document takes the rate live at its own asOf (owner, 2026-09-15) ──
 
-Deno.test("priceDocument: an ISSUED invoice keeps its stored rate version; a DRAFT re-rates", () => {
+Deno.test("priceDocument: an ISSUED invoice and a DRAFT both take the rate whose window holds asOf", () => {
   // Chicago Sales Tax changed version on 2026-06-01: 10.25% then 10.5%.
   const versions = catalogOf([
     { uid: "chi-sales-old", name: "Chicago Sales Tax", rate: 10.25, type: "percent", jurisdiction: "chicago", item_types: ["sale", "replacement"], applied_from: "2020-01-01T00:00:00.000-06:00", applied_to: "2026-06-01T00:00:00.000-05:00" },
     { uid: "chi-sales-new", name: "Chicago Sales Tax", rate: 10.5, type: "percent", jurisdiction: "chicago", item_types: ["sale", "replacement"], applied_from: "2026-06-01T00:00:00.000-05:00", applied_to: null },
   ]);
-  // A sale line stored at the OLD version; the invoice prices at 2026-07-02, inside the new window.
+  // A sale line stored at the OLD version; the document's asOf (2026-07-02) is inside the NEW window.
   const stored = () => [line({ type: "sale" }, {
     formula: "fixed", base_cents: 40000, chargeable_days: null,
     taxes: [{ uid: "chi-sales-old", name: "Chicago Sales Tax", rate: 10.25, type: "percent", amount_cents: 4100 }],
@@ -218,29 +218,18 @@ Deno.test("priceDocument: an ISSUED invoice keeps its stored rate version; a DRA
   const price = (status: "draft" | "issued") =>
     priceDocument(stored(), ctx({ document: { kind: "invoice", status, has_settlement: false }, tax: { ...taxCtx(), catalog: versions } }));
 
-  const issued = p(price("issued").items[0]);
-  assertEquals(issued.taxes.map((t) => [t.name, t.amount_cents]), [["Chicago Sales Tax", 4100]]);
-  assertEquals((price("issued").items[0].price as unknown as { taxes_base: { uid: string }[] }).taxes_base.map((t) => t.uid), ["chi-sales-old"]);
-  assertEquals(price("issued").totals.total_cents, 44100);
+  // The stored uid is not an input: the window decides, whatever the status. 40000 × 10.5% = 4200.
+  for (const status of ["issued", "draft"] as const) {
+    assertEquals(p(price(status).items[0]).taxes.map((t) => t.amount_cents), [4200]);
+    assertEquals(price(status).totals.total_cents, 44200);
+  }
 
-  // A draft has agreed nothing yet, so it prices at its date: 40000 × 10.5% = 4200.
-  assertEquals(p(price("draft").items[0]).taxes.map((t) => t.amount_cents), [4200]);
-  assertEquals(price("draft").totals.total_cents, 44200);
-});
-
-Deno.test("priceDocument: the freeze falls back to stored taxes where taxes_base is absent", () => {
-  const versions = catalogOf([
-    { uid: "chi-sales-old", name: "Chicago Sales Tax", rate: 10.25, type: "percent", jurisdiction: "chicago", item_types: ["sale"], applied_from: "2020-01-01T00:00:00.000-06:00", applied_to: "2026-06-01T00:00:00.000-05:00" },
-    { uid: "chi-sales-new", name: "Chicago Sales Tax", rate: 10.5, type: "percent", jurisdiction: "chicago", item_types: ["sale"], applied_from: "2026-06-01T00:00:00.000-05:00", applied_to: null },
-  ]);
-  const items = [line({ type: "sale" }, {
-    formula: "fixed", base_cents: 40000, chargeable_days: null,
-    taxes: [{ uid: "chi-sales-old", name: "Chicago Sales Tax", rate: 10.25, type: "percent", amount_cents: 4100 }],
-  })];
-  // A line stored before `taxes_base` existed carries no key at all (the fixture base has `[]`).
-  delete (items[0].price as { taxes_base?: unknown }).taxes_base;
-  const r = priceDocument(items, ctx({ document: { kind: "invoice", status: "issued", has_settlement: false }, tax: { ...taxCtx(), catalog: versions } }));
-  assertEquals(r.totals.total_cents, 44100);
+  // The SAME document dated inside the old window takes the old rate: 40000 × 10.25% = 4100.
+  const early = priceDocument(stored(), ctx({
+    document: { kind: "invoice", status: "issued", has_settlement: false },
+    tax: { ...taxCtx(), catalog: versions, asOf: "2026-05-15T00:00:00.000-05:00" },
+  }));
+  assertEquals(p(early.items[0]).taxes.map((t) => t.amount_cents), [4100]);
 });
 
 // ── Property sweep: the SUM equals today's re-pricing, on live documents ──

@@ -62,145 +62,6 @@ export { computeItemTaxAmountCents, type Tax };
 export { isTaxableCoa, TAXABLE_REVENUE_COAS };
 
 /**
- * **Which tax a newly authored line carries, keyed on `coa_revenue`** — the
- * DEFAULT, as against `TAXABLE_REVENUE_COAS` above, which is the PERMISSIVE
- * rule. The two answer different questions: *may* a line here carry tax, and
- * *what does a new line here get*.
- *
- * Measured over the whole prod corpus, restricted to `tax_applied` invoices,
- * every taxed line agrees:
- *
- * | coa | tax carried | lines | exceptions |
- * |---|---|---|---|
- * | 4000 | Chicago Rental Tax | 6,289 | 0 |
- * | 4200 | Chicago Sales Tax  |   518 | 0 |
- * | 4210 | Chicago Sales Tax  |   218 | 0 |
- *
- * ⚠️ **`type` explicitly does NOT decide it, and that is measured in BOTH
- * directions** (re-measured over orders *and* invoices, 2026-08-16 — see
- * manager#297):
- *
- * - a taxable COA carries its tax on types the type-keyed map calls untaxed —
- *   coa 4000 on **36** `service` lines, 4200 on **24**, 4210 on **4**;
- * - and a NON-taxable COA stays untaxed on types the type-keyed map would tax —
- *   **105** `sale` lines at coa 4700, all carrying no tax.
- *
- * That second direction is the larger population and the one nobody had looked
- * at. ⚠️ **Both directions are now moot as a CLIENT hazard**, and the reason is
- * worth keeping: `priceDocument` no longer reads a client's
- * `price.taxes` refs at all — `assignLineTaxes` rebuilds the array from
- * `(tax class, jurisdiction)`, so a client that seeds the wrong tax, or
- * none, is corrected on save either way. This table survives as the DEFAULT a
- * restatement tool needs when it is reconstructing what a historical line
- * carried, not as a rule any writer consults.
- *
- * The **rate** is not here: it comes from the date-bracketed catalog via
- * {@link findTaxAt} at the document's own date.
- *
- * ⚠️ **A line with NO `coa_revenue` is not covered by this table** — custom
- * lines (`buildCustomOrderLine` / `buildCustomInvoiceLine`) construct no such
- * field, and prod carries **99** of them. That gap is why this is a HISTORICAL
- * oracle and not a rule: it can only answer for the lines that carry an
- * account.
- *
- * ⚠️ **Its consumers are restatement tools, not writers.** The live default is
- * the line's tax class resolved in its jurisdiction ({@link resolveLineTax}),
- * which answers for a custom line too. A companion type-keyed table (`defaultTaxNameForLine`
- * / `DEFAULT_TAX_NAME_BY_TYPE`) was DELETED rather than kept: it was a second
- * encoding of a rule that already exists, and an earlier revision of this
- * docblock records a *third* (`chart-of-accounts.default_tax_profile`) deleted
- * for having one writer and zero readers.
- */
-export const TAXABLE_COA_TO_TAX_NAME: Readonly<Record<number, string | null>> = {
-  4000: "Chicago Rental Tax",
-  4140: null,
-  4200: "Chicago Sales Tax",
-  4210: "Chicago Sales Tax",
-};
-
-/**
- * Fail closed if the taxable-COA set has grown past {@link TAXABLE_COA_TO_TAX_NAME}.
- *
- * A taxable COA with no entry there would be silently left **untaxed**, which is
- * a money defect that looks like a clean run. Throws rather than exits so a
- * script, a test and a client can all call it.
- */
-export function assertCoaTaxMapCoversCore(): void {
-  const declared = Object.keys(TAXABLE_COA_TO_TAX_NAME).map(Number).sort();
-  const expected = [...TAXABLE_REVENUE_COAS].sort();
-  if (JSON.stringify(declared) !== JSON.stringify(expected)) {
-    throw new Error(
-      `TAXABLE_COA_TO_TAX_NAME [${declared}] no longer covers TAXABLE_REVENUE_COAS ` +
-        `[${expected}]. A taxable COA with no tax name would be silently left ` +
-        `untaxed — add the mapping (and re-measure the corpus) first.`,
-    );
-  }
-}
-
-/**
- * The APPLIED window of a tax version — the one place the bracket checks below
- * read the bounds from.
- *
- * ⚠️ **A missing bound is read as OPEN**, and that is dangerous rather than
- * merely permissive: an unbounded version brackets every instant, so two
- * versions of one name bracket the same instant and {@link findTaxAt} throws
- * `Tax catalog drift` — on the pricing path, out of a CRMS Cloud Task handler,
- * which retries forever. `TaxRateSchema` requires both bounds precisely so a
- * stored rate cannot reach that state; the `| null` here covers the partial
- * literals the structural `Tax` admits.
- */
-export function taxAppliedWindow(tax: Tax): { from: string | null; to: string | null } {
-  return { from: tax.applied_from ?? null, to: tax.applied_to ?? null };
-}
-
-/**
- * Does this tax version's half-open applied window contain `asOf`?
- *
- * Comparison is by instant (ms since epoch), so Chicago-offset strings with
- * heterogeneous DST (-05:00 vs -06:00) compare correctly. Half-open
- * `[from, to)` is what makes a supersede's boundary unambiguous: the successor
- * opens at exactly the instant the incumbent closes, and neither the last
- * millisecond of one nor the first of the other is claimed twice.
- */
-function windowContains(tax: Tax, t: number): boolean {
-  const { from, to } = taxAppliedWindow(tax);
-  if (from != null && t < new Date(from).getTime()) return false;
-  if (to != null && t >= new Date(to).getTime()) return false;
-  return true;
-}
-
-/** `uid@[from,to)` for a drift message. */
-function windowLabel(tax: Tax): string {
-  const { from, to } = taxAppliedWindow(tax);
-  return `${tax.uid}@[${from ?? "-∞"},${to ?? "∞"})`;
-}
-
-/**
- * Pick the Tax whose applied window contains `asOf`, matched by exact `name`.
- * Returns null when nothing matches (e.g. `asOf` before any historical doc).
- * Throws on catalog drift (two same-name docs bracket the same instant).
- *
- * @see {@link taxAppliedWindow} for why a missing bound is dangerous rather
- * than merely permissive.
- */
-export function findTaxAt(
-  taxes: Tax[],
-  name: string,
-  asOf: string,
-): Tax | null {
-  const t = new Date(asOf).getTime();
-  const matches = taxes.filter((tax) => tax.name === name && windowContains(tax, t));
-  if (matches.length === 0) return null;
-  if (matches.length > 1) {
-    throw new Error(
-      `Tax catalog drift: multiple "${name}" docs bracket ${asOf}: ` +
-        matches.map(windowLabel).join(", "),
-    );
-  }
-  return matches[0];
-}
-
-/**
  * What the catalog has to say about one line's taxes at an instant — the
  * `state` of a {@link LineTaxResolution}. Three states, because "no rate" has two
  * causes that must not be confused:
@@ -277,9 +138,8 @@ export interface UnreviewedTaxWarning {
  *
  * ⚠️ **`paxton` is absent, deliberately.** CFS no longer delivers there, so it
  * must not be *derived* — but it stays a {@link JurisdictionType} member
- * because one prod order and one invoice embed the Paxton tax uid and
- * `calculateItemTax` throws `Unknown tax uid` on a missing one. Closed, not
- * erased.
+ * because Paxton rates are still in the catalog and stored documents name
+ * them. Closed, not erased.
  *
  * `no_nexus` is absent for a different reason: it is not a city CFS collects
  * in, it is the answer when the address is in no state CFS collects in at all
@@ -311,8 +171,8 @@ const COLLECTING_JURISDICTION_BY_CITY: Readonly<Record<string, TaxJurisdictionTy
  * Adding it would make an out-of-state delivery look like a registration.
  *
  * ⚠️ **A closed registration leaves this list and STAYS a
- * {@link JurisdictionType} member** — stored documents keep naming it, and
- * `calculateItemTax` throws `Unknown tax uid` on a tax it cannot resolve. So
+ * {@link JurisdictionType} member** — stored documents and tax codes keep
+ * naming it. So
  * `JURISDICTIONS` is the storage vocabulary and this is the live registration
  * set; they are different questions and the first is a superset of the second.
  *
@@ -539,7 +399,7 @@ export interface TaxSourcingDestination {
  * fallback resolves identically on either side.
  *
  * ⚠️ **Not the banned business-date anti-pattern.** `asOf` is a resolution
- * instant handed to {@link findTaxAt}, never written to a document. Emitting
+ * instant handed to the class resolver, never written to a document. Emitting
  * Chicago offset form here would make the server and the client resolve
  * differently for an instant near midnight, which is the failure this note
  * exists to prevent.
@@ -569,7 +429,7 @@ export function deriveOrderTaxAsOf(
   // Earliest by INSTANT — `compareAsc` over parsed dates, not `.sort()` over the
   // strings. See the ⚠️ in the docblock for why the text order is not the
   // instant order. The original string is returned rather than a re-serialized
-  // one, so the value handed to `findTaxAt` is still what the document says.
+  // one, so the value the resolver reads is still what the document says.
   return starts.reduce((earliest, s) =>
     compareAsc(parseISO(s), parseISO(earliest)) < 0 ? s : earliest
   );
@@ -671,17 +531,6 @@ export interface DocumentTaxContext {
    * ({@link deriveOrderTaxAsOf}), an invoice's own `date`.
    */
   asOf: string;
-  /**
-   * Frozen documents only: tax NAME → the rate uid the stored document already
-   * carries.
-   *
-   * ⚠️ **The rule picks a CODE; this picks which RATE of it.** A completed order
-   * re-priced later must keep the rate it was billed at, and `applied_from`
-   * alone does not guarantee that. Only the VALUES are read — a rate knows its
-   * code, so the name key is historical and kept so callers need not change.
-   * Omit for a live document.
-   */
-  frozenVersions?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -803,7 +652,7 @@ export interface LineTaxResolution {
   uid_tax_class: string | null;
   /**
    * What the catalog had to say at `ctx.asOf`: `taxed` when some rate brackets
-   * it (or the document's frozen rate answers), `expired` when at least one
+   * it, `expired` when at least one
    * code priced on a lapsed review, `untaxed` when nothing applies.
    *
    * This function never throws: the manager's read-only surfaces and the audits
@@ -909,8 +758,7 @@ export function resolveLineTax(
   const { jurisdiction, level } = jurisdictionOf();
   const exempt = isReplacement ? false : ctx.exempt;
   const uidTaxClass = deriveLineTaxClass(item, ctx.catalog);
-  const frozen = ctx.frozenVersions ? new Set(ctx.frozenVersions.values()) : undefined;
-  const resolved = resolveClassTaxes(uidTaxClass, jurisdiction, exempt, ctx.asOf, ctx.catalog, frozen);
+  const resolved = resolveClassTaxes(uidTaxClass, jurisdiction, exempt, ctx.asOf, ctx.catalog);
 
   const state: TaxCellState = resolved.base.length === 0
     ? "untaxed"

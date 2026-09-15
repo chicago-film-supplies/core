@@ -62,14 +62,12 @@ export type PriceObject = OrderDocItemPriceType;
  * It is structural, not a stored document: the `taxes` collection it was once a
  * subset of is retired (api-cloudrun#993). Only `uid`/`name`/`rate`/`type` are
  * required — those are what the pricing helpers read. Everything else is
- * resolution metadata that only the as-of resolver in `@cfs/core/utils/taxes`
- * (`findTaxAt`) and the Xero boundary touch, and it stays optional so partial `Tax`
- * literals in tests and callers keep type-checking.
+ * resolution metadata that only the Xero boundary touches, and it stays optional
+ * so partial `Tax` literals in tests and callers keep type-checking.
  *
  * ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
- * `TaxRate`.** A missing bound reads as OPEN, so every version brackets every
- * instant and {@link findTaxAt} throws `Tax catalog drift` on the pricing path.
- * A partial literal in a test is allowed to be wrong that way; a stored rate is
+ * `TaxRate`.** The class resolver reads windows off `TaxRate`, never off this
+ * shape; a partial literal in a test is allowed to omit them, a stored rate is
  * not.
  */
 export interface Tax {
@@ -887,8 +885,7 @@ export function calculateItemDiscountCents(item: LineItem): number {
  * item type × jurisdiction, it has nothing to do with coa"* — and both gates
  * built on it (the engine's {@link isTaxableCoa} and api-cloudrun's
  * `resolveXeroTaxType`) were removed together. What it records now is which
- * accounts CFS's Xero history taxed, which is what {@link TAXABLE_COA_TO_TAX_NAME}
- * and the restatement tools need.
+ * accounts CFS's Xero history taxed.
  *
  * It existed because the set previously lived only on the *Xero push* side and
  * nowhere in the engine computing CFS's own totals. So CFS taxed lines it then
@@ -932,9 +929,8 @@ export const TAXABLE_REVENUE_COAS: readonly number[] = [4000, 4140, 4200, 4210];
  *
  * What it is FOR now: explaining the corpus the gate shaped. The invoice-sync
  * `coa_untaxes` arm (`@cfs/core/utils/invoices`) reads it to say why a frozen
- * invoice line carries no tax while its order line does, and api-cloudrun's
- * `repair-invoice-restate-from-xero.ts` reads it to restate historical lines the
- * way Xero billed them. Both are statements about documents already written.
+ * invoice line carries no tax while its order line does. That is a statement
+ * about documents already written.
  *
  * **`null`/`undefined` meant UNKNOWN, and unknown was TAXABLE** — the opposite
  * of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`. That asymmetry

@@ -292,7 +292,7 @@ export function validateTaxSetup(catalog: TaxCatalog): TaxSetupViolation[] {
  * Why each code in the class did or did not contribute a rate — the explain
  * output the manager renders on a product or line, and the audits reuse.
  *
- * - `matched` — a rate brackets `asOf` (or the document's frozen rate).
+ * - `matched` — a rate brackets `asOf`.
  * - `expired` — nothing brackets `asOf` but a version closed before it; priced
  *   on that version and reported, never refused (`UnreviewedTaxWarning`'s rule).
  * - `wrong_jurisdiction` — the code levies somewhere else. The normal case for
@@ -456,7 +456,7 @@ export function pricingTaxesOf(catalog: TaxCatalog): Array<{
  *
  * ```
  * codes = class.uid_tax_codes where code.jurisdiction === jurisdiction
- * rate  = frozen rate of that code  ??  rate bracketing asOf  ??  most recently CLOSED rate (expired)
+ * rate  = rate bracketing asOf  ??  most recently CLOSED rate (expired)
  * applied = exempt ? [] : base
  * ```
  *
@@ -469,11 +469,9 @@ export function pricingTaxesOf(catalog: TaxCatalog): Array<{
  *   must refuse (a writer) refuses on `validateTaxSetup` or on the missing
  *   stamp, not on a pricing throw — the tax-review outage recorded in
  *   `utils/taxes.ts` is the reason pricing never throws for configuration.
- * - **`frozenRateUids`**: a frozen document's stored `price.taxes[].uid`s. Where
- *   one of them is a version of a matched code it wins over today's version, so
- *   a completed order keeps the rate it was billed at. It replaces the legacy
- *   name-keyed `frozenVersions`: a line stores the RATE uid, and a rate knows
- *   its code, so no name is needed.
+ * - **No freeze.** A document's `asOf` and the rates' `[applied_from, applied_to)`
+ *   windows decide the rate, for a completed or issued document as for a live
+ *   one (owner, 2026-09-15). The stored-version freeze is deleted.
  *
  * ⚠️ **"Most recent" means most recently CLOSED at or before `asOf`**, the same
  * rule as `mostRecentClosedTax`: a document inside an interior gap gets the
@@ -485,7 +483,6 @@ export function resolveClassTaxes(
   exempt: boolean,
   asOf: string,
   catalog: TaxCatalog,
-  frozenRateUids?: ReadonlySet<string>,
 ): ClassTaxResolution {
   const cls = uidTaxClass === null ? undefined : catalog.classes.find((c) => c.uid === uidTaxClass);
   if (!cls) return { uid_tax_class: uidTaxClass, base: [], applied: [], considered: [] };
@@ -506,9 +503,7 @@ export function resolveClassTaxes(
     }
 
     const rates = catalog.rates.filter((r) => r.uid_tax_code === uid);
-    const frozen = frozenRateUids ? rates.find((r) => frozenRateUids.has(r.uid)) : undefined;
-    const live = rates.find((r) => contains(r, t));
-    const chosen = frozen ?? live;
+    const chosen = rates.find((r) => contains(r, t));
     if (chosen) {
       base.push({ rate: chosen, code, expired: false });
       considered.push({ uid_tax_code: uid, name: code.name, outcome: "matched", rate: chosen });

@@ -3059,7 +3059,7 @@ Deno.test("adoptOrderDividerStructure: reads a parent from a PRE-NORMALIZED path
 // unexplainedInvoiceItemDifferences — badge only the UNEXPLAINED (#481)
 // ══════════════════════════════════════════════════════════════════
 //
-// The badge and `audit-draft-invoice-mirror.ts` were two comparators kept in
+// The badge and the deleted `audit-draft-invoice-mirror` script were two comparators kept in
 // agreement by hand. The audit compared money and then EXPLAINED the difference;
 // the badge had no explainers, so it reported 8,792 prod lines of which the audit
 // called 0 real. These tests pin the three arms and — more importantly — the

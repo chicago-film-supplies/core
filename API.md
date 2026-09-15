@@ -25788,14 +25788,12 @@ A tax RATE in the pricing shape — what `pricingTaxesOf` projects the
 It is structural, not a stored document: the `taxes` collection it was once a
 subset of is retired (api-cloudrun#993). Only `uid`/`name`/`rate`/`type` are
 required — those are what the pricing helpers read. Everything else is
-resolution metadata that only the as-of resolver in `@cfs/core/utils/taxes`
-(`findTaxAt`) and the Xero boundary touch, and it stays optional so partial `Tax`
-literals in tests and callers keep type-checking.
+resolution metadata that only the Xero boundary touches, and it stays optional
+so partial `Tax` literals in tests and callers keep type-checking.
 
 ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
-`TaxRate`.** A missing bound reads as OPEN, so every version brackets every
-instant and {@link findTaxAt} throws `Tax catalog drift` on the pricing path.
-A partial literal in a test is allowed to be wrong that way; a stored rate is
+`TaxRate`.** The class resolver reads windows off `TaxRate`, never off this
+shape; a partial literal in a test is allowed to omit them, a stored rate is
 not.
 
 ```ts
@@ -26238,8 +26236,8 @@ says: #1751 and #1322 are both PAID there with `AmountPaid: 0`.
 {@link unexplainedInvoiceItemDifferences}, but it also says WHICH arm fired.
 
 The residue alone is what the badge needs; a diagnostic needs the reason, and
-`api-cloudrun/scripts/audit-draft-invoice-mirror.ts` reports one bucket per arm. Returning
-the arm is what lets that audit be a pure CONSUMER of this function rather
+api-cloudrun's deleted `audit-draft-invoice-mirror` script reported one bucket per arm. Returning
+the arm is what let that audit be a pure CONSUMER of this function rather
 than a second implementation of it — which is the defect api-cloudrun#481 is
 named after, and it had already produced two comparators that disagreed about
 8,792 prod lines.
@@ -26967,7 +26965,8 @@ Any other item is {@link stripOrderPrefix}.
 Strip the differences that are **explained** — leaving only the ones an
 operator should act on (api-cloudrun#481).
 
-The sync badge and `api-cloudrun/scripts/audit-draft-invoice-mirror.ts` were two
+The sync badge and api-cloudrun's `audit-draft-invoice-mirror` script (deleted
+2026-09-15) were two
 comparators kept in agreement by hand, and they disagreed by construction: the
 audit compared money and then *explained* the difference through tested arms,
 while the badge had none and so reported every one of them. On prod that was
@@ -29913,8 +29912,7 @@ for line taxability until the owner ruling of 2026-08-20 — *"an item's tax is
 item type × jurisdiction, it has nothing to do with coa"* — and both gates
 built on it (the engine's {@link isTaxableCoa} and api-cloudrun's
 `resolveXeroTaxType`) were removed together. What it records now is which
-accounts CFS's Xero history taxed, which is what {@link TAXABLE_COA_TO_TAX_NAME}
-and the restatement tools need.
+accounts CFS's Xero history taxed.
 
 It existed because the set previously lived only on the *Xero push* side and
 nowhere in the engine computing CFS's own totals. So CFS taxed lines it then
@@ -29954,14 +29952,12 @@ A tax RATE in the pricing shape — what `pricingTaxesOf` projects the
 It is structural, not a stored document: the `taxes` collection it was once a
 subset of is retired (api-cloudrun#993). Only `uid`/`name`/`rate`/`type` are
 required — those are what the pricing helpers read. Everything else is
-resolution metadata that only the as-of resolver in `@cfs/core/utils/taxes`
-(`findTaxAt`) and the Xero boundary touch, and it stays optional so partial `Tax`
-literals in tests and callers keep type-checking.
+resolution metadata that only the Xero boundary touches, and it stays optional
+so partial `Tax` literals in tests and callers keep type-checking.
 
 ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
-`TaxRate`.** A missing bound reads as OPEN, so every version brackets every
-instant and {@link findTaxAt} throws `Tax catalog drift` on the pricing path.
-A partial literal in a test is allowed to be wrong that way; a stored rate is
+`TaxRate`.** The class resolver reads windows off `TaxRate`, never off this
+shape; a partial literal in a test is allowed to omit them, a stored rate is
 not.
 
 ```ts
@@ -30691,9 +30687,8 @@ stood as a phantom `amount_due` on 19 invoices / $2,741.78.
 
 What it is FOR now: explaining the corpus the gate shaped. The invoice-sync
 `coa_untaxes` arm (`@cfs/core/utils/invoices`) reads it to say why a frozen
-invoice line carries no tax while its order line does, and api-cloudrun's
-`repair-invoice-restate-from-xero.ts` reads it to restate historical lines the
-way Xero billed them. Both are statements about documents already written.
+invoice line carries no tax while its order line does. That is a statement
+about documents already written.
 
 **`null`/`undefined` meant UNKNOWN, and unknown was TAXABLE** — the opposite
 of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`. That asymmetry
@@ -32291,8 +32286,8 @@ answer for an address in no state CFS collects in, decided by the region.
 Adding it would make an out-of-state delivery look like a registration.
 
 ⚠️ **A closed registration leaves this list and STAYS a
-{@link JurisdictionType} member** — stored documents keep naming it, and
-`calculateItemTax` throws `Unknown tax uid` on a tax it cannot resolve. So
+{@link JurisdictionType} member** — stored documents and tax codes keep
+naming it. So
 `JURISDICTIONS` is the storage vocabulary and this is the live registration
 set; they are different questions and the first is a superset of the second.
 
@@ -32322,7 +32317,6 @@ interface DocumentTaxContext {
   exempt: boolean;
   catalog: TaxCatalog;
   asOf: string;
-  frozenVersions?: ReadonlyMap<string, string>;
 }
 ```
 
@@ -32380,61 +32374,6 @@ interface ResolvedJurisdiction {
 }
 ```
 
-### `TAXABLE_COA_TO_TAX_NAME`
-
-**Which tax a newly authored line carries, keyed on `coa_revenue`** — the
-DEFAULT, as against `TAXABLE_REVENUE_COAS` above, which is the PERMISSIVE
-rule. The two answer different questions: *may* a line here carry tax, and
-*what does a new line here get*.
-
-Measured over the whole prod corpus, restricted to `tax_applied` invoices,
-every taxed line agrees:
-
-| coa | tax carried | lines | exceptions |
-|---|---|---|---|
-| 4000 | Chicago Rental Tax | 6,289 | 0 |
-| 4200 | Chicago Sales Tax  |   518 | 0 |
-| 4210 | Chicago Sales Tax  |   218 | 0 |
-
-⚠️ **`type` explicitly does NOT decide it, and that is measured in BOTH
-directions** (re-measured over orders *and* invoices, 2026-08-16 — see
-manager#297):
-
-- a taxable COA carries its tax on types the type-keyed map calls untaxed —
-  coa 4000 on **36** `service` lines, 4200 on **24**, 4210 on **4**;
-- and a NON-taxable COA stays untaxed on types the type-keyed map would tax —
-  **105** `sale` lines at coa 4700, all carrying no tax.
-
-That second direction is the larger population and the one nobody had looked
-at. ⚠️ **Both directions are now moot as a CLIENT hazard**, and the reason is
-worth keeping: `priceDocument` no longer reads a client's
-`price.taxes` refs at all — `assignLineTaxes` rebuilds the array from
-`(tax class, jurisdiction)`, so a client that seeds the wrong tax, or
-none, is corrected on save either way. This table survives as the DEFAULT a
-restatement tool needs when it is reconstructing what a historical line
-carried, not as a rule any writer consults.
-
-The **rate** is not here: it comes from the date-bracketed catalog via
-{@link findTaxAt} at the document's own date.
-
-⚠️ **A line with NO `coa_revenue` is not covered by this table** — custom
-lines (`buildCustomOrderLine` / `buildCustomInvoiceLine`) construct no such
-field, and prod carries **99** of them. That gap is why this is a HISTORICAL
-oracle and not a rule: it can only answer for the lines that carry an
-account.
-
-⚠️ **Its consumers are restatement tools, not writers.** The live default is
-the line's tax class resolved in its jurisdiction ({@link resolveLineTax}),
-which answers for a custom line too. A companion type-keyed table (`defaultTaxNameForLine`
-/ `DEFAULT_TAX_NAME_BY_TYPE`) was DELETED rather than kept: it was a second
-encoding of a rule that already exists, and an earlier revision of this
-docblock records a *third* (`chart-of-accounts.default_tax_profile`) deleted
-for having one writer and zero readers.
-
-```ts
-const TAXABLE_COA_TO_TAX_NAME: Readonly<Record<number, string | null>>;
-```
-
 ### `TAXABLE_REVENUE_COAS`
 
 The revenue COAs that sales/rental tax is actually owed on — 4000 Rental
@@ -32446,8 +32385,7 @@ for line taxability until the owner ruling of 2026-08-20 — *"an item's tax is
 item type × jurisdiction, it has nothing to do with coa"* — and both gates
 built on it (the engine's {@link isTaxableCoa} and api-cloudrun's
 `resolveXeroTaxType`) were removed together. What it records now is which
-accounts CFS's Xero history taxed, which is what {@link TAXABLE_COA_TO_TAX_NAME}
-and the restatement tools need.
+accounts CFS's Xero history taxed.
 
 It existed because the set previously lived only on the *Xero push* side and
 nowhere in the engine computing CFS's own totals. So CFS taxed lines it then
@@ -32487,14 +32425,12 @@ A tax RATE in the pricing shape — what `pricingTaxesOf` projects the
 It is structural, not a stored document: the `taxes` collection it was once a
 subset of is retired (api-cloudrun#993). Only `uid`/`name`/`rate`/`type` are
 required — those are what the pricing helpers read. Everything else is
-resolution metadata that only the as-of resolver in `@cfs/core/utils/taxes`
-(`findTaxAt`) and the Xero boundary touch, and it stays optional so partial `Tax`
-literals in tests and callers keep type-checking.
+resolution metadata that only the Xero boundary touches, and it stays optional
+so partial `Tax` literals in tests and callers keep type-checking.
 
 ⚠️ **`applied_from`/`applied_to` stay optional HERE while being required on
-`TaxRate`.** A missing bound reads as OPEN, so every version brackets every
-instant and {@link findTaxAt} throws `Tax catalog drift` on the pricing path.
-A partial literal in a test is allowed to be wrong that way; a stored rate is
+`TaxRate`.** The class resolver reads windows off `TaxRate`, never off this
+shape; a partial literal in a test is allowed to omit them, a stored rate is
 not.
 
 ```ts
@@ -32613,14 +32549,6 @@ interface UnreviewedTaxWarning {
   as_of: string;
 }
 ```
-
-### `assertCoaTaxMapCoversCore(): void`
-
-Fail closed if the taxable-COA set has grown past {@link TAXABLE_COA_TO_TAX_NAME}.
-
-A taxable COA with no entry there would be silently left **untaxed**, which is
-a money defect that looks like a clean run. Throws rather than exits so a
-script, a test and a client can all call it.
 
 ### `assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): UnreviewedTaxWarning[]`
 
@@ -32762,7 +32690,7 @@ The two callers reach for different clocks — api-cloudrun's
 fallback resolves identically on either side.
 
 ⚠️ **Not the banned business-date anti-pattern.** `asOf` is a resolution
-instant handed to {@link findTaxAt}, never written to a document. Emitting
+instant handed to the class resolver, never written to a document. Emitting
 Chicago offset form here would make the server and the client resolve
 differently for an instant near midnight, which is the failure this note
 exists to prevent.
@@ -32847,12 +32775,6 @@ rung draws.
 With exactly one destination on the document there is no other answer to
 pick, so nothing is being inferred from position.
 
-### `findTaxAt(taxes: Tax[], name: string, asOf: string): Tax | null`
-
-Pick the Tax whose applied window contains `asOf`, matched by exact `name`.
-Returns null when nothing matches (e.g. `asOf` before any historical doc).
-Throws on catalog drift (two same-name docs bracket the same instant).
-
 ### `isTaxableCoa(coaRevenue: number | null | undefined): boolean`
 
 Was a line with this revenue COA subject to tax **under the retired
@@ -32868,9 +32790,8 @@ stood as a phantom `amount_due` on 19 invoices / $2,741.78.
 
 What it is FOR now: explaining the corpus the gate shaped. The invoice-sync
 `coa_untaxes` arm (`@cfs/core/utils/invoices`) reads it to say why a frozen
-invoice line carries no tax while its order line does, and api-cloudrun's
-`repair-invoice-restate-from-xero.ts` reads it to restate historical lines the
-way Xero billed them. Both are statements about documents already written.
+invoice line carries no tax while its order line does. That is a statement
+about documents already written.
 
 **`null`/`undefined` meant UNKNOWN, and unknown was TAXABLE** — the opposite
 of the Xero push's `![4000, 4200, 4210].includes(coa ?? 0)`. That asymmetry
@@ -32979,19 +32900,6 @@ it tells Xero not to charge).
 its lines resolve untaxed — but a `replacement` on an out-of-state
 destination still sources to the origin and IS taxed.
 
-### `taxAppliedWindow(tax: Tax): typeLiteral`
-
-The APPLIED window of a tax version — the one place the bracket checks below
-read the bounds from.
-
-⚠️ **A missing bound is read as OPEN**, and that is dangerous rather than
-merely permissive: an unbounded version brackets every instant, so two
-versions of one name bracket the same instant and {@link findTaxAt} throws
-`Tax catalog drift` — on the pricing path, out of a CRMS Cloud Task handler,
-which retries forever. `TaxRateSchema` requires both bounds precisely so a
-stored rate cannot reach that state; the `| null` here covers the partial
-literals the structural `Tax` admits.
-
 ## `@cfs/core/utils/tax-classes`
 
 ### `ClassAppliedRate`
@@ -33024,7 +32932,7 @@ interface ClassTaxConsidered {
 Why each code in the class did or did not contribute a rate — the explain
 output the manager renders on a product or line, and the audits reuse.
 
-- `matched` — a rate brackets `asOf` (or the document's frozen rate).
+- `matched` — a rate brackets `asOf`.
 - `expired` — nothing brackets `asOf` but a version closed before it; priced
   on that version and reported, never refused (`UnreviewedTaxWarning`'s rule).
 - `wrong_jurisdiction` — the code levies somewhere else. The normal case for
@@ -33146,14 +33054,14 @@ Rate uids are the legacy `taxes` uids (the migration keeps them), so every
 stored ref still resolves. `name` is the CODE's: the rate carries none, and a
 line's `PriceModifier.name` has always been the tax's name.
 
-### `resolveClassTaxes(uidTaxClass: string | null, jurisdiction: string, exempt: boolean, asOf: string, catalog: TaxCatalog, frozenRateUids?: ReadonlySet<string>): ClassTaxResolution`
+### `resolveClassTaxes(uidTaxClass: string | null, jurisdiction: string, exempt: boolean, asOf: string, catalog: TaxCatalog): ClassTaxResolution`
 
 **Stage 3 for one line**: the class's codes, filtered to the jurisdiction
 stage 2 resolved, each taken at the rate live at `asOf`.
 
 ```
 codes = class.uid_tax_codes where code.jurisdiction === jurisdiction
-rate  = frozen rate of that code  ??  rate bracketing asOf  ??  most recently CLOSED rate (expired)
+rate  = rate bracketing asOf  ??  most recently CLOSED rate (expired)
 applied = exempt ? [] : base
 ```
 
@@ -33166,11 +33074,9 @@ applied = exempt ? [] : base
   must refuse (a writer) refuses on `validateTaxSetup` or on the missing
   stamp, not on a pricing throw — the tax-review outage recorded in
   `utils/taxes.ts` is the reason pricing never throws for configuration.
-- **`frozenRateUids`**: a frozen document's stored `price.taxes[].uid`s. Where
-  one of them is a version of a matched code it wins over today's version, so
-  a completed order keeps the rate it was billed at. It replaces the legacy
-  name-keyed `frozenVersions`: a line stores the RATE uid, and a rate knows
-  its code, so no name is needed.
+- **No freeze.** A document's `asOf` and the rates' `[applied_from, applied_to)`
+  windows decide the rate, for a completed or issued document as for a live
+  one (owner, 2026-09-15). The stored-version freeze is deleted.
 
 ⚠️ **"Most recent" means most recently CLOSED at or before `asOf`**, the same
 rule as `mostRecentClosedTax`: a document inside an interior gap gets the

@@ -209,7 +209,7 @@ Deno.test("resolveClassTaxes: the lapsed-review fall-forward is reported as expi
   assertEquals(r.applied.map((a) => [a.rate.uid, a.expired]), [["VEW4Ivy7VNqgxFA5eJw6", true]]);
 });
 
-// ── resolveClassTaxes: explain, frozen, exempt ───────────────────────────
+// ── resolveClassTaxes: explain, windows, exempt ──────────────────────────
 
 Deno.test("resolveClassTaxes explains every code in the class, in class order", () => {
   const r = resolveClassTaxes(CLASS_UID.bottled, "frankfort", false, "2026-09-13T00:00:00.000-05:00", CATALOG);
@@ -231,18 +231,11 @@ Deno.test("resolveClassTaxes: a Chicago bottle line carries sales tax AND the le
   assertEquals(sorted(r.applied.map((a) => a.code.name)), ["Chicago Bottled Water Tax", "Chicago Sales Tax"]);
 });
 
-Deno.test("resolveClassTaxes: a frozen document keeps the rate it was billed at", () => {
+Deno.test("resolveClassTaxes: the rate is the one whose window holds asOf — no stored version is consulted", () => {
   const today = resolveClassTaxes(CLASS_UID.sale, "chicago", false, "2026-09-13T00:00:00.000-05:00", CATALOG);
   assertEquals(today.applied.map((a) => a.rate.rate), [10.5]);
-  const frozen = resolveClassTaxes(
-    CLASS_UID.sale,
-    "chicago",
-    false,
-    "2026-09-13T00:00:00.000-05:00",
-    CATALOG,
-    new Set(["NJc430kShJ0GRj7uvaQZ"]),
-  );
-  assertEquals(frozen.applied.map((a) => a.rate.rate), [10.25]);
+  const before = resolveClassTaxes(CLASS_UID.sale, "chicago", false, "2026-08-01T00:00:00.000-05:00", CATALOG);
+  assertEquals(before.applied.map((a) => a.rate.uid), ["NJc430kShJ0GRj7uvaQZ"]);
 });
 
 Deno.test("resolveClassTaxes: exempt keeps base and empties applied", () => {

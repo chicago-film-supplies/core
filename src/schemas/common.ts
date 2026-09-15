@@ -616,9 +616,8 @@ export const StockMethodEnum: z.ZodType<StockMethodType> = z.enum(STOCK_METHODS)
  * distinct legal reasons.
  *
  * ⚠️ **`paxton` stays a member although CFS no longer delivers there.** Prod
- * holds one `complete` order and one invoice under it, both embedding the
- * Paxton tax uid, and `calculateItemTax` throws `Unknown tax uid` on a missing
- * one. The member is what keeps that history re-derivable; it is removed from
+ * holds one `complete` order and one invoice under it, and Paxton's codes and
+ * rates stay in the catalog. The member is what keeps that history re-derivable; it is removed from
  * the manager picker and from the derivation rule, not from the vocabulary.
  *
  * ## `no_nexus` is a sourcing ANSWER, not a place — and it is why `null` is free

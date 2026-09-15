@@ -1,12 +1,10 @@
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
 import {
-  assertCoaTaxMapCoversCore,
   assignLineTaxes,
   deriveOrderTaxAsOf,
   destinationsForItems,
   type DocumentTaxContext,
-  findTaxAt,
   resolveLineTax,
   type TaxDestination,
 } from "../src/utils/taxes.ts";
@@ -113,30 +111,6 @@ function makeItem(
   } as LineItem;
 }
 
-// ── findTaxAt ────────────────────────────────────────────────────
-
-Deno.test("findTaxAt resolves by name within the validity window", () => {
-  const tax = findTaxAt(CATALOG, "Frankfort Sales Tax", AS_OF);
-  assertEquals(tax?.uid, "frankfort-tax");
-});
-
-Deno.test("findTaxAt returns null when asOf precedes applied_from", () => {
-  assertEquals(findTaxAt(CATALOG, "Frankfort Sales Tax", "2025-06-01T00:00:00.000-05:00"), null);
-});
-
-Deno.test("findTaxAt treats null applied_to as open-ended", () => {
-  const tax = findTaxAt(CATALOG, "Frankfort Sales Tax", "2030-01-01T00:00:00.000-06:00");
-  assertEquals(tax?.uid, "frankfort-tax");
-});
-
-Deno.test("findTaxAt throws on catalog drift (two same-name docs bracket asOf)", () => {
-  const drifted: Tax[] = [
-    ...CATALOG,
-    { uid: "frankfort-dupe", name: "Frankfort Sales Tax", rate: 8, type: "percent", applied_from: "2026-01-01T00:00:00.000-06:00", applied_to: null },
-  ];
-  assertThrows(() => findTaxAt(drifted, "Frankfort Sales Tax", AS_OF), Error, "drift");
-});
-
 // ── The pricing rule: item TYPE × JURISDICTION, per LINE ─────────
 //
 // These replace ~40 arms that tested the `tax_profile` machinery
@@ -144,7 +118,7 @@ Deno.test("findTaxAt throws on catalog drift (two same-name docs bracket asOf)",
 // here against the rule that replaced them — exemption's stickiness, the
 // replacement carve-out, the COA gate, the reprice, the shape-agnostic price
 // rebuild — plus the three the profile shape could not express at all: a mixed
-// document, a line-level `taxed_as`, and a frozen rate version.
+// document and a line-level class override.
 
 // LineItem.price is a union (priceable vs transaction-fee); narrow for asserts.
 const px = (it: LineItem) =>
@@ -662,46 +636,6 @@ Deno.test("resolveLineTax reports the LEVEL that answered, for the order form", 
   );
 });
 
-// ── The rate VERSION is a separate question ──────────────────────
-
-Deno.test("🔴 a frozen document keeps the rate VERSION it already stores", () => {
-  // The rule picks a TAX; `frozenVersions` picks which version of it. A
-  // completed order re-priced on a later CRMS event must keep the rate it was
-  // billed at — and `applied_from` alone does not give that, because it is set
-  // to the CUTOVER, which precedes a future delivery date.
-  const versioned: LegacyTax[] = [
-    ...CATALOG,
-    {
-      uid: "chi-rental-tax-old",
-      name: "Chicago Rental Tax",
-      rate: 11,
-      type: "percent",
-      jurisdiction: "chicago",
-      item_types: ["rental"],
-      applied_from: "2025-01-01T00:00:00.000-06:00",
-      applied_to: "2026-01-01T00:00:00.000-06:00",
-    },
-  ];
-  const items = [makeItem()];
-  materialize(items, ctx({
-    taxes: versioned,
-    frozenVersions: new Map([["Chicago Rental Tax", "chi-rental-tax-old"]]),
-  }));
-  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax-old"]);
-  assertEquals(px(items[0]).taxes[0].rate, 11);
-});
-
-Deno.test("…and a frozen NAME the document never carried resolves at asOf", () => {
-  // Freezing cannot mean "keep a version that does not exist". This is the
-  // jurisdiction-correction case: the rule moves the line to a tax the frozen
-  // map has no entry for.
-  const items = [makeItem({ type: "sale" }, { taxes: [] })];
-  materialize(items, ctx({
-    frozenVersions: new Map([["Chicago Rental Tax", "chi-rental-tax"]]),
-  }));
-  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-sales-tax"]);
-});
-
 // ── assign vs materialize ────────────────────────────────────────
 
 Deno.test("assignLineTaxes rewrites the tax WITHOUT repricing the subtotal", () => {
@@ -816,21 +750,6 @@ Deno.test("deriveOrderTaxAsOf: falls back to the INJECTED now, never an ambient 
   assertEquals(deriveOrderTaxAsOf([], NOW), NOW);
   assertEquals(deriveOrderTaxAsOf(undefined, NOW), NOW);
   assertEquals(deriveOrderTaxAsOf([orderDest("IL", null), null, undefined], NOW), NOW);
-});
-
-// ── TAXABLE_COA_TO_TAX_NAME — the historical oracle ──────────────
-//
-// ⚠️ Not a rule any WRITER consults. The live default is
-// `findTaxFor(catalog, jurisdiction, taxed_as ?? type, asOf)`; this table
-// survives for the two restatement tools that reconstruct what a historical
-// line carried, where a COA key is the correct oracle. Its type-keyed
-// companion (`defaultTaxNameForLine` / `DEFAULT_TAX_NAME_BY_TYPE`) was DELETED
-// rather than kept — a second encoding of a rule that already exists.
-
-Deno.test("assertCoaTaxMapCoversCore: the name map covers every taxable COA", () => {
-  // Fails CLOSED. A taxable COA with no entry would be silently left untaxed,
-  // which is a money defect that looks like a clean run.
-  assertCoaTaxMapCoversCore();
 });
 
 // ── 🔴 An UNREVIEWED cell prices forward and reports it ──────────
@@ -948,19 +867,6 @@ Deno.test("a date BEFORE the first version is untaxed, not unreviewed", () => {
     ctx({ destinations: [at("Frankfort")], asOf: "2025-06-01T12:00:00.000-05:00" }),
   );
   assertEquals(px(items[0]).taxes, []);
-  assertEquals(warnings, []);
-});
-
-Deno.test("🔴 a FROZEN document keeps its stored version and warns NOT AT ALL", () => {
-  // The freeze outranks the fall-forward: what a completed order already stores
-  // beats what the catalog would infer for it, and there is nothing for an
-  // operator to act on.
-  const items = [makeItem()];
-  const warnings = assignLineTaxes(items, ctx({
-    taxes: LAPSED,
-    frozenVersions: new Map([["Chicago Rental Tax", "chi-rental-tax"]]),
-  }));
-  assertEquals(px(items[0]).taxes.map((t) => t.uid), ["chi-rental-tax"]);
   assertEquals(warnings, []);
 });
 

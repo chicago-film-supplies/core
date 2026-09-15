@@ -1000,7 +1000,8 @@ const TAX_EXPLAINABLE_FIELDS = new Set(["price.taxes", "price.taxes_base", "pric
  * Strip the differences that are **explained** — leaving only the ones an
  * operator should act on (api-cloudrun#481).
  *
- * The sync badge and `api-cloudrun/scripts/audit-draft-invoice-mirror.ts` were two
+ * The sync badge and api-cloudrun's `audit-draft-invoice-mirror` script (deleted
+ * 2026-09-15) were two
  * comparators kept in agreement by hand, and they disagreed by construction: the
  * audit compared money and then *explained* the difference through tested arms,
  * while the badge had none and so reported every one of them. On prod that was
@@ -1062,8 +1063,8 @@ export interface InvoiceSyncExplanation {
  * {@link unexplainedInvoiceItemDifferences}, but it also says WHICH arm fired.
  *
  * The residue alone is what the badge needs; a diagnostic needs the reason, and
- * `api-cloudrun/scripts/audit-draft-invoice-mirror.ts` reports one bucket per arm. Returning
- * the arm is what lets that audit be a pure CONSUMER of this function rather
+ * api-cloudrun's deleted `audit-draft-invoice-mirror` script reported one bucket per arm. Returning
+ * the arm is what let that audit be a pure CONSUMER of this function rather
  * than a second implementation of it — which is the defect api-cloudrun#481 is
  * named after, and it had already produced two comparators that disagreed about
  * 8,792 prod lines.
