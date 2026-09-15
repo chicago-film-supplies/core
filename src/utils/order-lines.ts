@@ -21,10 +21,9 @@
  * ## What these builders do NOT do: price
  *
  * The returned lines carry `subtotal`/`subtotal_discounted`/`total` of `0`, and
- * their `price.taxes` are bare `{ uid }` references copied from the catalog.
- * Run {@link https://jsr.io/@cfs/core/doc/utils/orders | calculateItemPrice}
- * against the live tax docs before persisting — that resolves each uid to
- * name/rate/type and computes the amounts. Pricing is not folded in here
+ * an empty `price.taxes`: tax is resolved from the line's `uid_tax_class`
+ * (stamped from the hit) when the document is priced — `priceDocument` — never
+ * copied from the catalog (api-cloudrun#993). Pricing is not folded in here
  * because the custom-line builders receive the *line's* tax set rather than the
  * tax catalog `calculateItemPrice` needs, so a single signature cannot express
  * both.
@@ -48,7 +47,6 @@ import type {
   InvoiceDocLineItemType,
   OrderDocLineItemType,
   PriceFormulaType,
-  PriceModifierType,
   ProductTypeType,
   RateType,
   StockMethodType,
@@ -81,25 +79,6 @@ void _productTypeParity;
 type _ComponentTypesAreLineTypes = ComponentTypeType extends DocLineItemTypeType ? true : never;
 const _componentTypeParity: _ComponentTypesAreLineTypes = true;
 void _componentTypeParity;
-
-/**
- * The catalog's tax references, in the shape an item price carries them BEFORE
- * pricing: bare `{ uid }`.
- *
- * `OrderDocItemPrice.taxes` declares `PriceModifierType[]` (uid + name + rate +
- * type + amount_cents), and only `calculateItemPrice` can fill the other four in — it
- * needs the live tax docs, which a catalog row does not carry. So this one field
- * is genuinely looser than the declared type, and narrowing exactly it is the
- * honest statement of that gap.
- */
-function unpricedTaxRefs(
-  taxes: ReadonlyArray<{ uid?: string }> | undefined,
-): PriceModifierType[] {
-  return (taxes ?? [])
-    .map((t) => t.uid)
-    .filter((uid): uid is string => Boolean(uid))
-    .map((uid) => ({ uid })) as PriceModifierType[];
-}
 
 /**
  * Shared options for building order line items from a Typesense
@@ -179,7 +158,8 @@ export function buildOrderLineFromProduct(
       discount: null,
       subtotal_cents: 0,
       subtotal_discounted_cents: 0,
-      taxes: unpricedTaxRefs(doc.price?.taxes),
+      // Empty: the line's tax is its class's, resolved at pricing (api-cloudrun#993).
+      taxes: [],
       total_cents: 0,
     },
   };
@@ -416,7 +396,7 @@ export function buildOrderComponentLines(
           discount: null,
           subtotal_cents: 0,
           subtotal_discounted_cents: 0,
-          taxes: unpricedTaxRefs(comp.price?.taxes),
+          taxes: [],
           total_cents: 0,
         },
       });

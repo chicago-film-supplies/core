@@ -501,7 +501,7 @@
         {
           "kind": "variable",
           "name": "COMPONENT_PRICE_KEYS",
-          "declaration": "const COMPONENT_PRICE_KEYS: \"base_cents\" | \"base_percent\" | \"replacement_cents\" | \"coa_revenue\" | \"taxes\" | \"formula\" | \"discountable\"[];",
+          "declaration": "const COMPONENT_PRICE_KEYS: \"base_cents\" | \"base_percent\" | \"replacement_cents\" | \"coa_revenue\" | \"formula\" | \"discountable\"[];",
           "doc": "The price keys a parent may deliberately author on its own `components` entry,\noverriding the component product's catalog price.\n\n⚠️ **Plain literals, no spread** — core#43 is the standing case where JSR's\nnpm `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate\ncould see it."
         },
         {
@@ -3303,7 +3303,7 @@
         {
           "kind": "interface",
           "name": "ProductPrice",
-          "declaration": "interface ProductPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  coa_revenue: COARevenueType;\n  taxes?: TaxRefType[];\n  formula: PriceFormulaType;\n  discountable: boolean;\n}",
+          "declaration": "interface ProductPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  coa_revenue: COARevenueType;\n  formula: PriceFormulaType;\n  discountable: boolean;\n}",
           "doc": "Pricing details for a product."
         },
         {
@@ -8150,7 +8150,7 @@
         {
           "kind": "variable",
           "name": "COMPONENT_PRICE_KEYS",
-          "declaration": "const COMPONENT_PRICE_KEYS: \"base_cents\" | \"base_percent\" | \"replacement_cents\" | \"coa_revenue\" | \"taxes\" | \"formula\" | \"discountable\"[];",
+          "declaration": "const COMPONENT_PRICE_KEYS: \"base_cents\" | \"base_percent\" | \"replacement_cents\" | \"coa_revenue\" | \"formula\" | \"discountable\"[];",
           "doc": "The price keys a parent may deliberately author on its own `components` entry,\noverriding the component product's catalog price.\n\n⚠️ **Plain literals, no spread** — core#43 is the standing case where JSR's\nnpm `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate\ncould see it."
         },
         {
@@ -8210,7 +8210,7 @@
         {
           "kind": "interface",
           "name": "ProductPrice",
-          "declaration": "interface ProductPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  coa_revenue: COARevenueType;\n  taxes?: TaxRefType[];\n  formula: PriceFormulaType;\n  discountable: boolean;\n}",
+          "declaration": "interface ProductPrice {\n  base_cents: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  coa_revenue: COARevenueType;\n  formula: PriceFormulaType;\n  discountable: boolean;\n}",
           "doc": "Pricing details for a product."
         },
         {
@@ -13451,7 +13451,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/order-lines",
-      "moduleDoc": "The order/invoice line builders — the one answer to *\"given catalog product P\nat quantity N, which line items does it produce, at what quantities?\"*\n\n```ts\nimport { buildOrderLineFromProduct, buildOrderComponentLines } from \"@cfs/core/utils/order-lines\";\n\nconst line = buildOrderLineFromProduct(productDoc, { quantity: 2, chargeDays: 5, uidOrder });\nconst kids = buildOrderComponentLines(productDoc, { quantity: 2, chargeDays: 5, uidOrder });\n```\n\nPure and db-free — the input is a Typesense `ProductDocument` the caller\nalready holds, and the output is a plain array. It lives here for the same\nreason `@cfs/core/utils/stock` does: it is shared verbatim so two\nconsumers **cannot disagree**. There are three — the manager's staging\npopover, the manager's order/invoice stores, and the public webapp's order\ndrafts — across two repos. A second copy of the component expansion is a\nsecond answer to \"what does this kit bring\", and the drafts a customer creates\nwould then disagree with the operator's view of the same order.\n\n## What these builders do NOT do: price\n\nThe returned lines carry `subtotal`/`subtotal_discounted`/`total` of `0`, and\ntheir `price.taxes` are bare `{ uid }` references copied from the catalog.\nRun {@link https://jsr.io/@cfs/core/doc/utils/orders | calculateItemPrice}\nagainst the live tax docs before persisting — that resolves each uid to\nname/rate/type and computes the amounts. Pricing is not folded in here\nbecause the custom-line builders receive the *line's* tax set rather than the\ntax catalog `calculateItemPrice` needs, so a single signature cannot express\nboth.\n\n## The catalog `path` convention is the INVERSE of the doc-item one\n\nA `product.components[]` row's `path` **excludes** itself and starts at the\nroot product: a direct child of product `A` has `path: [\"A\"]`, a grandchild\nhas `path: [\"A\", \"child\"]`. A doc-item `path` **includes** itself, so its\nparent is `path.at(-2)`. {@link buildOrderComponentLines} is the seam where one\nbecomes the other, and it derives every doc path from the **resolved parent**\nrather than concatenating the catalog chain — the same \"one author, parent-\nderived\" rule `computeItemPaths` follows, and for the same reason: a catalog\nrow whose chain contradicts its position must not be able to write a path.",
+      "moduleDoc": "The order/invoice line builders — the one answer to *\"given catalog product P\nat quantity N, which line items does it produce, at what quantities?\"*\n\n```ts\nimport { buildOrderLineFromProduct, buildOrderComponentLines } from \"@cfs/core/utils/order-lines\";\n\nconst line = buildOrderLineFromProduct(productDoc, { quantity: 2, chargeDays: 5, uidOrder });\nconst kids = buildOrderComponentLines(productDoc, { quantity: 2, chargeDays: 5, uidOrder });\n```\n\nPure and db-free — the input is a Typesense `ProductDocument` the caller\nalready holds, and the output is a plain array. It lives here for the same\nreason `@cfs/core/utils/stock` does: it is shared verbatim so two\nconsumers **cannot disagree**. There are three — the manager's staging\npopover, the manager's order/invoice stores, and the public webapp's order\ndrafts — across two repos. A second copy of the component expansion is a\nsecond answer to \"what does this kit bring\", and the drafts a customer creates\nwould then disagree with the operator's view of the same order.\n\n## What these builders do NOT do: price\n\nThe returned lines carry `subtotal`/`subtotal_discounted`/`total` of `0`, and\nan empty `price.taxes`: tax is resolved from the line's `uid_tax_class`\n(stamped from the hit) when the document is priced — `priceDocument` — never\ncopied from the catalog (api-cloudrun#993). Pricing is not folded in here\nbecause the custom-line builders receive the *line's* tax set rather than the\ntax catalog `calculateItemPrice` needs, so a single signature cannot express\nboth.\n\n## The catalog `path` convention is the INVERSE of the doc-item one\n\nA `product.components[]` row's `path` **excludes** itself and starts at the\nroot product: a direct child of product `A` has `path: [\"A\"]`, a grandchild\nhas `path: [\"A\", \"child\"]`. A doc-item `path` **includes** itself, so its\nparent is `path.at(-2)`. {@link buildOrderComponentLines} is the seam where one\nbecomes the other, and it derives every doc path from the **resolved parent**\nrather than concatenating the catalog chain — the same \"one author, parent-\nderived\" rule `computeItemPaths` follows, and for the same reason: a catalog\nrow whose chain contradicts its position must not be able to write a path.",
       "symbols": [
         {
           "kind": "interface",

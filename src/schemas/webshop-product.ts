@@ -18,7 +18,6 @@ import {
   UidNameRef,
   type UidNameRefType,
 } from "./common.ts";
-import { TaxRef, type TaxRefType } from "./order.ts";
 
 /** A component product within a webshop parent product. */
 export interface WebshopProductComponent {
@@ -37,8 +36,6 @@ export interface WebshopProductComponent {
   price: {
     base_cents: number;
     replacement_cents?: number | null;
-    /** @deprecated api-cloudrun#993 — optional until the purge, then deleted. */
-    taxes?: TaxRefType[];
     formula: ComponentPriceFormulaType;
     discountable: boolean;
   };
@@ -119,8 +116,6 @@ export interface WebshopProduct {
   price: {
     base_cents: number;
     replacement_cents?: number | null;
-    /** @deprecated api-cloudrun#993 — optional until the purge, then deleted. */
-    taxes?: TaxRefType[];
     formula: ComponentPriceFormulaType;
     discountable: boolean;
   };
@@ -178,7 +173,6 @@ const WebshopComponentSchema: z.ZodType<WebshopProductComponent> = z.strictObjec
   price: z.strictObject({
     base_cents: z.int(),
     replacement_cents: z.int().nullable().optional(),
-    taxes: z.array(TaxRef).optional().meta({ label: "Tax" }),
     formula: ComponentPriceFormulaEnum,
     discountable: z.boolean(),
   }),
@@ -219,7 +213,6 @@ export const WebshopProductSchema: z.ZodType<WebshopProduct> = z.strictObject({
   price: z.strictObject({
     base_cents: z.int(),
     replacement_cents: z.int().nullable().optional(),
-    taxes: z.array(TaxRef).optional().meta({ label: "Tax" }),
     formula: ComponentPriceFormulaEnum,
     discountable: z.boolean(),
   }),

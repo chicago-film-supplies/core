@@ -1133,7 +1133,7 @@ npm `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate
 could see it.
 
 ```ts
-const COMPONENT_PRICE_KEYS: "base_cents" | "base_percent" | "replacement_cents" | "coa_revenue" | "taxes" | "formula" | "discountable"[];
+const COMPONENT_PRICE_KEYS: "base_cents" | "base_percent" | "replacement_cents" | "coa_revenue" | "formula" | "discountable"[];
 ```
 
 ### `CREDIT_NOTE_REASONS`
@@ -7550,7 +7550,6 @@ interface ProductPrice {
   base_percent?: number | null;
   replacement_cents?: number | null;
   coa_revenue: COARevenueType;
-  taxes?: TaxRefType[];
   formula: PriceFormulaType;
   discountable: boolean;
 }
@@ -17959,7 +17958,7 @@ npm `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate
 could see it.
 
 ```ts
-const COMPONENT_PRICE_KEYS: "base_cents" | "base_percent" | "replacement_cents" | "coa_revenue" | "taxes" | "formula" | "discountable"[];
+const COMPONENT_PRICE_KEYS: "base_cents" | "base_percent" | "replacement_cents" | "coa_revenue" | "formula" | "discountable"[];
 ```
 
 ### `ComponentPriceKeyEnum`
@@ -18166,7 +18165,6 @@ interface ProductPrice {
   base_percent?: number | null;
   replacement_cents?: number | null;
   coa_revenue: COARevenueType;
-  taxes?: TaxRefType[];
   formula: PriceFormulaType;
   discountable: boolean;
 }
@@ -29262,10 +29260,9 @@ would then disagree with the operator's view of the same order.
 ## What these builders do NOT do: price
 
 The returned lines carry `subtotal`/`subtotal_discounted`/`total` of `0`, and
-their `price.taxes` are bare `{ uid }` references copied from the catalog.
-Run {@link https://jsr.io/@cfs/core/doc/utils/orders | calculateItemPrice}
-against the live tax docs before persisting — that resolves each uid to
-name/rate/type and computes the amounts. Pricing is not folded in here
+an empty `price.taxes`: tax is resolved from the line's `uid_tax_class`
+(stamped from the hit) when the document is priced — `priceDocument` — never
+copied from the catalog (api-cloudrun#993). Pricing is not folded in here
 because the custom-line builders receive the *line's* tax set rather than the
 tax catalog `calculateItemPrice` needs, so a single signature cannot express
 both.

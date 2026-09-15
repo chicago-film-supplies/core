@@ -409,13 +409,7 @@ Deno.test("T14: the discriminated rate columns are the ones that exist", () => {
     "order:items.price.taxes_base.rate",
     "order:totals.taxes.rate",
     "order:totals.transaction_fees.rate",
-    "product:component_of.price.taxes.rate",
-    "product:components.price.taxes.rate",
-    "product:price.taxes.rate",
     "taxes-rates:rate",
-    "webshop-product:component_of.price.taxes.rate",
-    "webshop-product:components.price.taxes.rate",
-    "webshop-product:price.taxes.rate",
   ]);
 });
 

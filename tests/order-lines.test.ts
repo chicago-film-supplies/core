@@ -28,7 +28,7 @@ function comp(
     stock_method: "bulk",
     inclusion_type: "default",
     zero_priced: false,
-    price: { base_cents: 1000, formula: "five_day_week", taxes: [{ uid: "tax1" }] },
+    price: { base_cents: 1000, formula: "five_day_week" },
     ...over,
   };
 }
@@ -43,7 +43,7 @@ function product(over: Partial<ProductDocument> = {}): ProductDocument {
     active: true,
     component_only: false,
     updated_at: 0,
-    price: { base_cents: 10000, replacement_cents: 50000, formula: "five_day_week", taxes: [{ uid: "tax1" }] },
+    price: { base_cents: 10000, replacement_cents: 50000, formula: "five_day_week" },
     ...over,
   };
 }
@@ -65,11 +65,10 @@ function catalogConcatPath(
 // output against the stored schema uses those.
 const REAL_PRODUCT_UID = "Pr0ductAAAAAAAAAAAAA";
 const REAL_ORDER_UID = "Ord3rAAAAAAAAAAAAAAA";
-const REAL_TAX_UID = "Tax1AAAAAAAAAAAAAAAA";
 
 Deno.test("buildOrderLineFromProduct emits a schema-valid line, ancestry-only path", () => {
   const line = buildOrderLineFromProduct(
-    product({ uid: REAL_PRODUCT_UID, price: { base_cents: 10000, replacement_cents: 50000, formula: "five_day_week", taxes: [{ uid: REAL_TAX_UID }] } }),
+    product({ uid: REAL_PRODUCT_UID, price: { base_cents: 10000, replacement_cents: 50000, formula: "five_day_week" } }),
     { ...OPTS, quantity: 3, uidOrder: REAL_ORDER_UID },
   );
 
@@ -87,17 +86,14 @@ Deno.test("buildOrderLineFromProduct emits a schema-valid line, ancestry-only pa
   assertEquals(line.price.base_cents, 10000);
   assertEquals(line.price.replacement_cents, 50000);
   assertEquals(line.price.chargeable_days, 5);
-  // Money fields are zero and taxes are bare uid refs until `calculateItemPrice`
-  // runs — the documented contract of this module.
+  // Money fields are zero and taxes empty until the document is priced — the
+  // documented contract of this module (api-cloudrun#993).
   assertEquals(line.price.subtotal_cents, 0);
   assertEquals(line.price.total_cents, 0);
-  assertEquals(line.price.taxes, [{ uid: REAL_TAX_UID }] as typeof line.price.taxes);
+  assertEquals(line.price.taxes, []);
 
-  // Structurally a line item, modulo the unpriced taxes the contract allows.
-  const parsed = OrderDocLineItem.safeParse({
-    ...line,
-    price: { ...line.price, taxes: [{ uid: REAL_TAX_UID, name: "T", rate: 0, type: "percent", amount_cents: 0 }] },
-  });
+  // Structurally a line item as built.
+  const parsed = OrderDocLineItem.safeParse(line);
   assert(parsed.success, JSON.stringify(parsed.error?.issues));
 });
 
@@ -128,7 +124,7 @@ Deno.test("buildOrderLineFromProduct carries a percent_of_total product's rate a
       uid: REAL_PRODUCT_UID,
       type: "transaction_fee",
       stock_method: "none",
-      price: { base_cents: 0, base_percent: 4, formula: "percent_of_total", taxes: [] },
+      price: { base_cents: 0, base_percent: 4, formula: "percent_of_total" },
     }),
     { ...OPTS, uidOrder: REAL_ORDER_UID },
   );

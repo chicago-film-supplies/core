@@ -199,7 +199,7 @@ Deno.test("getInitialValues — product price has correct structure", () => {
   const price = getInitialValues(ProductSchema).price;
   assertEquals(price?.base_cents, 0);
   assertEquals(price?.formula, "five_day_week");
-  assertEquals(price?.taxes, []);
+  assertEquals("taxes" in (price ?? {}), false);
   assertEquals(price?.discountable, true);
   // COA revenue codes are numeric — JS sorts object keys numerically, so first is 2210
   assertEquals(price?.coa_revenue, 2210);

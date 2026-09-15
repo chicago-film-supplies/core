@@ -9,7 +9,7 @@ const validWebshopProduct = {
   uid: "testwp10000000000000",
   name: "Canon C300",
   active: true,
-  price: { ...(base.price as Record<string, unknown>), base_cents: 50000, taxes: [{ uid: "testchirentaltax0000", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
+  price: { ...(base.price as Record<string, unknown>), base_cents: 50000, discountable: true },
   webshop: { available: true, description: "Great camera" },
   created_at: mockTimestamp,
   updated_at: mockTimestamp,
@@ -76,7 +76,7 @@ Deno.test("WebshopProductSchema rejects percent_of_total on a component's price"
     name: "Battery",
     type: "rental",
     quantity: 1,
-    price: { base_cents: 0, taxes: [], formula: "percent_of_total", discountable: false },
+    price: { base_cents: 0, formula: "percent_of_total", discountable: false },
   };
   const doc = { ...validWebshopProduct, components: [component] };
   assertEquals(WebshopProductSchema.safeParse(doc).success, false);
@@ -93,7 +93,7 @@ Deno.test("WebshopProductSchema still accepts a component priced five_day_week",
     name: "Battery",
     type: "rental",
     quantity: 1,
-    price: { base_cents: 0, taxes: [], formula: "five_day_week", discountable: false },
+    price: { base_cents: 0, formula: "five_day_week", discountable: false },
   };
   const doc = { ...validWebshopProduct, components: [component] };
   assertEquals(WebshopProductSchema.safeParse(doc).success, true);
@@ -117,9 +117,9 @@ for (const path of ["alternates", "components", "component_of"] as const) {
   });
 }
 
-Deno.test("WebshopProductSchema accepts a price with no taxes (api-cloudrun#993)", () => {
-  const { taxes: _omit, ...price } = validWebshopProduct.price as Record<string, unknown>;
-  assertEquals(WebshopProductSchema.safeParse({ ...validWebshopProduct, price }).success, true);
+Deno.test("WebshopProductSchema refuses a retired price.taxes (api-cloudrun#993)", () => {
+  const parsed = WebshopProductSchema.safeParse({ ...validWebshopProduct, price: { ...(validWebshopProduct.price as Record<string, unknown>), taxes: [] } });
+  assertEquals(parsed.success, false);
 });
 
 Deno.test("WebshopProductSchema requires webshop.available (core#95 batch 9)", () => {
@@ -135,7 +135,7 @@ Deno.test("WebshopProductSchema requires webshop.available (core#95 batch 9)", (
 // reached at two positions, so the requirement is asserted at both — a single
 // declaration can still be unreached through one of its embeddings.
 for (const arm of ["components", "component_of"] as const) {
-  Deno.test(`WebshopProductSchema accepts ${arm}[].price with no taxes (api-cloudrun#993)`, () => {
+  Deno.test(`WebshopProductSchema accepts ${arm}[].price with no taxes`, () => {
     const component = {
       uid: "testwpc000000000000a",
       path: [],

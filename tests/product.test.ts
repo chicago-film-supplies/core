@@ -15,7 +15,7 @@ const validProduct = {
   name: "Canon C300",
   active: true,
   crms_id: 100,
-  price: { ...base.price, base_cents: 50000, replacement_cents: 500000, taxes: [{ uid: "testchirentaltax0000", name: "Chicago Rental Tax", rate: 15, type: "percent" }], discountable: true },
+  price: { ...base.price, base_cents: 50000, replacement_cents: 500000, discountable: true },
   tags: [{ uid: "testt100000000000000", name: "Camera" }],
   webshop: { available: true },
   created_by: actor,
@@ -93,7 +93,6 @@ Deno.test("ProductSchema validates with components", () => {
         price: {
           base_cents: 0,
           replacement_cents: 10000,
-          taxes: [{ uid: "testtaxnone000000000", name: "No Tax", rate: 0, type: "percent" }],
           formula: "fixed",
           discountable: false,
         },
@@ -135,7 +134,7 @@ Deno.test("ProductSchema rejects rental component without price.replacement_cent
         stock_method: "bulk",
         crms_id: 200,
         quantity: 2,
-        price: { base_cents: 0, taxes: [], formula: "fixed", discountable: false },
+        price: { base_cents: 0, formula: "fixed", discountable: false },
       },
     ],
   };
@@ -157,7 +156,7 @@ Deno.test("ProductSchema accepts rental component with stock_method none and no 
         stock_method: "none",
         crms_id: 200,
         quantity: 1,
-        price: { base_cents: 0, taxes: [], formula: "fixed", discountable: false },
+        price: { base_cents: 0, formula: "fixed", discountable: false },
       },
     ],
   };
@@ -224,7 +223,6 @@ const validCreateInput = {
     // actually carry in prod. Stated in the shared fixture so the negative
     // cases below still fail for the reason each one names.
     coa_revenue: 4000 as const,
-    taxes: [],
     formula: "five_day_week" as const,
     discountable: true,
   },
@@ -252,7 +250,6 @@ Deno.test("CreateProductInput requires price.replacement_cents for rental compon
     quantity: 2,
     price: {
       base_cents: 0,
-      taxes: [],
       formula: "fixed" as const,
       discountable: false,
     },
@@ -450,7 +447,7 @@ Deno.test("price.coa_revenue is REQUIRED on the document and on BOTH inputs", ()
     stock_method: "bulk",
     crms_id: 200,
     quantity: 2,
-    price: { base_cents: 0, replacement_cents: 10000, taxes: [], formula: "fixed", discountable: false },
+    price: { base_cents: 0, replacement_cents: 10000, formula: "fixed", discountable: false },
   };
   assertEquals(ComponentSchema.safeParse(component).success, true);
 });
@@ -486,7 +483,7 @@ Deno.test("components require inclusion_type, price_overridden and zero_priced; 
     stock_method: "bulk",
     crms_id: 200,
     quantity: 2,
-    price: { base_cents: 0, replacement_cents: 10000, taxes: [], formula: "fixed", discountable: false },
+    price: { base_cents: 0, replacement_cents: 10000, formula: "fixed", discountable: false },
   };
 
   assertEquals(ComponentSchema.safeParse(backRef).success, true);
@@ -544,7 +541,7 @@ const componentBase = {
   stock_method: "bulk",
   crms_id: 200,
   quantity: 2,
-  price: { base_cents: 0, replacement_cents: 10000, taxes: [], formula: "fixed", discountable: false },
+  price: { base_cents: 0, replacement_cents: 10000, formula: "fixed", discountable: false },
 };
 
 Deno.test("a component may be priced five_day_week or fixed", () => {
@@ -654,9 +651,9 @@ for (const path of ["alternates", "components", "component_of"] as const) {
   });
 }
 
-Deno.test("ProductSchema accepts a price with no taxes (api-cloudrun#993)", () => {
-  const { taxes: _omit, ...price } = validProduct.price as Record<string, unknown>;
-  assertEquals(ProductSchema.safeParse({ ...validProduct, price }).success, true);
+Deno.test("ProductSchema refuses a retired price.taxes (api-cloudrun#993)", () => {
+  const parsed = ProductSchema.safeParse({ ...validProduct, price: { ...(validProduct.price as Record<string, unknown>), taxes: [] } });
+  assertEquals(parsed.success, false);
 });
 
 for (const leaf of ["discountable"] as const) {
@@ -702,27 +699,17 @@ Deno.test("CreateProductInput does NOT default the four array keys — the write
   }
 });
 
-// ⭐ **`price.taxes` is OPTIONAL on both inputs and on storage — api-cloudrun#993.**
-// It used to be required as the anti-erasure gate for a whole-object `price`
-// replacement. The class catalog (`uid_tax_class`) now decides tax, so erasing
-// the key is the migration's intent: readers stopped, then the writer, then the
-// corpus purge, then the field goes. Asserted on BOTH inputs and on storage so
-// the three cannot disagree during the purge window.
+// ⭐ **Product-level `price.taxes` is RETIRED — api-cloudrun#993.** Storage
+// refuses the key (`z.strictObject`), while both inputs (`z.object`) STRIP it,
+// so a client that has not been rebuilt is not 400'd for sending it.
 for (const [label, schema] of [
   ["CreateProductInput", CreateProductInput],
   ["UpdateProductInput", UpdateProductInput],
 ] as const) {
-  Deno.test(`${label} accepts a price that omits taxes (api-cloudrun#993)`, () => {
-    const { taxes: _drop, ...price } = validCreateInput.price as Record<string, unknown>;
-    assertEquals(schema.safeParse({ ...validCreateInput, price, version: 1 }).success, true);
-  });
-
-  Deno.test(`${label} still accepts an explicitly EMPTY taxes array`, () => {
-    // ⚠️ The mirror, and it is what keeps the arm above from over-reaching.
-    // `[]` is a legal, meaningful value — 15 of 15 prod `service` products and
-    // 11 of 11 `surcharge` products carry it. Requiring the KEY must not be
-    // read as banning the empty VALUE.
+  Deno.test(`${label} strips a retired price.taxes rather than refusing it`, () => {
     const price = { ...(validCreateInput.price as Record<string, unknown>), taxes: [] };
-    assertEquals(schema.safeParse({ ...validCreateInput, price, version: 1 }).success, true);
+    const parsed = schema.safeParse({ ...validCreateInput, price, version: 1 });
+    assertEquals(parsed.success, true);
+    if (parsed.success) assertEquals("taxes" in (parsed.data.price ?? {}), false);
   });
 }
