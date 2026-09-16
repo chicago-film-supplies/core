@@ -1,10 +1,18 @@
 /**
- * The per-field order → invoice sync (api-cloudrun#890, Step 2 of
- * `api-cloudrun/.claude/plans/order-propagation-overrides.md`).
+ * The per-field order → invoice sync (api-cloudrun#890, complete and in prod —
+ * `api-cloudrun/.claude/plans/order-propagation-overrides-RECORD.md`).
  *
- * Each case that fixes a row-mode defect runs the ROW mode too and asserts it
- * gets the case wrong — otherwise a fixture that never reaches the defect would
- * pass both ways and prove nothing.
+ * ⚠️ **The companion controls this docstring used to describe are GONE, and
+ * their absence is the thing to know.** It read: *"each case that fixes a
+ * row-mode defect runs the ROW mode too and asserts it gets the case wrong —
+ * otherwise a fixture that never reaches the defect would pass both ways and
+ * prove nothing."* That was exactly right, and retiring the row mode in core
+ * `10.0.0-beta.470` made the control **inexpressible**: there is no second mode
+ * left to disagree with.
+ *
+ * So the anti-vacuity argument for this file is now MUTATION, not a second arm —
+ * revert `mergeSharedFields` to a whole-row compare and these cases go red.
+ * **Do not read a green here as self-evidently meaningful.**
  */
 import { assert, assertEquals, assertNotEquals } from "@std/assert";
 import {
