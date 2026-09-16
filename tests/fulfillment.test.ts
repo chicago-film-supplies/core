@@ -37,6 +37,7 @@ Deno.test("FulfillmentItemInputLine carries every picker-authored field through 
     path: ["Destination000000001", "Item0000000000000001"],
     quantity: 3,
     path_substituted_for: ["Destination000000001", "Item0000000000000002"],
+    substituted_for: [{ path: ["Destination000000001", "Item0000000000000002"], quantity: 2 }],
   };
   const parsed = FulfillmentItemInputLine.safeParse(body);
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
@@ -47,6 +48,18 @@ Deno.test("FulfillmentItemInputLine carries every picker-authored field through 
   assertEquals(out.path, body.path);
   assertEquals(out.quantity, body.quantity);
   assertEquals(out.path_substituted_for, body.path_substituted_for, "path_substituted_for must survive — the invoice grain lost it exactly here");
+  assertEquals(out.substituted_for, body.substituted_for, "substituted_for must survive — manager#414's merge is authored here");
+});
+
+Deno.test("FulfillmentItemInputLine refuses a substituted_for naming one X twice", () => {
+  const path = ["Destination000000001", "Item0000000000000002"];
+  const res = FulfillmentItemInputLine.safeParse({
+    uid: "Item0000000000000001",
+    path: ["Destination000000001", "Item0000000000000001"],
+    quantity: 3,
+    substituted_for: [{ path, quantity: 1 }, { path, quantity: 1 }],
+  });
+  assertEquals(res.success, false);
 });
 
 Deno.test("FulfillmentItemInputLine PRESERVES quantity_order so the service can refuse it", () => {

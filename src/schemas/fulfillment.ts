@@ -304,6 +304,11 @@ export interface FulfillmentItemInputLineType {
   path: string[];
   quantity: number;
   path_substituted_for?: string[];
+  /**
+   * What this row stands in for, per replaced X (manager#414). Unique by path,
+   * as on the stored line.
+   */
+  substituted_for?: SubstitutedForEntryType[];
   /** Declared so the service can REFUSE it — see the note above. */
   quantity_order?: number;
 }
@@ -313,6 +318,7 @@ const FulfillmentItemInputLineInner = z.object({
   path: z.array(ItemUid),
   quantity: z.number().int().min(0),
   path_substituted_for: z.array(ItemUid).optional(),
+  substituted_for: SubstitutedForList.optional(),
   // Same declaration as the stored line's, so a body carrying it survives the
   // parse and reaches `updateFulfillmentItems`' explicit refusal.
   quantity_order: z.number().int().min(0).optional(),

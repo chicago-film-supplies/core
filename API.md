@@ -3945,6 +3945,7 @@ interface FulfillmentItemInputLineType {
   path: string[];
   quantity: number;
   path_substituted_for?: string[];
+  substituted_for?: SubstitutedForEntryType[];
   quantity_order?: number;
 }
 ```
@@ -17494,6 +17495,7 @@ interface FulfillmentItemInputLineType {
   path: string[];
   quantity: number;
   path_substituted_for?: string[];
+  substituted_for?: SubstitutedForEntryType[];
   quantity_order?: number;
 }
 ```
