@@ -25,13 +25,32 @@
  * (`cfs-items` skill, invariant 4 — a cross-document view compares stored paths
  * and never recomputes them).
  *
- * ## What is compared (owner decision, 2026-09-13)
+ * ## What is compared (owner ruling, 2026-09-16 — this REVERSED 2026-09-13)
  *
- * **Money, quantity and dates only.** Labels (`name`, `description`), `type`,
- * the tax-class levers and `price.taxes_base` never produce an entry: on prod the label
- * differences alone put rows on hundreds of settled invoices whose catalog names
- * moved after invoicing, and `taxes_base` is not money. A fulfillment carries no
- * price, so every comparison with a fulfillment is quantity and existence only.
+ * **Every field the two documents share, read off the two schemas.** The diff
+ * walks the same key intersection the SYNC merges (`orderInvoiceSharedFields`),
+ * so a new shared field is compared by construction and the two can never
+ * disagree about what "overridden" means.
+ *
+ * ⚠️ **The rule it replaced was "money, quantity and dates only", and it was not
+ * arbitrary** — comparing labels put rows on hundreds of settled prod invoices
+ * whose catalog names moved after invoicing. That cost is accepted: label rows
+ * return. What is NOT acceptable is a hand-maintained list of compared fields,
+ * because a field absent from it was invisible to every diff view with nothing
+ * saying so, and the list could drift from the sync's own answer.
+ *
+ * 🔴 **The exchange is not one-for-one: DERIVED money is now compared NOWHERE.**
+ * An invoice is repriced in its own context — its jurisdiction, its tax date,
+ * tax versions frozen past draft — so `subtotal_cents`, `total_cents`, `taxes`
+ * and `taxes_base` can differ from the order's with no operator edit and no
+ * quantity split. Reporting that is G2, the false override this whole campaign
+ * exists to delete, and the suppression is therefore unconditional rather than
+ * gated on a split. A real change still reports through its CAUSE — a declared
+ * input (`base_cents`, `base_percent`), or a discount or tax whose TERMS moved
+ * ({@link termsDiffer}) — never through its arithmetic.
+ *
+ * A fulfillment carries no price, so every comparison with a fulfillment is
+ * quantity and existence only.
  *
  * **Destination pairs compare EVERY payload field** (owner decision, same day) —
  * addresses, contacts, collecting/returning flags, dates, jurisdiction. Only the
@@ -132,6 +151,7 @@ import {
   invoiceItemDifferences,
   invoiceScopeDividersMatch,
   isInExtensionSection,
+  orderInvoiceSharedFields,
   projectOrderItemToInvoiceItem,
 } from "./invoices.ts";
 import type { LineItem } from "./orders.ts";
@@ -279,34 +299,29 @@ export interface DocumentDiffContext {
   isOrderFrozen: (order: Order) => boolean;
 }
 
-/** The line fields that produce a `differs` entry. `price` covers a wholly-missing price object. */
-const COMPARED_LINE_FIELDS: ReadonlySet<string> = new Set([
-  "quantity",
-  "price",
-  "price.base_cents",
-  "price.base_percent",
-  "price.chargeable_days",
-  "price.discount",
-  "price.subtotal_cents",
-  "price.subtotal_discounted_cents",
-  "price.taxes",
-  "price.total_cents",
-]);
-
 /**
- * Line fields that follow from `quantity` and `price.chargeable_days`, so an
- * invoice row billing a different number of units or days than the order
- * differs in them by construction. That money is the `billed` entry's.
- * `price.discount` and `price.taxes` carry amounts too; their TERMS are still
- * compared ({@link termsDiffer}).
+ * The DERIVED line fields, read off the shared-field classification rather than
+ * listed here — the same source {@link mergeSharedFields} skips.
+ *
+ * ⭐ **This replaced two hand-maintained lists, and that is the point.** There
+ * used to be a `COMPARED_LINE_FIELDS` set naming what produced a `differs`
+ * entry and a `SPLIT_DERIVED_FIELDS` set naming what a quantity/day split
+ * excused. A field absent from the first was invisible to every diff view with
+ * nothing saying so, and the two lists could disagree with the SYNC about what
+ * counts as an override — which is precisely how a line could read "overridden"
+ * in one place and "synced" in another.
+ *
+ * Now the diff walks the same key intersection the sync merges, so **a new
+ * shared field is compared by construction** and the two answers cannot drift.
  */
-const SPLIT_DERIVED_FIELDS: ReadonlySet<string> = new Set([
-  "price.subtotal_cents",
-  "price.subtotal_discounted_cents",
-  "price.total_cents",
-  "price.discount",
-  "price.taxes",
-]);
+const derivedLineFields = (): ReadonlySet<string> => {
+  if (derivedLineFieldsMemo) return derivedLineFieldsMemo;
+  derivedLineFieldsMemo = new Set(
+    orderInvoiceSharedFields().line.filter((f) => f.kind === "derived").map((f) => f.path),
+  );
+  return derivedLineFieldsMemo;
+};
+let derivedLineFieldsMemo: ReadonlySet<string> | undefined;
 
 /** The pair keys a comparison is addressed BY, never part of what it compares. */
 const PAIR_IDENTITY_FIELDS: ReadonlySet<string> = new Set(["uid", "uid_order"]);
@@ -422,13 +437,26 @@ function lineFields(
     invoiceItemDifferences(expected, invoiceLine),
     { taxNameByUid: context.taxNameByUid, orderFrozen: context.isOrderFrozen(order) },
   );
-  const split = orderLine.quantity !== invoiceLine.quantity ||
-    (orderLine.price?.chargeable_days ?? null) !== (invoiceLine.price?.chargeable_days ?? null);
+  const derived = derivedLineFields();
   return unexplained
-    .filter((f) => COMPARED_LINE_FIELDS.has(f))
     // How many units and days are billed is the `billed` entry's, over the sum.
     .filter((f) => f !== "quantity" && f !== "price.chargeable_days")
-    .filter((f) => !split || !SPLIT_DERIVED_FIELDS.has(f) || termsDiffer(orderLine, invoiceLine, f))
+    // 🔴 **A DERIVED field never produces a row on its own — this is G2, and the
+    // suppression is UNCONDITIONAL.** It used to apply only when the line billed
+    // a different number of units or days, on the reasoning that a split
+    // explains the difference. But an invoice is repriced in its OWN context —
+    // its jurisdiction, its tax date, tax versions frozen past draft — so its
+    // derived money can differ from the order's with no operator edit and no
+    // split at all, and reporting that is exactly the false override this whole
+    // campaign exists to delete. The sync never compares a derived field; the
+    // diff must not either, or the two disagree about what "overridden" means.
+    //
+    // What survives is the part that is NOT derived: a real change to a declared
+    // input (`base_cents`, `base_percent`) reports itself, and a discount or tax
+    // whose TERMS moved reports through {@link termsDiffer}. So a difference an
+    // operator actually caused is still visible — through its cause rather than
+    // through its arithmetic.
+    .filter((f) => !derived.has(f) || termsDiffer(orderLine, invoiceLine, f))
     .map((field) => ({ field, here: readField(here, field), there: readField(there, field) }));
 }
 

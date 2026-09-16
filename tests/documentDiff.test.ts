@@ -131,11 +131,31 @@ Deno.test("documentDiff: the key is the path — the same product at a second, u
   assertEquals(Object.keys(summary(diff.lines)), [`${D}/${LIGHT}`]);
 });
 
-Deno.test("documentDiff: order ↔ invoice compares money and quantity, never labels or taxes_base", () => {
+Deno.test("documentDiff: order ↔ invoice compares every shared field, and NO derived money", () => {
+  // 🔴 **This assertion is the inverse of the one it replaced, by owner ruling
+  // (2026-09-16).** The old contract was "money and quantity only, never
+  // labels": comparing `name`/`description` put rows on hundreds of settled
+  // invoices whose catalog names moved after invoicing, so the compared set was
+  // a hand-maintained list. That list could disagree with the SYNC about what
+  // counts as an override, and a field absent from it was invisible to every
+  // diff view with nothing saying so.
+  //
+  // The diff now walks the same key intersection the sync merges, so a new
+  // shared field is compared by construction. The cost is accepted: label rows
+  // return.
+  //
+  // ⭐ **And the exchange is not one-for-one — DERIVED money stopped being
+  // compared at all.** An invoice is repriced in its own tax context, so its
+  // subtotal/total/taxes can differ from the order's with no operator edit; that
+  // was G2, the false override this campaign exists to delete. A real change
+  // reports through its CAUSE (a declared input, or a discount/tax whose terms
+  // moved), never through its arithmetic.
   const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
   patchLine(inv.items, `${O}/${D}/${G}/${TRIPOD}`, (it) => {
     it.name = "Renamed tripod";
     it.description = "moved in the catalog";
+    // Derived-only: the declared inputs are untouched, so this is the invoice's
+    // own pricing context and must produce no row.
     const price = it.price as Record<string, unknown>;
     price.subtotal_cents = 2500;
     price.subtotal_discounted_cents = 2500;
@@ -149,14 +169,48 @@ Deno.test("documentDiff: order ↔ invoice compares money and quantity, never la
 
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
     [`${D}/${G}/${TRIPOD}`]: [
-      "invoice#2241:differs(price.subtotal_cents=3000→2500,price.subtotal_discounted_cents=3000→2500,price.total_cents=3000→2500)",
+      'invoice#2241:differs(description=""→"moved in the catalog",name="prod-tripod"→"Renamed tripod")',
+    ],
+    [`${D}/${LIGHT}`]: [
+      'invoice#2241:differs(name="prod-light"→"Label-only change")',
     ],
   });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).lines), {
     [`${O}/${D}/${G}/${TRIPOD}`]: [
-      "order#1001:differs(price.subtotal_cents=2500→3000,price.subtotal_discounted_cents=2500→3000,price.total_cents=2500→3000)",
+      'order#1001:differs(description="moved in the catalog"→"",name="Renamed tripod"→"prod-tripod")',
+    ],
+    [`${O}/${D}/${LIGHT}`]: [
+      'order#1001:differs(name="Label-only change"→"prod-light")',
     ],
   });
+});
+
+Deno.test("documentDiff: derived money alone NEVER produces a row, split or no split — G2", () => {
+  // The anti-vacuity companion to the test above: prove the suppression is
+  // doing the work, by moving ONLY derived money and expecting silence, then
+  // moving a DECLARED input on the same line and expecting exactly that.
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  patchLine(inv.items, `${O}/${D}/${LIGHT}`, (it) => {
+    const price = it.price as Record<string, unknown>;
+    price.subtotal_cents = 111;
+    price.subtotal_discounted_cents = 111;
+    price.total_cents = 111;
+  });
+  assertEquals(
+    summary(computeDocumentDiffs({ orders: [order()], invoices: [inv] }, { kind: "order", uid: O }, CONTEXT).lines),
+    {},
+    "derived money moved on its own — the invoice's own tax context, not an override",
+  );
+
+  const declared = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  patchLine(declared.items, `${O}/${D}/${LIGHT}`, (it) => {
+    (it.price as Record<string, unknown>).base_cents = 111;
+  });
+  assertEquals(
+    summary(computeDocumentDiffs({ orders: [order()], invoices: [declared] }, { kind: "order", uid: O }, CONTEXT).lines),
+    { [`${D}/${LIGHT}`]: ["invoice#2241:differs(price.base_cents=1000→111)"] },
+    "a DECLARED input still reports — the suppression is not swallowing real edits",
+  );
 });
 
 Deno.test("documentDiff: a line no invoice carries is ONE uninvoiced entry on all three views", () => {
@@ -444,13 +498,17 @@ Deno.test("documentDiff: a transaction fee is compared order ↔ invoice but nev
   const fee = { ...line("fee-1", [D, "fee-1"], 1, 500), type: "transaction_fee" } as unknown as LineItem;
   const items = [...orderItems(), fee];
   const inv = invoice("inv-1", [{ order: O, items }]);
-  patchLine(inv.items, `${O}/${D}/fee-1`, (it) => { (it.price as Record<string, unknown>).total_cents = 999; });
+  // ⚠️ A DECLARED input, not `total_cents`. A fee's derived money legitimately
+  // differs between an order and an invoice billing part of it, and derived
+  // money no longer produces a row at all — so mutating it would make this test
+  // pass vacuously against the very suppression it is not about.
+  patchLine(inv.items, `${O}/${D}/fee-1`, (it) => { (it.price as Record<string, unknown>).base_cents = 999; });
   const diff = computeDocumentDiffs(
     { orders: [order(items)], fulfillments: [fulfillment(items)], invoices: [inv] },
     { kind: "invoice", uid: "inv-1" },
     CONTEXT,
   );
-  assertEquals(summary(diff.lines), { [`${O}/${D}/fee-1`]: ["order#1001:differs(price.total_cents=999→500)"] });
+  assertEquals(summary(diff.lines), { [`${O}/${D}/fee-1`]: ["order#1001:differs(price.base_cents=999→500)"] });
 });
 
 /** One order line, and the invoices that bill it, for the sum tests. */
