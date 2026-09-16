@@ -389,10 +389,9 @@ export interface DocDestinationType {
    *
    * ⚠️ **An address correction is now ordinary payload.** Repointing
    * `delivery.uid` moves the ENDPOINT, not the row — which is what lets
-   * `pairsMatch` see the difference and `carryOverridablePairFields` run on the
-   * population it was written for (api-cloudrun#663: 239 of 989 prod invoice
-   * pairs named no order pair at all, 14 carrying a `jurisdiction` that prices
-   * their lines).
+   * the merge see the difference and run on the population it was written for
+   * (api-cloudrun#663: 239 of 989 prod invoice pairs named no order pair at all,
+   * 14 carrying a `jurisdiction` that prices their lines).
    *
    * ⚠️ **NOT a `destinations/{uid}` document id.** It is an `items[].uid` — a
    * UUID, and the same value `path[k]` already carries for that divider. All
@@ -538,12 +537,13 @@ export const DestinationPairCore: {
   // so a document carrying the new field type-checked and was then REFUSED at
   // write. Both grains now spread this shape.
   //
-  // ⚠️ **What still needs a decision is the OVERRIDE POLICY, not the shape.**
-  // `toInvoiceDestinationPair` and `pairsMatch` (`utils/invoices.ts`) both walk
-  // the pair with `Object.entries`, so a new field is carried and compared for
-  // free; the one deliberate call is whether it belongs in
-  // `INVOICE_OVERRIDABLE_PAIR_FIELDS` — payload the invoice owns and
-  // `carryOverridablePairFields` reconciles.
+  // ⭐ **There is no OVERRIDE POLICY to decide any more.**
+  // `toInvoiceDestinationPair` walks the pair with `Object.entries` and the merge
+  // reads its field set off the two schemas, so a new field is carried and
+  // merged PER FIELD for free. The hand-maintained owned-field list this comment
+  // used to point at is deleted. What a new field needs instead is a
+  // classification on its declaration — `.meta({ derived })` when a derivation
+  // writes it, `.meta({ propagate: false })` when it is a homonym.
   jurisdiction: JurisdictionEnum.nullable().optional().meta({
     column: true,
     label: "Jurisdiction",

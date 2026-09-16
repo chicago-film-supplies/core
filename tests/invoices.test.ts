@@ -1,6 +1,7 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { getInitialValues, InvoiceDocLineItem, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
 import { computeItemPaths, rederiveDocumentTotalsForAudit, validateItemPaths } from "../src/utils/orders.ts";
+import type { OrderInvoiceFieldSync } from "../src/utils/invoices.ts";
 import {
   adoptOrderDividerStructure,
   buildInvoiceDestinationDivider,
@@ -19,7 +20,6 @@ import {
   invoiceItemDifferences,
   invoiceItemsMatch,
   invoiceScopeDividersMatch,
-  isItemSynced,
   type LineItem,
   explainInvoiceItemDifferences,
   unexplainedInvoiceItemDifferences,
@@ -34,7 +34,6 @@ import {
   toInvoiceDestinationPair,
   syncOrderItems,
   syncOrderToInvoiceSelective,
-  syncScalarWithOverride,
   validateInvoiceItemPaths,
   validateInvoiceItemUniqueness,
 } from "../src/utils/invoices.ts";
@@ -123,6 +122,8 @@ function makeItem(
 // Firestore / parallel-DB collisions, so fixed valid ids stay readable.
 
 // Order divider uids (ItemUid — UUID form).
+const PF: OrderInvoiceFieldSync = { holidays: [] };
+
 const ORDER_DIV_1 = "00000000-0000-4000-8000-00000000d101";
 const ORDER_DIV_2 = "00000000-0000-4000-8000-00000000d102";
 // Destination divider uids (z.uuid()).
@@ -682,11 +683,19 @@ Deno.test("syncOrderToInvoiceSelective projects synced items and carries forward
 // because the comparator sees one of them and not the other. These tests exist
 // to keep that asymmetry deliberate.
 
-Deno.test("projection: `price.taxes_base` inherits, so an invoice profile revert is lossless", () => {
+Deno.test("`price.taxes_base` reaches an invoice by PROJECTION, and the merge never touches it", () => {
   // Divergence (6): the doc-level override rewrites `taxes` and never
   // `taxes_base`, so without the snapshot an invoice reverting to `tax_applied`
-  // has nothing to restore from — the (since deleted) tax materializer returned early and the
-  // line keeps whichever override was last written.
+  // has nothing to restore from.
+  //
+  // 🔴 **Which half carries it changed with the per-field rule, and this test
+  // used to assert the wrong half.** `price.taxes_base` classifies as `derived`
+  // (`orderInvoiceSharedFields().line`), so `mergeSharedFields` SKIPS it — that
+  // skip IS the G2 fix: derived money is never compared, so it can never read as
+  // an operator override and freeze a line. An invoice therefore acquires
+  // `taxes_base` from the PROJECTION when the line is new, and from
+  // `priceDocument` when it is repriced — never from merging a line it already
+  // has. Asserting the merge carried it was asserting G2 back into existence.
   const prevItem = orderShapedLine();
   const withBase = orderShapedLine({
     price: {
@@ -694,21 +703,30 @@ Deno.test("projection: `price.taxes_base` inherits, so an invoice profile revert
     } as unknown as LineItem["price"],
   });
 
-  const result = syncOrderToInvoiceSelective(
-    [prevItem],
-    [withBase],
-    buildOrderScopedItems([prevItem], ORDER_DIV_1),
-    ORDER_DIV_1,
-  );
-  const price = asLine(result[0]).price as unknown as Record<string, unknown>;
+  // The projection — how a NEW invoice line gets it.
+  const projected = buildOrderScopedItems([withBase], ORDER_DIV_1)[0];
   assertEquals(
-    (price.taxes_base as Array<{ uid: string }>)[0].uid,
+    ((asLine(projected).price as unknown as Record<string, unknown>).taxes_base as Array<{ uid: string }>)[0].uid,
     "chirentaltax00000001",
   );
   // …and the strict invoice schema accepts it, which is the half `core` had to
   // ship before any of this could be written.
-  const parsed = InvoiceDocLineItem.safeParse(result[0]);
+  const parsed = InvoiceDocLineItem.safeParse(projected);
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues, null, 2));
+
+  // The merge — an EXISTING invoice line keeps its own derived money and is not
+  // frozen by the difference. The non-derived edit still lands.
+  const stored = buildOrderScopedItems([prevItem], ORDER_DIV_1)[0];
+  const renamed = orderShapedLine({
+    name: "Renamed",
+    price: {
+      taxes_base: [{ uid: "chirentaltax00000001", name: "Chicago Rental Tax", rate: 15, type: "percent" }],
+    } as unknown as LineItem["price"],
+  });
+  const merged = syncOrderToInvoiceSelective([prevItem], [renamed], [stored], ORDER_DIV_1);
+  const mergedPrice = asLine(merged[0]).price as unknown as Record<string, unknown>;
+  assertEquals("taxes_base" in mergedPrice, false, "derived money is not merged — priceDocument authors it");
+  assertEquals((merged[0] as InvoiceItem).name, "Renamed", "…and the real edit still propagated");
 });
 
 Deno.test("projection: an order line with NO taxes_base emits no `taxes_base` key at all", () => {
@@ -722,44 +740,39 @@ Deno.test("projection: an order line with NO taxes_base emits no `taxes_base` ke
   assertEquals("taxes_base" in price, false);
 });
 
-Deno.test("⚠️ projection: a NEW taxes_base makes a previously-synced line read OVERRIDDEN", () => {
-  // THE TRANSITION HAZARD, stated as a test rather than left to be discovered.
+Deno.test("per field: a NEW taxes_base no longer locks a line — G2 is gone", () => {
+  // THE INVERSION of the transition hazard this file used to pin.
   //
-  // `invoicePriceDifferences` compares the price key sets for equality. Every stored
-  // ORDER line has carried `taxes_base` since 2026-07; no stored INVOICE line
-  // carries it, because the projection dropped it until now. So on the first
-  // deploy after this change, an untouched pair differs by exactly one key and
-  // `isItemSynced` says "overridden".
+  // Under the whole-row comparator, every stored ORDER line had carried
+  // `taxes_base` since 2026-07 while no stored INVOICE line did, so an untouched
+  // pair differed by exactly one key and read OVERRIDDEN. That was SELF-LOCKING:
+  // the sync only replaced a line it considered synced, so a line failing the
+  // check could never be rewritten to acquire the field, and it cleared only by
+  // backfilling. Derived money froze real edits.
   //
-  // That is self-locking: `syncOrderToInvoiceSelective` only REPLACES a line it
-  // considers synced, so a line failing this check can never be rewritten to
-  // acquire the field. It clears only by backfilling `taxes_base` onto the
-  // stored invoice lines — tracked in the convergence plan's §4.3b, sequenced
-  // with the api-cloudrun pin bump.
-  //
-  // Prod exposure is bounded: 0 draft invoices, and the order→invoice mirror
-  // skips settled/paid/void. The visible effect is the sync badge, which reads
-  // every invoice unconditionally.
-  const orderLine = orderShapedLine({
+  // Per field there is no whole-row verdict to fail. A key the invoice does not
+  // carry cannot freeze the keys it does, so the line follows the order.
+  const prevOrderLine = orderShapedLine();
+  const nextOrderLine = orderShapedLine({
+    name: "Renamed",
     price: {
       taxes_base: [{ uid: "chirentaltax00000001", name: "Chicago Rental Tax", rate: 15, type: "percent" }],
     } as unknown as LineItem["price"],
   });
-  // A stored invoice line as it exists TODAY: same row, written by the old
-  // projection, so it has no `taxes_base`.
-  const storedInvoiceLine = buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0];
+  // A stored invoice line as the OLD projection wrote it: no `taxes_base`.
+  const storedInvoiceLine = buildOrderScopedItems([prevOrderLine], ORDER_DIV_1)[0];
 
-  assertEquals(
-    isItemSynced(orderLine, storedInvoiceLine as InvoiceItem, ORDER_DIV_1),
-    false,
-    "if this ever returns true the hazard is gone — delete this test and the backfill with it",
+  const result = syncOrderToInvoiceSelective(
+    [prevOrderLine],
+    [nextOrderLine],
+    [storedInvoiceLine],
+    ORDER_DIV_1,
   );
-
-  // The discriminating half: once the stored line carries the snapshot, the same
-  // pair is synced again. Without this, the assertion above would pass against a
-  // comparator that had broken outright.
-  const backfilled = buildOrderScopedItems([orderLine], ORDER_DIV_1)[0];
-  assertEquals(isItemSynced(orderLine, backfilled as InvoiceItem, ORDER_DIV_1), true);
+  assertEquals(
+    (result[0] as InvoiceItem).name,
+    "Renamed",
+    "the line must still follow the order — a missing derived key must not freeze it",
+  );
 });
 
 Deno.test("projection: `coa_revenue` inherits but changes NO sync verdict", () => {
@@ -772,11 +785,6 @@ Deno.test("projection: `coa_revenue` inherits but changes NO sync verdict", () =
   // nested inside `price` and therefore compared.
   const orderLine = orderShapedLine({ coa_revenue: 4000 });
   const storedInvoiceLine = buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0];
-  assertEquals(
-    isItemSynced(orderLine, storedInvoiceLine as InvoiceItem, ORDER_DIV_1),
-    true,
-    "coa_revenue is invoice-owned — it must not participate in the sync verdict",
-  );
 
   // It still reaches the projected item, and the invoice's own value still wins.
   const projected = buildOrderScopedItems([orderLine], ORDER_DIV_1)[0];
@@ -1660,7 +1668,7 @@ Deno.test("syncOrderDestinationsSelective adds new pairs tagged with uid_order",
   const prev = [makePair("d1", "c1")];
   const next = [makePair("d1", "c1"), makePair("d2", "c2")];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1") }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(result.length, 2);
   assertEquals(result[1].delivery.uid, "d2");
   assertEquals(result[1].uid_order, "o1");
@@ -1670,7 +1678,7 @@ Deno.test("syncOrderDestinationsSelective replaces synced pairs with new order d
   const prev = [makePair("d1", "c1", { delivery: { instructions: "old" } })];
   const next = [makePair("d1", "c1", { delivery: { instructions: "new" } })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { delivery: { instructions: "old" } }) }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(result.length, 1);
   assertEquals(result[0].delivery.instructions, "new");
 });
@@ -1679,7 +1687,7 @@ Deno.test("syncOrderDestinationsSelective keeps overridden pairs (invoice differ
   const prev = [makePair("d1", "c1", { delivery: { instructions: "orig" } })];
   const next = [makePair("d1", "c1", { delivery: { instructions: "new" } })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { delivery: { instructions: "manual edit" } }) }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(result.length, 1);
   assertEquals(result[0].delivery.instructions, "manual edit");
 });
@@ -1691,7 +1699,7 @@ Deno.test("syncOrderDestinationsSelective drops removed pairs when not overridde
     { uid_order: "o1", ...makePair("d1", "c1") },
     { uid_order: "o1", ...makePair("d2", "c2") },
   ];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(result.length, 1);
   assertEquals(result[0].delivery.uid, "d1");
 });
@@ -1703,7 +1711,7 @@ Deno.test("syncOrderDestinationsSelective keeps removed pairs when overridden", 
     { uid_order: "o1", ...makePair("d1", "c1") },
     { uid_order: "o1", ...makePair("d2", "c2", { delivery: { instructions: "manual edit" } }) },
   ];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(result.length, 2);
   assertEquals(result[1].delivery.instructions, "manual edit");
 });
@@ -1727,7 +1735,7 @@ Deno.test("syncOrderDestinationsSelective: prev MISSING + still on the order ⇒
   const invoice: InvoiceDestinationPair[] = [
     { uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: "rantoul" }) },
   ];
-  const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(destinations.length, 1);
   assertEquals(destinations[0].jurisdiction, "rantoul", "the invoice's own value survives");
   assertEquals(dropped.length, 0);
@@ -1742,7 +1750,7 @@ Deno.test("syncOrderDestinationsSelective: prev MISSING + NOT on the order ⇒ l
     { uid_order: "o1", ...makePair("d1", "c1") },
     { uid_order: "o1", ...makePair("d-other", "c-other", { jurisdiction: "rantoul" }) },
   ];
-  const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
 
   assertEquals(destinations.length, 1, "the unmatched invoice pair is gone");
   assertEquals(destinations[0].delivery.uid, "d1");
@@ -1764,7 +1772,7 @@ Deno.test("syncOrderDestinationsSelective: an ORDINARY removal reports a differe
     { uid_order: "o1", ...makePair("d1", "c1") },
     { uid_order: "o1", ...makePair("d2", "c2") },
   ];
-  const { dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(dropped.length, 1);
   assertEquals(dropped[0].reason, "removed_from_order");
   assertEquals(dropped[0].jurisdiction, null);
@@ -1780,7 +1788,7 @@ Deno.test("syncOrderDestinationsSelective: a dropped pair from ANOTHER order is 
     { uid_order: "o1", ...makePair("d1", "c1") },
     { uid_order: "o2", ...makePair("d9", "c9", { jurisdiction: "rantoul" }) },
   ];
-  const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(destinations.length, 2);
   assertEquals(dropped.length, 0);
 });
@@ -1792,7 +1800,7 @@ Deno.test("syncOrderDestinationsSelective leaves out-of-scope (other-order) pair
     { uid_order: "o1", ...makePair("d1", "c1") },
     { uid_order: "o2", ...makePair("dX", "cX") },
   ];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(result.length, 1);
   assertEquals(result[0].uid_order, "o2");
   assertEquals(result[0].delivery.uid, "dX");
@@ -1808,21 +1816,6 @@ Deno.test("removeOrderScopedDestinations filters by uid_order", () => {
   assertEquals(result[0].uid_order, "o2");
 });
 
-Deno.test("syncScalarWithOverride replaces when invoice matches prev", () => {
-  assertEquals(syncScalarWithOverride("foo", "bar", "foo"), "bar");
-  assertEquals(syncScalarWithOverride(null, "new", null), "new");
-  assertEquals(syncScalarWithOverride(undefined, "new", undefined), "new");
-});
-
-Deno.test("syncScalarWithOverride keeps invoice when it differs from prev", () => {
-  assertEquals(syncScalarWithOverride("foo", "bar", "manual"), "manual");
-  assertEquals(syncScalarWithOverride(null, "new", "manual"), "manual");
-});
-
-// ── validateInvoiceItemPaths ────────────────────────────────────
-
-// Start each test from a baseline normalized through computeInvoiceItemPaths so
-// the test fixture's bare order divider path doesn't mask injected mismatches.
 const cleanInvoiceItems: InvoiceItem[] = computeInvoiceItemPaths(multiOrderInvoiceItems);
 
 Deno.test("validateInvoiceItemPaths returns [] for items just produced by computeInvoiceItemPaths", () => {
@@ -2812,22 +2805,6 @@ Deno.test("projectOrderItemToInvoiceItem: the export IS what the sync path compa
   }
 });
 
-Deno.test("isItemSynced: an ORDER-shaped line matches its own projection — core#52", () => {
-  // The regression the whole draft mirror rested on. `stock_method` is required
-  // on a stored order line and rejected by the strict invoice line schema, so
-  // comparing the two shapes directly could never agree and the mirror
-  // propagated additions only — never an edit, never a removal.
-  const orderLine = orderShapedLine();
-  const invoiceLine = buildOrderScopedItems([orderLine], ORDER_DIV_1)[0] as InvoiceItem;
-  assertEquals(isItemSynced(orderLine, invoiceLine, ORDER_DIV_1), true);
-  // The fixture is not vacuous: it really does carry the order-only fields.
-  assertEquals(typeof (orderLine as unknown as Record<string, unknown>).stock_method, "string");
-  assertEquals(
-    typeof (orderLine.price as unknown as Record<string, unknown>).replacement_cents,
-    "number",
-  );
-});
-
 Deno.test("fail-closed companion: comparing the two SHAPES directly still disagrees", () => {
   const orderLine = orderShapedLine();
   const invoiceLine = buildOrderScopedItems([orderLine], ORDER_DIV_1)[0] as InvoiceItem;
@@ -2838,20 +2815,6 @@ Deno.test("fail-closed companion: comparing the two SHAPES directly still disagr
   );
 });
 
-Deno.test("isItemSynced: a genuine override is still detected", () => {
-  const orderLine = orderShapedLine();
-  const overridden = {
-    ...buildOrderScopedItems([orderLine], ORDER_DIV_1)[0],
-    name: "Operator renamed this",
-  } as InvoiceItem;
-  assertEquals(isItemSynced(orderLine, overridden, ORDER_DIV_1), false);
-});
-
-// ══════════════════════════════════════════════════════════════════
-// adoptOrderDividerStructure / invoiceScopeDividersMatch
-// ══════════════════════════════════════════════════════════════════
-
-/** An order carrying a group divider the CRMS invoice tree omits. */
 function groupedOrderItems(): LineItem[] {
   return computeItemPaths([
     { ...RESYNC_DEST, path: [] },
@@ -3233,7 +3196,7 @@ Deno.test("syncOrderDestinationsSelective carries jurisdiction onto a NEW invoic
   // allowed to have, unlike the equality check below.
   const prev: ReturnType<typeof makePair>[] = [];
   const next = [makePair("d1", "c1", { jurisdiction: "frankfort" })];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, [], "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, [], "o1", new Set(), PF);
   assertEquals(result.length, 1);
   assertEquals(result[0].jurisdiction, "frankfort");
 });
@@ -3242,7 +3205,7 @@ Deno.test("syncOrderDestinationsSelective carries a CHANGED jurisdiction on an u
   const prev = [makePair("d1", "c1", { jurisdiction: "chicago" })];
   const next = [makePair("d1", "c1", { jurisdiction: "frankfort" })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: "chicago" }) }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(result[0].jurisdiction, "frankfort");
 });
 
@@ -3260,7 +3223,7 @@ Deno.test("syncOrderDestinationsSelective PRESERVES an invoice-side jurisdiction
   const prev = [makePair("d1", "c1", { jurisdiction: "chicago" })];
   const next = [makePair("d1", "c1", { jurisdiction: "chicago" })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: "rantoul" }) }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(result[0].jurisdiction, "rantoul");
 });
 
@@ -3279,7 +3242,7 @@ Deno.test("a jurisdiction override does NOT freeze the rest of the pair", () => 
     uid_order: "o1",
     ...makePair("d1", "c1", { jurisdiction: "rantoul", delivery: { instructions: "old" } }),
   }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(result[0].jurisdiction, "rantoul", "the owned field is still the override");
   assertEquals(result[0].delivery.instructions, "new", "…and everything else resumed syncing");
   assertEquals(result[0].customer_collecting, true);
@@ -3300,19 +3263,28 @@ Deno.test("an INHERITED pair still accepts the order's changed jurisdiction — 
   const prev = [prevNoKey as ReturnType<typeof makePair>];
   const next = [makePair("d1", "c1", { jurisdiction: "frankfort" })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: null }) }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(result[0].jurisdiction, "frankfort");
 });
 
-Deno.test("an owned-field edit does not keep a pair the ORDER deleted", () => {
-  // The other side of the same change, stated so it is a decision rather than a
-  // side effect: an override on an invoice-owned field is a statement about the
-  // field, not a claim that the destination still exists. Under the old
-  // whole-pair freeze this pair survived its own deletion.
+Deno.test("a jurisdiction edit KEEPS a pair the ORDER deleted — the v0.270.0 reversal", () => {
+  // 🔴 This assertion is the INVERSE of the one it replaced, and the flip is a
+  // consequence of the per-field rule rather than a decision taken separately.
+  //
+  // Under the whole-pair comparator `jurisdiction` was *invoice-owned*: skipped
+  // by the match and reconciled on its own, so a jurisdiction-only edit was not
+  // an override and the pair was DROPPED when the order deleted it — on the
+  // stated ground that "an owned-field edit is not a claim that the destination
+  // still exists". Per field there is no owned set. `jurisdiction` is a shared
+  // field like any other, so editing it IS an override and the pair survives.
+  //
+  // ⚠️ Prod has behaved this way since 2026-09-15 (`v0.270.0` shipped the
+  // per-field rule); only the dead row mode still asserted the old ruling.
   const prev = [makePair("d1", "c1", { jurisdiction: "chicago" })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1", { jurisdiction: "rantoul" }) }];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, [], invoice, "o1", new Set());
-  assertEquals(result.length, 0);
+  const { destinations: result } = syncOrderDestinationsSelective(prev, [], invoice, "o1", new Set(), PF);
+  assertEquals(result.length, 1, "the edit is an override, so the pair outlives its deletion");
+  assertEquals(result[0].jurisdiction, "rantoul");
 });
 
 Deno.test("pairsMatch: null, undefined and absent jurisdiction are ONE state", () => {
@@ -3324,7 +3296,7 @@ Deno.test("pairsMatch: null, undefined and absent jurisdiction are ONE state", (
   const prev = [withNull];
   const next = [makePair("d1", "c1", { delivery: { instructions: "new" } })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...withAbsent } as InvoiceDestinationPair];
-  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
   assertEquals(result[0].delivery.instructions, "new", "absent must not read as an override of null");
 });
 
@@ -3339,7 +3311,7 @@ Deno.test("pairsMatch is insensitive to KEY ORDER", () => {
   ) as ReturnType<typeof makePair>;
   const next = [makePair("d1", "c1", { jurisdiction: "chicago", delivery: { instructions: "new" } })];
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...reordered }];
-  const { destinations: result } = syncOrderDestinationsSelective([built], next, invoice, "o1", new Set());
+  const { destinations: result } = syncOrderDestinationsSelective([built], next, invoice, "o1", new Set(), PF);
   assertEquals(result[0].delivery.instructions, "new");
 });
 
@@ -3379,6 +3351,7 @@ Deno.test("syncOrderDestinationsSelective never emits an UNDEFINED field", () =>
     [],
     "o1",
     new Set(),
+    PF,
   );
   assertEquals(result.length, 1);
   for (const [key, value] of Object.entries(result[0])) {
@@ -3539,13 +3512,12 @@ function assertJoined(items: readonly InvoiceDocItemType[], dests: readonly Invo
   assertEquals(dividers, pairs, "every destination divider has exactly its pair");
 }
 
-const BOTH = { items: true, destinations: true };
 
 Deno.test("syncOrderDestinationScope: a clean delete drops divider and pair together", () => {
   const prev = scopeOrder([DEST_1, DEST_2]);
   const next = scopeOrder([DEST_1]);
   const inv = scopeInvoice(prev);
-  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, BOTH);
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, PF);
   assertJoined(r.scopedItems, r.destinations);
   assertEquals(r.destinations.map((p) => p.uid), [DEST_1]);
   assertEquals(r.kept, []);
@@ -3557,7 +3529,7 @@ Deno.test("syncOrderDestinationScope: a RENAMED divider keeps its unedited pair 
   const next = scopeOrder([DEST_1]);
   const inv = scopeInvoice(prev);
   inv.items = inv.items.map((it) => it.type === "destination" && it.uid === DEST_2 ? { ...it, name: "Renamed" } : it);
-  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, BOTH);
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, PF);
   assertJoined(r.scopedItems, r.destinations);
   assertEquals(r.destinations.map((p) => p.uid).sort(), [DEST_1, DEST_2].sort());
   assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: true, pair_overridden: false }]);
@@ -3571,28 +3543,34 @@ Deno.test("syncOrderDestinationScope: an EDITED pair keeps its unedited divider 
   inv.destinations = inv.destinations.map((p) =>
     p.uid === DEST_2 ? { ...p, delivery: { ...p.delivery, instructions: "manual edit" } } : p
   );
-  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, BOTH);
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, PF);
   assertJoined(r.scopedItems, r.destinations);
   assertEquals(r.scopedItems.some((it) => it.type === "destination" && it.uid === DEST_2), true);
   assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: false, pair_overridden: true }]);
 });
 
-Deno.test("syncOrderDestinationScope: a jurisdiction-only edit does NOT keep a deleted destination (unchanged ruling)", () => {
+Deno.test("syncOrderDestinationScope: a jurisdiction-only edit KEEPS a deleted destination — and keeps BOTH halves", () => {
+  // The row-level statement of the reversal above. What matters at this level is
+  // that the divider and the pair are kept TOGETHER: the write guard refuses a
+  // half-row, and the invoice write is staged inside the ORDER's transaction, so
+  // splitting the row fails the operator's order edit (api-cloudrun#664).
   const prev = scopeOrder([DEST_1, DEST_2]);
   const next = scopeOrder([DEST_1]);
   const inv = scopeInvoice(prev);
   inv.destinations = inv.destinations.map((p) => p.uid === DEST_2 ? { ...p, jurisdiction: "rantoul" } : p);
-  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, BOTH);
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, PF);
   assertJoined(r.scopedItems, r.destinations);
-  assertEquals(r.destinations.map((p) => p.uid), [DEST_1]);
-  assertEquals(r.dropped.map((d) => [d.uid, d.jurisdiction]), [[DEST_2, "rantoul"]]);
+  assertEquals(r.destinations.map((p) => p.uid), [DEST_1, DEST_2]);
+  assertEquals(r.scopedItems.some((it) => it.type === "destination" && it.uid === DEST_2), true);
+  assertEquals(r.dropped, [], "nothing was dropped, so nothing should be reported as dropped");
+  assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: false, pair_overridden: true }]);
 });
 
 Deno.test("syncOrderDestinationScope: a new destination arrives as divider and pair", () => {
   const prev = scopeOrder([DEST_1]);
   const next = scopeOrder([DEST_1, DEST_2]);
   const inv = scopeInvoice(prev);
-  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, BOTH);
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, PF);
   assertJoined(r.scopedItems, r.destinations);
   assertEquals(r.destinations.map((p) => p.uid), [DEST_1, DEST_2]);
 });
@@ -3602,7 +3580,7 @@ Deno.test("syncOrderDestinationScope: another order's pairs pass through untouch
   const next = scopeOrder([DEST_1]);
   const inv = scopeInvoice(prev);
   const foreign: InvoiceDestinationPair = { uid_order: ORDER_DIV_2, ...makePair("fx", "fy", { uid: DEST_2 }) };
-  const r = syncOrderDestinationScope(prev, next, inv.items, [...inv.destinations, foreign], ORDER_DIV_1, BOTH);
+  const r = syncOrderDestinationScope(prev, next, inv.items, [...inv.destinations, foreign], ORDER_DIV_1, PF);
   assertEquals(r.destinations.filter((p) => p.uid_order === ORDER_DIV_2), [foreign]);
 });
 
@@ -3622,7 +3600,7 @@ Deno.test("syncOrderDestinationScope: sweep — every add/delete/rename/pair-edi
           inv.destinations = inv.destinations.map((d) =>
             e1.includes(d.uid) ? { ...d, delivery: { ...d.delivery, instructions: "edit" } } : d
           );
-          const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, BOTH);
+          const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, PF);
           assertJoined(r.scopedItems, r.destinations);
         }
       }
@@ -3687,9 +3665,9 @@ Deno.test("syncOrderDestinationsSelective: an extension section's pair is kept, 
   const orderPair = makePair("d1", "c1");
   const extPair = { uid_order: "o1", ...makePair("d1", "c1", { uid: "ext-pair" }) };
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...orderPair }, extPair];
-  const kept = syncOrderDestinationsSelective([orderPair], [orderPair], invoice, "o1", new Set(["ext-pair"]));
+  const kept = syncOrderDestinationsSelective([orderPair], [orderPair], invoice, "o1", new Set(["ext-pair"]), PF);
   assertEquals([kept.destinations.map((p) => p.uid), kept.dropped], [[orderPair.uid, "ext-pair"], []]);
-  const unaware = syncOrderDestinationsSelective([orderPair], [orderPair], invoice, "o1", new Set());
+  const unaware = syncOrderDestinationsSelective([orderPair], [orderPair], invoice, "o1", new Set(), PF);
   assertEquals(unaware.dropped.map((d) => [d.uid, d.reason]), [["ext-pair", "key_names_no_order_pair"]]);
 });
 

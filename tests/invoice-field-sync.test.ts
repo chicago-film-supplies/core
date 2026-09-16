@@ -25,8 +25,16 @@ const CHAIR = "Chair000000000000001";
 const LAMP = "Lamp0000000000000001";
 const TAX_CLASS = "TaxC1assDefau1tAAAAA";
 
-const FIELD: OrderInvoiceFieldSync = { perField: true, holidays: [] };
-const BOTH = { items: true, destinations: true };
+const FIELD: OrderInvoiceFieldSync = { holidays: [] };
+
+// ⚠️ **Five assertions in this file used to run the same case through the ROW
+// mode as a companion control** — proving each per-field green was not vacuous,
+// because the two modes gave different answers. The row mode is deleted (it had
+// no caller left once `v0.270.0` shipped the per-field rule to prod), so that
+// control is no longer EXPRESSIBLE here and the companions went with it. What
+// replaces it is mutation: revert `mergeSharedFields` to a whole-row compare and
+// these arms go red. Do not read their green as self-evidently meaningful.
+
 
 const iso = (day: number, time = "00:00:00") => `2026-10-${String(day).padStart(2, "0")}T${time}.000-05:00`;
 const daysFor = (from: string, to: string) => getDuration({ delivery_start: from, collection_start: to }, []).chargeDays;
@@ -104,8 +112,8 @@ type Row = Record<string, unknown> & { uid: string; path: string[]; price?: Reco
 const rows = (items: readonly InvoiceDocItemType[]) => items as unknown as Row[];
 const lineAt = (items: readonly InvoiceDocItemType[], uid: string) => rows(items).filter((r) => r.uid === uid);
 
-function sync(prev: OrderShape, next: OrderShape, inv: ReturnType<typeof invoiceOf>, mode?: OrderInvoiceFieldSync) {
-  return syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER, BOTH, mode);
+function sync(prev: OrderShape, next: OrderShape, inv: ReturnType<typeof invoiceOf>, mode: OrderInvoiceFieldSync = FIELD) {
+  return syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER, mode);
 }
 
 const WINDOW: [string, string] = [iso(5), iso(9)];
@@ -134,9 +142,6 @@ Deno.test("per field: the folding chair — an invoice at 2 follows 2 → 3; an 
   (rows(edited.items).find((r) => r.uid === CHAIR)!).quantity = 4;
   const kept = lineAt(sync(prev, next, edited, FIELD).scopedItems, CHAIR);
   assertEquals([kept[0].quantity, kept[0].price?.base_cents], [4, 1500], "quantity kept, price followed (G1)");
-
-  // Companion: the row mode freezes the whole line on the one override.
-  assertEquals(lineAt(sync(prev, next, edited).scopedItems, CHAIR)[0].price?.base_cents, 1000);
 });
 
 Deno.test("per field: a line that differs only in DERIVED money still follows the order (G2)", () => {
@@ -148,7 +153,6 @@ Deno.test("per field: a line that differs only in DERIVED money still follows th
   stored.price = { ...stored.price, total_cents: 1150, taxes_base: [{ uid: "t", name: "Tax", rate: 15, type: "percent" }] };
 
   assertEquals(lineAt(sync(prev, next, inv, FIELD).scopedItems, CHAIR)[0].name, "Padded chair");
-  assertEquals(lineAt(sync(prev, next, inv).scopedItems, CHAIR)[0].name, "Folding chair", "companion: the row mode reads money as an edit");
 });
 
 Deno.test("per field: a line the order removed is dropped unless a shared field was overridden", () => {
@@ -163,7 +167,6 @@ Deno.test("per field: a line the order removed is dropped unless a shared field 
   const out = sync(prev, next, inv, FIELD).scopedItems;
   assertEquals(lineAt(out, CHAIR).length, 0, "derived-only difference is not an override");
   assertEquals(lineAt(out, LAMP).length, 1);
-  assertEquals(lineAt(sync(prev, next, inv).scopedItems, CHAIR).length, 1, "companion: the row mode keeps it");
 });
 
 Deno.test("per field: a line the order MOVED appears once, at its new path, keeping its invoice-only fields (G3)", () => {
@@ -184,8 +187,6 @@ Deno.test("per field: a line the order MOVED appears once, at its new path, keep
   assertEquals(moved.length, 1, "one line, not two");
   assertEquals(moved[0].path, [ORDER, DEST_B, CHAIR]);
   assertEquals([moved[0].quantity, moved[0].xero_id, moved[0].coa_revenue, moved[0].name], [4, "LineXero", 4010, "Moved chair"]);
-
-  assertEquals(lineAt(sync(prev, next, inv).scopedItems, CHAIR).length, 2, "companion: the row mode bills it twice");
 });
 
 Deno.test("per field: when the order did not change, the scope comes back unchanged", () => {
@@ -226,10 +227,6 @@ Deno.test("per field: pair dates merge per leaf — a mixed window takes each _f
   assertEquals((out.collection_start_fs as { nanoseconds: number }).nanoseconds, 2, "collection followed → the order's _fs");
   assertEquals(out.days_charged, daysFor(iso(6), iso(16)));
   assertNotEquals(daysFor(iso(6), iso(16)), daysFor(iso(5), iso(16)), "anti-vacuity: the two windows bill differently");
-
-  // The row mode copies the order's dates whole over the invoice's edit.
-  const row = (sync(prev, next, inv).destinations[0] as unknown as { dates: Record<string, unknown> }).dates;
-  assertEquals(row.delivery_start, iso(5), "companion");
 });
 
 Deno.test("per field: a mixed window that would be invalid keeps the invoice's WHOLE dates", () => {

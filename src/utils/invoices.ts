@@ -936,9 +936,14 @@ export function invoiceItemDifferences(expected: InvoiceItem, current: InvoiceIt
  *
  * It replaced two near-duplicate comparisons — the private
  * `invoiceProjectionMatches` behind {@link computeInvoiceSyncStatus}, and
- * {@link isItemSynced}'s order-shaped one behind the draft mirror — which had
- * drifted into disagreeing about what "the same line" means. Both now call
- * this; {@link isItemSynced} projects its order item first.
+ * `isItemSynced`'s order-shaped one behind the draft mirror — which had drifted
+ * into disagreeing about what "the same line" means.
+ *
+ * ⚠️ `isItemSynced` is GONE (retired with the whole-row sync mode): a whole-row
+ * verdict is exactly what the per-field rule replaced, so leaving the predicate
+ * exported would have invited a caller back into G1. This comparator survives
+ * because {@link computeInvoiceSyncStatus} still asks a row-level question for
+ * the sync BADGE, which is a display, not a write decision.
  *
  * The comparison rules live in {@link invoiceItemDifferences}; this is that
  * function's emptiness. Keeping the boolean as the derived half rather than the
@@ -1135,46 +1140,6 @@ export function explainInvoiceItemDifferences(
   return { unexplained, arms };
 }
 
-/**
- * Compare a previous order item to a current invoice item to detect overrides.
- * Returns true if the invoice item is "synced" (matches the order item on all
- * non-invoice-only fields), false if it has been manually overridden.
- *
- * **It projects the order item first, then delegates to
- * {@link invoiceItemsMatch} — and that projection IS core#52's fix.** The
- * function used to compare an order-SHAPED item against an invoice-SHAPED one,
- * key sets before values; `stock_method` is required on a stored order line
- * (`schemas/order.ts`) and REJECTED by the strict `InvoiceDocLineItem`,
- * so the two sets could never be equal and an unchanged item reported
- * "overridden" — for every real line item in the corpus, with nothing thrown.
- * `price.replacement_cents` was a second, independent mismatch. The consequence
- * was that the order→invoice draft mirror propagated additions only: never an
- * edit, never a removal. Filtering both sides did NOT fix it — those are
- * order-only fields, not invoice-only overrides — so the fix had to be to
- * compare two invoice-shaped items, which is a real behavioural change to the
- * mirror rather than a tidy-up.
- *
- * ⚠️ The covering unit test's fixture omits `stock_method`, which is why it was
- * green throughout. Keep it that way only if it is testing something else — a
- * fixture repaired to make this green would delete the evidence.
- *
- * @param prevOrderItem - The order item from the previous version of the order
- * @param invoiceItem - The current invoice item (with order-scoped path)
- * @param orderDividerUid - The uid of the order divider (both sides carry the
- *   scoped path once the order item is projected, so nothing is stripped)
- * @returns true if the item is synced (not overridden), false if overridden
- */
-export function isItemSynced(
-  prevOrderItem: LineItem,
-  invoiceItem: InvoiceItem,
-  orderDividerUid: string,
-): boolean {
-  return invoiceItemsMatch(
-    projectOrderItemToInvoiceItem(prevOrderItem, orderDividerUid),
-    invoiceItem,
-  );
-}
-
 // ── Substitutions on an invoice ─────────────────────────────────
 
 /**
@@ -1259,7 +1224,7 @@ function withoutSubstitutionAnchor<T extends InvoiceDocItemType>(item: T): T {
   return copy as T;
 }
 
-// ── Per-field sync — the opt-in mode (api-cloudrun#890) ─────────
+// ── Per-field sync — the ONLY mode (api-cloudrun#890) ───────────
 
 /**
  * The fields an order shares with an invoice, split by the unit the merge runs
@@ -1298,18 +1263,18 @@ export function orderInvoiceSharedFields(): OrderInvoiceSharedFields {
 }
 
 /**
- * Opt into the per-field rule on the order → invoice sync.
+ * The context the per-field order → invoice sync needs beyond the documents.
  *
- * Without it, a line or a pair is compared WHOLE: one differing field (derived
- * money included) freezes every field of the row (G1, G2, G6, G7). With it,
- * each shared field follows the order unless the invoice's value differs from
+ * Each shared field follows the order unless the invoice's value differs from
  * the order's PREVIOUS value — `mergeSharedFields`, one matched row at a time.
  *
- * ⚠️ Additive on purpose: consumers sweep onto the latest beta, so the row mode
- * stays the default until the per-field mode has shipped to prod.
+ * ⚠️ **This used to be optional, and omitting it selected a WHOLE-ROW mode** in
+ * which one differing field (derived money included) froze every field of the
+ * row (G1, G2, G6, G7). That mode was additive on purpose while the per-field
+ * rule swept out to prod; it shipped in `v0.270.0` (2026-09-15), left no caller
+ * behind, and was deleted rather than left as a second way to be wrong.
  */
 export interface OrderInvoiceFieldSync {
-  perField: true;
   /**
    * The holiday dates a pair's day counts are recomputed with, when its merged
    * window is neither the order's nor the invoice's (some leaves from each).
@@ -1462,30 +1427,33 @@ interface ScopedRowOrigin {
  * @param prevOrderItems - Items from the previous version of the order
  * @param newOrderItems - Items from the new version of the order
  * @param currentInvoiceItems - Items scoped to this order in the current invoice (without order divider)
- * ## Per-field mode ({@link OrderInvoiceFieldSync})
+ * ## Every decision is PER FIELD ({@link OrderInvoiceFieldSync})
  *
- * Every whole-row decision above becomes a per-field one: a matched row is
- * {@link mergeSharedFields}'d rather than replaced-or-kept, and a removed row is
- * dropped only when no shared field was overridden. Derived money is never
- * compared, so it can neither freeze a line nor keep a removed one.
+ * A matched row is {@link mergeSharedFields}'d rather than replaced-or-kept, and
+ * a removed row is dropped only when no shared field was overridden. Derived
+ * money is never compared, so it can neither freeze a line nor keep a removed
+ * one.
  *
  * And a LINE the order moved to a new path, which the invoice carried at the old
- * one, moves with it and keeps every invoice-only field (G3). The row mode
- * projects it fresh at the new path and, when overridden, also keeps the old row
- * — one line billed twice.
+ * one, moves with it and keeps every invoice-only field (G3).
  *
  * @param orderDividerUid - The uid of the order divider in the invoice
- * @param mode - Omit for the row mode; see {@link OrderInvoiceFieldSync}
  * @returns Updated invoice items (scoped under the order divider, ready for insertion)
+ *
+ * ⚠️ **It takes no {@link OrderInvoiceFieldSync}, and that is not an oversight.**
+ * The only thing the context carries is `holidays`, which settles a merged
+ * window's day counts — a PAIR concern. Items reach it through
+ * {@link syncOrderDestinationScope}, which owns both halves and runs
+ * {@link resolveDownstreamChargeDays} after them. An unused parameter here would
+ * read as "this path considers holidays" when it does not.
  */
 export function syncOrderToInvoiceSelective(
   prevOrderItems: LineItem[],
   newOrderItems: LineItem[],
   currentInvoiceItems: InvoiceDocItemType[],
   orderDividerUid: string,
-  mode?: OrderInvoiceFieldSync,
 ): InvoiceDocItemType[] {
-  return syncScopedItems(prevOrderItems, newOrderItems, currentInvoiceItems, orderDividerUid, mode).items;
+  return syncScopedItems(prevOrderItems, newOrderItems, currentInvoiceItems, orderDividerUid).items;
 }
 
 /** {@link syncOrderToInvoiceSelective}, plus each emitted row's origin. */
@@ -1494,9 +1462,7 @@ function syncScopedItems(
   newOrderItems: LineItem[],
   currentInvoiceItems: InvoiceDocItemType[],
   orderDividerUid: string,
-  mode: OrderInvoiceFieldSync | undefined,
 ): { items: InvoiceDocItemType[]; origins: Map<InvoiceDocItemType, ScopedRowOrigin> } {
-  const perField = mode?.perField === true;
   const origins = new Map<InvoiceDocItemType, ScopedRowOrigin>();
   const emit = (row: InvoiceDocItemType, origin: ScopedRowOrigin) => {
     origins.set(row, origin);
@@ -1619,11 +1585,11 @@ function syncScopedItems(
         const carriedBefore = movedFromKey !== undefined && invoiceByPath.has(movedFromKey);
         if (prevItem || (movedFrom !== undefined && !carriedBefore)) continue;
 
-        // Per field, the invoice's own row moves with the line and keeps every
-        // field (G3). Only when no order line took over the old path — then that
-        // row belongs to the line there, and the row mode's projection stands.
+        // The invoice's own row moves with the line and keeps every field (G3).
+        // Only when no order line took over the old path — otherwise that row
+        // belongs to the line sitting there now, and a fresh projection stands.
         const movedPrev = movedFromKey !== undefined ? prevByPath.get(movedFromKey) : undefined;
-        if (perField && carriedBefore && movedPrev && !newPathKeys.has(movedFromKey!)) {
+        if (carriedBefore && movedPrev && !newPathKeys.has(movedFromKey!)) {
           const stored = invoiceByPath.get(movedFromKey!)!;
           processedInvoicePaths.add(movedFromKey!);
           const row = {
@@ -1636,18 +1602,12 @@ function syncScopedItems(
       }
       // New item — project to invoice shape, scoped under the order divider
       emit(withoutSubstitutionAnchor(projectOrderItemToInvoiceItem(newItem, orderDividerUid)), { source: newItem });
-    } else if (perField && prevItem) {
+    } else if (prevItem) {
       // Each shared field follows the order unless the invoice overrode it.
       emit(withoutSubstitutionAnchor(mergeLine(prevItem, newItem, invoiceItem, orderDividerUid)), {
         stored: invoiceItem,
         source: newItem,
       });
-    } else if (!perField && prevItem && isItemSynced(prevItem, invoiceItem, orderDividerUid)) {
-      // Not overridden — replace with projected order item, carry forward invoice-only fields
-      emit(withoutSubstitutionAnchor({
-        ...projectOrderItemToInvoiceItem(newItem, orderDividerUid),
-        ...pickInvoiceOnlyFields(invoiceItem),
-      }), { stored: invoiceItem, source: newItem });
     } else {
       // Overridden or no prev item — keep invoice item unchanged
       emit(withoutSubstitutionAnchor(invoiceItem), { stored: invoiceItem, source: newItem });
@@ -1674,9 +1634,7 @@ function syncScopedItems(
     }
 
     const prevItem = prevByPath.get(pathKey);
-    const overridden = prevItem !== undefined && (perField
-      ? lineOverridden(prevItem, invoiceItem, orderDividerUid)
-      : !isItemSynced(prevItem, invoiceItem, orderDividerUid));
+    const overridden = prevItem !== undefined && lineOverridden(prevItem, invoiceItem, orderDividerUid);
     if (overridden) {
       // Overridden — keep it even though it's been removed from the order
       emit(invoiceItem, { stored: invoiceItem });
@@ -2504,7 +2462,7 @@ export type InvoiceDestinationPair = InvoiceDocDestinationType;
  * 🔴 **It was `(uid_order, delivery.uid, collection.uid)` and that key MOVED —
  * which is the whole of api-cloudrun#663.** Those are `destinations/{uid}`
  * document ids, so correcting an address on one side re-pointed them, the key
- * stopped naming the same row, and `pairsMatch` never ran: the invoice's
+ * stopped naming the same row, and the override check never ran: the invoice's
  * payload was never consulted, and an operator's jurisdiction override was
  * dropped with no error and a changed tax rate on an issued invoice.
  *
@@ -2541,7 +2499,7 @@ function invoicePairKey(pair: InvoiceDestinationPair): string {
  * REFUSES an undefined value — the write fails, it does not drop the key — so a
  * pair whose optional field is simply absent would make the invoice
  * unwritable. `null` and absent mean the same thing on every field of this
- * pair, and `pairsMatch` canonicalizes the two together, so this costs no
+ * pair, and {@link canonicalizePayload} folds the two together, so this costs no
  * information and no override detection.
  *
  * ⚠️ The spread is deliberate and is what makes a NEW pair field carried by
@@ -2554,115 +2512,6 @@ export function toInvoiceDestinationPair(
 ): InvoiceDestinationPair {
   const out: Record<string, unknown> = { uid_order: uidOrder };
   for (const [key, value] of Object.entries(pair)) out[key] = value ?? null;
-  return out as unknown as InvoiceDestinationPair;
-}
-
-/**
- * The three fields a pair comparison must NOT look at. `uid` is the pair's
- * IDENTITY (its destination divider's uid) and `uid_order` its scope — a key is
- * what a comparison is addressed BY, never part of what it compares. `dates` is
- * snapshotted from the source order, so the invoice never owns it and a change
- * there is not an operator edit.
- *
- * ⚠️ **This set and {@link INVOICE_OVERRIDABLE_PAIR_FIELDS} are both skipped by
- * {@link pairsMatch} and they skip for OPPOSITE reasons. Do not merge them.**
- * The members here are *not payload* — there is no statement in them that an
- * operator could have made, so a difference can never be an edit. The members
- * there *are* payload, and are skipped precisely because they may be an edit:
- * they are **reconciled** field-by-field instead of compared. Conflating the two
- * puts the next field in the wrong one, and the two wrong answers differ — a
- * payload field in here is never carried at all, while a non-payload field over
- * there would be carried forward forever from a value nobody chose.
- */
-const PAIR_MATCH_EXCLUDED: ReadonlySet<string> = new Set(["uid", "uid_order", "dates"]);
-
-/**
- * The destination-pair fields an invoice OWNS — compared by nothing and
- * **reconciled** per field by {@link carryOverridablePairFields}.
- *
- * ONE list, with its membership set and the carry derived from it, for the
- * reason {@link INVOICE_ONLY_ITEM_FIELDS} states: four hand-maintained copies of
- * one fact is how `crms_id` came to be absent from every one of them.
- *
- * ⚠️ **Named *overridable*, not *only*.** The item-side list names fields the
- * ORDER does not carry at all, which is what makes *"present on the invoice
- * wins"* safe there. `jurisdiction` is carried by **both** documents, with the
- * order's as the default — so the carry here is an override *detection*
- * ({@link syncScalarWithOverride}), never a presence test. See
- * {@link carryOverridablePairFields} for why the distinction is load-bearing.
- *
- * ⚠️ One literal, no spread — core#43 is the standing case where JSR's npm
- * `.d.ts` emit TRUNCATED a spread inside an `as const`.
- *
- * ⚠️ **Exported for a consumer that cannot use the carry beside it.** The CRMS
- * invoice rebuild (`api-cloudrun/src/services/webhooks/invoice.ts`, deleted with
- * the CRMS ingest) rebuilt
- * `destinations` wholesale from the source order and therefore has **no `prev`
- * to compare against** — the third row of api-cloudrun's carry-forward table,
- * where *"the operator edited it"* collapses to *"a non-null value is stored"*.
- * It needs this LIST and cannot use {@link carryOverridablePairFields}, whose
- * whole mechanism is the three-way comparison. The list is exported rather than
- * the rule copied, because two hand-maintained copies of one field set in one
- * domain is api-cloudrun#593 verbatim.
- */
-export const INVOICE_OVERRIDABLE_PAIR_FIELDS = ["jurisdiction"] as const;
-
-/** Membership form of {@link INVOICE_OVERRIDABLE_PAIR_FIELDS}, for key filtering. */
-const INVOICE_OVERRIDABLE_PAIR_FIELD_SET: ReadonlySet<string> = new Set(
-  INVOICE_OVERRIDABLE_PAIR_FIELDS,
-);
-
-/**
- * Reconcile the invoice-owned fields of one pair, on the SYNCED arm of
- * {@link syncOrderDestinationsSelective}.
- *
- * This is the half of the items mechanism that destinations never got. On items,
- * editing an invoice-owned field is invisible to the comparator, so the row
- * stays "synced", keeps tracking the order, and carries the override forward —
- * an owned edit costs nothing. Before this, editing a pair's `jurisdiction` was
- * a *difference*, so the pair flipped to "overridden" and froze address,
- * contact, instructions, `customer_collecting`/`returning` and dates along with
- * it, on every later order edit.
- *
- * 🔴 **It uses {@link syncScalarWithOverride}, NOT a {@link pickInvoiceOnlyFields}
- * -shaped spread, and copying the items form here would ship a silent defect.**
- * That picker is *"present on the invoice wins"* (`if (source[key] !== undefined)`),
- * which is safe only because the order projection has nothing at those keys.
- * {@link toInvoiceDestinationPair} normalizes every present key's nullish to
- * `null`, so an inherited-and-unedited invoice pair carries `jurisdiction: null`
- * — which is `!== undefined`. A "present wins" carry would take that `null` over
- * the order's real value and **pin every synced invoice to null forever**.
- *
- * ⚠️ **The `?? null` on all three arms is load-bearing.**
- * `syncScalarWithOverride` compares by `===`, and the two documents spell
- * "asserts nothing" differently: the order side deletes the key
- * (`buildDestinationPair`, `api-cloudrun/src/services/orders.ts`) while the
- * invoice side stores `null`. Un-normalized, `undefined === null` is false,
- * every inherited pair reads as an override, and the pair pins at `null` — the
- * exact failure {@link canonicalizePayload} already prevents *inside*
- * {@link pairsMatch}, reappearing one layer out.
- *
- * @param prev - The pair as the order last had it (order-side spelling)
- * @param next - The new order pair, already projected to invoice shape
- * @param inv - The stored invoice pair
- * @returns `next` with each owned field resolved to the order's new value or the
- *   invoice's override
- */
-function carryOverridablePairFields(
-  prev: DocDestinationType,
-  next: InvoiceDestinationPair,
-  inv: InvoiceDestinationPair,
-): InvoiceDestinationPair {
-  const prevRec = prev as unknown as Record<string, unknown>;
-  const invRec = inv as unknown as Record<string, unknown>;
-  const out: Record<string, unknown> = { ...(next as unknown as Record<string, unknown>) };
-  for (const key of INVOICE_OVERRIDABLE_PAIR_FIELDS) {
-    out[key] = syncScalarWithOverride(
-      prevRec[key] ?? null,
-      out[key] ?? null,
-      invRec[key] ?? null,
-    );
-  }
   return out as unknown as InvoiceDestinationPair;
 }
 
@@ -2691,38 +2540,6 @@ export function canonicalizePayload(value: unknown): unknown {
     out[key] = canonicalizePayload(v);
   }
   return out;
-}
-
-/**
- * Deep-equality check on a pair's payload, ignoring {@link PAIR_MATCH_EXCLUDED}.
- *
- * 🔴 **An equality check enumerates what it SKIPS, never what it takes**, and
- * the two failure modes are opposite. A forgotten key in a *projection* drops a
- * field, which surfaces. A forgotten key here silently answers *"equal"* — so
- * the caller concludes the invoice pair was never edited, and **overwrites the
- * operator's edit with the order's value.** Silent data loss, not a missing
- * field. Excluding by name makes every future field on the pair compared by
- * construction; the sibling projections in
- * {@link syncOrderDestinationsSelective} enumerate their takings for the same
- * reason, in the other direction.
- *
- * Two skip sets, for opposite reasons — {@link PAIR_MATCH_EXCLUDED} is *not
- * payload*, {@link INVOICE_OVERRIDABLE_PAIR_FIELDS} is payload the invoice owns
- * and {@link carryOverridablePairFields} reconciles. Read both docblocks before
- * adding a name to either.
- */
-function pairsMatch(a: DocDestinationType, b: DocDestinationType): boolean {
-  const strip = (pair: DocDestinationType): Record<string, unknown> => {
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(pair)) {
-      if (PAIR_MATCH_EXCLUDED.has(key)) continue;
-      if (INVOICE_OVERRIDABLE_PAIR_FIELD_SET.has(key)) continue;
-      out[key] = value;
-    }
-    return out;
-  };
-  return JSON.stringify(canonicalizePayload(strip(a))) ===
-    JSON.stringify(canonicalizePayload(strip(b)));
 }
 
 /**
@@ -2790,22 +2607,29 @@ export interface OrderDestinationSyncResult {
  *
  * Policy per pair:
  * - Not in invoice (new in order) → add, tagged with `uid_order`.
- * - In invoice AND prev order matches current invoice → replace with new order
- *   pair, **carrying the invoice-owned fields forward**
- *   ({@link carryOverridablePairFields}).
- * - In invoice BUT prev order ≠ invoice → overridden, keep invoice version.
- * - In invoice but not in new order:
- *   - prev matches invoice → deleted from order, drop.
- *   - prev ≠ invoice → overridden, keep.
+ * - In invoice AND the order has a `prev` for it → merged PER FIELD
+ *   ({@link mergePair}): every `dates` leaf, each endpoint atom, `jurisdiction`
+ *   and the customer flags each follow the order unless the invoice's value
+ *   differs from the order's previous one.
+ * - In invoice but the order has no `prev` → keep the invoice version.
+ * - In invoice but not in new order: dropped, unless some shared field was
+ *   overridden, in which case it is kept.
  *
- * ⚠️ **"Matches" here is {@link pairsMatch}, which no longer sees the
- * {@link INVOICE_OVERRIDABLE_PAIR_FIELDS}.** So an override on one of those is
- * no longer a whole-pair freeze: the pair keeps syncing everything else and the
- * owned field is carried. Two consequences worth stating, because they are the
- * behaviour change: the rest of the pair (address, contact, instructions,
- * `customer_collecting`/`returning`) now tracks the order again, and a pair the
- * ORDER has deleted is dropped even when the invoice set a jurisdiction on it —
- * an owned-field edit is not a claim that the destination still exists.
+ * ⚠️ **An override is per FIELD, so it is not a whole-pair freeze.** The rest of
+ * the pair (address, contact, instructions, `customer_collecting`/`returning`)
+ * keeps tracking the order.
+ *
+ * 🔴 **This REVERSED one ruling, in `v0.270.0`, and the reversal is easy to miss
+ * because it is a consequence rather than a decision.** Under the whole-pair
+ * comparator `jurisdiction` was *invoice-owned*: skipped by the match and
+ * reconciled separately, so a jurisdiction-only edit was not an override and a
+ * pair the ORDER deleted was DROPPED — on the stated ground that *"an
+ * owned-field edit is not a claim that the destination still exists"*. Per
+ * field there is no owned set: `jurisdiction` is a shared field like any other,
+ * so editing it IS an override and the pair now SURVIVES its own deletion,
+ * reported in `kept`. Both readings are defensible; this one follows from the
+ * campaign's single rule, and it is the behaviour prod has had since
+ * 2026-09-15.
  *
  * @param prevOrderDests - Pairs from the previous version of the order
  * @param newOrderDests - Pairs from the new version of the order
@@ -2816,13 +2640,8 @@ export interface OrderDestinationSyncResult {
  *   construction, so they are kept verbatim rather than dropped as
  *   `key_names_no_order_pair`. Empty when the invoice has no order divider,
  *   because no section can hang under one.
- * @param mode - Omit for the whole-pair mode. With {@link OrderInvoiceFieldSync}
- *   a matched pair is merged per field — every `dates` leaf, each endpoint atom,
- *   `jurisdiction`, the customer flags — and its window's derived fields settled
- *   by {@link mergePair}; a pair the order deleted is dropped only when no shared
- *   field was overridden. `PAIR_MATCH_EXCLUDED` and the owned-field carry are not
- *   consulted: `dates` is compared like any other field, and `jurisdiction` is
- *   just another shared field.
+ * @param mode - The merge context ({@link OrderInvoiceFieldSync}); its
+ *   `holidays` settle a merged window's derived day counts in {@link mergePair}.
  * @returns `{ destinations, dropped }` — the updated full invoice destinations
  *   array, and every pair this call removed, each with the reason it went. See
  *   {@link OrderDestinationSyncResult}; **do not discard `dropped`.**
@@ -2833,7 +2652,7 @@ export function syncOrderDestinationsSelective(
   currentInvoiceDests: InvoiceDestinationPair[],
   uidOrder: string,
   extensionPairUids: ReadonlySet<string>,
-  mode?: OrderInvoiceFieldSync,
+  mode: OrderInvoiceFieldSync,
 ): OrderDestinationSyncResult {
   // Index prev order pairs by key (scoped to uidOrder).
   const prevByKey = new Map<string, DocDestinationType>();
@@ -2866,14 +2685,8 @@ export function syncOrderDestinationsSelective(
     if (!inv) {
       // New pair — add tagged with uid_order.
       synced.push(toInvoiceDestinationPair(uidOrder, newPair));
-    } else if (mode && prev) {
+    } else if (prev) {
       synced.push(mergePair(prev, newPair, inv, uidOrder, mode.holidays));
-    } else if (!mode && prev && pairsMatch(prev, inv)) {
-      // Not overridden on any COMPARED field — replace with the new order pair,
-      // then reconcile the fields the invoice owns.
-      synced.push(
-        carryOverridablePairFields(prev, toInvoiceDestinationPair(uidOrder, newPair), inv),
-      );
     } else {
       // Overridden (or prev missing) — keep invoice version.
       synced.push(inv);
@@ -2888,15 +2701,15 @@ export function syncOrderDestinationsSelective(
       continue;
     }
     const prev = prevByKey.get(key);
-    if (prev && (mode ? pairOverridden(prev, inv, uidOrder) : !pairsMatch(prev, inv))) {
+    if (prev && pairOverridden(prev, inv, uidOrder)) {
       // Overridden — keep even though removed from order.
       synced.push(inv);
       continue;
     }
     // Dropped. ⚠️ Two ways to reach this line and they are NOT the same event:
     // with a `prev` the order deleted a pair the invoice had not edited, which
-    // is intended; without one the key names no order pair, so `pairsMatch`
-    // never ran and the invoice's payload was never consulted. The second is
+    // is intended; without one the key names no order pair, so the override
+    // check never ran and the invoice's payload was never consulted. The second is
     // api-cloudrun#663, and it is the reason this reports rather than counts.
     dropped.push({
       uid_order: uidOrder,
@@ -2948,9 +2761,9 @@ export interface OrderDestinationScopeSyncResult {
  * divider AND its pair — the pair has no path of its own and hangs off its
  * divider's (`pair.uid === last(divider.path)`).
  *
- * Each half keeps its own existing override test — {@link isItemSynced} for the
- * divider (a name edit counts), {@link pairsMatch} for the pair (the owned
- * `jurisdiction` does not) — and the row is overridden if EITHER half is.
+ * Each half runs the same per-field test its own sync runs —
+ * {@link lineOverridden} for the divider, {@link pairOverridden} for the pair —
+ * and the row is overridden if EITHER half is.
  *
  * A half with no previous order counterpart is not an override, matching both
  * underlying helpers: each drops an invoice row the order never had.
@@ -2961,15 +2774,12 @@ function destinationRowOverridden(
   invDivider: InvoiceDocItemType | undefined,
   invPair: InvoiceDestinationPair | undefined,
   orderDividerUid: string,
-  perField: boolean,
 ): { divider: boolean; pair: boolean } {
   return {
-    divider: invDivider !== undefined && prevDivider !== undefined && (perField
-      ? lineOverridden(prevDivider, invDivider, orderDividerUid)
-      : !isItemSynced(prevDivider, invDivider as InvoiceItem, orderDividerUid)),
-    pair: invPair !== undefined && prevPair !== undefined && (perField
-      ? pairOverridden(prevPair, invPair, orderDividerUid)
-      : !pairsMatch(prevPair, invPair)),
+    divider: invDivider !== undefined && prevDivider !== undefined &&
+      lineOverridden(prevDivider, invDivider, orderDividerUid),
+    pair: invPair !== undefined && prevPair !== undefined &&
+      pairOverridden(prevPair, invPair, orderDividerUid),
   };
 }
 
@@ -2999,12 +2809,15 @@ function destinationRowOverridden(
  * @param currentScopedItems - The invoice's items under the order divider, without the divider
  * @param currentInvoiceDests - The invoice's full destinations array (all orders)
  * @param orderUid - The order's uid, which is also its invoice divider's uid
- * @param flags - Which halves the edit touched; an untouched half is carried as stored.
- *   Ignored in per-field mode, which always runs both: a field the order did not
- *   change merges to what the invoice already has.
- * @param mode - Omit for the whole-row mode. With {@link OrderInvoiceFieldSync}
- *   both halves merge per field, and each line's `chargeable_days` is then
- *   settled against its OWN invoice pair ({@link resolveDownstreamChargeDays}).
+ * @param mode - The merge context ({@link OrderInvoiceFieldSync}).
+ *
+ * ⚠️ **There is no per-half `flags` argument any more.** It named which halves
+ * the edit touched, so an untouched half could be carried as stored — a saving
+ * the per-field rule does not need and cannot safely take: a field the order did
+ * not change merges to what the invoice already has, so running both halves
+ * unconditionally is already a no-op where the old flag would have skipped.
+ * Both halves merge per field, and each line's `chargeable_days` is then settled
+ * against its OWN invoice pair ({@link resolveDownstreamChargeDays}).
  */
 export function syncOrderDestinationScope(
   prevOrder: { items: LineItem[]; destinations: DocDestinationType[] },
@@ -3012,24 +2825,18 @@ export function syncOrderDestinationScope(
   currentScopedItems: InvoiceDocItemType[],
   currentInvoiceDests: InvoiceDestinationPair[],
   orderUid: string,
-  flags: { items: boolean; destinations: boolean },
-  mode?: OrderInvoiceFieldSync,
+  mode: OrderInvoiceFieldSync,
 ): OrderDestinationScopeSyncResult {
-  const perField = mode?.perField === true;
-  const itemSync = perField || flags.items
-    ? syncScopedItems(prevOrder.items, nextOrder.items, currentScopedItems, orderUid, mode)
-    : undefined;
-  let scopedItems = itemSync ? itemSync.items : [...currentScopedItems];
-  const destSync: OrderDestinationSyncResult = perField || flags.destinations
-    ? syncOrderDestinationsSelective(
-      prevOrder.destinations,
-      nextOrder.destinations,
-      currentInvoiceDests,
-      orderUid,
-      new Set(extensionSectionTargets(currentScopedItems as InvoiceItem[], orderUid).keys()),
-      mode,
-    )
-    : { destinations: [...currentInvoiceDests], dropped: [] };
+  const itemSync = syncScopedItems(prevOrder.items, nextOrder.items, currentScopedItems, orderUid);
+  let scopedItems = itemSync.items;
+  const destSync: OrderDestinationSyncResult = syncOrderDestinationsSelective(
+    prevOrder.destinations,
+    nextOrder.destinations,
+    currentInvoiceDests,
+    orderUid,
+    new Set(extensionSectionTargets(currentScopedItems as InvoiceItem[], orderUid).keys()),
+    mode,
+  );
   let destinations = destSync.destinations;
   const dropped = [...destSync.dropped];
   const kept: KeptInvoiceDestination[] = [];
@@ -3064,7 +2871,7 @@ export function syncOrderDestinationScope(
   for (const uid of deleted) {
     const invDivider = dividerIn(currentScopedItems, uid);
     const invPair = pairIn(currentInvoiceDests, uid);
-    const overridden = destinationRowOverridden(prevDividers.get(uid), prevPairs.get(uid), invDivider, invPair, orderUid, perField);
+    const overridden = destinationRowOverridden(prevDividers.get(uid), prevPairs.get(uid), invDivider, invPair, orderUid);
 
     if (overridden.divider || overridden.pair) {
       if (invDivider && !dividerIn(scopedItems, uid)) scopedItems = [...scopedItems, invDivider];
@@ -3093,7 +2900,7 @@ export function syncOrderDestinationScope(
     }
   }
 
-  if (perField && itemSync) {
+  {
     scopedItems = settleScopedChargeDays(scopedItems, itemSync.origins, {
       orderUid,
       nextOrderPairs: nextOrder.destinations,
@@ -3171,24 +2978,6 @@ function settleScopedChargeDays(
     if (days === mergedDays) return row;
     return { ...row, price: { ...price, chargeable_days: days } } as InvoiceDocItemType;
   });
-}
-
-/**
- * Scalar co-write with override detection. Returns the new order value if
- * the invoice value still matches the previous order value (i.e. the invoice
- * has not been manually edited on this field); otherwise returns the current
- * invoice value (treated as an override, preserved).
- *
- * Values are compared by strict equality (`===`). Both `undefined` and `null`
- * participate in the match — a field that was `null` on prev and is `null`
- * on the invoice will accept a new non-null order value.
- */
-export function syncScalarWithOverride<T>(
-  prevOrderValue: T | undefined,
-  newOrderValue: T | undefined,
-  currentInvoiceValue: T | undefined,
-): T | undefined {
-  return prevOrderValue === currentInvoiceValue ? newOrderValue : currentInvoiceValue;
 }
 
 /**

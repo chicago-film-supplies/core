@@ -682,17 +682,26 @@ const InvoiceDocTotals: z.ZodType<InvoiceDocTotalsType> = z.strictObject({
  * flags across 8 prod invoices). The schema now spreads `DestinationPairCore`, so
  * declaring a field there lands it on both grains.
  *
- * The other three enumerators have all become walks and need no edit either:
+ * The other enumerators have all become walks and need no edit either:
  * `toInvoiceDestinationPair` projects with `Object.entries` (its docblock says the
- * spread is deliberate — do not tidy it into a field list), `pairsMatch`
- * destructures `{ uid_order, dates, ...rest }` and compares `rest`, and
- * api-cloudrun's CRMS invoice webhook map is deleted.
+ * spread is deliberate — do not tidy it into a field list), the merge reads the
+ * field set off the two schemas (`orderInvoiceSharedFields`), and api-cloudrun's
+ * CRMS invoice webhook map is deleted.
  *
- * ⚠️ **What a new field still needs is an override RULING**: whether it belongs in
- * `INVOICE_OVERRIDABLE_PAIR_FIELDS` (`@cfs/core/utils/invoices`) — payload the
- * invoice owns and `carryOverridablePairFields` reconciles — or is order-authored
- * and freezes the pair when it differs. That is a policy call, and no shape can
- * make it.
+ * ⭐ **A new field no longer needs an override RULING, and that is the point of
+ * the campaign this paragraph used to describe.** It said a new field had to be
+ * placed either in `INVOICE_OVERRIDABLE_PAIR_FIELDS` — payload the invoice owned
+ * and a separate carry reconciled — or left order-authored to freeze the whole
+ * pair when it differed. Both that list and the whole-pair freeze are deleted.
+ * Every shared field is now merged per field by construction: it follows the
+ * order unless the invoice's value differs from the order's PREVIOUS value.
+ *
+ * ⚠️ **What a new field DOES need is a classification, and it is a declaration
+ * rather than a policy**: `.meta({ derived })` if a derivation writes it (it is
+ * then never compared and recomputed afterwards), or `.meta({ propagate: false })`
+ * if the key means different things on the two documents. Untagged, it
+ * propagates — which is the safe default for a payload field and the unsafe one
+ * for a homonym, so tag the homonym.
  */
 export interface InvoiceDocDestinationType extends DocDestinationType {
   uid_order: string;
