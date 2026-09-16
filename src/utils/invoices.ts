@@ -83,7 +83,7 @@ import {
   type SubstitutionAnchor,
 } from "./substitutions.ts";
 import { mapPathsAcrossRebuild, pairItemsByUidOccurrence } from "./item-pairing.ts";
-import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType } from "../schemas/mod.ts";
+import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType, SubstitutedForEntryType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
   InvoiceSchema,
@@ -160,6 +160,8 @@ export interface InvoiceItem extends LineItem {
    * `crms_opportunity_id` line above records the absence of.
    */
   path_substituted_for?: string[];
+  /** @see `InvoiceDocLineItemType.substituted_for` (manager#414). */
+  substituted_for?: SubstitutedForEntryType[];
   /** @see `InvoiceDocDestinationItemType.path_extension_for` — a destination divider's only. */
   path_extension_for?: string[];
 }
@@ -441,7 +443,7 @@ export function getXeroUnitAmountFromCents(subtotalCents: number, quantity: numb
  * before values and reported the ENTIRE CRMS-authored corpus `out_of_sync`,
  * with nothing thrown.
  *
- * ⚠️ Seven literals, no spread. core#43 is the standing case where JSR's npm
+ * ⚠️ Eight literals, no spread. core#43 is the standing case where JSR's npm
  * `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate could
  * see it.
  *
@@ -463,6 +465,8 @@ const INVOICE_ONLY_ITEM_FIELDS = [
   "crms_id",
   "crms_opportunity_id",
   "path_substituted_for",
+  // Its successor (manager#414): the same record, with how much of Y stands in.
+  "substituted_for",
   // 🔴 Type-checked against the STORED shape, not derived from it. Derivation is
   // wrong here and the distinction is the whole point: this is an OVERRIDE
   // POLICY, not a structural difference — `coa_revenue` is on the order line too
@@ -1153,14 +1157,18 @@ export function explainInvoiceItemDifferences(
  *    `path_substituted_for` is an ORDER path on every surface that stores it.
  *    Comparing a divider-scoped path against it matches nothing, and the
  *    failure is silent: every substitution reads as unexplained drift.
- * 2. ⭐ **An anchor is SPENT once the order carries a line at the anchor's own
+ * 2. ⭐ **A `legacy` anchor is SPENT once the order carries a line at the anchor's own
  *    path** — the admin has made the same substitution upstream, so there is no
  *    divergence left to record. This is the invoice's half of the fulfillment
  *    rule *"cleared by the projection on graduation (admin emits at the same
  *    path)"*, and dropping the anchor here is what lets the line resume syncing
  *    normally instead of being frozen by its own divergence record.
  *
- * ⚠️ A DANGLING anchor is deliberately still live: if the admin deletes X from
+ *    An `entry` anchor (`substituted_for`, manager#414) is spent the other way
+ *    round, once the order no longer carries X: a merge is always into a Y the
+ *    order already has, so Y's presence says nothing (owner, 2026-09-16).
+ *
+ * ⚠️ A DANGLING legacy anchor is deliberately still live: if the admin deletes X from
  * the order without substituting, nothing resolves `substitutedFor` any more,
  * but Y is still on the invoice and the field is still the record of why.
  *
@@ -1192,9 +1200,15 @@ export function liveInvoiceAnchors(
     scopedInvoiceItems.map((it) => ({
       path: stripOrderPrefix(it.path ?? [], orderDividerUid),
       path_substituted_for: it.path_substituted_for,
+      substituted_for: it.substituted_for,
+      quantity: it.quantity,
     })),
   );
-  return anchors.filter((a) => !orderPathKeys.has(itemPathKey(a.path)));
+  // A legacy anchor is spent once the order carries Y; an entry once it no
+  // longer carries X (owner, 2026-09-16) — see `SubstitutionAnchor.form`.
+  return anchors.filter((a) =>
+    a.form === "legacy" ? !orderPathKeys.has(itemPathKey(a.path)) : orderPathKeys.has(itemPathKey(a.substitutedFor))
+  );
 }
 
 /**
@@ -1504,11 +1518,15 @@ function syncScopedItems(
   // is no longer at-or-below any anchor, the invoice has nothing there, and X
   // falls through to the `!invoiceItem` branch below and is projected fresh —
   // beside the very substitute that replaced it.
+  // ⚠️ LEGACY anchors only. An `entry` anchor (manager#414) may be a merge into a
+  // Y the order carries, or a partial swap that leaves X on the invoice, and
+  // this arm's "X is removed, emit Y where X stood" is wrong for both. No writer
+  // stamps `substituted_for` yet; Track S2 teaches this sync before one does.
   const anchors = liveInvoiceAnchors(
     currentInvoiceItems as InvoiceItem[],
     newOrderItems,
     orderDividerUid,
-  ).map((a) => {
+  ).filter((a) => a.form === "legacy").map((a) => {
     const now = moved.toPath(a.substitutedFor);
     return now ? { ...a, substitutedFor: now } : a;
   });

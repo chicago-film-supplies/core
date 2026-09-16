@@ -2,7 +2,7 @@
  * Shared schema fragments used across multiple collections.
  */
 import { z } from "zod";
-import { AnyUid, FirestoreId } from "./_uid.ts";
+import { AnyUid, FirestoreId, ItemUid } from "./_uid.ts";
 import { usState } from "./_usState.ts";
 
 // Re-export the id validators so consumers can import them from the package root.
@@ -93,6 +93,51 @@ export const FirestoreTimestamp: z.ZodType<FirestoreTimestampType> = z.custom<Fi
   type: "string",
   format: "date-time",
   description: "Firestore Timestamp (serialized as an ISO datetime in the spec).",
+});
+
+/**
+ * One substitution a downstream row stands in for (manager#414, owner decision D1).
+ *
+ * `path` is the REPLACED KIT's ORDER path, never a component's: X's and Y's
+ * components do not correspond one to one. `quantity` is how many units of this
+ * row stand in for X, recorded when the swap is made and never re-derived from
+ * the catalog (optional and variable components make that wrong).
+ */
+export interface SubstitutedForEntryType {
+  path: string[];
+  quantity: number;
+}
+
+/** @see {@link SubstitutedForEntryType} */
+export const SubstitutedForEntry: z.ZodType<SubstitutedForEntryType> = z.strictObject({
+  path: z.array(ItemUid).min(1),
+  quantity: z.int().positive(),
+});
+
+/**
+ * `substituted_for` on a fulfillment or invoice line: every row in a
+ * substitute's subtree carries it, stamped in one write by one writer (D1).
+ *
+ * The per-row invariant it makes checkable (D2):
+ *
+ * > row quantity = order quantity at its path (0 if none) + Σ `substituted_for[].quantity`
+ *
+ * Entries are unique by `path` and ACCUMULATE: a second merge of the same X into
+ * the same row adds to the existing entry rather than appending a second one.
+ *
+ * Replaces `path_substituted_for`, which names X but not how much of it — so a
+ * merge into an existing sibling could not be told from an in-place swap, and
+ * could not be reversed.
+ */
+export const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]> = z.array(SubstitutedForEntry).superRefine((entries, ctx) => {
+  const seen = new Set<string>();
+  for (const [i, entry] of entries.entries()) {
+    const k = entry.path.join("/");
+    if (seen.has(k)) {
+      ctx.addIssue({ code: "custom", path: [i, "path"], message: "substituted_for entries must be unique by path; add to the existing entry's quantity" });
+    }
+    seen.add(k);
+  }
 });
 
 /**

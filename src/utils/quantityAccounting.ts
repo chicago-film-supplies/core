@@ -33,9 +33,13 @@
  *   drops an anchor whose Y the order now carries itself, and that row then
  *   counts at its own path like any other.
  *
- * Track S (manager#414) replaces `path_substituted_for` with
- * `substituted_for[].quantity`; only {@link billedByPath}'s substitution input
- * changes then, not this module's contract.
+ * **`substituted_for` (Track S, manager#414) records how MUCH of Y stands in.**
+ * The subtree root's entry credits X by its quantity (then down X's components by
+ * the ratio walk, as above), and every row of the subtree bills its own path by
+ * `row quantity − Σ live entry quantities` (D2) — which is how a merge into a Y
+ * the order already carries bills both lines. An entry is spent once the order
+ * no longer carries its X, and its units then count at the row's own path.
+ * Legacy `path_substituted_for` rows keep the rule above until S4 removes them.
  *
  * ## Dates are money, not quantity (D4)
  *
@@ -125,6 +129,7 @@ import {
   toInvoiceDestinationPair,
   toOrderRelativePath,
 } from "./invoices.ts";
+import { isAtOrBelow, standInUnits } from "./substitutions.ts";
 import { addChicagoDays } from "./dates.ts";
 import { isPreTaxItem, type LineItem } from "./orders.ts";
 import { extensionChargeDays, priceLine } from "./price-document.ts";
@@ -175,6 +180,12 @@ export interface BilledRow {
    * units other rows billed, so it adds no quantity (api-cloudrun#680 R1).
    */
   via: "direct" | "substitute" | "extension";
+  /**
+   * Units this row bills AT THIS PATH. The row's own quantity, except for a
+   * merged substitute (manager#414): its row counts toward each X it stands in
+   * for by that entry's quantity, and toward its own path by the rest.
+   */
+  quantity: number;
   /** The window of the invoice pair dating the row's section — for an extension row, the extension's own. */
   window: BilledWindow | null;
 }
@@ -254,29 +265,65 @@ export function billedByPath(
           invoiceUid: invoice.uid,
           item,
           via: "extension",
+          quantity: item.quantity ?? 0,
           window,
         });
         continue;
       }
       const rel = (item.path ?? []).slice(1);
-      const anchor = anchors.find((a) => key(a.path) === key(rel));
-      if (anchor) {
-        const x = key(anchor.substitutedFor);
-        at(x).rows.push({ invoiceUid: invoice.uid, item, via: "substitute", window });
-        substituteCredit.set(x, (substituteCredit.get(x) ?? 0) + (item.quantity ?? 0));
+      const enclosing = anchors.filter((a) => isAtOrBelow(rel, a.path));
+      const bill = (units: number) => {
+        if (units <= 0) return;
+        const entry = at(key(rel));
+        entry.rows.push({ invoiceUid: invoice.uid, item, via: "direct", quantity: units, window });
+        entry.quantity += units;
+      };
+      if (enclosing.length === 0) {
+        bill(item.quantity ?? 0);
         continue;
       }
-      // A substitute's own components stand in for nothing on the order.
-      if (anchors.some((a) => rel.length > a.path.length && key(rel.slice(0, a.path.length)) === key(a.path))) continue;
-      const entry = at(key(rel));
-      entry.rows.push({ invoiceUid: invoice.uid, item, via: "direct", window });
-      entry.quantity += item.quantity ?? 0;
+      // Y itself: each anchor at this row credits its X by the units standing in.
+      for (const anchor of enclosing) {
+        if (key(anchor.path) !== key(rel) || anchor.quantity <= 0) continue;
+        const x = key(anchor.substitutedFor);
+        at(x).rows.push({ invoiceUid: invoice.uid, item, via: "substitute", quantity: anchor.quantity, window });
+        substituteCredit.set(x, (substituteCredit.get(x) ?? 0) + anchor.quantity);
+      }
+      // A legacy swap was in place: all of Y replaced X, and Y's components
+      // stand in for nothing on the order.
+      if (enclosing.some((a) => a.form === "legacy")) continue;
+      // A `substituted_for` row (D2): what does not stand in for a live X is the
+      // order's own quantity at this path — a merge into a Y the order carries.
+      const liveX = new Set(enclosing.map((a) => key(a.substitutedFor)));
+      bill((item.quantity ?? 0) - standInUnits(item, liveX));
     }
   }
 
-  // Walk the order top-down: a line's credit is what substitutes name it plus
-  // its kit parent's credit scaled by the order's own component ratio. Paths are
-  // depth-first contiguous, so a parent's credit is final before its children.
+  for (const [k, units] of substitutionCredit(orderItems, substituteCredit)) at(k).quantity += units;
+
+  return { byPath, compared, unaligned };
+}
+
+/**
+ * Units of each order line that substitutes stand in for: what substitutes name
+ * it directly, plus its kit parent's credit scaled by the ORDER's own component
+ * ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
+ * level — never the catalog, D1/D2).
+ *
+ * The one walk both {@link billedByPath} and `computeDocumentDiffs`'s D2
+ * quantity check read. A path under a credited kit is present even at 0.
+ *
+ * A path named directly that the order does not carry (a dangling anchor) keeps
+ * its direct credit; the walk only reaches paths the order has.
+ *
+ * @param orderItems - The order's items, dividers included (skipped)
+ * @param direct - Order path key → units substitutes name it for directly
+ */
+export function substitutionCredit(
+  orderItems: readonly LineItem[],
+  direct: ReadonlyMap<string, number>,
+): Map<string, number> {
+  // Paths are depth-first contiguous, so a parent's credit is final before its children.
   const credit = new Map<string, number>();
   const quantityAt = new Map<string, number>();
   for (const item of orderItems) {
@@ -291,18 +338,14 @@ export function billedByPath(
     const inherited = parentCredit > 0 && parentQuantity > 0
       ? Math.floor((2 * parentCredit * quantity + parentQuantity) / (2 * parentQuantity))
       : 0;
-    const own = (substituteCredit.get(k) ?? 0) + inherited;
+    const own = (direct.get(k) ?? 0) + inherited;
     if (own === 0 && !(parentCredit > 0)) continue;
     credit.set(k, own);
-    at(k).quantity += own;
   }
-  // A substitute naming an X the order no longer carries (a dangling anchor)
-  // still bills that path; the walk above only reached paths the order has.
-  for (const [k, units] of substituteCredit) {
-    if (!quantityAt.has(k)) at(k).quantity += units;
+  for (const [k, units] of direct) {
+    if (!quantityAt.has(k)) credit.set(k, units);
   }
-
-  return { byPath, compared, unaligned };
+  return credit;
 }
 
 /** @see {@link accountLine} */
@@ -416,7 +459,7 @@ export function extensionGroups(
       extensions.push(row);
       continue;
     }
-    const quantity = row.item.quantity ?? 0;
+    const quantity = row.quantity;
     if (quantity <= 0 || row.window === null) continue;
     groups.push({
       item: row.item,

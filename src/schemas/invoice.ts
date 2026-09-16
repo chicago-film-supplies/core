@@ -32,6 +32,8 @@ import {
   isLineItemType,
   PriceFormulaEnum,
   type PriceFormulaType,
+  SubstitutedForList,
+  type SubstitutedForEntryType,
   TimestampFields,
 } from "./common.ts";
 import {
@@ -408,6 +410,8 @@ export interface InvoiceDocLineItemType {
    *    hands a literal `undefined` to a write boundary.
    */
   path_substituted_for?: string[];
+  /** @see `FulfillmentLineItemType.substituted_for` (manager#414). Plain `.optional()`, like `path_substituted_for`. */
+  substituted_for?: SubstitutedForEntryType[];
 }
 
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
@@ -440,6 +444,7 @@ const InvoiceDocLineItemInner = z.strictObject({
   // Plain `.optional()`, matching `FulfillmentLineItem.path_substituted_for`
   // exactly — see the interface docblock for why this one is not `.nullable()`.
   path_substituted_for: z.array(ItemUid).optional(),
+  substituted_for: SubstitutedForList.optional(),
 }).superRefine(checkItemPriceFormula).superRefine(checkZeroPricedAmount);
 
 // 🔴 `checkZeroPricedAmount` moved onto the **Inner** const on 2026-09-09, and
@@ -1168,6 +1173,8 @@ export interface InvoiceItemInputLineType {
    * than rejected.
    */
   path_substituted_for?: string[];
+  /** @see `InvoiceDocLineItemType.substituted_for`. Needs an input channel for the same reason as `path_substituted_for`. */
+  substituted_for?: SubstitutedForEntryType[];
   /**
    * @see `InvoiceDocLineItemType.zero_priced`. NOT operator-authored — it is
    * projected from the order line — and it still needs an input channel, for
@@ -1223,6 +1230,7 @@ const InvoiceItemInputLineInner = z.object({
   uid_tax_class_override: FirestoreId.nullable().optional(),
   tracking_category: z.string().nullable().optional(),
   path_substituted_for: z.array(ItemUid).optional(),
+  substituted_for: SubstitutedForList.optional(),
   zero_priced: z.boolean().nullable().optional(),
 }).superRefine(checkItemPriceFormula);
 

@@ -74,18 +74,48 @@
  * @module
  */
 
-/** A substitution row, reduced to the two paths the predicates need. */
+/**
+ * A substitution row, reduced to what the predicates need.
+ *
+ * One anchor per (substitute row, replaced X). A row merged from two different
+ * X's is two anchors sharing one `path`.
+ */
 export interface SubstitutionAnchor {
   /** Y's own path, in the document that carries the row. */
   readonly path: readonly string[];
-  /** X's ORDER path — the row Y replaces. Locked at substitution time. */
+  /** X's ORDER path — the row Y replaces. Re-pointed by the syncs when X moves. */
   readonly substitutedFor: readonly string[];
+  /**
+   * Units of Y that stand in for X. For a `legacy` anchor it is the row's whole
+   * quantity: `path_substituted_for` swapped in place, so all of Y replaced X.
+   */
+  readonly quantity: number;
+  /**
+   * `legacy` — read from `path_substituted_for`. `entry` — read from a
+   * `substituted_for` entry (manager#414), which may be a MERGE into a row the
+   * order also carries.
+   *
+   * ⚠️ The two graduate differently (owner, 2026-09-16): a legacy anchor is
+   * spent once the order carries Y itself; an entry is spent once the order no
+   * longer carries X. Y being on the order says nothing about a merge, which
+   * was always into a Y the order had.
+   */
+  readonly form: "legacy" | "entry";
+}
+
+/** One `substituted_for` entry, as a row carries it. */
+export interface MaybeSubstitutedForEntry {
+  readonly path: readonly string[];
+  readonly quantity: number;
 }
 
 /** The shape every caller already has; deliberately narrower than a line item. */
 export interface MaybeSubstitution {
   readonly path: readonly string[];
   readonly path_substituted_for?: readonly string[] | undefined;
+  readonly substituted_for?: readonly MaybeSubstitutedForEntry[] | undefined;
+  /** Read only for a `legacy` anchor's {@link SubstitutionAnchor.quantity}. */
+  readonly quantity?: number | undefined;
 }
 
 /**
@@ -129,6 +159,14 @@ export function isStrictlyBelow(
  * inside a substituted subtree — the components of Y explain nothing, they are
  * themselves explained. Only the row that names X licenses anything.
  *
+ * ⭐ **`substituted_for` is stamped on EVERY row of Y's subtree (D1), so the
+ * anchor is the subtree's ROOT for that X** — the row no strict ancestor in the
+ * set also names that X for. A component's entry records how many of ITS units
+ * stand in (the D2 invariant, {@link standInUnits}); it anchors nothing.
+ *
+ * A row carrying both fields yields anchors from `substituted_for` only: the
+ * new field is the more specific statement of the same swap.
+ *
  * 🔴 **An EMPTY path on either side is refused, and it is the sharp case.**
  * `[]` is a prefix of every path, so an anchor holding one turns
  * {@link isRemovedBySubstitution} and {@link isInSubstitutedSubtree} into
@@ -157,13 +195,58 @@ export function collectSubstitutionAnchors(
   rows: readonly MaybeSubstitution[],
 ): SubstitutionAnchor[] {
   const anchors: SubstitutionAnchor[] = [];
+  /** Every (row path, X path) an entry names — to tell a subtree root from a component. */
+  const named = new Set<string>();
   for (const row of rows) {
+    for (const entry of row.substituted_for ?? []) named.add(joinKey(row.path) + "\x1e" + joinKey(entry.path));
+  }
+  for (const row of rows) {
+    if (row.path.length === 0) continue;
+    const entries = (row.substituted_for ?? []).filter((e) => e.path.length > 0);
+    if (entries.length > 0) {
+      for (const entry of entries) {
+        let underRoot = false;
+        for (let depth = row.path.length - 1; depth > 0 && !underRoot; depth--) {
+          underRoot = named.has(joinKey(row.path.slice(0, depth)) + "\x1e" + joinKey(entry.path));
+        }
+        if (underRoot) continue;
+        anchors.push({ path: row.path, substitutedFor: entry.path, quantity: entry.quantity, form: "entry" });
+      }
+      continue;
+    }
     if (row.path_substituted_for === undefined) continue;
     if (row.path_substituted_for.length === 0) continue;
-    if (row.path.length === 0) continue;
-    anchors.push({ path: row.path, substitutedFor: row.path_substituted_for });
+    anchors.push({ path: row.path, substitutedFor: row.path_substituted_for, quantity: row.quantity ?? 0, form: "legacy" });
   }
   return anchors;
+}
+
+/** Element-wise join for set keys; `\x1f` never occurs in a uid. */
+function joinKey(path: readonly string[]): string {
+  return path.join("\x1f");
+}
+
+/**
+ * How many of a row's own units stand in for a substitution rather than for
+ * the order line at its own path — Σ of its `substituted_for` quantities whose
+ * X is one of `liveX` (the D2 invariant: the rest is the order's quantity at
+ * the row's path).
+ *
+ * A spent entry (its X not in `liveX`) stands in for nothing, so its units
+ * count at the row's own path again. A row with no `substituted_for` returns 0,
+ * including a `legacy` anchor row, whose whole quantity the caller reads from
+ * {@link SubstitutionAnchor.quantity}.
+ *
+ * @param row - The downstream row
+ * @param liveX - Keys (`path.join("/")`) of the X paths whose anchors are live
+ * @returns Units of the row that stand in for a live substitution
+ */
+export function standInUnits(row: MaybeSubstitution, liveX: ReadonlySet<string>): number {
+  let units = 0;
+  for (const entry of row.substituted_for ?? []) {
+    if (entry.path.length > 0 && liveX.has(entry.path.join("/"))) units += entry.quantity;
+  }
+  return units;
 }
 
 /**

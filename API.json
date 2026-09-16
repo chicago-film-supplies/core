@@ -1785,7 +1785,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineItemType",
-          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced?: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  path_substituted_for?: string[];\n}",
+          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced?: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  path_substituted_for?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n}",
           "doc": "Line item in the fulfillment order view — no price, no financial flags."
         },
         {
@@ -2043,7 +2043,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced?: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  path_substituted_for?: string[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced?: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  path_substituted_for?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -2103,7 +2103,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n  zero_priced?: boolean | null;\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -3947,6 +3947,24 @@
           "name": "StoreUpdated",
           "declaration": "type StoreUpdated = EventEnvelope<Store> & typeLiteral;",
           "doc": ""
+        },
+        {
+          "kind": "variable",
+          "name": "SubstitutedForEntry",
+          "declaration": "const SubstitutedForEntry: z.ZodType<SubstitutedForEntryType>;",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "SubstitutedForEntryType",
+          "declaration": "interface SubstitutedForEntryType {\n  path: string[];\n  quantity: number;\n}",
+          "doc": "One substitution a downstream row stands in for (manager#414, owner decision D1).\n\n`path` is the REPLACED KIT's ORDER path, never a component's: X's and Y's\ncomponents do not correspond one to one. `quantity` is how many units of this\nrow stand in for X, recorded when the swap is made and never re-derived from\nthe catalog (optional and variable components make that wrong)."
+        },
+        {
+          "kind": "variable",
+          "name": "SubstitutedForList",
+          "declaration": "const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]>;",
+          "doc": "`substituted_for` on a fulfillment or invoice line: every row in a\nsubstitute's subtree carries it, stamped in one write by one writer (D1).\n\nThe per-row invariant it makes checkable (D2):\n\n> row quantity = order quantity at its path (0 if none) + Σ `substituted_for[].quantity`\n\nEntries are unique by `path` and ACCUMULATE: a second merge of the same X into\nthe same row adds to the existing entry rather than appending a second one.\n\nReplaces `path_substituted_for`, which names X but not how much of it — so a\nmerge into an existing sibling could not be told from an in-place swap, and\ncould not be reversed."
         },
         {
           "kind": "interface",
@@ -6161,6 +6179,24 @@
         },
         {
           "kind": "variable",
+          "name": "SubstitutedForEntry",
+          "declaration": "const SubstitutedForEntry: z.ZodType<SubstitutedForEntryType>;",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "SubstitutedForEntryType",
+          "declaration": "interface SubstitutedForEntryType {\n  path: string[];\n  quantity: number;\n}",
+          "doc": "One substitution a downstream row stands in for (manager#414, owner decision D1).\n\n`path` is the REPLACED KIT's ORDER path, never a component's: X's and Y's\ncomponents do not correspond one to one. `quantity` is how many units of this\nrow stand in for X, recorded when the swap is made and never re-derived from\nthe catalog (optional and variable components make that wrong)."
+        },
+        {
+          "kind": "variable",
+          "name": "SubstitutedForList",
+          "declaration": "const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]>;",
+          "doc": "`substituted_for` on a fulfillment or invoice line: every row in a\nsubstitute's subtree carries it, stamped in one write by one writer (D1).\n\nThe per-row invariant it makes checkable (D2):\n\n> row quantity = order quantity at its path (0 if none) + Σ `substituted_for[].quantity`\n\nEntries are unique by `path` and ACCUMULATE: a second merge of the same X into\nthe same row adds to the existing entry rather than appending a second one.\n\nReplaces `path_substituted_for`, which names X but not how much of it — so a\nmerge into an existing sibling could not be told from an in-place swap, and\ncould not be reversed."
+        },
+        {
+          "kind": "variable",
           "name": "TAX_JURISDICTIONS",
           "declaration": "const TAX_JURISDICTIONS: \"chicago\" | \"rantoul\" | \"frankfort\" | \"paxton\"[];",
           "doc": "**Who can LEVY a tax** — every {@link JurisdictionType} except `no_nexus`.\nThe vocabulary of `taxes-codes/{uid}.jurisdiction` (api-cloudrun#993).\n\n⚠️ **Not the live registration set, and must not be derived from it.**\n`COLLECTING_JURISDICTIONS` (`utils/taxes.ts`) omits `paxton` deliberately —\nCFS no longer delivers there — but the Paxton Sales Tax code still exists and\nfrozen documents still price on its rates. A closed registration keeps its\ncodes; it only stops being derived. So this is the storage half of the pair\n`JURISDICTIONS` / `COLLECTING_JURISDICTIONS` already draws, one level down,\nand `utils/taxes.ts` types its city table against it so a new registration\nmust be a member here first.\n\n`no_nexus` is excluded because it is an answer, not an authority: nobody\nlevies a tax under it.\n\nWritten out rather than filtered for the JSR-emit reason\n{@link PRE_TAX_ITEM_TYPES} records; `_taxJurisdictionParity` pins it."
@@ -7122,7 +7158,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced?: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  path_substituted_for?: string[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced?: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  path_substituted_for?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -7176,7 +7212,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n  zero_priced?: boolean | null;\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  path_substituted_for?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -7902,7 +7938,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineItemType",
-          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced?: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  path_substituted_for?: string[];\n}",
+          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced?: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  path_substituted_for?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n}",
           "doc": "Line item in the fulfillment order view — no price, no financial flags."
         },
         {
@@ -11262,7 +11298,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/quantityAccounting",
-      "moduleDoc": "**Quantity accounting** — how much of an order line its invoices have billed,\nand what is left to bill (api-cloudrun#680, manager#414).\n\n## One sum, computed on read, never stored (owner decision D3, 2026-09-13)\n\n> billed quantity at an order path = Σ over non-void, aligned invoices of\n> (line quantity at that path + substitution quantities naming it)\n\nNothing stores this number, so there is no second writer and no denorm to\ndrift — the `Order.invoices[]` status-drift class. A `quantity_invoiced` field\non order lines was rejected for exactly that reason.\n\nIts readers: `computeDocumentDiffs`'s \"billed N of M\" entry, the\nremaining-invoice create mode (via {@link remainingForOrder}), and the\ncoverage census.\n\n## Substitutions, as the documents carry them today\n\nToday a substitute Y carries one `path_substituted_for` naming X's order path,\nand Y replaces X in place. So:\n\n- **Y's row quantity counts in full toward X.** Y's own path is not an order\n  path and receives nothing, and Y's components (which exist on no order\n  line) count toward nothing.\n- **X's components are credited through the ORDER's own stored ratio** —\n  `credit × component quantity ÷ kit quantity`, walked down the order's path\n  tree, rounded half-up once per level. Never the catalog: optional and\n  variable components make catalog derivation wrong (D1). A full swap credits\n  every component exactly its order quantity, so the rounding only ever bites\n  a partial swap.\n- **A spent anchor is not a substitution** — {@link liveInvoiceAnchors}\n  drops an anchor whose Y the order now carries itself, and that row then\n  counts at its own path like any other.\n\nTrack S (manager#414) replaces `path_substituted_for` with\n`substituted_for[].quantity`; only {@link billedByPath}'s substitution input\nchanges then, not this module's contract.\n\n## Dates are money, not quantity (D4)\n\nAn order whose dates were extended after it was billed has no quantity left to\nbill and still has money left to bill. That remainder is each billed row priced\nas a D7 EXTENSION (api-cloudrun#997): for\n`max(order charge days, 5) − max(billed charge days, 5)` days with the\none-week minimum skipped, through `priceDocument`'s line pricer — so it is\nexactly what an extension section on an invoice bills (#997 D11).\n\n🔴 **An extension is a change of WINDOW, and its days are the PAIRS' days.**\nA billed row is extended only when the order pair's charge end is LATER than\nthe end of the window that billed it (earlier is a shortening, the same is\nnothing), and the day counts are the two pairs' `days_charged` — never a\nline's `chargeable_days`. A {@link BilledWindow} is that pair's end and count.\nA sign that disagrees with the window's direction is no extension either.\n\nThis reverses the first cut, which read line `chargeable_days` on both sides.\nThe 2026-09-16 census (prod and dev agree) found ONE genuine extension in the\ncorpus (#898) against 34 orders reading a positive extension on an UNMOVED\nwindow — $59.6k — and 60 remainder sections charging from the day after their\nown end: CRMS lines stored with no days, hand-held days, a long rental billed\nin two parts (35 + 10 of 45 days, each invoice carrying the full window), and\na pair recounted from 10 to 11 days. Every one had identical windows.\n\nThe one cost, taken knowingly (owner, 2026-09-16): a row whose days an\noperator held by hand is extended by the pairs' difference on top of whatever\nit billed. A row billed on no pair — no `destinations` entry, or no end —\nextends by nothing: an unknown window is not a later one.\n\n🔴 **Never price \"the extra days\" as an ordinary line.** `five_day_week` floors\nat one week, so `price(3 days)` charges a week the billed row already paid.\nThe D7 day count floors each SIDE at the week instead, and skips the floor on\nthe difference. A `fixed` row never read its days and extends by nothing.\n\n**A bill of the extension nets it out.** A line in an invoice's\ndate-extension section (`path_extension_for`) reaches {@link billedByPath} as\nan `extension` row at the path it extends: it adds no units, and\n{@link accountLine} subtracts its money, priced at its own added days, from\nwhat the order's days add to the unit rows.\n\n⚠️ **A line's `chargeable_days` is read for its RATE terms only**, never for\nthe extension's days — see above.\n\n## Money is PRE-TAX, in integer cents\n\nEvery cent figure here is `subtotal_discounted_cents`: the invoice writer that\nbills a remainder materializes tax on the line it builds, per destination, and\npricing tax here would restate `priceDocument`'s tax stage. Each amount is one\npricer result, rounded once (`cfs-money`).\n\nSigned on purpose: a negative quantity or extension is OVER-billing (the order\nwent down, or its dates shortened, after billing). That is a credit-note\nquestion rather than a remainder, and it is the caller's to decide — this\nreports it rather than clamping it away.\n\n## A remainder refuses CRMS-authored invoices (owner, 2026-09-16)\n\nBoth {@link remainingForOrder} and {@link buildRemainingInvoice} fail closed\nwhen any LIVE invoice on the order carries a `crms_id`, naming those uids in\n`crms_authored`, exactly as they do on an unaligned scope. The sum itself\n({@link billedByPath}) is unaffected, so a diff still reads them.\n\nThe 2026-09-16 census (`api-cloudrun/scripts/audit-order-invoice-coverage.ts`,\nprod and dev identical): every one of the 103 orders the button was offered\non was billed by CRMS, and none by a native invoice. CRMS billed units under\na different destination than the order carries them now — #478 bills 10\nTrash Removal under one destination where the order spreads them over five —\nso the same units read as NEW at four paths and OVER-billed at the fifth, and\na remainder bills paid units again. 32 of the 103 carried that signature;\nthe rest cannot be told apart from it with what is stored.\n\nPure: no reads.",
+      "moduleDoc": "**Quantity accounting** — how much of an order line its invoices have billed,\nand what is left to bill (api-cloudrun#680, manager#414).\n\n## One sum, computed on read, never stored (owner decision D3, 2026-09-13)\n\n> billed quantity at an order path = Σ over non-void, aligned invoices of\n> (line quantity at that path + substitution quantities naming it)\n\nNothing stores this number, so there is no second writer and no denorm to\ndrift — the `Order.invoices[]` status-drift class. A `quantity_invoiced` field\non order lines was rejected for exactly that reason.\n\nIts readers: `computeDocumentDiffs`'s \"billed N of M\" entry, the\nremaining-invoice create mode (via {@link remainingForOrder}), and the\ncoverage census.\n\n## Substitutions, as the documents carry them today\n\nToday a substitute Y carries one `path_substituted_for` naming X's order path,\nand Y replaces X in place. So:\n\n- **Y's row quantity counts in full toward X.** Y's own path is not an order\n  path and receives nothing, and Y's components (which exist on no order\n  line) count toward nothing.\n- **X's components are credited through the ORDER's own stored ratio** —\n  `credit × component quantity ÷ kit quantity`, walked down the order's path\n  tree, rounded half-up once per level. Never the catalog: optional and\n  variable components make catalog derivation wrong (D1). A full swap credits\n  every component exactly its order quantity, so the rounding only ever bites\n  a partial swap.\n- **A spent anchor is not a substitution** — {@link liveInvoiceAnchors}\n  drops an anchor whose Y the order now carries itself, and that row then\n  counts at its own path like any other.\n\n**`substituted_for` (Track S, manager#414) records how MUCH of Y stands in.**\nThe subtree root's entry credits X by its quantity (then down X's components by\nthe ratio walk, as above), and every row of the subtree bills its own path by\n`row quantity − Σ live entry quantities` (D2) — which is how a merge into a Y\nthe order already carries bills both lines. An entry is spent once the order\nno longer carries its X, and its units then count at the row's own path.\nLegacy `path_substituted_for` rows keep the rule above until S4 removes them.\n\n## Dates are money, not quantity (D4)\n\nAn order whose dates were extended after it was billed has no quantity left to\nbill and still has money left to bill. That remainder is each billed row priced\nas a D7 EXTENSION (api-cloudrun#997): for\n`max(order charge days, 5) − max(billed charge days, 5)` days with the\none-week minimum skipped, through `priceDocument`'s line pricer — so it is\nexactly what an extension section on an invoice bills (#997 D11).\n\n🔴 **An extension is a change of WINDOW, and its days are the PAIRS' days.**\nA billed row is extended only when the order pair's charge end is LATER than\nthe end of the window that billed it (earlier is a shortening, the same is\nnothing), and the day counts are the two pairs' `days_charged` — never a\nline's `chargeable_days`. A {@link BilledWindow} is that pair's end and count.\nA sign that disagrees with the window's direction is no extension either.\n\nThis reverses the first cut, which read line `chargeable_days` on both sides.\nThe 2026-09-16 census (prod and dev agree) found ONE genuine extension in the\ncorpus (#898) against 34 orders reading a positive extension on an UNMOVED\nwindow — $59.6k — and 60 remainder sections charging from the day after their\nown end: CRMS lines stored with no days, hand-held days, a long rental billed\nin two parts (35 + 10 of 45 days, each invoice carrying the full window), and\na pair recounted from 10 to 11 days. Every one had identical windows.\n\nThe one cost, taken knowingly (owner, 2026-09-16): a row whose days an\noperator held by hand is extended by the pairs' difference on top of whatever\nit billed. A row billed on no pair — no `destinations` entry, or no end —\nextends by nothing: an unknown window is not a later one.\n\n🔴 **Never price \"the extra days\" as an ordinary line.** `five_day_week` floors\nat one week, so `price(3 days)` charges a week the billed row already paid.\nThe D7 day count floors each SIDE at the week instead, and skips the floor on\nthe difference. A `fixed` row never read its days and extends by nothing.\n\n**A bill of the extension nets it out.** A line in an invoice's\ndate-extension section (`path_extension_for`) reaches {@link billedByPath} as\nan `extension` row at the path it extends: it adds no units, and\n{@link accountLine} subtracts its money, priced at its own added days, from\nwhat the order's days add to the unit rows.\n\n⚠️ **A line's `chargeable_days` is read for its RATE terms only**, never for\nthe extension's days — see above.\n\n## Money is PRE-TAX, in integer cents\n\nEvery cent figure here is `subtotal_discounted_cents`: the invoice writer that\nbills a remainder materializes tax on the line it builds, per destination, and\npricing tax here would restate `priceDocument`'s tax stage. Each amount is one\npricer result, rounded once (`cfs-money`).\n\nSigned on purpose: a negative quantity or extension is OVER-billing (the order\nwent down, or its dates shortened, after billing). That is a credit-note\nquestion rather than a remainder, and it is the caller's to decide — this\nreports it rather than clamping it away.\n\n## A remainder refuses CRMS-authored invoices (owner, 2026-09-16)\n\nBoth {@link remainingForOrder} and {@link buildRemainingInvoice} fail closed\nwhen any LIVE invoice on the order carries a `crms_id`, naming those uids in\n`crms_authored`, exactly as they do on an unaligned scope. The sum itself\n({@link billedByPath}) is unaffected, so a diff still reads them.\n\nThe 2026-09-16 census (`api-cloudrun/scripts/audit-order-invoice-coverage.ts`,\nprod and dev identical): every one of the 103 orders the button was offered\non was billed by CRMS, and none by a native invoice. CRMS billed units under\na different destination than the order carries them now — #478 bills 10\nTrash Removal under one destination where the order spreads them over five —\nso the same units read as NEW at four paths and OVER-billed at the fifth, and\na remainder bills paid units again. 32 of the 103 carried that signature;\nthe rest cannot be told apart from it with what is stored.\n\nPure: no reads.",
       "symbols": [
         {
           "kind": "interface",
@@ -11285,7 +11321,7 @@
         {
           "kind": "interface",
           "name": "BilledRow",
-          "declaration": "interface BilledRow {\n  invoiceUid: string;\n  item: InvoiceItem;\n  via: \"direct\" | \"substitute\" | \"extension\";\n  window: BilledWindow | null;\n}",
+          "declaration": "interface BilledRow {\n  invoiceUid: string;\n  item: InvoiceItem;\n  via: \"direct\" | \"substitute\" | \"extension\";\n  quantity: number;\n  window: BilledWindow | null;\n}",
           "doc": "One invoice row that bills an order path."
         },
         {
@@ -11442,6 +11478,23 @@
             }
           ],
           "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "substitutionCredit",
+          "signature": "substitutionCredit(orderItems: readonly LineItem[], direct: ReadonlyMap<string, number>): Map<string, number>",
+          "doc": "Units of each order line that substitutes stand in for: what substitutes name\nit directly, plus its kit parent's credit scaled by the ORDER's own component\nratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per\nlevel — never the catalog, D1/D2).\n\nThe one walk both {@link billedByPath} and `computeDocumentDiffs`'s D2\nquantity check read. A path under a credited kit is present even at 0.\n\nA path named directly that the order does not carry (a dangling anchor) keeps\nits direct credit; the walk only reaches paths the order has.",
+          "paramTags": [
+            {
+              "name": "orderItems",
+              "doc": "The order's items, dividers included (skipped)"
+            },
+            {
+              "name": "direct",
+              "doc": "Order path key → units substitutes name it for directly"
+            }
+          ],
+          "returnsTag": null
         }
       ]
     },
@@ -11534,7 +11587,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItem",
-          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  path_substituted_for?: string[];\n  path_extension_for?: string[];\n}",
+          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  path_substituted_for?: string[];\n  substituted_for?: SubstitutedForEntryType[];\n  path_extension_for?: string[];\n}",
           "doc": "An invoice item with optional order-scoping and invoice-specific fields.\nExtends LineItem with properties that should be carried forward during sync\nand fields needed for Xero mapping.\n\n`price` accepts both the utility's intermediate PriceObject and the full\nInvoiceDocItemPriceType from schemas to avoid type drift."
         },
         {
@@ -12067,7 +12120,7 @@
           "kind": "function",
           "name": "liveInvoiceAnchors",
           "signature": "liveInvoiceAnchors(scopedInvoiceItems: readonly InvoiceItem[], orderItems: readonly LineItem[], orderDividerUid: string): SubstitutionAnchor[]",
-          "doc": "The substitutions an invoice's order-scoped lines carry, expressed in the\nORDER's path space, with SPENT anchors dropped.\n\nTwo conversions happen here and both are load-bearing:\n\n1. 🔴 **The path spaces differ.** An invoice line's stored `path` is prefixed\n   with its order divider's uid and an order line's is not, while\n   `path_substituted_for` is an ORDER path on every surface that stores it.\n   Comparing a divider-scoped path against it matches nothing, and the\n   failure is silent: every substitution reads as unexplained drift.\n2. ⭐ **An anchor is SPENT once the order carries a line at the anchor's own\n   path** — the admin has made the same substitution upstream, so there is no\n   divergence left to record. This is the invoice's half of the fulfillment\n   rule *\"cleared by the projection on graduation (admin emits at the same\n   path)\"*, and dropping the anchor here is what lets the line resume syncing\n   normally instead of being frozen by its own divergence record.\n\n⚠️ A DANGLING anchor is deliberately still live: if the admin deletes X from\nthe order without substituting, nothing resolves `substitutedFor` any more,\nbut Y is still on the invoice and the field is still the record of why.\n\n🔴 **`substitutedFor` IS re-derived, and this paragraph used to deny it.**\n{@link syncOrderToInvoiceSelective} re-points every anchor returned here at\nwherever X sits on the CURRENT order, and writes that value back. The field\nmeans *\"the replaced line's current order path\"*, not *\"its path at the moment\nof the swap\"* — the old wording was a description of an implementation, and\nfollowing it is what let an order-side reparent resurrect X\n(api-cloudrun#897). The sync is the only place that can do this: it is the one\ncaller holding both revisions of the order. Every downstream reader — the wire\nguard, `api-cloudrun/scripts/audit-fulfillment-divergence.ts`, {@link computeInvoiceSyncStatus},\n{@link computeOrderInvoiceCoverage} — sees only the current order and would have\nno way to resolve a locked value.",
+          "doc": "The substitutions an invoice's order-scoped lines carry, expressed in the\nORDER's path space, with SPENT anchors dropped.\n\nTwo conversions happen here and both are load-bearing:\n\n1. 🔴 **The path spaces differ.** An invoice line's stored `path` is prefixed\n   with its order divider's uid and an order line's is not, while\n   `path_substituted_for` is an ORDER path on every surface that stores it.\n   Comparing a divider-scoped path against it matches nothing, and the\n   failure is silent: every substitution reads as unexplained drift.\n2. ⭐ **A `legacy` anchor is SPENT once the order carries a line at the anchor's own\n   path** — the admin has made the same substitution upstream, so there is no\n   divergence left to record. This is the invoice's half of the fulfillment\n   rule *\"cleared by the projection on graduation (admin emits at the same\n   path)\"*, and dropping the anchor here is what lets the line resume syncing\n   normally instead of being frozen by its own divergence record.\n\n   An `entry` anchor (`substituted_for`, manager#414) is spent the other way\n   round, once the order no longer carries X: a merge is always into a Y the\n   order already has, so Y's presence says nothing (owner, 2026-09-16).\n\n⚠️ A DANGLING legacy anchor is deliberately still live: if the admin deletes X from\nthe order without substituting, nothing resolves `substitutedFor` any more,\nbut Y is still on the invoice and the field is still the record of why.\n\n🔴 **`substitutedFor` IS re-derived, and this paragraph used to deny it.**\n{@link syncOrderToInvoiceSelective} re-points every anchor returned here at\nwherever X sits on the CURRENT order, and writes that value back. The field\nmeans *\"the replaced line's current order path\"*, not *\"its path at the moment\nof the swap\"* — the old wording was a description of an implementation, and\nfollowing it is what let an order-side reparent resurrect X\n(api-cloudrun#897). The sync is the only place that can do this: it is the one\ncaller holding both revisions of the order. Every downstream reader — the wire\nguard, `api-cloudrun/scripts/audit-fulfillment-divergence.ts`, {@link computeInvoiceSyncStatus},\n{@link computeOrderInvoiceCoverage} — sees only the current order and would have\nno way to resolve a locked value.",
           "paramTags": [
             {
               "name": "scopedInvoiceItems",
@@ -13101,21 +13154,27 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "MaybeSubstitutedForEntry",
+          "declaration": "interface MaybeSubstitutedForEntry {\n  readonly path: readonly string[];\n  readonly quantity: number;\n}",
+          "doc": "One `substituted_for` entry, as a row carries it."
+        },
+        {
+          "kind": "interface",
           "name": "MaybeSubstitution",
-          "declaration": "interface MaybeSubstitution {\n  readonly path: readonly string[];\n  readonly path_substituted_for?: readonly string[] | undefined;\n}",
+          "declaration": "interface MaybeSubstitution {\n  readonly path: readonly string[];\n  readonly path_substituted_for?: readonly string[] | undefined;\n  readonly substituted_for?: readonly MaybeSubstitutedForEntry[] | undefined;\n  readonly quantity?: number | undefined;\n}",
           "doc": "The shape every caller already has; deliberately narrower than a line item."
         },
         {
           "kind": "interface",
           "name": "SubstitutionAnchor",
-          "declaration": "interface SubstitutionAnchor {\n  readonly path: readonly string[];\n  readonly substitutedFor: readonly string[];\n}",
-          "doc": "A substitution row, reduced to the two paths the predicates need."
+          "declaration": "interface SubstitutionAnchor {\n  readonly path: readonly string[];\n  readonly substitutedFor: readonly string[];\n  readonly quantity: number;\n  readonly form: \"legacy\" | \"entry\";\n}",
+          "doc": "A substitution row, reduced to what the predicates need.\n\nOne anchor per (substitute row, replaced X). A row merged from two different\nX's is two anchors sharing one `path`."
         },
         {
           "kind": "function",
           "name": "collectSubstitutionAnchors",
           "signature": "collectSubstitutionAnchors(rows: readonly MaybeSubstitution[]): SubstitutionAnchor[]",
-          "doc": "Reduce a row set to its substitution anchors.\n\n⚠️ A row with no `path_substituted_for` is not an anchor even if it sits\ninside a substituted subtree — the components of Y explain nothing, they are\nthemselves explained. Only the row that names X licenses anything.\n\n🔴 **An EMPTY path on either side is refused, and it is the sharp case.**\n`[]` is a prefix of every path, so an anchor holding one turns\n{@link isRemovedBySubstitution} and {@link isInSubstitutedSubtree} into\n`true` for the entire document — every guard relaxed at once, every audit\ncertifying its whole corpus as explained. The failure is silent and it is in\nthe permissive direction, which is why this refuses rather than warns.\n\n⚠️ **It is reachable, not theoretical.** The field is `.optional()` on both\nsurfaces with no `.min(1)`, and `getInitialValues` materializes an optional\narray as `[]` — so any line seeded from the schema carries an empty one.\nMeasured: a `getInitialValues(InvoiceDocLineItem)` fixture made a\nsubstitution \"explain\" the removal of a row sharing no path segment with it.\nThe wire guard in `api-cloudrun/src/services/fulfillmentEdits.ts` happens to\nreject an empty `path_substituted_for` on submission (it resolves to no order\nitem), but the audits and projections read STORED rows and had no such\nbackstop.\n\n⭐ Refusing here rather than in the schema is deliberate: `.min(1)` would make\na form seed fail to parse, and the defect is not that `[]` can be written —\nit is that `[]` must not LICENSE anything.",
+          "doc": "Reduce a row set to its substitution anchors.\n\n⚠️ A row with no `path_substituted_for` is not an anchor even if it sits\ninside a substituted subtree — the components of Y explain nothing, they are\nthemselves explained. Only the row that names X licenses anything.\n\n⭐ **`substituted_for` is stamped on EVERY row of Y's subtree (D1), so the\nanchor is the subtree's ROOT for that X** — the row no strict ancestor in the\nset also names that X for. A component's entry records how many of ITS units\nstand in (the D2 invariant, {@link standInUnits}); it anchors nothing.\n\nA row carrying both fields yields anchors from `substituted_for` only: the\nnew field is the more specific statement of the same swap.\n\n🔴 **An EMPTY path on either side is refused, and it is the sharp case.**\n`[]` is a prefix of every path, so an anchor holding one turns\n{@link isRemovedBySubstitution} and {@link isInSubstitutedSubtree} into\n`true` for the entire document — every guard relaxed at once, every audit\ncertifying its whole corpus as explained. The failure is silent and it is in\nthe permissive direction, which is why this refuses rather than warns.\n\n⚠️ **It is reachable, not theoretical.** The field is `.optional()` on both\nsurfaces with no `.min(1)`, and `getInitialValues` materializes an optional\narray as `[]` — so any line seeded from the schema carries an empty one.\nMeasured: a `getInitialValues(InvoiceDocLineItem)` fixture made a\nsubstitution \"explain\" the removal of a row sharing no path segment with it.\nThe wire guard in `api-cloudrun/src/services/fulfillmentEdits.ts` happens to\nreject an empty `path_substituted_for` on submission (it resolves to no order\nitem), but the audits and projections read STORED rows and had no such\nbackstop.\n\n⭐ Refusing here rather than in the schema is deliberate: `.min(1)` would make\na form seed fail to parse, and the defect is not that `[]` can be written —\nit is that `[]` must not LICENSE anything.",
           "paramTags": [
             {
               "name": "rows",
@@ -13225,6 +13284,23 @@
             }
           ],
           "returnsTag": "Whether the row is a substitution's own row or one of its components"
+        },
+        {
+          "kind": "function",
+          "name": "standInUnits",
+          "signature": "standInUnits(row: MaybeSubstitution, liveX: ReadonlySet<string>): number",
+          "doc": "How many of a row's own units stand in for a substitution rather than for\nthe order line at its own path — Σ of its `substituted_for` quantities whose\nX is one of `liveX` (the D2 invariant: the rest is the order's quantity at\nthe row's path).\n\nA spent entry (its X not in `liveX`) stands in for nothing, so its units\ncount at the row's own path again. A row with no `substituted_for` returns 0,\nincluding a `legacy` anchor row, whose whole quantity the caller reads from\n{@link SubstitutionAnchor.quantity}.",
+          "paramTags": [
+            {
+              "name": "row",
+              "doc": "The downstream row"
+            },
+            {
+              "name": "liveX",
+              "doc": "Keys (`path.join(\"/\")`) of the X paths whose anchors are live"
+            }
+          ],
+          "returnsTag": "Units of the row that stand in for a live substitution"
         }
       ]
     },

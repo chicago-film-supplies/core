@@ -3981,6 +3981,7 @@ interface FulfillmentLineItemType {
   uid_order?: string;
   quantity_order?: number;
   path_substituted_for?: string[];
+  substituted_for?: SubstitutedForEntryType[];
 }
 ```
 
@@ -4601,6 +4602,7 @@ interface InvoiceDocLineItemType {
   crms_opportunity_id?: number | null;
   crms_id?: number | string | null;
   path_substituted_for?: string[];
+  substituted_for?: SubstitutedForEntryType[];
 }
 ```
 
@@ -4741,6 +4743,7 @@ interface InvoiceItemInputLineType {
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   path_substituted_for?: string[];
+  substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
 }
 ```
@@ -8937,6 +8940,48 @@ const StoreSchema: z.ZodType<Store>;
 
 ```ts
 type StoreUpdated = EventEnvelope<Store> & typeLiteral;
+```
+
+### `SubstitutedForEntry`
+
+```ts
+const SubstitutedForEntry: z.ZodType<SubstitutedForEntryType>;
+```
+
+### `SubstitutedForEntryType`
+
+One substitution a downstream row stands in for (manager#414, owner decision D1).
+
+`path` is the REPLACED KIT's ORDER path, never a component's: X's and Y's
+components do not correspond one to one. `quantity` is how many units of this
+row stand in for X, recorded when the swap is made and never re-derived from
+the catalog (optional and variable components make that wrong).
+
+```ts
+interface SubstitutedForEntryType {
+  path: string[];
+  quantity: number;
+}
+```
+
+### `SubstitutedForList`
+
+`substituted_for` on a fulfillment or invoice line: every row in a
+substitute's subtree carries it, stamped in one write by one writer (D1).
+
+The per-row invariant it makes checkable (D2):
+
+> row quantity = order quantity at its path (0 if none) + Σ `substituted_for[].quantity`
+
+Entries are unique by `path` and ACCUMULATE: a second merge of the same X into
+the same row adds to the existing entry rather than appending a second one.
+
+Replaces `path_substituted_for`, which names X but not how much of it — so a
+merge into an existing sibling could not be told from an in-place swap, and
+could not be reversed.
+
+```ts
+const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]>;
 ```
 
 ### `Supplier`
@@ -13727,6 +13772,48 @@ Zod schema for StoreBreakdownLocation.
 const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation>;
 ```
 
+### `SubstitutedForEntry`
+
+```ts
+const SubstitutedForEntry: z.ZodType<SubstitutedForEntryType>;
+```
+
+### `SubstitutedForEntryType`
+
+One substitution a downstream row stands in for (manager#414, owner decision D1).
+
+`path` is the REPLACED KIT's ORDER path, never a component's: X's and Y's
+components do not correspond one to one. `quantity` is how many units of this
+row stand in for X, recorded when the swap is made and never re-derived from
+the catalog (optional and variable components make that wrong).
+
+```ts
+interface SubstitutedForEntryType {
+  path: string[];
+  quantity: number;
+}
+```
+
+### `SubstitutedForList`
+
+`substituted_for` on a fulfillment or invoice line: every row in a
+substitute's subtree carries it, stamped in one write by one writer (D1).
+
+The per-row invariant it makes checkable (D2):
+
+> row quantity = order quantity at its path (0 if none) + Σ `substituted_for[].quantity`
+
+Entries are unique by `path` and ACCUMULATE: a second merge of the same X into
+the same row adds to the existing entry rather than appending a second one.
+
+Replaces `path_substituted_for`, which names X but not how much of it — so a
+merge into an existing sibling could not be told from an in-place swap, and
+could not be reversed.
+
+```ts
+const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]>;
+```
+
 ### `TAX_JURISDICTIONS`
 
 **Who can LEVY a tax** — every {@link JurisdictionType} except `no_nexus`.
@@ -15736,6 +15823,7 @@ interface InvoiceDocLineItemType {
   crms_opportunity_id?: number | null;
   crms_id?: number | string | null;
   path_substituted_for?: string[];
+  substituted_for?: SubstitutedForEntryType[];
 }
 ```
 
@@ -15870,6 +15958,7 @@ interface InvoiceItemInputLineType {
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   path_substituted_for?: string[];
+  substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
 }
 ```
@@ -17441,6 +17530,7 @@ interface FulfillmentLineItemType {
   uid_order?: string;
   quantity_order?: number;
   path_substituted_for?: string[];
+  substituted_for?: SubstitutedForEntryType[];
 }
 ```
 
@@ -25043,9 +25133,13 @@ and Y replaces X in place. So:
   drops an anchor whose Y the order now carries itself, and that row then
   counts at its own path like any other.
 
-Track S (manager#414) replaces `path_substituted_for` with
-`substituted_for[].quantity`; only {@link billedByPath}'s substitution input
-changes then, not this module's contract.
+**`substituted_for` (Track S, manager#414) records how MUCH of Y stands in.**
+The subtree root's entry credits X by its quantity (then down X's components by
+the ratio walk, as above), and every row of the subtree bills its own path by
+`row quantity − Σ live entry quantities` (D2) — which is how a merge into a Y
+the order already carries bills both lines. An entry is spent once the order
+no longer carries its X, and its units then count at the row's own path.
+Legacy `path_substituted_for` rows keep the rule above until S4 removes them.
 
 ## Dates are money, not quantity (D4)
 
@@ -25164,6 +25258,7 @@ interface BilledRow {
   invoiceUid: string;
   item: InvoiceItem;
   via: "direct" | "substitute" | "extension";
+  quantity: number;
   window: BilledWindow | null;
 }
 ```
@@ -25384,6 +25479,24 @@ for the caller to route to a credit note rather than a remainder.
 - `invoices` — Every invoice linked to the order, live or void — ALL of them, never a page
 - `orderDestinations` — The order's CURRENT pairs, which date every extension
 
+### `substitutionCredit(orderItems: readonly LineItem[], direct: ReadonlyMap<string, number>): Map<string, number>`
+
+Units of each order line that substitutes stand in for: what substitutes name
+it directly, plus its kit parent's credit scaled by the ORDER's own component
+ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
+level — never the catalog, D1/D2).
+
+The one walk both {@link billedByPath} and `computeDocumentDiffs`'s D2
+quantity check read. A path under a credited kit is present even at 0.
+
+A path named directly that the order does not carry (a dangling anchor) keeps
+its direct credit; the walk only reaches paths the order has.
+
+**Parameters**
+
+- `orderItems` — The order's items, dividers included (skipped)
+- `direct` — Order path key → units substitutes name it for directly
+
 ## `@cfs/core/utils/icons`
 
 ### `CFS_LOGO_SVG`
@@ -25561,6 +25674,7 @@ interface InvoiceItem {
   crms_id?: number | string | null;
   crms_opportunity_id?: number | null;
   path_substituted_for?: string[];
+  substituted_for?: SubstitutedForEntryType[];
   path_extension_for?: string[];
 }
 ```
@@ -26593,14 +26707,18 @@ Two conversions happen here and both are load-bearing:
    `path_substituted_for` is an ORDER path on every surface that stores it.
    Comparing a divider-scoped path against it matches nothing, and the
    failure is silent: every substitution reads as unexplained drift.
-2. ⭐ **An anchor is SPENT once the order carries a line at the anchor's own
+2. ⭐ **A `legacy` anchor is SPENT once the order carries a line at the anchor's own
    path** — the admin has made the same substitution upstream, so there is no
    divergence left to record. This is the invoice's half of the fulfillment
    rule *"cleared by the projection on graduation (admin emits at the same
    path)"*, and dropping the anchor here is what lets the line resume syncing
    normally instead of being frozen by its own divergence record.
 
-⚠️ A DANGLING anchor is deliberately still live: if the admin deletes X from
+   An `entry` anchor (`substituted_for`, manager#414) is spent the other way
+   round, once the order no longer carries X: a merge is always into a Y the
+   order already has, so Y's presence says nothing (owner, 2026-09-16).
+
+⚠️ A DANGLING legacy anchor is deliberately still live: if the admin deletes X from
 the order without substituting, nothing resolves `substitutedFor` any more,
 but Y is still on the invoice and the field is still the record of why.
 
@@ -28689,6 +28807,17 @@ strip that prefix first — `path_substituted_for` is an ORDER path on both
 surfaces, and comparing it against a divider-scoped path matches nothing and
 reports every substitution as unexplained.
 
+### `MaybeSubstitutedForEntry`
+
+One `substituted_for` entry, as a row carries it.
+
+```ts
+interface MaybeSubstitutedForEntry {
+  readonly path: readonly string[];
+  readonly quantity: number;
+}
+```
+
 ### `MaybeSubstitution`
 
 The shape every caller already has; deliberately narrower than a line item.
@@ -28697,17 +28826,24 @@ The shape every caller already has; deliberately narrower than a line item.
 interface MaybeSubstitution {
   readonly path: readonly string[];
   readonly path_substituted_for?: readonly string[] | undefined;
+  readonly substituted_for?: readonly MaybeSubstitutedForEntry[] | undefined;
+  readonly quantity?: number | undefined;
 }
 ```
 
 ### `SubstitutionAnchor`
 
-A substitution row, reduced to the two paths the predicates need.
+A substitution row, reduced to what the predicates need.
+
+One anchor per (substitute row, replaced X). A row merged from two different
+X's is two anchors sharing one `path`.
 
 ```ts
 interface SubstitutionAnchor {
   readonly path: readonly string[];
   readonly substitutedFor: readonly string[];
+  readonly quantity: number;
+  readonly form: "legacy" | "entry";
 }
 ```
 
@@ -28718,6 +28854,14 @@ Reduce a row set to its substitution anchors.
 ⚠️ A row with no `path_substituted_for` is not an anchor even if it sits
 inside a substituted subtree — the components of Y explain nothing, they are
 themselves explained. Only the row that names X licenses anything.
+
+⭐ **`substituted_for` is stamped on EVERY row of Y's subtree (D1), so the
+anchor is the subtree's ROOT for that X** — the row no strict ancestor in the
+set also names that X for. A component's entry records how many of ITS units
+stand in (the D2 invariant, {@link standInUnits}); it anchors nothing.
+
+A row carrying both fields yields anchors from `substituted_for` only: the
+new field is the more specific statement of the same swap.
 
 🔴 **An EMPTY path on either side is refused, and it is the sharp case.**
 `[]` is a prefix of every path, so an anchor holding one turns
@@ -28840,6 +28984,25 @@ wire boundary, use {@link isInSubstitutedSubtree} and check Y separately.
 - `anchors` — The downstream document's substitution anchors
 
 **Returns** — Whether the row is a substitution's own row or one of its components
+
+### `standInUnits(row: MaybeSubstitution, liveX: ReadonlySet<string>): number`
+
+How many of a row's own units stand in for a substitution rather than for
+the order line at its own path — Σ of its `substituted_for` quantities whose
+X is one of `liveX` (the D2 invariant: the rest is the order's quantity at
+the row's path).
+
+A spent entry (its X not in `liveX`) stands in for nothing, so its units
+count at the row's own path again. A row with no `substituted_for` returns 0,
+including a `legacy` anchor row, whose whole quantity the caller reads from
+{@link SubstitutionAnchor.quantity}.
+
+**Parameters**
+
+- `row` — The downstream row
+- `liveX` — Keys (`path.join("/")`) of the X paths whose anchors are live
+
+**Returns** — Units of the row that stand in for a live substitution
 
 ## `@cfs/core/utils/money`
 

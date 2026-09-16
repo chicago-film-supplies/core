@@ -7,7 +7,9 @@ import {
   isInSubstitutedSubtree,
   isRemovedBySubstitution,
   isStrictlyBelow,
+  standInUnits,
 } from "../src/utils/substitutions.ts";
+import { SubstitutedForList } from "../src/schemas/common.ts";
 
 /**
  * The path algebra behind every substitution guard, on both surfaces.
@@ -202,4 +204,37 @@ Deno.test("findSubtreeAnchor: undefined when nothing encloses the path", () => {
   ]);
   assertEquals(findSubtreeAnchor(["d", "z", "c1"], anchors), undefined);
   assertEquals(findSubtreeAnchor(["d", "y"], anchors), undefined);
+});
+
+// ── substituted_for (manager#414, Track S1) ──────────────────────────────────
+
+Deno.test("collectSubstitutionAnchors: a substituted_for subtree anchors at its ROOT only, one anchor per X", () => {
+  const anchors = collectSubstitutionAnchors([
+    { path: ["d", "y"], quantity: 5, substituted_for: [{ path: ["d", "x1"], quantity: 2 }, { path: ["d", "x2"], quantity: 1 }] },
+    { path: ["d", "y", "c"], quantity: 10, substituted_for: [{ path: ["d", "x1"], quantity: 4 }] },
+  ]);
+  assertEquals(anchors.map((a) => [a.path.join("/"), a.substitutedFor.join("/"), a.quantity, a.form]), [
+    ["d/y", "d/x1", 2, "entry"],
+    ["d/y", "d/x2", 1, "entry"],
+  ]);
+});
+
+Deno.test("collectSubstitutionAnchors: a legacy anchor stands in with the row's whole quantity", () => {
+  const [a] = collectSubstitutionAnchors([{ path: ["d", "y"], quantity: 3, path_substituted_for: ["d", "x"] }]);
+  assertEquals([a.quantity, a.form], [3, "legacy"]);
+});
+
+Deno.test("standInUnits: sums only entries whose X is live", () => {
+  const row = { path: ["d", "y"], substituted_for: [{ path: ["d", "x1"], quantity: 2 }, { path: ["d", "x2"], quantity: 1 }] };
+  assertEquals(standInUnits(row, new Set(["d/x1", "d/x2"])), 3);
+  assertEquals(standInUnits(row, new Set(["d/x2"])), 1);
+  assertEquals(standInUnits({ path: ["d", "y"], path_substituted_for: ["d", "x"] }, new Set(["d/x"])), 0);
+});
+
+Deno.test("SubstitutedForList: entries are unique by path, and a path and a positive quantity are required", () => {
+  const d = "Dest1AAAAAAAAAAAAAAA", x = "ProdXAAAAAAAAAAAAAAA", w = "ProdWAAAAAAAAAAAAAAA";
+  assert(SubstitutedForList.safeParse([{ path: [d, x], quantity: 2 }, { path: [d, w], quantity: 1 }]).success);
+  assertFalse(SubstitutedForList.safeParse([{ path: [d, x], quantity: 2 }, { path: [d, x], quantity: 1 }]).success);
+  assertFalse(SubstitutedForList.safeParse([{ path: [], quantity: 2 }]).success);
+  assertFalse(SubstitutedForList.safeParse([{ path: [d, x], quantity: 0 }]).success);
 });

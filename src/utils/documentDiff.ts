@@ -157,11 +157,14 @@ import {
 import type { LineItem } from "./orders.ts";
 import {
   collectSubstitutionAnchors,
+  isAtOrBelow,
   isInSubstitutedSubtree,
   isRemovedBySubstitution,
+  type MaybeSubstitution,
+  standInUnits,
   type SubstitutionAnchor,
 } from "./substitutions.ts";
-import { accountLine, type AccountedInvoice, type BilledByPath, billedByPath, orderLineWindow } from "./quantityAccounting.ts";
+import { accountLine, type AccountedInvoice, type BilledByPath, billedByPath, orderLineWindow, substitutionCredit } from "./quantityAccounting.ts";
 import { orderFulfillmentSharedFields, type SharedField } from "./shared-fields.ts";
 
 /** The three document kinds a diff can be viewed from or sourced from. */
@@ -405,7 +408,7 @@ function scopeFulfillment(fulfillment: Fulfillment): ScopedLines {
 
 function scopeInvoice(invoice: Invoice, orderUid: string): ScopedLines {
   const byKey = new Map<string, LineItem>();
-  const rel: Array<{ path: string[]; path_substituted_for?: string[] }> = [];
+  const rel: MaybeSubstitution[] = [];
   // A date-extension section bills days on lines the order has; its money is
   // the `billed` entry's (through `billedByPath`), so its lines are no line
   // comparison's subject.
@@ -415,7 +418,8 @@ function scopeInvoice(invoice: Invoice, orderUid: string): ScopedLines {
     if (isInExtensionSection(it.path, orderUid, extensionTargets)) continue;
     const relPath = it.path.slice(1);
     byKey.set(key(relPath), it as unknown as LineItem);
-    rel.push({ path: relPath, path_substituted_for: (it as InvoiceItem).path_substituted_for });
+    const line = it as InvoiceItem;
+    rel.push({ path: relPath, path_substituted_for: line.path_substituted_for, substituted_for: line.substituted_for, quantity: line.quantity });
   }
   return { byKey, anchors: collectSubstitutionAnchors(rel) };
 }
@@ -443,12 +447,18 @@ function lineFields(
   there: LineItem,
   orderUid: string,
   context: DocumentDiffContext,
+  expectedFulfillmentQuantity?: number,
 ): DocumentDiffField[] {
   const involvesFulfillment = viewed.kind === "fulfillment" || source.kind === "fulfillment";
   // Fulfillment ↔ invoice quantity is the `billed` entry's, judged against the order.
   if (involvesFulfillment && (viewed.kind === "invoice" || source.kind === "invoice")) return [];
   if (involvesFulfillment) {
-    return here.quantity === there.quantity
+    // D2: a fulfillment row is the order's quantity, less what substitutes took
+    // from it, plus what it stands in for (manager#414).
+    const fulfillmentQuantity = (viewed.kind === "fulfillment" ? here : there).quantity ?? 0;
+    const orderQuantity = (viewed.kind === "order" ? here : there).quantity ?? 0;
+    const expected = expectedFulfillmentQuantity ?? orderQuantity;
+    return fulfillmentQuantity === expected
       ? []
       : [{ field: "quantity", here: here.quantity ?? null, there: there.quantity ?? null }];
   }
@@ -617,6 +627,26 @@ function compareScope(
     );
   };
 
+  // Order ↔ downstream only: which side carries the substitutions, and the D2
+  // quantity each downstream row that the order also carries should have.
+  const orderSide = viewed.kind === "order" ? viewed : source.kind === "order" ? source : undefined;
+  const downstream = orderSide === undefined ? undefined : orderSide === viewed ? source : viewed;
+  const liveAnchors = downstream === undefined || orderSide === undefined
+    ? []
+    : downstream.lines.anchors.filter((a) => orderSide.lines.byKey.has(key(a.substitutedFor)));
+  const credit = (() => {
+    if (orderSide === undefined || liveAnchors.length === 0) return new Map<string, number>();
+    const direct = new Map<string, number>();
+    for (const a of liveAnchors) direct.set(key(a.substitutedFor), (direct.get(key(a.substitutedFor)) ?? 0) + a.quantity);
+    return substitutionCredit((orderSide.doc as Order).items as unknown as LineItem[], direct);
+  })();
+  const expectedFulfillmentQuantity = (rel: string, downstreamRow: LineItem, orderRow: LineItem): number | undefined => {
+    if (downstream?.kind !== "fulfillment" || liveAnchors.length === 0) return undefined;
+    const path = rel.split("/");
+    const liveX = new Set(liveAnchors.filter((a) => isAtOrBelow(path, a.path)).map((a) => key(a.substitutedFor)));
+    return (orderRow.quantity ?? 0) - (credit.get(rel) ?? 0) + standInUnits(downstreamRow as MaybeSubstitution, liveX);
+  };
+
   for (const [rel, here] of viewed.lines.byKey) {
     if (!comparable(viewed, source, here)) continue;
     const there = source.lines.byKey.get(rel);
@@ -630,7 +660,8 @@ function compareScope(
       // The source substituted this line away: one entry here, at X.
       const theirs = source.lines.anchors.find((a) => key(a.substitutedFor) === rel);
       if (theirs) {
-        substituted(rel, rel, key(theirs.path));
+        // A merge's Y is on this document too, and its own row carries the one entry.
+        if (!viewed.lines.byKey.has(key(theirs.path))) substituted(rel, rel, key(theirs.path));
         continue;
       }
       if (explainedBy(viewed, source, rel) || explainedBy(source, viewed, rel)) continue;
@@ -643,7 +674,15 @@ function compareScope(
       push(out.lines, viewedKey(rel), { source: sourceRef, kind: "only_here", fields: [] });
       continue;
     }
-    const fields = lineFields(viewed, source, here, there, orderUid, context);
+    // A merge (manager#414): Y is on both documents, and the downstream row
+    // stands in for an X the order still carries. One entry per X, at Y.
+    for (const a of liveAnchors) {
+      if (a.form === "entry" && key(a.path) === rel) substituted(rel, key(a.substitutedFor), rel);
+    }
+    const expected = downstream === undefined
+      ? undefined
+      : expectedFulfillmentQuantity(rel, downstream === viewed ? here : there, downstream === viewed ? there : here);
+    const fields = lineFields(viewed, source, here, there, orderUid, context, expected);
     if (fields.length > 0) push(out.lines, viewedKey(rel), { source: sourceRef, kind: "differs", fields });
   }
   for (const [rel, there] of source.lines.byKey) {

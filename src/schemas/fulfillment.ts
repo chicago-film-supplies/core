@@ -33,6 +33,8 @@ import {
   type OrgPathNodeType,
   StockMethodEnum,
   type StockMethodType,
+  SubstitutedForList,
+  type SubstitutedForEntryType,
   TimestampFields,
 } from "./common.ts";
 import {
@@ -144,6 +146,11 @@ export interface FulfillmentLineItemType {
    * projection on graduation (admin emits at the same path).
    */
   path_substituted_for?: string[];
+  /**
+   * The substitutions this row stands in for, with how many units each — see
+   * `SubstitutedForList`. Replaces `path_substituted_for` (manager#414).
+   */
+  substituted_for?: SubstitutedForEntryType[];
 }
 
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
@@ -170,6 +177,7 @@ const FulfillmentLineItemInner = z.strictObject({
   uid_order: FirestoreId.optional(),
   quantity_order: z.number().int().min(0).optional(),
   path_substituted_for: z.array(ItemUid).optional(),
+  substituted_for: SubstitutedForList.optional(),
   // 🔴 Attached to the **Inner** const so `FulfillmentItem`'s discriminated union
   // below enforces it, matching `order.ts` and (since 2026-09-09) `invoice.ts`.
   // ⚠️ It is VACUOUS at this grain and that is deliberate rather than an

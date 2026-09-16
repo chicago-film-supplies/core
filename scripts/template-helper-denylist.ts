@@ -431,6 +431,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "accountLine",
     "billedByPath",
     "remainingForOrder",
+    "substitutionCredit",
   ],
   // `utils/fulfillment-items.ts` is a WRITE-PATH function shared by the API and
   // the manager — it rebuilds a fulfillment's items array from a picker
@@ -530,6 +531,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "isRemovedBySubstitution",
     "isStrictlyBelow",
     "isSubstitutionRow",
+    "standInUnits",
   ],
   // 🔴 **The two calendar-day primitives, hidden because a template that ages a
   // document RE-DATES it.** `addChicagoDays` and `chicagoDaysBetween` are what

@@ -510,3 +510,84 @@ Deno.test("quantityAccounting: a row billed on no known window extends nothing",
   assertEquals(remainingForOrder(O, lightOrder(2, 10), [bare], pairs(10)).lines, []);
   assertEquals(accountLine(line(LIGHT, [D, G, LIGHT], 2, 1000, 10), billedByPath(O, lightOrder(2, 10), [invoice("a", lightOrder(2, 3))]).byPath.get(lightKey), null).extension_cents, 0);
 });
+
+// ── substituted_for: merges and partial swaps (manager#414, Track S1) ─────────
+
+const TRIPOD = "prod-tripod";
+const tripodKey = `${D}/${G}/${TRIPOD}`;
+
+/** Light 2 and Tripod 2 under one group. */
+/** An invoice of `items`, then `substituted_for` stamped on the rows it names — the fixture's projection drops unknown keys. */
+function stamped(uid: string, items: LineItem[], entries: Record<string, Array<{ path: string[]; quantity: number }>>): AccountedInvoice {
+  const inv = invoice(uid, items);
+  for (const it of inv.items) {
+    const found = entries[it.path.slice(1).join("/")];
+    if (found) (it as InvoiceItem).substituted_for = found;
+  }
+  return inv;
+}
+
+const mergeOrder = (tripods = 2): LineItem[] => [
+  DEST_ITEM,
+  GROUP_ITEM,
+  line(LIGHT, [D, G, LIGHT], 2, 1000),
+  ...(tripods > 0 ? [line(TRIPOD, [D, G, TRIPOD], tripods, 3000)] : []),
+];
+
+Deno.test("quantityAccounting: a MERGE bills both lines — the substitute's own path by the rest, the replaced line by the entry", () => {
+  // Both tripods merged into the Light row: 4 = 2 (the order's own Light) + 2 standing in.
+  const inv = stamped("a", [DEST_ITEM, GROUP_ITEM, line(LIGHT, [D, G, LIGHT], 4, 1000)], { [lightKey]: [{ path: [D, G, TRIPOD], quantity: 2 }] });
+  const billed = billedByPath(O, mergeOrder(), [inv]);
+  assertEquals(billed.byPath.get(lightKey)?.quantity, 2);
+  assertEquals(billed.byPath.get(lightKey)?.rows.map((r) => [r.via, r.quantity]), [["direct", 2]]);
+  assertEquals(billed.byPath.get(tripodKey)?.quantity, 2);
+  assertEquals(billed.byPath.get(tripodKey)?.rows.map((r) => [r.via, r.quantity]), [["substitute", 2]]);
+  assertEquals(remainingForOrder(O, mergeOrder(), [inv], pairs()).lines, []);
+});
+
+Deno.test("quantityAccounting: a merge is SPENT once the order no longer carries X — its units count at the row's own path", () => {
+  // The operator removed the tripods from the order (owner ruling, 2026-09-16).
+  const inv = stamped("a", [DEST_ITEM, GROUP_ITEM, line(LIGHT, [D, G, LIGHT], 4, 1000)], { [lightKey]: [{ path: [D, G, TRIPOD], quantity: 2 }] });
+  const billed = billedByPath(O, mergeOrder(0), [inv]);
+  assertEquals(billed.byPath.get(lightKey)?.quantity, 4);
+  assertEquals(billed.byPath.has(tripodKey), false);
+  // 4 billed of 2 ordered: over-billed by 2.
+  assertEquals(remainingForOrder(O, mergeOrder(0), [inv], pairs()).lines.map((l) => l.quantity), [-2]);
+});
+
+Deno.test("quantityAccounting: a partial kit swap through substituted_for credits X's components by the ORDER's ratio", () => {
+  // Order: 4 kits, 8 stakes (2 per kit). Invoice: 2 kits + 4 stakes billed as themselves,
+  // 2 kits swapped for an alternate kit whose 6 pegs all stand in for the kit.
+  const ALT = "prod-alt-kit";
+  const PEG = "prod-peg";
+  const inv = stamped("a", [
+    DEST_ITEM,
+    line(KIT, [D, KIT], 2, 5000),
+    line(STAKE, [D, KIT, STAKE], 4, 0),
+    line(ALT, [D, ALT], 2, 5000),
+    line(PEG, [D, ALT, PEG], 6, 0),
+  ], { [`${D}/${ALT}`]: [{ path: [D, KIT], quantity: 2 }], [`${D}/${ALT}/${PEG}`]: [{ path: [D, KIT], quantity: 6 }] });
+  const billed = billedByPath(O, kitOrder(), [inv]);
+  // Kit: 2 direct + 2 standing in = 4. Stakes: 4 direct + 2 × 8 ÷ 4 = 4 credited = 8.
+  assertEquals([billed.byPath.get(`${D}/${KIT}`)?.quantity, billed.byPath.get(`${D}/${KIT}/${STAKE}`)?.quantity], [4, 8]);
+  // The alternate kit and its pegs stand in entirely, so neither bills its own path.
+  assertEquals([billed.byPath.has(`${D}/${ALT}`), billed.byPath.has(`${D}/${ALT}/${PEG}`)], [false, false]);
+  assertEquals(remainingForOrder(O, kitOrder(), [inv], pairs()).lines, []);
+});
+
+Deno.test("quantityAccounting: merging a kit into a kit the order carries bills both kits and both component lines", () => {
+  // Order: kit Y 2 (4 C), kit X 1 (2 C2). Invoice: X merged whole into Y.
+  const YK = "prod-kit-y", XK = "prod-kit-x", C = "prod-c", C2 = "prod-c2";
+  const order = [DEST_ITEM, line(YK, [D, YK], 2, 5000), line(C, [D, YK, C], 4, 0), line(XK, [D, XK], 1, 5000), line(C2, [D, XK, C2], 2, 0)];
+  const inv = stamped("a", [DEST_ITEM, line(YK, [D, YK], 3, 5000), line(C, [D, YK, C], 6, 0)], {
+    [`${D}/${YK}`]: [{ path: [D, XK], quantity: 1 }],
+    [`${D}/${YK}/${C}`]: [{ path: [D, XK], quantity: 2 }],
+  });
+  const billed = billedByPath(O, order, [inv]);
+  // YK: 3 − 1 = 2. C: 6 − 2 = 4. XK: 1 standing in. C2: 1 × 2 ÷ 1 = 2 by ratio.
+  assertEquals(
+    [`${D}/${YK}`, `${D}/${YK}/${C}`, `${D}/${XK}`, `${D}/${XK}/${C2}`].map((k) => billed.byPath.get(k)?.quantity),
+    [2, 4, 1, 2],
+  );
+  assertEquals(remainingForOrder(O, order, [inv], pairs()).lines, []);
+});

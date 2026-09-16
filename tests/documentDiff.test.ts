@@ -670,3 +670,53 @@ Deno.test("documentDiff: an invoice and a fulfillment have NO doc-level relation
   assertEquals(entries.length, 1, "exactly one entry — against the ORDER, not against the fulfillment");
   assertEquals(entries[0].kind === "doc_field" && entries[0].source.kind, "order");
 });
+
+// ── substituted_for: merges (manager#414, Track S1) ──────────────────────────
+
+/** Merge `quantity` units of the line at `fromKey` into the row at `intoKey`, dropping the replaced row when it is used up. */
+function merge(rows: LineItem[], fromKey: string, intoKey: string, quantity: number, prefix: string[] = []): void {
+  const from = rows.findIndex((it) => it.path.join("/") === fromKey);
+  const into = rows.find((it) => it.path.join("/") === intoKey) as unknown as Record<string, unknown>;
+  const replaced = rows[from];
+  into.quantity = (into.quantity as number) + quantity;
+  into.substituted_for = [{ path: replaced.path.slice(prefix.length), quantity }];
+  if ((replaced.quantity ?? 0) === quantity) rows.splice(from, 1);
+  else (replaced as unknown as Record<string, unknown>).quantity = (replaced.quantity ?? 0) - quantity;
+}
+
+Deno.test("documentDiff: a fulfillment MERGE is one entry at the substitute from both views — no differs, no missing line", () => {
+  // The one Tripod merged into the group's Light row: 2 + 1 = 3.
+  const f = fulfillment();
+  merge(f.items as unknown as LineItem[], `${D}/${G}/${TRIPOD}`, `${D}/${G}/${LIGHT}`, 1);
+  const sources = { orders: [order()], fulfillments: [f] };
+  const entry = `${D}/${G}/${TRIPOD}→${D}/${G}/${LIGHT}`;
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), { [`${D}/${G}/${LIGHT}`]: [`order#1001:substituted(${entry})`] });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), { [`${D}/${G}/${LIGHT}`]: [`fulfillment#1001:substituted(${entry})`] });
+});
+
+Deno.test("documentDiff: a PARTIAL merge leaves the replaced line at the rest — explained, not a quantity difference", () => {
+  // One of the four ungrouped Lights merged into the Tripod: Light 3, Tripod 1 + 1.
+  const f = fulfillment();
+  merge(f.items as unknown as LineItem[], `${D}/${LIGHT}`, `${D}/${G}/${TRIPOD}`, 1);
+  const diff = computeDocumentDiffs({ orders: [order()], fulfillments: [f] }, { kind: "fulfillment", uid: O }, CONTEXT);
+  assertEquals(summary(diff.lines), { [`${D}/${G}/${TRIPOD}`]: [`order#1001:substituted(${D}/${LIGHT}→${D}/${G}/${TRIPOD})`] });
+});
+
+Deno.test("documentDiff: a merged row whose quantity breaks D2 still reports the quantity difference", () => {
+  const f = fulfillment();
+  const rows = f.items as unknown as LineItem[];
+  merge(rows, `${D}/${G}/${TRIPOD}`, `${D}/${G}/${LIGHT}`, 1);
+  // A picker bumped the merged row by hand: 5, where 2 ordered + 1 standing in = 3.
+  patchLine(rows, `${D}/${G}/${LIGHT}`, (it) => it.quantity = 5);
+  const diff = computeDocumentDiffs({ orders: [order()], fulfillments: [f] }, { kind: "fulfillment", uid: O }, CONTEXT);
+  assertEquals(summary(diff.lines), {
+    [`${D}/${G}/${LIGHT}`]: [`order#1001:substituted(${D}/${G}/${TRIPOD}→${D}/${G}/${LIGHT})`, "order#1001:differs(quantity=5→2)"],
+  });
+});
+
+Deno.test("documentDiff: an invoice merge is substituted at the substitute on the order view, and bills both lines in full", () => {
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  merge(inv.items as unknown as LineItem[], `${O}/${D}/${G}/${TRIPOD}`, `${O}/${D}/${G}/${LIGHT}`, 1, [O]);
+  const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv] }, { kind: "order", uid: O }, CONTEXT);
+  assertEquals(summary(diff.lines), { [`${D}/${G}/${LIGHT}`]: [`invoice#2241:substituted(${D}/${G}/${TRIPOD}→${D}/${G}/${LIGHT})`] });
+});
