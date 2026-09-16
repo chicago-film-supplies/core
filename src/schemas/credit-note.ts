@@ -169,7 +169,7 @@ export interface CreditNoteDocItemPrice {
 const CreditNoteDocItemPriceSchema: z.ZodType<CreditNoteDocItemPrice> = z.strictObject({
   base_cents: z.int().meta({ column: true, label: "Base Price" }),
   base_percent: z.number().nullable().optional(),
-  chargeable_days: z.number().nullable(),
+  chargeable_days: z.int().nullable(),
   formula: PriceFormulaEnum.meta({ column: true, label: "Formula" }),
   subtotal_cents: z.int().meta({ column: true, label: "Subtotal" }),
   subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal" }),

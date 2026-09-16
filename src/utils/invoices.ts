@@ -95,7 +95,7 @@ import {
   SETTLEMENT_CONTRACTS,
 } from "../schemas/mod.ts";
 import { fromCentsBig, roundDivHalfAwayFromZero } from "./money.ts";
-import { chicagoDaysBetween, getDuration, isNonTerminatingWindow } from "./dates.ts";
+import { canonicalChargeWindows, chicagoDaysBetween } from "./dates.ts";
 import {
   classifySharedFields,
   fieldsUnder,
@@ -103,7 +103,6 @@ import {
   resolveMergedPairDates,
   type SharedField,
 } from "./shared-fields.ts";
-import { resolveDownstreamChargeDays } from "./orders.ts";
 import { agingBucketOf, type InvoiceAging } from "../schemas/mod.ts";
 import {
   computeItemPaths,
@@ -1310,20 +1309,11 @@ function mergePair(
     nextPair.dates,
     inv.dates,
     holidays,
-    getDuration,
-    isNonTerminatingWindow,
+    canonicalChargeWindows,
   );
   // `null` means the merged window was invalid — keep the invoice's whole
   // `dates` and let the pair diff show it. An invalid window is never written.
   return dates === null ? { ...merged, dates: inv.dates } : { ...merged, dates };
-}
-
-/** One emitted scope row and where it came from — what the charge-day pass reads. */
-interface ScopedRowOrigin {
-  /** The stored invoice row it was merged into or kept as, if any. */
-  stored?: InvoiceDocItemType;
-  /** The new order line at its path, if any. */
-  source?: LineItem;
 }
 
 /**
@@ -1415,8 +1405,7 @@ interface ScopedRowOrigin {
  * ⚠️ **It takes no {@link OrderInvoiceFieldSync}, and that is not an oversight.**
  * The only thing the context carries is `holidays`, which settles a merged
  * window's day counts — a PAIR concern. Items reach it through
- * {@link syncOrderDestinationScope}, which owns both halves and runs
- * {@link resolveDownstreamChargeDays} after them. An unused parameter here would
+ * {@link syncOrderDestinationScope}, which owns both halves. An unused parameter here would
  * read as "this path considers holidays" when it does not.
  */
 export function syncOrderToInvoiceSelective(
@@ -1428,16 +1417,14 @@ export function syncOrderToInvoiceSelective(
   return syncScopedItems(prevOrderItems, newOrderItems, currentInvoiceItems, orderDividerUid).items;
 }
 
-/** {@link syncOrderToInvoiceSelective}, plus each emitted row's origin. */
+/** {@link syncOrderToInvoiceSelective}'s body. */
 function syncScopedItems(
   prevOrderItems: LineItem[],
   newOrderItems: LineItem[],
   storedInvoiceItems: InvoiceDocItemType[],
   orderDividerUid: string,
-): { items: InvoiceDocItemType[]; origins: Map<InvoiceDocItemType, ScopedRowOrigin> } {
-  const origins = new Map<InvoiceDocItemType, ScopedRowOrigin>();
-  const emit = (row: InvoiceDocItemType, origin: ScopedRowOrigin) => {
-    origins.set(row, origin);
+): { items: InvoiceDocItemType[] } {
+  const emit = (row: InvoiceDocItemType) => {
     result.push(row);
   };
   const newPathKeys = new Set(newOrderItems.map((it) => itemPathKey(it.path)));
@@ -1530,7 +1517,7 @@ function syncScopedItems(
       // own part was overridden on the invoice.
       const prevItem = prevByPath.get(relKey);
       const own = prevItem && !lineOverridden(prevItem, row, orderDividerUid) ? 0 : (row as InvoiceItem).quantity ?? 0;
-      emit({ ...row, quantity: own } as InvoiceDocItemType, { stored: row });
+      emit({ ...row, quantity: own } as InvoiceDocItemType);
     }
     enteredX.delete(x);
   };
@@ -1569,21 +1556,18 @@ function syncScopedItems(
             ...mergeLine(movedPrev, newItem, stored, orderDividerUid),
             path: [orderDividerUid, ...newItem.path],
           } as InvoiceDocItemType;
-          emit(row, { stored, source: newItem });
+          emit(row);
           continue;
         }
       }
       // New item — project to invoice shape, scoped under the order divider
-      emit(projectOrderItemToInvoiceItem(newItem, orderDividerUid), { source: newItem });
+      emit(projectOrderItemToInvoiceItem(newItem, orderDividerUid));
     } else if (prevItem) {
       // Each shared field follows the order unless the invoice overrode it.
-      emit(mergeLine(prevItem, newItem, invoiceItem, orderDividerUid), {
-        stored: invoiceItem,
-        source: newItem,
-      });
+      emit(mergeLine(prevItem, newItem, invoiceItem, orderDividerUid));
     } else {
       // Overridden or no prev item — keep invoice item unchanged
-      emit(invoiceItem, { stored: invoiceItem, source: newItem });
+      emit(invoiceItem);
     }
   }
 
@@ -1597,23 +1581,20 @@ function syncScopedItems(
     const overridden = prevItem !== undefined && lineOverridden(prevItem, invoiceItem, orderDividerUid);
     if (overridden) {
       // Overridden — keep it even though it's been removed from the order
-      emit(invoiceItem, { stored: invoiceItem });
+      emit(invoiceItem);
     }
     // Else: synced and removed from order — drop it
   }
 
-  for (const row of extensionRows) emit(row, { stored: row });
+  for (const row of extensionRows) emit(row);
 
   // Apply the NEW order's D2 offset, re-point live entries and strip spent ones.
   // A substituted row left with no units is dropped, with everything below it.
   const items: InvoiceDocItemType[] = [];
-  const finalOrigins = new Map<InvoiceDocItemType, ScopedRowOrigin>();
   const droppedPaths: string[][] = [];
   for (const row of result) {
-    const origin = origins.get(row) ?? {};
     if (!isLineItemType(row.type) || isInExtensionSection(row.path, orderDividerUid, extensionTargets)) {
       items.push(row);
-      finalOrigins.set(row, origin);
       continue;
     }
     const rel = relOf(row);
@@ -1625,7 +1606,6 @@ function syncScopedItems(
     );
     if (!substituted) {
       items.push(row);
-      finalOrigins.set(row, origin);
       continue;
     }
     if (quantity <= 0) {
@@ -1636,9 +1616,8 @@ function syncScopedItems(
     if (substituted_for) out.substituted_for = substituted_for as SubstitutedForEntryType[];
     else delete out.substituted_for;
     items.push(out);
-    finalOrigins.set(out, origin);
   }
-  return { items, origins: finalOrigins };
+  return { items };
 }
 
 // ── Invoice path computation ─────────────────────────────────────
@@ -2817,8 +2796,9 @@ function destinationRowOverridden(
  * the per-field rule does not need and cannot safely take: a field the order did
  * not change merges to what the invoice already has, so running both halves
  * unconditionally is already a no-op where the old flag would have skipped.
- * Both halves merge per field, and each line's `chargeable_days` is then settled
- * against its OWN invoice pair ({@link resolveDownstreamChargeDays}).
+ * Both halves merge per field. A line's `chargeable_days` is derived, so the
+ * merge leaves it alone and the caller's `priceDocument` stamps it from the
+ * line's own invoice pair.
  */
 export function syncOrderDestinationScope(
   prevOrder: { items: LineItem[]; destinations: DocDestinationType[] },
@@ -2901,84 +2881,7 @@ export function syncOrderDestinationScope(
     }
   }
 
-  {
-    scopedItems = settleScopedChargeDays(scopedItems, itemSync.origins, {
-      orderUid,
-      nextOrderPairs: nextOrder.destinations,
-      storedPairs: currentInvoiceDests,
-      mergedPairs: destinations,
-      extensionTargets: extensionSectionTargets(currentScopedItems as InvoiceItem[], orderUid),
-    });
-  }
-
   return { scopedItems, destinations, dropped, kept };
-}
-
-/**
- * Settle each scoped line's `chargeable_days` against its own invoice pair, after
- * both halves of the scope have merged (Target model D).
- *
- * A line's destination is the first path segment naming one of this order's
- * invoice pairs. Rows in a date-extension section are skipped: their pair is the
- * invoice's own and the order has nothing to say about it.
- *
- * - A row merged from a stored row → {@link resolveDownstreamChargeDays}.
- * - A row added from the order → it follows the invoice pair's default when the
- *   order line follows the order pair's; otherwise it takes the order's value.
- */
-function settleScopedChargeDays(
-  rows: InvoiceDocItemType[],
-  origins: ReadonlyMap<InvoiceDocItemType, ScopedRowOrigin>,
-  ctx: {
-    orderUid: string;
-    nextOrderPairs: readonly DocDestinationType[];
-    storedPairs: readonly InvoiceDestinationPair[];
-    mergedPairs: readonly InvoiceDestinationPair[];
-    extensionTargets: ReadonlyMap<string, readonly string[]>;
-  },
-): InvoiceDocItemType[] {
-  const daysOf = (pair: { dates?: unknown } | undefined): number | null =>
-    ((pair?.dates ?? null) as { days_charged?: number | null } | null)?.days_charged ?? null;
-  const scoped = (pairs: readonly InvoiceDestinationPair[]) =>
-    new Map(pairs.filter((p) => p.uid_order === ctx.orderUid && p.uid).map((p) => [p.uid!, p]));
-  const merged = scoped(ctx.mergedPairs);
-  const stored = scoped(ctx.storedPairs);
-  const nextOrder = new Map(ctx.nextOrderPairs.map((p) => [p.uid, p]));
-  const daysOfRow = (row: InvoiceDocItemType | LineItem | undefined): number | null =>
-    ((row as { price?: { chargeable_days?: number | null } | null } | undefined)?.price?.chargeable_days) ?? null;
-
-  return rows.map((row) => {
-    if (isDividerItemType(row.type)) return row;
-    const price = (row as { price?: { chargeable_days?: number | null } | null }).price;
-    if (!price) return row;
-    if (isInExtensionSection(row.path, ctx.orderUid, ctx.extensionTargets)) return row;
-    const dest = row.path.find((seg) => merged.has(seg));
-    if (dest === undefined) return row;
-
-    const origin = origins.get(row) ?? {};
-    const mergedDays = price.chargeable_days ?? null;
-    const nextSourceDays = daysOfRow(origin.source);
-    const nextSourceDefault = daysOf(nextOrder.get(dest));
-    const nextDownstreamDefault = daysOf(merged.get(dest));
-
-    let days: number | null;
-    if (!origin.stored) {
-      days = origin.source && nextSourceDays !== null && nextSourceDays === nextSourceDefault
-        ? nextDownstreamDefault
-        : mergedDays;
-    } else {
-      days = resolveDownstreamChargeDays({
-        nextSourceDays,
-        nextSourceDefault,
-        storedDays: daysOfRow(origin.stored),
-        mergedDays,
-        prevDownstreamDefault: daysOf(stored.get(dest)),
-        nextDownstreamDefault,
-      });
-    }
-    if (days === mergedDays) return row;
-    return { ...row, price: { ...price, chargeable_days: days } } as InvoiceDocItemType;
-  });
 }
 
 /**

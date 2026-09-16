@@ -42,8 +42,7 @@ const validDates = {
   delivery_end: "2026-03-01T00:00:00Z",
   collection_start: "2026-03-10T00:00:00Z",
   collection_end: "2026-03-10T00:00:00Z",
-  charge_start: "2026-03-01T00:00:00Z",
-  charge_end: "2026-03-10T00:00:00Z",
+  charge_windows: [{ start: "2026-03-01T00:00:00Z", end: "2026-03-10T00:00:00Z" }],
 };
 
 const validDocDates = {
@@ -60,6 +59,9 @@ const validDocDates = {
   charge_start_fs: mockTimestamp,
   charge_end: "2026-03-10T00:00:00Z",
   charge_end_fs: mockTimestamp,
+  days_active: 7,
+  days_charged: 7,
+  charge_windows: [{ start: "2026-03-01T00:00:00Z", end: "2026-03-10T00:00:00Z", days: 7 }],
 };
 
 // Each destination now owns its own full date range (delivery/collection +

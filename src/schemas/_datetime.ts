@@ -14,7 +14,7 @@
  */
 
 import { z } from "zod";
-import { parseISO, startOfDay } from "date-fns";
+import { format, parseISO, startOfDay } from "date-fns";
 import { tz } from "@date-fns/tz";
 
 /**
@@ -32,6 +32,15 @@ export function toChicagoInstant(input: string): string {
 export function toChicagoStartOfDay(input: string): string {
   return startOfDay(parseISO(input, { in: tz("America/Chicago") }))
     .toISOString();
+}
+
+/**
+ * The Chicago calendar date (`YYYY-MM-DD`) holding an instant. Same output as
+ * `toChicagoYmd` in `@cfs/core/utils/dates`, duplicated for the same reason as
+ * the two transforms above.
+ */
+export function toChicagoYmd(input: string): string {
+  return format(parseISO(input), "yyyy-MM-dd", { in: tz("America/Chicago") });
 }
 
 /**

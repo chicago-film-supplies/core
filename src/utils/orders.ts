@@ -36,7 +36,7 @@ import type {
 } from "../schemas/mod.ts";
 import isEqual from "lodash-es/isEqual";
 import { itemContract, zeroPricedFlaggedNonComponents } from "../schemas/mod.ts";
-import { getDuration, toChicagoYmd } from "./dates.ts";
+import { billableDays, canonicalChargeWindows, chargedDays, toChicagoYmd } from "./dates.ts";
 import {
   fromCents,
   roundDivHalfAwayFromZero,
@@ -249,12 +249,15 @@ export type GroupPath = GroupPathType;
 // ── Date & destination comparison ───────────────────────────────
 
 /**
- * Whether charge dates match the delivery/collection dates
- * (i.e. no custom charge period has been set).
+ * Whether the pair charges exactly its possession: one charge window from
+ * delivery start to collection start (no custom charge period has been set).
+ * Instants are compared, not strings.
  */
-export function isSameAsDeliveryDates(dates: OrderDatesType): boolean {
-  return dates.charge_start === dates.delivery_start
-    && dates.charge_end === dates.collection_start;
+export function isSameAsDeliveryDates(dates: Pick<OrderDatesType, "delivery_start" | "collection_start" | "charge_windows">): boolean {
+  const windows = dates.charge_windows;
+  if (!windows || windows.length !== 1 || !dates.delivery_start || !dates.collection_start) return false;
+  return Date.parse(windows[0].start) === Date.parse(dates.delivery_start)
+    && Date.parse(windows[0].end) === Date.parse(dates.collection_start);
 }
 
 /**
@@ -343,125 +346,23 @@ export function getDestinationsLegend(
 }
 
 /**
- * Compute default chargeable days from order dates and holidays.
- * Returns null if required dates are missing.
+ * The days a pair's charge windows charge, counted against `holidays`: Σ each
+ * window's business days. Returns `null` when the dates are incomplete or a
+ * window cannot be counted.
+ *
+ * For a stored pair, read the stored counts with `chargedDays` instead.
  */
 export function getDefaultChargeDays(
-  dates: OrderDatesType,
+  dates: Pick<OrderDatesType, "delivery_start" | "collection_start" | "charge_windows">,
   holidays: string[],
 ): number | null {
   if (!dates?.delivery_start || !dates?.collection_start) return null;
   try {
-    const duration = getDuration(dates, holidays);
-    return duration?.chargeDays ?? null;
+    const windows = canonicalChargeWindows(dates, holidays).charge_windows as unknown as { days: number }[] | undefined;
+    return windows ? chargedDays({ charge_windows: windows }) : null;
   } catch {
     return null;
   }
-}
-
-/**
- * Update chargeable_days on line items that still match the previous default.
- * Skips structural items, items without a price, and manual overrides.
- */
-export function syncChargeDaysToItems(
-  items: LineItem[],
-  previousDefault: number | null,
-  newDefault: number | null,
-): void {
-  if (previousDefault === newDefault) return;
-
-  for (const item of items) {
-    if (item.type === "destination" || item.type === "group") continue;
-    if (!item.price) continue;
-    const days = (item.price as PriceObject).chargeable_days;
-    if (days === null || days === undefined) continue;
-    if (previousDefault === null) continue;
-    if (days !== previousDefault) continue;
-    (item.price as PriceObject).chargeable_days = newDefault;
-  }
-}
-
-/** The minimum a destination pair needs for a day-count reconcile. */
-export interface ChargeDaysPair {
-  uid: string;
-  dates: { days_charged?: number | null } | null;
-}
-
-/**
- * Pure, per-destination form of {@link syncChargeDaysToItems}: when a pair's
- * `days_charged` moves, every priced line under THAT destination still at the
- * previous default takes the new one. A hand-set day count is left alone.
- *
- * The destination a line belongs to is read from its `path` — a destination
- * divider's uid is its pair's `uid`, so the first path segment naming a pair is
- * the line's destination. That makes it independent of divider positions, and the
- * same function serves an order (`[dest, …]`) and an invoice (`[order, dest, …]`).
- *
- * ⚠️ **A previous default of `null` moves nothing**, exactly as the mutating
- * version: with no earlier default there is no way to tell a line that followed
- * it from one that was set by hand, and on a money field leaving the days alone
- * is the visible failure.
- *
- * Returns a new array; lines it changes are copied, the rest are shared.
- */
-export function reconcileChargeDaysByDestination<T extends { type: string; path?: string[]; price?: unknown }>(
-  items: readonly T[],
-  prevPairs: readonly ChargeDaysPair[],
-  nextPairs: readonly ChargeDaysPair[],
-): T[] {
-  const prevDefault = new Map(prevPairs.map((p) => [p.uid, p.dates?.days_charged ?? null]));
-  const nextDefault = new Map(nextPairs.map((p) => [p.uid, p.dates?.days_charged ?? null]));
-  return items.map((item) => {
-    if (item.type === "destination" || item.type === "group" || item.type === "order") return item;
-    const price = item.price as PriceObject | null | undefined;
-    if (!price || price.chargeable_days === null || price.chargeable_days === undefined) return item;
-    const dest = (item.path ?? []).find((seg) => prevDefault.has(seg));
-    if (dest === undefined || !nextDefault.has(dest)) return item;
-    const before = prevDefault.get(dest) ?? null;
-    const after = nextDefault.get(dest) ?? null;
-    if (before === null || before === after || price.chargeable_days !== before) return item;
-    return { ...item, price: { ...price, chargeable_days: after } };
-  });
-}
-
-/**
- * A downstream line's `chargeable_days` after an order edit, when the downstream
- * document (an invoice) has its OWN destination dates.
- *
- * `chargeable_days` is not a plain value: a line at its pair's default FOLLOWS that
- * default, and only a line set to something else carries a value of its own. The
- * plain three-way merge (`mergeSharedFields`) cannot see that, and gets one case
- * wrong in the dangerous direction:
- *
- * > The order's dates move, so its default-following line goes 5 → 7. The invoice
- * > overrode its dates and still charges 5 days. The merge sees the invoice line
- * > at 5 = the order's previous 5 and takes 7 — billing seven days against a
- * > five-day invoice window.
- *
- * So, in order:
- * 1. The stored line did NOT follow its own pair's default → it is a value; the
- *    merge's answer stands.
- * 2. The new order line follows ITS default → the order is saying "follow the
- *    dates", so the downstream line follows the DOWNSTREAM pair's new default.
- * 3. The merge took a new value from the order → the order hand-set one; take it.
- * 4. Otherwise → keep following the downstream pair's new default.
- *
- * `mergedDays` is what `mergeSharedFields` produced for the field.
- */
-export function resolveDownstreamChargeDays(args: {
-  nextSourceDays: number | null;
-  nextSourceDefault: number | null;
-  storedDays: number | null;
-  mergedDays: number | null;
-  prevDownstreamDefault: number | null;
-  nextDownstreamDefault: number | null;
-}): number | null {
-  const { nextSourceDays, nextSourceDefault, storedDays, mergedDays, prevDownstreamDefault, nextDownstreamDefault } = args;
-  const storedFollows = storedDays !== null && storedDays === prevDownstreamDefault;
-  if (!storedFollows) return mergedDays;
-  if (nextSourceDays !== null && nextSourceDays === nextSourceDefault) return nextDownstreamDefault;
-  if (mergedDays !== storedDays) return mergedDays;
-  return nextDownstreamDefault;
 }
 
 // ── Per-destination date rollups ─────────────────────────────────
@@ -807,6 +708,16 @@ export interface LinePricingOptions {
    * and 7→4 is −2. Only a `five_day_week` line can be extended.
    */
   extensionDays?: number;
+  /**
+   * The stored day counts of the charge windows of a pair with TWO OR MORE
+   * windows. A `five_day_week` line is then priced at
+   * `billableDays(windowDays) ÷ 5` — every window carries the one-week minimum —
+   * instead of from its own `chargeable_days` (charge-windows decision 2).
+   *
+   * A single-window pair passes nothing: `max(days, 5)` of one window is exactly
+   * the line's own floor, so a one-window pair prices as it always has.
+   */
+  windowDays?: readonly number[];
 }
 
 /**
@@ -843,7 +754,14 @@ function perUnitSubtotal(
   // `pricingFactor = Math.max(chargeable_days / 5, 1)` — so the day factor bites
   // only above the one-week floor. At exactly 5 days it is 1, as is `fixed`.
   // An extension skips that floor: its day count is signed and always applies.
-  const days = extension !== undefined ? Math.round(extension) : Math.round(chargeable_days ?? 0);
+  const windowDays = extension === undefined && formula === "five_day_week" && (opts?.windowDays?.length ?? 0) >= 2
+    ? opts!.windowDays!
+    : undefined;
+  const days = extension !== undefined
+    ? Math.round(extension)
+    : windowDays !== undefined
+    ? billableDays(windowDays)
+    : Math.round(chargeable_days ?? 0);
   const useDays = extension !== undefined || (formula === "five_day_week" && days > 5);
 
   // `base_cents` is ALREADY an integer count of cents, so this is a widening

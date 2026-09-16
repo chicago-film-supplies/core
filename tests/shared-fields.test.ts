@@ -19,7 +19,7 @@ import {
   type SharedField,
   type SharedFieldClassification,
 } from "../src/utils/shared-fields.ts";
-import { getDuration, isNonTerminatingWindow } from "../src/utils/dates.ts";
+import { canonicalChargeWindows, getDuration } from "../src/utils/dates.ts";
 import type { TaxCatalog } from "../src/utils/tax-classes.ts";
 import { type LegacyTax, type LegacyTaxRow, migrateLegacyTaxCatalog } from "./helpers/legacyTaxCatalog.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
@@ -59,12 +59,13 @@ const DATES = [
   "derived destinations[].dates.collection_start_fs",
   "propagated destinations[].dates.collection_end",
   "derived destinations[].dates.collection_end_fs",
-  "propagated destinations[].dates.charge_start",
+  "derived destinations[].dates.charge_start",
   "derived destinations[].dates.charge_start_fs",
-  "propagated destinations[].dates.charge_end",
+  "derived destinations[].dates.charge_end",
   "derived destinations[].dates.charge_end_fs",
   "derived destinations[].dates.days_active",
   "derived destinations[].dates.days_charged",
+  "propagated destinations[].dates.charge_windows",
   "atom destinations[].delivery",
   "atom destinations[].collection",
   "propagated destinations[].customer_collecting",
@@ -89,7 +90,7 @@ Deno.test("classifySharedFields: order → invoice, every shared key and its kin
     "propagated items[].zero_priced",
     "propagated items[].price.base_cents",
     "propagated items[].price.base_percent",
-    "propagated items[].price.chargeable_days",
+    "derived items[].price.chargeable_days",
     "propagated items[].price.formula",
     "derived items[].price.subtotal_cents",
     "derived items[].price.subtotal_discounted_cents",
@@ -238,7 +239,7 @@ function pairDates(over: Record<string, unknown> = {}): Record<string, unknown> 
 }
 
 const resolve4 = (merged: Record<string, unknown>, source: Record<string, unknown>, downstream: Record<string, unknown>) =>
-  resolveMergedPairDates(merged, source, downstream, [], getDuration, isNonTerminatingWindow);
+  resolveMergedPairDates(merged, source, downstream, [], canonicalChargeWindows);
 
 Deno.test("resolveMergedPairDates: a window unchanged from the downstream's is returned as-is", () => {
   const downstream = pairDates();
@@ -327,7 +328,10 @@ const CAT: TaxCatalog = (() => {
 })();
 
 const ctx: PriceDocumentContext = {
-  document: { kind: "order" },
+  document: { kind: "order", status: "draft" },
+  // Two windows (3 + 4 days) under every path, so the derived `chargeable_days`
+  // moves off the sentinel's 5 and the tag check sees the pricer write it.
+  charge_windows: [{ divider_path: [], days: [3, 4] }],
   tax: {
     destinations: [{ uid: null, jurisdiction: undefined, delivery: { uid: null, address: { city: "Chicago", region: "IL" } } }],
     origin: "chicago",

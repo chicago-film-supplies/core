@@ -3,7 +3,7 @@
  */
 import { z } from "zod";
 import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
-import { chicagoInstant } from "./_datetime.ts";
+import { chicagoInstant, toChicagoYmd as toChicagoYmdForSchema } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { LineItemCore, LineTaxCore } from "./_items.ts";
 import {
@@ -105,16 +105,95 @@ export function isValidOrderStatusTransition(
 const INCLUSION_TYPES_NULLABLE = ["default", "mandatory", "optional"] as const;
 
 /**
- * Order dates — all six date boundaries as ISO datetime strings with offset,
- * or null when the boundary is unset.
+ * One charge window as a client states it: a start and an end instant.
+ *
+ * The day count is not an input. The server counts it once, when the window is
+ * written (`canonicalChargeWindows` in `@cfs/core/utils/dates`).
+ */
+export interface ChargeWindowInputType {
+  start: string;
+  end: string;
+}
+
+/** Zod schema for {@link ChargeWindowInputType}. */
+export const ChargeWindowInput: z.ZodType<ChargeWindowInputType> = z.object({
+  start: chicagoInstant(),
+  end: chicagoInstant(),
+});
+
+/**
+ * One stored charge window: a start, an end, and the business days it charges.
+ *
+ * A pair holds one or more of these (`OrderDocDates.charge_windows`). A hotspot
+ * out for three months and switched on three times is one pair with three
+ * windows: splitting it into three pairs would invent deliveries and free up the
+ * stock between windows.
+ *
+ * - **`days` is counted once, when the window is written**, and stored. The
+ *   holiday list has no versions, so recounting on read would move the days on a
+ *   document already sent out.
+ * - **`days` may be 0.** A window over a weekend charges nothing of its own; the
+ *   one-week minimum still applies to it when priced (`billableDays`).
+ * - **No `_fs` twins and no `uid`.** The array is one value to the shared-field
+ *   merge (`shared: "value"` on the field).
+ */
+export interface ChargeWindowType {
+  start: string;
+  end: string;
+  days: number;
+}
+
+/** Zod schema for {@link ChargeWindowType}. */
+export const ChargeWindow: z.ZodType<ChargeWindowType> = z.strictObject({
+  start: chicagoInstant(),
+  end: chicagoInstant(),
+  days: z.int().min(0).meta({ derived: true }),
+});
+
+/** A window's Chicago calendar date, as `YYYY-MM-DD`. */
+const windowYmd = (instant: string): string => toChicagoYmdForSchema(instant);
+
+/**
+ * The windows are in order and do not overlap, compared by CALENDAR DAY: each
+ * window starts on a later Chicago date than the one before it ends.
+ *
+ * Two checks need holidays and so live in the API instead: an adjacent pair of
+ * windows with no business day between them, and a window whose end is too far
+ * before its start to count.
+ */
+function checkChargeWindowsOrdered(
+  windows: readonly { start: string; end: string }[],
+  ctx: z.RefinementCtx,
+): void {
+  for (let i = 1; i < windows.length; i++) {
+    if (windowYmd(windows[i].start) <= windowYmd(windows[i - 1].end)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [i, "start"],
+        message: `Charge window ${i + 1} must start on a later day than window ${i} ends`,
+      });
+    }
+  }
+}
+
+/**
+ * Order dates as a client states them.
+ *
+ * Possession (delivery and collection) and the charge windows are separate:
+ * possession drives bookings and availability, and the windows decide what is
+ * billed.
+ *
+ * 🔴 **`charge_windows` is required and `charge_start`/`charge_end` are gone**
+ * (charge-windows campaign, decision 9). This schema is a `z.object`, so a
+ * client that still sends the old keys has them stripped. A client that sends no
+ * windows is refused, so the manager must ship before the API.
  */
 export interface OrderDatesType {
   delivery_start: string | null;
   delivery_end: string | null;
   collection_start: string | null;
   collection_end: string | null;
-  charge_start: string | null;
-  charge_end: string | null;
+  charge_windows: ChargeWindowInputType[];
 }
 
 /** Zod schema for order dates. */
@@ -123,8 +202,7 @@ export const OrderDates: z.ZodType<OrderDatesType> = z.object({
   delivery_end: chicagoInstant().nullable(),
   collection_start: chicagoInstant().nullable(),
   collection_end: chicagoInstant().nullable(),
-  charge_start: chicagoInstant().nullable(),
-  charge_end: chicagoInstant().nullable(),
+  charge_windows: z.array(ChargeWindowInput).min(1).superRefine(checkChargeWindowsOrdered),
 });
 
 /**
@@ -147,6 +225,13 @@ export interface OrderDocDatesType {
   charge_end_fs: FirestoreTimestampType | null;
   days_active: number | null;
   days_charged: number | null;
+  /**
+   * The pair's charge windows, in order. Optional until every stored pair has
+   * been backfilled (charge-windows release step 3); then required, and
+   * `charge_start`/`charge_end`(+`_fs`)/`days_charged` are removed. Until then a
+   * writer states both, the old fields derived from the windows.
+   */
+  charge_windows?: ChargeWindowType[];
 }
 
 /**
@@ -196,12 +281,16 @@ export const OrderDocDates: z.ZodType<OrderDocDatesType> = z.strictObject({
   collection_start_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
   collection_end: chicagoInstant().nullable(),
   collection_end_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
-  charge_start: chicagoInstant().nullable(),
+  // Legacy mirrors of the charge windows' envelope, derived by
+  // `canonicalChargeWindows` until they are removed (charge-windows step 5).
+  charge_start: chicagoInstant().nullable().meta({ derived: true }),
   charge_start_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
-  charge_end: chicagoInstant().nullable(),
+  charge_end: chicagoInstant().nullable().meta({ derived: true }),
   charge_end_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
   days_active: z.int().nullable().meta({ derived: true }),
   days_charged: z.int().nullable().meta({ derived: true }),
+  charge_windows: z.array(ChargeWindow).min(1).superRefine(checkChargeWindowsOrdered)
+    .optional().meta({ shared: "value" }),
 });
 
 /**
@@ -696,7 +785,6 @@ export interface ItemPriceType {
   base_cents?: number;
   base_percent?: number | null;
   replacement_cents?: number | null;
-  chargeable_days?: number | null;
   formula?: PriceFormulaType;
   subtotal_cents?: number;
   discount?: DiscountInputType | null;
@@ -709,7 +797,9 @@ export const ItemPrice: z.ZodType<ItemPriceType> = z.object({
   base_cents: z.int().optional(),
   base_percent: z.number().nullable().optional(),
   replacement_cents: z.int().nullable().optional(),
-  chargeable_days: z.int().nullable().optional(),
+  // No `chargeable_days`: a line's days are derived from its pair's charge
+  // windows by `priceDocument` (charge-windows decision 3). A client that still
+  // sends one has it stripped.
   formula: PriceFormulaEnum.optional(),
   subtotal_cents: z.int().optional(),
   discount: DiscountInput.nullable().optional(),
@@ -1029,7 +1119,10 @@ export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObjec
   // line has no replacement value", which is not the fact `0` states, and
   // `checkItemContract`'s `forbidden` arm reads the difference.
   replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
-  chargeable_days: z.number().int().nullable().meta({ column: true, label: "Chargeable Days" }),
+  // Derived: `priceDocument` stamps it from the pair's charge windows (Σ days)
+  // on a rental `five_day_week` line, `null` on every other line. The key stays
+  // present. See `lineChargeableDays` in `@cfs/core/utils/price-document`.
+  chargeable_days: z.int().nullable().meta({ column: true, label: "Chargeable Days", derived: true }),
   formula: PriceFormulaEnum.meta({ column: true, label: "Formula" }),
   subtotal_cents: z.int().meta({ column: true, label: "Subtotal", derived: true }),
   subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal", derived: true }),

@@ -62,8 +62,19 @@ const taxCtx = (city = "Chicago", exempt = false): DocumentTaxContext => ({
   asOf: "2026-07-02T00:00:00.000-05:00",
 });
 
-const ORDER: PriceDocumentContext["document"] = { kind: "order" };
-const ctx = (over: Partial<PriceDocumentContext> = {}): PriceDocumentContext => ({ document: ORDER, tax: taxCtx(), ...over });
+const ORDER: PriceDocumentContext["document"] = { kind: "order", status: "draft" };
+/**
+ * One catch-all pair stored before charge windows existed, so a line keeps the
+ * `chargeable_days` a test gives it. The charge-window tests below build their
+ * own pairs.
+ */
+const LEGACY_PAIRS: PriceDocumentContext["charge_windows"] = [{ divider_path: [], days: null }];
+const ctx = (over: Partial<PriceDocumentContext> = {}): PriceDocumentContext => ({
+  document: ORDER,
+  tax: taxCtx(),
+  charge_windows: LEGACY_PAIRS,
+  ...over,
+});
 
 let uidSeq = 0;
 function line(over: Partial<LineItem> = {}, price: Record<string, unknown> = {}): LineItem {

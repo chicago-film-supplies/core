@@ -265,9 +265,13 @@ Deno.test("per field: a pair the order deleted is kept when its dates were overr
   assertEquals(kept.kept.map((k) => k.uid), [DEST_B], "divider and pair kept together");
 });
 
-// ── Charge days (Target model D) ─────────────────────────────────────────────
+// ── Charge days are derived (charge-windows decision 3) ──────────────────────
+//
+// A line's `chargeable_days` is stamped by `priceDocument` from its OWN pair's
+// windows, so the sync neither propagates it from the order nor settles it
+// against the invoice pair. It leaves the stored value for the pricer.
 
-Deno.test("per field: the conflict case — order dates and default-following days move, invoice overrode only its dates", () => {
+Deno.test("per field: the sync leaves a line's chargeable_days as stored — priceDocument derives it", () => {
   const [from, to, later] = [iso(5), iso(9), iso(14)];
   const before = daysFor(from, to);
   const after = daysFor(from, later);
@@ -276,23 +280,8 @@ Deno.test("per field: the conflict case — order dates and default-following da
   const prev = { items: [divider(DEST_A), line(CHAIR, DEST_A, { days: before })], destinations: [pair(DEST_A, dates(from, to, 0))] };
   const next = { items: [divider(DEST_A), line(CHAIR, DEST_A, { days: after })], destinations: [pair(DEST_A, dates(from, later, 0))] };
 
-  // The invoice moved collection to later the same day: different window, same day count.
-  const inv = invoiceOf(prev);
-  const late = to.replace("00:00:00", "15:00:00");
-  (inv.destinations[0] as unknown as Record<string, unknown>).dates = { ...dates(from, late, 0), days_charged: before };
-  assertEquals(daysFor(from, late), before);
-
-  const out = sync(prev, next, inv, FIELD);
-  assertEquals(lineAt(out.scopedItems, CHAIR)[0].price?.chargeable_days, before, "bills the INVOICE's window, not the order's");
-
-  // An unedited invoice follows the order's new days.
-  assertEquals(lineAt(sync(prev, next, invoiceOf(prev), FIELD).scopedItems, CHAIR)[0].price?.chargeable_days, after);
-});
-
-Deno.test("per field: an order hand-set day count still propagates", () => {
-  const [from, to] = WINDOW;
-  const def = daysFor(from, to);
-  const prev = { items: [divider(DEST_A), line(CHAIR, DEST_A, { days: def })], destinations: [pair(DEST_A, dates(from, to, 0))] };
-  const next = { items: [divider(DEST_A), line(CHAIR, DEST_A, { days: def + 3 })], destinations: [pair(DEST_A, dates(from, to, 0))] };
-  assertEquals(lineAt(sync(prev, next, invoiceOf(prev), FIELD).scopedItems, CHAIR)[0].price?.chargeable_days, def + 3);
+  const out = sync(prev, next, invoiceOf(prev), FIELD);
+  assertEquals(lineAt(out.scopedItems, CHAIR)[0].price?.chargeable_days, before, "not propagated from the order line");
+  // The pair itself did follow the order, so the pricer will stamp `after`.
+  assertEquals((out.destinations[0].dates as { collection_start: string }).collection_start, later);
 });

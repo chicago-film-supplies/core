@@ -297,9 +297,11 @@ const InvoiceDocItemPrice: z.ZodType<InvoiceDocItemPriceType> = z.strictObject({
   // things — units, documents, attempts, days". This grain admitted 2.5. 0 of
   // 1,040 stored invoices carry a fractional value in either project, and 0
   // across the 23 committed `invoice`+`quote` fixtures in `templates`.
-  chargeable_days: z.number().int().nullable().meta({
+  // Derived from the invoice pair's charge windows, as on an order line.
+  chargeable_days: z.int().nullable().meta({
     column: true,
     label: "Chargeable Days",
+    derived: true,
   }),
   formula: PriceFormulaEnum.meta({
     column: true,
@@ -1122,7 +1124,6 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
 export interface InvoiceItemInputPriceType {
   base_cents?: number;
   base_percent?: number | null;
-  chargeable_days?: number | null;
   formula?: PriceFormulaType;
   discount?: DiscountInputType | null;
   taxes?: Array<{ uid: string }>;
@@ -1131,9 +1132,8 @@ export interface InvoiceItemInputPriceType {
 const InvoiceItemInputPrice: z.ZodType<InvoiceItemInputPriceType> = z.object({
   base_cents: z.int().optional(),
   base_percent: z.number().nullable().optional(),
-  // `.int()` to match the stored `InvoiceDocItemPriceType.chargeable_days`. A count
-  // of days is integral — `CLAUDE.md` § *Stored money is integer cents*.
-  chargeable_days: z.int().nullable().optional(),
+  // No `chargeable_days`: derived from the pair's charge windows by
+  // `priceDocument` (charge-windows decision 3), and stripped if sent.
   formula: PriceFormulaEnum.optional(),
   discount: DiscountInput.nullable().optional(),
   taxes: z.array(z.object({ uid: FirestoreId })).optional(),

@@ -5,7 +5,26 @@
 **Related:** api-cloudrun#1028
 
 ## START HERE
-The census is done and every backfill decision it raised is settled (status block below). Next is **core beta A** (§ Release order step 1): add `charge_windows` to the stored schema as optional, `canonicalChargeWindows` / `chargedDays` / `chargeEnvelope` / `billableDays`, `applyDateEdit`, the `shared: "value"` classifier rule, the required `PriceDocumentContext.charge_windows`, and derived line days. Keep the old fields. The line numbers below predate Track S; re-grep before trusting them. First command: `grep -n "days_charged" -r src/ | wc -l`.
+Core beta A is **written and green, but not pushed**: branch `feat/charge-windows-a` in the core worktree `.claude/worktrees/charge-windows-a`. See the first status block. Next: the owner decides whether to publish it (pushing to `beta` cuts a JSR beta that breaks the api-cloudrun and manager compiles, so each pin bump carries its code change). Then release step 2 (the manager, then the API) against that beta. First command: `git -C core log --oneline origin/beta..feat/charge-windows-a`.
+
+> ## ⚠️ STATUS UPDATE 2026-09-16: core beta A implemented (unpublished)
+> **What landed in core** (all gates green: suite, `check`, `lint`, `check:generated`, `check:declarations`; `tests/charge-windows.test.ts` has 34 tests, and mutating the multi-window factor and the follow rule turns them red):
+> - **Schema:** `ChargeWindowInput`, `ChargeWindow` (strict, `days` int ≥ 0, derived), both on the `schemas` barrel. `OrderDocDates.charge_windows` is optional with `shared: "value"` and a calendar-day order/overlap refine. `OrderDates.charge_windows` is **required**, and `charge_start`/`charge_end` are gone from input (stripped). `charge_start`/`charge_end` are now tagged derived. Line `chargeable_days` is derived on orders and invoices and dropped from both line inputs. Credit-note days are `z.int()`.
+> - **`utils/dates`:** `chargedDays`, `billableDays`, `chargeEnvelope`, `chargeWindowsOf` (emitted as template helpers), plus `canonicalChargeWindows` and `applyDateEdit` (denylisted: write path). `canonicalChargeWindows` also writes the legacy mirrors (`charge_start`/`charge_end` = the envelope, `days_charged` = Σ) and nulls a moved mirror's `_fs` for the writer to stamp. It synthesizes one window for a pair stored before windows. `applyDateEdit` errors are `holidays_unloaded`, `non_terminating`, `overlap`, `adjacent`, `missing_dates`, `invalid_days`, `no_such_window`, `last_window`, `extension_window` and `invalid_instant`.
+> - **Shared fields:** `SharedField.derived_keys`. The merge compares `charge_windows` without `days`. `resolveMergedPairDates(merged, source, downstream, holidays, canonicalize)` takes `canonicalChargeWindows` in place of `getDuration` + `isNonTerminatingWindow` (**breaking for api-cloudrun**).
+> - **Pricer:** `PriceDocumentKind` order arm needs `status`. `PriceDocumentContext.charge_windows` is required (build it with `chargeWindowContext(destinations)`). `lineChargeableDays` is the one derivation. `LinePricingOptions.windowDays` prices 2+ windows at `billableDays ÷ 5`. `CreditSourceLine.window_days` credits a multi-window line as it was billed.
+> - **Deleted:** `syncChargeDaysToItems`, `reconcileChargeDaysByDestination`, `resolveDownstreamChargeDays` and `settleScopedChargeDays` (with its row-origin plumbing), plus their tests. `isSameAsDeliveryDates` now means "one window equal to possession" and `getDefaultChargeDays` sums the windows.
+>
+> **Two design calls made while building (flag to the owner):**
+> 1. **A pair stored before windows keeps its lines' stored days** (a new line takes the pair's `days_charged`). Without this, the prod deploy of step 2 would re-derive the census's live divergent documents (#1003, #979, #2396, #2408, #2399) on their next reprice, before the backfill runs. ⚠️ **The protection ends the moment such a pair is canonicalized**: a manager date edit, an API date PUT, a merged-window sync or a holiday recompute synthesizes and recounts its window. **Run the backfill right after the step-2 API deploy.** The rule is removed in beta B.
+> 2. **A `complete`/`canceled` order keeps stored line days** (the owner's census decision). The check lives in `lineChargeableDays`. What reopening such an order should do is still undecided.
+>
+> **Deferred from beta A** (still in the design below; do not forget them):
+> - §2c extensions: `clipWindowsAfter` and `extensionAddedDays`. `quantityAccounting` still reads `charge_end`/`days_charged`, which `canonicalChargeWindows` keeps in step. ⚠️ `buildRemainingInvoice`'s extension pair states no `charge_windows`, so **the API must call `canonicalChargeWindows(…, { extension: true })` with a window carrying the section's days**, or a recount replaces the added days.
+> - §3 comparators: `computeInvoiceSyncStatus` still badges an invoice whose own windows bill different days, because the money differs too. Making that an explained difference needs the pair's windows in its context. It was not a tag change, so it was not done.
+> - The pair invariant (every rental `five_day_week` line on a 2+ window pair has days = Σ) holds because `priceDocument` stamps it. There is no schema-level check.
+> - §6 readers (`deriveOrderDateEnvelope`, Typesense, `getDuration`'s charge half) and bookings are beta B, as planned.
+> - `getInitialValues(OrderDocDates)` seeds `charge_windows: []`, which the stored schema refuses. The manager must seed with `applyDateEdit` `default_dates` (already planned).
 
 > ## ⚠️ STATUS UPDATE 2026-09-16: census run on PROD (dev agrees to within 2 invoices)
 > Script: the charge-windows census script, uncommitted on api-cloudrun branch `chore/charge-windows-census` (worktree `charge-windows`); it lands with the backfill. Prod: 1,033 orders, 1,051 invoices.
@@ -66,8 +85,8 @@ Today every destination pair has exactly one `charge_start`/`charge_end`.
 
 - **Where dates live:** each pair's `dates: OrderDocDates` (`core/src/schemas/order.ts:130-205`), on orders, fulfillments and invoice pairs.
 - **Day counts:** `getDuration` (`core/src/utils/dates.ts:586`) → `days_charged` → copied onto lines.
-  - Lines follow a date change only while they equal the old default: `core/src/utils/orders.ts:366-500`, `core/src/utils/invoices.ts:2929`.
-  - Tests pin "hand-set values are preserved" (`core/tests/charge-days.test.ts:16, 61-71`).
+  - Lines follow a date change only while they equal the old default (before beta A: `syncChargeDaysToItems` and friends in `core/src/utils/orders.ts`, and `settleScopedChargeDays` in `core/src/utils/invoices.ts`; all deleted in beta A).
+  - Tests pinned "hand-set values are preserved" (the charge-days test file, deleted in beta A).
 - **Per-line duration inputs** (`manager/src/components/orders/item-cells/ItemDuration.tsx` and its `invoices` twin) write one line's days alone. This contradicts decision 3.
 - **Price:** `perUnitSubtotal` (`core/src/utils/orders.ts:817-846`) applies days only for `five_day_week` with days > 5.
   - Invoice `sale`/`service`/`surcharge` lines are stored as `five_day_week` with null days (`core/src/schemas/common.ts:955-965`), and price at factor 1.
@@ -187,7 +206,7 @@ chargeable_days: z.int().nullable().meta({ derived: true })   // key stays prese
 **Documents already sent out are never re-derived.** Void, paid and settled invoices, and the `probe-settled` path (`lineMoneyAgrees` ignores days), carry their **stored** line days through. Otherwise a divergence that doesn't change money (e.g. 3 → 4) would silently rewrite a paid invoice's days, and one that does change money would 400 non-money edits such as #473 repairs. **Issued, unpaid invoices do get re-derived**; the census decides their backfill (#2408).
 
 **Delete:**
-- `syncChargeDaysToItems`, `reconcileChargeDaysByDestination`, `resolveDownstreamChargeDays`, `settleScopedChargeDays`, with their tests (`charge-days.test.ts`)
+- `syncChargeDaysToItems`, `reconcileChargeDaysByDestination`, `resolveDownstreamChargeDays`, `settleScopedChargeDays`, with their tests (done in beta A)
 - Their callers: `services/orders.ts:1631, 2968`, `services/invoices.ts:1304`, `core/src/utils/invoices.ts` (`settleScopedChargeDays`'s caller), `manager/src/stores/orders.ts:304-371`
 - The holiday recompute becomes "recanonicalize, then reprice". Replace its positional "Nth divider owns Nth destination" mapping (`services/orders.ts:3015-3030`) with path/uid.
 

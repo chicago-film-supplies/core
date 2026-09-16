@@ -180,9 +180,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "getParentProductUid", // path machinery
     "getItemSubtreeRange", // path machinery
     "getRemovalIndices", // editor delete machinery
-    "syncChargeDaysToItems", // mutates items in place — write-path only
-    "reconcileChargeDaysByDestination", // pure per-destination form of the above — write-path only
-    "resolveDownstreamChargeDays", // order → invoice day-count sync rule — write-path only
     "deriveOrderDateEnvelope", // superseded by per-destination dates; not for rendering
     "buildQueryByDates", // Typesense projection helper
     "buildQueryByContacts", // Typesense projection helper — the sibling of buildQueryByDates
@@ -547,8 +544,17 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // supplies the default at BUILD time, the stamped value is the fact. And the
   // same reason `it.pick_sheets` carries no quantity helper — the row already
   // holds the number, so a second way to get it can only disagree.
+  //
+  // The charge-window WRITERS are denied for the same reason: a render reads the
+  // stored `charge_windows[].days`, counted once when the window was written.
+  // `canonicalChargeWindows` recounts against a holiday list the render does not
+  // hold, and `applyDateEdit` is the date editor's rule set. The READERS —
+  // `chargedDays`, `billableDays`, `chargeEnvelope`, `chargeWindowsOf` — read
+  // stored values only and are emitted.
   dates: [
     "addChicagoDays",
+    "applyDateEdit",
+    "canonicalChargeWindows",
     "chicagoDaysBetween",
   ],
 };

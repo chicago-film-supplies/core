@@ -204,7 +204,7 @@ const ctx = (overrides: Partial<DocumentTaxContext> & { taxes?: LegacyTax[] } = 
  * written back into `items` so the assertions below read the priced lines.
  */
 function materialize(items: LineItem[], taxCtx: DocumentTaxContext) {
-  const priced = priceDocument(items, { document: { kind: "order" }, tax: taxCtx });
+  const priced = priceDocument(items, { document: { kind: "order", status: "draft" }, tax: taxCtx, charge_windows: [{ divider_path: [], days: null }] });
   items.splice(0, items.length, ...priced.items);
   return priced.warnings;
 }

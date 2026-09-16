@@ -68,7 +68,6 @@ import {
   getDestinationPairItemName,
   getDestinationsLegend,
   getDefaultChargeDays,
-  syncChargeDaysToItems,
   type LineItem,
   type LinePriceMoney,
   priceTransactionFeeLine,
@@ -1567,20 +1566,35 @@ const baseDates: OrderDatesType = {
   delivery_end: "2025-01-06T15:00:00.000Z",
   collection_start: "2025-01-10T21:00:00.000Z",
   collection_end: "2025-01-10T21:00:00.000Z",
-  charge_start: "2025-01-06T15:00:00.000Z",
-  charge_end: "2025-01-10T21:00:00.000Z",
+  charge_windows: [{ start: "2025-01-06T15:00:00.000Z", end: "2025-01-10T21:00:00.000Z" }],
 };
 
-Deno.test("isSameAsDeliveryDates returns true when charge matches delivery/collection", () => {
+Deno.test("isSameAsDeliveryDates: one window over possession", () => {
   assertEquals(isSameAsDeliveryDates(baseDates), true);
 });
 
-Deno.test("isSameAsDeliveryDates returns false when charge_start differs", () => {
-  assertEquals(isSameAsDeliveryDates({ ...baseDates, charge_start: "2025-01-07T09:00:00.000Z" }), false);
+Deno.test("isSameAsDeliveryDates compares instants, not strings", () => {
+  assertEquals(
+    isSameAsDeliveryDates({ ...baseDates, charge_windows: [{ start: "2025-01-06T09:00:00.000-06:00", end: "2025-01-10T15:00:00.000-06:00" }] }),
+    true,
+  );
 });
 
-Deno.test("isSameAsDeliveryDates returns false when charge_end differs", () => {
-  assertEquals(isSameAsDeliveryDates({ ...baseDates, charge_end: "2025-01-09T21:00:00.000Z" }), false);
+Deno.test("isSameAsDeliveryDates is false when the window starts later", () => {
+  assertEquals(isSameAsDeliveryDates({ ...baseDates, charge_windows: [{ start: "2025-01-07T09:00:00.000Z", end: "2025-01-10T21:00:00.000Z" }] }), false);
+});
+
+Deno.test("isSameAsDeliveryDates is false with two windows, even when they span possession", () => {
+  assertEquals(
+    isSameAsDeliveryDates({
+      ...baseDates,
+      charge_windows: [
+        { start: "2025-01-06T15:00:00.000Z", end: "2025-01-07T21:00:00.000Z" },
+        { start: "2025-01-09T15:00:00.000Z", end: "2025-01-10T21:00:00.000Z" },
+      ],
+    }),
+    false,
+  );
 });
 
 // ── isSameAsDeliveryDestination ─────────────────────────────────
@@ -1597,7 +1611,7 @@ const baseEndpoint = {
 const NO_DATES: OrderDatesType = {
   delivery_start: null, delivery_end: null,
   collection_start: null, collection_end: null,
-  charge_start: null, charge_end: null,
+  charge_windows: [],
 };
 
 Deno.test("isSameAsDeliveryDestination returns true when endpoints match", () => {
@@ -1838,47 +1852,24 @@ Deno.test("getDefaultChargeDays returns chargeable days", () => {
     delivery_end: "2025-01-06T15:00:00.000Z",
     collection_start: "2025-01-10T21:00:00.000Z",
     collection_end: "2025-01-10T21:00:00.000Z",
-    charge_start: "2025-01-06T15:00:00.000Z",
-    charge_end: "2025-01-10T21:00:00.000Z",
+    charge_windows: [{ start: "2025-01-06T15:00:00.000Z", end: "2025-01-10T21:00:00.000Z" }],
   };
   const result = getDefaultChargeDays(dates, []);
   assertEquals(result, 5);
 });
 
-// ── syncChargeDaysToItems ───────────────────────────────────────
-
-Deno.test("syncChargeDaysToItems no-ops when defaults are equal", () => {
-  const items = [makeItem({ type: "rental" }, { chargeable_days: 5 })];
-  syncChargeDaysToItems(items, 5, 5);
-  assertEquals((items[0].price as PriceObject).chargeable_days, 5);
-});
-
-Deno.test("syncChargeDaysToItems updates items matching previous default", () => {
-  const items = [makeItem({ type: "rental" }, { chargeable_days: 5 })];
-  syncChargeDaysToItems(items, 5, 10);
-  assertEquals((items[0].price as PriceObject).chargeable_days, 10);
-});
-
-Deno.test("syncChargeDaysToItems skips manual overrides", () => {
-  const items = [makeItem({ type: "rental" }, { chargeable_days: 7 })];
-  syncChargeDaysToItems(items, 5, 10);
-  assertEquals((items[0].price as PriceObject).chargeable_days, 7);
-});
-
-Deno.test("syncChargeDaysToItems skips structural items", () => {
-  const items = [
-    makeItem({ type: "destination" }, { chargeable_days: 5 }),
-    makeItem({ type: "group" }, { chargeable_days: 5 }),
-  ];
-  syncChargeDaysToItems(items, 5, 10);
-  assertEquals((items[0].price as PriceObject).chargeable_days, 5);
-  assertEquals((items[1].price as PriceObject).chargeable_days, 5);
-});
-
-Deno.test("syncChargeDaysToItems skips when previousDefault is null", () => {
-  const items = [makeItem({ type: "rental" }, { chargeable_days: 5 })];
-  syncChargeDaysToItems(items, null, 10);
-  assertEquals((items[0].price as PriceObject).chargeable_days, 5);
+Deno.test("getDefaultChargeDays sums every window", () => {
+  const dates: OrderDatesType = {
+    delivery_start: "2025-01-06T09:00:00.000-06:00",
+    delivery_end: "2025-01-06T09:00:00.000-06:00",
+    collection_start: "2025-01-24T15:00:00.000-06:00",
+    collection_end: "2025-01-24T15:00:00.000-06:00",
+    charge_windows: [
+      { start: "2025-01-06T09:00:00.000-06:00", end: "2025-01-08T15:00:00.000-06:00" },
+      { start: "2025-01-20T09:00:00.000-06:00", end: "2025-01-21T15:00:00.000-06:00" },
+    ],
+  };
+  assertEquals(getDefaultChargeDays(dates, []), 5);
 });
 
 // ── computeItemPaths ────────────────────────────────────────────

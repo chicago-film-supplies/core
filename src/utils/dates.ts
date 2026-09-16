@@ -646,3 +646,443 @@ export function getDuration(
     chargePeriodLabel: charge.periodLabel,
   };
 }
+
+// ── Charge windows ──────────────────────────────────────────────────
+//
+// A destination pair charges for one or more windows (`charge_windows` on
+// `OrderDocDates`). Each window stores the business days it charges, counted
+// once when it is written. Every total is a sum of those stored counts, so
+// nothing below the write path needs the holiday list.
+
+/** A window as the helpers read it. `days` is present once the window is stored. */
+export interface ChargeWindowLike {
+  start: string;
+  end: string;
+  days?: number;
+}
+
+/** A stored window: its day count has been written. */
+export interface CountedChargeWindow {
+  start: string;
+  end: string;
+  days: number;
+}
+
+/**
+ * The date fields the charge-window helpers read and write.
+ *
+ * Structural, so an `OrderDocDatesType`, a manager draft and an invoice pair's
+ * dates all fit. Every key is optional here because the helpers must accept a
+ * pair stored before windows existed (`charge_start`/`charge_end` only).
+ */
+export interface ChargeDates {
+  delivery_start?: string | null;
+  delivery_end?: string | null;
+  collection_start?: string | null;
+  collection_end?: string | null;
+  charge_windows?: readonly ChargeWindowLike[] | null;
+  /** Legacy: the first window's start, kept in step until the field is removed. */
+  charge_start?: string | null;
+  /** Legacy: the last window's end, kept in step until the field is removed. */
+  charge_end?: string | null;
+  days_active?: number | null;
+  /** Legacy: Σ window days, kept in step until the field is removed. */
+  days_charged?: number | null;
+}
+
+/**
+ * **The days a pair charges: Σ `window.days`.** Reads stored counts only.
+ *
+ * ```ts
+ * chargedDays({ charge_windows: [{ start, end, days: 3 }, { start, end, days: 4 }] }); // 7
+ * ```
+ */
+export function chargedDays(dates: { charge_windows: readonly { days: number }[] }): number {
+  let sum = 0;
+  for (const w of dates.charge_windows) sum += w.days;
+  return sum;
+}
+
+/**
+ * **The days a set of windows bills: Σ `max(days, 5)`.** Every window carries
+ * the one-week minimum, a 0-day window included (charge-windows decision 2).
+ *
+ * For a single window this is today's `max(days, 5)`, so a one-window pair
+ * prices exactly as before.
+ *
+ * ```ts
+ * billableDays([3, 4, 2]); // 15 → 3.0 × base
+ * billableDays([3, 0, 4]); // 15
+ * billableDays([8, 7, 6]); // 21 → 4.2 × base
+ * ```
+ */
+export function billableDays(days: readonly number[]): number {
+  let sum = 0;
+  for (const d of days) sum += Math.max(d, 5);
+  return sum;
+}
+
+/**
+ * **The span a pair's windows cover**: the first window's start and the last
+ * window's end. `null` when the pair has no windows.
+ *
+ * It is not a window: the gaps between windows charge nothing.
+ */
+export function chargeEnvelope(
+  dates: { charge_windows?: readonly { start: string; end: string }[] | null },
+): { start: string; end: string } | null {
+  const windows = dates.charge_windows;
+  if (!windows || windows.length === 0) return null;
+  return { start: windows[0].start, end: windows[windows.length - 1].end };
+}
+
+/**
+ * A pair's windows, or the one window a legacy pair implies: `charge_start`
+ * (else `delivery_start`) to `charge_end` (else `collection_start`). `null` when
+ * neither form yields both bounds.
+ */
+export function chargeWindowsOf(dates: ChargeDates): ChargeWindowLike[] | null {
+  if (dates.charge_windows && dates.charge_windows.length > 0) {
+    return dates.charge_windows.map((w) => ({ ...w }));
+  }
+  const start = dates.charge_start ?? dates.delivery_start ?? null;
+  const end = dates.charge_end ?? dates.collection_start ?? null;
+  if (!start || !end) return null;
+  return [{ start, end }];
+}
+
+/** Business days in one window, counted in Chicago. */
+function countWindowDays(start: string, end: string, holidays: readonly string[]): number {
+  return countCfsBusinessDays(
+    parseISO(start, { in: CHICAGO }),
+    parseISO(end, { in: CHICAGO }),
+    [...holidays],
+  ).days;
+}
+
+/** What {@link canonicalChargeWindows} guarantees about the dates it returns. */
+export interface CanonicalChargeDates {
+  /** Counted, in Chicago offset form. Absent only when the pair has no charge bounds at all. */
+  charge_windows?: CountedChargeWindow[];
+}
+
+/** Options for {@link canonicalChargeWindows}. */
+export interface CanonicalChargeWindowsOptions {
+  /**
+   * The pair opens a date-extension section. Its windows keep their stored
+   * `days` — the added days its writer computed — and are never recounted.
+   */
+  extension?: boolean;
+}
+
+/**
+ * **The one writer of stored day counts.** Recounts every window's `days` and
+ * the pair's `days_active` against `holidays`.
+ *
+ * - **Windows.** A pair stored before windows existed gets the one window its
+ *   `charge_start`/`charge_end` imply ({@link chargeWindowsOf}). Instants are
+ *   canonicalized to Chicago offset form.
+ * - **Extension pairs keep their days** (`opts.extension`): the count is the
+ *   days added past what was billed, not a count of the window.
+ * - **The legacy fields follow the windows** — `charge_start`/`charge_end` are
+ *   the envelope and `days_charged` is Σ days — until they are removed. When a
+ *   legacy boundary moves, its `_fs` mirror is set to `null`, because a utility
+ *   cannot mint a Firestore Timestamp. The writer must stamp it.
+ *
+ * Pure: returns a copy.
+ *
+ * @throws Error when a window or the possession span cannot be counted
+ *   ({@link isNonTerminatingWindow}), when an extension window states no days,
+ *   or when `holidays` is not an array.
+ */
+export function canonicalChargeWindows<D extends ChargeDates>(
+  dates: D,
+  holidays: readonly string[],
+  opts: CanonicalChargeWindowsOptions = {},
+): D & CanonicalChargeDates {
+  if (!Array.isArray(holidays)) {
+    throw new Error("holidays must be an array");
+  }
+  const out = { ...dates } as D & CanonicalChargeDates & Record<string, unknown>;
+
+  const windows = chargeWindowsOf(dates);
+  if (windows !== null) {
+    const counted: CountedChargeWindow[] = windows.map((w, i) => {
+      const start = toChicagoInstant(w.start);
+      const end = toChicagoInstant(w.end);
+      if (opts.extension) {
+        if (typeof w.days !== "number") {
+          throw new Error(`Extension charge window ${i + 1} states no days`);
+        }
+        return { start, end, days: w.days };
+      }
+      if (isNonTerminatingWindow(start, end)) {
+        throw new Error(`Charge window ${i + 1} ends more than one day before it starts`);
+      }
+      return { start, end, days: countWindowDays(start, end, holidays) };
+    });
+    out.charge_windows = counted;
+    const envelope = chargeEnvelope({ charge_windows: counted })!;
+    setLegacyBound(out, "charge_start", envelope.start);
+    setLegacyBound(out, "charge_end", envelope.end);
+    out.days_charged = chargedDays({ charge_windows: counted });
+  }
+
+  if (dates.delivery_start && dates.collection_start) {
+    if (isNonTerminatingWindow(dates.delivery_start, dates.collection_start)) {
+      throw new Error("collection_start is more than one day before delivery_start");
+    }
+    out.days_active = countWindowDays(dates.delivery_start, dates.collection_start, holidays);
+  } else if ("days_active" in dates) {
+    out.days_active = null;
+  }
+  return out;
+}
+
+/** Write a legacy boundary, clearing its `_fs` mirror when the instant moved. */
+function setLegacyBound(out: Record<string, unknown>, key: "charge_start" | "charge_end", value: string): void {
+  const previous = out[key];
+  const moved = typeof previous !== "string" || toChicagoInstant(previous) !== value;
+  out[key] = value;
+  if (moved && `${key}_fs` in out) out[`${key}_fs`] = null;
+}
+
+// ── applyDateEdit ───────────────────────────────────────────────────
+
+/** An edit to one pair's dates. See {@link applyDateEdit}. */
+export type DateEdit =
+  | { type: "set_possession"; delivery_start?: string | null; collection_start?: string | null }
+  | { type: "set_possession_days"; days: number }
+  | { type: "set_window"; index: number; start?: string; end?: string }
+  | { type: "set_window_days"; index: number; days: number }
+  | { type: "add_window"; start: string; end: string }
+  | { type: "remove_window"; index: number }
+  | { type: "reset_windows" }
+  | { type: "copy_from"; dates: ChargeDates }
+  | { type: "default_dates"; now: Date | string };
+
+/** Why {@link applyDateEdit} refused an edit. */
+export type DateEditError =
+  | "holidays_unloaded"
+  | "non_terminating"
+  | "overlap"
+  | "adjacent"
+  | "missing_dates"
+  | "invalid_days"
+  | "no_such_window"
+  | "last_window"
+  | "extension_window"
+  | "invalid_instant";
+
+/** Context for {@link applyDateEdit}. */
+export interface DateEditContext {
+  /**
+   * Chicago holiday dates. `null` means the list has not loaded, and every edit
+   * is refused with `holidays_unloaded` rather than counting holidays as
+   * business days.
+   */
+  holidays: readonly string[] | null;
+  /**
+   * The dates the follow rules compare against. Defaults to `dates` itself. The
+   * API passes the STORED pair, so an input that moved possession and left its
+   * windows as stored follows exactly as the manager's edit would have.
+   */
+  prev?: ChargeDates;
+  /** The pair opens a date-extension section: its windows cannot be edited. */
+  extension?: boolean;
+}
+
+/** What {@link applyDateEdit} returns. */
+export type DateEditResult<D> = { dates: D & CanonicalChargeDates } | { error: DateEditError };
+
+/** Same instant, whatever offset each string is written in. */
+function sameInstant(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return Date.parse(a) === Date.parse(b);
+}
+
+/** The Chicago calendar date of `day`, at the Chicago time of day of `timeOf`. */
+function atTimeOf(day: Date, timeOf: string): string {
+  const t = parseISO(timeOf, { in: CHICAGO });
+  return set(day, {
+    hours: t.getHours(),
+    minutes: t.getMinutes(),
+    seconds: t.getSeconds(),
+    milliseconds: t.getMilliseconds(),
+  }, { in: CHICAGO }).toISOString();
+}
+
+/** The end `days` business days on from `start`, keeping `endTimeOf`'s time of day. */
+function endAfterBusinessDays(start: string, days: number, endTimeOf: string, holidays: readonly string[]): string {
+  const endDay = getEndDateByChargePeriod(parseISO(start, { in: CHICAGO }), days, [...holidays]);
+  return atTimeOf(endDay, endTimeOf);
+}
+
+/** Is there no business day strictly between `earlierEnd` and `laterStart`? */
+function windowsAdjacent(earlierEnd: string, laterStart: string, holidays: readonly string[]): boolean {
+  const from = addDays(startOfDay(parseISO(earlierEnd, { in: CHICAGO })), 1);
+  const to = addDays(startOfDay(parseISO(laterStart, { in: CHICAGO })), -1);
+  if (differenceInCalendarDays(to, from) < 0) return true;
+  return countCfsBusinessDays(from, to, [...holidays]).days === 0;
+}
+
+/** Order, overlap, adjacency and walkability — the checks a stored pair must pass. */
+function checkWindows(
+  windows: readonly ChargeWindowLike[],
+  holidays: readonly string[],
+): DateEditError | null {
+  for (const w of windows) {
+    if (isNonTerminatingWindow(w.start, w.end)) return "non_terminating";
+  }
+  for (let i = 1; i < windows.length; i++) {
+    if (toChicagoYmd(windows[i].start) <= toChicagoYmd(windows[i - 1].end)) return "overlap";
+    if (windowsAdjacent(windows[i - 1].end, windows[i].start, holidays)) return "adjacent";
+  }
+  return null;
+}
+
+/**
+ * **Apply one date edit to a pair and recount it.** The one home of the date
+ * rules, shared by the manager's date editor and the API.
+ *
+ * Instants are parsed in Chicago and returned in Chicago offset form, and every
+ * successful edit ends in {@link canonicalChargeWindows}.
+ *
+ * The follow rules (both compare instants, not strings, against `ctx.prev`):
+ * - **An `*_end` follows its `*_start`** while it equals the previous start.
+ * - **The window follows possession** when the pair has exactly one window
+ *   whose bounds equal the previous delivery and collection starts.
+ *
+ * The edits:
+ * - `set_possession` — move delivery and/or collection start.
+ * - `set_possession_days` — collection start moves to `days` business days from
+ *   delivery start, keeping its own time of day.
+ * - `set_window` / `set_window_days` — one window's bounds, or its end by day
+ *   count keeping the end's time of day. Refused on an extension pair.
+ * - `add_window` (inserted in order), `remove_window` (at least one stays),
+ *   `reset_windows` (one window over possession).
+ * - `copy_from` — a new pair takes a previous pair's dates.
+ * - `default_dates` — delivery at 09:00 on the next business day (tomorrow once
+ *   the Chicago hour is past 8), collection 5 business days on at 15:00, one
+ *   window over both.
+ *
+ * Never throws for a bad edit: it returns `{ error }`.
+ */
+export function applyDateEdit<D extends ChargeDates>(
+  dates: D,
+  edit: DateEdit,
+  ctx: DateEditContext,
+): DateEditResult<D> {
+  const holidays = ctx.holidays;
+  if (!Array.isArray(holidays)) return { error: "holidays_unloaded" };
+  const prev = ctx.prev ?? dates;
+  const next = { ...dates } as D & Record<string, unknown>;
+  let windows = chargeWindowsOf(dates);
+
+  const editsWindows = edit.type === "set_window" || edit.type === "set_window_days" ||
+    edit.type === "add_window" || edit.type === "remove_window" || edit.type === "reset_windows";
+  if (ctx.extension && editsWindows) return { error: "extension_window" };
+
+  /** Move possession, then apply both follow rules against `prev`. */
+  const moveP = (delivery: string | null | undefined, collection: string | null | undefined): void => {
+    const followsPossession = windows !== null && windows.length === 1 &&
+      sameInstant(windows[0].start, prev.delivery_start) && sameInstant(windows[0].end, prev.collection_start);
+    if (delivery !== undefined) {
+      const value = delivery === null ? null : toChicagoInstant(delivery);
+      if (sameInstant(dates.delivery_end, prev.delivery_start)) next.delivery_end = value;
+      next.delivery_start = value;
+    }
+    if (collection !== undefined) {
+      const value = collection === null ? null : toChicagoInstant(collection);
+      if (sameInstant(dates.collection_end, prev.collection_start)) next.collection_end = value;
+      next.collection_start = value;
+    }
+    if (followsPossession && next.delivery_start && next.collection_start) {
+      windows = [{ start: next.delivery_start, end: next.collection_start }];
+    }
+  };
+
+  try {
+    switch (edit.type) {
+      case "set_possession":
+        moveP(edit.delivery_start, edit.collection_start);
+        break;
+      case "set_possession_days": {
+        if (!Number.isInteger(edit.days) || edit.days < 1) return { error: "invalid_days" };
+        if (!dates.delivery_start || !dates.collection_start) return { error: "missing_dates" };
+        moveP(undefined, endAfterBusinessDays(dates.delivery_start, edit.days, dates.collection_start, holidays));
+        break;
+      }
+      case "set_window": {
+        if (!windows || !windows[edit.index]) return { error: "no_such_window" };
+        const w = windows[edit.index];
+        windows[edit.index] = {
+          start: edit.start !== undefined ? toChicagoInstant(edit.start) : w.start,
+          end: edit.end !== undefined ? toChicagoInstant(edit.end) : w.end,
+        };
+        break;
+      }
+      case "set_window_days": {
+        if (!Number.isInteger(edit.days) || edit.days < 1) return { error: "invalid_days" };
+        if (!windows || !windows[edit.index]) return { error: "no_such_window" };
+        const w = windows[edit.index];
+        windows[edit.index] = { start: w.start, end: endAfterBusinessDays(w.start, edit.days, w.end, holidays) };
+        break;
+      }
+      case "add_window": {
+        const added = { start: toChicagoInstant(edit.start), end: toChicagoInstant(edit.end) };
+        windows = [...(windows ?? []), added].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+        break;
+      }
+      case "remove_window": {
+        if (!windows || !windows[edit.index]) return { error: "no_such_window" };
+        if (windows.length === 1) return { error: "last_window" };
+        windows = windows.filter((_, i) => i !== edit.index);
+        break;
+      }
+      case "reset_windows": {
+        if (!dates.delivery_start || !dates.collection_start) return { error: "missing_dates" };
+        windows = [{ start: dates.delivery_start, end: dates.collection_start }];
+        break;
+      }
+      case "copy_from": {
+        const source = edit.dates;
+        for (const key of ["delivery_start", "delivery_end", "collection_start", "collection_end"] as const) {
+          next[key] = source[key] ? toChicagoInstant(source[key]!) : null;
+        }
+        windows = chargeWindowsOf(source);
+        break;
+      }
+      case "default_dates": {
+        const now = typeof edit.now === "string" ? parseISO(edit.now, { in: CHICAGO }) : new TZDate(edit.now, "America/Chicago");
+        let day: Date = now;
+        if (getHours(day) > 8) day = addDays(day, 1);
+        day = set(day, { hours: 9, minutes: 0, seconds: 0, milliseconds: 0 }, { in: CHICAGO });
+        while (isWeekend(day) || isHoliday(day, [...holidays])) day = addDays(day, 1);
+        const start = day.toISOString();
+        const endDay = getEndDateByChargePeriod(day, 5, [...holidays]);
+        const end = set(endDay, { hours: 15, minutes: 0, seconds: 0, milliseconds: 0 }, { in: CHICAGO }).toISOString();
+        next.delivery_start = start;
+        next.delivery_end = start;
+        next.collection_start = end;
+        next.collection_end = end;
+        windows = [{ start, end }];
+        break;
+      }
+    }
+
+    if (next.delivery_start && next.collection_start && isNonTerminatingWindow(next.delivery_start, next.collection_start)) {
+      return { error: "non_terminating" };
+    }
+    if (windows !== null) {
+      const problem = checkWindows(windows, holidays);
+      if (problem) return { error: problem };
+      next.charge_windows = windows;
+    }
+    return { dates: canonicalChargeWindows(next as D, holidays, { extension: ctx.extension }) };
+  } catch {
+    // Every refusable edit is checked above, so a throw here is an instant
+    // that does not parse.
+    return { error: "invalid_instant" };
+  }
+}

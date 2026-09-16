@@ -18,7 +18,7 @@
  * | kind | what it is | how the merge treats it |
  * |---|---|---|
  * | `propagated` | a value both documents carry with the same meaning | the three-way rule |
- * | `derived` | written by a derivation (`priceDocument`, `getDuration`, the `_fs` mirrors) | skipped, then recomputed |
+ * | `derived` | written by a derivation (`priceDocument`, `canonicalChargeWindows`, the `_fs` mirrors) | skipped, then recomputed |
  * | `homonym` | same key, different meaning (`status`, `xero_id`, …) | skipped |
  * | `atom` | a snapshot of another document (an object carrying its own `uid`) | the three-way rule, on the WHOLE object |
  *
@@ -63,6 +63,13 @@ export interface SharedField {
   /** Dotted path with `[]` crossing a row array: `items[].price.discount.rate`. */
   path: string;
   kind: SharedFieldKind;
+  /**
+   * Set on a field declared `.meta({ shared: "value" })`: an array or object
+   * merged as ONE value. Lists the keys inside it that a derivation writes
+   * (`.meta({ derived: true })` one level down), which the merge ignores when it
+   * compares. `charge_windows[].days` is the one case.
+   */
+  derived_keys?: readonly string[];
 }
 
 /** Result of {@link classifySharedFields}. */
@@ -82,6 +89,14 @@ export interface SharedFieldClassification {
 export const DERIVED_META_KEY = "derived";
 /** The meta key that marks a homonym: `.meta({ propagate: false })`. */
 export const PROPAGATE_META_KEY = "propagate";
+/**
+ * The meta key that marks a value merged whole: `.meta({ shared: "value" })`.
+ *
+ * For a uid-less object array, which is neither a row array (no identity to match
+ * rows by) nor an array of scalars. `charge_windows` is the case: its windows have
+ * no identity apart from their position, so the array is taken or kept as a unit.
+ */
+export const SHARED_META_KEY = "shared";
 
 /** Keys that identify a row rather than describing it. */
 const ROW_IDENTITY_KEYS: ReadonlySet<string> = new Set(["uid", "path"]);
@@ -173,6 +188,20 @@ function resolve(nodes: readonly z.ZodType[]): Resolved {
   return { kind: "unhandled", type: [...types].sort().join("|") };
 }
 
+/** The `derived` keys of the element (or object) inside a `shared: "value"` node. */
+function derivedKeysOf(aNodes: readonly z.ZodType[], bNodes: readonly z.ZodType[]): string[] {
+  const keys = new Set<string>();
+  for (const nodes of [aNodes, bNodes]) {
+    let r = resolve(nodes);
+    if (r.kind === "array") r = resolve(r.element);
+    if (r.kind !== "object") continue;
+    for (const [key, children] of r.shape) {
+      if (metaOf(children, DERIVED_META_KEY) === true) keys.add(key);
+    }
+  }
+  return [...keys].sort();
+}
+
 const metaOf = (nodes: readonly z.ZodType[], key: string): unknown => {
   for (const n of nodes) {
     const v = readMetaThroughWrappers<unknown>(n, key);
@@ -221,6 +250,10 @@ export function classifySharedFields(
     }
     if (metaOf(both, DERIVED_META_KEY) === true) {
       fields.push({ path, kind: "derived" });
+      return;
+    }
+    if (metaOf(both, SHARED_META_KEY) === "value") {
+      fields.push({ path, kind: "propagated", derived_keys: derivedKeysOf(aNodes, bNodes) });
       return;
     }
 
@@ -288,7 +321,7 @@ export function fieldsUnder(c: SharedFieldClassification, row: string): SharedFi
   const prefix = `${row}.`;
   return c.fields
     .filter((f) => f.path.startsWith(prefix) && !f.path.slice(prefix.length).includes("[]"))
-    .map((f) => ({ path: f.path.slice(prefix.length), kind: f.kind }));
+    .map((f) => ({ ...f, path: f.path.slice(prefix.length) }));
 }
 
 // ── The three-way merge ─────────────────────────────────────────────────────
@@ -327,6 +360,17 @@ export function sameSharedValue(a: unknown, b: unknown): boolean {
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
+
+/** `value` (an object, or an array of them) with `keys` dropped at its first level. */
+function withoutKeys(value: unknown, keys: readonly string[]): unknown {
+  const strip = (v: unknown) => {
+    if (!isPlainObject(v)) return v;
+    const out = { ...v };
+    for (const k of keys) delete out[k];
+    return out;
+  };
+  return Array.isArray(value) ? value.map(strip) : strip(value);
+}
 
 /**
  * Apply the three-way rule to every propagating field of ONE matched row or
@@ -402,7 +446,13 @@ export function mergeSharedFields<T>(
     done.add(unitPath);
 
     const d = at(downstream, unitSegs);
-    if (!sameSharedValue(d, at(prev, unitSegs))) {
+    // A whole value compares without the keys a derivation writes inside it, so
+    // an invoice whose holiday recount differs is not an override.
+    const same = (x: unknown, y: unknown) =>
+      unit === segs.length && field.derived_keys?.length
+        ? sameSharedValue(withoutKeys(x, field.derived_keys), withoutKeys(y, field.derived_keys))
+        : sameSharedValue(x, y);
+    if (!same(d, at(prev, unitSegs))) {
       overridden.add(unitPath);
       continue;
     }
@@ -410,7 +460,7 @@ export function mergeSharedFields<T>(
     // Already says the same thing: keep the downstream's own spelling. Writing
     // `null` over an absent key changes nothing it states and widens the stored
     // key set — which, on an invoice line, is what re-pushes it to Xero.
-    if (sameSharedValue(d, n)) continue;
+    if (same(d, n)) continue;
     // The parent exists on all three sides (that is what the collapse ensured),
     // so it exists on `merged`, which is a copy of `downstream`.
     const parent = unitSegs.slice(0, -1).reduce<Record<string, unknown>>(
@@ -427,8 +477,20 @@ export function mergeSharedFields<T>(
 
 // ── A merged pair's window, and its derived fields ──────────────────────────
 
-/** The six ISO boundaries of a pair's `dates`. Everything else on it is derived. */
-const PAIR_DATE_BOUNDARIES = [
+/**
+ * What a pair's window IS: the four possession boundaries and the charge windows.
+ * Everything else on `dates` is derived from these.
+ */
+const PAIR_WINDOW_KEYS = [
+  "delivery_start",
+  "delivery_end",
+  "collection_start",
+  "collection_end",
+  "charge_windows",
+] as const;
+
+/** The instants whose `_fs` Timestamp mirror a merge must carry from the right side. */
+const PAIR_FS_BOUNDARIES = [
   "delivery_start",
   "delivery_end",
   "collection_start",
@@ -439,24 +501,29 @@ const PAIR_DATE_BOUNDARIES = [
 
 type DateRecord = Record<string, unknown>;
 const isDateRecord = (v: unknown): v is DateRecord => v !== null && typeof v === "object" && !Array.isArray(v);
-const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+
+/** Compare two `charge_windows` values by their bounds; `days` is derived. */
+const sameWindowKey = (key: string, a: unknown, b: unknown): boolean =>
+  key === "charge_windows"
+    ? sameSharedValue(withoutKeys(a, ["days"]), withoutKeys(b, ["days"]))
+    : sameSharedValue(a, b);
 
 /**
- * Resolve the `dates` object to STORE for a pair whose leaves have just been
+ * Resolve the `dates` object to STORE for a pair whose fields have just been
  * merged, and recompute the derived fields the merge deliberately left alone.
  *
- * {@link mergeSharedFields} runs per `dates` LEAF and skips the `derived` keys —
- * the `_fs` Timestamp mirrors and the `days_*` counts — so it leaves them as the
- * downstream document had them. That is correct when the merged window came
- * wholly from one side and internally inconsistent when it did not, which is
- * exactly what an operator editing one endpoint in the pair editor produces.
- * Four cases:
+ * {@link mergeSharedFields} runs per `dates` field and skips the `derived` ones —
+ * the `_fs` Timestamp mirrors, the day counts, and the legacy
+ * `charge_start`/`charge_end` — so it leaves them as the downstream document had
+ * them. That is correct when the merged window came wholly from one side and
+ * internally inconsistent when it did not, which is exactly what an operator
+ * editing one endpoint in the pair editor produces. Four cases:
  *
  * - **window unchanged from the downstream's** → nothing to recompute;
  * - **window equal to the source's** → take the source's `dates` whole, whose
- *   derived fields were computed from exactly those boundaries;
- * - **a mix** → each `_fs` from the side its own boundary came from, and the day
- *   counts recomputed against `holidays`;
+ *   derived fields were computed from exactly that window;
+ * - **a mix** → recount through `canonicalize`, then each `_fs` from whichever
+ *   side holds the same instant (`null` when neither does, for the writer to stamp);
  * - **invalid** → keep the downstream's WHOLE `dates`.
  *
  * 🔴 **A mixed window can be invalid** — the downstream moved delivery later
@@ -471,9 +538,9 @@ const str = (v: unknown): string | null => (typeof v === "string" && v.length > 
  * @param source - the new order pair's `dates`
  * @param downstream - the stored document's `dates`
  * @param holidays - Chicago `YYYY-MM-DD` days, for the day-count recompute
- * @param getDuration - the day-count derivation, injected so this module stays
- *   free of a dependency on the date helpers' own import graph
- * @param isNonTerminating - the invalid-window predicate
+ * @param canonicalize - `canonicalChargeWindows` from `utils/dates`, injected so
+ *   this module stays free of the date helpers' import graph. It throws on a
+ *   window it cannot count.
  * @returns the `dates` to store, or `null` meaning "keep the downstream's whole"
  */
 export function resolveMergedPairDates<D>(
@@ -481,11 +548,7 @@ export function resolveMergedPairDates<D>(
   source: D,
   downstream: D,
   holidays: readonly string[],
-  getDuration: (
-    w: { delivery_start: string; collection_start: string; charge_start: string | null; charge_end: string | null },
-    holidays: string[],
-  ) => { activeDays: number | null; chargeDays: number | null },
-  isNonTerminating: (start: string, end: string) => boolean,
+  canonicalize: (dates: D, holidays: readonly string[]) => D,
 ): D | null {
   const m = merged as unknown;
   const n = source as unknown;
@@ -493,44 +556,25 @@ export function resolveMergedPairDates<D>(
   if (!isDateRecord(m)) return merged;
 
   const windowOf = (other: unknown) =>
-    isDateRecord(other) && PAIR_DATE_BOUNDARIES.every((b) => sameSharedValue(m[b], other[b]));
+    isDateRecord(other) && PAIR_WINDOW_KEYS.every((k) => sameWindowKey(k, m[k], other[k]));
   if (windowOf(s)) return merged;
   if (windowOf(n)) return source;
 
-  const nonTerminating = (start: string | null, end: string | null) =>
-    start !== null && end !== null && isNonTerminating(start, end);
-  if (
-    nonTerminating(str(m.delivery_start), str(m.collection_start)) ||
-    nonTerminating(str(m.charge_start) ?? str(m.delivery_start), str(m.charge_end) ?? str(m.collection_start))
-  ) return null;
-
-  const dates: DateRecord = { ...m };
-  for (const b of PAIR_DATE_BOUNDARIES) {
-    const fromDownstream = isDateRecord(s) && sameSharedValue(m[b], s[b]);
-    dates[`${b}_fs`] =
-      (fromDownstream ? (s as DateRecord)[`${b}_fs`] : isDateRecord(n) ? n[`${b}_fs`] : null) ?? null;
+  let dates: DateRecord;
+  try {
+    dates = { ...(canonicalize({ ...m } as D, holidays) as DateRecord) };
+  } catch {
+    return null;
   }
-  const deliveryStart = str(m.delivery_start);
-  const collectionStart = str(m.collection_start);
-  if (deliveryStart !== null && collectionStart !== null) {
-    try {
-      const duration = getDuration(
-        {
-          delivery_start: deliveryStart,
-          collection_start: collectionStart,
-          charge_start: str(m.charge_start),
-          charge_end: str(m.charge_end),
-        },
-        [...holidays],
-      );
-      dates.days_active = duration.activeDays;
-      dates.days_charged = duration.chargeDays;
-    } catch {
-      return null;
-    }
-  } else {
-    dates.days_active = null;
-    dates.days_charged = null;
+  for (const b of PAIR_FS_BOUNDARIES) {
+    const fsKey = `${b}_fs`;
+    if (!(fsKey in dates) && !(isDateRecord(s) && fsKey in s)) continue;
+    const from = isDateRecord(s) && sameSharedValue(dates[b], s[b])
+      ? s
+      : isDateRecord(n) && sameSharedValue(dates[b], n[b])
+      ? n
+      : null;
+    dates[fsKey] = (from ? from[fsKey] : null) ?? null;
   }
   return dates as D;
 }

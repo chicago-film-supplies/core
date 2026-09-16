@@ -685,6 +685,30 @@
           "doc": "A collection name valid in a {@link DocSourceType}."
         },
         {
+          "kind": "variable",
+          "name": "ChargeWindow",
+          "declaration": "const ChargeWindow: z.ZodType<ChargeWindowType>;",
+          "doc": "Zod schema for {@link ChargeWindowType}."
+        },
+        {
+          "kind": "variable",
+          "name": "ChargeWindowInput",
+          "declaration": "const ChargeWindowInput: z.ZodType<ChargeWindowInputType>;",
+          "doc": "Zod schema for {@link ChargeWindowInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "ChargeWindowInputType",
+          "declaration": "interface ChargeWindowInputType {\n  start: string;\n  end: string;\n}",
+          "doc": "One charge window as a client states it: a start and an end instant.\n\nThe day count is not an input. The server counts it once, when the window is\nwritten (`canonicalChargeWindows` in `@cfs/core/utils/dates`)."
+        },
+        {
+          "kind": "interface",
+          "name": "ChargeWindowType",
+          "declaration": "interface ChargeWindowType {\n  start: string;\n  end: string;\n  days: number;\n}",
+          "doc": "One stored charge window: a start, an end, and the business days it charges.\n\nA pair holds one or more of these (`OrderDocDates.charge_windows`). A hotspot\nout for three months and switched on three times is one pair with three\nwindows: splitting it into three pairs would invent deliveries and free up the\nstock between windows.\n\n- **`days` is counted once, when the window is written**, and stored. The\n  holiday list has no versions, so recounting on read would move the days on a\n  document already sent out.\n- **`days` may be 0.** A window over a weekend charges nothing of its own; the\n  one-week minimum still applies to it when priced (`billableDays`).\n- **No `_fs` twins and no `uid`.** The array is one value to the shared-field\n  merge (`shared: \"value\"` on the field)."
+        },
+        {
           "kind": "interface",
           "name": "ChartOfAccounts",
           "declaration": "interface ChartOfAccounts {\n  uid: string;\n  code: COACodeType;\n  name: string;\n  type: COATypeType;\n  class: COAClassType;\n  status: COAStatusType;\n  xero_id: string | null;\n  description?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
@@ -2175,7 +2199,7 @@
         {
           "kind": "interface",
           "name": "ItemPriceType",
-          "declaration": "interface ItemPriceType {\n  base_cents?: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  chargeable_days?: number | null;\n  formula?: PriceFormulaType;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
+          "declaration": "interface ItemPriceType {\n  base_cents?: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  formula?: PriceFormulaType;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
           "doc": "Price breakdown for an order item (input — client sends partial data, server computes the rest)."
         },
         {
@@ -2775,8 +2799,8 @@
         {
           "kind": "interface",
           "name": "OrderDatesType",
-          "declaration": "interface OrderDatesType {\n  delivery_start: string | null;\n  delivery_end: string | null;\n  collection_start: string | null;\n  collection_end: string | null;\n  charge_start: string | null;\n  charge_end: string | null;\n}",
-          "doc": "Order dates — all six date boundaries as ISO datetime strings with offset,\nor null when the boundary is unset."
+          "declaration": "interface OrderDatesType {\n  delivery_start: string | null;\n  delivery_end: string | null;\n  collection_start: string | null;\n  collection_end: string | null;\n  charge_windows: ChargeWindowInputType[];\n}",
+          "doc": "Order dates as a client states them.\n\nPossession (delivery and collection) and the charge windows are separate:\npossession drives bookings and availability, and the windows decide what is\nbilled.\n\n🔴 **`charge_windows` is required and `charge_start`/`charge_end` are gone**\n(charge-windows campaign, decision 9). This schema is a `z.object`, so a\nclient that still sends the old keys has them stripped. A client that sends no\nwindows is refused, so the manager must ship before the API."
         },
         {
           "kind": "variable",
@@ -2787,7 +2811,7 @@
         {
           "kind": "interface",
           "name": "OrderDocDatesType",
-          "declaration": "interface OrderDocDatesType {\n  delivery_start: string | null;\n  delivery_start_fs: FirestoreTimestampType | null;\n  delivery_end: string | null;\n  delivery_end_fs: FirestoreTimestampType | null;\n  collection_start: string | null;\n  collection_start_fs: FirestoreTimestampType | null;\n  collection_end: string | null;\n  collection_end_fs: FirestoreTimestampType | null;\n  charge_start: string | null;\n  charge_start_fs: FirestoreTimestampType | null;\n  charge_end: string | null;\n  charge_end_fs: FirestoreTimestampType | null;\n  days_active: number | null;\n  days_charged: number | null;\n}",
+          "declaration": "interface OrderDocDatesType {\n  delivery_start: string | null;\n  delivery_start_fs: FirestoreTimestampType | null;\n  delivery_end: string | null;\n  delivery_end_fs: FirestoreTimestampType | null;\n  collection_start: string | null;\n  collection_start_fs: FirestoreTimestampType | null;\n  collection_end: string | null;\n  collection_end_fs: FirestoreTimestampType | null;\n  charge_start: string | null;\n  charge_start_fs: FirestoreTimestampType | null;\n  charge_end: string | null;\n  charge_end_fs: FirestoreTimestampType | null;\n  days_active: number | null;\n  days_charged: number | null;\n  charge_windows?: ChargeWindowType[];\n}",
           "doc": "Order dates with Firestore timestamp companions — the persisted, per-destination\ndate set. Each destination on an order/fulfillment/invoice owns one of these;\nthere is no order-level rollup (derive on demand via deriveOrderDateEnvelope)."
         },
         {
@@ -7230,7 +7254,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputPriceType",
-          "declaration": "interface InvoiceItemInputPriceType {\n  base_cents?: number;\n  base_percent?: number | null;\n  chargeable_days?: number | null;\n  formula?: PriceFormulaType;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n}",
+          "declaration": "interface InvoiceItemInputPriceType {\n  base_cents?: number;\n  base_percent?: number | null;\n  formula?: PriceFormulaType;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n}",
           "doc": "Item price input — partial, server computes the rest."
         },
         {
@@ -7472,6 +7496,30 @@
       "moduleDoc": "",
       "symbols": [
         {
+          "kind": "variable",
+          "name": "ChargeWindow",
+          "declaration": "const ChargeWindow: z.ZodType<ChargeWindowType>;",
+          "doc": "Zod schema for {@link ChargeWindowType}."
+        },
+        {
+          "kind": "variable",
+          "name": "ChargeWindowInput",
+          "declaration": "const ChargeWindowInput: z.ZodType<ChargeWindowInputType>;",
+          "doc": "Zod schema for {@link ChargeWindowInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "ChargeWindowInputType",
+          "declaration": "interface ChargeWindowInputType {\n  start: string;\n  end: string;\n}",
+          "doc": "One charge window as a client states it: a start and an end instant.\n\nThe day count is not an input. The server counts it once, when the window is\nwritten (`canonicalChargeWindows` in `@cfs/core/utils/dates`)."
+        },
+        {
+          "kind": "interface",
+          "name": "ChargeWindowType",
+          "declaration": "interface ChargeWindowType {\n  start: string;\n  end: string;\n  days: number;\n}",
+          "doc": "One stored charge window: a start, an end, and the business days it charges.\n\nA pair holds one or more of these (`OrderDocDates.charge_windows`). A hotspot\nout for three months and switched on three times is one pair with three\nwindows: splitting it into three pairs would invent deliveries and free up the\nstock between windows.\n\n- **`days` is counted once, when the window is written**, and stored. The\n  holiday list has no versions, so recounting on read would move the days on a\n  document already sent out.\n- **`days` may be 0.** A window over a weekend charges nothing of its own; the\n  one-week minimum still applies to it when priced (`billableDays`).\n- **No `_fs` twins and no `uid`.** The array is one value to the shared-field\n  merge (`shared: \"value\"` on the field)."
+        },
+        {
           "kind": "interface",
           "name": "ConsolidatedItemType",
           "declaration": "interface ConsolidatedItemType {\n  uid: string;\n  name: string;\n  type: string;\n  quantity: number;\n  stock_method: string;\n}",
@@ -7606,7 +7654,7 @@
         {
           "kind": "interface",
           "name": "ItemPriceType",
-          "declaration": "interface ItemPriceType {\n  base_cents?: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  chargeable_days?: number | null;\n  formula?: PriceFormulaType;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
+          "declaration": "interface ItemPriceType {\n  base_cents?: number;\n  base_percent?: number | null;\n  replacement_cents?: number | null;\n  formula?: PriceFormulaType;\n  subtotal_cents?: number;\n  discount?: DiscountInputType | null;\n  taxes?: Array<typeLiteral>;\n  total_cents?: number;\n}",
           "doc": "Price breakdown for an order item (input — client sends partial data, server computes the rest)."
         },
         {
@@ -7648,8 +7696,8 @@
         {
           "kind": "interface",
           "name": "OrderDatesType",
-          "declaration": "interface OrderDatesType {\n  delivery_start: string | null;\n  delivery_end: string | null;\n  collection_start: string | null;\n  collection_end: string | null;\n  charge_start: string | null;\n  charge_end: string | null;\n}",
-          "doc": "Order dates — all six date boundaries as ISO datetime strings with offset,\nor null when the boundary is unset."
+          "declaration": "interface OrderDatesType {\n  delivery_start: string | null;\n  delivery_end: string | null;\n  collection_start: string | null;\n  collection_end: string | null;\n  charge_windows: ChargeWindowInputType[];\n}",
+          "doc": "Order dates as a client states them.\n\nPossession (delivery and collection) and the charge windows are separate:\npossession drives bookings and availability, and the windows decide what is\nbilled.\n\n🔴 **`charge_windows` is required and `charge_start`/`charge_end` are gone**\n(charge-windows campaign, decision 9). This schema is a `z.object`, so a\nclient that still sends the old keys has them stripped. A client that sends no\nwindows is refused, so the manager must ship before the API."
         },
         {
           "kind": "variable",
@@ -7660,7 +7708,7 @@
         {
           "kind": "interface",
           "name": "OrderDocDatesType",
-          "declaration": "interface OrderDocDatesType {\n  delivery_start: string | null;\n  delivery_start_fs: FirestoreTimestampType | null;\n  delivery_end: string | null;\n  delivery_end_fs: FirestoreTimestampType | null;\n  collection_start: string | null;\n  collection_start_fs: FirestoreTimestampType | null;\n  collection_end: string | null;\n  collection_end_fs: FirestoreTimestampType | null;\n  charge_start: string | null;\n  charge_start_fs: FirestoreTimestampType | null;\n  charge_end: string | null;\n  charge_end_fs: FirestoreTimestampType | null;\n  days_active: number | null;\n  days_charged: number | null;\n}",
+          "declaration": "interface OrderDocDatesType {\n  delivery_start: string | null;\n  delivery_start_fs: FirestoreTimestampType | null;\n  delivery_end: string | null;\n  delivery_end_fs: FirestoreTimestampType | null;\n  collection_start: string | null;\n  collection_start_fs: FirestoreTimestampType | null;\n  collection_end: string | null;\n  collection_end_fs: FirestoreTimestampType | null;\n  charge_start: string | null;\n  charge_start_fs: FirestoreTimestampType | null;\n  charge_end: string | null;\n  charge_end_fs: FirestoreTimestampType | null;\n  days_active: number | null;\n  days_charged: number | null;\n  charge_windows?: ChargeWindowType[];\n}",
           "doc": "Order dates with Firestore timestamp companions — the persisted, per-destination\ndate set. Each destination on an order/fulfillment/invoice owns one of these;\nthere is no order-level rollup (derive on demand via deriveOrderDateEnvelope)."
         },
         {
@@ -10997,10 +11045,64 @@
           "doc": "Result of a business-day count between two dates."
         },
         {
+          "kind": "interface",
+          "name": "CanonicalChargeDates",
+          "declaration": "interface CanonicalChargeDates {\n  charge_windows?: CountedChargeWindow[];\n}",
+          "doc": "What {@link canonicalChargeWindows} guarantees about the dates it returns."
+        },
+        {
+          "kind": "interface",
+          "name": "CanonicalChargeWindowsOptions",
+          "declaration": "interface CanonicalChargeWindowsOptions {\n  extension?: boolean;\n}",
+          "doc": "Options for {@link canonicalChargeWindows}."
+        },
+        {
+          "kind": "interface",
+          "name": "ChargeDates",
+          "declaration": "interface ChargeDates {\n  delivery_start?: string | null;\n  delivery_end?: string | null;\n  collection_start?: string | null;\n  collection_end?: string | null;\n  charge_windows?: readonly ChargeWindowLike[] | null;\n  charge_start?: string | null;\n  charge_end?: string | null;\n  days_active?: number | null;\n  days_charged?: number | null;\n}",
+          "doc": "The date fields the charge-window helpers read and write.\n\nStructural, so an `OrderDocDatesType`, a manager draft and an invoice pair's\ndates all fit. Every key is optional here because the helpers must accept a\npair stored before windows existed (`charge_start`/`charge_end` only)."
+        },
+        {
           "kind": "typeAlias",
           "name": "ChargeDaysLabel",
           "declaration": "type ChargeDaysLabel = \"day\" | \"days\" | \"week\" | \"weeks\";",
           "doc": "Display values returned by {@link formatChargeDays}."
+        },
+        {
+          "kind": "interface",
+          "name": "ChargeWindowLike",
+          "declaration": "interface ChargeWindowLike {\n  start: string;\n  end: string;\n  days?: number;\n}",
+          "doc": "A window as the helpers read it. `days` is present once the window is stored."
+        },
+        {
+          "kind": "interface",
+          "name": "CountedChargeWindow",
+          "declaration": "interface CountedChargeWindow {\n  start: string;\n  end: string;\n  days: number;\n}",
+          "doc": "A stored window: its day count has been written."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "DateEdit",
+          "declaration": "type DateEdit = typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral;",
+          "doc": "An edit to one pair's dates. See {@link applyDateEdit}."
+        },
+        {
+          "kind": "interface",
+          "name": "DateEditContext",
+          "declaration": "interface DateEditContext {\n  holidays: readonly string[] | null;\n  prev?: ChargeDates;\n  extension?: boolean;\n}",
+          "doc": "Context for {@link applyDateEdit}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "DateEditError",
+          "declaration": "type DateEditError = \"holidays_unloaded\" | \"non_terminating\" | \"overlap\" | \"adjacent\" | \"missing_dates\" | \"invalid_days\" | \"no_such_window\" | \"last_window\" | \"extension_window\" | \"invalid_instant\";",
+          "doc": "Why {@link applyDateEdit} refused an edit."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "DateEditResult",
+          "declaration": "type DateEditResult = typeLiteral | typeLiteral;",
+          "doc": "What {@link applyDateEdit} returns."
         },
         {
           "kind": "interface",
@@ -11025,6 +11127,54 @@
           "name": "addChicagoDays",
           "signature": "addChicagoDays(input: string, days: number): string",
           "doc": "The Chicago start of day `days` calendar days after `input`'s Chicago\ncalendar date. DST-aware; `days` may be negative.\n\n🔴 **Calendar arithmetic, NOT `+ days * 86400000`, and the difference is a\nsilent off-by-one twice a year.** Chicago days are 23 or 25 hours long across\na DST boundary, so adding a fixed number of milliseconds lands on the wrong\ncalendar date whenever the span crosses one. Measured 2026-09-07, the\nfall-back direction:\n\n```text\n2026-10-20 + 15 days   correct: 2026-11-04    naive ms: 2026-11-03\n```\n\nThe spring-forward direction happens to survive the naive form — the extra\nhour is absorbed by the `startOfDay` snap — which is exactly what makes this\nhard to catch by testing one boundary. ⚠️ **A test that only crosses March is\ngreen on a broken implementation.**\n\n⭐ Returns the START OF DAY, not the input's time of day. Both callers\n(`invoice.due_date`, which is a `chicagoStartOfDay()` field, and aging-bucket\nedges) want a calendar date, and a helper that sometimes preserved a time\nwould put the DST question back where it started.\n\n```ts\naddChicagoDays(\"2026-02-25T00:00:00.000-06:00\", 15); // \"2026-03-12T00:00:00.000-05:00\"\naddChicagoDays(\"2026-10-20T00:00:00.000-05:00\", 15); // \"2026-11-04T00:00:00.000-06:00\"\naddChicagoDays(\"2026-06-16T00:00:00.000-05:00\", -15); // \"2026-06-01T00:00:00.000-05:00\"\n```",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "applyDateEdit",
+          "signature": "applyDateEdit(dates: D, edit: DateEdit, ctx: DateEditContext): DateEditResult<D>",
+          "doc": "**Apply one date edit to a pair and recount it.** The one home of the date\nrules, shared by the manager's date editor and the API.\n\nInstants are parsed in Chicago and returned in Chicago offset form, and every\nsuccessful edit ends in {@link canonicalChargeWindows}.\n\nThe follow rules (both compare instants, not strings, against `ctx.prev`):\n- **An `*_end` follows its `*_start`** while it equals the previous start.\n- **The window follows possession** when the pair has exactly one window\n  whose bounds equal the previous delivery and collection starts.\n\nThe edits:\n- `set_possession` — move delivery and/or collection start.\n- `set_possession_days` — collection start moves to `days` business days from\n  delivery start, keeping its own time of day.\n- `set_window` / `set_window_days` — one window's bounds, or its end by day\n  count keeping the end's time of day. Refused on an extension pair.\n- `add_window` (inserted in order), `remove_window` (at least one stays),\n  `reset_windows` (one window over possession).\n- `copy_from` — a new pair takes a previous pair's dates.\n- `default_dates` — delivery at 09:00 on the next business day (tomorrow once\n  the Chicago hour is past 8), collection 5 business days on at 15:00, one\n  window over both.\n\nNever throws for a bad edit: it returns `{ error }`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "billableDays",
+          "signature": "billableDays(days: readonly number[]): number",
+          "doc": "**The days a set of windows bills: Σ `max(days, 5)`.** Every window carries\nthe one-week minimum, a 0-day window included (charge-windows decision 2).\n\nFor a single window this is today's `max(days, 5)`, so a one-window pair\nprices exactly as before.\n\n```ts\nbillableDays([3, 4, 2]); // 15 → 3.0 × base\nbillableDays([3, 0, 4]); // 15\nbillableDays([8, 7, 6]); // 21 → 4.2 × base\n```",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "canonicalChargeWindows",
+          "signature": "canonicalChargeWindows(dates: D, holidays: readonly string[], _: unknown): D & CanonicalChargeDates",
+          "doc": "**The one writer of stored day counts.** Recounts every window's `days` and\nthe pair's `days_active` against `holidays`.\n\n- **Windows.** A pair stored before windows existed gets the one window its\n  `charge_start`/`charge_end` imply ({@link chargeWindowsOf}). Instants are\n  canonicalized to Chicago offset form.\n- **Extension pairs keep their days** (`opts.extension`): the count is the\n  days added past what was billed, not a count of the window.\n- **The legacy fields follow the windows** — `charge_start`/`charge_end` are\n  the envelope and `days_charged` is Σ days — until they are removed. When a\n  legacy boundary moves, its `_fs` mirror is set to `null`, because a utility\n  cannot mint a Firestore Timestamp. The writer must stamp it.\n\nPure: returns a copy.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "chargeEnvelope",
+          "signature": "chargeEnvelope(dates: typeLiteral): typeLiteral | null",
+          "doc": "**The span a pair's windows cover**: the first window's start and the last\nwindow's end. `null` when the pair has no windows.\n\nIt is not a window: the gaps between windows charge nothing.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "chargeWindowsOf",
+          "signature": "chargeWindowsOf(dates: ChargeDates): ChargeWindowLike[] | null",
+          "doc": "A pair's windows, or the one window a legacy pair implies: `charge_start`\n(else `delivery_start`) to `charge_end` (else `collection_start`). `null` when\nneither form yields both bounds.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "chargedDays",
+          "signature": "chargedDays(dates: typeLiteral): number",
+          "doc": "**The days a pair charges: Σ `window.days`.** Reads stored counts only.\n\n```ts\nchargedDays({ charge_windows: [{ start, end, days: 3 }, { start, end, days: 4 }] }); // 7\n```",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12103,8 +12253,8 @@
         {
           "kind": "function",
           "name": "isSameAsDeliveryDates",
-          "signature": "isSameAsDeliveryDates(dates: OrderDatesType): boolean",
-          "doc": "Whether charge dates match the delivery/collection dates\n(i.e. no custom charge period has been set).",
+          "signature": "isSameAsDeliveryDates(dates: Pick<OrderDatesType, \"delivery_start\" | \"collection_start\" | \"charge_windows\">): boolean",
+          "doc": "Whether the pair charges exactly its possession: one charge window from\ndelivery start to collection start (no custom charge period has been set).\nInstants are compared, not strings.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12284,7 +12434,7 @@
             },
             {
               "name": "mode",
-              "doc": "The merge context ({@link OrderInvoiceFieldSync}).\n\n⚠️ **There is no per-half `flags` argument any more.** It named which halves\nthe edit touched, so an untouched half could be carried as stored — a saving\nthe per-field rule does not need and cannot safely take: a field the order did\nnot change merges to what the invoice already has, so running both halves\nunconditionally is already a no-op where the old flag would have skipped.\nBoth halves merge per field, and each line's `chargeable_days` is then settled\nagainst its OWN invoice pair ({@link resolveDownstreamChargeDays})."
+              "doc": "The merge context ({@link OrderInvoiceFieldSync}).\n\n⚠️ **There is no per-half `flags` argument any more.** It named which halves\nthe edit touched, so an untouched half could be carried as stored — a saving\nthe per-field rule does not need and cannot safely take: a field the order did\nnot change merges to what the invoice already has, so running both halves\nunconditionally is already a no-op where the old flag would have skipped.\nBoth halves merge per field. A line's `chargeable_days` is derived, so the\nmerge leaves it alone and the caller's `priceDocument` stamps it from the\nline's own invoice pair."
             }
           ],
           "returnsTag": null
@@ -12366,7 +12516,7 @@
               "doc": "The uid of the order divider in the invoice"
             }
           ],
-          "returnsTag": "Updated invoice items (scoped under the order divider, ready for insertion)\n\n⚠️ **It takes no {@link OrderInvoiceFieldSync}, and that is not an oversight.**\nThe only thing the context carries is `holidays`, which settles a merged\nwindow's day counts — a PAIR concern. Items reach it through\n{@link syncOrderDestinationScope}, which owns both halves and runs\n{@link resolveDownstreamChargeDays} after them. An unused parameter here would\nread as \"this path considers holidays\" when it does not."
+          "returnsTag": "Updated invoice items (scoped under the order divider, ready for insertion)\n\n⚠️ **It takes no {@link OrderInvoiceFieldSync}, and that is not an oversight.**\nThe only thing the context carries is `holidays`, which settles a merged\nwindow's day counts — a PAIR concern. Items reach it through\n{@link syncOrderDestinationScope}, which owns both halves. An unused parameter here would\nread as \"this path considers holidays\" when it does not."
         },
         {
           "kind": "function",
@@ -12622,8 +12772,8 @@
         {
           "kind": "function",
           "name": "isSameAsDeliveryDates",
-          "signature": "isSameAsDeliveryDates(dates: OrderDatesType): boolean",
-          "doc": "Whether charge dates match the delivery/collection dates\n(i.e. no custom charge period has been set).",
+          "signature": "isSameAsDeliveryDates(dates: Pick<OrderDatesType, \"delivery_start\" | \"collection_start\" | \"charge_windows\">): boolean",
+          "doc": "Whether the pair charges exactly its possession: one charge window from\ndelivery start to collection start (no custom charge period has been set).\nInstants are compared, not strings.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13713,12 +13863,6 @@
       "moduleDoc": "Shared order utility functions for CFS applications.\nIncludes pricing calculations, item consolidation, and destination grouping.\n\nStored money is integer cents. A document is priced by `priceDocument`\n(`@cfs/core/utils/price-document`); this module holds the per-line pricers it\ncomposes, and the audit oracle {@link rederiveDocumentTotalsForAudit}.",
       "symbols": [
         {
-          "kind": "interface",
-          "name": "ChargeDaysPair",
-          "declaration": "interface ChargeDaysPair {\n  uid: string;\n  dates: typeLiteral | null;\n}",
-          "doc": "The minimum a destination pair needs for a day-count reconcile."
-        },
-        {
           "kind": "typeAlias",
           "name": "ConsolidatedItem",
           "declaration": "type ConsolidatedItem = ConsolidatedItemType;",
@@ -13829,7 +13973,7 @@
         {
           "kind": "interface",
           "name": "LinePricingOptions",
-          "declaration": "interface LinePricingOptions {\n  extensionDays?: number;\n}",
+          "declaration": "interface LinePricingOptions {\n  extensionDays?: number;\n  windowDays?: readonly number[];\n}",
           "doc": "Pricing inputs that come from the DOCUMENT rather than the line.\n\nOnly `priceDocument` (`@cfs/core/utils/price-document`) derives these. A\nwriter that prices a line on its own never passes them, which is the point:\nthe document decides, so no per-line caller can forget to (D1 of the\npriceDocument campaign, api-cloudrun#997)."
         },
         {
@@ -14150,8 +14294,8 @@
         {
           "kind": "function",
           "name": "getDefaultChargeDays",
-          "signature": "getDefaultChargeDays(dates: OrderDatesType, holidays: string[]): number | null",
-          "doc": "Compute default chargeable days from order dates and holidays.\nReturns null if required dates are missing.",
+          "signature": "getDefaultChargeDays(dates: Pick<OrderDatesType, \"delivery_start\" | \"collection_start\" | \"charge_windows\">, holidays: string[]): number | null",
+          "doc": "The days a pair's charge windows charge, counted against `holidays`: Σ each\nwindow's business days. Returns `null` when the dates are incomplete or a\nwindow cannot be counted.\n\nFor a stored pair, read the stored counts with `chargedDays` instead.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14287,8 +14431,8 @@
         {
           "kind": "function",
           "name": "isSameAsDeliveryDates",
-          "signature": "isSameAsDeliveryDates(dates: OrderDatesType): boolean",
-          "doc": "Whether charge dates match the delivery/collection dates\n(i.e. no custom charge period has been set).",
+          "signature": "isSameAsDeliveryDates(dates: Pick<OrderDatesType, \"delivery_start\" | \"collection_start\" | \"charge_windows\">): boolean",
+          "doc": "Whether the pair charges exactly its possession: one charge window from\ndelivery start to collection start (no custom charge period has been set).\nInstants are compared, not strings.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14363,33 +14507,9 @@
         },
         {
           "kind": "function",
-          "name": "reconcileChargeDaysByDestination",
-          "signature": "reconcileChargeDaysByDestination(items: readonly T[], prevPairs: readonly ChargeDaysPair[], nextPairs: readonly ChargeDaysPair[]): T[]",
-          "doc": "Pure, per-destination form of {@link syncChargeDaysToItems}: when a pair's\n`days_charged` moves, every priced line under THAT destination still at the\nprevious default takes the new one. A hand-set day count is left alone.\n\nThe destination a line belongs to is read from its `path` — a destination\ndivider's uid is its pair's `uid`, so the first path segment naming a pair is\nthe line's destination. That makes it independent of divider positions, and the\nsame function serves an order (`[dest, …]`) and an invoice (`[order, dest, …]`).\n\n⚠️ **A previous default of `null` moves nothing**, exactly as the mutating\nversion: with no earlier default there is no way to tell a line that followed\nit from one that was set by hand, and on a money field leaving the days alone\nis the visible failure.\n\nReturns a new array; lines it changes are copied, the rest are shared.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
           "name": "rederiveDocumentTotalsForAudit",
           "signature": "rederiveDocumentTotalsForAudit(items: LineItem[], taxes: Tax[]): DocumentTotalsCore",
           "doc": "**The audit oracle: document totals RE-DERIVED from line inputs**, independently\nof the money stored on the lines.\n\n`priceDocument` (`@cfs/core/utils/price-document`) makes totals a SUM of stored\nline money. The hourly totals-drift check (api-cloudrun#575) must keep asking\nthe other question — \"do the stored numbers still follow from the inputs?\" —\nbecause pointing it at the sum would check the implementation against itself\n(D2 of api-cloudrun#997). Since step 2 of that campaign it is the ONLY way\ncore re-derives totals; the writers' `calculateOrderTotals` /\n`calculateInvoiceTotals` are deleted.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "resolveDownstreamChargeDays",
-          "signature": "resolveDownstreamChargeDays(args: typeLiteral): number | null",
-          "doc": "A downstream line's `chargeable_days` after an order edit, when the downstream\ndocument (an invoice) has its OWN destination dates.\n\n`chargeable_days` is not a plain value: a line at its pair's default FOLLOWS that\ndefault, and only a line set to something else carries a value of its own. The\nplain three-way merge (`mergeSharedFields`) cannot see that, and gets one case\nwrong in the dangerous direction:\n\n> The order's dates move, so its default-following line goes 5 → 7. The invoice\n> overrode its dates and still charges 5 days. The merge sees the invoice line\n> at 5 = the order's previous 5 and takes 7 — billing seven days against a\n> five-day invoice window.\n\nSo, in order:\n1. The stored line did NOT follow its own pair's default → it is a value; the\n   merge's answer stands.\n2. The new order line follows ITS default → the order is saying \"follow the\n   dates\", so the downstream line follows the DOWNSTREAM pair's new default.\n3. The merge took a new value from the order → the order hand-set one; take it.\n4. Otherwise → keep following the downstream pair's new default.\n\n`mergedDays` is what `mergeSharedFields` produced for the field.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
-          "name": "syncChargeDaysToItems",
-          "signature": "syncChargeDaysToItems(items: LineItem[], previousDefault: number | null, newDefault: number | null): void",
-          "doc": "Update chargeable_days on line items that still match the previous default.\nSkips structural items, items without a price, and manual overrides.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14465,6 +14585,12 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "ChargeWindowPair",
+          "declaration": "interface ChargeWindowPair {\n  uid?: string | null;\n  uid_order?: string | null;\n  dates?: typeLiteral | null;\n}",
+          "doc": "The pair shape {@link chargeWindowContext} reads."
+        },
+        {
+          "kind": "interface",
           "name": "CreditLinePrice",
           "declaration": "interface CreditLinePrice {\n  base_cents: number;\n  chargeable_days: number | null;\n  formula: indexedAccess;\n}",
           "doc": "The stored price of one credit-note line: the invoice line's declared half plus money."
@@ -14478,7 +14604,7 @@
         {
           "kind": "interface",
           "name": "CreditSourceLine",
-          "declaration": "interface CreditSourceLine {\n  uid: string;\n  path: readonly string[];\n  type: indexedAccess;\n  quantity: number;\n  price: typeLiteral;\n}",
+          "declaration": "interface CreditSourceLine {\n  uid: string;\n  path: readonly string[];\n  type: indexedAccess;\n  quantity: number;\n  price: typeLiteral;\n  window_days?: readonly number[] | null;\n}",
           "doc": "The invoice-line surface a credit is priced from (api-cloudrun#997 D4)."
         },
         {
@@ -14489,8 +14615,14 @@
         },
         {
           "kind": "interface",
+          "name": "PairChargeWindows",
+          "declaration": "interface PairChargeWindows {\n  divider_path: readonly string[];\n  days: readonly number[] | null;\n  legacy_days_charged?: number | null;\n}",
+          "doc": "The charge windows of one destination pair, as the pricer reads them: stored\nday counts only, so pricing never needs the holiday list."
+        },
+        {
+          "kind": "interface",
           "name": "PriceDocumentContext",
-          "declaration": "interface PriceDocumentContext {\n  document: PriceDocumentKind;\n  tax: DocumentTaxContext;\n  extensions?: readonly PriceDocumentExtension[];\n}",
+          "declaration": "interface PriceDocumentContext {\n  document: PriceDocumentKind;\n  tax: DocumentTaxContext;\n  extensions?: readonly PriceDocumentExtension[];\n  charge_windows: readonly PairChargeWindows[];\n}",
           "doc": "Everything {@link priceDocument} reads besides the items."
         },
         {
@@ -14519,6 +14651,14 @@
         },
         {
           "kind": "function",
+          "name": "chargeWindowContext",
+          "signature": "chargeWindowContext(destinations: readonly ChargeWindowPair[]): PairChargeWindows[]",
+          "doc": "**Build {@link PriceDocumentContext.charge_windows}** from a document's stored\n`destinations`. Reads stored window days only.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "extensionChargeDays",
           "signature": "extensionChargeDays(orderChargeDays: number, billedChargeDays: number): number",
           "doc": "The extension day count for D7: `max(order, 5) − max(billed, 5)`.\n\nBoth sides floor at the one-week minimum, because each window was (or would\nbe) charged at least a week. The difference is therefore what the extension\nadds on top, and it can be negative when the order's window shrank.",
@@ -14530,6 +14670,14 @@
           "name": "invoiceExtensionSections",
           "signature": "invoiceExtensionSections(items: readonly typeLiteral[]): PriceDocumentExtension[]",
           "doc": "The date-extension sections of an invoice's items: one per destination\ndivider carrying `path_extension_for`.\n\nThe one derivation of {@link PriceDocumentContext.extensions}, shared by every\ninvoice writer and the manager's optimistic recompute — a caller that forgets\nto pass it re-prices extension lines at the one-week floor.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "lineChargeableDays",
+          "signature": "lineChargeableDays(item: LineItem, ctx: Pick<PriceDocumentContext, \"document\" | \"charge_windows\" | \"extensions\">): typeLiteral",
+          "doc": "**A line's `chargeable_days`, the one derivation of it** (charge-windows\ndecision 3), and the window days that price it.\n\n| line | `chargeable_days` |\n|---|---|\n| in an extension section | its own stored days (the days added) |\n| on a `complete`/`canceled` order | its own stored days |\n| `rental` + `five_day_week` on a pair with windows | Σ window days |\n| `rental` + `five_day_week` on a pair stored before windows | its own stored days, else the pair's `days_charged` |\n| `rental` + `five_day_week` on no pair | refused |\n| anything else | `null` |\n\n`windowDays` is set only for a pair with two or more windows, where the price\nis `billableDays(windows) ÷ 5` rather than the line's own floor.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14552,7 +14700,7 @@
         {
           "kind": "function",
           "name": "priceLine",
-          "signature": "priceLine(item: LineItem, taxes: Tax[], extensionDays?: number): LinePriceMoney",
+          "signature": "priceLine(item: LineItem, taxes: Tax[], extensionDays?: number, windowDays?: readonly number[]): LinePriceMoney",
           "doc": "**Stage 2 for one line: the line pricer.** `priceDocument` prices every line\nthrough it, and so does the one reader that must price a line outside a\ndocument — `accountLine` (`./quantityAccounting.ts`), which prices a\nremainder and a billed row's extension (#997 D11).\n\n`extensionDays` is D7: the line is priced for that many days with the\none-week minimum skipped, which is what an extension section on an invoice\nbills. A document line passes its own `chargeable_days`; `accountLine` passes\n{@link extensionChargeDays}`(order, billed)` for a billed row.",
           "paramTags": [],
           "returnsTag": null
@@ -14861,7 +15009,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/shared-fields",
-      "moduleDoc": "Which fields does a downstream document SHARE with its order, and how does each\none propagate?\n\nThe order → invoice / fulfillment sync is moving to one per-field rule\n(api-cloudrun#890, api-cloudrun#989):\n\n```\ndownstream' = isEqual(downstream, prevOrder) ? nextOrder : downstream\n```\n\nfollowed by re-running the derivations on the downstream document. Applying that\nrule needs to know, for every field, which of four structural cases it is in.\nThis module answers that from the two Zod schemas, so there is no hand-maintained\nfield list to drift (see the plan's \"Is a hand-maintained field list a\nmistake?\").\n\n| kind | what it is | how the merge treats it |\n|---|---|---|\n| `propagated` | a value both documents carry with the same meaning | the three-way rule |\n| `derived` | written by a derivation (`priceDocument`, `getDuration`, the `_fs` mirrors) | skipped, then recomputed |\n| `homonym` | same key, different meaning (`status`, `xero_id`, …) | skipped |\n| `atom` | a snapshot of another document (an object carrying its own `uid`) | the three-way rule, on the WHOLE object |\n\nPlus two structural containers the merge descends rather than compares:\n\n- **rows** — an array whose element carries a `uid` (`items[]`, `destinations[]`).\n  Rows are matched by identity first. `uid` and `path` inside a row are its\n  IDENTITY, not values, so they are not reported.\n- **value objects** — an object with no `uid` (`dates`, `price`, `discount`).\n  Recursed into, leaf by leaf.\n\nA key present on only one schema is not reported at all. \"Not in the order\nschema\" IS the definition of downstream-only.\n\n## Where the kinds come from\n\n`derived` and `homonym` are DECLARED on the schema field, as\n`.meta({ derived: true })` and `.meta({ propagate: false })`. A tag on either\nschema counts. `atom` and the containers are read from the shape.\n\n⚠️ **`propagate: false` has the unsafe default** — an untagged new homonym is\nreported `propagated`. The guard is the snapshot of this function's output in\n`tests/shared-fields.test.ts`: a new shared key at any level fails it until\nsomeone looks.\n\n## It fails closed\n\nA node type the walker does not recognise is reported in `unhandled` rather than\nguessed at. Callers assert it is empty.",
+      "moduleDoc": "Which fields does a downstream document SHARE with its order, and how does each\none propagate?\n\nThe order → invoice / fulfillment sync is moving to one per-field rule\n(api-cloudrun#890, api-cloudrun#989):\n\n```\ndownstream' = isEqual(downstream, prevOrder) ? nextOrder : downstream\n```\n\nfollowed by re-running the derivations on the downstream document. Applying that\nrule needs to know, for every field, which of four structural cases it is in.\nThis module answers that from the two Zod schemas, so there is no hand-maintained\nfield list to drift (see the plan's \"Is a hand-maintained field list a\nmistake?\").\n\n| kind | what it is | how the merge treats it |\n|---|---|---|\n| `propagated` | a value both documents carry with the same meaning | the three-way rule |\n| `derived` | written by a derivation (`priceDocument`, `canonicalChargeWindows`, the `_fs` mirrors) | skipped, then recomputed |\n| `homonym` | same key, different meaning (`status`, `xero_id`, …) | skipped |\n| `atom` | a snapshot of another document (an object carrying its own `uid`) | the three-way rule, on the WHOLE object |\n\nPlus two structural containers the merge descends rather than compares:\n\n- **rows** — an array whose element carries a `uid` (`items[]`, `destinations[]`).\n  Rows are matched by identity first. `uid` and `path` inside a row are its\n  IDENTITY, not values, so they are not reported.\n- **value objects** — an object with no `uid` (`dates`, `price`, `discount`).\n  Recursed into, leaf by leaf.\n\nA key present on only one schema is not reported at all. \"Not in the order\nschema\" IS the definition of downstream-only.\n\n## Where the kinds come from\n\n`derived` and `homonym` are DECLARED on the schema field, as\n`.meta({ derived: true })` and `.meta({ propagate: false })`. A tag on either\nschema counts. `atom` and the containers are read from the shape.\n\n⚠️ **`propagate: false` has the unsafe default** — an untagged new homonym is\nreported `propagated`. The guard is the snapshot of this function's output in\n`tests/shared-fields.test.ts`: a new shared key at any level fails it until\nsomeone looks.\n\n## It fails closed\n\nA node type the walker does not recognise is reported in `unhandled` rather than\nguessed at. Callers assert it is empty.",
       "symbols": [
         {
           "kind": "variable",
@@ -14882,9 +15030,15 @@
           "doc": "The meta key that marks a homonym: `.meta({ propagate: false })`."
         },
         {
+          "kind": "variable",
+          "name": "SHARED_META_KEY",
+          "declaration": "const SHARED_META_KEY: \"shared\";",
+          "doc": "The meta key that marks a value merged whole: `.meta({ shared: \"value\" })`.\n\nFor a uid-less object array, which is neither a row array (no identity to match\nrows by) nor an array of scalars. `charge_windows` is the case: its windows have\nno identity apart from their position, so the array is taken or kept as a unit."
+        },
+        {
           "kind": "interface",
           "name": "SharedField",
-          "declaration": "interface SharedField {\n  path: string;\n  kind: SharedFieldKind;\n}",
+          "declaration": "interface SharedField {\n  path: string;\n  kind: SharedFieldKind;\n  derived_keys?: readonly string[];\n}",
           "doc": "One shared field."
         },
         {
@@ -14940,8 +15094,8 @@
         {
           "kind": "function",
           "name": "resolveMergedPairDates",
-          "signature": "resolveMergedPairDates(merged: D, source: D, downstream: D, holidays: readonly string[], getDuration: fnOrConstructor, isNonTerminating: fnOrConstructor): D | null",
-          "doc": "Resolve the `dates` object to STORE for a pair whose leaves have just been\nmerged, and recompute the derived fields the merge deliberately left alone.\n\n{@link mergeSharedFields} runs per `dates` LEAF and skips the `derived` keys —\nthe `_fs` Timestamp mirrors and the `days_*` counts — so it leaves them as the\ndownstream document had them. That is correct when the merged window came\nwholly from one side and internally inconsistent when it did not, which is\nexactly what an operator editing one endpoint in the pair editor produces.\nFour cases:\n\n- **window unchanged from the downstream's** → nothing to recompute;\n- **window equal to the source's** → take the source's `dates` whole, whose\n  derived fields were computed from exactly those boundaries;\n- **a mix** → each `_fs` from the side its own boundary came from, and the day\n  counts recomputed against `holidays`;\n- **invalid** → keep the downstream's WHOLE `dates`.\n\n🔴 **A mixed window can be invalid** — the downstream moved delivery later\nwhile the source moved collection earlier — and an invalid window is NEVER\nwritten. The downstream keeps its own `dates` and the pair diff shows it.\n\n⭐ **One implementation for the invoice and the fulfillment.** Two copies of a\npairing rule in one domain is precisely what api-cloudrun#593 was; the arms\ndiffer only in the pair TYPE, and this is generic in it.",
+          "signature": "resolveMergedPairDates(merged: D, source: D, downstream: D, holidays: readonly string[], canonicalize: fnOrConstructor): D | null",
+          "doc": "Resolve the `dates` object to STORE for a pair whose fields have just been\nmerged, and recompute the derived fields the merge deliberately left alone.\n\n{@link mergeSharedFields} runs per `dates` field and skips the `derived` ones —\nthe `_fs` Timestamp mirrors, the day counts, and the legacy\n`charge_start`/`charge_end` — so it leaves them as the downstream document had\nthem. That is correct when the merged window came wholly from one side and\ninternally inconsistent when it did not, which is exactly what an operator\nediting one endpoint in the pair editor produces. Four cases:\n\n- **window unchanged from the downstream's** → nothing to recompute;\n- **window equal to the source's** → take the source's `dates` whole, whose\n  derived fields were computed from exactly that window;\n- **a mix** → recount through `canonicalize`, then each `_fs` from whichever\n  side holds the same instant (`null` when neither does, for the writer to stamp);\n- **invalid** → keep the downstream's WHOLE `dates`.\n\n🔴 **A mixed window can be invalid** — the downstream moved delivery later\nwhile the source moved collection earlier — and an invalid window is NEVER\nwritten. The downstream keeps its own `dates` and the pair diff shows it.\n\n⭐ **One implementation for the invoice and the fulfillment.** Two copies of a\npairing rule in one domain is precisely what api-cloudrun#593 was; the arms\ndiffer only in the pair TYPE, and this is generic in it.",
           "paramTags": [
             {
               "name": "merged",
@@ -14960,12 +15114,8 @@
               "doc": "Chicago `YYYY-MM-DD` days, for the day-count recompute"
             },
             {
-              "name": "getDuration",
-              "doc": "the day-count derivation, injected so this module stays\nfree of a dependency on the date helpers' own import graph"
-            },
-            {
-              "name": "isNonTerminating",
-              "doc": "the invalid-window predicate"
+              "name": "canonicalize",
+              "doc": "`canonicalChargeWindows` from `utils/dates`, injected so\nthis module stays free of the date helpers' import graph. It throws on a\nwindow it cannot count."
             }
           ],
           "returnsTag": "the `dates` to store, or `null` meaning \"keep the downstream's whole\""
@@ -15084,8 +15234,8 @@
         {
           "kind": "function",
           "name": "isSameAsDeliveryDates",
-          "signature": "isSameAsDeliveryDates(dates: OrderDatesType): boolean",
-          "doc": "Whether charge dates match the delivery/collection dates\n(i.e. no custom charge period has been set).",
+          "signature": "isSameAsDeliveryDates(dates: Pick<OrderDatesType, \"delivery_start\" | \"collection_start\" | \"charge_windows\">): boolean",
+          "doc": "Whether the pair charges exactly its possession: one charge window from\ndelivery start to collection start (no custom charge period has been set).\nInstants are compared, not strings.",
           "paramTags": [],
           "returnsTag": null
         },

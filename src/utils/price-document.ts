@@ -41,7 +41,7 @@
  * The input items are not mutated. Items come back as copies with a new `price`
  * on every priced line; dividers are returned as they were.
  */
-import type { InvoiceStatusType, TaxRefType } from "../schemas/mod.ts";
+import type { InvoiceStatusType, OrderStatusType, TaxRefType } from "../schemas/mod.ts";
 import {
   assembleLinePrice,
   calculateReplacementTotals,
@@ -54,6 +54,7 @@ import {
   isTransactionFeeItem,
   type LineItem,
   type LinePriceMoney,
+  type LinePricingOptions,
   type PriceModifier,
   type PriceObject,
   type Tax,
@@ -70,8 +71,58 @@ import { pricingTaxesOf } from "./tax-classes.ts";
  * two cannot disagree about what "settled" means.
  */
 export type PriceDocumentKind =
-  | { kind: "order" }
+  | { kind: "order"; status: OrderStatusType }
   | { kind: "invoice"; status: InvoiceStatusType; has_settlement: boolean };
+
+/**
+ * The charge windows of one destination pair, as the pricer reads them: stored
+ * day counts only, so pricing never needs the holiday list.
+ */
+export interface PairChargeWindows {
+  /**
+   * The path of the pair's destination divider: `[pair.uid]` on an order,
+   * `[uid_order, pair.uid]` on an invoice. A line belongs to the pair whose
+   * divider path is a prefix of its own.
+   */
+  divider_path: readonly string[];
+  /**
+   * Each window's stored `days`, in order. `null` for a pair stored before
+   * charge windows existed: its lines keep the day counts they already carry.
+   * Removed once every pair is backfilled (charge-windows release step 4).
+   */
+  days: readonly number[] | null;
+  /** A legacy pair's `days_charged`: the days a NEW line on it starts with. */
+  legacy_days_charged?: number | null;
+}
+
+/** The pair shape {@link chargeWindowContext} reads. */
+export interface ChargeWindowPair {
+  uid?: string | null;
+  /** Set on an invoice pair: the order the pair is scoped to. */
+  uid_order?: string | null;
+  dates?: {
+    charge_windows?: readonly { days: number }[] | null;
+    days_charged?: number | null;
+  } | null;
+}
+
+/**
+ * **Build {@link PriceDocumentContext.charge_windows}** from a document's stored
+ * `destinations`. Reads stored window days only.
+ */
+export function chargeWindowContext(destinations: readonly ChargeWindowPair[]): PairChargeWindows[] {
+  const out: PairChargeWindows[] = [];
+  for (const pair of destinations) {
+    if (!pair.uid) continue;
+    const windows = pair.dates?.charge_windows;
+    out.push({
+      divider_path: pair.uid_order ? [pair.uid_order, pair.uid] : [pair.uid],
+      days: windows && windows.length > 0 ? windows.map((w) => w.days) : null,
+      legacy_days_charged: pair.dates?.days_charged ?? null,
+    });
+  }
+  return out;
+}
 
 /**
  * A date-extension section (#680, D7): every line whose `path` starts with
@@ -119,6 +170,12 @@ export interface PriceDocumentContext {
   tax: DocumentTaxContext;
   /** Date-extension sections, if the document has any. */
   extensions?: readonly PriceDocumentExtension[];
+  /**
+   * Every destination pair's charge windows — build it with
+   * {@link chargeWindowContext}. Required: a line's `chargeable_days` and a
+   * multi-window line's price both come from here.
+   */
+  charge_windows: readonly PairChargeWindows[];
 }
 
 /** What {@link priceDocument} returns. */
@@ -175,13 +232,88 @@ function assertRepriceable(document: PriceDocumentKind): void {
  * @throws Error on a line with no pricing rule, and on an extension of a line
  *   that is not `five_day_week` or carries a flat tax.
  */
-export function priceLine(item: LineItem, taxes: Tax[], extensionDays?: number): LinePriceMoney {
-  return computeLineMoney(
-    item,
-    taxes,
-    item.uid,
-    extensionDays === undefined ? undefined : { extensionDays },
-  );
+export function priceLine(
+  item: LineItem,
+  taxes: Tax[],
+  extensionDays?: number,
+  windowDays?: readonly number[],
+): LinePriceMoney {
+  const opts: LinePricingOptions = {};
+  if (extensionDays !== undefined) opts.extensionDays = extensionDays;
+  if (windowDays !== undefined) opts.windowDays = windowDays;
+  return computeLineMoney(item, taxes, item.uid, opts);
+}
+
+/**
+ * The pair a line hangs under: the entry whose `divider_path` is the longest
+ * prefix of the line's `path`.
+ */
+function pairOf(item: { path: readonly string[] }, pairs: readonly PairChargeWindows[]): PairChargeWindows | undefined {
+  let best: PairChargeWindows | undefined;
+  for (const pair of pairs) {
+    if (pair.divider_path.length > item.path.length) continue;
+    if (!pair.divider_path.every((segment, i) => item.path[i] === segment)) continue;
+    if (!best || pair.divider_path.length > best.divider_path.length) best = pair;
+  }
+  return best;
+}
+
+/**
+ * Is this a line whose days come from its pair's windows? A `rental` priced
+ * `five_day_week`. Every other line (a `sale`, `service` or `surcharge` stored
+ * as `five_day_week` included) has `chargeable_days: null` and prices at
+ * factor 1.
+ */
+function daysFromWindows(item: LineItem): boolean {
+  return item.type === "rental" && item.price?.formula === "five_day_week";
+}
+
+/**
+ * Has this document been sent out or closed, so its lines keep the day counts
+ * they carry? A `complete` or `canceled` order (charge-windows census decision,
+ * 2026-09-16). A void, paid or settled invoice never reaches here: it is refused
+ * outright.
+ */
+function keepsStoredDays(document: PriceDocumentKind): boolean {
+  return document.kind === "order" && (document.status === "complete" || document.status === "canceled");
+}
+
+/**
+ * **A line's `chargeable_days`, the one derivation of it** (charge-windows
+ * decision 3), and the window days that price it.
+ *
+ * | line | `chargeable_days` |
+ * |---|---|
+ * | in an extension section | its own stored days (the days added) |
+ * | on a `complete`/`canceled` order | its own stored days |
+ * | `rental` + `five_day_week` on a pair with windows | Σ window days |
+ * | `rental` + `five_day_week` on a pair stored before windows | its own stored days, else the pair's `days_charged` |
+ * | `rental` + `five_day_week` on no pair | refused |
+ * | anything else | `null` |
+ *
+ * `windowDays` is set only for a pair with two or more windows, where the price
+ * is `billableDays(windows) ÷ 5` rather than the line's own floor.
+ *
+ * @throws Error on a rental `five_day_week` line that hangs under no pair.
+ */
+export function lineChargeableDays(
+  item: LineItem,
+  ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">,
+): { chargeable_days: number | null; windowDays?: readonly number[] } {
+  const stored = item.price?.chargeable_days ?? null;
+  if (extensionFor(item, ctx.extensions)) return { chargeable_days: stored };
+  if (keepsStoredDays(ctx.document)) return { chargeable_days: stored };
+  if (!daysFromWindows(item)) return { chargeable_days: null };
+  const pair = pairOf(item, ctx.charge_windows);
+  if (!pair) {
+    throw new Error(
+      `Rental line ${item.uid} is not under a destination pair, so it has no charge windows to bill. ` +
+        "Move it under a destination",
+    );
+  }
+  if (pair.days === null) return { chargeable_days: stored ?? pair.legacy_days_charged ?? null };
+  const sum = pair.days.reduce((total, d) => total + d, 0);
+  return pair.days.length >= 2 ? { chargeable_days: sum, windowDays: pair.days } : { chargeable_days: sum };
 }
 
 /** The added days an extension line bills: its own `chargeable_days`, which it must state. */
@@ -253,9 +385,11 @@ export function priceDocument<T extends LineItem>(
   // ── Stages 2 + 3: per-line money, assembled ──
   for (const item of out) {
     if (!isPriceableItem(item)) continue;
-    const price = item.price;
     const extension = extensionFor(item, ctx.extensions);
-    const money: LinePriceMoney = priceLine(item, pricing, extension && extensionDaysOf(item));
+    const derived = isPreTaxItem(item) ? lineChargeableDays(item, ctx) : { chargeable_days: null };
+    if (isPreTaxItem(item)) item.price = { ...item.price, chargeable_days: derived.chargeable_days };
+    const price = item.price;
+    const money: LinePriceMoney = priceLine(item, pricing, extension && extensionDaysOf(item), derived.windowDays);
     // ⚠️ Stage 1 has ALREADY written `taxes_base` on every pre-tax line, so it is
     // always present here, as the deleted `materializeDocumentTax` also left it.
     // That widens the key set of a stored line that never carried it (measured
@@ -318,6 +452,12 @@ export interface CreditSourceLine {
     discount: { rate: number; type: "percent" | "flat" } | null;
     taxes: readonly { uid: string }[];
   };
+  /**
+   * The stored window days of the invoice pair the line billed under. A line
+   * whose pair had two or more windows is credited at the multi-window factor,
+   * as it was billed; otherwise its own stored `chargeable_days` price it.
+   */
+  window_days?: readonly number[] | null;
 }
 
 /** One invoice line to credit, and how many of it. */
@@ -395,7 +535,12 @@ export function priceCreditNote(
     }
     const price = assembleLinePrice(
       { base_cents: line.price.base_cents, chargeable_days: line.price.chargeable_days, formula: line.price.formula },
-      priceLine(item, taxes, extension && extensionDaysOf(item)),
+      priceLine(
+        item,
+        taxes,
+        extension && extensionDaysOf(item),
+        !extension && (line.window_days?.length ?? 0) >= 2 ? line.window_days! : undefined,
+      ),
       item,
     ) as CreditLinePrice;
     prices.push(price);
