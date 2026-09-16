@@ -25479,15 +25479,15 @@ for the caller to route to a credit note rather than a remainder.
 - `invoices` — Every invoice linked to the order, live or void — ALL of them, never a page
 - `orderDestinations` — The order's CURRENT pairs, which date every extension
 
-### `substitutionCredit(orderItems: readonly LineItem[], direct: ReadonlyMap<string, number>): Map<string, number>`
+### `substitutionCredit(orderItems: readonly CreditableRow[], direct: ReadonlyMap<string, number>): Map<string, number>`
 
 Units of each order line that substitutes stand in for: what substitutes name
 it directly, plus its kit parent's credit scaled by the ORDER's own component
 ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
 level — never the catalog, D1/D2).
 
-The one walk both {@link billedByPath} and `computeDocumentDiffs`'s D2
-quantity check read. A path under a credited kit is present even at 0.
+The one walk `billedByPath`, `computeDocumentDiffs`'s D2 quantity check and
+the invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.
 
 A path named directly that the order does not carry (a dangling anchor) keeps
 its direct credit; the walk only reaches paths the order has.
@@ -27065,6 +27065,12 @@ multiple positions in the items array. For each item:
   verbatim, at the tail of the scope
 - **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed
   and Y's is emitted in its place — see below
+- **`substituted_for` entries** (manager#414): every row is merged at its
+  ORDER-EQUIVALENT quantity (D2) and re-offset against the new order, so a
+  merged Y and a partially swapped X follow order quantity edits. A substitute
+  row the order does not carry is placed after X's subtree. Entries are
+  re-pointed when X moves; once the order drops X, the entry and its units go
+  with it (owner, 2026-09-16)
 
 ## 🔴 Why the substitution arm exists: without it a substitution lasts until
 the next order save
@@ -28807,6 +28813,18 @@ strip that prefix first — `path_substituted_for` is an ORDER path on both
 surfaces, and comparing it against a divider-scoped path matches nothing and
 reports every substitution as unexplained.
 
+### `CreditableRow`
+
+An order row, reduced to what {@link substitutionCredit} reads.
+
+```ts
+interface CreditableRow {
+  readonly type: string;
+  readonly path?: readonly string[] | undefined;
+  readonly quantity?: number | undefined;
+}
+```
+
 ### `MaybeSubstitutedForEntry`
 
 One `substituted_for` entry, as a row carries it.
@@ -29003,6 +29021,24 @@ including a `legacy` anchor row, whose whole quantity the caller reads from
 - `liveX` — Keys (`path.join("/")`) of the X paths whose anchors are live
 
 **Returns** — Units of the row that stand in for a live substitution
+
+### `substitutionCredit(orderItems: readonly CreditableRow[], direct: ReadonlyMap<string, number>): Map<string, number>`
+
+Units of each order line that substitutes stand in for: what substitutes name
+it directly, plus its kit parent's credit scaled by the ORDER's own component
+ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
+level — never the catalog, D1/D2).
+
+The one walk `billedByPath`, `computeDocumentDiffs`'s D2 quantity check and
+the invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.
+
+A path named directly that the order does not carry (a dangling anchor) keeps
+its direct credit; the walk only reaches paths the order has.
+
+**Parameters**
+
+- `orderItems` — The order's items, dividers included (skipped)
+- `direct` — Order path key → units substitutes name it for directly
 
 ## `@cfs/core/utils/money`
 

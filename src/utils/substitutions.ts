@@ -74,6 +74,8 @@
  * @module
  */
 
+import { isLineItemType } from "../schemas/common.ts";
+
 /**
  * A substitution row, reduced to what the predicates need.
  *
@@ -339,3 +341,55 @@ export function findSubtreeAnchor(
   }
   return best;
 }
+
+/** An order row, reduced to what {@link substitutionCredit} reads. */
+export interface CreditableRow {
+  readonly type: string;
+  readonly path?: readonly string[] | undefined;
+  readonly quantity?: number | undefined;
+}
+
+/**
+ * Units of each order line that substitutes stand in for: what substitutes name
+ * it directly, plus its kit parent's credit scaled by the ORDER's own component
+ * ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
+ * level — never the catalog, D1/D2).
+ *
+ * The one walk `billedByPath`, `computeDocumentDiffs`'s D2 quantity check and
+ * the invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.
+ *
+ * A path named directly that the order does not carry (a dangling anchor) keeps
+ * its direct credit; the walk only reaches paths the order has.
+ *
+ * @param orderItems - The order's items, dividers included (skipped)
+ * @param direct - Order path key → units substitutes name it for directly
+ */
+export function substitutionCredit(
+  orderItems: readonly CreditableRow[],
+  direct: ReadonlyMap<string, number>,
+): Map<string, number> {
+  // Paths are depth-first contiguous, so a parent's credit is final before its children.
+  const credit = new Map<string, number>();
+  const quantityAt = new Map<string, number>();
+  for (const item of orderItems) {
+    if (!isLineItemType(item.type)) continue;
+    const path = item.path ?? [];
+    const k = path.join("/");
+    const quantity = item.quantity ?? 0;
+    quantityAt.set(k, quantity);
+    const parent = path.slice(0, -1).join("/");
+    const parentCredit = credit.get(parent) ?? 0;
+    const parentQuantity = quantityAt.get(parent) ?? 0;
+    const inherited = parentCredit > 0 && parentQuantity > 0
+      ? Math.floor((2 * parentCredit * quantity + parentQuantity) / (2 * parentQuantity))
+      : 0;
+    const own = (direct.get(k) ?? 0) + inherited;
+    if (own === 0 && !(parentCredit > 0)) continue;
+    credit.set(k, own);
+  }
+  for (const [k, units] of direct) {
+    if (!quantityAt.has(k)) credit.set(k, units);
+  }
+  return credit;
+}
+

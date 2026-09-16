@@ -3689,3 +3689,127 @@ Deno.test("computeInvoiceSyncStatus: an extension section is what the invoice wa
   assertEquals(status.get([ORDER_DIV_1, EXT_DIV, ITEM_1].join("/")), "in_sync");
   assertEquals([...status.values()].filter((s) => s === "out_of_sync").length, 0);
 });
+
+// ── substituted_for entries in the order → invoice sync (manager#414, S2) ──
+//
+// D2: an invoice row's quantity is the order's at its path, less what
+// substitutes took from it, plus Σ its own `substituted_for` quantities. The
+// sync merges the ORDER-EQUIVALENT quantity three-way and re-applies the
+// substitution after, so an order edit reaches a merged or partially swapped
+// row instead of reading as an operator override that freezes it.
+//
+// ⚠️ "X deleted from the order" drops the stand-in units WITH X (owner,
+// 2026-09-16) — the entry is spent, and its units leave rather than re-bill at Y.
+
+/** An invoice-scoped line under ORDER_DIV_1, from an order-shaped line. */
+function scopedLine(overrides: Partial<LineItem>, substitutedFor?: { path: string[]; quantity: number }[]): InvoiceDocItemType {
+  const row = buildOrderScopedItems([orderShapedLine(overrides)], ORDER_DIV_1)[0];
+  return (substitutedFor ? { ...row, substituted_for: substitutedFor } : row) as unknown as InvoiceDocItemType;
+}
+
+const qtyByName = (items: readonly InvoiceDocItemType[]) =>
+  items.map((i) => `${i.name}:${(i as { quantity?: number }).quantity ?? "-"}`);
+const entriesOf = (item: InvoiceDocItemType | undefined) =>
+  (item as { substituted_for?: { path: string[]; quantity: number }[] } | undefined)?.substituted_for;
+
+const X_PATH = [DEST_1, GROUP_1, ITEM_1];
+const Y_PATH = [DEST_1, GROUP_1, ITEM_Y];
+const orderX = (quantity: number, path = X_PATH) => orderShapedLine({ uid: ITEM_1, name: "X", quantity, path });
+const orderY = (quantity: number) => orderShapedLine({ uid: ITEM_Y, name: "Y", quantity, path: Y_PATH });
+
+Deno.test("substituted_for sync: a merged Y follows an order quantity change", () => {
+  // Order X 2 / Y 2; the invoice merged both X into Y (Y 4, X gone). The order
+  // raises Y to 3: the invoice's Y is 3 + 2.
+  const invoice = [scopedLine({ uid: ITEM_Y, name: "Y", quantity: 4, path: Y_PATH }, [{ path: X_PATH, quantity: 2 }])];
+  const result = syncOrderToInvoiceSelective([orderX(2), orderY(2)], [orderX(2), orderY(3)], invoice, ORDER_DIV_1);
+  assertEquals(qtyByName(result), ["Y:5"]);
+  assertEquals(entriesOf(result[0]), [{ path: X_PATH, quantity: 2 }]);
+});
+
+Deno.test("substituted_for sync: a partially swapped X follows an order quantity change", () => {
+  // Order X 4 / Y 2; the invoice swapped 1 X into Y (X 3, Y 3). Order X → 6.
+  const invoice = [
+    scopedLine({ uid: ITEM_1, name: "X", quantity: 3, path: X_PATH }),
+    scopedLine({ uid: ITEM_Y, name: "Y", quantity: 3, path: Y_PATH }, [{ path: X_PATH, quantity: 1 }]),
+  ];
+  const result = syncOrderToInvoiceSelective([orderX(4), orderY(2)], [orderX(6), orderY(2)], invoice, ORDER_DIV_1);
+  assertEquals(qtyByName(result), ["X:5", "Y:3"]);
+});
+
+Deno.test("substituted_for sync: a kit's components shrink by the ORDER's stored ratio", () => {
+  // Kit X 4 with 8 stakes; 1 kit swapped (X 3, stakes 6). Order → 6 kits / 12 stakes.
+  const STAKE = "Item0000000000000077";
+  const stakePath = [...X_PATH, STAKE];
+  const orderStakes = (quantity: number) => orderShapedLine({ uid: STAKE, name: "stake", quantity, path: stakePath });
+  const invoice = [
+    scopedLine({ uid: ITEM_1, name: "X", quantity: 3, path: X_PATH }),
+    scopedLine({ uid: STAKE, name: "stake", quantity: 6, path: stakePath }),
+    scopedLine({ uid: ITEM_Y, name: "Y", quantity: 3, path: Y_PATH }, [{ path: X_PATH, quantity: 1 }]),
+  ];
+  const result = syncOrderToInvoiceSelective(
+    [orderX(4), orderStakes(8), orderY(2)],
+    [orderX(6), orderStakes(12), orderY(2)],
+    invoice,
+    ORDER_DIV_1,
+  );
+  assertEquals(qtyByName(result), ["X:5", "stake:10", "Y:3"]);
+});
+
+Deno.test("substituted_for sync: a Y the order does not carry survives, in X's position", () => {
+  const before = orderShapedLine({ uid: ITEM_SIBLING, name: "Before", path: [DEST_1, GROUP_1, ITEM_SIBLING] });
+  const after = orderShapedLine({ uid: "Item0000000000000008", name: "After", path: [DEST_1, GROUP_1, "Item0000000000000008"] });
+  const YC = [...Y_PATH, ITEM_Y_COMPONENT];
+  const order = [before, orderX(2), after];
+  const invoice = [
+    buildOrderScopedItems([before], ORDER_DIV_1)[0],
+    buildOrderScopedItems([after], ORDER_DIV_1)[0],
+    scopedLine({ uid: ITEM_Y, name: "Y", quantity: 2, path: Y_PATH }, [{ path: X_PATH, quantity: 2 }]),
+    scopedLine({ uid: ITEM_Y_COMPONENT, name: "Y bulb", quantity: 4, path: YC }, [{ path: X_PATH, quantity: 4 }]),
+  ];
+  const result = syncOrderToInvoiceSelective(order, order, invoice, ORDER_DIV_1);
+  assertEquals(qtyByName(result), ["Before:1", "Y:2", "Y bulb:4", "After:1"]);
+});
+
+Deno.test("substituted_for sync: X deleted from the order takes a merged Y's stand-in units with it", () => {
+  const invoice = [scopedLine({ uid: ITEM_Y, name: "Y", quantity: 4, path: Y_PATH }, [{ path: X_PATH, quantity: 2 }])];
+  const result = syncOrderToInvoiceSelective([orderX(2), orderY(2)], [orderY(2)], invoice, ORDER_DIV_1);
+  assertEquals(qtyByName(result), ["Y:2"]);
+  assertEquals(entriesOf(result[0]), undefined, "a spent entry is stripped, not written back");
+});
+
+// ⚠️ Passes before the entry arm too — the removed-items pass already dropped a
+// Y with no order line. Kept as the guard that the new arm does not keep it.
+Deno.test("substituted_for sync: X deleted from the order drops a Y the order never carried", () => {
+  const invoice = [scopedLine({ uid: ITEM_Y, name: "Y", quantity: 2, path: Y_PATH }, [{ path: X_PATH, quantity: 2 }])];
+  assertEquals(syncOrderToInvoiceSelective([orderX(2)], [], invoice, ORDER_DIV_1), []);
+});
+
+Deno.test("substituted_for sync: Y removed from the order keeps only its stand-in units", () => {
+  // Merge: order X 2 / Y 2, invoice Y 4 {X 2} with X kept at 0 (absent). Order drops Y.
+  const invoice = [scopedLine({ uid: ITEM_Y, name: "Y", quantity: 4, path: Y_PATH }, [{ path: X_PATH, quantity: 2 }])];
+  const result = syncOrderToInvoiceSelective([orderX(2), orderY(2)], [orderX(2)], invoice, ORDER_DIV_1);
+  assertEquals(qtyByName(result), ["Y:2"]);
+  assertEquals(entriesOf(result[0]), [{ path: X_PATH, quantity: 2 }]);
+});
+
+Deno.test("substituted_for sync: an X reparent re-points the entry, and a second save is stable", () => {
+  const movedX = [DEST_1, GROUP_2, ITEM_1];
+  const invoice = [scopedLine({ uid: ITEM_Y, name: "Y", quantity: 2, path: Y_PATH }, [{ path: X_PATH, quantity: 2 }])];
+  const first = syncOrderToInvoiceSelective([orderX(2)], [orderX(2, movedX)], invoice, ORDER_DIV_1);
+  assertEquals(qtyByName(first), ["Y:2"]);
+  assertEquals(entriesOf(first[0]), [{ path: movedX, quantity: 2 }]);
+  const second = syncOrderToInvoiceSelective([orderX(2, movedX)], [orderX(2, movedX)], first, ORDER_DIV_1);
+  assertEquals(qtyByName(second), ["Y:2"]);
+});
+
+Deno.test("substituted_for sync status: a merged Y and a partial X are in_sync (D2)", () => {
+  const invoice = [
+    scopedLine({ uid: ITEM_1, name: "X", quantity: 3, path: X_PATH }),
+    scopedLine({ uid: ITEM_Y, name: "Y", quantity: 3, path: Y_PATH }, [{ path: X_PATH, quantity: 1 }]),
+  ] as unknown as InvoiceItem[];
+  const status = computeInvoiceSyncStatus(invoice, [orderX(4), orderY(2)], ORDER_DIV_1, NO_EXPLANATIONS);
+  assertEquals(status.get([ORDER_DIV_1, ...X_PATH].join("/")), "in_sync");
+  assertEquals(status.get([ORDER_DIV_1, ...Y_PATH].join("/")), "in_sync");
+  const drifted = computeInvoiceSyncStatus(invoice, [orderX(5), orderY(2)], ORDER_DIV_1, NO_EXPLANATIONS);
+  assertEquals(drifted.get([ORDER_DIV_1, ...X_PATH].join("/")), "out_of_sync", "D2 relaxes exactly the substituted units");
+});

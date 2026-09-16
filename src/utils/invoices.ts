@@ -79,8 +79,11 @@ import {
   collectSubstitutionAnchors,
   isAtOrBelow,
   isRemovedBySubstitution,
+  isStrictlyBelow,
   isSubstitutionRow,
+  standInUnits,
   type SubstitutionAnchor,
+  substitutionCredit,
 } from "./substitutions.ts";
 import { mapPathsAcrossRebuild, pairItemsByUidOccurrence } from "./item-pairing.ts";
 import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType, SubstitutedForEntryType } from "../schemas/mod.ts";
@@ -1366,6 +1369,29 @@ function mergePair(
   return dates === null ? { ...merged, dates: inv.dates } : { ...merged, dates };
 }
 
+/**
+ * The D2 offset of each order-relative path under a set of `entry` anchors:
+ * `+ Σ standing-in units` on a substitute row, `− credit` on a line a substitute
+ * took units from (its kit components scaled by the ORDER's own ratio).
+ *
+ * `quantity − offset` is the row's ORDER-EQUIVALENT quantity — what it would be
+ * with no substitution — and is what the order → invoice comparisons read.
+ */
+function entryOffsets(
+  anchors: readonly SubstitutionAnchor[],
+  orderItems: readonly LineItem[],
+): { credit: Map<string, number>; liveX: Set<string> } {
+  const direct = new Map<string, number>();
+  const liveX = new Set<string>();
+  for (const a of anchors) {
+    if (a.form !== "entry") continue;
+    const x = itemPathKey(a.substitutedFor);
+    liveX.add(x);
+    direct.set(x, (direct.get(x) ?? 0) + a.quantity);
+  }
+  return { credit: substitutionCredit(orderItems, direct), liveX };
+}
+
 /** One emitted scope row and where it came from — what the charge-day pass reads. */
 interface ScopedRowOrigin {
   /** The stored invoice row it was merged into or kept as, if any. */
@@ -1390,6 +1416,12 @@ interface ScopedRowOrigin {
  *   verbatim, at the tail of the scope
  * - **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed
  *   and Y's is emitted in its place — see below
+ * - **`substituted_for` entries** (manager#414): every row is merged at its
+ *   ORDER-EQUIVALENT quantity (D2) and re-offset against the new order, so a
+ *   merged Y and a partially swapped X follow order quantity edits. A substitute
+ *   row the order does not carry is placed after X's subtree. Entries are
+ *   re-pointed when X moves; once the order drops X, the entry and its units go
+ *   with it (owner, 2026-09-16)
  *
  * ## 🔴 Why the substitution arm exists: without it a substitution lasts until
  * the next order save
@@ -1474,7 +1506,7 @@ export function syncOrderToInvoiceSelective(
 function syncScopedItems(
   prevOrderItems: LineItem[],
   newOrderItems: LineItem[],
-  currentInvoiceItems: InvoiceDocItemType[],
+  storedInvoiceItems: InvoiceDocItemType[],
   orderDividerUid: string,
 ): { items: InvoiceDocItemType[]; origins: Map<InvoiceDocItemType, ScopedRowOrigin> } {
   const origins = new Map<InvoiceDocItemType, ScopedRowOrigin>();
@@ -1483,6 +1515,7 @@ function syncScopedItems(
     result.push(row);
   };
   const newPathKeys = new Set(newOrderItems.map((it) => itemPathKey(it.path)));
+  const prevPathKeys = new Set(prevOrderItems.map((it) => itemPathKey(it.path)));
   // Index prev order items by path key
   const prevByPath = new Map<string, LineItem>();
   for (const item of prevOrderItems) {
@@ -1491,16 +1524,9 @@ function syncScopedItems(
 
   // Extension sections bill money on lines another invoice billed; they pass
   // through untouched and take no part in the path match below.
-  const extensionTargets = extensionSectionTargets(currentInvoiceItems as InvoiceItem[], orderDividerUid);
-  const extensionRows = currentInvoiceItems.filter((it) => isInExtensionSection(it.path, orderDividerUid, extensionTargets));
-
-  // Index current invoice items by order-relative path key
-  const invoiceByPath = new Map<string, InvoiceDocItemType>();
-  for (const item of currentInvoiceItems) {
-    if (isInExtensionSection(item.path, orderDividerUid, extensionTargets)) continue;
-    const relPath = stripOrderPrefix(item.path, orderDividerUid);
-    invoiceByPath.set(itemPathKey(relPath), item);
-  }
+  const extensionTargets = extensionSectionTargets(storedInvoiceItems as InvoiceItem[], orderDividerUid);
+  const extensionRows = storedInvoiceItems.filter((it) => isInExtensionSection(it.path, orderDividerUid, extensionTargets));
+  const relOf = (row: { path: readonly string[] }) => stripOrderPrefix([...row.path], orderDividerUid);
 
   // Where each order LINE moved between the two revisions. Dividers are excluded
   // deliberately: an anchor names a line, and a divider's path moving is
@@ -1509,6 +1535,49 @@ function syncScopedItems(
     prevOrderItems.filter((it) => isLineItemType(it.type)),
     newOrderItems.filter((it) => isLineItemType(it.type)),
   );
+
+  // ── `substituted_for` entries (manager#414) ──
+  //
+  // D2: a row's quantity is the order's at its path, less the units substitutes
+  // took from it, plus Σ what it stands in for. Every comparison below reads the
+  // ORDER-EQUIVALENT quantity (the offset under the PREVIOUS order removed), and
+  // the offset under the NEW order is applied to what is emitted — so an order
+  // quantity change reaches a merged or partially swapped row instead of reading
+  // as an operator override that freezes it.
+  //
+  // An entry is live while the order carries its X (owner, 2026-09-16), re-pointed
+  // at wherever X sits now. Once the new order lacks X, the entry is dropped and
+  // its units go WITH it (owner, 2026-09-16): the stand-in was for a line the
+  // order no longer has.
+  const entryAnchorsPrev = collectSubstitutionAnchors(
+    storedInvoiceItems
+      .filter((it) => !isInExtensionSection(it.path, orderDividerUid, extensionTargets))
+      .map((it) => ({ path: relOf(it), substituted_for: (it as InvoiceItem).substituted_for })),
+  ).filter((a) => prevPathKeys.has(itemPathKey(a.substitutedFor)));
+  const xNow = (x: readonly string[]): readonly string[] => moved.toPath(x) ?? x;
+  const entryAnchorsNew = entryAnchorsPrev
+    .map((a) => ({ ...a, substitutedFor: [...xNow(a.substitutedFor)] }))
+    .filter((a) => newPathKeys.has(itemPathKey(a.substitutedFor)));
+  const offsetPrev = entryOffsets(entryAnchorsPrev, prevOrderItems);
+  const offsetNew = entryOffsets(entryAnchorsNew, newOrderItems);
+
+  /** The stored row at its order-equivalent quantity under the previous order. */
+  const normalize = (row: InvoiceDocItemType): InvoiceDocItemType => {
+    if (!isLineItemType(row.type) || isInExtensionSection(row.path, orderDividerUid, extensionTargets)) return row;
+    const offset = standInUnits(row as InvoiceItem, offsetPrev.liveX) -
+      (offsetPrev.credit.get(itemPathKey(relOf(row))) ?? 0);
+    if (offset === 0) return row;
+    return { ...row, quantity: ((row as InvoiceItem).quantity ?? 0) - offset } as InvoiceDocItemType;
+  };
+  const currentInvoiceItems = storedInvoiceItems.map(normalize);
+
+  // Index current invoice items by order-relative path key
+  const invoiceByPath = new Map<string, InvoiceDocItemType>();
+  for (const item of currentInvoiceItems) {
+    if (isInExtensionSection(item.path, orderDividerUid, extensionTargets)) continue;
+    const relPath = stripOrderPrefix(item.path, orderDividerUid);
+    invoiceByPath.set(itemPathKey(relPath), item);
+  }
 
   // The substitutions this invoice carries, in the ORDER's path space, spent
   // ones already dropped — each anchor RE-POINTED at wherever X sits now.
@@ -1520,8 +1589,8 @@ function syncScopedItems(
   // beside the very substitute that replaced it.
   // ⚠️ LEGACY anchors only. An `entry` anchor (manager#414) may be a merge into a
   // Y the order carries, or a partial swap that leaves X on the invoice, and
-  // this arm's "X is removed, emit Y where X stood" is wrong for both. No writer
-  // stamps `substituted_for` yet; Track S2 teaches this sync before one does.
+  // this arm's "X is removed, emit Y where X stood" is wrong for both. Entries
+  // take the D2 offset above and the placement arm below.
   const anchors = liveInvoiceAnchors(
     currentInvoiceItems as InvoiceItem[],
     newOrderItems,
@@ -1563,9 +1632,42 @@ function syncScopedItems(
   /** Order-relative keys already emitted by the substitution arm. */
   const emittedSubstituted = new Set<string>();
 
+  // An entry's substitute rows that the NEW order does not carry at their own
+  // path, grouped by X's new key. They are placed right AFTER X's subtree —
+  // never inside it, where a positional path recompute would reparent them
+  // under X — whether or not X itself is still on the invoice.
+  const entryRowsByX = new Map<string, InvoiceDocItemType[]>();
+  for (const a of entryAnchorsNew) {
+    const rows = currentInvoiceItems.filter((it) => {
+      const rel = relOf(it);
+      return isAtOrBelow(rel, a.path) && !newPathKeys.has(itemPathKey(rel)) &&
+        !isInExtensionSection(it.path, orderDividerUid, extensionTargets);
+    });
+    const x = itemPathKey(a.substitutedFor);
+    entryRowsByX.set(x, [...(entryRowsByX.get(x) ?? []), ...rows]);
+  }
+  const enteredX = new Map<string, readonly string[]>();
+  const flushEntryRows = (x: string) => {
+    for (const row of entryRowsByX.get(x) ?? []) {
+      const relKey = itemPathKey(relOf(row));
+      if (emittedSubstituted.has(relKey)) continue;
+      emittedSubstituted.add(relKey);
+      // A merged Y the order dropped keeps only its stand-in units, unless its
+      // own part was overridden on the invoice.
+      const prevItem = prevByPath.get(relKey);
+      const own = prevItem && !lineOverridden(prevItem, row, orderDividerUid) ? 0 : (row as InvoiceItem).quantity ?? 0;
+      emit({ ...row, quantity: own } as InvoiceDocItemType, { stored: row });
+    }
+    enteredX.delete(x);
+  };
+
   // Process new order items in order
   for (const newItem of newOrderItems) {
     const pathKey = itemPathKey(newItem.path);
+    for (const [x, xPath] of enteredX) {
+      if (!isAtOrBelow(newItem.path, xPath)) flushEntryRows(x);
+    }
+    if (entryRowsByX.has(pathKey)) enteredX.set(pathKey, newItem.path);
 
     // 🔴 SUBSTITUTED. X — and every component beneath it — is explained away by
     // an anchor, so it must not be re-projected. Y's subtree is emitted HERE
@@ -1632,6 +1734,8 @@ function syncScopedItems(
     }
   }
 
+  for (const x of [...enteredX.keys()]) flushEntryRows(x);
+
   // Handle removed items (in invoice but not in new order)
   for (const [pathKey, invoiceItem] of invoiceByPath) {
     if (processedInvoicePaths.has(pathKey) || emittedSubstituted.has(pathKey)) continue;
@@ -1661,7 +1765,50 @@ function syncScopedItems(
   }
 
   for (const row of extensionRows) emit(row, { stored: row });
-  return { items: result, origins };
+
+  // Apply the NEW order's D2 offset, re-point live entries and strip spent ones.
+  // A substituted row left with no units is dropped, with everything below it.
+  const items: InvoiceDocItemType[] = [];
+  const finalOrigins = new Map<InvoiceDocItemType, ScopedRowOrigin>();
+  const droppedPaths: string[][] = [];
+  for (const row of result) {
+    const origin = origins.get(row) ?? {};
+    if (!isLineItemType(row.type) || isInExtensionSection(row.path, orderDividerUid, extensionTargets)) {
+      items.push(row);
+      finalOrigins.set(row, origin);
+      continue;
+    }
+    const rel = relOf(row);
+    if (droppedPaths.some((d) => isStrictlyBelow(rel, d))) continue;
+    const stored = (row as InvoiceItem).substituted_for;
+    const credit = offsetNew.credit.get(itemPathKey(rel)) ?? 0;
+    if (stored === undefined && credit === 0) {
+      items.push(row);
+      finalOrigins.set(row, origin);
+      continue;
+    }
+    let quantity = ((row as InvoiceItem).quantity ?? 0) - credit;
+    const kept: SubstitutedForEntryType[] = [];
+    for (const entry of stored ?? []) {
+      // An entry already spent against the previous order stood in for nothing,
+      // so its units are part of the row's own quantity; only the record goes.
+      if (!offsetPrev.liveX.has(itemPathKey(entry.path))) continue;
+      const now = xNow(entry.path);
+      if (!newPathKeys.has(itemPathKey(now))) continue;
+      kept.push({ ...entry, path: [...now] });
+      quantity += entry.quantity;
+    }
+    if (quantity <= 0) {
+      droppedPaths.push(rel);
+      continue;
+    }
+    const out = { ...row, quantity } as InvoiceDocItemType & { substituted_for?: SubstitutedForEntryType[] };
+    if (kept.length > 0) out.substituted_for = kept;
+    else delete out.substituted_for;
+    items.push(out);
+    finalOrigins.set(out, origin);
+  }
+  return { items, origins: finalOrigins };
 }
 
 // ── Invoice path computation ─────────────────────────────────────
@@ -2263,13 +2410,20 @@ export function computeInvoiceSyncStatus(
 
   // The substitutions this scope carries, in the order's own path space.
   const anchors = liveInvoiceAnchors(currentInvoiceItems, orderItems, orderDividerUid);
+  // D2 (manager#414): a merged or partially swapped row is compared at its
+  // ORDER-EQUIVALENT quantity, so exactly the substituted units are explained.
+  const offset = entryOffsets(anchors, orderItems);
 
   const matchedRelKeys = new Set<string>();
   for (const orderItem of orderItems) {
     const relKey = itemPathKey(orderItem.path ?? []);
     matchedRelKeys.add(relKey);
     const fullKey = itemPathKey([orderDividerUid, ...(orderItem.path ?? [])]);
-    const current = invoiceByRelPath.get(relKey);
+    const stored = invoiceByRelPath.get(relKey);
+    const d2 = stored === undefined
+      ? 0
+      : standInUnits(stored, offset.liveX) - (offset.credit.get(relKey) ?? 0);
+    const current = stored === undefined || d2 === 0 ? stored : { ...stored, quantity: (stored.quantity ?? 0) - d2 };
     if (!current) {
       // Explained: this line was substituted away. No invoice row exists to
       // carry a badge, so emit no entry rather than a phantom `out_of_sync`.

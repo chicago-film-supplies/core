@@ -532,6 +532,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "isStrictlyBelow",
     "isSubstitutionRow",
     "standInUnits",
+    "substitutionCredit",
   ],
   // 🔴 **The two calendar-day primitives, hidden because a template that ages a
   // document RE-DATES it.** `addChicagoDays` and `chicagoDaysBetween` are what

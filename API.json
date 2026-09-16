@@ -11482,8 +11482,8 @@
         {
           "kind": "function",
           "name": "substitutionCredit",
-          "signature": "substitutionCredit(orderItems: readonly LineItem[], direct: ReadonlyMap<string, number>): Map<string, number>",
-          "doc": "Units of each order line that substitutes stand in for: what substitutes name\nit directly, plus its kit parent's credit scaled by the ORDER's own component\nratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per\nlevel — never the catalog, D1/D2).\n\nThe one walk both {@link billedByPath} and `computeDocumentDiffs`'s D2\nquantity check read. A path under a credited kit is present even at 0.\n\nA path named directly that the order does not carry (a dangling anchor) keeps\nits direct credit; the walk only reaches paths the order has.",
+          "signature": "substitutionCredit(orderItems: readonly CreditableRow[], direct: ReadonlyMap<string, number>): Map<string, number>",
+          "doc": "Units of each order line that substitutes stand in for: what substitutes name\nit directly, plus its kit parent's credit scaled by the ORDER's own component\nratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per\nlevel — never the catalog, D1/D2).\n\nThe one walk `billedByPath`, `computeDocumentDiffs`'s D2 quantity check and\nthe invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.\n\nA path named directly that the order does not carry (a dangling anchor) keeps\nits direct credit; the walk only reaches paths the order has.",
           "paramTags": [
             {
               "name": "orderItems",
@@ -12347,7 +12347,7 @@
           "kind": "function",
           "name": "syncOrderToInvoiceSelective",
           "signature": "syncOrderToInvoiceSelective(prevOrderItems: LineItem[], newOrderItems: LineItem[], currentInvoiceItems: InvoiceDocItemType[], orderDividerUid: string): InvoiceDocItemType[]",
-          "doc": "Selectively sync order items into an invoice, respecting invoice-side overrides.\n\nItems are matched by **path** (not uid), since the same product can appear at\nmultiple positions in the items array. For each item:\n\n- **Synced** (prev order matches current invoice, minus invoice-only fields):\n  replaced with the new order item, carrying forward invoice-only overrides\n- **Overridden** (invoice item differs from prev order): left unchanged\n- **New** (in new order, not in prev): added under the order divider\n- **Left out** (a LINE in prev and new, never on the invoice): stays out\n- **Removed** (in prev order, not in new): removed only if synced, kept if overridden\n- **Extension sections** ({@link extensionSectionTargets}): passed through\n  verbatim, at the tail of the scope\n- **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed\n  and Y's is emitted in its place — see below\n\n## 🔴 Why the substitution arm exists: without it a substitution lasts until\nthe next order save\n\nMeasured against this function before the arm was added, with the order\nUNCHANGED (`prev === new`) and the invoice holding Y in X's place:\n\n```\nBEFORE  invoice lines: [ \"Light Y\" ]\nAFTER   invoice lines: [ \"Light X\" ]\n```\n\nBoth halves of the path match fail, and each fails toward undoing the\noperator's edit: X's order path has no invoice line, so the `!invoiceItem`\nbranch re-projects X; Y's path has no PREV ORDER line, so the removed-items\npass drops it as a synced line the order no longer carries. **Neither branch\nis wrong on its own** — the pair is only wrong because nothing told this\nfunction the two rows are the same row, and `path_substituted_for` is what\nsays so.\n\n⭐ That is Increment 2's lesson on a third surface. A projection undoes any\ndownstream override not stored in a form the projection HONOURS, and being\n*stored* is not enough — `path_substituted_for` was already a stored field on\nfulfillments and this function had never heard of it.\n\n## 🔴 A line the invoice LEFT OUT stays out (api-cloudrun#680 R1, owner 2026-09-15)\n\nThe documented rule above was always \"new = in new order, not in prev\", and the\ncode projected EVERY order line the invoice lacked. So an unsettled partial\ninvoice was refilled with the whole order on its next save, and an \"invoice\nremaining\" invoice re-billed lines another invoice had already billed. A line\ncounts as new only when the previous order had no line at its path and no line\nthat moved there. Dividers are still projected when missing: they are the\nskeleton alignment reads, not something an operator bills.\n\n## Extension sections are billing, not order structure\n\nAn extension section's divider names no order path of its own, so without its\nown arm the removed-items pass would drop the divider and every line under it\nas \"synced and removed from the order\". They are emitted untouched after\neverything else.\n\n⚠️ **The whole-scope {@link syncOrderItems} deliberately does NOT get this\narm.** It is the operator's hard snap-to-order, documented to discard\noverrides and drop lines the order no longer has; a substitution is an\noverride, so discarding it is what the operator asked for. Only the automatic\nper-save sync has to be non-destructive.",
+          "doc": "Selectively sync order items into an invoice, respecting invoice-side overrides.\n\nItems are matched by **path** (not uid), since the same product can appear at\nmultiple positions in the items array. For each item:\n\n- **Synced** (prev order matches current invoice, minus invoice-only fields):\n  replaced with the new order item, carrying forward invoice-only overrides\n- **Overridden** (invoice item differs from prev order): left unchanged\n- **New** (in new order, not in prev): added under the order divider\n- **Left out** (a LINE in prev and new, never on the invoice): stays out\n- **Removed** (in prev order, not in new): removed only if synced, kept if overridden\n- **Extension sections** ({@link extensionSectionTargets}): passed through\n  verbatim, at the tail of the scope\n- **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed\n  and Y's is emitted in its place — see below\n- **`substituted_for` entries** (manager#414): every row is merged at its\n  ORDER-EQUIVALENT quantity (D2) and re-offset against the new order, so a\n  merged Y and a partially swapped X follow order quantity edits. A substitute\n  row the order does not carry is placed after X's subtree. Entries are\n  re-pointed when X moves; once the order drops X, the entry and its units go\n  with it (owner, 2026-09-16)\n\n## 🔴 Why the substitution arm exists: without it a substitution lasts until\nthe next order save\n\nMeasured against this function before the arm was added, with the order\nUNCHANGED (`prev === new`) and the invoice holding Y in X's place:\n\n```\nBEFORE  invoice lines: [ \"Light Y\" ]\nAFTER   invoice lines: [ \"Light X\" ]\n```\n\nBoth halves of the path match fail, and each fails toward undoing the\noperator's edit: X's order path has no invoice line, so the `!invoiceItem`\nbranch re-projects X; Y's path has no PREV ORDER line, so the removed-items\npass drops it as a synced line the order no longer carries. **Neither branch\nis wrong on its own** — the pair is only wrong because nothing told this\nfunction the two rows are the same row, and `path_substituted_for` is what\nsays so.\n\n⭐ That is Increment 2's lesson on a third surface. A projection undoes any\ndownstream override not stored in a form the projection HONOURS, and being\n*stored* is not enough — `path_substituted_for` was already a stored field on\nfulfillments and this function had never heard of it.\n\n## 🔴 A line the invoice LEFT OUT stays out (api-cloudrun#680 R1, owner 2026-09-15)\n\nThe documented rule above was always \"new = in new order, not in prev\", and the\ncode projected EVERY order line the invoice lacked. So an unsettled partial\ninvoice was refilled with the whole order on its next save, and an \"invoice\nremaining\" invoice re-billed lines another invoice had already billed. A line\ncounts as new only when the previous order had no line at its path and no line\nthat moved there. Dividers are still projected when missing: they are the\nskeleton alignment reads, not something an operator bills.\n\n## Extension sections are billing, not order structure\n\nAn extension section's divider names no order path of its own, so without its\nown arm the removed-items pass would drop the divider and every line under it\nas \"synced and removed from the order\". They are emitted untouched after\neverything else.\n\n⚠️ **The whole-scope {@link syncOrderItems} deliberately does NOT get this\narm.** It is the operator's hard snap-to-order, documented to discard\noverrides and drop lines the order no longer has; a substitution is an\noverride, so discarding it is what the operator asked for. Only the automatic\nper-save sync has to be non-destructive.",
           "paramTags": [
             {
               "name": "prevOrderItems",
@@ -13154,6 +13154,12 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "CreditableRow",
+          "declaration": "interface CreditableRow {\n  readonly type: string;\n  readonly path?: readonly string[] | undefined;\n  readonly quantity?: number | undefined;\n}",
+          "doc": "An order row, reduced to what {@link substitutionCredit} reads."
+        },
+        {
+          "kind": "interface",
           "name": "MaybeSubstitutedForEntry",
           "declaration": "interface MaybeSubstitutedForEntry {\n  readonly path: readonly string[];\n  readonly quantity: number;\n}",
           "doc": "One `substituted_for` entry, as a row carries it."
@@ -13301,6 +13307,23 @@
             }
           ],
           "returnsTag": "Units of the row that stand in for a live substitution"
+        },
+        {
+          "kind": "function",
+          "name": "substitutionCredit",
+          "signature": "substitutionCredit(orderItems: readonly CreditableRow[], direct: ReadonlyMap<string, number>): Map<string, number>",
+          "doc": "Units of each order line that substitutes stand in for: what substitutes name\nit directly, plus its kit parent's credit scaled by the ORDER's own component\nratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per\nlevel — never the catalog, D1/D2).\n\nThe one walk `billedByPath`, `computeDocumentDiffs`'s D2 quantity check and\nthe invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.\n\nA path named directly that the order does not carry (a dangling anchor) keeps\nits direct credit; the walk only reaches paths the order has.",
+          "paramTags": [
+            {
+              "name": "orderItems",
+              "doc": "The order's items, dividers included (skipped)"
+            },
+            {
+              "name": "direct",
+              "doc": "Order path key → units substitutes name it for directly"
+            }
+          ],
+          "returnsTag": null
         }
       ]
     },
