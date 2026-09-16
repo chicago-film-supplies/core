@@ -99,7 +99,7 @@
  * `crms_authored`, exactly as they do on an unaligned scope. The sum itself
  * ({@link billedByPath}) is unaffected, so a diff still reads them.
  *
- * The 2026-09-16 census (api-cloudrun `scripts/audit-order-invoice-coverage.ts`,
+ * The 2026-09-16 census (`api-cloudrun/scripts/audit-order-invoice-coverage.ts`,
  * prod and dev identical): every one of the 103 orders the button was offered
  * on was billed by CRMS, and none by a native invoice. CRMS billed units under
  * a different destination than the order carries them now — #478 bills 10
