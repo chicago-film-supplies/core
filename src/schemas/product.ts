@@ -810,6 +810,21 @@ export interface CreateProductInputType {
     reference: string;
     uuid_session: string;
     allocations: MovementAllocationInputType[];
+    /**
+     * Who the opening stock was bought from. REQUIRED key: a `{ uid }` on a
+     * `purchase`, `null` on `make`/`find`.
+     *
+     * 🔴 **Required, not optional, on purpose.** An opening `purchase` posts a
+     * bill to Accounts Payable, and `MovementSchema` refuses a stored purchase
+     * whose `supplier` is `null` — so before this key existed EVERY product
+     * created with an opening purchase 400'd at `validateBeforeWrite`. Making
+     * the caller state it (even as `null`) means a client that forgets the key
+     * fails at the door, naming the field, instead of deep in the transaction.
+     *
+     * The uid only; the server resolves the name — see
+     * `CreateTransactionInputType.supplier`.
+     */
+    supplier: { uid: string } | null;
   };
 }
 
@@ -886,6 +901,8 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     reference: z.string(),
     uuid_session: z.uuid(),
     allocations: z.array(MovementAllocationInput).min(1),
+    // The uid alone; the writer resolves the name. See the interface docblock.
+    supplier: z.object({ uid: FirestoreId }).nullable(),
   }).optional(),
 }).refine(
   (p) => p.type !== "rental" || p.stock_method === "none" || p.price.replacement_cents != null,
@@ -906,6 +923,23 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   {
     message: "transaction.quantity must equal the sum of per-location allocation quantities",
     path: ["transaction", "quantity"],
+  },
+).refine(
+  // Same rule as `CreateTransactionInput`: a purchase's offset is real Accounts
+  // Payable, so it has to be billed to somebody. Pathed at `supplier` so the
+  // manager renders the error on the picker.
+  (p) => !p.transaction || p.transaction.type !== "purchase" || p.transaction.supplier != null,
+  {
+    message: "a purchase must name the supplier it was bought from",
+    path: ["transaction", "supplier"],
+  },
+).refine(
+  // And only a purchase: a supplier on a `make`/`find` would store a snapshot
+  // that reads as a purchase from someone. `createTransaction` refuses it too.
+  (p) => !p.transaction || p.transaction.type === "purchase" || p.transaction.supplier == null,
+  {
+    message: "only a purchase names a supplier",
+    path: ["transaction", "supplier"],
   },
 );
 /** Input type for updating a product. */

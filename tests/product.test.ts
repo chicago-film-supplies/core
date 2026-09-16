@@ -237,6 +237,30 @@ Deno.test("CreateProductInput requires price.replacement_cents for rental produc
   assertEquals(CreateProductInput.safeParse({ ...input, stock_method: "none" }).success, true);
 });
 
+Deno.test("CreateProductInput opening balance: supplier key is required, non-null exactly on a purchase", () => {
+  const opening = {
+    quantity: 2,
+    total_cost_cents: 1000,
+    date: "2026-09-16T12:00:00.000-05:00",
+    reference: "",
+    uuid_session: "7f3c1b1e-9d2a-4c1e-8f6a-2b3c4d5e6f70",
+    allocations: [{ uid_location: "testlocation10000000", quantity: 2 }],
+  };
+  const withTx = (transaction: Record<string, unknown>) => ({ ...validCreateInput, transaction });
+  const supplier = { uid: "testsupplier10000000" };
+
+  // The prod 400: a purchase with no supplier must fail at the door, pathed on the picker.
+  const noSupplier = CreateProductInput.safeParse(withTx({ ...opening, type: "purchase", supplier: null }));
+  assertEquals(noSupplier.success, false);
+  assertEquals(noSupplier.error?.issues.some((i) => i.path.join(".") === "transaction.supplier"), true);
+  // Required key: omitting it is refused for every type, not only purchase.
+  assertEquals(CreateProductInput.safeParse(withTx({ ...opening, type: "find" })).success, false);
+
+  assertEquals(CreateProductInput.safeParse(withTx({ ...opening, type: "purchase", supplier })).success, true);
+  assertEquals(CreateProductInput.safeParse(withTx({ ...opening, type: "make", supplier: null })).success, true);
+  assertEquals(CreateProductInput.safeParse(withTx({ ...opening, type: "find", supplier })).success, false);
+});
+
 Deno.test("CreateProductInput requires price.replacement_cents for rental components", () => {
   const rentalComponent = {
     uid: "testcomp100000000000",
