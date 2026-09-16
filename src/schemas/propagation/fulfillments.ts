@@ -265,7 +265,7 @@ const updateFulfillmentDestinationsTransaction: TransactionDefinition = {
     "which nothing measures.\n\n" +
     "⚠️ Availability is ADVISORY here, by owner ruling: an edited window that oversells " +
     "is recorded by the rebuild's `stock_oversold` warning, not refused. Every operator " +
-    "claim path in `src/lib/stockGate.ts` is advisory and only `public-booking` is hard; " +
+    "claim path in `api-cloudrun/src/lib/stockGate.ts` is advisory and only `public-booking` is hard; " +
     "a picker must be able to record where the gear physically is.",
   steps: [
     "update-fulfillment-destinations:pairs-self",
