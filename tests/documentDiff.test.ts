@@ -542,11 +542,28 @@ Deno.test("documentDiff: a date extension is money on the billed entry, not a ch
   // Billed 2 at 3 chargeable days (floored to one week: 2 × 1000 = 2000¢); the
   // order now charges 7 days (2 × 1000 × 7 ÷ 5 = 2800¢). 800¢ left to bill —
   // not price(4 days) = 2000¢, which is what pricing "the extra days" would say.
-  const sources = { orders: [billedOrder(2, 7)], invoices: [billing("inv-a", 2241, 2, 3)] };
+  // The extension is the pairs' windows: the invoice's charged 3 days to Sep 3, the order's now 7 to Sep 9.
+  const sources = { orders: [dated(billedOrder(2, 7), 7, "2026-09-09")], invoices: [dated(billing("inv-a", 2241, 2, 3), 3, "2026-09-03")] };
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
     [`${D}/${G}/${LIGHT}`]: ["billed[#2241](2 of 2,q0,x800)"],
   });
 });
+
+Deno.test("documentDiff: line days that disagree on an unmoved window are no billed entry (api-cloudrun#680)", () => {
+  // Prod's CRMS-authored invoices: the same window on both pairs, the billed row stored
+  // at other days. The retired line-day rule reported "Billed 2 of 2" with 800¢ owed.
+  const sources = { orders: [dated(billedOrder(2, 7), 7, "2026-09-09")], invoices: [dated(billing("inv-a", 2241, 2, 3), 7, "2026-09-09")] };
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {});
+});
+
+/** Give every pair on a document a charge window ending `endDay` and charging `days`. */
+function dated<T extends Order | Invoice>(doc: T, days: number, endDay: string): T {
+  const destinations = (doc as unknown as { destinations: { dates: Record<string, unknown> }[] }).destinations.map((pair) => ({
+    ...pair,
+    dates: { ...pair.dates, charge_start: "2026-09-01T00:00:00.000-05:00", charge_end: `${endDay}T00:00:00.000-05:00`, days_charged: days },
+  }));
+  return { ...doc, destinations } as T;
+}
 
 Deno.test("documentDiff: a split bill still reports a base price the invoice changed", () => {
   const a = billing("inv-a", 2241, 3);

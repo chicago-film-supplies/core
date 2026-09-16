@@ -25056,6 +25056,26 @@ as a D7 EXTENSION (api-cloudrun#997): for
 one-week minimum skipped, through `priceDocument`'s line pricer — so it is
 exactly what an extension section on an invoice bills (#997 D11).
 
+🔴 **An extension is a change of WINDOW, and its days are the PAIRS' days.**
+A billed row is extended only when the order pair's charge end is LATER than
+the end of the window that billed it (earlier is a shortening, the same is
+nothing), and the day counts are the two pairs' `days_charged` — never a
+line's `chargeable_days`. A {@link BilledWindow} is that pair's end and count.
+A sign that disagrees with the window's direction is no extension either.
+
+This reverses the first cut, which read line `chargeable_days` on both sides.
+The 2026-09-16 census (prod and dev agree) found ONE genuine extension in the
+corpus (#898) against 34 orders reading a positive extension on an UNMOVED
+window — $59.6k — and 60 remainder sections charging from the day after their
+own end: CRMS lines stored with no days, hand-held days, a long rental billed
+in two parts (35 + 10 of 45 days, each invoice carrying the full window), and
+a pair recounted from 10 to 11 days. Every one had identical windows.
+
+The one cost, taken knowingly (owner, 2026-09-16): a row whose days an
+operator held by hand is extended by the pairs' difference on top of whatever
+it billed. A row billed on no pair — no `destinations` entry, or no end —
+extends by nothing: an unknown window is not a later one.
+
 🔴 **Never price "the extra days" as an ordinary line.** `five_day_week` floors
 at one week, so `price(3 days)` charges a week the billed row already paid.
 The D7 day count floors each SIDE at the week instead, and skips the floor on
@@ -25067,12 +25087,8 @@ an `extension` row at the path it extends: it adds no units, and
 {@link accountLine} subtracts its money, priced at its own added days, from
 what the order's days add to the unit rows.
 
-⚠️ **The date input is `price.chargeable_days`, not the destination pair's
-dates.** The pair's dates are its upstream: `syncChargeDaysToItems` writes the
-pair's charge days onto every line still on the default, and an operator can
-override a line's days by hand. The pricer reads the line, so the line is what
-was billed and the line is what the order now asks for — a hand-held line
-whose days did not move correctly reports no extension.
+⚠️ **A line's `chargeable_days` is read for its RATE terms only**, never for
+the extension's days — see above.
 
 ## Money is PRE-TAX, in integer cents
 
@@ -25097,6 +25113,7 @@ interface AccountedInvoice {
   uid: string;
   status: InvoiceStatusType;
   items: InvoiceItem[];
+  destinations?: readonly InvoiceDocDestinationType[];
 }
 ```
 
@@ -25130,6 +25147,18 @@ interface BilledRow {
   invoiceUid: string;
   item: InvoiceItem;
   via: "direct" | "substitute" | "extension";
+  window: BilledWindow | null;
+}
+```
+
+### `BilledWindow`
+
+A pair's charge window, as an extension compares it: where it ends, and the days it charges.
+
+```ts
+interface BilledWindow {
+  end: string;
+  days_charged: number;
 }
 ```
 
@@ -25143,6 +25172,7 @@ interface ExtensionGroup {
   via: "direct" | "substitute";
   quantity: number;
   billed_days: number;
+  billed_end: string;
   extension_days: number;
   section: [string, string];
 }
@@ -25187,9 +25217,7 @@ interface RemainingInvoice {
 An invoice as {@link buildRemainingInvoice} reads it: its lines, and the pairs that date its sections.
 
 ```ts
-interface RemainingInvoiceSource {
-  destinations?: readonly InvoiceDocDestinationType[];
-}
+type RemainingInvoiceSource = AccountedInvoice;
 ```
 
 ### `RemainingLine`
@@ -25217,14 +25245,15 @@ interface RemainingOrderSource {
 }
 ```
 
-### `accountLine(orderLine: LineItem, billed: BilledAtPath | undefined): LineAccount`
+### `accountLine(orderLine: LineItem, billed: BilledAtPath | undefined, orderWindow: BilledWindow | null): LineAccount`
 
 Account for one order line against what the invoices bill at its path.
 
 **Parameters**
 
-- `orderLine` — The order line, at its current quantity and `chargeable_days`
+- `orderLine` — The order line, at its current quantity
 - `billed` — {@link billedByPath}'s entry for the line's path, if any
+- `orderWindow` — {@link orderLineWindow} for the line; `null` extends nothing
 
 ### `billedByPath(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[]): BilledByPath`
 
@@ -25269,7 +25298,9 @@ manager's preview.
   row's terms at the group's added days. A path already in the section (the
   same product billed on different terms) opens another section.
 - **Its pair** is the order's pair re-keyed to the section, charging from the
-  day after the billed window's `charge_end` to the order's. The `_fs`
+  day after the billed window's end to the order's. An extension is only
+  owed on a window that ends before the order's, so the section never starts
+  after it ends. The `_fs`
   companion of a moved `charge_start` is `null` here: the writer stamps it,
   because a utility cannot mint a Firestore Timestamp.
 - **Over-billing is never netted in.** A negative quantity or extension is
@@ -25277,24 +25308,36 @@ manager's preview.
 
 🔴 Fails closed on an unaligned scope, exactly as {@link remainingForOrder}.
 
-### `extensionGroups(orderLine: LineItem, billed: BilledAtPath | undefined): ExtensionGroup[]`
+### `extensionGroups(orderLine: LineItem, billed: BilledAtPath | undefined, orderWindow: BilledWindow | null): ExtensionGroup[]`
 
 The extension still owed on an order line, as groups of billed units that
 share their terms and their cumulative billed days (api-cloudrun#680 R1).
 
-The walk: every `five_day_week` unit row starts a group at its own
-`chargeable_days`. Each extension row then moves its quantity from the groups
-with the FEWEST billed days, in invoice order, to
-`max(days, 5) + added days`. A remainder invoice brings every group to the
-order's days at once, so a later remainder always extends from a single
-cumulative count per window; the fewest-first rule only has to choose for an
-extension built by hand. Extension quantity beyond the units billed is
-ignored.
+The walk: every `five_day_week` unit row on a known {@link BilledWindow}
+starts a group at its pair's days and end. Each extension row then moves its
+quantity from the groups whose window ENDS earliest (then fewest days), in
+invoice order, to `max(days, 5) + the extension pair's days`, ending where the
+extension's pair ends. A remainder invoice brings every group to the order's
+window at once, so a later remainder always extends from a single cumulative
+window; the earliest-first rule only has to choose for an extension built by
+hand. Extension quantity beyond the units billed is ignored.
 
-A `fixed` row never read its days, so it forms no group. A group whose
-extension is zero is dropped.
+A group is owed `extensionChargeDays(order pair days, billed days)` only when
+its sign agrees with the window's direction: a later order end and more days,
+or an earlier end and fewer. The same end is nothing, whatever the counts say.
 
-### `remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[]): RemainingForOrder`
+A `fixed` row never read its days, so it forms no group; nor does a row on no
+known window. A group whose extension is zero is dropped.
+
+### `orderLineWindow(destinations: readonly typeLiteral[], path: readonly string[]): BilledWindow | null`
+
+The window of the order pair an order line hangs under (`path[0]`), or `null`.
+
+### `pairWindow(pair: typeLiteral | undefined): BilledWindow | null`
+
+A pair's {@link BilledWindow}, or `null` when it has no end or no day count.
+
+### `remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], orderDestinations: readonly DocDestinationType[]): RemainingForOrder`
 
 What is left to bill on an order: new lines in full, quantity deltas at
 existing paths, and date-extension money on rows already billed (D4).
@@ -25312,6 +25355,7 @@ for the caller to route to a credit note rather than a remainder.
 - `orderUid` — The order's uid
 - `orderItems` — The order's CURRENT `items`, dividers included
 - `invoices` — Every invoice linked to the order, live or void — ALL of them, never a page
+- `orderDestinations` — The order's CURRENT pairs, which date every extension
 
 ## `@cfs/core/utils/icons`
 

@@ -161,7 +161,7 @@ import {
   isRemovedBySubstitution,
   type SubstitutionAnchor,
 } from "./substitutions.ts";
-import { accountLine, type AccountedInvoice, type BilledByPath, billedByPath } from "./quantityAccounting.ts";
+import { accountLine, type AccountedInvoice, type BilledByPath, billedByPath, orderLineWindow } from "./quantityAccounting.ts";
 import { orderFulfillmentSharedFields, type SharedField } from "./shared-fields.ts";
 
 /** The three document kinds a diff can be viewed from or sourced from. */
@@ -750,7 +750,7 @@ export function computeDocumentDiffs(
     if (order === undefined || at === undefined) return;
     const orderLine = scopeOrder(order).byKey.get(rel);
     if (orderLine === undefined) return;
-    const account = accountLine(orderLine, at);
+    const account = accountLine(orderLine, at, orderLineWindow(order.destinations ?? [], orderLine.path ?? []));
     if (account.quantity === 0 && account.extension_cents === 0) return;
     if (out.lines.get(viewedKey)?.some((e) => e.kind === "billed")) return;
     push(out.lines, viewedKey, {
