@@ -602,6 +602,35 @@ export function buildQueryByDates(
   return [...days].sort();
 }
 
+/** Minimal destination shape consumed by {@link buildQueryByContacts}. */
+interface QueryByContactsDestination {
+  delivery?: { contact?: { uid?: string | null } | null } | null;
+  collection?: { contact?: { uid?: string | null } | null } | null;
+}
+
+/**
+ * Every contact uid named by a destination's delivery or collection endpoint.
+ * Server-maintained on the order (and fulfillment) doc as `query_by_contacts`,
+ * for reverse `array-contains` lookups from a contact.
+ *
+ * ⚠️ **Order is preserved and duplicates are NOT removed** — this is the
+ * behaviour of the two inline copies it replaces (`createOrder` and
+ * `updateOrder` in `api-cloudrun/src/services/orders.ts`), and deduping here
+ * would rewrite the field on every stored order the first time each one is
+ * touched. `array-contains` is indifferent to both, so the change would be pure
+ * write amplification on an Eventarc-fanned-out collection.
+ */
+export function buildQueryByContacts(
+  destinations: ReadonlyArray<QueryByContactsDestination>,
+): string[] {
+  const uids: string[] = [];
+  for (const d of destinations) {
+    if (d.delivery?.contact?.uid) uids.push(d.delivery.contact.uid);
+    if (d.collection?.contact?.uid) uids.push(d.collection.contact.uid);
+  }
+  return uids;
+}
+
 // ── Type guards ──────────────────────────────────────────────────
 
 // All three predicates below read the SAME fact — `ITEM_CONTRACTS[type].pricing`

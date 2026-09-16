@@ -185,6 +185,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "resolveDownstreamChargeDays", // order → invoice day-count sync rule — write-path only
     "deriveOrderDateEnvelope", // superseded by per-destination dates; not for rendering
     "buildQueryByDates", // Typesense projection helper
+    "buildQueryByContacts", // Typesense projection helper — the sibling of buildQueryByDates
     "computeItemTaxAmountCents", // single-tax building block used by calculateItemTax — not a render helper
     // The transaction-fee pass of pricing (`priceDocument` stage 4, and the audit oracle).
     // Both need the DOCUMENT's subtotal_discounted as a basis, and both answer a

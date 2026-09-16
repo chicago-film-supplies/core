@@ -30402,6 +30402,19 @@ rendered for "both" double-counts every rental.
 - `consolidated` — Dedupe by product uid and sum quantities
 - `destinationDividerUid` — Scope to one destination section
 
+### `buildQueryByContacts(destinations: ReadonlyArray<QueryByContactsDestination>): string[]`
+
+Every contact uid named by a destination's delivery or collection endpoint.
+Server-maintained on the order (and fulfillment) doc as `query_by_contacts`,
+for reverse `array-contains` lookups from a contact.
+
+⚠️ **Order is preserved and duplicates are NOT removed** — this is the
+behaviour of the two inline copies it replaces (`createOrder` and
+`updateOrder` in `api-cloudrun/src/services/orders.ts`), and deduping here
+would rewrite the field on every stored order the first time each one is
+touched. `array-contains` is indifferent to both, so the change would be pure
+write amplification on an Eventarc-fanned-out collection.
+
 ### `buildQueryByDates(destinations: ReadonlyArray<QueryByDatesDestination>): string[]`
 
 Deduped, ascending list of Chicago `YYYY-MM-DD` boundary days across every

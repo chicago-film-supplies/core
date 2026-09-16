@@ -827,7 +827,11 @@ const updateOrderRules: CollectionRule[] = [
     invariant:
       // ⚠️ See the `create-order` twin above — `tax_profile` is gone (#596) and
       // its successor is carried rather than stripped.
-      "Fulfillment view mirrors the order on every update — stripped of pricing, totals, invoices, CRM/Xero ids, the order's version, notes, and transaction_fee items; the destination `jurisdiction` is carried",
+      // ⚠️ It is no longer a MIRROR, and that word was load-bearing: since
+      // api-cloudrun#989 an update is a per-field three-way merge, so a value
+      // the fulfillment holds that differs from the order's PREVIOUS value is an
+      // override and is kept. Row membership still follows the order.
+      "Fulfillment view follows the order per field on every update — a field whose stored value differs from the order's previous value is an operator override and is kept; stripped of pricing, totals, invoices, CRM/Xero ids, the order's version, notes, and transaction_fee items; the destination `jurisdiction` is carried; `query_by_dates`/`query_by_contacts` are DERIVED from the fulfillment's own destinations rather than copied from the order",
     enforced_by: [FULFILLMENT_SHAPE_STRIPS, FULFILLMENT_STRIP_ASSERTED],
     transaction: "update-order",
     fields: [

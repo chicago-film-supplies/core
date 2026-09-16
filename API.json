@@ -13899,6 +13899,14 @@
         },
         {
           "kind": "function",
+          "name": "buildQueryByContacts",
+          "signature": "buildQueryByContacts(destinations: ReadonlyArray<QueryByContactsDestination>): string[]",
+          "doc": "Every contact uid named by a destination's delivery or collection endpoint.\nServer-maintained on the order (and fulfillment) doc as `query_by_contacts`,\nfor reverse `array-contains` lookups from a contact.\n\n⚠️ **Order is preserved and duplicates are NOT removed** — this is the\nbehaviour of the two inline copies it replaces (`createOrder` and\n`updateOrder` in `api-cloudrun/src/services/orders.ts`), and deduping here\nwould rewrite the field on every stored order the first time each one is\ntouched. `array-contains` is indifferent to both, so the change would be pure\nwrite amplification on an Eventarc-fanned-out collection.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "buildQueryByDates",
           "signature": "buildQueryByDates(destinations: ReadonlyArray<QueryByDatesDestination>): string[]",
           "doc": "Deduped, ascending list of Chicago `YYYY-MM-DD` boundary days across every\ndestination's delivery + collection windows. Server-maintained on the order\n(and fulfillment) doc as `query_by_dates`, reserved for exact-day Firestore\n`array-contains` lookups. Charge dates are billing-only and excluded.",
