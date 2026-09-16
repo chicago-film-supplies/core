@@ -8,6 +8,7 @@ import {
   isRemovedBySubstitution,
   isStrictlyBelow,
   standInUnits,
+  substitutionResync,
 } from "../src/utils/substitutions.ts";
 import { SubstitutedForList } from "../src/schemas/common.ts";
 
@@ -237,4 +238,59 @@ Deno.test("SubstitutedForList: entries are unique by path, and a path and a posi
   assertFalse(SubstitutedForList.safeParse([{ path: [d, x], quantity: 2 }, { path: [d, x], quantity: 1 }]).success);
   assertFalse(SubstitutedForList.safeParse([{ path: [], quantity: 2 }]).success);
   assertFalse(SubstitutedForList.safeParse([{ path: [d, x], quantity: 0 }]).success);
+});
+
+// ── substitutionResync (manager#414, S2) ─────────────────────────
+
+const line = (path: string[], quantity: number) => ({ type: "rental", path, quantity });
+
+Deno.test("substitutionResync: merged Y reads order-equivalent, and re-offsets on the next order", () => {
+  const X = ["d", "x"], Y = ["d", "y"];
+  const rows = [{ path: Y, quantity: 4, substituted_for: [{ path: X, quantity: 2 }] }];
+  const r = substitutionResync(rows, [line(X, 2), line(Y, 2)], [line(X, 2), line(Y, 3)]);
+  assertEquals(r.orderEquivalent(Y, rows[0]), 2);
+  assertEquals(r.reoffset(Y, rows[0].substituted_for, 3), {
+    quantity: 5,
+    substituted_for: [{ path: X, quantity: 2 }],
+    substituted: true,
+  });
+});
+
+Deno.test("substitutionResync: a partial X is credited, its components by the order's ratio", () => {
+  const X = ["d", "x"], C = ["d", "x", "c"], Y = ["d", "y"];
+  const rows = [{ path: Y, quantity: 1, substituted_for: [{ path: X, quantity: 1 }] }];
+  const order = [line(X, 4), line(C, 8)];
+  const r = substitutionResync(rows, order, order);
+  assertEquals(r.orderEquivalent(X, { path: X, quantity: 3 }), 4);
+  assertEquals(r.orderEquivalent(C, { path: C, quantity: 6 }), 8);
+  assertEquals(r.reoffset(C, undefined, 8).quantity, 6);
+});
+
+Deno.test("substitutionResync: X gone from the next order drops the entry WITH its units", () => {
+  const X = ["d", "x"], Y = ["d", "y"];
+  const entries = [{ path: X, quantity: 2 }];
+  const r = substitutionResync([{ path: Y, quantity: 4, substituted_for: entries }], [line(X, 2), line(Y, 2)], [line(Y, 2)]);
+  assertEquals(r.anchorsNext, []);
+  assertEquals(r.reoffset(Y, entries, 2), { quantity: 2, substituted_for: undefined, substituted: true });
+});
+
+Deno.test("substitutionResync: an entry already spent on the previous order keeps its units", () => {
+  const X = ["d", "x"], Y = ["d", "y"];
+  const entries = [{ path: X, quantity: 2 }];
+  const r = substitutionResync([{ path: Y, quantity: 4, substituted_for: entries }], [line(Y, 2)], [line(Y, 2)]);
+  const equivalent = r.orderEquivalent(Y, { path: Y, quantity: 4, substituted_for: entries });
+  assertEquals(equivalent, 4, "nothing live to subtract");
+  assertEquals(r.reoffset(Y, entries, equivalent), { quantity: 4, substituted_for: undefined, substituted: true });
+});
+
+Deno.test("substitutionResync: X reparented re-points the entry", () => {
+  const X = ["d", "g1", "x"], X2 = ["d", "g2", "x"], Y = ["d", "g1", "y"];
+  const entries = [{ path: X, quantity: 2 }];
+  const r = substitutionResync(
+    [{ path: Y, quantity: 2, substituted_for: entries }],
+    [line(X, 2)],
+    [line(X2, 2)],
+    (p) => (p.join("/") === X.join("/") ? X2 : undefined),
+  );
+  assertEquals(r.reoffset(Y, entries, 0).substituted_for, [{ path: X2, quantity: 2 }]);
 });

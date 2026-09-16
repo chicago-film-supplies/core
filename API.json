@@ -13177,6 +13177,12 @@
           "doc": "A substitution row, reduced to what the predicates need.\n\nOne anchor per (substitute row, replaced X). A row merged from two different\nX's is two anchors sharing one `path`."
         },
         {
+          "kind": "interface",
+          "name": "SubstitutionResync",
+          "declaration": "interface SubstitutionResync {\n  readonly anchorsPrev: readonly SubstitutionAnchor[];\n  readonly anchorsNext: readonly SubstitutionAnchor[];\n  orderEquivalent(path: readonly string[], row: MaybeSubstitution): number;\n  reoffset(path: readonly string[], entries: readonly MaybeSubstitutedForEntry[] | undefined, orderEquivalent: number): typeLiteral;\n}",
+          "doc": ""
+        },
+        {
           "kind": "function",
           "name": "collectSubstitutionAnchors",
           "signature": "collectSubstitutionAnchors(rows: readonly MaybeSubstitution[]): SubstitutionAnchor[]",
@@ -13321,6 +13327,31 @@
             {
               "name": "direct",
               "doc": "Order path key → units substitutes name it for directly"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "substitutionResync",
+          "signature": "substitutionResync(rows: readonly MaybeSubstitution[], prevOrderItems: readonly CreditableRow[], nextOrderItems: readonly CreditableRow[], _: unknown): SubstitutionResync",
+          "doc": "The D2 offset of a downstream document's `substituted_for` entries across one\norder edit — the half an order → downstream sync needs (manager#414).\n\nA sync compares and merges ORDER-EQUIVALENT quantities, then re-offsets what it\nemits, so a merged Y and a partially swapped X follow order quantity edits\ninstead of reading as an override. One implementation for the invoice sync\n(`syncOrderToInvoiceSelective`) and api-cloudrun's fulfillment sync, which\nmust answer identically.",
+          "paramTags": [
+            {
+              "name": "rows",
+              "doc": "The downstream rows, paths in the ORDER's path space"
+            },
+            {
+              "name": "prevOrderItems",
+              "doc": "The order before the edit"
+            },
+            {
+              "name": "nextOrderItems",
+              "doc": "The order after it (the same array for a one-order read)"
+            },
+            {
+              "name": "toPath",
+              "doc": "Where a previous-order line path sits on the next order, if it moved"
             }
           ],
           "returnsTag": null

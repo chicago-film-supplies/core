@@ -393,3 +393,107 @@ export function substitutionCredit(
   return credit;
 }
 
+
+/** @see {@link substitutionResync} */
+export interface SubstitutionResync {
+  /** The `entry` anchors live against the PREVIOUS order (it carries their X). */
+  readonly anchorsPrev: readonly SubstitutionAnchor[];
+  /** {@link anchorsPrev}, each X re-pointed to the NEXT order, kept only where it still carries X. */
+  readonly anchorsNext: readonly SubstitutionAnchor[];
+  /**
+   * A stored row's ORDER-EQUIVALENT quantity — its quantity with the previous
+   * order's D2 offset removed: `quantity − standing-in units + credit`.
+   *
+   * @param path - The row's path, in the ORDER's path space
+   * @param row - The stored row
+   */
+  orderEquivalent(path: readonly string[], row: MaybeSubstitution): number;
+  /**
+   * Re-apply the D2 offset under the NEXT order to a row's order-equivalent
+   * quantity: `− credit + Σ live entries`. Entries are re-pointed at X's next
+   * path; one whose X the next order lacks is dropped WITH its units (owner,
+   * 2026-09-16); one already spent against the previous order is dropped and its
+   * units stay (they were never removed).
+   *
+   * @param path - The row's path on the next order, in the ORDER's path space
+   * @param entries - The row's stored `substituted_for`
+   * @param orderEquivalent - The row's order-equivalent quantity after any merge
+   * @returns `substituted` is true when an entry or a credit touched the row —
+   *   the rows a caller drops once `quantity` reaches 0
+   */
+  reoffset(
+    path: readonly string[],
+    entries: readonly MaybeSubstitutedForEntry[] | undefined,
+    orderEquivalent: number,
+  ): { quantity: number; substituted_for: MaybeSubstitutedForEntry[] | undefined; substituted: boolean };
+}
+
+/**
+ * The D2 offset of a downstream document's `substituted_for` entries across one
+ * order edit — the half an order → downstream sync needs (manager#414).
+ *
+ * A sync compares and merges ORDER-EQUIVALENT quantities, then re-offsets what it
+ * emits, so a merged Y and a partially swapped X follow order quantity edits
+ * instead of reading as an override. One implementation for the invoice sync
+ * (`syncOrderToInvoiceSelective`) and api-cloudrun's fulfillment sync, which
+ * must answer identically.
+ *
+ * @param rows - The downstream rows, paths in the ORDER's path space
+ * @param prevOrderItems - The order before the edit
+ * @param nextOrderItems - The order after it (the same array for a one-order read)
+ * @param toPath - Where a previous-order line path sits on the next order, if it moved
+ */
+export function substitutionResync(
+  rows: readonly MaybeSubstitution[],
+  prevOrderItems: readonly CreditableRow[],
+  nextOrderItems: readonly CreditableRow[],
+  toPath: (path: readonly string[]) => readonly string[] | undefined = () => undefined,
+): SubstitutionResync {
+  const keys = (items: readonly CreditableRow[]) => new Set(items.map((it) => (it.path ?? []).join("/")));
+  const prevKeys = keys(prevOrderItems);
+  const nextKeys = keys(nextOrderItems);
+  const xNext = (x: readonly string[]): readonly string[] => toPath(x) ?? x;
+
+  const anchorsPrev = collectSubstitutionAnchors(rows.map((r) => ({ path: r.path, substituted_for: r.substituted_for })))
+    .filter((a) => prevKeys.has(a.substitutedFor.join("/")));
+  const anchorsNext = anchorsPrev
+    .map((a) => ({ ...a, substitutedFor: [...xNext(a.substitutedFor)] }))
+    .filter((a) => nextKeys.has(a.substitutedFor.join("/")));
+
+  const offsets = (anchors: readonly SubstitutionAnchor[], orderItems: readonly CreditableRow[]) => {
+    const direct = new Map<string, number>();
+    const liveX = new Set<string>();
+    for (const a of anchors) {
+      const x = a.substitutedFor.join("/");
+      liveX.add(x);
+      direct.set(x, (direct.get(x) ?? 0) + a.quantity);
+    }
+    return { credit: substitutionCredit(orderItems, direct), liveX };
+  };
+  const prev = offsets(anchorsPrev, prevOrderItems);
+  const next = offsets(anchorsNext, nextOrderItems);
+
+  return {
+    anchorsPrev,
+    anchorsNext,
+    orderEquivalent: (path, row) =>
+      (row.quantity ?? 0) - standInUnits(row, prev.liveX) + (prev.credit.get(path.join("/")) ?? 0),
+    reoffset: (path, entries, orderEquivalent) => {
+      const credit = next.credit.get(path.join("/")) ?? 0;
+      let quantity = orderEquivalent - credit;
+      const kept: MaybeSubstitutedForEntry[] = [];
+      for (const entry of entries ?? []) {
+        if (!prev.liveX.has(entry.path.join("/"))) continue;
+        const now = xNext(entry.path);
+        if (!nextKeys.has(now.join("/"))) continue;
+        kept.push({ ...entry, path: [...now] });
+        quantity += entry.quantity;
+      }
+      return {
+        quantity,
+        substituted_for: kept.length > 0 ? kept : undefined,
+        substituted: credit > 0 || (entries?.length ?? 0) > 0,
+      };
+    },
+  };
+}

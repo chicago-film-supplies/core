@@ -28867,6 +28867,17 @@ interface SubstitutionAnchor {
 }
 ```
 
+### `SubstitutionResync`
+
+```ts
+interface SubstitutionResync {
+  readonly anchorsPrev: readonly SubstitutionAnchor[];
+  readonly anchorsNext: readonly SubstitutionAnchor[];
+  orderEquivalent(path: readonly string[], row: MaybeSubstitution): number;
+  reoffset(path: readonly string[], entries: readonly MaybeSubstitutedForEntry[] | undefined, orderEquivalent: number): typeLiteral;
+}
+```
+
 ### `collectSubstitutionAnchors(rows: readonly MaybeSubstitution[]): SubstitutionAnchor[]`
 
 Reduce a row set to its substitution anchors.
@@ -29041,6 +29052,24 @@ its direct credit; the walk only reaches paths the order has.
 
 - `orderItems` — The order's items, dividers included (skipped)
 - `direct` — Order path key → units substitutes name it for directly
+
+### `substitutionResync(rows: readonly MaybeSubstitution[], prevOrderItems: readonly CreditableRow[], nextOrderItems: readonly CreditableRow[], _: unknown): SubstitutionResync`
+
+The D2 offset of a downstream document's `substituted_for` entries across one
+order edit — the half an order → downstream sync needs (manager#414).
+
+A sync compares and merges ORDER-EQUIVALENT quantities, then re-offsets what it
+emits, so a merged Y and a partially swapped X follow order quantity edits
+instead of reading as an override. One implementation for the invoice sync
+(`syncOrderToInvoiceSelective`) and api-cloudrun's fulfillment sync, which
+must answer identically.
+
+**Parameters**
+
+- `rows` — The downstream rows, paths in the ORDER's path space
+- `prevOrderItems` — The order before the edit
+- `nextOrderItems` — The order after it (the same array for a one-order read)
+- `toPath` — Where a previous-order line path sits on the next order, if it moved
 
 ## `@cfs/core/utils/money`
 
