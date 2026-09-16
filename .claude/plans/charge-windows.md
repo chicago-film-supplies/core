@@ -240,7 +240,7 @@ chargeable_days: z.int().nullable().meta({ derived: true })   // key stays prese
   - Stored line days, plus the stored pair window days via the same context. It never recounts.
   - Legacy divergent lines all sit in single-window pairs after the backfill, so they re-derive exactly as today.
   - Pass `extensions` too; it omits them today, and extension invoices probably show as drift. Check prod.
-  - Callers: `settlementProjection.ts:235`, `scripts/audit-transaction-fee-lines.ts:230`.
+  - Callers: `settlementProjection.ts:235`, `api-cloudrun/scripts/audit-transaction-fee-lines.ts:230`.
 - **`priceCreditNote` credits as billed:** stored line days, plus the stored pair window count (multi-window factor only when the credited line's pair had 2+ windows).
   - Credit notes have never stored non-null days (146/146), so test crediting an extension line, a multi-window line and a legacy divergent line explicitly.
 
