@@ -11186,13 +11186,13 @@
         {
           "kind": "typeAlias",
           "name": "DocumentDiffKind",
-          "declaration": "type DocumentDiffKind = \"differs\" | \"only_here\" | \"missing_here\" | \"pair_field\" | \"uninvoiced\" | \"substituted\" | \"billed\";",
-          "doc": "- `differs` — the same path on both sides, a compared field disagrees\n- `only_here` — on the viewed document, absent from the source\n- `missing_here` — on the source, absent from the viewed document\n- `pair_field` — a destination pair's compared field disagrees\n- `uninvoiced` — an order/fulfillment line that no invoice carries\n- `substituted` — one side carries a substitute where the other carries the line it replaced\n- `billed` — the invoices, summed, bill a different quantity or chargeable days than the order"
+          "declaration": "type DocumentDiffKind = \"differs\" | \"only_here\" | \"missing_here\" | \"pair_field\" | \"doc_field\" | \"uninvoiced\" | \"substituted\" | \"billed\";",
+          "doc": "- `differs` — the same path on both sides, a compared field disagrees\n- `only_here` — on the viewed document, absent from the source\n- `missing_here` — on the source, absent from the viewed document\n- `pair_field` — a destination pair's compared field disagrees\n- `doc_field` — a DOCUMENT-level shared field disagrees (organization, subject,\n  reference, `tax_exempt`, `uid_store`) — not a row, so it is filed on its own\n- `uninvoiced` — an order/fulfillment line that no invoice carries\n- `substituted` — one side carries a substitute where the other carries the line it replaced\n- `billed` — the invoices, summed, bill a different quantity or chargeable days than the order"
         },
         {
           "kind": "interface",
           "name": "DocumentDiffMap",
-          "declaration": "interface DocumentDiffMap {\n  lines: Map<string, DocumentDiffEntry[]>;\n  pairs: Map<string, DocumentDiffEntry[]>;\n  unaligned: Array<typeLiteral>;\n  status: Array<typeLiteral>;\n}",
+          "declaration": "interface DocumentDiffMap {\n  lines: Map<string, DocumentDiffEntry[]>;\n  pairs: Map<string, DocumentDiffEntry[]>;\n  unaligned: Array<typeLiteral>;\n  status: Array<typeLiteral>;\n  doc: DocumentDiffEntry[];\n}",
           "doc": "The answer for one viewed document.\n\nKeys are `path.join(\"/\")` in the VIEWED document's own path space, so a row\nlooks itself up by its own stored path: an invoice line's key carries its\norder-divider prefix, an order or fulfillment line's does not. A destination\npair is keyed by its destination divider's path key, in the same space."
         },
         {

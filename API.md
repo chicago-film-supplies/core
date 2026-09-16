@@ -24882,12 +24882,14 @@ interface DocumentDiffField {
 - `only_here` — on the viewed document, absent from the source
 - `missing_here` — on the source, absent from the viewed document
 - `pair_field` — a destination pair's compared field disagrees
+- `doc_field` — a DOCUMENT-level shared field disagrees (organization, subject,
+  reference, `tax_exempt`, `uid_store`) — not a row, so it is filed on its own
 - `uninvoiced` — an order/fulfillment line that no invoice carries
 - `substituted` — one side carries a substitute where the other carries the line it replaced
 - `billed` — the invoices, summed, bill a different quantity or chargeable days than the order
 
 ```ts
-type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field" | "uninvoiced" | "substituted" | "billed";
+type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field" | "doc_field" | "uninvoiced" | "substituted" | "billed";
 ```
 
 ### `DocumentDiffMap`
@@ -24905,6 +24907,7 @@ interface DocumentDiffMap {
   pairs: Map<string, DocumentDiffEntry[]>;
   unaligned: Array<typeLiteral>;
   status: Array<typeLiteral>;
+  doc: DocumentDiffEntry[];
 }
 ```
 

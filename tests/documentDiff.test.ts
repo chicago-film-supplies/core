@@ -554,3 +554,102 @@ Deno.test("documentDiff: a split bill still reports a base price the invoice cha
   const diff = computeDocumentDiffs({ orders: [billedOrder(5)], invoices: [a, billing("inv-b", 2250, 2)] }, { kind: "order", uid: O }, CONTEXT);
   assertEquals(summary(diff.lines), { [`${D}/${G}/${LIGHT}`]: ["invoice#2241:differs(price.base_cents=1000→900)"] });
 });
+
+// ── Document-level differences (G13) ────────────────────────────
+
+/** A readable projection of the doc-level list. */
+function docSummary(map: DocumentDiffMap): string[] {
+  return map.doc.map((e) =>
+    e.kind === "doc_field"
+      ? `${e.source.kind}#${e.source.number}:doc_field(${
+        e.fields.map((f) => `${f.field}=${JSON.stringify(f.here)}→${JSON.stringify(f.there)}`).join(",")
+      })`
+      : `unexpected:${e.kind}`
+  );
+}
+
+const ORG_A = { uid: "org-a", name: "Acme Films", path: [{ uid: "org-a", name: "Acme Films" }] };
+const ORG_B = { uid: "org-b", name: "Acme Films — Lighting", path: [{ uid: "org-b", name: "Acme Films — Lighting" }] };
+
+Deno.test("documentDiff: a doc-level shared field that differs reports ONE doc_field entry (G13)", () => {
+  // Before this there was nowhere for these to go. `computeDocumentDiffs`
+  // returned `lines` and `pairs` only, so an invoice whose organization had been
+  // overridden — or frozen by a denorm drift — showed NOTHING in any view, which
+  // is exactly what made the organization silently stop following its order.
+  const ord = order();
+  (ord as unknown as Record<string, unknown>).organization = ORG_A;
+  (ord as unknown as Record<string, unknown>).subject = "Feature shoot";
+  (ord as unknown as Record<string, unknown>).reference = "PO-77";
+  (ord as unknown as Record<string, unknown>).tax_exempt = false;
+  (ord as unknown as Record<string, unknown>).uid_store = "store-chicago";
+
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  const invRec = inv as unknown as Record<string, unknown>;
+  invRec.organization = ORG_B; // moved to a department
+  invRec.subject = "Feature shoot"; // agrees — must not report
+  invRec.reference = "PO-78"; // overridden
+  invRec.tax_exempt = true; // overridden
+  invRec.uid_store = "store-chicago"; // agrees
+
+  const sources = { orders: [ord], invoices: [inv] };
+  assertEquals(docSummary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT)), [
+    'order#1001:doc_field(organization={"uid":"org-b","name":"Acme Films — Lighting","path":[{"uid":"org-b","name":"Acme Films — Lighting"}]}→{"uid":"org-a","name":"Acme Films","path":[{"uid":"org-a","name":"Acme Films"}]},tax_exempt=true→false,reference="PO-78"→"PO-77")',
+  ]);
+  // …and the order view reports the same difference the other way round.
+  assertEquals(docSummary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT)).length, 1);
+});
+
+Deno.test("documentDiff: homonym and derived doc fields NEVER report — the two exclusions", () => {
+  // The anti-vacuity half. `status`, `number`, `version` and `xero_id` differ on
+  // essentially every real order/invoice pair — an order's `xero_id` is its Xero
+  // QUOTE and an invoice's is its Xero INVOICE — so if homonyms were compared
+  // this surface would report on every document in the corpus and be worthless.
+  // `totals` is derived and is the doc-level G2.
+  const ord = order();
+  const ordRec = ord as unknown as Record<string, unknown>;
+  ordRec.xero_id = "quote-xyz";
+  ordRec.crms_id = 4242;
+  ordRec.totals = { total_cents: 9999 };
+  ordRec.subject = "Same";
+
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  const invRec = inv as unknown as Record<string, unknown>;
+  invRec.xero_id = "invoice-abc"; // homonym — different meaning, not a difference
+  invRec.crms_id = 1717; // homonym
+  invRec.totals = { total_cents: 1111 }; // derived
+  invRec.subject = "Same"; // the one propagated field, and it agrees
+
+  assertEquals(
+    docSummary(computeDocumentDiffs({ orders: [ord], invoices: [inv] }, { kind: "invoice", uid: "inv-1" }, CONTEXT)),
+    [],
+    "status/number/version/xero_id/crms_id are homonyms and totals is derived — none is a difference",
+  );
+
+  // Mutation control: the walk really does reach this document. Move a
+  // PROPAGATED field and the same call reports it.
+  invRec.subject = "Changed";
+  assertEquals(
+    docSummary(computeDocumentDiffs({ orders: [ord], invoices: [inv] }, { kind: "invoice", uid: "inv-1" }, CONTEXT)),
+    ['order#1001:doc_field(subject="Changed"→"Same")'],
+  );
+});
+
+Deno.test("documentDiff: an invoice and a fulfillment have NO doc-level relationship", () => {
+  // Both are projections OF the order and have no link to each other. Comparing
+  // them would report every difference twice and there is no rule saying which
+  // of the two should have followed the other.
+  const ord = order();
+  (ord as unknown as Record<string, unknown>).subject = "From the order";
+  const f = fulfillment();
+  (f as unknown as Record<string, unknown>).subject = "From the order";
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  (inv as unknown as Record<string, unknown>).subject = "Invoice's own";
+
+  const entries = computeDocumentDiffs(
+    { orders: [ord], fulfillments: [f], invoices: [inv] },
+    { kind: "invoice", uid: "inv-1" },
+    CONTEXT,
+  ).doc;
+  assertEquals(entries.length, 1, "exactly one entry — against the ORDER, not against the fulfillment");
+  assertEquals(entries[0].kind === "doc_field" && entries[0].source.kind, "order");
+});

@@ -162,6 +162,7 @@ import {
   type SubstitutionAnchor,
 } from "./substitutions.ts";
 import { accountLine, type AccountedInvoice, type BilledByPath, billedByPath } from "./quantityAccounting.ts";
+import { orderFulfillmentSharedFields, type SharedField } from "./shared-fields.ts";
 
 /** The three document kinds a diff can be viewed from or sourced from. */
 export type DocumentKind = "order" | "fulfillment" | "invoice";
@@ -179,11 +180,21 @@ export interface DocumentRef {
  * - `only_here` — on the viewed document, absent from the source
  * - `missing_here` — on the source, absent from the viewed document
  * - `pair_field` — a destination pair's compared field disagrees
+ * - `doc_field` — a DOCUMENT-level shared field disagrees (organization, subject,
+ *   reference, `tax_exempt`, `uid_store`) — not a row, so it is filed on its own
  * - `uninvoiced` — an order/fulfillment line that no invoice carries
  * - `substituted` — one side carries a substitute where the other carries the line it replaced
  * - `billed` — the invoices, summed, bill a different quantity or chargeable days than the order
  */
-export type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field" | "uninvoiced" | "substituted" | "billed";
+export type DocumentDiffKind =
+  | "differs"
+  | "only_here"
+  | "missing_here"
+  | "pair_field"
+  | "doc_field"
+  | "uninvoiced"
+  | "substituted"
+  | "billed";
 
 /** One compared field. `here` is the viewed document's value, `there` the source's. */
 export interface DocumentDiffField {
@@ -275,6 +286,21 @@ export interface DocumentDiffMap {
    * order and fulfillment views, and the order on the invoice view.
    */
   status: Array<{ issue: DocumentStatusIssue; source: DocumentRef }>;
+  /**
+   * Document-level differences — one `doc_field` entry per source (G13).
+   *
+   * These belong to the DOCUMENT rather than to any row, so they are a flat list
+   * rather than a keyed map: `organization`, `subject`, `reference`,
+   * `tax_exempt` and `uid_store` have no path to be filed under, and before this
+   * an invoice whose organization had been overridden showed nothing anywhere.
+   *
+   * The compared set is the doc-level shared-field classification, filtered to
+   * `propagated` and `atom`. `homonym` fields are excluded because the key means
+   * different things on the two documents (an order's `xero_id` is its QUOTE,
+   * an invoice's is its INVOICE), and `derived` because nothing authors it by
+   * hand — the same two exclusions the merge makes, from the same source.
+   */
+  doc: DocumentDiffEntry[];
 }
 
 /** A lifecycle mismatch no per-line comparison can show. */
@@ -501,6 +527,58 @@ function covers(coverage: InvoiceCoverage, rel: string): boolean {
   return coverage.billed.byPath.has(rel);
 }
 
+/**
+ * The document-level fields to compare between two document kinds, read off the
+ * shared-field classification rather than listed here (G13).
+ *
+ * `null` means the pair has no direct document-level relationship. An invoice
+ * and a fulfillment are both projections OF an order and have no link to each
+ * other — comparing them would report every difference twice, once against the
+ * order and once against each other, and there is no rule saying which of the
+ * two should have followed the other.
+ */
+function docFieldsFor(a: DocumentKind, b: DocumentKind): readonly SharedField[] | null {
+  const pair = new Set([a, b]);
+  if (pair.size !== 2) return null;
+  if (pair.has("order") && pair.has("invoice")) return orderInvoiceSharedFields().doc;
+  if (pair.has("order") && pair.has("fulfillment")) return orderFulfillmentSharedFields().doc;
+  return null;
+}
+
+/**
+ * Document-level differences between the viewed document and one source.
+ *
+ * ⚠️ **`propagated` and `atom` only.** A `homonym` is the same key meaning
+ * different things on the two documents — an order's `xero_id` is its Xero
+ * QUOTE and an invoice's is its Xero INVOICE, and `status`, `number`, `version`
+ * and the actor stamps are each the document's own — so comparing one reports a
+ * difference that is not a difference. A `derived` field is recomputed in the
+ * downstream document's own context and is the G2 class exactly, in the same way
+ * derived line money is. Both exclusions come from the same classification the
+ * merge consults, so the diff and the sync cannot disagree.
+ *
+ * An `atom` is compared WHOLE — it is a snapshot of another document, and
+ * comparing it leaf by leaf would report a chimera as several small differences
+ * rather than one moved reference.
+ */
+function compareDocFields(out: DocumentDiffMap, viewed: Side, source: Side): void {
+  const shared = docFieldsFor(viewed.kind, source.kind);
+  if (shared === null) return;
+  const sourceRef = refOf(source.kind, source.doc);
+  // One entry per source, however many scopes reach the same pair.
+  if (out.doc.some((e) => e.kind === "doc_field" && e.source.kind === sourceRef.kind && e.source.uid === sourceRef.uid)) return;
+
+  const fields: DocumentDiffField[] = [];
+  for (const f of shared) {
+    if (f.kind !== "propagated" && f.kind !== "atom") continue;
+    const here = readField(viewed.doc, f.path);
+    const there = readField(source.doc, f.path);
+    if (JSON.stringify(canonicalizePayload(here)) === JSON.stringify(canonicalizePayload(there))) continue;
+    fields.push({ field: f.path, here, there });
+  }
+  if (fields.length > 0) out.doc.push({ kind: "doc_field", source: sourceRef, fields });
+}
+
 /** Compare the viewed side against one source side, within one order scope. */
 function compareScope(
   out: DocumentDiffMap,
@@ -511,6 +589,7 @@ function compareScope(
   context: DocumentDiffContext,
 ): void {
   const sourceRef = refOf(source.kind, source.doc);
+  compareDocFields(out, viewed, source);
   // An invoice key carries its order-divider prefix; the others are order-relative.
   const viewedKey = (rel: string) => (viewed.kind === "invoice" ? (rel === "" ? orderUid : `${orderUid}/${rel}`) : rel);
   const uninvoiced = (rel: string) => {
@@ -626,7 +705,7 @@ export function computeDocumentDiffs(
   viewing: { kind: DocumentKind; uid: string },
   context: DocumentDiffContext,
 ): DocumentDiffMap {
-  const out: DocumentDiffMap = { lines: new Map(), pairs: new Map(), unaligned: [], status: [] };
+  const out: DocumentDiffMap = { lines: new Map(), pairs: new Map(), unaligned: [], status: [], doc: [] };
   const orders = sources.orders ?? [];
   const fulfillments = sources.fulfillments ?? [];
   // A void invoice bills nothing: dropped before any comparison (see the module doc).
