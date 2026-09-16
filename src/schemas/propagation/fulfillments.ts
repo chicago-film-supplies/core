@@ -196,15 +196,93 @@ const resetFulfillmentTransaction: TransactionDefinition = {
   ],
 };
 
+// ── update-fulfillment-destinations ──────────────────────────────────
+
+/**
+ * The positive half — a pair field the operator states is stored, and the two
+ * `query_by_*` arrays are re-derived from what was stored rather than copied.
+ */
+const PAIR_EDIT_STORES_AND_DERIVES: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/fulfillment/fulfillmentDestinations.test.ts::PUT /destinations stores the window and re-derives query_by_dates",
+  clause:
+    "the `destinations + version + query_by_dates` half — the anchored step moves a collection window, asserts the stored pair carries it with its `_fs` mirror and recomputed day counts, and asserts `query_by_dates` describes the STORED pair rather than the order's. `query_by_contacts` is asserted only when an endpoint moves, in a sibling step.",
+  gates: true,
+};
+
+const updateFulfillmentDestinationsRules: CollectionRule[] = [
+  {
+    id: "update-fulfillment-destinations:pairs-self",
+    source: "fulfillments",
+    target: "fulfillments",
+    mode: "co-write",
+    invariant:
+      "An operator's pair edit writes destinations + version + query_by_dates + " +
+      "query_by_contacts on the same doc atomically. The editable fields are DERIVED " +
+      "from the order → fulfillment shared-field classification — `propagated` and " +
+      "`atom` are writable, `derived` (`dates.*_fs`, `days_active`, `days_charged`) is " +
+      "recomputed and never read from the request — so there is no list to drift. " +
+      "Row MEMBERSHIP is not editable: a pair can be corrected, never added or removed.",
+    enforced_by: [PAIR_EDIT_STORES_AND_DERIVES],
+    transaction: "update-fulfillment-destinations",
+    fields: [
+      { source: ["destinations"], target: ["destinations"] },
+      { source: ["version"], target: ["version"], transform: "incremented" },
+      {
+        source: [],
+        target: ["query_by_dates"],
+        transform: "recomputed from the merged destinations",
+      },
+      {
+        source: [],
+        target: ["query_by_contacts"],
+        transform: "recomputed from the merged destinations",
+      },
+    ],
+  },
+];
+
+const updateFulfillmentDestinationsTransaction: TransactionDefinition = {
+  id: "update-fulfillment-destinations",
+  description:
+    "An operator's edit to a fulfillment's destination pair fields — the window it " +
+    "was actually picked for, and where it actually went. Optimistic concurrency via " +
+    "version; writes only the fulfillment doc itself.\n\n" +
+    "🔴 The BOOKINGS that follow are not a step of this transaction. A booking's " +
+    "window is built from the fulfillment's EFFECTIVE pair (api-cloudrun#989 item 4), " +
+    "and `buildBookingDates` has exactly one author, in `updateOrder`. So this route " +
+    "converges them by driving an organization-echo `updateOrder` afterwards, " +
+    "best-effort, exactly as the items writer does after a substitution — which fires " +
+    "`update-order` and is recorded under that transaction, not this one. If that call " +
+    "loses a version race the bookings converge on the next order write instead.\n\n" +
+    "⚠️ That convergence has NO `enforced_by` entry here, and the omission is deliberate " +
+    "rather than a gap in the catalog: `enforced_by` attaches to a RULE, and the " +
+    "convergence is not a step of this transaction. It is asserted by the api-side step " +
+    "\"the edit converges the order's bookings onto the new window\" in " +
+    "tests/integration/fulfillment/fulfillmentDestinations.test.ts, which covers the " +
+    "OUTCOME only — not the accelerator's mechanism, and not the lost-race window above, " +
+    "which nothing measures.\n\n" +
+    "⚠️ Availability is ADVISORY here, by owner ruling: an edited window that oversells " +
+    "is recorded by the rebuild's `stock_oversold` warning, not refused. Every operator " +
+    "claim path in `src/lib/stockGate.ts` is advisory and only `public-booking` is hard; " +
+    "a picker must be able to record where the gear physically is.",
+  steps: [
+    "update-fulfillment-destinations:pairs-self",
+  ],
+};
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/fulfillments.ts` contributes to the propagation catalog. */
 export const fulfillments: PropagationModule = {
   rules: [
     ...updateFulfillmentItemsRules,
+    ...updateFulfillmentDestinationsRules,
     ...resetFulfillmentRules,
   ],
   transactions: [
     updateFulfillmentItemsTransaction,
+    updateFulfillmentDestinationsTransaction,
     resetFulfillmentTransaction,
   ],
 };

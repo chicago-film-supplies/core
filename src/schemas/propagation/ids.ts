@@ -110,6 +110,7 @@ export type TransactionId =
   | "void-credit-note"
   // fulfillments.ts
   | "update-fulfillment-items"
+  | "update-fulfillment-destinations"
   | "reset-fulfillment"
   // taxes.ts
   | "create-tax-code"
@@ -267,6 +268,7 @@ export type RuleId =
   | "void-credit-note:status"
   // fulfillments.ts
   | "update-fulfillment-items:items-self"
+  | "update-fulfillment-destinations:pairs-self"
   | "reset-fulfillment:rebuild-from-order"
   // taxes.ts
   | "create-tax-rate:recompute-live-orders"
