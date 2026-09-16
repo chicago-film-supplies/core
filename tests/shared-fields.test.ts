@@ -15,9 +15,11 @@ import {
   fieldsUnder,
   mergeSharedFields,
   orderFulfillmentSharedFields,
+  resolveMergedPairDates,
   type SharedField,
   type SharedFieldClassification,
 } from "../src/utils/shared-fields.ts";
+import { getDuration, isNonTerminatingWindow } from "../src/utils/dates.ts";
 import type { TaxCatalog } from "../src/utils/tax-classes.ts";
 import { type LegacyTax, type LegacyTaxRow, migrateLegacyTaxCatalog } from "./helpers/legacyTaxCatalog.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
@@ -202,6 +204,103 @@ Deno.test("order → fulfillment: the pair schemas are the SAME node, so no proj
     elementOf(order) !== elementOf(shapeOf(InvoiceSchema).destinations),
     "the probe must distinguish a genuinely different pair schema",
   );
+});
+
+// ── resolveMergedPairDates: the four cases, directly ─────────────────────────
+//
+// It is reached through `mergePair` by the invoice suite, which is what proves
+// the extraction faithful. These exercise it as the public API it now is — the
+// invoice path covers three of the four cases incidentally and the invalid one
+// only through a whole-sync fixture, so the `null` contract is asserted here
+// where a caller can actually see it.
+
+const FS = (iso: string) => ({ seconds: Math.floor(Date.parse(iso) / 1000), nanoseconds: 0 });
+
+/** A pair's `dates`, with each boundary's `_fs` mirror tagged by side. */
+function pairDates(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    delivery_start: "2026-05-01T09:00:00.000-05:00",
+    delivery_start_fs: FS("2026-05-01T09:00:00-05:00"),
+    delivery_end: "2026-05-01T09:00:00.000-05:00",
+    delivery_end_fs: FS("2026-05-01T09:00:00-05:00"),
+    collection_start: "2026-05-10T15:00:00.000-05:00",
+    collection_start_fs: FS("2026-05-10T15:00:00-05:00"),
+    collection_end: "2026-05-10T15:00:00.000-05:00",
+    collection_end_fs: FS("2026-05-10T15:00:00-05:00"),
+    charge_start: null,
+    charge_start_fs: null,
+    charge_end: null,
+    charge_end_fs: null,
+    days_active: 8,
+    days_charged: 6,
+    ...over,
+  };
+}
+
+const resolve4 = (merged: Record<string, unknown>, source: Record<string, unknown>, downstream: Record<string, unknown>) =>
+  resolveMergedPairDates(merged, source, downstream, [], getDuration, isNonTerminatingWindow);
+
+Deno.test("resolveMergedPairDates: a window unchanged from the downstream's is returned as-is", () => {
+  const downstream = pairDates();
+  const source = pairDates({ collection_start: "2026-06-20T15:00:00.000-05:00" });
+  // The merge kept the downstream's window, so nothing is recomputed.
+  const out = resolve4(pairDates(), source, downstream);
+  assertEquals(out, pairDates());
+});
+
+Deno.test("resolveMergedPairDates: a window equal to the SOURCE's takes the source's dates whole", () => {
+  const downstream = pairDates();
+  const source = pairDates({
+    collection_start: "2026-06-20T15:00:00.000-05:00",
+    collection_start_fs: FS("2026-06-20T15:00:00-05:00"),
+    days_active: 36,
+    days_charged: 27,
+  });
+  const merged = pairDates({ collection_start: "2026-06-20T15:00:00.000-05:00" });
+  // Identity, not equality: the source's own derived fields were computed from
+  // exactly these boundaries, so they are taken rather than recomputed.
+  assert(resolve4(merged, source, downstream) === source);
+});
+
+Deno.test("🔴 resolveMergedPairDates: a MIXED window takes each _fs from its own side and recomputes the days", () => {
+  const downstream = pairDates({
+    delivery_start: "2026-05-04T09:00:00.000-05:00",
+    delivery_start_fs: FS("2026-05-04T09:00:00-05:00"),
+  });
+  const source = pairDates({
+    collection_start: "2026-05-14T15:00:00.000-05:00",
+    collection_start_fs: FS("2026-05-14T15:00:00-05:00"),
+  });
+  // Delivery from the downstream, collection from the source — what an operator
+  // moving ONE endpoint in the pair editor produces.
+  const merged = pairDates({
+    delivery_start: "2026-05-04T09:00:00.000-05:00",
+    collection_start: "2026-05-14T15:00:00.000-05:00",
+  });
+
+  const out = resolve4(merged, source, downstream) as Record<string, unknown>;
+  assertEquals(out.delivery_start_fs, downstream.delivery_start_fs, "_fs follows its own boundary's side");
+  assertEquals(out.collection_start_fs, source.collection_start_fs, "_fs follows its own boundary's side");
+  // Recomputed against the merged window, so neither input's stale count survives.
+  const expected = getDuration(
+    { delivery_start: "2026-05-04T09:00:00.000-05:00", collection_start: "2026-05-14T15:00:00.000-05:00", charge_start: null, charge_end: null },
+    [],
+  );
+  assertEquals(out.days_active, expected.activeDays);
+  assertEquals(out.days_charged, expected.chargeDays);
+  assert(out.days_active !== pairDates().days_active, "the stale count did not simply survive");
+});
+
+Deno.test("🔴 resolveMergedPairDates: an INVALID mix returns null — the caller keeps the downstream's whole dates", () => {
+  // The downstream moved delivery LATER while the source moved collection
+  // EARLIER, so the merged window does not terminate. Never written.
+  const downstream = pairDates({ delivery_start: "2026-06-01T09:00:00.000-05:00" });
+  const source = pairDates({ collection_start: "2026-05-02T15:00:00.000-05:00" });
+  const merged = pairDates({
+    delivery_start: "2026-06-01T09:00:00.000-05:00",
+    collection_start: "2026-05-02T15:00:00.000-05:00",
+  });
+  assertEquals(resolve4(merged, source, downstream), null);
 });
 
 // ── The derived tags match what the pricer writes ────────────────────────────
