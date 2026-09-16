@@ -31933,6 +31933,26 @@ The meta key that marks a field as written by a derivation.
 const DERIVED_META_KEY: "derived";
 ```
 
+### `OrderFulfillmentSharedFields`
+
+The fields an order shares with its fulfillment, split by the unit the merge
+runs on. Read from the two schemas by {@link classifySharedFields}, so there
+is no field list here to drift.
+
+The invoice sibling is `orderInvoiceSharedFields` in `utils/invoices.ts`.
+This one lives here rather than in a `utils/fulfillments.ts` sibling because
+that module is the template-helper namespace for `it.fulfillments` — every
+export in it becomes a helper a template can call, and a schema-pair
+classifier is a write-path concern with no document to render.
+
+```ts
+interface OrderFulfillmentSharedFields {
+  line: readonly SharedField[];
+  pair: readonly SharedField[];
+  doc: readonly SharedField[];
+}
+```
+
 ### `PROPAGATE_META_KEY`
 
 The meta key that marks a homonym: `.meta({ propagate: false })`.
@@ -32033,6 +32053,23 @@ the order still has keeps `null`; an order that removes one reaches an
 unedited row.
 
 Pure: returns a new value, never mutates its arguments.
+
+### `orderFulfillmentSharedFields(): OrderFulfillmentSharedFields`
+
+{@link OrderFulfillmentSharedFields}, classified once per process.
+
+⭐ **Simpler than the invoice pair, and the schema is why.**
+`Fulfillment.destinations` is `z.array(DocDestination)` — the ORDER's own pair
+schema — so all three arguments to {@link mergeSharedFields} are already in
+the downstream shape and there is no `toInvoiceDestinationPair` analogue to
+write, and no `uid_order` to key on. Pairs match on `pair.uid` alone.
+
+⚠️ **`number` and `status` classify as `homonym` and the merge therefore skips
+them, which is correct and is NOT the whole story.** On a fulfillment both are
+genuine copies of the order's — the uid IS the order's uid, the number IS the
+order's number, and `FulfillmentSchema` reuses `ORDER_STATUSES` for exactly
+that reason. They stay on the caller's unconditional-copy list; the tag says
+"not a propagated VALUE", not "leave it stale".
 
 ### `sameSharedValue(a: unknown, b: unknown): boolean`
 

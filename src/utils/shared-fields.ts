@@ -52,6 +52,7 @@
  * @module
  */
 import type { z } from "zod";
+import { FulfillmentSchema, OrderSchema } from "../schemas/mod.ts";
 import { readMetaThroughWrappers } from "../schemas/zod-walk.ts";
 
 /** How one shared field propagates — see the module docs. */
@@ -422,6 +423,63 @@ export function mergeSharedFields<T>(
   }
 
   return { merged: merged as T, overridden: [...overridden].sort() };
+}
+
+// ── The order → fulfillment schema pair (api-cloudrun#989) ──────────────────
+
+/**
+ * The fields an order shares with its fulfillment, split by the unit the merge
+ * runs on. Read from the two schemas by {@link classifySharedFields}, so there
+ * is no field list here to drift.
+ *
+ * The invoice sibling is `orderInvoiceSharedFields` in `utils/invoices.ts`.
+ * This one lives here rather than in a `utils/fulfillments.ts` sibling because
+ * that module is the template-helper namespace for `it.fulfillments` — every
+ * export in it becomes a helper a template can call, and a schema-pair
+ * classifier is a write-path concern with no document to render.
+ */
+export interface OrderFulfillmentSharedFields {
+  /** One `items[]` row, paths relative to the row. */
+  line: readonly SharedField[];
+  /** One `destinations[]` pair, paths relative to the pair. */
+  pair: readonly SharedField[];
+  /** The document itself, every row excluded. */
+  doc: readonly SharedField[];
+}
+
+let orderFulfillmentSharedFieldsMemo: OrderFulfillmentSharedFields | undefined;
+
+/**
+ * {@link OrderFulfillmentSharedFields}, classified once per process.
+ *
+ * ⭐ **Simpler than the invoice pair, and the schema is why.**
+ * `Fulfillment.destinations` is `z.array(DocDestination)` — the ORDER's own pair
+ * schema — so all three arguments to {@link mergeSharedFields} are already in
+ * the downstream shape and there is no `toInvoiceDestinationPair` analogue to
+ * write, and no `uid_order` to key on. Pairs match on `pair.uid` alone.
+ *
+ * ⚠️ **`number` and `status` classify as `homonym` and the merge therefore skips
+ * them, which is correct and is NOT the whole story.** On a fulfillment both are
+ * genuine copies of the order's — the uid IS the order's uid, the number IS the
+ * order's number, and `FulfillmentSchema` reuses `ORDER_STATUSES` for exactly
+ * that reason. They stay on the caller's unconditional-copy list; the tag says
+ * "not a propagated VALUE", not "leave it stale".
+ *
+ * @throws Error when the classification reports a node it could not interpret —
+ *   the merge would otherwise silently skip that field.
+ */
+export function orderFulfillmentSharedFields(): OrderFulfillmentSharedFields {
+  if (orderFulfillmentSharedFieldsMemo) return orderFulfillmentSharedFieldsMemo;
+  const c = classifySharedFields(OrderSchema, FulfillmentSchema);
+  if (c.unhandled.length > 0) {
+    throw new Error(`order → fulfillment shared fields unclassified: ${JSON.stringify(c.unhandled)}`);
+  }
+  orderFulfillmentSharedFieldsMemo = {
+    line: fieldsUnder(c, "items[]"),
+    pair: fieldsUnder(c, "destinations[]"),
+    doc: fieldsUnder(c, ""),
+  };
+  return orderFulfillmentSharedFieldsMemo;
 }
 
 /**

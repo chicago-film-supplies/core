@@ -14737,6 +14737,12 @@
           "doc": "The meta key that marks a field as written by a derivation."
         },
         {
+          "kind": "interface",
+          "name": "OrderFulfillmentSharedFields",
+          "declaration": "interface OrderFulfillmentSharedFields {\n  line: readonly SharedField[];\n  pair: readonly SharedField[];\n  doc: readonly SharedField[];\n}",
+          "doc": "The fields an order shares with its fulfillment, split by the unit the merge\nruns on. Read from the two schemas by {@link classifySharedFields}, so there\nis no field list here to drift.\n\nThe invoice sibling is `orderInvoiceSharedFields` in `utils/invoices.ts`.\nThis one lives here rather than in a `utils/fulfillments.ts` sibling because\nthat module is the template-helper namespace for `it.fulfillments` — every\nexport in it becomes a helper a template can call, and a schema-pair\nclassifier is a write-path concern with no document to render."
+        },
+        {
           "kind": "variable",
           "name": "PROPAGATE_META_KEY",
           "declaration": "const PROPAGATE_META_KEY: \"propagate\";",
@@ -14787,6 +14793,14 @@
           "name": "mergeSharedFields",
           "signature": "mergeSharedFields(fields: readonly SharedField[], prev: T, next: T, downstream: T): SharedFieldMerge<T>",
           "doc": "Apply the three-way rule to every propagating field of ONE matched row or\ndocument:\n\n```\nmerged.F = sameSharedValue(downstream.F, prev.F) ? next.F : downstream.F\n```\n\n🔴 **All three arguments must already be in the DOWNSTREAM document's shape.**\nProject the order's previous and next row first (`projectOrderItemToInvoiceItem`,\n`toInvoiceDestinationPair`). Comparing an order-shaped row against an\ninvoice-shaped one is how every paired line once read as out of sync on\n`stock_method` alone (core#52): a key one shape carries and the other never can\nis not an override.\n\nWhat it does NOT touch, by construction:\n- `derived` fields — left as `downstream` has them. The caller re-runs the\n  derivation afterwards (`priceDocument`, the day count), which is what stops an\n  invoice's own tax context reading as an override (G2).\n- `homonym` fields, and every key the classification does not name (the\n  downstream document's own fields: `xero_id`, `quantity_order`, …).\n\n`atom` fields (another document's snapshot) are taken or kept WHOLE.\n\n⚠️ **A null parent collapses its children into one unit.** If a value object\n(`price.discount`) is `null` or absent on any of the three sides, its fields\ncannot be merged one by one — there is nothing to write a `rate` into — so the\nrule runs once on the whole object instead. An operator who removed a discount\nthe order still has keeps `null`; an order that removes one reaches an\nunedited row.\n\nPure: returns a new value, never mutates its arguments.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orderFulfillmentSharedFields",
+          "signature": "orderFulfillmentSharedFields(): OrderFulfillmentSharedFields",
+          "doc": "{@link OrderFulfillmentSharedFields}, classified once per process.\n\n⭐ **Simpler than the invoice pair, and the schema is why.**\n`Fulfillment.destinations` is `z.array(DocDestination)` — the ORDER's own pair\nschema — so all three arguments to {@link mergeSharedFields} are already in\nthe downstream shape and there is no `toInvoiceDestinationPair` analogue to\nwrite, and no `uid_order` to key on. Pairs match on `pair.uid` alone.\n\n⚠️ **`number` and `status` classify as `homonym` and the merge therefore skips\nthem, which is correct and is NOT the whole story.** On a fulfillment both are\ngenuine copies of the order's — the uid IS the order's uid, the number IS the\norder's number, and `FulfillmentSchema` reuses `ORDER_STATUSES` for exactly\nthat reason. They stay on the caller's unconditional-copy list; the tag says\n\"not a propagated VALUE\", not \"leave it stale\".",
           "paramTags": [],
           "returnsTag": null
         },

@@ -420,6 +420,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "classifySharedFields",
     "fieldsUnder",
     "mergeSharedFields",
+    "orderFulfillmentSharedFields",
     "sameSharedValue",
   ],
   // `utils/quantityAccounting.ts` sums what an order's SIBLING invoices bill

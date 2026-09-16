@@ -14,6 +14,7 @@ import {
   classifySharedFields,
   fieldsUnder,
   mergeSharedFields,
+  orderFulfillmentSharedFields,
   type SharedField,
   type SharedFieldClassification,
 } from "../src/utils/shared-fields.ts";
@@ -143,6 +144,64 @@ Deno.test("classifySharedFields: order → fulfillment, every shared key and its
     "homonym created_at",
     "homonym updated_at",
   ]);
+});
+
+Deno.test("orderFulfillmentSharedFields: classified once, grouped by merge unit", () => {
+  const a = orderFulfillmentSharedFields();
+  assert(a === orderFulfillmentSharedFields(), "memoized");
+  assert(a.line.some((f) => f.path === "quantity" && f.kind === "propagated"));
+  assert(a.pair.some((f) => f.path === "dates.delivery_start" && f.kind === "propagated"));
+  assert(a.pair.some((f) => f.path === "jurisdiction" && f.kind === "propagated"));
+  assert(a.doc.some((f) => f.path === "organization" && f.kind === "atom"));
+  assert(a.doc.some((f) => f.path === "subject" && f.kind === "propagated"));
+  assert(a.doc.some((f) => f.path === "reference" && f.kind === "propagated"));
+
+  // 🔴 The fields the caller must keep copying UNCONDITIONALLY are exactly the
+  // ones the merge refuses, and the two lists have to be read together or a
+  // fulfillment silently stops tracking its order's number or status. Stated as
+  // a set so a newly-tagged homonym fails here rather than going stale.
+  assertEquals(
+    a.doc.filter((f) => f.kind !== "propagated" && f.kind !== "atom").map((f) => `${f.kind} ${f.path}`),
+    [
+      "homonym uid",
+      "homonym number",
+      "homonym status",
+      "derived query_by_items",
+      "derived query_by_contacts",
+      "derived query_by_dates",
+      "homonym version",
+      "homonym created_at",
+      "homonym updated_at",
+    ],
+  );
+});
+
+// 🔴 A fulfillment pair needs NO projection, and that is a schema fact worth a
+// test rather than a comment: `Fulfillment.destinations` is the order's own
+// `DocDestination`, so all three arguments to `mergeSharedFields` are already in
+// the downstream shape. If that ever stops being true, the merge silently starts
+// comparing an order-shaped pair against a fulfillment-shaped one — core#52's
+// `stock_method` class, where a key one shape cannot carry reads as an override.
+Deno.test("order → fulfillment: the pair schemas are the SAME node, so no projection is needed", () => {
+  const shapeOf = (s: unknown) =>
+    ((s as { _zod: { def: { shape: Record<string, unknown> } } })._zod.def.shape);
+  const order = shapeOf(OrderSchema).destinations;
+  const fulfillment = shapeOf(FulfillmentSchema).destinations;
+  const elementOf = (n: unknown) => (n as { _zod: { def: { element?: unknown } } })._zod.def.element;
+  // Both halves resolve, so the identity below is a real comparison and not
+  // `undefined === undefined`.
+  assert(elementOf(order) !== undefined && elementOf(fulfillment) !== undefined, "both elements resolve");
+  assert(
+    elementOf(order) === elementOf(fulfillment),
+    "Fulfillment.destinations must stay z.array(DocDestination) — the order's own pair schema",
+  );
+  // Companion: the invoice is the case this probe must be able to REJECT. Its
+  // pair is a distinct schema, which is exactly why the invoice arm needs
+  // `toInvoiceDestinationPair` and this one does not.
+  assert(
+    elementOf(order) !== elementOf(shapeOf(InvoiceSchema).destinations),
+    "the probe must distinguish a genuinely different pair schema",
+  );
 });
 
 // ── The derived tags match what the pricer writes ────────────────────────────
