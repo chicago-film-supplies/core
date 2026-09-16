@@ -16,7 +16,6 @@ import type {
   OrderDocTotalsType,
   OrderDocItemPriceType,
   InvoiceDocItemPriceType,
-  OrderDatesType,
   OrderDocDatesType,
   DestinationType,
   DocDestinationType,
@@ -36,7 +35,7 @@ import type {
 } from "../schemas/mod.ts";
 import isEqual from "lodash-es/isEqual";
 import { itemContract, zeroPricedFlaggedNonComponents } from "../schemas/mod.ts";
-import { billableDays, canonicalChargeWindows, chargedDays, toChicagoYmd } from "./dates.ts";
+import { billableDays, canonicalChargeWindows, type ChargeDates, chargedDays, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
 import {
   fromCents,
   roundDivHalfAwayFromZero,
@@ -253,8 +252,9 @@ export type GroupPath = GroupPathType;
  * delivery start to collection start (no custom charge period has been set).
  * Instants are compared, not strings.
  */
-export function isSameAsDeliveryDates(dates: Pick<OrderDatesType, "delivery_start" | "collection_start" | "charge_windows">): boolean {
-  const windows = dates.charge_windows;
+export function isSameAsDeliveryDates(dates: ChargeDates): boolean {
+  // `chargeWindowsOf`, so a pair stored before windows reads its one implied window.
+  const windows = chargeWindowsOf(dates);
   if (!windows || windows.length !== 1 || !dates.delivery_start || !dates.collection_start) return false;
   return Date.parse(windows[0].start) === Date.parse(dates.delivery_start)
     && Date.parse(windows[0].end) === Date.parse(dates.collection_start);
@@ -264,7 +264,7 @@ export function isSameAsDeliveryDates(dates: Pick<OrderDatesType, "delivery_star
  * Whether a destination's collection endpoint matches its delivery endpoint
  * (address, contact, and instructions are all equal).
  */
-export function isSameAsDeliveryDestination(destination: DestinationType): boolean {
+export function isSameAsDeliveryDestination(destination: Pick<DestinationType, "delivery" | "collection">): boolean {
   if (!destination.delivery && !destination.collection) return true;
   if (!destination.collection) return true;
   if (!destination.delivery) return false;
@@ -294,7 +294,7 @@ export function isSameAsDeliveryDestination(destination: DestinationType): boole
  * Falls back to "Destination N" when no addresses are present.
  */
 export function getDestinationPairItemName(
-  destination: DestinationType,
+  destination: Pick<DestinationType, "delivery" | "collection">,
   index: number,
 ): string {
   const deliveryName = destination.delivery?.address?.name || destination.delivery?.address?.street || "";
@@ -326,7 +326,7 @@ export function getDestinationPairItemName(
  * Empty input returns empty strings.
  */
 export function getDestinationsLegend(
-  destinations: DestinationType[] | undefined | null,
+  destinations: readonly Pick<DestinationType, "customer_collecting" | "customer_returning">[] | undefined | null,
 ): { start: string; end: string } {
   if (!destinations || destinations.length === 0) {
     return { start: "", end: "" };
@@ -353,7 +353,7 @@ export function getDestinationsLegend(
  * For a stored pair, read the stored counts with `chargedDays` instead.
  */
 export function getDefaultChargeDays(
-  dates: Pick<OrderDatesType, "delivery_start" | "collection_start" | "charge_windows">,
+  dates: ChargeDates,
   holidays: string[],
 ): number | null {
   if (!dates?.delivery_start || !dates?.collection_start) return null;

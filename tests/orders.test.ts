@@ -1597,6 +1597,13 @@ Deno.test("isSameAsDeliveryDates is false with two windows, even when they span 
   );
 });
 
+Deno.test("isSameAsDeliveryDates reads a pair stored before windows by its charge bounds", () => {
+  const { charge_windows: _, ...legacy } = baseDates;
+  assertEquals(isSameAsDeliveryDates({ ...legacy, charge_start: legacy.delivery_start, charge_end: legacy.collection_start }), true);
+  assertEquals(isSameAsDeliveryDates({ ...legacy, charge_start: null, charge_end: null }), true);
+  assertEquals(isSameAsDeliveryDates({ ...legacy, charge_start: "2025-01-07T15:00:00.000Z", charge_end: legacy.collection_start }), false);
+});
+
 // ── isSameAsDeliveryDestination ─────────────────────────────────
 
 const baseEndpoint = {

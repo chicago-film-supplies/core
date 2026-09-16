@@ -12110,7 +12110,7 @@
         {
           "kind": "function",
           "name": "getDestinationsLegend",
-          "signature": "getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral",
+          "signature": "getDestinationsLegend(destinations: readonly Pick<DestinationType, \"customer_collecting\" | \"customer_returning\">[] | undefined | null): typeLiteral",
           "doc": "Pair-derived legend strings for the order's start/end dates.\n\nEach pair contributes a label based on its `customer_collecting` /\n`customer_returning` flags. Labels are deduped and joined with \" / \", so\na mixed-mode order (one pair we deliver, one pair the customer picks up)\nrenders as \"In Store Pickup / Delivery\".\n\nMapping:\n  start: customer_collecting === true → \"In Store Pickup\", else → \"Delivery\"\n  end:   customer_returning  === true → \"In Store Return\", else → \"Pickup\"\n\nEmpty input returns empty strings.",
           "paramTags": [],
           "returnsTag": null
@@ -12253,7 +12253,7 @@
         {
           "kind": "function",
           "name": "isSameAsDeliveryDates",
-          "signature": "isSameAsDeliveryDates(dates: Pick<OrderDatesType, \"delivery_start\" | \"collection_start\" | \"charge_windows\">): boolean",
+          "signature": "isSameAsDeliveryDates(dates: ChargeDates): boolean",
           "doc": "Whether the pair charges exactly its possession: one charge window from\ndelivery start to collection start (no custom charge period has been set).\nInstants are compared, not strings.",
           "paramTags": [],
           "returnsTag": null
@@ -12699,7 +12699,7 @@
         {
           "kind": "function",
           "name": "getDestinationPairItemName",
-          "signature": "getDestinationPairItemName(destination: DestinationType, index: number): string",
+          "signature": "getDestinationPairItemName(destination: Pick<DestinationType, \"delivery\" | \"collection\">, index: number): string",
           "doc": "Build a display name for a destination pair from its delivery/collection addresses.\nFalls back to \"Destination N\" when no addresses are present.",
           "paramTags": [],
           "returnsTag": null
@@ -12707,7 +12707,7 @@
         {
           "kind": "function",
           "name": "getDestinationsLegend",
-          "signature": "getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral",
+          "signature": "getDestinationsLegend(destinations: readonly Pick<DestinationType, \"customer_collecting\" | \"customer_returning\">[] | undefined | null): typeLiteral",
           "doc": "Pair-derived legend strings for the order's start/end dates.\n\nEach pair contributes a label based on its `customer_collecting` /\n`customer_returning` flags. Labels are deduped and joined with \" / \", so\na mixed-mode order (one pair we deliver, one pair the customer picks up)\nrenders as \"In Store Pickup / Delivery\".\n\nMapping:\n  start: customer_collecting === true → \"In Store Pickup\", else → \"Delivery\"\n  end:   customer_returning  === true → \"In Store Return\", else → \"Pickup\"\n\nEmpty input returns empty strings.",
           "paramTags": [],
           "returnsTag": null
@@ -12772,7 +12772,7 @@
         {
           "kind": "function",
           "name": "isSameAsDeliveryDates",
-          "signature": "isSameAsDeliveryDates(dates: Pick<OrderDatesType, \"delivery_start\" | \"collection_start\" | \"charge_windows\">): boolean",
+          "signature": "isSameAsDeliveryDates(dates: ChargeDates): boolean",
           "doc": "Whether the pair charges exactly its possession: one charge window from\ndelivery start to collection start (no custom charge period has been set).\nInstants are compared, not strings.",
           "paramTags": [],
           "returnsTag": null
@@ -12780,7 +12780,7 @@
         {
           "kind": "function",
           "name": "isSameAsDeliveryDestination",
-          "signature": "isSameAsDeliveryDestination(destination: DestinationType): boolean",
+          "signature": "isSameAsDeliveryDestination(destination: Pick<DestinationType, \"delivery\" | \"collection\">): boolean",
           "doc": "Whether a destination's collection endpoint matches its delivery endpoint\n(address, contact, and instructions are all equal).",
           "paramTags": [],
           "returnsTag": null
@@ -14294,7 +14294,7 @@
         {
           "kind": "function",
           "name": "getDefaultChargeDays",
-          "signature": "getDefaultChargeDays(dates: Pick<OrderDatesType, \"delivery_start\" | \"collection_start\" | \"charge_windows\">, holidays: string[]): number | null",
+          "signature": "getDefaultChargeDays(dates: ChargeDates, holidays: string[]): number | null",
           "doc": "The days a pair's charge windows charge, counted against `holidays`: Σ each\nwindow's business days. Returns `null` when the dates are incomplete or a\nwindow cannot be counted.\n\nFor a stored pair, read the stored counts with `chargedDays` instead.",
           "paramTags": [],
           "returnsTag": null
@@ -14302,7 +14302,7 @@
         {
           "kind": "function",
           "name": "getDestinationPairItemName",
-          "signature": "getDestinationPairItemName(destination: DestinationType, index: number): string",
+          "signature": "getDestinationPairItemName(destination: Pick<DestinationType, \"delivery\" | \"collection\">, index: number): string",
           "doc": "Build a display name for a destination pair from its delivery/collection addresses.\nFalls back to \"Destination N\" when no addresses are present.",
           "paramTags": [],
           "returnsTag": null
@@ -14310,7 +14310,7 @@
         {
           "kind": "function",
           "name": "getDestinationsLegend",
-          "signature": "getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral",
+          "signature": "getDestinationsLegend(destinations: readonly Pick<DestinationType, \"customer_collecting\" | \"customer_returning\">[] | undefined | null): typeLiteral",
           "doc": "Pair-derived legend strings for the order's start/end dates.\n\nEach pair contributes a label based on its `customer_collecting` /\n`customer_returning` flags. Labels are deduped and joined with \" / \", so\na mixed-mode order (one pair we deliver, one pair the customer picks up)\nrenders as \"In Store Pickup / Delivery\".\n\nMapping:\n  start: customer_collecting === true → \"In Store Pickup\", else → \"Delivery\"\n  end:   customer_returning  === true → \"In Store Return\", else → \"Pickup\"\n\nEmpty input returns empty strings.",
           "paramTags": [],
           "returnsTag": null
@@ -14431,7 +14431,7 @@
         {
           "kind": "function",
           "name": "isSameAsDeliveryDates",
-          "signature": "isSameAsDeliveryDates(dates: Pick<OrderDatesType, \"delivery_start\" | \"collection_start\" | \"charge_windows\">): boolean",
+          "signature": "isSameAsDeliveryDates(dates: ChargeDates): boolean",
           "doc": "Whether the pair charges exactly its possession: one charge window from\ndelivery start to collection start (no custom charge period has been set).\nInstants are compared, not strings.",
           "paramTags": [],
           "returnsTag": null
@@ -14439,7 +14439,7 @@
         {
           "kind": "function",
           "name": "isSameAsDeliveryDestination",
-          "signature": "isSameAsDeliveryDestination(destination: DestinationType): boolean",
+          "signature": "isSameAsDeliveryDestination(destination: Pick<DestinationType, \"delivery\" | \"collection\">): boolean",
           "doc": "Whether a destination's collection endpoint matches its delivery endpoint\n(address, contact, and instructions are all equal).",
           "paramTags": [],
           "returnsTag": null
@@ -15201,7 +15201,7 @@
         {
           "kind": "function",
           "name": "getDestinationsLegend",
-          "signature": "getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral",
+          "signature": "getDestinationsLegend(destinations: readonly Pick<DestinationType, \"customer_collecting\" | \"customer_returning\">[] | undefined | null): typeLiteral",
           "doc": "Pair-derived legend strings for the order's start/end dates.\n\nEach pair contributes a label based on its `customer_collecting` /\n`customer_returning` flags. Labels are deduped and joined with \" / \", so\na mixed-mode order (one pair we deliver, one pair the customer picks up)\nrenders as \"In Store Pickup / Delivery\".\n\nMapping:\n  start: customer_collecting === true → \"In Store Pickup\", else → \"Delivery\"\n  end:   customer_returning  === true → \"In Store Return\", else → \"Pickup\"\n\nEmpty input returns empty strings.",
           "paramTags": [],
           "returnsTag": null
@@ -15234,7 +15234,7 @@
         {
           "kind": "function",
           "name": "isSameAsDeliveryDates",
-          "signature": "isSameAsDeliveryDates(dates: Pick<OrderDatesType, \"delivery_start\" | \"collection_start\" | \"charge_windows\">): boolean",
+          "signature": "isSameAsDeliveryDates(dates: ChargeDates): boolean",
           "doc": "Whether the pair charges exactly its possession: one charge window from\ndelivery start to collection start (no custom charge period has been set).\nInstants are compared, not strings.",
           "paramTags": [],
           "returnsTag": null

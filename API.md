@@ -26764,7 +26764,7 @@ The membership test is `ITEM_CONTRACTS[type].kind`. It used to be a local
 `STRUCTURAL_TYPES` set — a thirteenth hand-written copy of the divider list,
 and the only one that answered "billable" for a type it had never heard of.
 
-### `getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral`
+### `getDestinationsLegend(destinations: readonly Pick<DestinationType, "customer_collecting" | "customer_returning">[] | undefined | null): typeLiteral`
 
 Pair-derived legend strings for the order's start/end dates.
 
@@ -26978,7 +26978,7 @@ order-input item without being handed a stored price that does not exist yet.
 
 Determine whether a line item is priceable (has a price object, not a structural item).
 
-### `isSameAsDeliveryDates(dates: Pick<OrderDatesType, "delivery_start" | "collection_start" | "charge_windows">): boolean`
+### `isSameAsDeliveryDates(dates: ChargeDates): boolean`
 
 Whether the pair charges exactly its possession: one charge window from
 delivery start to collection start (no custom charge period has been set).
@@ -27872,12 +27872,12 @@ residual IS real money because Xero recomputes `LineAmount = UnitAmount ×
 Quantity` on the other side of a wire; that one stays, and the two must not be
 swept into each other.
 
-### `getDestinationPairItemName(destination: DestinationType, index: number): string`
+### `getDestinationPairItemName(destination: Pick<DestinationType, "delivery" | "collection">, index: number): string`
 
 Build a display name for a destination pair from its delivery/collection addresses.
 Falls back to "Destination N" when no addresses are present.
 
-### `getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral`
+### `getDestinationsLegend(destinations: readonly Pick<DestinationType, "customer_collecting" | "customer_returning">[] | undefined | null): typeLiteral`
 
 Pair-derived legend strings for the order's start/end dates.
 
@@ -27968,13 +27968,13 @@ order (where the caller passes `""` and skips the group downstream).
 - `fallbackDeliveryUid` — Endpoint for a section whose pair supplies none
 - `fallbackCollectionUid` — Defaults to `fallbackDeliveryUid`
 
-### `isSameAsDeliveryDates(dates: Pick<OrderDatesType, "delivery_start" | "collection_start" | "charge_windows">): boolean`
+### `isSameAsDeliveryDates(dates: ChargeDates): boolean`
 
 Whether the pair charges exactly its possession: one charge window from
 delivery start to collection start (no custom charge period has been set).
 Instants are compared, not strings.
 
-### `isSameAsDeliveryDestination(destination: DestinationType): boolean`
+### `isSameAsDeliveryDestination(destination: Pick<DestinationType, "delivery" | "collection">): boolean`
 
 Whether a destination's collection endpoint matches its delivery endpoint
 (address, contact, and instructions are all equal).
@@ -31172,7 +31172,7 @@ boundaries take the latest; `days_active` / `days_charged` take the largest
 non-null value. For a single-destination order the envelope equals that
 destination's dates exactly.
 
-### `getDefaultChargeDays(dates: Pick<OrderDatesType, "delivery_start" | "collection_start" | "charge_windows">, holidays: string[]): number | null`
+### `getDefaultChargeDays(dates: ChargeDates, holidays: string[]): number | null`
 
 The days a pair's charge windows charge, counted against `holidays`: Σ each
 window's business days. Returns `null` when the dates are incomplete or a
@@ -31180,12 +31180,12 @@ window cannot be counted.
 
 For a stored pair, read the stored counts with `chargedDays` instead.
 
-### `getDestinationPairItemName(destination: DestinationType, index: number): string`
+### `getDestinationPairItemName(destination: Pick<DestinationType, "delivery" | "collection">, index: number): string`
 
 Build a display name for a destination pair from its delivery/collection addresses.
 Falls back to "Destination N" when no addresses are present.
 
-### `getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral`
+### `getDestinationsLegend(destinations: readonly Pick<DestinationType, "customer_collecting" | "customer_returning">[] | undefined | null): typeLiteral`
 
 Pair-derived legend strings for the order's start/end dates.
 
@@ -31345,13 +31345,13 @@ order-input item without being handed a stored price that does not exist yet.
 
 Determine whether a line item is priceable (has a price object, not a structural item).
 
-### `isSameAsDeliveryDates(dates: Pick<OrderDatesType, "delivery_start" | "collection_start" | "charge_windows">): boolean`
+### `isSameAsDeliveryDates(dates: ChargeDates): boolean`
 
 Whether the pair charges exactly its possession: one charge window from
 delivery start to collection start (no custom charge period has been set).
 Instants are compared, not strings.
 
-### `isSameAsDeliveryDestination(destination: DestinationType): boolean`
+### `isSameAsDeliveryDestination(destination: Pick<DestinationType, "delivery" | "collection">): boolean`
 
 Whether a destination's collection endpoint matches its delivery endpoint
 (address, contact, and instructions are all equal).
@@ -32945,7 +32945,7 @@ residual IS real money because Xero recomputes `LineAmount = UnitAmount ×
 Quantity` on the other side of a wire; that one stays, and the two must not be
 swept into each other.
 
-### `getDestinationsLegend(destinations: DestinationType[] | undefined | null): typeLiteral`
+### `getDestinationsLegend(destinations: readonly Pick<DestinationType, "customer_collecting" | "customer_returning">[] | undefined | null): typeLiteral`
 
 Pair-derived legend strings for the order's start/end dates.
 
@@ -32992,7 +32992,7 @@ order (where the caller passes `""` and skips the group downstream).
 - `fallbackDeliveryUid` — Endpoint for a section whose pair supplies none
 - `fallbackCollectionUid` — Defaults to `fallbackDeliveryUid`
 
-### `isSameAsDeliveryDates(dates: Pick<OrderDatesType, "delivery_start" | "collection_start" | "charge_windows">): boolean`
+### `isSameAsDeliveryDates(dates: ChargeDates): boolean`
 
 Whether the pair charges exactly its possession: one charge window from
 delivery start to collection start (no custom charge period has been set).
