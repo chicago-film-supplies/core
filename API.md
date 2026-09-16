@@ -3944,7 +3944,6 @@ interface FulfillmentItemInputLineType {
   uid: string;
   path: string[];
   quantity: number;
-  path_substituted_for?: string[];
   substituted_for?: SubstitutedForEntryType[];
   quantity_order?: number;
 }
@@ -3981,7 +3980,6 @@ interface FulfillmentLineItemType {
   order_number?: number;
   uid_order?: string;
   quantity_order?: number;
-  path_substituted_for?: string[];
   substituted_for?: SubstitutedForEntryType[];
 }
 ```
@@ -4602,7 +4600,6 @@ interface InvoiceDocLineItemType {
   xero_tracking_option_id?: string | null;
   crms_opportunity_id?: number | null;
   crms_id?: number | string | null;
-  path_substituted_for?: string[];
   substituted_for?: SubstitutedForEntryType[];
 }
 ```
@@ -4743,7 +4740,6 @@ interface InvoiceItemInputLineType {
   coa_revenue?: COARevenueType | null;
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;
-  path_substituted_for?: string[];
   substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
 }
@@ -8977,7 +8973,7 @@ The per-row invariant it makes checkable (D2):
 Entries are unique by `path` and ACCUMULATE: a second merge of the same X into
 the same row adds to the existing entry rather than appending a second one.
 
-Replaces `path_substituted_for`, which names X but not how much of it — so a
+Replaced `path_substituted_for` (removed in S4), which named X but not how much of it — so a
 merge into an existing sibling could not be told from an in-place swap, and
 could not be reversed.
 
@@ -11824,7 +11820,7 @@ Narrows a fulfillment doc item to a line item (excludes the two dividers).
 the predicate was hand-written four times across three repos and two of those
 copies returned `boolean` and therefore narrowed NOTHING — `isLineItemType`
 tests the `type` STRING, so a caller reaching for it got a truth value and
-still had to cast to touch `quantity_order` or `path_substituted_for`. The
+still had to cast to touch `quantity_order` or `substituted_for`. The
 order and invoice grains have had `isLineItem` / `isInvoiceLineItem` all
 along; this closes the set.
 
@@ -13807,7 +13803,7 @@ The per-row invariant it makes checkable (D2):
 Entries are unique by `path` and ACCUMULATE: a second merge of the same X into
 the same row adds to the existing entry rather than appending a second one.
 
-Replaces `path_substituted_for`, which names X but not how much of it — so a
+Replaced `path_substituted_for` (removed in S4), which named X but not how much of it — so a
 merge into an existing sibling could not be told from an in-place swap, and
 could not be reversed.
 
@@ -15823,7 +15819,6 @@ interface InvoiceDocLineItemType {
   xero_tracking_option_id?: string | null;
   crms_opportunity_id?: number | null;
   crms_id?: number | string | null;
-  path_substituted_for?: string[];
   substituted_for?: SubstitutedForEntryType[];
 }
 ```
@@ -15958,7 +15953,6 @@ interface InvoiceItemInputLineType {
   coa_revenue?: COARevenueType | null;
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;
-  path_substituted_for?: string[];
   substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
 }
@@ -17494,7 +17488,6 @@ interface FulfillmentItemInputLineType {
   uid: string;
   path: string[];
   quantity: number;
-  path_substituted_for?: string[];
   substituted_for?: SubstitutedForEntryType[];
   quantity_order?: number;
 }
@@ -17531,7 +17524,6 @@ interface FulfillmentLineItemType {
   order_number?: number;
   uid_order?: string;
   quantity_order?: number;
-  path_substituted_for?: string[];
   substituted_for?: SubstitutedForEntryType[];
 }
 ```
@@ -17578,7 +17570,7 @@ Narrows a fulfillment doc item to a line item (excludes the two dividers).
 the predicate was hand-written four times across three repos and two of those
 copies returned `boolean` and therefore narrowed NOTHING — `isLineItemType`
 tests the `type` STRING, so a caller reaching for it got a truth value and
-still had to cast to touch `quantity_order` or `path_substituted_for`. The
+still had to cast to touch `quantity_order` or `substituted_for`. The
 order and invoice grains have had `isLineItem` / `isInvoiceLineItem` all
 along; this closes the set.
 
@@ -25117,31 +25109,25 @@ Its readers: `computeDocumentDiffs`'s "billed N of M" entry, the
 remaining-invoice create mode (via {@link remainingForOrder}), and the
 coverage census.
 
-## Substitutions, as the documents carry them today
+## Substitutions (D2, manager#414)
 
-Today a substitute Y carries one `path_substituted_for` naming X's order path,
-and Y replaces X in place. So:
+A substitute Y's `substituted_for` entries record how MUCH of Y stands in for
+each X. So:
 
-- **Y's row quantity counts in full toward X.** Y's own path is not an order
-  path and receives nothing, and Y's components (which exist on no order
-  line) count toward nothing.
+- **The subtree root's entry credits X by its quantity.** Y's components carry
+  entries too (stamped at the document's ratio), but they anchor nothing.
 - **X's components are credited through the ORDER's own stored ratio** —
   `credit × component quantity ÷ kit quantity`, walked down the order's path
   tree, rounded half-up once per level. Never the catalog: optional and
   variable components make catalog derivation wrong (D1). A full swap credits
   every component exactly its order quantity, so the rounding only ever bites
   a partial swap.
-- **A spent anchor is not a substitution** — {@link liveInvoiceAnchors}
-  drops an anchor whose Y the order now carries itself, and that row then
-  counts at its own path like any other.
-
-**`substituted_for` (Track S, manager#414) records how MUCH of Y stands in.**
-The subtree root's entry credits X by its quantity (then down X's components by
-the ratio walk, as above), and every row of the subtree bills its own path by
-`row quantity − Σ live entry quantities` (D2) — which is how a merge into a Y
-the order already carries bills both lines. An entry is spent once the order
-no longer carries its X, and its units then count at the row's own path.
-Legacy `path_substituted_for` rows keep the rule above until S4 removes them.
+- **Every row of the subtree bills its own path by
+  `row quantity − Σ live entry quantities`** — which is how a merge into a Y
+  the order already carries bills both lines.
+- **A spent entry is not a substitution** — {@link liveInvoiceAnchors} drops an
+  anchor once the order no longer carries its X, and its units then count at
+  the row's own path like any other.
 
 ## Dates are money, not quantity (D4)
 
@@ -25675,7 +25661,6 @@ interface InvoiceItem {
   xero_tracking_option_id?: string | null;
   crms_id?: number | string | null;
   crms_opportunity_id?: number | null;
-  path_substituted_for?: string[];
   substituted_for?: SubstitutedForEntryType[];
   path_extension_for?: string[];
 }
@@ -26705,36 +26690,23 @@ ORDER's path space, with SPENT anchors dropped.
 Two conversions happen here and both are load-bearing:
 
 1. 🔴 **The path spaces differ.** An invoice line's stored `path` is prefixed
-   with its order divider's uid and an order line's is not, while
-   `path_substituted_for` is an ORDER path on every surface that stores it.
+   with its order divider's uid and an order line's is not, while a
+   `substituted_for` entry names an ORDER path on every surface that stores it.
    Comparing a divider-scoped path against it matches nothing, and the
    failure is silent: every substitution reads as unexplained drift.
-2. ⭐ **A `legacy` anchor is SPENT once the order carries a line at the anchor's own
-   path** — the admin has made the same substitution upstream, so there is no
-   divergence left to record. This is the invoice's half of the fulfillment
-   rule *"cleared by the projection on graduation (admin emits at the same
-   path)"*, and dropping the anchor here is what lets the line resume syncing
-   normally instead of being frozen by its own divergence record.
+2. ⭐ **An anchor is SPENT once the order no longer carries X** (owner,
+   2026-09-16). A merge is always into a Y the order already has, so Y's
+   presence on the order says nothing about whether the swap still stands.
 
-   An `entry` anchor (`substituted_for`, manager#414) is spent the other way
-   round, once the order no longer carries X: a merge is always into a Y the
-   order already has, so Y's presence says nothing (owner, 2026-09-16).
-
-⚠️ A DANGLING legacy anchor is deliberately still live: if the admin deletes X from
-the order without substituting, nothing resolves `substitutedFor` any more,
-but Y is still on the invoice and the field is still the record of why.
-
-🔴 **`substitutedFor` IS re-derived, and this paragraph used to deny it.**
-{@link syncOrderToInvoiceSelective} re-points every anchor returned here at
-wherever X sits on the CURRENT order, and writes that value back. The field
-means *"the replaced line's current order path"*, not *"its path at the moment
-of the swap"* — the old wording was a description of an implementation, and
-following it is what let an order-side reparent resurrect X
+🔴 **`substitutedFor` IS re-derived.** {@link syncOrderToInvoiceSelective}
+re-points every entry at wherever X sits on the CURRENT order
+({@link substitutionResync}) and writes that value back. The field means *"the
+replaced line's current order path"*, not *"its path at the moment of the
+swap"* — a locked value is what let an order-side reparent resurrect X
 (api-cloudrun#897). The sync is the only place that can do this: it is the one
 caller holding both revisions of the order. Every downstream reader — the wire
 guard, `api-cloudrun/scripts/audit-fulfillment-divergence.ts`, {@link computeInvoiceSyncStatus},
-{@link computeOrderInvoiceCoverage} — sees only the current order and would have
-no way to resolve a locked value.
+{@link computeOrderInvoiceCoverage} — sees only the current order.
 
 **Parameters**
 
@@ -27090,12 +27062,12 @@ operator's edit: X's order path has no invoice line, so the `!invoiceItem`
 branch re-projects X; Y's path has no PREV ORDER line, so the removed-items
 pass drops it as a synced line the order no longer carries. **Neither branch
 is wrong on its own** — the pair is only wrong because nothing told this
-function the two rows are the same row, and `path_substituted_for` is what
+function the two rows are the same row, and `substituted_for` is what
 says so.
 
 ⭐ That is Increment 2's lesson on a third surface. A projection undoes any
 downstream override not stored in a form the projection HONOURS, and being
-*stored* is not enough — `path_substituted_for` was already a stored field on
+*stored* is not enough — the substitution record was already a stored field on
 fulfillments and this function had never heard of it.
 
 ## 🔴 A line the invoice LEFT OUT stays out (api-cloudrun#680 R1, owner 2026-09-15)
@@ -27393,7 +27365,7 @@ const toPick = buildPackingList(fulfillment.items);
 `fulfillments` became a template SOURCE collection so a packing list can be
 rendered from what was actually PICKED rather than from what was ordered — a
 fulfillment line carries `quantity` beside `quantity_order`, and
-`path_substituted_for` when a picker swapped one item for another. None of
+`substituted_for` when a picker swapped one item for another. None of
 that exists on the order, so an order-sourced packing list can only ever
 describe intent.
 
@@ -27762,8 +27734,8 @@ it**, which is the property the two previous implementations both lacked.
   carrying the submitted line's values.
 - A stored line the submission drops is removed.
 - A submitted line with no stored counterpart is a substitution: it is placed
-  immediately after the line named by its `path_substituted_for`, which is
-  where its parentage comes from. Several substitutions against one anchor
+  immediately after the deepest ancestor the output still carries, which is
+  where its parentage comes from. Several substitutions against one ancestor
   keep their submitted order relative to each other.
 - Structural items are never taken from the submission — the picker does not
   own them, and the API strips them from the request body.
@@ -28754,12 +28726,12 @@ substitution licenses — no more, no less. There are six askers today:
 
 | asked by | of what | direction |
 |---|---|---|
-| `api-cloudrun/src/services/fulfillmentEdits.ts` — the omission guard | a STORED row the submission drops | is it at or below some `path_substituted_for`? |
+| `api-cloudrun/src/services/fulfillmentEdits.ts` — the omission guard | a STORED row the submission drops | is it at or below some entry's X? |
 | `api-cloudrun/src/services/fulfillmentEdits.ts` — the counterpart guard | a SUBMITTED row with no order line | is it strictly below some substitution's own path? |
-| `api-cloudrun/scripts/audit-fulfillment-divergence.ts` | an ORDER line with no fulfillment row | is it at or below some `path_substituted_for`? |
-| {@link syncOrderToInvoiceSelective} | an ORDER line the invoice does not carry | is it at or below some `path_substituted_for`? |
+| `api-cloudrun/scripts/audit-fulfillment-divergence.ts` | an ORDER line with no fulfillment row | is it at or below some entry's X? |
+| {@link syncOrderToInvoiceSelective} | an ORDER line the invoice does not carry | is it at or below some entry's X? |
 | {@link computeInvoiceSyncStatus} | both sides of a substituted pair | is the divergence tracked rather than drift? |
-| {@link computeOrderInvoiceCoverage} | an order line with no invoice line | is it at or below some `path_substituted_for`? |
+| {@link computeOrderInvoiceCoverage} | an order line with no invoice line | is it at or below some entry's X? |
 
 Four of the six are the same question, and the wire boundary, the audit and
 the projection **must** answer it identically — an audit stricter than the
@@ -28779,8 +28751,8 @@ predicate.
 A substitution row Y carries two paths and they live in **different
 documents**:
 
-- **`path_substituted_for`** is X's path in the ORDER — the row Y replaces,
-  **as the order carries it NOW**. It is what licenses the *absence* of X (and
+- **a `substituted_for` entry's `path`** is X's path in the ORDER — the row Y
+  replaces, **as the order carries it NOW**. It is what licenses the *absence* of X (and
   of X's whole component subtree) from the downstream document.
   🔴 This read *"locked at substitution time, never re-derived"* until
   api-cloudrun#897, and that was wrong rather than a policy since changed. A
@@ -28811,7 +28783,7 @@ loop below is both cheaper and correct.
 and its order counterpart share one path space, so the fulfillment callers
 pass stored paths straight in. An invoice line's stored path is prefixed with
 its ORDER DIVIDER's uid and an order line's is not, so the invoice callers
-strip that prefix first — `path_substituted_for` is an ORDER path on both
+strip that prefix first — an entry's `path` is an ORDER path on both
 surfaces, and comparing it against a divider-scoped path matches nothing and
 reports every substitution as unexplained.
 
@@ -28845,7 +28817,6 @@ The shape every caller already has; deliberately narrower than a line item.
 ```ts
 interface MaybeSubstitution {
   readonly path: readonly string[];
-  readonly path_substituted_for?: readonly string[] | undefined;
   readonly substituted_for?: readonly MaybeSubstitutedForEntry[] | undefined;
   readonly quantity?: number | undefined;
 }
@@ -28863,7 +28834,6 @@ interface SubstitutionAnchor {
   readonly path: readonly string[];
   readonly substitutedFor: readonly string[];
   readonly quantity: number;
-  readonly form: "legacy" | "entry";
 }
 ```
 
@@ -28882,17 +28852,10 @@ interface SubstitutionResync {
 
 Reduce a row set to its substitution anchors.
 
-⚠️ A row with no `path_substituted_for` is not an anchor even if it sits
-inside a substituted subtree — the components of Y explain nothing, they are
-themselves explained. Only the row that names X licenses anything.
-
 ⭐ **`substituted_for` is stamped on EVERY row of Y's subtree (D1), so the
 anchor is the subtree's ROOT for that X** — the row no strict ancestor in the
 set also names that X for. A component's entry records how many of ITS units
 stand in (the D2 invariant, {@link standInUnits}); it anchors nothing.
-
-A row carrying both fields yields anchors from `substituted_for` only: the
-new field is the more specific statement of the same swap.
 
 🔴 **An EMPTY path on either side is refused, and it is the sharp case.**
 `[]` is a prefix of every path, so an anchor holding one turns
@@ -28907,7 +28870,7 @@ array as `[]` — so any line seeded from the schema carries an empty one.
 Measured: a `getInitialValues(InvoiceDocLineItem)` fixture made a
 substitution "explain" the removal of a row sharing no path segment with it.
 The wire guard in `api-cloudrun/src/services/fulfillmentEdits.ts` happens to
-reject an empty `path_substituted_for` on submission (it resolves to no order
+reject an entry with an empty path on submission (it resolves to no order
 item), but the audits and projections read STORED rows and had no such
 backstop.
 
@@ -28919,7 +28882,7 @@ it is that `[]` must not LICENSE anything.
 
 - `rows` — The rows to scan
 
-**Returns** — One anchor per row carrying a non-empty `path_substituted_for`
+**Returns** — One anchor per (subtree root, X), with a non-empty path on both sides
 
 ### `findSubtreeAnchor(path: readonly string[], anchors: readonly SubstitutionAnchor[]): SubstitutionAnchor | undefined`
 
@@ -29024,9 +28987,7 @@ X is one of `liveX` (the D2 invariant: the rest is the order's quantity at
 the row's path).
 
 A spent entry (its X not in `liveX`) stands in for nothing, so its units
-count at the row's own path again. A row with no `substituted_for` returns 0,
-including a `legacy` anchor row, whose whole quantity the caller reads from
-{@link SubstitutionAnchor.quantity}.
+count at the row's own path again. A row with no `substituted_for` returns 0.
 
 **Parameters**
 

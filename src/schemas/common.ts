@@ -125,7 +125,7 @@ export const SubstitutedForEntry: z.ZodType<SubstitutedForEntryType> = z.strictO
  * Entries are unique by `path` and ACCUMULATE: a second merge of the same X into
  * the same row adds to the existing entry rather than appending a second one.
  *
- * Replaces `path_substituted_for`, which names X but not how much of it — so a
+ * Replaced `path_substituted_for` (removed in S4), which named X but not how much of it — so a
  * merge into an existing sibling could not be told from an in-place swap, and
  * could not be reversed.
  */

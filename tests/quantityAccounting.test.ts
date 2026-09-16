@@ -170,7 +170,7 @@ function substituted(inv: AccountedInvoice, relKey: string, uid: string, quantit
   const y = {
     ...replaced, uid, name: uid, quantity,
     path: [...replaced.path.slice(0, -1), uid],
-    path_substituted_for: replaced.path.slice(1),
+    substituted_for: [{ path: replaced.path.slice(1), quantity }],
   } as InvoiceItem;
   // Drop the replaced row and its whole subtree.
   const depth = replaced.path.length;

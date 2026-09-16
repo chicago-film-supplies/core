@@ -376,10 +376,10 @@ export interface InvoiceDocLineItemType {
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   crms_id?: number | string | null;
   /**
-   * Operator-set on substitution line items. Carries the path of the
-   * substituted-for ORDER line at the moment of substitution — locked then, and
-   * never re-derived. It is the record that this invoice deliberately diverges
-   * from its order, not a live pointer.
+   * Operator-set on substitution line items (manager#414): the ORDER lines this
+   * row stands in for, with how many units each — see `SubstitutedForList`. It is
+   * the record that this invoice deliberately diverges from its order; the
+   * invoice sync re-points each entry when its X moves on the order.
    *
    * ⚠️ **The invoice's divergence is a MONEY concern and moves no bookings** —
    * that is the one place it differs from `FulfillmentLineItemType`'s field of
@@ -399,7 +399,7 @@ export interface InvoiceDocLineItemType {
    *    reach. That is `stored-optionality.test.ts`'s own
    *    `array-member-uncensusable`.
    * 3. **Its twin is already spelled this way.**
-   *    `FulfillmentLineItemType.path_substituted_for` is plain `.optional()`,
+   *    `FulfillmentLineItemType.substituted_for` is plain `.optional()`,
    *    and this field's entire job is to mean the same thing on a second
    *    surface. Two spellings of one fact is the defect
    *    {@link INVOICE_ONLY_ITEM_FIELDS} records under `crms_id`.
@@ -409,8 +409,6 @@ export interface InvoiceDocLineItemType {
    *    `invoiceItemDifferences` counts `undefined` as not-present — so no path
    *    hands a literal `undefined` to a write boundary.
    */
-  path_substituted_for?: string[];
-  /** @see `FulfillmentLineItemType.substituted_for` (manager#414). Plain `.optional()`, like `path_substituted_for`. */
   substituted_for?: SubstitutedForEntryType[];
 }
 
@@ -441,9 +439,8 @@ const InvoiceDocLineItemInner = z.strictObject({
   xero_tracking_option_id: z.uuid().nullable().optional(),
   crms_opportunity_id: z.int().nullable().optional(),
   crms_id: z.union([z.int(), z.string()]).nullable().optional(),
-  // Plain `.optional()`, matching `FulfillmentLineItem.path_substituted_for`
+  // Plain `.optional()`, matching `FulfillmentLineItem.substituted_for`
   // exactly — see the interface docblock for why this one is not `.nullable()`.
-  path_substituted_for: z.array(ItemUid).optional(),
   substituted_for: SubstitutedForList.optional(),
 }).superRefine(checkItemPriceFormula).superRefine(checkZeroPricedAmount);
 
@@ -1166,14 +1163,12 @@ export interface InvoiceItemInputLineType {
   uid_tax_class_override?: string | null;
   tracking_category?: string | null;
   /**
-   * @see `InvoiceDocLineItemType.path_substituted_for`. Operator-authored, so it
+   * @see `InvoiceDocLineItemType.substituted_for`. Operator-authored, so it
    * needs an input channel: this schema is a plain `z.object` and STRIPS
    * unknown keys, and `buildInvoiceItems` rebuilds each stored line from typed
    * fields — so a field absent here is silently dropped on every PUT rather
    * than rejected.
    */
-  path_substituted_for?: string[];
-  /** @see `InvoiceDocLineItemType.substituted_for`. Needs an input channel for the same reason as `path_substituted_for`. */
   substituted_for?: SubstitutedForEntryType[];
   /**
    * @see `InvoiceDocLineItemType.zero_priced`. NOT operator-authored — it is
@@ -1229,7 +1224,6 @@ const InvoiceItemInputLineInner = z.object({
   coa_revenue: COARevenueEnum.nullable().optional(),
   uid_tax_class_override: FirestoreId.nullable().optional(),
   tracking_category: z.string().nullable().optional(),
-  path_substituted_for: z.array(ItemUid).optional(),
   substituted_for: SubstitutedForList.optional(),
   zero_priced: z.boolean().nullable().optional(),
 }).superRefine(checkItemPriceFormula);

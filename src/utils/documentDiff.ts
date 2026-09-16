@@ -101,7 +101,7 @@
  * ## A substitution is ONE difference, never a pair of presence entries
  *
  * A picker or an invoice can carry Y in place of the order's X
- * (`path_substituted_for` names X's order path). Reported by presence alone,
+ * (a `substituted_for` entry names X's order path). Reported by presence alone,
  * that is X `only_here` + Y `missing_here` (+ X `uninvoiced` against an
  * invoice) — two or three unrelated-looking rows for one swap. Instead:
  *
@@ -419,7 +419,7 @@ function scopeInvoice(invoice: Invoice, orderUid: string): ScopedLines {
     const relPath = it.path.slice(1);
     byKey.set(key(relPath), it as unknown as LineItem);
     const line = it as InvoiceItem;
-    rel.push({ path: relPath, path_substituted_for: line.path_substituted_for, substituted_for: line.substituted_for, quantity: line.quantity });
+    rel.push({ path: relPath, substituted_for: line.substituted_for });
   }
   return { byKey, anchors: collectSubstitutionAnchors(rel) };
 }
@@ -677,7 +677,7 @@ function compareScope(
     // A merge (manager#414): Y is on both documents, and the downstream row
     // stands in for an X the order still carries. One entry per X, at Y.
     for (const a of liveAnchors) {
-      if (a.form === "entry" && key(a.path) === rel) substituted(rel, key(a.substitutedFor), rel);
+      if (key(a.path) === rel) substituted(rel, key(a.substitutedFor), rel);
     }
     const expected = downstream === undefined
       ? undefined

@@ -10,12 +10,12 @@
  *
  * | asked by | of what | direction |
  * |---|---|---|
- * | `api-cloudrun/src/services/fulfillmentEdits.ts` — the omission guard | a STORED row the submission drops | is it at or below some `path_substituted_for`? |
+ * | `api-cloudrun/src/services/fulfillmentEdits.ts` — the omission guard | a STORED row the submission drops | is it at or below some entry's X? |
  * | `api-cloudrun/src/services/fulfillmentEdits.ts` — the counterpart guard | a SUBMITTED row with no order line | is it strictly below some substitution's own path? |
- * | `api-cloudrun/scripts/audit-fulfillment-divergence.ts` | an ORDER line with no fulfillment row | is it at or below some `path_substituted_for`? |
- * | {@link syncOrderToInvoiceSelective} | an ORDER line the invoice does not carry | is it at or below some `path_substituted_for`? |
+ * | `api-cloudrun/scripts/audit-fulfillment-divergence.ts` | an ORDER line with no fulfillment row | is it at or below some entry's X? |
+ * | {@link syncOrderToInvoiceSelective} | an ORDER line the invoice does not carry | is it at or below some entry's X? |
  * | {@link computeInvoiceSyncStatus} | both sides of a substituted pair | is the divergence tracked rather than drift? |
- * | {@link computeOrderInvoiceCoverage} | an order line with no invoice line | is it at or below some `path_substituted_for`? |
+ * | {@link computeOrderInvoiceCoverage} | an order line with no invoice line | is it at or below some entry's X? |
  *
  * Four of the six are the same question, and the wire boundary, the audit and
  * the projection **must** answer it identically — an audit stricter than the
@@ -35,8 +35,8 @@
  * A substitution row Y carries two paths and they live in **different
  * documents**:
  *
- * - **`path_substituted_for`** is X's path in the ORDER — the row Y replaces,
- *   **as the order carries it NOW**. It is what licenses the *absence* of X (and
+ * - **a `substituted_for` entry's `path`** is X's path in the ORDER — the row Y
+ *   replaces, **as the order carries it NOW**. It is what licenses the *absence* of X (and
  *   of X's whole component subtree) from the downstream document.
  *   🔴 This read *"locked at substitution time, never re-derived"* until
  *   api-cloudrun#897, and that was wrong rather than a policy since changed. A
@@ -67,7 +67,7 @@
  * and its order counterpart share one path space, so the fulfillment callers
  * pass stored paths straight in. An invoice line's stored path is prefixed with
  * its ORDER DIVIDER's uid and an order line's is not, so the invoice callers
- * strip that prefix first — `path_substituted_for` is an ORDER path on both
+ * strip that prefix first — an entry's `path` is an ORDER path on both
  * surfaces, and comparing it against a divider-scoped path matches nothing and
  * reports every substitution as unexplained.
  *
@@ -88,21 +88,14 @@ export interface SubstitutionAnchor {
   /** X's ORDER path — the row Y replaces. Re-pointed by the syncs when X moves. */
   readonly substitutedFor: readonly string[];
   /**
-   * Units of Y that stand in for X. For a `legacy` anchor it is the row's whole
-   * quantity: `path_substituted_for` swapped in place, so all of Y replaced X.
+   * Units of Y that stand in for X, read from the root row's `substituted_for`
+   * entry (manager#414). It may be a MERGE into a row the order also carries.
+   *
+   * ⚠️ An anchor is spent once the order no longer carries X (owner,
+   * 2026-09-16). Y being on the order says nothing about a merge, which is
+   * always into a Y the order had.
    */
   readonly quantity: number;
-  /**
-   * `legacy` — read from `path_substituted_for`. `entry` — read from a
-   * `substituted_for` entry (manager#414), which may be a MERGE into a row the
-   * order also carries.
-   *
-   * ⚠️ The two graduate differently (owner, 2026-09-16): a legacy anchor is
-   * spent once the order carries Y itself; an entry is spent once the order no
-   * longer carries X. Y being on the order says nothing about a merge, which
-   * was always into a Y the order had.
-   */
-  readonly form: "legacy" | "entry";
 }
 
 /** One `substituted_for` entry, as a row carries it. */
@@ -114,9 +107,8 @@ export interface MaybeSubstitutedForEntry {
 /** The shape every caller already has; deliberately narrower than a line item. */
 export interface MaybeSubstitution {
   readonly path: readonly string[];
-  readonly path_substituted_for?: readonly string[] | undefined;
   readonly substituted_for?: readonly MaybeSubstitutedForEntry[] | undefined;
-  /** Read only for a `legacy` anchor's {@link SubstitutionAnchor.quantity}. */
+  /** The row's own quantity — read by {@link SubstitutionResync.orderEquivalent}. */
   readonly quantity?: number | undefined;
 }
 
@@ -157,17 +149,10 @@ export function isStrictlyBelow(
 /**
  * Reduce a row set to its substitution anchors.
  *
- * ⚠️ A row with no `path_substituted_for` is not an anchor even if it sits
- * inside a substituted subtree — the components of Y explain nothing, they are
- * themselves explained. Only the row that names X licenses anything.
- *
  * ⭐ **`substituted_for` is stamped on EVERY row of Y's subtree (D1), so the
  * anchor is the subtree's ROOT for that X** — the row no strict ancestor in the
  * set also names that X for. A component's entry records how many of ITS units
  * stand in (the D2 invariant, {@link standInUnits}); it anchors nothing.
- *
- * A row carrying both fields yields anchors from `substituted_for` only: the
- * new field is the more specific statement of the same swap.
  *
  * 🔴 **An EMPTY path on either side is refused, and it is the sharp case.**
  * `[]` is a prefix of every path, so an anchor holding one turns
@@ -182,7 +167,7 @@ export function isStrictlyBelow(
  * Measured: a `getInitialValues(InvoiceDocLineItem)` fixture made a
  * substitution "explain" the removal of a row sharing no path segment with it.
  * The wire guard in `api-cloudrun/src/services/fulfillmentEdits.ts` happens to
- * reject an empty `path_substituted_for` on submission (it resolves to no order
+ * reject an entry with an empty path on submission (it resolves to no order
  * item), but the audits and projections read STORED rows and had no such
  * backstop.
  *
@@ -191,7 +176,7 @@ export function isStrictlyBelow(
  * it is that `[]` must not LICENSE anything.
  *
  * @param rows - The rows to scan
- * @returns One anchor per row carrying a non-empty `path_substituted_for`
+ * @returns One anchor per (subtree root, X), with a non-empty path on both sides
  */
 export function collectSubstitutionAnchors(
   rows: readonly MaybeSubstitution[],
@@ -204,21 +189,15 @@ export function collectSubstitutionAnchors(
   }
   for (const row of rows) {
     if (row.path.length === 0) continue;
-    const entries = (row.substituted_for ?? []).filter((e) => e.path.length > 0);
-    if (entries.length > 0) {
-      for (const entry of entries) {
-        let underRoot = false;
-        for (let depth = row.path.length - 1; depth > 0 && !underRoot; depth--) {
-          underRoot = named.has(joinKey(row.path.slice(0, depth)) + "\x1e" + joinKey(entry.path));
-        }
-        if (underRoot) continue;
-        anchors.push({ path: row.path, substitutedFor: entry.path, quantity: entry.quantity, form: "entry" });
+    for (const entry of row.substituted_for ?? []) {
+      if (entry.path.length === 0) continue;
+      let underRoot = false;
+      for (let depth = row.path.length - 1; depth > 0 && !underRoot; depth--) {
+        underRoot = named.has(joinKey(row.path.slice(0, depth)) + "\x1e" + joinKey(entry.path));
       }
-      continue;
+      if (underRoot) continue;
+      anchors.push({ path: row.path, substitutedFor: entry.path, quantity: entry.quantity });
     }
-    if (row.path_substituted_for === undefined) continue;
-    if (row.path_substituted_for.length === 0) continue;
-    anchors.push({ path: row.path, substitutedFor: row.path_substituted_for, quantity: row.quantity ?? 0, form: "legacy" });
   }
   return anchors;
 }
@@ -235,9 +214,7 @@ function joinKey(path: readonly string[]): string {
  * the row's path).
  *
  * A spent entry (its X not in `liveX`) stands in for nothing, so its units
- * count at the row's own path again. A row with no `substituted_for` returns 0,
- * including a `legacy` anchor row, whose whole quantity the caller reads from
- * {@link SubstitutionAnchor.quantity}.
+ * count at the row's own path again. A row with no `substituted_for` returns 0.
  *
  * @param row - The downstream row
  * @param liveX - Keys (`path.join("/")`) of the X paths whose anchors are live

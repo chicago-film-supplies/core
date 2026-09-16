@@ -60,8 +60,8 @@ function pathKey(path: readonly string[] | undefined): string {
  *   carrying the submitted line's values.
  * - A stored line the submission drops is removed.
  * - A submitted line with no stored counterpart is a substitution: it is placed
- *   immediately after the line named by its `path_substituted_for`, which is
- *   where its parentage comes from. Several substitutions against one anchor
+ *   immediately after the deepest ancestor the output still carries, which is
+ *   where its parentage comes from. Several substitutions against one ancestor
  *   keep their submitted order relative to each other.
  * - Structural items are never taken from the submission — the picker does not
  *   own them, and the API strips them from the request body.
@@ -100,7 +100,7 @@ export function rebuildFulfillmentItems(
   }
 
   // Pass 2 — anything left is new, and a new line is a substitution. Place it
-  // after its anchor, because that is the only statement of its parentage.
+  // after its nearest surviving ancestor, the only statement of its parentage.
   const placedPerAnchor = new Map<string, number>();
   // Lines whose parentage resolved to nothing at all. They go to the ROOT, not
   // to the tail: appending would hand them whichever divider happens to come
@@ -113,32 +113,21 @@ export function rebuildFulfillmentItems(
     if (consumed.has(key)) continue;
     consumed.add(key);
 
-    const anchorKey = pathKey(li.path_substituted_for);
-    let at = anchorKey === ""
-      ? -1
-      : out.findIndex((i) => pathKey(i.path) === anchorKey);
-
-    if (at === -1) {
-      // No anchor resolved — fall back to the deepest ancestor the output
-      // still carries, so the line keeps as much of its parentage as survives.
-      // Reached when a substitution's anchor was removed in the same write.
-      const ancestry = (li.path ?? []).slice(0, -1);
-      for (let d = ancestry.length - 1; d >= 0 && at === -1; d--) {
-        at = out.findIndex((i) => (i.uid ?? "") === ancestry[d]);
-      }
+    // The deepest ancestor the output still carries, so the line keeps as much
+    // of its parentage as survives.
+    let at = -1;
+    const ancestry = (li.path ?? []).slice(0, -1);
+    for (let d = ancestry.length - 1; d >= 0 && at === -1; d--) {
+      at = out.findIndex((i) => (i.uid ?? "") === ancestry[d]);
     }
 
     if (at === -1) {
       rootless.push(li);
     } else {
-      // Offset past substitutions already placed against this same anchor, so
-      // a second one does not jump ahead of the first. Counted rather than
-      // scanned: the anchor itself never moves, so its index is stable and the
-      // n-th insertion belongs at `anchor + 1 + n`.
-      // Keyed on the RESOLVED row, not on `path_substituted_for`: two lines
-      // that both fell back to the same ancestor share a placement point while
-      // carrying different anchors, and keying on the anchor would stack them
-      // on a counter neither of them owns.
+      // Offset past substitutions already placed against this same row, so a
+      // second one does not jump ahead of the first. Counted rather than
+      // scanned: the row itself never moves, so its index is stable and the
+      // n-th insertion belongs at `row + 1 + n`.
       const seat = pathKey(out[at].path);
       const nth = placedPerAnchor.get(seat) ?? 0;
       out.splice(at + 1 + nth, 0, li);

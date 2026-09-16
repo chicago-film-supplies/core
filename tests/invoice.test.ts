@@ -1077,27 +1077,27 @@ Deno.test("InvoiceSchema accepts an empty pdf_params — the 'nothing recorded' 
   assertEquals(InvoiceSchema.safeParse({ ...validInvoice, pdf_params: {} }).success, true);
 });
 
-// ── path_substituted_for (manager#399) ──────────────────────────
+// ── substituted_for (manager#399, manager#414) ──────────────────
 
-Deno.test("path_substituted_for: absent is the ordinary state, and it parses", () => {
+Deno.test("substituted_for: absent is the ordinary state, and it parses", () => {
   // The field is `.optional()` and NOT `.nullable()`, deliberately — see the
   // declaration's own docblock. The consequence to pin is that the ~8,900 stored
   // lines that predate it, and every line that is not a substitution, are valid
   // exactly as they stand. That is what makes this an ADD with no backfill and
   // no write-refusing window, unlike a removal.
-  const { path_substituted_for: _absent, ...withoutKey } = {
+  const { substituted_for: _absent, ...withoutKey } = {
     ...lineItemBase,
     uid: "Item0000000000000001",
     type: "rental",
     name: "Light",
     path: ["Item0000000000000001"],
   } as Record<string, unknown>;
-  assert(!("path_substituted_for" in withoutKey));
+  assert(!("substituted_for" in withoutKey));
   const parsed = InvoiceDocLineItem.safeParse(withoutKey);
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
 });
 
-Deno.test("path_substituted_for: a path is accepted and NULL is refused", () => {
+Deno.test("substituted_for: an entry list is accepted and NULL is refused", () => {
   // ⚠️ Both halves matter. `null` being refused is what makes "absent" the only
   // spelling of "not a substitution" — two spellings of one state is what the
   // repo's nullable-over-optional ruling exists to prevent, and here it is
@@ -1108,19 +1108,37 @@ Deno.test("path_substituted_for: a path is accepted and NULL is refused", () => 
     type: "rental",
     name: "Light Y",
     path: ["Item0000000000000002"],
-    path_substituted_for: ["Destination000000001", "Item0000000000000001"],
+    substituted_for: [{ path: ["Destination000000001", "Item0000000000000001"], quantity: 1 }],
   } as Record<string, unknown>;
 
   const ok = InvoiceDocLineItem.safeParse(line);
   assertEquals(ok.success, true, JSON.stringify(ok.success ? {} : ok.error.issues));
 
   assertEquals(
-    InvoiceDocLineItem.safeParse({ ...line, path_substituted_for: null }).success,
+    InvoiceDocLineItem.safeParse({ ...line, substituted_for: null }).success,
     false,
   );
 });
 
-Deno.test("path_substituted_for: the INPUT schema accepts it, or every PUT drops it", () => {
+Deno.test("path_substituted_for is gone from the stored line — a document still carrying it is refused (S4)", () => {
+  // The contract step of manager#414: the legacy key is no longer declared, and
+  // the line is a strictObject, so any stored document still carrying it fails
+  // to parse. Both corpora must scan to 0 before this publishes.
+  const line = {
+    ...lineItemBase,
+    uid: "Item0000000000000002",
+    type: "rental",
+    name: "Light Y",
+    path: ["Item0000000000000002"],
+  } as Record<string, unknown>;
+  assertEquals(InvoiceDocLineItem.safeParse(line).success, true);
+  assertEquals(
+    InvoiceDocLineItem.safeParse({ ...line, path_substituted_for: ["Destination000000001", "Item0000000000000001"] }).success,
+    false,
+  );
+});
+
+Deno.test("substituted_for: the INPUT schema accepts it, or every PUT drops it", () => {
   // 🔴 `InvoiceItemInputLineInner` is a plain `z.object`, so an unknown key is
   // STRIPPED rather than rejected — and `buildInvoiceItems` rebuilds each stored
   // line from typed fields. A field missing from the input channel therefore
@@ -1132,12 +1150,12 @@ Deno.test("path_substituted_for: the INPUT schema accepts it, or every PUT drops
       uid: "Item0000000000000002",
       type: "rental",
       path: ["Item0000000000000002"],
-      path_substituted_for: ["Destination000000001", "Item0000000000000001"],
+      substituted_for: [{ path: ["Destination000000001", "Item0000000000000001"], quantity: 1 }],
     }],
   });
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
   const items = (parsed.success ? parsed.data.items : []) as unknown as Array<Record<string, unknown>>;
-  assertEquals(items[0].path_substituted_for, ["Destination000000001", "Item0000000000000001"]);
+  assertEquals(items[0].substituted_for, [{ path: ["Destination000000001", "Item0000000000000001"], quantity: 1 }]);
 });
 
 Deno.test("reference is bounded at 255, matching the order and fulfillment grains", () => {

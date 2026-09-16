@@ -29,10 +29,10 @@ const STORED: FulfillmentItemType[] = [
   line(Z, [D, GB, Z]),
 ];
 
-Deno.test("a substitution lands under its anchor's parent, not the last divider", () => {
+Deno.test("a substitution lands under its nearest surviving ancestor, not the last divider", () => {
   const submitted = [
     ...lines(STORED).map((l) => (l.uid === X ? { ...l, quantity: 0 } : l)),
-    line(ALT, [D, GA, PARENT, ALT], 2, { path_substituted_for: [D, GA, PARENT, X] }),
+    line(ALT, [D, GA, PARENT, ALT], 2, { substituted_for: [{ path: [D, GA, PARENT, X], quantity: 2 }] }),
   ];
   const out = rebuildFulfillmentItems(STORED, submitted);
   assertEquals(pathOf(out, ALT), [D, GA, PARENT, ALT]);
@@ -45,7 +45,7 @@ Deno.test("🔴 the result does not depend on the order lines are submitted in",
   // function exists: sequence comes from the STORED document.
   const base = [
     ...lines(STORED).map((l) => (l.uid === X ? { ...l, quantity: 0 } : l)),
-    line(ALT, [D, GA, PARENT, ALT], 2, { path_substituted_for: [D, GA, PARENT, X] }),
+    line(ALT, [D, GA, PARENT, ALT], 2, { substituted_for: [{ path: [D, GA, PARENT, X], quantity: 2 }] }),
   ];
   const expected = rebuildFulfillmentItems(STORED, base).map((i) => `${i.uid}:${(i.path ?? []).join("/")}`);
 
@@ -86,12 +86,12 @@ Deno.test("structural items are never taken from the submission", () => {
   assertEquals(out.filter((i) => i.type === "group").length, 2);
 });
 
-Deno.test("two substitutions against one anchor keep their submitted order", () => {
+Deno.test("two substitutions against one seat keep their submitted order", () => {
   const ALT2 = "prod-alt2";
   const submitted = [
     ...lines(STORED).map((l) => (l.uid === X ? { ...l, quantity: 0 } : l)),
-    line(ALT, [D, GA, PARENT, ALT], 1, { path_substituted_for: [D, GA, PARENT, X] }),
-    line(ALT2, [D, GA, PARENT, ALT2], 1, { path_substituted_for: [D, GA, PARENT, X] }),
+    line(ALT, [D, GA, PARENT, ALT], 1, { substituted_for: [{ path: [D, GA, PARENT, X], quantity: 1 }] }),
+    line(ALT2, [D, GA, PARENT, ALT2], 1, { substituted_for: [{ path: [D, GA, PARENT, X], quantity: 1 }] }),
   ];
   const out = rebuildFulfillmentItems(STORED, submitted);
   const order = out.map((i) => i.uid);
@@ -100,10 +100,10 @@ Deno.test("two substitutions against one anchor keep their submitted order", () 
   assertEquals(pathOf(out, ALT2), [D, GA, PARENT, ALT2]);
 });
 
-Deno.test("a substitution whose anchor was removed falls back to its deepest surviving ancestor", () => {
+Deno.test("a substitution whose X was removed in the same write still lands under its deepest surviving ancestor", () => {
   const submitted = [
     ...lines(STORED).filter((l) => l.uid !== X),
-    line(ALT, [D, GA, PARENT, ALT], 1, { path_substituted_for: [D, GA, PARENT, X] }),
+    line(ALT, [D, GA, PARENT, ALT], 1, { substituted_for: [{ path: [D, GA, PARENT, X], quantity: 1 }] }),
   ];
   const out = rebuildFulfillmentItems(STORED, submitted);
   // PARENT survives, so ALT stays under it rather than defaulting to the tail.

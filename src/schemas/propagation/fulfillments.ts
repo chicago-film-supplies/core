@@ -117,7 +117,7 @@ const RESET_REBUILDS: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/fulfillment/fulfillmentEdits.test.ts::POST /reset clears picker work and re-projects",
   clause:
-    "the rebuild half — after a picker substitution and a quantity override, the reset leaves no `path_substituted_for` line and restores the order's quantity, with `version` strictly greater than before. It does not assert the other six replaced fields.",
+    "the rebuild half — after a picker substitution and a quantity override, the reset leaves no `substituted_for` line and restores the order's quantity, with `version` strictly greater than before. It does not assert the other six replaced fields.",
   gates: true,
 };
 

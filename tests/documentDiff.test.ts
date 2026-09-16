@@ -364,7 +364,7 @@ function substitute<T extends { path: string[] }>(rows: T[], pathKey: string, ui
   rows.splice(at, 1, {
     uid, type: "rental", name: "Monopod", description: "", quantity: 1,
     path: [...rows[at].path.slice(0, -1), uid],
-    path_substituted_for: replacedPath,
+    substituted_for: [{ path: replacedPath, quantity: 1 }],
   } as unknown as T);
 }
 
@@ -390,8 +390,8 @@ Deno.test("documentDiff: substituting a KIT explains the replaced kit's componen
   const at = rows.findIndex((it) => it.path.join("/") === `${D}/${KIT}`);
   // Y replaces the kit and its component; Y carries a component of its own.
   rows.splice(at, 2,
-    { uid: "prod-alt", type: "rental", name: "Alt", description: "", quantity: 1, path: [D, "prod-alt"], path_substituted_for: [D, KIT] } as unknown as LineItem,
-    { uid: "comp-b", type: "rental", name: "B", description: "", quantity: 1, path: [D, "prod-alt", "comp-b"] } as unknown as LineItem,
+    { uid: "prod-alt", type: "rental", name: "Alt", description: "", quantity: 1, path: [D, "prod-alt"], substituted_for: [{ path: [D, KIT], quantity: 1 }] } as unknown as LineItem,
+    { uid: "comp-b", type: "rental", name: "B", description: "", quantity: 1, path: [D, "prod-alt", "comp-b"], substituted_for: [{ path: [D, KIT], quantity: 1 }] } as unknown as LineItem,
   );
   const sources = { orders: [order(items)], fulfillments: [f] };
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
@@ -429,7 +429,7 @@ Deno.test("documentDiff: a sibling invoice's substitution covers the line for ev
 Deno.test("documentDiff: a substitute whose replaced line the other side does NOT carry is an ordinary presence difference", () => {
   const f = fulfillment();
   const rows = f.items as unknown as LineItem[];
-  rows.push({ uid: MONOPOD, type: "rental", name: "Monopod", description: "", quantity: 1, path: [D, MONOPOD], path_substituted_for: [D, "gone"] } as unknown as LineItem);
+  rows.push({ uid: MONOPOD, type: "rental", name: "Monopod", description: "", quantity: 1, path: [D, MONOPOD], substituted_for: [{ path: [D, "gone"], quantity: 1 }] } as unknown as LineItem);
   const sources = { orders: [order()], fulfillments: [f] };
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), { [`${D}/${MONOPOD}`]: ["order#1001:only_here"] });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), { [`${D}/${MONOPOD}`]: ["fulfillment#1001:missing_here"] });

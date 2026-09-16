@@ -19,7 +19,7 @@
  * `fulfillments` became a template SOURCE collection so a packing list can be
  * rendered from what was actually PICKED rather than from what was ordered — a
  * fulfillment line carries `quantity` beside `quantity_order`, and
- * `path_substituted_for` when a picker swapped one item for another. None of
+ * `substituted_for` when a picker swapped one item for another. None of
  * that exists on the order, so an order-sourced packing list can only ever
  * describe intent.
  *

@@ -74,12 +74,13 @@ Deno.test("isStrictlyBelow: excludes the row itself", () => {
 
 // ── anchors ──────────────────────────────────────────────────────
 
-Deno.test("collectSubstitutionAnchors: only rows carrying path_substituted_for", () => {
+Deno.test("collectSubstitutionAnchors: only rows carrying substituted_for", () => {
   const anchors = collectSubstitutionAnchors([
     { path: ["d", "a"] },
-    { path: ["d", "y"], path_substituted_for: ["d", "x"] },
+    { path: ["d", "y"], substituted_for: [{ path: ["d", "x"], quantity: 1 }] },
     { path: ["d", "y", "c1"] },
-    { path: ["d", "b"], path_substituted_for: undefined },
+    { path: ["d", "b"], substituted_for: undefined },
+    { path: ["d", "e"], substituted_for: [] },
   ]);
   assertEquals(anchors.length, 1);
   assertEquals(anchors[0].path, ["d", "y"]);
@@ -95,7 +96,7 @@ Deno.test("collectSubstitutionAnchors: an EMPTY path on either side is not an an
   // with no `.min(1)` and `getInitialValues` materializes an optional array as
   // `[]`, so any line seeded from the schema carries one.
   const fromSeed = collectSubstitutionAnchors([
-    { path: ["d", "y"], path_substituted_for: [] },
+    { path: ["d", "y"], substituted_for: [{ path: [], quantity: 1 }] },
   ]);
   assertEquals(fromSeed, []);
   assertFalse(
@@ -106,7 +107,7 @@ Deno.test("collectSubstitutionAnchors: an EMPTY path on either side is not an an
   // The mirror: an anchor with no path of its own would put every row in the
   // document inside its subtree.
   const noOwnPath = collectSubstitutionAnchors([
-    { path: [], path_substituted_for: ["d", "x"] },
+    { path: [], substituted_for: [{ path: ["d", "x"], quantity: 1 }] },
   ]);
   assertEquals(noOwnPath, []);
   assertFalse(isInSubstitutedSubtree(["completely", "unrelated"], noOwnPath));
@@ -114,14 +115,14 @@ Deno.test("collectSubstitutionAnchors: an EMPTY path on either side is not an an
 
 Deno.test("isRemovedBySubstitution: X itself is explained", () => {
   const anchors = collectSubstitutionAnchors([
-    { path: ["d", "y"], path_substituted_for: ["d", "x"] },
+    { path: ["d", "y"], substituted_for: [{ path: ["d", "x"], quantity: 1 }] },
   ]);
   assert(isRemovedBySubstitution(["d", "x"], anchors));
 });
 
 Deno.test("isRemovedBySubstitution: X's whole component subtree is explained", () => {
   const anchors = collectSubstitutionAnchors([
-    { path: ["d", "y"], path_substituted_for: ["d", "x"] },
+    { path: ["d", "y"], substituted_for: [{ path: ["d", "x"], quantity: 1 }] },
   ]);
   assert(isRemovedBySubstitution(["d", "x", "c1"], anchors));
   assert(isRemovedBySubstitution(["d", "x", "c1", "c2"], anchors));
@@ -129,7 +130,7 @@ Deno.test("isRemovedBySubstitution: X's whole component subtree is explained", (
 
 Deno.test("isRemovedBySubstitution: an unrelated row is NOT explained", () => {
   const anchors = collectSubstitutionAnchors([
-    { path: ["d", "y"], path_substituted_for: ["d", "x"] },
+    { path: ["d", "y"], substituted_for: [{ path: ["d", "x"], quantity: 1 }] },
   ]);
   assertFalse(isRemovedBySubstitution(["d", "z"], anchors));
   assertFalse(isRemovedBySubstitution(["d", "z", "c1"], anchors));
@@ -145,7 +146,7 @@ Deno.test("isRemovedBySubstitution: an unrelated row is NOT explained", () => {
  */
 Deno.test("isRemovedBySubstitution: reads substitutedFor, never the anchor's own path", () => {
   const anchors = collectSubstitutionAnchors([
-    { path: ["d", "y"], path_substituted_for: ["d", "x"] },
+    { path: ["d", "y"], substituted_for: [{ path: ["d", "x"], quantity: 1 }] },
   ]);
   assert(isRemovedBySubstitution(["d", "x"], anchors));
   assertFalse(isRemovedBySubstitution(["d", "y"], anchors));
@@ -155,7 +156,7 @@ Deno.test("isRemovedBySubstitution: reads substitutedFor, never the anchor's own
 
 Deno.test("isInSubstitutedSubtree: Y's components are explained", () => {
   const anchors = collectSubstitutionAnchors([
-    { path: ["d", "y"], path_substituted_for: ["d", "x"] },
+    { path: ["d", "y"], substituted_for: [{ path: ["d", "x"], quantity: 1 }] },
   ]);
   assert(isInSubstitutedSubtree(["d", "y", "c1"], anchors));
   assert(isInSubstitutedSubtree(["d", "y", "c1", "c2"], anchors));
@@ -168,14 +169,14 @@ Deno.test("isInSubstitutedSubtree: Y's components are explained", () => {
  */
 Deno.test("isInSubstitutedSubtree: Y is NOT inside its own subtree", () => {
   const anchors = collectSubstitutionAnchors([
-    { path: ["d", "y"], path_substituted_for: ["d", "x"] },
+    { path: ["d", "y"], substituted_for: [{ path: ["d", "x"], quantity: 1 }] },
   ]);
   assertFalse(isInSubstitutedSubtree(["d", "y"], anchors));
 });
 
 Deno.test("isInSubstitutedSubtree: X's surviving descendants are not explained as additions", () => {
   const anchors = collectSubstitutionAnchors([
-    { path: ["d", "y"], path_substituted_for: ["d", "x"] },
+    { path: ["d", "y"], substituted_for: [{ path: ["d", "x"], quantity: 1 }] },
   ]);
   assertFalse(isInSubstitutedSubtree(["d", "x", "c1"], anchors));
 });
@@ -184,8 +185,8 @@ Deno.test("isInSubstitutedSubtree: X's surviving descendants are not explained a
 
 Deno.test("findSubtreeAnchor: returns the NEAREST enclosing anchor", () => {
   const anchors = collectSubstitutionAnchors([
-    { path: ["d", "y"], path_substituted_for: ["d", "x"] },
-    { path: ["d", "y", "c1", "y2"], path_substituted_for: ["d", "y", "c1", "x2"] },
+    { path: ["d", "y"], substituted_for: [{ path: ["d", "x"], quantity: 1 }] },
+    { path: ["d", "y", "c1", "y2"], substituted_for: [{ path: ["d", "y", "c1", "x2"], quantity: 1 }] },
   ]);
   // A component of the inner substitution belongs to the inner anchor — the
   // product whose `components[]` must sanction it.
@@ -201,7 +202,7 @@ Deno.test("findSubtreeAnchor: returns the NEAREST enclosing anchor", () => {
 
 Deno.test("findSubtreeAnchor: undefined when nothing encloses the path", () => {
   const anchors = collectSubstitutionAnchors([
-    { path: ["d", "y"], path_substituted_for: ["d", "x"] },
+    { path: ["d", "y"], substituted_for: [{ path: ["d", "x"], quantity: 1 }] },
   ]);
   assertEquals(findSubtreeAnchor(["d", "z", "c1"], anchors), undefined);
   assertEquals(findSubtreeAnchor(["d", "y"], anchors), undefined);
@@ -214,22 +215,17 @@ Deno.test("collectSubstitutionAnchors: a substituted_for subtree anchors at its 
     { path: ["d", "y"], quantity: 5, substituted_for: [{ path: ["d", "x1"], quantity: 2 }, { path: ["d", "x2"], quantity: 1 }] },
     { path: ["d", "y", "c"], quantity: 10, substituted_for: [{ path: ["d", "x1"], quantity: 4 }] },
   ]);
-  assertEquals(anchors.map((a) => [a.path.join("/"), a.substitutedFor.join("/"), a.quantity, a.form]), [
-    ["d/y", "d/x1", 2, "entry"],
-    ["d/y", "d/x2", 1, "entry"],
+  assertEquals(anchors.map((a) => [a.path.join("/"), a.substitutedFor.join("/"), a.quantity]), [
+    ["d/y", "d/x1", 2],
+    ["d/y", "d/x2", 1],
   ]);
-});
-
-Deno.test("collectSubstitutionAnchors: a legacy anchor stands in with the row's whole quantity", () => {
-  const [a] = collectSubstitutionAnchors([{ path: ["d", "y"], quantity: 3, path_substituted_for: ["d", "x"] }]);
-  assertEquals([a.quantity, a.form], [3, "legacy"]);
 });
 
 Deno.test("standInUnits: sums only entries whose X is live", () => {
   const row = { path: ["d", "y"], substituted_for: [{ path: ["d", "x1"], quantity: 2 }, { path: ["d", "x2"], quantity: 1 }] };
   assertEquals(standInUnits(row, new Set(["d/x1", "d/x2"])), 3);
   assertEquals(standInUnits(row, new Set(["d/x2"])), 1);
-  assertEquals(standInUnits({ path: ["d", "y"], path_substituted_for: ["d", "x"] }, new Set(["d/x"])), 0);
+  assertEquals(standInUnits({ path: ["d", "y"] }, new Set(["d/x"])), 0);
 });
 
 Deno.test("SubstitutedForList: entries are unique by path, and a path and a positive quantity are required", () => {

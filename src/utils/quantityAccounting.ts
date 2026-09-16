@@ -15,31 +15,25 @@
  * remaining-invoice create mode (via {@link remainingForOrder}), and the
  * coverage census.
  *
- * ## Substitutions, as the documents carry them today
+ * ## Substitutions (D2, manager#414)
  *
- * Today a substitute Y carries one `path_substituted_for` naming X's order path,
- * and Y replaces X in place. So:
+ * A substitute Y's `substituted_for` entries record how MUCH of Y stands in for
+ * each X. So:
  *
- * - **Y's row quantity counts in full toward X.** Y's own path is not an order
- *   path and receives nothing, and Y's components (which exist on no order
- *   line) count toward nothing.
+ * - **The subtree root's entry credits X by its quantity.** Y's components carry
+ *   entries too (stamped at the document's ratio), but they anchor nothing.
  * - **X's components are credited through the ORDER's own stored ratio** —
  *   `credit × component quantity ÷ kit quantity`, walked down the order's path
  *   tree, rounded half-up once per level. Never the catalog: optional and
  *   variable components make catalog derivation wrong (D1). A full swap credits
  *   every component exactly its order quantity, so the rounding only ever bites
  *   a partial swap.
- * - **A spent anchor is not a substitution** — {@link liveInvoiceAnchors}
- *   drops an anchor whose Y the order now carries itself, and that row then
- *   counts at its own path like any other.
- *
- * **`substituted_for` (Track S, manager#414) records how MUCH of Y stands in.**
- * The subtree root's entry credits X by its quantity (then down X's components by
- * the ratio walk, as above), and every row of the subtree bills its own path by
- * `row quantity − Σ live entry quantities` (D2) — which is how a merge into a Y
- * the order already carries bills both lines. An entry is spent once the order
- * no longer carries its X, and its units then count at the row's own path.
- * Legacy `path_substituted_for` rows keep the rule above until S4 removes them.
+ * - **Every row of the subtree bills its own path by
+ *   `row quantity − Σ live entry quantities`** — which is how a merge into a Y
+ *   the order already carries bills both lines.
+ * - **A spent entry is not a substitution** — {@link liveInvoiceAnchors} drops an
+ *   anchor once the order no longer carries its X, and its units then count at
+ *   the row's own path like any other.
  *
  * ## Dates are money, not quantity (D4)
  *
@@ -291,10 +285,7 @@ export function billedByPath(
         at(x).rows.push({ invoiceUid: invoice.uid, item, via: "substitute", quantity: anchor.quantity, window });
         substituteCredit.set(x, (substituteCredit.get(x) ?? 0) + anchor.quantity);
       }
-      // A legacy swap was in place: all of Y replaced X, and Y's components
-      // stand in for nothing on the order.
-      if (enclosing.some((a) => a.form === "legacy")) continue;
-      // A `substituted_for` row (D2): what does not stand in for a live X is the
+      // D2: what does not stand in for a live X is the
       // order's own quantity at this path — a merge into a Y the order carries.
       const liveX = new Set(enclosing.map((a) => key(a.substitutedFor)));
       bill((item.quantity ?? 0) - standInUnits(item, liveX));

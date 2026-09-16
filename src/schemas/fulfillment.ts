@@ -16,8 +16,8 @@
  * not a property to assume from this header.
  *
  * Picker-editable: line items may carry `quantity_order` (server-set when
- * picker quantity diverges from order quantity) and `path_substituted_for`
- * (picker-set on substitution line items, cleared on graduation). The doc
+ * picker quantity diverges from order quantity) and `substituted_for`
+ * (picker-set on substitution line items, spent once the order drops X). The doc
  * carries its own `version` for optimistic concurrency on picker writes.
  */
 import { z } from "zod";
@@ -141,14 +141,8 @@ export interface FulfillmentLineItemType {
    */
   quantity_order?: number;
   /**
-   * Picker-set on substitution line items. Carries the path of the
-   * substituted-for item at the moment of substitution. Cleared by the
-   * projection on graduation (admin emits at the same path).
-   */
-  path_substituted_for?: string[];
-  /**
-   * The substitutions this row stands in for, with how many units each — see
-   * `SubstitutedForList`. Replaces `path_substituted_for` (manager#414).
+   * Picker-set on substitution line items: the substitutions this row stands in
+   * for, with how many units each — see `SubstitutedForList` (manager#414).
    */
   substituted_for?: SubstitutedForEntryType[];
 }
@@ -176,7 +170,6 @@ const FulfillmentLineItemInner = z.strictObject({
   order_number: z.int().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
   quantity_order: z.number().int().min(0).optional(),
-  path_substituted_for: z.array(ItemUid).optional(),
   substituted_for: SubstitutedForList.optional(),
   // 🔴 Attached to the **Inner** const so `FulfillmentItem`'s discriminated union
   // below enforces it, matching `order.ts` and (since 2026-09-09) `invoice.ts`.
@@ -242,7 +235,7 @@ export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> =
 //
 // ⭐ **The field list is MEASURED from the service, not chosen.** Every body
 // field `updateFulfillmentItems` reads: `uid` (23 sites), `path` (19),
-// `path_substituted_for` (10), `quantity` (5), and `quantity_order` (1, only to
+// `substituted_for`, `quantity` (5), and `quantity_order` (1, only to
 // refuse it). Everything else on a stored line — `type`, `name`, `description`,
 // `stock_method`, `order_number`, `uid_order`, `zero_priced` — is re-derived
 // server-side from the order item, the replacement product or the catalog
@@ -254,7 +247,7 @@ export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> =
 // the invoice grain already has the scar: `InvoiceItemInputLineInner` is a
 // `z.object`, so a field missing from the input channel is STRIPPED, the write
 // succeeds, and the value is simply gone from the stored document —
-// `path_substituted_for` did exactly that, which is why
+// the retired `path_substituted_for` did exactly that, which is why
 // `tests/invoice.test.ts` carries an arm named *"the INPUT schema accepts it, or
 // every PUT drops it"*. The fulfillment twin of that arm is in
 // `tests/fulfillment.test.ts`.
@@ -303,7 +296,6 @@ export interface FulfillmentItemInputLineType {
   uid: string;
   path: string[];
   quantity: number;
-  path_substituted_for?: string[];
   /**
    * What this row stands in for, per replaced X (manager#414). Unique by path,
    * as on the stored line.
@@ -317,7 +309,6 @@ const FulfillmentItemInputLineInner = z.object({
   uid: ItemUid,
   path: z.array(ItemUid),
   quantity: z.number().int().min(0),
-  path_substituted_for: z.array(ItemUid).optional(),
   substituted_for: SubstitutedForList.optional(),
   // Same declaration as the stored line's, so a body carrying it survives the
   // parse and reaches `updateFulfillmentItems`' explicit refusal.
@@ -379,7 +370,7 @@ export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z
  * the predicate was hand-written four times across three repos and two of those
  * copies returned `boolean` and therefore narrowed NOTHING — `isLineItemType`
  * tests the `type` STRING, so a caller reaching for it got a truth value and
- * still had to cast to touch `quantity_order` or `path_substituted_for`. The
+ * still had to cast to touch `quantity_order` or `substituted_for`. The
  * order and invoice grains have had `isLineItem` / `isInvoiceLineItem` all
  * along; this closes the set.
  *
