@@ -94,7 +94,13 @@ import {
 } from "../schemas/mod.ts";
 import { fromCentsBig, roundDivHalfAwayFromZero } from "./money.ts";
 import { chicagoDaysBetween, getDuration, isNonTerminatingWindow } from "./dates.ts";
-import { classifySharedFields, fieldsUnder, mergeSharedFields, sameSharedValue, type SharedField } from "./shared-fields.ts";
+import {
+  classifySharedFields,
+  fieldsUnder,
+  mergeSharedFields,
+  resolveMergedPairDates,
+  type SharedField,
+} from "./shared-fields.ts";
 import { resolveDownstreamChargeDays } from "./orders.ts";
 import { agingBucketOf, type InvoiceAging } from "../schemas/mod.ts";
 import {
@@ -1332,16 +1338,6 @@ function mergeLine(
   ).merged;
 }
 
-/** The six ISO boundaries of a pair's `dates`, each with a `_fs` companion. */
-const PAIR_DATE_BOUNDARIES = [
-  "delivery_start",
-  "delivery_end",
-  "collection_start",
-  "collection_end",
-  "charge_start",
-  "charge_end",
-] as const;
-
 /** Is any shared field of this invoice pair different from the previous order pair? */
 function pairOverridden(prev: DocDestinationType, inv: InvoiceDestinationPair, uidOrder: string): boolean {
   const p = toInvoiceDestinationPair(uidOrder, prev);
@@ -1378,50 +1374,17 @@ function mergePair(
     inv,
   );
 
-  type DateRecord = Record<string, unknown>;
-  const isRecord = (v: unknown): v is DateRecord => v !== null && typeof v === "object" && !Array.isArray(v);
-  const m = merged.dates as unknown;
-  const n = nextPair.dates as unknown;
-  const s = inv.dates as unknown;
-  if (!isRecord(m)) return merged;
-
-  const windowOf = (other: unknown) =>
-    isRecord(other) && PAIR_DATE_BOUNDARIES.every((b) => sameSharedValue(m[b], other[b]));
-  if (windowOf(s)) return merged;
-  if (windowOf(n)) return { ...merged, dates: nextPair.dates };
-
-  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
-  const nonTerminating = (start: string | null, end: string | null) =>
-    start !== null && end !== null && isNonTerminatingWindow(start, end);
-  const keepStored = { ...merged, dates: inv.dates };
-  if (
-    nonTerminating(str(m.delivery_start), str(m.collection_start)) ||
-    nonTerminating(str(m.charge_start) ?? str(m.delivery_start), str(m.charge_end) ?? str(m.collection_start))
-  ) return keepStored;
-
-  const dates: DateRecord = { ...m };
-  for (const b of PAIR_DATE_BOUNDARIES) {
-    const fromStored = isRecord(s) && sameSharedValue(m[b], s[b]);
-    dates[`${b}_fs`] = (fromStored ? (s as DateRecord)[`${b}_fs`] : isRecord(n) ? n[`${b}_fs`] : null) ?? null;
-  }
-  const deliveryStart = str(m.delivery_start);
-  const collectionStart = str(m.collection_start);
-  if (deliveryStart !== null && collectionStart !== null) {
-    try {
-      const duration = getDuration(
-        { delivery_start: deliveryStart, collection_start: collectionStart, charge_start: str(m.charge_start), charge_end: str(m.charge_end) },
-        [...holidays],
-      );
-      dates.days_active = duration.activeDays;
-      dates.days_charged = duration.chargeDays;
-    } catch {
-      return keepStored;
-    }
-  } else {
-    dates.days_active = null;
-    dates.days_charged = null;
-  }
-  return { ...merged, dates: dates as unknown as InvoiceDestinationPair["dates"] };
+  const dates = resolveMergedPairDates(
+    merged.dates,
+    nextPair.dates,
+    inv.dates,
+    holidays,
+    getDuration,
+    isNonTerminatingWindow,
+  );
+  // `null` means the merged window was invalid — keep the invoice's whole
+  // `dates` and let the pair diff show it. An invalid window is never written.
+  return dates === null ? { ...merged, dates: inv.dates } : { ...merged, dates };
 }
 
 /** One emitted scope row and where it came from — what the charge-day pass reads. */

@@ -425,6 +425,116 @@ export function mergeSharedFields<T>(
   return { merged: merged as T, overridden: [...overridden].sort() };
 }
 
+// ── A merged pair's window, and its derived fields ──────────────────────────
+
+/** The six ISO boundaries of a pair's `dates`. Everything else on it is derived. */
+const PAIR_DATE_BOUNDARIES = [
+  "delivery_start",
+  "delivery_end",
+  "collection_start",
+  "collection_end",
+  "charge_start",
+  "charge_end",
+] as const;
+
+type DateRecord = Record<string, unknown>;
+const isDateRecord = (v: unknown): v is DateRecord => v !== null && typeof v === "object" && !Array.isArray(v);
+const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+
+/**
+ * Resolve the `dates` object to STORE for a pair whose leaves have just been
+ * merged, and recompute the derived fields the merge deliberately left alone.
+ *
+ * {@link mergeSharedFields} runs per `dates` LEAF and skips the `derived` keys —
+ * the `_fs` Timestamp mirrors and the `days_*` counts — so it leaves them as the
+ * downstream document had them. That is correct when the merged window came
+ * wholly from one side and internally inconsistent when it did not, which is
+ * exactly what an operator editing one endpoint in the pair editor produces.
+ * Four cases:
+ *
+ * - **window unchanged from the downstream's** → nothing to recompute;
+ * - **window equal to the source's** → take the source's `dates` whole, whose
+ *   derived fields were computed from exactly those boundaries;
+ * - **a mix** → each `_fs` from the side its own boundary came from, and the day
+ *   counts recomputed against `holidays`;
+ * - **invalid** → keep the downstream's WHOLE `dates`.
+ *
+ * 🔴 **A mixed window can be invalid** — the downstream moved delivery later
+ * while the source moved collection earlier — and an invalid window is NEVER
+ * written. The downstream keeps its own `dates` and the pair diff shows it.
+ *
+ * ⭐ **One implementation for the invoice and the fulfillment.** Two copies of a
+ * pairing rule in one domain is precisely what api-cloudrun#593 was; the arms
+ * differ only in the pair TYPE, and this is generic in it.
+ *
+ * @param merged - the pair's `dates` as {@link mergeSharedFields} left it
+ * @param source - the new order pair's `dates`
+ * @param downstream - the stored document's `dates`
+ * @param holidays - Chicago `YYYY-MM-DD` days, for the day-count recompute
+ * @param getDuration - the day-count derivation, injected so this module stays
+ *   free of a dependency on the date helpers' own import graph
+ * @param isNonTerminating - the invalid-window predicate
+ * @returns the `dates` to store, or `null` meaning "keep the downstream's whole"
+ */
+export function resolveMergedPairDates<D>(
+  merged: D,
+  source: D,
+  downstream: D,
+  holidays: readonly string[],
+  getDuration: (
+    w: { delivery_start: string; collection_start: string; charge_start: string | null; charge_end: string | null },
+    holidays: string[],
+  ) => { activeDays: number | null; chargeDays: number | null },
+  isNonTerminating: (start: string, end: string) => boolean,
+): D | null {
+  const m = merged as unknown;
+  const n = source as unknown;
+  const s = downstream as unknown;
+  if (!isDateRecord(m)) return merged;
+
+  const windowOf = (other: unknown) =>
+    isDateRecord(other) && PAIR_DATE_BOUNDARIES.every((b) => sameSharedValue(m[b], other[b]));
+  if (windowOf(s)) return merged;
+  if (windowOf(n)) return source;
+
+  const nonTerminating = (start: string | null, end: string | null) =>
+    start !== null && end !== null && isNonTerminating(start, end);
+  if (
+    nonTerminating(str(m.delivery_start), str(m.collection_start)) ||
+    nonTerminating(str(m.charge_start) ?? str(m.delivery_start), str(m.charge_end) ?? str(m.collection_start))
+  ) return null;
+
+  const dates: DateRecord = { ...m };
+  for (const b of PAIR_DATE_BOUNDARIES) {
+    const fromDownstream = isDateRecord(s) && sameSharedValue(m[b], s[b]);
+    dates[`${b}_fs`] =
+      (fromDownstream ? (s as DateRecord)[`${b}_fs`] : isDateRecord(n) ? n[`${b}_fs`] : null) ?? null;
+  }
+  const deliveryStart = str(m.delivery_start);
+  const collectionStart = str(m.collection_start);
+  if (deliveryStart !== null && collectionStart !== null) {
+    try {
+      const duration = getDuration(
+        {
+          delivery_start: deliveryStart,
+          collection_start: collectionStart,
+          charge_start: str(m.charge_start),
+          charge_end: str(m.charge_end),
+        },
+        [...holidays],
+      );
+      dates.days_active = duration.activeDays;
+      dates.days_charged = duration.chargeDays;
+    } catch {
+      return null;
+    }
+  } else {
+    dates.days_active = null;
+    dates.days_charged = null;
+  }
+  return dates as D;
+}
+
 // ── The order → fulfillment schema pair (api-cloudrun#989) ──────────────────
 
 /**

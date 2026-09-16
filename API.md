@@ -32084,6 +32084,45 @@ order's number, and `FulfillmentSchema` reuses `ORDER_STATUSES` for exactly
 that reason. They stay on the caller's unconditional-copy list; the tag says
 "not a propagated VALUE", not "leave it stale".
 
+### `resolveMergedPairDates(merged: D, source: D, downstream: D, holidays: readonly string[], getDuration: fnOrConstructor, isNonTerminating: fnOrConstructor): D | null`
+
+Resolve the `dates` object to STORE for a pair whose leaves have just been
+merged, and recompute the derived fields the merge deliberately left alone.
+
+{@link mergeSharedFields} runs per `dates` LEAF and skips the `derived` keys —
+the `_fs` Timestamp mirrors and the `days_*` counts — so it leaves them as the
+downstream document had them. That is correct when the merged window came
+wholly from one side and internally inconsistent when it did not, which is
+exactly what an operator editing one endpoint in the pair editor produces.
+Four cases:
+
+- **window unchanged from the downstream's** → nothing to recompute;
+- **window equal to the source's** → take the source's `dates` whole, whose
+  derived fields were computed from exactly those boundaries;
+- **a mix** → each `_fs` from the side its own boundary came from, and the day
+  counts recomputed against `holidays`;
+- **invalid** → keep the downstream's WHOLE `dates`.
+
+🔴 **A mixed window can be invalid** — the downstream moved delivery later
+while the source moved collection earlier — and an invalid window is NEVER
+written. The downstream keeps its own `dates` and the pair diff shows it.
+
+⭐ **One implementation for the invoice and the fulfillment.** Two copies of a
+pairing rule in one domain is precisely what api-cloudrun#593 was; the arms
+differ only in the pair TYPE, and this is generic in it.
+
+**Parameters**
+
+- `merged` — the pair's `dates` as {@link mergeSharedFields} left it
+- `source` — the new order pair's `dates`
+- `downstream` — the stored document's `dates`
+- `holidays` — Chicago `YYYY-MM-DD` days, for the day-count recompute
+- `getDuration` — the day-count derivation, injected so this module stays
+free of a dependency on the date helpers' own import graph
+- `isNonTerminating` — the invalid-window predicate
+
+**Returns** — the `dates` to store, or `null` meaning "keep the downstream's whole"
+
 ### `sameSharedValue(a: unknown, b: unknown): boolean`
 
 Do two values state the same thing? Absent and `null` are the same statement.

@@ -14814,6 +14814,39 @@
         },
         {
           "kind": "function",
+          "name": "resolveMergedPairDates",
+          "signature": "resolveMergedPairDates(merged: D, source: D, downstream: D, holidays: readonly string[], getDuration: fnOrConstructor, isNonTerminating: fnOrConstructor): D | null",
+          "doc": "Resolve the `dates` object to STORE for a pair whose leaves have just been\nmerged, and recompute the derived fields the merge deliberately left alone.\n\n{@link mergeSharedFields} runs per `dates` LEAF and skips the `derived` keys —\nthe `_fs` Timestamp mirrors and the `days_*` counts — so it leaves them as the\ndownstream document had them. That is correct when the merged window came\nwholly from one side and internally inconsistent when it did not, which is\nexactly what an operator editing one endpoint in the pair editor produces.\nFour cases:\n\n- **window unchanged from the downstream's** → nothing to recompute;\n- **window equal to the source's** → take the source's `dates` whole, whose\n  derived fields were computed from exactly those boundaries;\n- **a mix** → each `_fs` from the side its own boundary came from, and the day\n  counts recomputed against `holidays`;\n- **invalid** → keep the downstream's WHOLE `dates`.\n\n🔴 **A mixed window can be invalid** — the downstream moved delivery later\nwhile the source moved collection earlier — and an invalid window is NEVER\nwritten. The downstream keeps its own `dates` and the pair diff shows it.\n\n⭐ **One implementation for the invoice and the fulfillment.** Two copies of a\npairing rule in one domain is precisely what api-cloudrun#593 was; the arms\ndiffer only in the pair TYPE, and this is generic in it.",
+          "paramTags": [
+            {
+              "name": "merged",
+              "doc": "the pair's `dates` as {@link mergeSharedFields} left it"
+            },
+            {
+              "name": "source",
+              "doc": "the new order pair's `dates`"
+            },
+            {
+              "name": "downstream",
+              "doc": "the stored document's `dates`"
+            },
+            {
+              "name": "holidays",
+              "doc": "Chicago `YYYY-MM-DD` days, for the day-count recompute"
+            },
+            {
+              "name": "getDuration",
+              "doc": "the day-count derivation, injected so this module stays\nfree of a dependency on the date helpers' own import graph"
+            },
+            {
+              "name": "isNonTerminating",
+              "doc": "the invalid-window predicate"
+            }
+          ],
+          "returnsTag": "the `dates` to store, or `null` meaning \"keep the downstream's whole\""
+        },
+        {
+          "kind": "function",
           "name": "sameSharedValue",
           "signature": "sameSharedValue(a: unknown, b: unknown): boolean",
           "doc": "Do two values state the same thing? Absent and `null` are the same statement.",
