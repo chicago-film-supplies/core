@@ -25102,6 +25102,22 @@ went down, or its dates shortened, after billing). That is a credit-note
 question rather than a remainder, and it is the caller's to decide — this
 reports it rather than clamping it away.
 
+## A remainder refuses CRMS-authored invoices (owner, 2026-09-16)
+
+Both {@link remainingForOrder} and {@link buildRemainingInvoice} fail closed
+when any LIVE invoice on the order carries a `crms_id`, naming those uids in
+`crms_authored`, exactly as they do on an unaligned scope. The sum itself
+({@link billedByPath}) is unaffected, so a diff still reads them.
+
+The 2026-09-16 census (api-cloudrun `scripts/audit-order-invoice-coverage.ts`,
+prod and dev identical): every one of the 103 orders the button was offered
+on was billed by CRMS, and none by a native invoice. CRMS billed units under
+a different destination than the order carries them now — #478 bills 10
+Trash Removal under one destination where the order spreads them over five —
+so the same units read as NEW at four paths and OVER-billed at the fifth, and
+a remainder bills paid units again. 32 of the 103 carried that signature;
+the rest cannot be told apart from it with what is stored.
+
 Pure: no reads.
 
 ### `AccountedInvoice`
@@ -25114,6 +25130,7 @@ interface AccountedInvoice {
   status: InvoiceStatusType;
   items: InvoiceItem[];
   destinations?: readonly InvoiceDocDestinationType[];
+  crms_id?: number | string | null;
 }
 ```
 
@@ -25197,6 +25214,7 @@ interface RemainingForOrder {
   lines: RemainingLine[];
   compared: string[];
   unaligned: string[];
+  crms_authored: string[];
 }
 ```
 
@@ -25209,6 +25227,7 @@ interface RemainingInvoice {
   overbilled: typeLiteral[];
   compared: string[];
   unaligned: string[];
+  crms_authored: string[];
 }
 ```
 
@@ -25306,7 +25325,12 @@ manager's preview.
 - **Over-billing is never netted in.** A negative quantity or extension is
   returned in `overbilled`, for the credit-note flow.
 
-🔴 Fails closed on an unaligned scope, exactly as {@link remainingForOrder}.
+🔴 Fails closed on an unaligned scope or a live CRMS-authored invoice, exactly
+as {@link remainingForOrder}.
+
+### `crmsAuthoredInvoices(invoices: readonly AccountedInvoice[]): string[]`
+
+The uids of the LIVE invoices CRMS authored — a remainder refuses when any exist.
 
 ### `extensionGroups(orderLine: LineItem, billed: BilledAtPath | undefined, orderWindow: BilledWindow | null): ExtensionGroup[]`
 
@@ -25345,6 +25369,9 @@ existing paths, and date-extension money on rows already billed (D4).
 🔴 **Fails closed on any unaligned scope** — `lines` comes back empty and the
 uids are in `unaligned`. A remainder built over a partial sum bills again
 whatever the unaligned invoice already billed.
+
+🔴 **Fails closed on any live CRMS-authored invoice**, the same way, naming it
+in `crms_authored` — see the module header.
 
 Every order LINE is considered, dividers never. A line whose quantity and
 extension are both zero is omitted; a negative one (over-billing) is returned,

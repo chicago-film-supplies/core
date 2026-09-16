@@ -202,6 +202,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "quantityAccounting": [
     { name: "buildRemainingInvoice", expr: "it.quantityAccounting.buildRemainingInvoice(order, invoices, arg3)", desc: "Build the invoice that bills what is left on an order: new lines whole, quantity increases at their own path, and each extension of dates as a date-extension section (owner decisions, 2026-09-13 and 2026-09-15).", returns: "RemainingInvoice" },
+    { name: "crmsAuthoredInvoices", expr: "it.quantityAccounting.crmsAuthoredInvoices(invoices)", desc: "The uids of the LIVE invoices CRMS authored — a remainder refuses when any exist.", returns: "string[]" },
     { name: "extensionGroups", expr: "it.quantityAccounting.extensionGroups(orderLine, billed, orderWindow)", desc: "The extension still owed on an order line, as groups of billed units that share their terms and their cumulative billed days (api-cloudrun#680 R1).", returns: "ExtensionGroup[]" },
     { name: "orderLineWindow", expr: "it.quantityAccounting.orderLineWindow(destinations, path)", desc: "The window of the order pair an order line hangs under (`path[0]`), or `null`.", returns: "BilledWindow | null" },
     { name: "pairWindow", expr: "it.quantityAccounting.pairWindow(pair)", desc: "A pair's {@link BilledWindow}, or `null` when it has no end or no day count.", returns: "BilledWindow | null" },

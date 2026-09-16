@@ -19,6 +19,7 @@ import {
   accountLine,
   billedByPath,
   buildRemainingInvoice,
+  crmsAuthoredInvoices,
   remainingForOrder,
   type RemainingInvoiceSource,
 } from "../src/utils/quantityAccounting.ts";
@@ -221,7 +222,7 @@ Deno.test("quantityAccounting: an unaligned scope fails remainingForOrder closed
   const unaligned = invoice("b", [DEST_ITEM, line(LIGHT, [D, LIGHT], 3, 1000)]);
   const billed = billedByPath(O, order, [aligned, unaligned]);
   assertEquals([billed.compared, billed.unaligned], [["a"], ["b"]]);
-  assertEquals(remainingForOrder(O, order, [aligned, unaligned], pairs()), { lines: [], compared: ["a"], unaligned: ["b"] });
+  assertEquals(remainingForOrder(O, order, [aligned, unaligned], pairs()), { lines: [], compared: ["a"], unaligned: ["b"], crms_authored: [] });
 });
 
 Deno.test("quantityAccounting: accountLine with nothing billed is the whole line", () => {
@@ -405,6 +406,44 @@ Deno.test("buildRemainingInvoice: an unaligned scope fails closed", () => {
   assertEquals([built.items, built.unaligned], [[], ["a"]]);
 });
 
+
+// ── CRMS-authored invoices (owner, 2026-09-16) ──
+
+const crms = (inv: AccountedInvoice, crmsId: number | string = 4711): AccountedInvoice => ({ ...inv, crms_id: crmsId });
+
+Deno.test("quantityAccounting: a live CRMS-authored invoice fails the remainder closed, and names it", () => {
+  const order = [...lightOrder(6), line("prod-tripod", [D, "prod-tripod"], 1, 3000)];
+  const billedBy = [crms(invoice("a", lightOrder(4), "paid")), invoice("b", lightOrder(1), "issued")];
+  assertEquals(remainingForOrder(O, order, billedBy, pairs()), { lines: [], compared: ["a", "b"], unaligned: [], crms_authored: ["a"] });
+  const built = buildRemainingInvoice(orderSource(order), billedBy, mint);
+  assertEquals([built.items, built.destinations, built.overbilled, built.crms_authored], [[], [], [], ["a"]]);
+  // The sum is not a remainder: a diff still reads what CRMS billed.
+  assertEquals(billedByPath(O, order, billedBy).byPath.get(lightKey)?.quantity, 5);
+});
+
+Deno.test("quantityAccounting: the same order billed natively still has a remainder — the refusal is the crms_id, nothing else", () => {
+  const order = [...lightOrder(6), line("prod-tripod", [D, "prod-tripod"], 1, 3000)];
+  const native = [invoice("a", lightOrder(4), "paid"), invoice("b", lightOrder(1), "issued")];
+  const { lines, crms_authored } = remainingForOrder(O, order, native, pairs());
+  assertEquals([lines.map((l) => [l.path.at(-1), l.quantity, l.new]), crms_authored], [[[LIGHT, 1, false], ["prod-tripod", 1, true]], []]);
+  assertEquals(buildRemainingInvoice(orderSource(order), native, mint).items.length > 0, true);
+});
+
+Deno.test("quantityAccounting: a VOID CRMS invoice, a null crms_id and an empty one do not refuse", () => {
+  const order = lightOrder(6);
+  const billedBy = [
+    crms(invoice("v", lightOrder(6), "void")),
+    { ...invoice("a", lightOrder(2), "paid"), crms_id: null },
+    crms(invoice("b", lightOrder(2), "issued"), ""),
+  ];
+  const result = remainingForOrder(O, order, billedBy, pairs());
+  assertEquals([result.crms_authored, result.lines.map((l) => l.quantity)], [[], [2]]);
+  assertEquals(buildRemainingInvoice(orderSource(order), billedBy, mint).crms_authored, []);
+});
+
+Deno.test("quantityAccounting: a string crms_id refuses as a number does", () => {
+  assertEquals(crmsAuthoredInvoices([crms(invoice("a", lightOrder(1), "draft"), "1911")]), ["a"]);
+});
 
 // ── Windows, not day counts: the 2026-09-16 census shapes (api-cloudrun#680 R1) ──
 

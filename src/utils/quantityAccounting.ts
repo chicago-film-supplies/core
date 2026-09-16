@@ -92,6 +92,22 @@
  * question rather than a remainder, and it is the caller's to decide — this
  * reports it rather than clamping it away.
  *
+ * ## A remainder refuses CRMS-authored invoices (owner, 2026-09-16)
+ *
+ * Both {@link remainingForOrder} and {@link buildRemainingInvoice} fail closed
+ * when any LIVE invoice on the order carries a `crms_id`, naming those uids in
+ * `crms_authored`, exactly as they do on an unaligned scope. The sum itself
+ * ({@link billedByPath}) is unaffected, so a diff still reads them.
+ *
+ * The 2026-09-16 census (api-cloudrun `scripts/audit-order-invoice-coverage.ts`,
+ * prod and dev identical): every one of the 103 orders the button was offered
+ * on was billed by CRMS, and none by a native invoice. CRMS billed units under
+ * a different destination than the order carries them now — #478 bills 10
+ * Trash Removal under one destination where the order spreads them over five —
+ * so the same units read as NEW at four paths and OVER-billed at the fifth, and
+ * a remainder bills paid units again. 32 of the 103 carried that signature;
+ * the rest cannot be told apart from it with what is stored.
+ *
  * Pure: no reads.
  *
  * @module
@@ -120,6 +136,8 @@ export interface AccountedInvoice {
   items: InvoiceItem[];
   /** The pairs that date its sections. Without one, a row it bills has no {@link BilledWindow} and extends by nothing. */
   destinations?: readonly InvoiceDocDestinationType[];
+  /** Set on a CRMS-authored invoice. A remainder refuses an order any live one bills. */
+  crms_id?: number | string | null;
 }
 
 /** A pair's charge window, as an extension compares it: where it ends, and the days it charges. */
@@ -459,6 +477,15 @@ export interface RemainingForOrder {
   compared: string[];
   /** Non-empty ⇒ `lines` is empty: the sum would under-count, so nothing is computed. */
   unaligned: string[];
+  /** Live CRMS-authored invoices. Non-empty ⇒ `lines` is empty: their paths cannot be trusted to bill the order's. */
+  crms_authored: string[];
+}
+
+/** The uids of the LIVE invoices CRMS authored — a remainder refuses when any exist. */
+export function crmsAuthoredInvoices(invoices: readonly AccountedInvoice[]): string[] {
+  return invoices
+    .filter((invoice) => invoice.status !== "void" && invoice.crms_id !== undefined && invoice.crms_id !== null && invoice.crms_id !== "")
+    .map((invoice) => invoice.uid);
 }
 
 /**
@@ -468,6 +495,9 @@ export interface RemainingForOrder {
  * 🔴 **Fails closed on any unaligned scope** — `lines` comes back empty and the
  * uids are in `unaligned`. A remainder built over a partial sum bills again
  * whatever the unaligned invoice already billed.
+ *
+ * 🔴 **Fails closed on any live CRMS-authored invoice**, the same way, naming it
+ * in `crms_authored` — see the module header.
  *
  * Every order LINE is considered, dividers never. A line whose quantity and
  * extension are both zero is omitted; a negative one (over-billing) is returned,
@@ -485,7 +515,10 @@ export function remainingForOrder(
   orderDestinations: readonly DocDestinationType[],
 ): RemainingForOrder {
   const billed = billedByPath(orderUid, orderItems, invoices);
-  if (billed.unaligned.length > 0) return { lines: [], compared: billed.compared, unaligned: billed.unaligned };
+  const crmsAuthored = crmsAuthoredInvoices(invoices);
+  if (billed.unaligned.length > 0 || crmsAuthored.length > 0) {
+    return { lines: [], compared: billed.compared, unaligned: billed.unaligned, crms_authored: crmsAuthored };
+  }
   const lines: RemainingLine[] = [];
   for (const item of orderItems) {
     if (!isLineItemType(item.type)) continue;
@@ -495,7 +528,7 @@ export function remainingForOrder(
     if (account.quantity === 0 && account.extension_cents === 0) continue;
     lines.push({ ...account, path, item, new: at === undefined });
   }
-  return { lines, compared: billed.compared, unaligned: [] };
+  return { lines, compared: billed.compared, unaligned: [], crms_authored: [] };
 }
 
 // ── The remainder invoice (api-cloudrun#680 R1) ─────────────────
@@ -513,7 +546,7 @@ export type RemainingInvoiceSource = AccountedInvoice;
 
 /** @see {@link buildRemainingInvoice} */
 export interface RemainingInvoice {
-  /** The order divider, then the order's scope. Empty when `unaligned` is non-empty or nothing remains. */
+  /** The order divider, then the order's scope. Empty when `unaligned` or `crms_authored` is non-empty, or nothing remains. */
   items: InvoiceDocItemType[];
   /** Every order pair, then one pair per extension section. */
   destinations: InvoiceDocDestinationType[];
@@ -521,6 +554,8 @@ export interface RemainingInvoice {
   overbilled: { path: string[]; quantity: number; extension_days: number }[];
   compared: string[];
   unaligned: string[];
+  /** Live CRMS-authored invoices; non-empty ⇒ nothing is built. See the module header. */
+  crms_authored: string[];
 }
 
 /**
@@ -552,7 +587,8 @@ export interface RemainingInvoice {
  * - **Over-billing is never netted in.** A negative quantity or extension is
  *   returned in `overbilled`, for the credit-note flow.
  *
- * 🔴 Fails closed on an unaligned scope, exactly as {@link remainingForOrder}.
+ * 🔴 Fails closed on an unaligned scope or a live CRMS-authored invoice, exactly
+ * as {@link remainingForOrder}.
  *
  * @throws Error when an extension is owed on a unit a SUBSTITUTE billed: the
  *   extension line would price the substitute at the replaced line's path, and
@@ -565,8 +601,9 @@ export function buildRemainingInvoice(
 ): RemainingInvoice {
   const O = order.uid;
   const billed = billedByPath(O, order.items, invoices);
-  const empty = { items: [], destinations: [], overbilled: [], compared: billed.compared, unaligned: billed.unaligned };
-  if (billed.unaligned.length > 0) return empty;
+  const crmsAuthored = crmsAuthoredInvoices(invoices);
+  const empty = { items: [], destinations: [], overbilled: [], compared: billed.compared, unaligned: billed.unaligned, crms_authored: crmsAuthored };
+  if (billed.unaligned.length > 0 || crmsAuthored.length > 0) return empty;
 
   const orderLines = order.items.filter((it) => isLineItemType(it.type));
   const overbilled: RemainingInvoice["overbilled"] = [];
@@ -692,5 +729,5 @@ export function buildRemainingInvoice(
     }
   }
 
-  return { items, destinations: [...pairs, ...extensionPairs], overbilled, compared: billed.compared, unaligned: [] };
+  return { items, destinations: [...pairs, ...extensionPairs], overbilled, compared: billed.compared, unaligned: [], crms_authored: [] };
 }
