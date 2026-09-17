@@ -84,8 +84,6 @@ Deno.test("CreateOrderInput shows custom error for empty destinations", () => {
       delivery_end: "2026-01-02",
       collection_start: "2026-01-03",
       collection_end: "2026-01-04",
-      charge_start: "2026-01-01",
-      charge_end: "2026-01-04",
     },
     destinations: [],
   };

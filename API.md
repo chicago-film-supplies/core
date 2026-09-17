@@ -6288,7 +6288,7 @@ Possession (delivery and collection) and the charge windows are separate:
 possession drives bookings and availability, and the windows decide what is
 billed.
 
-🔴 **`charge_windows` is required and `charge_start`/`charge_end` are gone**
+🔴 **`charge_windows` is required and the legacy charge fields are gone**
 (charge-windows campaign, decision 9). This schema is a `z.object`, so a
 client that still sends the old keys has them stripped. A client that sends no
 windows is refused, so the manager must ship before the API.
@@ -6362,12 +6362,7 @@ interface OrderDocDatesType {
   collection_start_fs: FirestoreTimestampType | null;
   collection_end: string | null;
   collection_end_fs: FirestoreTimestampType | null;
-  charge_start?: string | null;
-  charge_start_fs?: FirestoreTimestampType | null;
-  charge_end?: string | null;
-  charge_end_fs?: FirestoreTimestampType | null;
   days_active: number | null;
-  days_charged?: number | null;
   charge_windows: ChargeWindowType[];
 }
 ```
@@ -16952,7 +16947,7 @@ Possession (delivery and collection) and the charge windows are separate:
 possession drives bookings and availability, and the windows decide what is
 billed.
 
-🔴 **`charge_windows` is required and `charge_start`/`charge_end` are gone**
+🔴 **`charge_windows` is required and the legacy charge fields are gone**
 (charge-windows campaign, decision 9). This schema is a `z.object`, so a
 client that still sends the old keys has them stripped. A client that sends no
 windows is refused, so the manager must ship before the API.
@@ -17026,12 +17021,7 @@ interface OrderDocDatesType {
   collection_start_fs: FirestoreTimestampType | null;
   collection_end: string | null;
   collection_end_fs: FirestoreTimestampType | null;
-  charge_start?: string | null;
-  charge_start_fs?: FirestoreTimestampType | null;
-  charge_end?: string | null;
-  charge_end_fs?: FirestoreTimestampType | null;
   days_active: number | null;
-  days_charged?: number | null;
   charge_windows: ChargeWindowType[];
 }
 ```
@@ -24963,9 +24953,6 @@ the pair's `days_active` against `holidays`.
   no windows is left without them.
 - **Extension pairs keep their days** (`opts.extension`): the count is the
   days added past what was billed, not a count of the window.
-- **The legacy fields are deleted** — `charge_start`/`charge_end` (+`_fs`) and
-  `days_charged` (charge-windows step 5). Every stored pair passes through
-  here on its next write, so a rewrite drops them; the purge takes the rest.
 
 Pure: returns a copy.
 
@@ -25713,7 +25700,6 @@ manager's preview.
   the section's ADDED days, never a count of the window (owner, 2026-09-17),
   so its lines derive exactly that. An extension is only owed on a window
   that ends before the order's, so the section never starts after it ends.
-  It carries none of the legacy charge fields.
 - **Over-billing is never netted in.** A negative quantity or extension is
   returned in `overbilled`, for the credit-note flow.
 

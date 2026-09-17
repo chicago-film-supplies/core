@@ -47,7 +47,7 @@ Deno.test("OrderDates: charge_windows is required, and a legacy charge_start is 
   const base = { delivery_start: at(5, "09:00:00"), delivery_end: null, collection_start: at(9, "15:00:00"), collection_end: null };
   assertEquals(OrderDates.safeParse(base).success, false, "no windows");
   assertEquals(OrderDates.safeParse({ ...base, charge_windows: [] }).success, false, "at least one window");
-  const legacy = OrderDates.safeParse({ ...base, charge_start: at(5, "09:00:00"), charge_windows: [{ start: at(5, "09:00:00"), end: at(9, "15:00:00") }] });
+  const legacy = OrderDates.safeParse({ ...base, charge_windows: [{ start: at(5, "09:00:00"), end: at(9, "15:00:00") }] });
   assert(legacy.success);
   assertEquals("charge_start" in legacy.data, false);
 });
@@ -98,18 +98,12 @@ Deno.test("chargedDays and chargeEnvelope read stored windows only", () => {
 
 // ── canonicalChargeWindows ───────────────────────────────────────────────────
 
-const FS = { seconds: 1, nanoseconds: 0 };
 
 Deno.test("canonicalChargeWindows: recounts each window and DELETES the legacy fields (charge-windows step 5)", () => {
   const out = canonicalChargeWindows({
     delivery_start: at(5, "09:00:00"),
     collection_start: at(16, "15:00:00"),
-    charge_start: at(5, "09:00:00"),
-    charge_start_fs: FS,
-    charge_end: at(16, "15:00:00"),
-    charge_end_fs: FS,
     days_active: null,
-    days_charged: 11,
     charge_windows: [
       { start: at(5, "09:00:00"), end: at(7, "15:00:00"), days: 99 },
       { start: at(12, "09:00:00"), end: at(13, "15:00:00") },
@@ -126,8 +120,6 @@ Deno.test("canonicalChargeWindows: the legacy charge bounds never imply a window
   const out = canonicalChargeWindows({
     delivery_start: at(5, "09:00:00"),
     collection_start: at(16, "15:00:00"),
-    charge_start: at(6, "09:00:00"),
-    charge_end: null,
   } as ChargeDates & Record<string, unknown>, []) as ChargeDates & Record<string, unknown>;
   assertEquals(out.charge_windows, undefined);
   assertEquals(["charge_start" in out, "charge_end" in out], [false, false]);
@@ -303,12 +295,7 @@ Deno.test("resolveMergedPairDates: a mix recounts the windows and carries each _
     collection_start_fs: { seconds: 2, nanoseconds: tag },
     collection_end: at(collection, "15:00:00"),
     collection_end_fs: { seconds: 2, nanoseconds: tag },
-    charge_start: at(5, "09:00:00"),
-    charge_start_fs: { seconds: 3, nanoseconds: tag },
-    charge_end: at(windowEnd, "15:00:00"),
-    charge_end_fs: { seconds: 4, nanoseconds: tag },
     days_active: 0,
-    days_charged: 0,
     charge_windows: [{ start: at(5, "09:00:00"), end: at(windowEnd, "15:00:00"), days: 0 }],
   });
   // The downstream's window is NOT its possession, so it does not follow.
@@ -320,7 +307,6 @@ Deno.test("resolveMergedPairDates: a mix recounts the windows and carries each _
   assertEquals(out.charge_windows, [{ start: at(5, "09:00:00"), end: at(7, "15:00:00"), days: 3 }]);
   assertEquals(out.days_active, 10);
   assertEquals(out.collection_start_fs, source.collection_start_fs);
-  assertEquals(["charge_start", "charge_end_fs", "days_charged"].filter((k) => k in out), [], "a recount drops the legacy fields");
   assertEquals(merged.collection_start_fs, downstream.collection_start_fs, "the caller's merged object is not mutated");
 
   const invalid = { ...merged, charge_windows: [{ start: at(9, "09:00:00"), end: at(5, "15:00:00"), days: 0 }] };
@@ -333,10 +319,7 @@ Deno.test("resolveMergedPairDates: a kept window equal to the downstream's posse
     delivery_end: at(5, "09:00:00"),
     collection_start: at(collection, "15:00:00"),
     collection_end: at(collection, "15:00:00"),
-    charge_start: at(5, "09:00:00"),
-    charge_end: at(windowEnd, "15:00:00"),
     days_active: 0,
-    days_charged: 0,
     charge_windows: [{ start: at(5, "09:00:00"), end: at(windowEnd, "15:00:00"), days: 0 }],
   });
   // The invoice's window is its possession; the order's is not, and did not follow.

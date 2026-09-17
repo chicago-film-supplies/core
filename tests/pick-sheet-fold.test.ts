@@ -78,12 +78,7 @@ function dates(deliveryStart: string | null, collectionStart: string | null): Or
     collection_start_fs: null,
     collection_end: null,
     collection_end_fs: null,
-    charge_start: null,
-    charge_start_fs: null,
-    charge_end: null,
-    charge_end_fs: null,
     days_active: null,
-    days_charged: null,
     charge_windows: [],
   };
 }
@@ -189,10 +184,6 @@ function booking(productUid: string, deliveryUid: string, opts: BookingOpts = {}
       start_fs: null,
       end: null,
       end_fs: null,
-      charge_start: null,
-      charge_start_fs: null,
-      charge_end: null,
-      charge_end_fs: null,
     },
     destinations: {
       delivery: { uid: deliveryUid, address: null },

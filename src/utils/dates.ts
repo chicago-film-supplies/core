@@ -763,9 +763,6 @@ export interface CanonicalChargeWindowsOptions {
  *   no windows is left without them.
  * - **Extension pairs keep their days** (`opts.extension`): the count is the
  *   days added past what was billed, not a count of the window.
- * - **The legacy fields are deleted** — `charge_start`/`charge_end` (+`_fs`) and
- *   `days_charged` (charge-windows step 5). Every stored pair passes through
- *   here on its next write, so a rewrite drops them; the purge takes the rest.
  *
  * Pure: returns a copy.
  *
@@ -801,7 +798,6 @@ export function canonicalChargeWindows<D extends ChargeDates>(
     });
     out.charge_windows = counted;
   }
-  for (const key of LEGACY_CHARGE_KEYS) delete out[key];
 
   if (dates.delivery_start && dates.collection_start) {
     if (isNonTerminatingWindow(dates.delivery_start, dates.collection_start)) {
@@ -813,9 +809,6 @@ export function canonicalChargeWindows<D extends ChargeDates>(
   }
   return out;
 }
-
-/** The pre-window charge fields, removed from every pair `canonicalChargeWindows` writes. */
-const LEGACY_CHARGE_KEYS = ["charge_start", "charge_start_fs", "charge_end", "charge_end_fs", "days_charged"] as const;
 
 // ── applyDateEdit ───────────────────────────────────────────────────
 

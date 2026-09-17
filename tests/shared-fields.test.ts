@@ -59,12 +59,7 @@ const DATES = [
   "derived destinations[].dates.collection_start_fs",
   "propagated destinations[].dates.collection_end",
   "derived destinations[].dates.collection_end_fs",
-  "derived destinations[].dates.charge_start",
-  "derived destinations[].dates.charge_start_fs",
-  "derived destinations[].dates.charge_end",
-  "derived destinations[].dates.charge_end_fs",
   "derived destinations[].dates.days_active",
-  "derived destinations[].dates.days_charged",
   "propagated destinations[].dates.charge_windows",
   "atom destinations[].delivery",
   "atom destinations[].collection",
@@ -228,12 +223,7 @@ function pairDates(over: Record<string, unknown> = {}): Record<string, unknown> 
     collection_start_fs: FS("2026-05-10T15:00:00-05:00"),
     collection_end: "2026-05-10T15:00:00.000-05:00",
     collection_end_fs: FS("2026-05-10T15:00:00-05:00"),
-    charge_start: null,
-    charge_start_fs: null,
-    charge_end: null,
-    charge_end_fs: null,
     days_active: 8,
-    days_charged: 6,
     ...windowOver(over),
   };
 }
@@ -263,7 +253,6 @@ Deno.test("resolveMergedPairDates: a window equal to the SOURCE's takes the sour
     collection_start: "2026-06-20T15:00:00.000-05:00",
     collection_start_fs: FS("2026-06-20T15:00:00-05:00"),
     days_active: 36,
-    days_charged: 27,
   });
   const merged = pairDates({ collection_start: "2026-06-20T15:00:00.000-05:00" });
   // Identity, not equality: the source's own derived fields were computed from
@@ -296,7 +285,6 @@ Deno.test("🔴 resolveMergedPairDates: a MIXED window takes each _fs from its o
     [],
   );
   assertEquals(out.days_active, expected.activeDays);
-  assertEquals("days_charged" in out, false, "a recount drops the legacy fields");
   assert(out.days_active !== pairDates().days_active, "the stale count did not simply survive");
 });
 
@@ -575,18 +563,17 @@ Deno.test("mergeSharedFields: pair dates merge per leaf and never touch the deri
   const dates = (d: string, c: string, days: number) => ({
     delivery_start: d, delivery_start_fs: null, delivery_end: d, delivery_end_fs: null,
     collection_start: c, collection_start_fs: null, collection_end: c, collection_end_fs: null,
-    charge_start: null, charge_start_fs: null, charge_end: null, charge_end_fs: null,
-    days_active: days, days_charged: days,
+    days_active: days,
   });
   const pair = (dd: ReturnType<typeof dates>) => ({ uid: "dest-1", uid_order: "order-1", dates: dd, delivery: null, collection: null, customer_collecting: false, customer_returning: false, jurisdiction: null });
   const prev = pair(dates("2026-10-01T00:00:00.000-05:00", "2026-10-05T00:00:00.000-05:00", 4));
   const next = pair(dates("2026-10-03T00:00:00.000-05:00", "2026-10-07T00:00:00.000-05:00", 4));
   // The invoice extended collection only.
-  const down = pair({ ...prev.dates, collection_start: "2026-10-09T00:00:00.000-05:00", collection_end: "2026-10-09T00:00:00.000-05:00", days_charged: 6 });
+  const down = pair({ ...prev.dates, collection_start: "2026-10-09T00:00:00.000-05:00", collection_end: "2026-10-09T00:00:00.000-05:00" });
 
   const { merged, overridden } = mergeSharedFields(PAIR_FIELDS, prev, next, down);
   assertEquals(overridden, ["dates.collection_end", "dates.collection_start"]);
   assertEquals(merged.dates.delivery_start, "2026-10-03T00:00:00.000-05:00");
   assertEquals(merged.dates.collection_start, "2026-10-09T00:00:00.000-05:00");
-  assertEquals(merged.dates.days_charged, 6, "derived, left for the day count to recompute");
+  assertEquals(merged.dates.days_active, 4, "derived, left for the day count to recompute");
 });

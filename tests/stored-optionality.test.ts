@@ -219,28 +219,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["products.uid_tax_class", "mid-expand"],
   ["webshop-products.tax_class_name", "mid-expand"],
   ["webshop-products.uid_tax_class", "mid-expand"],
-  // Charge windows step 5 (core/.claude/plans/charge-windows.md) — the legacy
-  // charge fields, optional so a purged pair parses. Next: purge, then DELETE
-  // (not tighten) — each entry leaves with its declaration.
-  ["bookings.dates.charge_end", "mid-expand"],
-  ["bookings.dates.charge_end_fs", "mid-expand"],
-  ["bookings.dates.charge_start", "mid-expand"],
-  ["bookings.dates.charge_start_fs", "mid-expand"],
-  ["fulfillments.destinations[].dates.charge_end", "mid-expand"],
-  ["fulfillments.destinations[].dates.charge_end_fs", "mid-expand"],
-  ["fulfillments.destinations[].dates.charge_start", "mid-expand"],
-  ["fulfillments.destinations[].dates.charge_start_fs", "mid-expand"],
-  ["fulfillments.destinations[].dates.days_charged", "mid-expand"],
-  ["invoices.destinations[].dates.charge_end", "mid-expand"],
-  ["invoices.destinations[].dates.charge_end_fs", "mid-expand"],
-  ["invoices.destinations[].dates.charge_start", "mid-expand"],
-  ["invoices.destinations[].dates.charge_start_fs", "mid-expand"],
-  ["invoices.destinations[].dates.days_charged", "mid-expand"],
-  ["orders.destinations[].dates.charge_end", "mid-expand"],
-  ["orders.destinations[].dates.charge_end_fs", "mid-expand"],
-  ["orders.destinations[].dates.charge_start", "mid-expand"],
-  ["orders.destinations[].dates.charge_start_fs", "mid-expand"],
-  ["orders.destinations[].dates.days_charged", "mid-expand"],
   // ── refused — a written refusal sits beside the declaration, with its corpus
   //    count. See `src/schemas/supplier.ts`.
   ["transactions.supplier", "refused:no-writer-yet"],

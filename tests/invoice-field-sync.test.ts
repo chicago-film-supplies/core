@@ -56,10 +56,7 @@ function dates(from: string, to: string, tag: number) {
     delivery_end: from, delivery_end_fs: fs(from),
     collection_start: to, collection_start_fs: fs(to),
     collection_end: to, collection_end_fs: fs(to),
-    charge_start: null, charge_start_fs: null,
-    charge_end: null, charge_end_fs: null,
     days_active: activeFor(from, to),
-    days_charged: daysFor(from, to),
     charge_windows: [{ start: from, end: to, days: daysFor(from, to) }],
   };
 }
@@ -235,7 +232,6 @@ Deno.test("per field: pair dates merge per leaf — a mixed window takes each _f
   assertEquals((out.delivery_start_fs as { nanoseconds: number }).nanoseconds, 3, "delivery kept → the invoice's own _fs");
   assertEquals((out.collection_start_fs as { nanoseconds: number }).nanoseconds, 2, "collection followed → the order's _fs");
   assertEquals((out.charge_windows as unknown as { days: number }[])[0].days, daysFor(iso(6), iso(16)));
-  assertEquals("days_charged" in out, false, "a recount drops the legacy fields");
   assertNotEquals(daysFor(iso(6), iso(16)), daysFor(iso(5), iso(16)), "anti-vacuity: the two windows bill differently");
 });
 

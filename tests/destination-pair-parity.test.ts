@@ -142,7 +142,8 @@ Deno.test("InvoiceDocDestination REFUSES a pair that omits customer_collecting/r
   const base = {
     uid_order: "testorder10000000000",
     uid: "11111111-1111-4111-8111-111111111111",
-    // ⚠️ **Complete on purpose, all fourteen keys.** This map used to state six
+    // ⚠️ **Complete on purpose, all nine keys** (fourteen until charge-windows
+    // step 5 deleted the five legacy charge fields). This map used to state six
     // and parse anyway, because `OrderDocDates` carried `.default(null)` on
     // every field. Those defaults are gone (a default on a stored schema is
     // inert — `validateBeforeWrite` persists the raw document — so its one
@@ -160,12 +161,7 @@ Deno.test("InvoiceDocDestination REFUSES a pair that omits customer_collecting/r
       collection_start_fs: fsTs("2026-01-09T08:00:00.000-06:00"),
       collection_end: "2026-01-09T09:00:00.000-06:00",
       collection_end_fs: fsTs("2026-01-09T09:00:00.000-06:00"),
-      charge_start: "2026-01-05T08:00:00.000-06:00",
-      charge_start_fs: fsTs("2026-01-05T08:00:00.000-06:00"),
-      charge_end: "2026-01-09T09:00:00.000-06:00",
-      charge_end_fs: fsTs("2026-01-09T09:00:00.000-06:00"),
       days_active: 5,
-      days_charged: 5,
       charge_windows: [{ start: "2026-01-05T08:00:00.000-06:00", end: "2026-01-09T09:00:00.000-06:00", days: 5 }],
     },
     delivery: { uid: null, address: null, instructions: null, contact: null },

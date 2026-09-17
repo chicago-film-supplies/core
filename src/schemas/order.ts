@@ -183,7 +183,7 @@ function checkChargeWindowsOrdered(
  * possession drives bookings and availability, and the windows decide what is
  * billed.
  *
- * 🔴 **`charge_windows` is required and `charge_start`/`charge_end` are gone**
+ * 🔴 **`charge_windows` is required and the legacy charge fields are gone**
  * (charge-windows campaign, decision 9). This schema is a `z.object`, so a
  * client that still sends the old keys has them stripped. A client that sends no
  * windows is refused, so the manager must ship before the API.
@@ -219,17 +219,7 @@ export interface OrderDocDatesType {
   collection_start_fs: FirestoreTimestampType | null;
   collection_end: string | null;
   collection_end_fs: FirestoreTimestampType | null;
-  /** Legacy, being removed (charge-windows step 5). Written by nothing; read by nothing. */
-  charge_start?: string | null;
-  /** Legacy, being removed (charge-windows step 5). */
-  charge_start_fs?: FirestoreTimestampType | null;
-  /** Legacy, being removed (charge-windows step 5). */
-  charge_end?: string | null;
-  /** Legacy, being removed (charge-windows step 5). */
-  charge_end_fs?: FirestoreTimestampType | null;
   days_active: number | null;
-  /** Legacy, being removed (charge-windows step 5). */
-  days_charged?: number | null;
   /**
    * The pair's charge windows, in order. Required since every stored pair was
    * backfilled (charge-windows release step 3, 2026-09-17, both projects).
@@ -284,16 +274,7 @@ export const OrderDocDates: z.ZodType<OrderDocDatesType> = z.strictObject({
   collection_start_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
   collection_end: chicagoInstant().nullable(),
   collection_end_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
-  // Legacy mirrors of the charge windows' envelope, mid-removal (charge-windows
-  // step 5): optional → nothing writes them (`canonicalChargeWindows` deletes
-  // them) → purge → delete. Optional so a purged pair still parses; still
-  // declared so an unpurged one does.
-  charge_start: chicagoInstant().nullable().optional().meta({ derived: true }),
-  charge_start_fs: FirestoreTimestamp.nullable().optional().meta({ derived: true }),
-  charge_end: chicagoInstant().nullable().optional().meta({ derived: true }),
-  charge_end_fs: FirestoreTimestamp.nullable().optional().meta({ derived: true }),
   days_active: z.int().nullable().meta({ derived: true }),
-  days_charged: z.int().nullable().optional().meta({ derived: true }),
   charge_windows: z.array(ChargeWindow).min(1).superRefine(checkChargeWindowsOrdered)
     .meta({ shared: "value" }),
 });

@@ -65,9 +65,7 @@ const NO_DOC_DATES: OrderDocDatesType = {
   delivery_end: null, delivery_end_fs: TS0,
   collection_start: null, collection_start_fs: TS0,
   collection_end: null, collection_end_fs: TS0,
-  charge_start: null, charge_start_fs: TS0,
-  charge_end: null, charge_end_fs: TS0,
-  days_active: null, days_charged: null,
+  days_active: null,
   charge_windows: [{ start: "2026-01-05T09:00:00.000-06:00", end: "2026-01-05T09:00:00.000-06:00", days: 0 }],
 };
 

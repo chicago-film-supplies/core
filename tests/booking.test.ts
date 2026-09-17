@@ -27,9 +27,6 @@ const validBooking = {
     start: "2026-03-01T00:00:00Z",
     start_fs: null,
     end: "2026-03-10T00:00:00Z",
-    charge_start: "2026-03-01T00:00:00Z",
-    charge_start_fs: null,
-    charge_end: "2026-03-10T00:00:00Z",
   },
   organization: {
     uid: "testorg1000000000000",

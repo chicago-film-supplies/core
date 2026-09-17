@@ -306,10 +306,7 @@ Deno.test("walker: masks destination instructions on OrderSchema", async () => {
           delivery_end: "2026-01-16T12:00:00.000-06:00",
           collection_start: "2026-01-16T12:00:00.000-06:00",
           collection_end: "2026-01-17T12:00:00.000-06:00",
-          charge_start: "2026-01-15T00:00:00.000-06:00",
-          charge_end: "2026-01-17T00:00:00.000-06:00",
           days_active: 2,
-          days_charged: 2,
         },
         delivery: {
           uid: null,

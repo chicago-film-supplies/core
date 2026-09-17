@@ -55,12 +55,7 @@ const validDocDates = {
   collection_start_fs: mockTimestamp,
   collection_end: "2026-03-10T00:00:00Z",
   collection_end_fs: mockTimestamp,
-  charge_start: "2026-03-01T00:00:00Z",
-  charge_start_fs: mockTimestamp,
-  charge_end: "2026-03-10T00:00:00Z",
-  charge_end_fs: mockTimestamp,
   days_active: 7,
-  days_charged: 7,
   charge_windows: [{ start: "2026-03-01T00:00:00Z", end: "2026-03-10T00:00:00Z", days: 7 }],
 };
 
