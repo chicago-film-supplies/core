@@ -107,8 +107,19 @@ The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces w
   CI checks out core alone: `src/`, `scripts/` and `tests/` are then core's OWN top-level
   entries, so a bare citation naming an api-cloudrun file is BROKEN rather than merely
   ambiguous. 65 of those existed when it landed and a full-workspace run could see only 22.
-  Simulate it with `cp -R core /tmp/x && cd /tmp/x/core && HOME=/tmp/nonexistent deno task
-  audit:citations`. Rules in `src/utils/citations.ts`, planted both ways in
+  ⭐ **`deno task audit:citations:ci` RUNS that scope, and it is in `.githooks/pre-push`**
+  (core#106) — `git archive HEAD` into a lone directory that must be named `core`, then
+  the ordinary audit inside it. Before it existed the divergence was found only by a
+  failed CI job, and since `publish.yaml` gates `release` on `needs: ci`, that presents
+  as *"a docs commit failed CI"* while the cost is *"core did not ship"* — **five betas
+  lost across two incidents** (2026-09-10; 2026-09-17, where a bare sibling path in a
+  plan doc left core unpublishable by anyone for three commits).
+  ⚠️ **Do NOT blank `HOME` to simulate it** — this line prescribed
+  `HOME=/tmp/nonexistent` until 2026-09-17 and it breaks Deno's module cache, so the
+  task dies *before* the audit runs and the failure looks like a broken repo. The absent
+  SIBLINGS are the whole reproduction. ⚠️ And the extracted directory must be named
+  `core`: the runner derives the workspace from the PARENT, so any other name reports
+  ~178 broken, `utils/citations.ts` included. Rules in `src/utils/citations.ts`, planted both ways in
   `tests/citations.test.ts`. **The task carries `--strict`** (core#67), so AMBIGUOUS fails
   as well as BROKEN — the flag lives in the `deno.json` task, not at the call sites, so the
   hook and CI cannot drift apart. `tests/citations.test.ts` asserts that by WALKING

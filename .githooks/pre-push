@@ -9,6 +9,15 @@ deno task test
 echo "pre-push: citations"
 deno task audit:citations
 
+# 🔴 The SAME audit at CI'S scope — core alone, siblings absent (core#106). The run
+# above sees the whole workspace, so a bare `scripts/...` citation naming an
+# api-cloudrun file resolves here and is BROKEN in CI. `publish.yaml` gates `release`
+# on `needs: ci`, so that divergence SKIPS THE JSR PUBLISH while presenting as a
+# failed docs commit. Five betas lost across two incidents (2026-09-10, 2026-09-17)
+# before anything ran this.
+echo "pre-push: citations (CI scope)"
+deno task audit:citations:ci
+
 # 🔴 The OTHER direction. The audit above checks the citations THIS repo owns,
 # pointing outward; nothing checked citations pointing IN. So a rename here leaves
 # this gate green while sibling repos that cite the old path go red — and the repo
