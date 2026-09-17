@@ -32630,6 +32630,10 @@ them. That is correct when the merged window came wholly from one side and
 internally inconsistent when it did not, which is exactly what an operator
 editing one endpoint in the pair editor produces. Four cases:
 
+First the follow rule: a downstream whose single window equalled its own
+possession follows a possession the merge took from the source (see
+`followPossession`). Then:
+
 - **window unchanged from the downstream's** → nothing to recompute;
 - **window equal to the source's** → take the source's `dates` whole, whose
   derived fields were computed from exactly that window;

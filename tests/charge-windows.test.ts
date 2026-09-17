@@ -316,18 +316,65 @@ Deno.test("resolveMergedPairDates: a mix recounts the windows and carries each _
     days_charged: 0,
     charge_windows: [{ start: at(5, "09:00:00"), end: at(windowEnd, "15:00:00"), days: 0 }],
   });
-  const downstream = dates(9, 9, 1);
+  // The downstream's window is NOT its possession, so it does not follow.
+  const downstream = dates(9, 7, 1);
   const source = dates(16, 16, 2);
   // Collection from the source, the window kept from the downstream.
   const merged = { ...downstream, collection_start: source.collection_start, collection_end: source.collection_end };
   const out = resolveMergedPairDates(merged, source, downstream, [], canonicalChargeWindows)!;
-  assertEquals(out.charge_windows, [{ start: at(5, "09:00:00"), end: at(9, "15:00:00"), days: 5 }]);
+  assertEquals(out.charge_windows, [{ start: at(5, "09:00:00"), end: at(7, "15:00:00"), days: 3 }]);
   assertEquals(out.days_active, 10);
   assertEquals(out.collection_start_fs, source.collection_start_fs);
   assertEquals(out.charge_end_fs, downstream.charge_end_fs);
+  assertEquals(merged.collection_start_fs, downstream.collection_start_fs, "the caller's merged object is not mutated");
 
   const invalid = { ...merged, charge_windows: [{ start: at(9, "09:00:00"), end: at(5, "15:00:00"), days: 0 }] };
   assertEquals(resolveMergedPairDates(invalid, source, downstream, [], canonicalChargeWindows), null);
+});
+
+Deno.test("resolveMergedPairDates: a kept window equal to the downstream's possession follows a merged possession move", () => {
+  const dates = (collection: number, windowEnd: number) => ({
+    delivery_start: at(5, "09:00:00"),
+    delivery_end: at(5, "09:00:00"),
+    collection_start: at(collection, "15:00:00"),
+    collection_end: at(collection, "15:00:00"),
+    charge_start: at(5, "09:00:00"),
+    charge_end: at(windowEnd, "15:00:00"),
+    days_active: 0,
+    days_charged: 0,
+    charge_windows: [{ start: at(5, "09:00:00"), end: at(windowEnd, "15:00:00"), days: 0 }],
+  });
+  // The invoice's window is its possession; the order's is not, and did not follow.
+  const downstream = dates(9, 9);
+  const source = dates(16, 12);
+  const merged = { ...downstream, collection_start: source.collection_start, collection_end: source.collection_end };
+  const out = resolveMergedPairDates(merged, source, downstream, [], canonicalChargeWindows)!;
+  assertEquals(out.charge_windows, [{ start: at(5, "09:00:00"), end: at(16, "15:00:00"), days: 10 }]);
+  assertEquals(out.charge_end, at(16, "15:00:00"));
+  assertEquals(out.days_charged, 10);
+
+  // Compared as instants: the same moment in another offset still follows.
+  const utc = { ...downstream, charge_windows: [{ start: "2026-10-05T14:00:00.000Z", end: "2026-10-09T20:00:00.000Z", days: 5 }] };
+  const utcOut = resolveMergedPairDates({ ...utc, collection_start: source.collection_start }, source, utc, [], canonicalChargeWindows)!;
+  assertEquals(utcOut.charge_windows?.[0].end, at(16, "15:00:00"));
+
+  // Two windows never follow.
+  const two = { ...downstream, charge_windows: [{ start: at(5, "09:00:00"), end: at(6, "15:00:00"), days: 2 }, { start: at(8, "09:00:00"), end: at(9, "15:00:00"), days: 2 }] };
+  const twoOut = resolveMergedPairDates({ ...two, collection_start: source.collection_start }, source, two, [], canonicalChargeWindows)!;
+  assertEquals(twoOut.charge_windows?.map((w) => w.days), [2, 2]);
+
+  // A pair stored before windows follows by its charge bounds.
+  const { charge_windows: _a, ...legacy } = downstream;
+  const { charge_windows: _b, ...legacySource } = source;
+  const legacyOut = resolveMergedPairDates(
+    { ...legacy, collection_start: source.collection_start, collection_end: source.collection_end } as typeof downstream,
+    legacySource as typeof downstream,
+    legacy as typeof downstream,
+    [],
+    canonicalChargeWindows,
+  )!;
+  assertEquals(legacyOut.charge_windows, [{ start: at(5, "09:00:00"), end: at(16, "15:00:00"), days: 10 }]);
+  assertEquals(legacyOut.charge_end, at(16, "15:00:00"));
 });
 
 // ── The pricer ───────────────────────────────────────────────────────────────

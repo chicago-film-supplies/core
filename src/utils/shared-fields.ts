@@ -508,6 +508,38 @@ const sameWindowKey = (key: string, a: unknown, b: unknown): boolean =>
     ? sameSharedValue(withoutKeys(a, ["days"]), withoutKeys(b, ["days"]))
     : sameSharedValue(a, b);
 
+const sameInstantValue = (a: unknown, b: unknown): boolean =>
+  typeof a === "string" && typeof b === "string" && Date.parse(a) === Date.parse(b);
+
+/** A dates record's windows, reading a pair stored before windows by its charge bounds. */
+function storedWindows(d: DateRecord): { start: unknown; end: unknown }[] | null {
+  if (Array.isArray(d.charge_windows)) return d.charge_windows as { start: unknown; end: unknown }[];
+  if (d.charge_start != null && d.charge_end != null) return [{ start: d.charge_start, end: d.charge_end }];
+  return null;
+}
+
+/**
+ * The follow rule, applied against the MERGED previous possession: when the
+ * merge kept the downstream's windows but took a moved possession from the
+ * source, a downstream whose one window equalled its own possession follows it.
+ *
+ * Without this an invoice or fulfillment that reset its window to possession
+ * keeps the old window after the order moves possession, which no manager or
+ * API edit on the downstream itself would produce (`applyDateEdit`'s rule).
+ * Mutates `merged`, which the caller has already copied; the recount follows.
+ */
+function followPossession(merged: DateRecord, downstream: DateRecord): void {
+  const kept = storedWindows(downstream);
+  if (kept === null || kept.length !== 1) return;
+  if (!sameWindowKey("charge_windows", storedWindows(merged), kept)) return;
+  if (!sameInstantValue(kept[0].start, downstream.delivery_start)) return;
+  if (!sameInstantValue(kept[0].end, downstream.collection_start)) return;
+  const moved = !sameInstantValue(merged.delivery_start, downstream.delivery_start) ||
+    !sameInstantValue(merged.collection_start, downstream.collection_start);
+  if (!moved || typeof merged.delivery_start !== "string" || typeof merged.collection_start !== "string") return;
+  merged.charge_windows = [{ start: merged.delivery_start, end: merged.collection_start }];
+}
+
 /**
  * Resolve the `dates` object to STORE for a pair whose fields have just been
  * merged, and recompute the derived fields the merge deliberately left alone.
@@ -518,6 +550,10 @@ const sameWindowKey = (key: string, a: unknown, b: unknown): boolean =>
  * them. That is correct when the merged window came wholly from one side and
  * internally inconsistent when it did not, which is exactly what an operator
  * editing one endpoint in the pair editor produces. Four cases:
+ *
+ * First the follow rule: a downstream whose single window equalled its own
+ * possession follows a possession the merge took from the source (see
+ * `followPossession`). Then:
  *
  * - **window unchanged from the downstream's** → nothing to recompute;
  * - **window equal to the source's** → take the source's `dates` whole, whose
@@ -550,14 +586,15 @@ export function resolveMergedPairDates<D>(
   holidays: readonly string[],
   canonicalize: (dates: D, holidays: readonly string[]) => D,
 ): D | null {
-  const m = merged as unknown;
   const n = source as unknown;
   const s = downstream as unknown;
-  if (!isDateRecord(m)) return merged;
+  if (!isDateRecord(merged)) return merged;
+  const m: DateRecord = { ...merged };
+  if (isDateRecord(s)) followPossession(m, s);
 
   const windowOf = (other: unknown) =>
     isDateRecord(other) && PAIR_WINDOW_KEYS.every((k) => sameWindowKey(k, m[k], other[k]));
-  if (windowOf(s)) return merged;
+  if (windowOf(s)) return m as D;
   if (windowOf(n)) return source;
 
   let dates: DateRecord;
