@@ -23,8 +23,8 @@ when step 6 lands.**
 > **Where the code is.** `@cfs/core@10.0.0-beta.485` deleted the legacy charge field
 > declarations (both projects census 0); `beta.486` added `chargeWindowPairViolations`
 > (core `338fbe3`), called from api-cloudrun's `assertValidForWrite` (`da808d6a`), with
-> `api-cloudrun/scripts/audit-charge-window-pairs.ts`; core `ec0df30` adds the sync
-> comparator's `invoice_windows` arm. The purge moved **10,266 prod documents in 17
+> `api-cloudrun/scripts/audit-charge-window-pairs.ts`; **`beta.487`** (core `ec0df30`) added
+> the sync comparator's `invoice_windows` arm, closing core#112. The purge moved **10,266 prod documents in 17
 > minutes** — 1,032 orders, 1,020 invoices, 1,034 fulfillments, 7,180 bookings.
 >
 > **Seven findings worth carrying, and none of them is about charge windows.**
@@ -66,8 +66,13 @@ when step 6 lands.**
 >    anyone for three commits** before it was caught (fixed 2026-09-17). ⭐ **Note that
 >    naming the defect re-commits it**: spelling the bad citation out here to explain it
 >    is itself a broken citation, which is why this sentence describes it instead.
->    `audit:citations` gates `release`. Simulate CI with
->    `cp -R core /tmp/x && cd /tmp/x/core && deno task audit:citations`. Also:
+>    ✅ **This is GUARDED now, so do not hand-roll the simulation the way this entry
+>    originally told you to** — `deno task audit:citations:ci` runs the audit against
+>    `git archive HEAD` in a lone checkout and sits in `.githooks/pre-push` (core#106,
+>    closed 2026-09-17 by core `27c4e33`). It cost five betas across two incidents before
+>    anything ran it. ⚠️ Two traps it now handles for you: the extracted directory must be
+>    named `core`, and blanking `HOME` breaks Deno's module cache so the task dies before
+>    the audit runs. Also:
 >    `describesDeletion` reads a ±240-char window from the START of a citation, so put a
 >    deletion verb immediately after the path.
 > 7. ⚠️ **`scripts/_stockReconciliationPlan.ts`'s `windowStart` lost its
@@ -480,7 +485,7 @@ inert on an invoice. That single key is the difference between "the invoice's pa
 editable" being true and false, and a partial bill is decision 3's whole use case.
 
 ⚠️ **Mostly a manager change, so it does NOT carry the publish/pin dance** — unlike every
-step before it. Current core: **the beta published by core `ec0df30`**, all three consumers pinned.
+step before it. Current core: **`@cfs/core@10.0.0-beta.487`**, all three consumers pinned and pushed.
 
 📌 **Two things step 6 creates a population for, both currently inert:**
 - the core#113 pair guard (0 multi-window pairs exist today);
