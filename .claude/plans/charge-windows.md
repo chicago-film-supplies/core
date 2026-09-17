@@ -257,7 +257,7 @@ chargeable_days: z.int().nullable().meta({ derived: true })   // key stays prese
 - **api-cloudrun:**
   - `lib/orderFulfillmentSync.ts:668`, `lib/typesenseTranslate.ts:549`, `lib/orderHelpers.ts:66-112`
   - `lib/xeroQuoteStatus.ts:122-123`, `services/xeroQuotes.ts:291, 308`, `lib/trello.ts:90`
-  - Scripts: `audit-invoice-override-classes.ts:99`, `audit-order-invoice-coverage.ts`, `audit-line-price-provenance.ts:188`, `audit-document-grain-parity.ts:356`, `repair-missing-bookings.ts:33`; retire `backfill-invoice-destination-windows.ts`
+  - Scripts: `audit-invoice-override-classes.ts:99`, `audit-order-invoice-coverage.ts`, `audit-line-price-provenance.ts:188`, `audit-document-grain-parity.ts:356`, `repair-missing-bookings.ts:33`; `backfill-invoice-destination-windows.ts` retired — DONE, deleted in api-cloudrun `f6da4a20`
   - Skill `write-path-invariants/SKILL.md:390` (the `derived` example becomes `charge_windows[].days`)
 - **manager:**
   - `DestinationDatesSummary.tsx:84-145`, `InvoiceDestinationSummary.tsx:104-117`, `BookingDetail.tsx:64-67`, `createOrderInvoiceCoverage.ts:111`

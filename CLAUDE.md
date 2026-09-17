@@ -688,9 +688,11 @@ plausible wrong values and turned the census green.
 already agree on everything the projected value DEPENDS on.** That assertion costs one
 predicate, fails closed, and is the only thing standing between "the census reads 0" and "the
 census reads 0 because I filled it in". Repaired via
-`api-cloudrun/scripts/backfill-invoice-destination-windows.ts`, which projects the whole `dates`
-map rather than the two keys, on a triple-confirmed predicate — criterion 1 alone would have hit
-46 legitimate same-day pairs.
+`api-cloudrun/scripts/backfill-invoice-destination-windows.ts` — ⚠️ **since DELETED**, an applied
+one-shot retired with the charge-windows campaign in api-cloudrun `f6da4a20` along with the
+`days_charged` key it repaired, recoverable from git history at that commit's parent. It projected
+the whole `dates` map rather than the two keys, on a triple-confirmed predicate — criterion 1 alone
+would have hit 46 legitimate same-day pairs. The lesson is the part that outlives the script.
 
 ⚠️ **And this is why "the census is 0" does not license the tightening on its own.**
 `Invoice.subject` reads 0 nulls across 1,040 documents and is *still* not free, because

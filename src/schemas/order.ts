@@ -255,8 +255,11 @@ export interface OrderDocDatesType {
  * while the real 2023 windows sat on the source orders. There was no duration
  * because there was no window. Repaired 2026-09-09 with owner approval by
  * projecting each order's whole `dates` map
- * (`api-cloudrun/scripts/backfill-invoice-destination-windows.ts`), prod then
- * dev-by-mirror, both verified at 0 by two independent instruments.
+ * (`api-cloudrun/scripts/backfill-invoice-destination-windows.ts` — since
+ * DELETED as an applied one-shot, with the charge-windows campaign in
+ * api-cloudrun `f6da4a20`, which also removed the `days_charged` key it
+ * repaired), prod then dev-by-mirror, both verified at 0 by two independent
+ * instruments.
  *
  * ⭐ **The instrument that caught it was an anti-vacuity arm, not the census.**
  * The first repair drafted here projected only the two durations and asserted
