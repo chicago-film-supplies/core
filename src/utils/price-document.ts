@@ -134,6 +134,19 @@ export function chargeWindowContext(destinations: readonly ChargeWindowPair[]): 
  * so a re-price reads nothing beyond the document. Derive the sections with
  * {@link invoiceExtensionSections}.
  */
+/**
+ * A pricer refusal caused by the document it was handed — a rental line under no
+ * pair, a percent fee line of quantity ≠ 1, a line under two extension sections,
+ * a bad credit request — rather than by a fault in the pricer. The API maps it
+ * to a 400; every other throw from this module stays a 500.
+ */
+export class PriceRefusalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PriceRefusalError";
+  }
+}
+
 export interface PriceDocumentExtension {
   /** The path of the invoice destination divider that opens the section. */
   divider_path: readonly string[];
@@ -284,7 +297,7 @@ function keepsStoredDays(document: PriceDocumentKind): boolean {
  *
  * | line | `chargeable_days` |
  * |---|---|
- * | in an extension section | its own stored days (the days added) |
+ * | in an extension section | Σ its pair's window days (the days added); its own stored days on a pair stored before windows |
  * | on a `complete`/`canceled` order | its own stored days |
  * | `rental` + `five_day_week` on a pair with windows | Σ window days |
  * | `rental` + `five_day_week` on a pair stored before windows | its own stored days, else the pair's `days_charged` |
@@ -301,12 +314,19 @@ export function lineChargeableDays(
   ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">,
 ): { chargeable_days: number | null; windowDays?: readonly number[] } {
   const stored = item.price?.chargeable_days ?? null;
-  if (extensionFor(item, ctx.extensions)) return { chargeable_days: stored };
+  if (extensionFor(item, ctx.extensions)) {
+    // An extension pair's one window carries the days the section ADDS, never
+    // recounted, so its lines bill that. A pair stored before windows keeps the
+    // line's own stored days.
+    const pair = pairOf(item, ctx.charge_windows);
+    if (pair?.days) return { chargeable_days: pair.days.reduce((total, d) => total + d, 0) };
+    return { chargeable_days: stored };
+  }
   if (keepsStoredDays(ctx.document)) return { chargeable_days: stored };
   if (!daysFromWindows(item)) return { chargeable_days: null };
   const pair = pairOf(item, ctx.charge_windows);
   if (!pair) {
-    throw new Error(
+    throw new PriceRefusalError(
       `Rental line ${item.uid} is not under a destination pair, so it has no charge windows to bill. ` +
         "Move it under a destination",
     );
@@ -320,7 +340,7 @@ export function lineChargeableDays(
 function extensionDaysOf(item: LineItem): number {
   const days = item.price?.chargeable_days;
   if (typeof days !== "number") {
-    throw new Error(`Line ${item.uid} sits in an extension section and states no chargeable_days to extend by`);
+    throw new PriceRefusalError(`Line ${item.uid} sits in an extension section and states no chargeable_days to extend by`);
   }
   return days;
 }
@@ -336,7 +356,7 @@ function extensionFor(
   );
   if (match.length === 0) return undefined;
   if (match.length > 1) {
-    throw new Error(`Line ${item.uid} falls under ${match.length} extension sections; a line extends one window`);
+    throw new PriceRefusalError(`Line ${item.uid} falls under ${match.length} extension sections; a line extends one window`);
   }
   return match[0];
 }
@@ -414,7 +434,7 @@ export function priceDocument<T extends LineItem>(
     if (item.quantity !== 1) {
       // Xero's UnitAmount is amount ÷ quantity, so a percent fee at any other
       // quantity would push a different unit price than the one CFS stored.
-      throw new Error(`Percent fee line ${item.uid} has quantity ${item.quantity}; a percent fee line is quantity 1`);
+      throw new PriceRefusalError(`Percent fee line ${item.uid} has quantity ${item.quantity}; a percent fee line is quantity 1`);
     }
     const amountCents = calculateTransactionFeeAmountCents(item, feeBasisCents);
     item.price = {
@@ -510,7 +530,7 @@ export function priceCreditNote(
   const priced: LineItem[] = [];
   for (const { line, quantity } of selection) {
     if (!Number.isInteger(quantity) || quantity <= 0) {
-      throw new Error(`Credit quantity for line ${line.uid} must be a positive integer, got ${quantity}`);
+      throw new PriceRefusalError(`Credit quantity for line ${line.uid} must be a positive integer, got ${quantity}`);
     }
     // A line in an extension section is credited as it was billed: at its own
     // added days with the week minimum skipped. Priced as an ordinary line it
@@ -531,7 +551,7 @@ export function priceCreditNote(
       },
     } as unknown as LineItem;
     if (!isPreTaxItem(item)) {
-      throw new Error(`Line ${line.uid} has type "${line.type}", which cannot be credited — only a pre-tax line has a credit`);
+      throw new PriceRefusalError(`Line ${line.uid} has type "${line.type}", which cannot be credited — only a pre-tax line has a credit`);
     }
     const price = assembleLinePrice(
       { base_cents: line.price.base_cents, chargeable_days: line.price.chargeable_days, formula: line.price.formula },

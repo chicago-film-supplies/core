@@ -31,6 +31,7 @@ import {
   chargeWindowContext,
   type CreditSourceLine,
   lineChargeableDays,
+  PriceRefusalError,
   type PriceDocumentContext,
   priceCreditNote,
   priceDocument,
@@ -468,7 +469,7 @@ Deno.test("priceDocument: only a rental five_day_week line takes days from its p
 });
 
 Deno.test("priceDocument: a rental five_day_week line under no pair is refused", () => {
-  assertThrows(() => priceDocument([line(["order-divider"])], priceCtx(pairWith([5]))), Error, "not under a destination pair");
+  assertThrows(() => priceDocument([line(["order-divider"])], priceCtx(pairWith([5]))), PriceRefusalError, "not under a destination pair");
 });
 
 Deno.test("priceDocument: a complete or canceled order keeps its lines' stored days", () => {
@@ -494,13 +495,21 @@ Deno.test("chargeWindowContext: an invoice pair's divider path is [uid_order, ui
   assertEquals(lineChargeableDays(onInvoice, priceCtx(ctx)), { chargeable_days: 7, windowDays: [3, 4] });
 });
 
-Deno.test("priceDocument: an extension line keeps its own added days", () => {
-  const ext = line(["O", "E"], { chargeable_days: 2 });
-  const out = priceDocument([ext], {
-    ...priceCtx(chargeWindowContext([{ uid: "E", uid_order: "O", dates: { charge_windows: [{ days: 9 }] } }]), { kind: "invoice", status: "draft", has_settlement: false }),
-    extensions: [{ divider_path: ["O", "E"] }],
-  }).items[0].price as unknown as { chargeable_days: number; subtotal_cents: number };
-  assertEquals([out.chargeable_days, out.subtotal_cents], [2, 4000]);
+Deno.test("priceDocument: an extension line bills its pair's added days, unfloored", () => {
+  const priceExt = (stored: number | null, dates: Record<string, unknown>) => {
+    const ext = line(["O", "E"], { chargeable_days: stored });
+    return priceDocument([ext], {
+      ...priceCtx(chargeWindowContext([{ uid: "E", uid_order: "O", dates }]), { kind: "invoice", status: "draft", has_settlement: false }),
+      extensions: [{ divider_path: ["O", "E"] }],
+    }).items[0].price as unknown as { chargeable_days: number; subtotal_cents: number };
+  };
+  // The window carries the added days; a line arriving with none (an API build nulls input days) takes them.
+  const fromWindow = priceExt(null, { charge_windows: [{ days: 2 }] });
+  assertEquals([fromWindow.chargeable_days, fromWindow.subtotal_cents], [2, 4000]);
+  assertEquals(priceExt(7, { charge_windows: [{ days: 2 }] }).chargeable_days, 2, "the window wins over a stale line count");
+  // A pair stored before windows keeps the line's own days.
+  const legacy = priceExt(3, { charge_windows: null, days_charged: 9 });
+  assertEquals([legacy.chargeable_days, legacy.subtotal_cents], [3, 6000]);
 });
 
 Deno.test("priceCreditNote: a line billed on a multi-window pair is credited as billed", () => {

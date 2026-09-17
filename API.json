@@ -14629,13 +14629,19 @@
           "kind": "interface",
           "name": "PriceDocumentExtension",
           "declaration": "interface PriceDocumentExtension {\n  divider_path: readonly string[];\n}",
-          "doc": "A date-extension section (#680, D7): every line whose `path` starts with\n`divider_path` bills the days the order's window grew past what was billed.\n\nThe day count is the LINE's own `chargeable_days` — the ADDED days, computed\nonce by the writer that builds the section (owner, 2026-09-15) — priced with\nthe one-week floor skipped. The section supplies only the rule, never a count,\nso a re-price reads nothing beyond the document. Derive the sections with\n{@link invoiceExtensionSections}."
+          "doc": ""
         },
         {
           "kind": "typeAlias",
           "name": "PriceDocumentKind",
           "declaration": "type PriceDocumentKind = typeLiteral | typeLiteral;",
           "doc": "Which document is being priced, and whether it may be.\n\nAn invoice states its `status` and whether any settlement (payment or credit)\nhas been recorded against it. The refusal reads exactly what api-cloudrun's\n`updateInvoice` gate reads — `invoiceHasSettlement || paid || void` — so the\ntwo cannot disagree about what \"settled\" means."
+        },
+        {
+          "kind": "other",
+          "name": "PriceRefusalError",
+          "declaredKind": "class",
+          "doc": "A pricer refusal caused by the document it was handed — a rental line under no\npair, a percent fee line of quantity ≠ 1, a line under two extension sections,\na bad credit request — rather than by a fault in the pricer. The API maps it\nto a 400; every other throw from this module stays a 500."
         },
         {
           "kind": "interface",
@@ -14677,7 +14683,7 @@
           "kind": "function",
           "name": "lineChargeableDays",
           "signature": "lineChargeableDays(item: LineItem, ctx: Pick<PriceDocumentContext, \"document\" | \"charge_windows\" | \"extensions\">): typeLiteral",
-          "doc": "**A line's `chargeable_days`, the one derivation of it** (charge-windows\ndecision 3), and the window days that price it.\n\n| line | `chargeable_days` |\n|---|---|\n| in an extension section | its own stored days (the days added) |\n| on a `complete`/`canceled` order | its own stored days |\n| `rental` + `five_day_week` on a pair with windows | Σ window days |\n| `rental` + `five_day_week` on a pair stored before windows | its own stored days, else the pair's `days_charged` |\n| `rental` + `five_day_week` on no pair | refused |\n| anything else | `null` |\n\n`windowDays` is set only for a pair with two or more windows, where the price\nis `billableDays(windows) ÷ 5` rather than the line's own floor.",
+          "doc": "**A line's `chargeable_days`, the one derivation of it** (charge-windows\ndecision 3), and the window days that price it.\n\n| line | `chargeable_days` |\n|---|---|\n| in an extension section | Σ its pair's window days (the days added); its own stored days on a pair stored before windows |\n| on a `complete`/`canceled` order | its own stored days |\n| `rental` + `five_day_week` on a pair with windows | Σ window days |\n| `rental` + `five_day_week` on a pair stored before windows | its own stored days, else the pair's `days_charged` |\n| `rental` + `five_day_week` on no pair | refused |\n| anything else | `null` |\n\n`windowDays` is set only for a pair with two or more windows, where the price\nis `billableDays(windows) ÷ 5` rather than the line's own floor.",
           "paramTags": [],
           "returnsTag": null
         },

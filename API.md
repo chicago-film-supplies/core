@@ -31740,15 +31740,6 @@ interface PriceDocumentContext {
 
 ### `PriceDocumentExtension`
 
-A date-extension section (#680, D7): every line whose `path` starts with
-`divider_path` bills the days the order's window grew past what was billed.
-
-The day count is the LINE's own `chargeable_days` — the ADDED days, computed
-once by the writer that builds the section (owner, 2026-09-15) — priced with
-the one-week floor skipped. The section supplies only the rule, never a count,
-so a re-price reads nothing beyond the document. Derive the sections with
-{@link invoiceExtensionSections}.
-
 ```ts
 interface PriceDocumentExtension {
   divider_path: readonly string[];
@@ -31767,6 +31758,10 @@ two cannot disagree about what "settled" means.
 ```ts
 type PriceDocumentKind = typeLiteral | typeLiteral;
 ```
+
+### `PriceRefusalError`
+
+_(class — see source)_
 
 ### `PricedCreditNote`
 
@@ -31821,7 +31816,7 @@ decision 3), and the window days that price it.
 
 | line | `chargeable_days` |
 |---|---|
-| in an extension section | its own stored days (the days added) |
+| in an extension section | Σ its pair's window days (the days added); its own stored days on a pair stored before windows |
 | on a `complete`/`canceled` order | its own stored days |
 | `rental` + `five_day_week` on a pair with windows | Σ window days |
 | `rental` + `five_day_week` on a pair stored before windows | its own stored days, else the pair's `days_charged` |
