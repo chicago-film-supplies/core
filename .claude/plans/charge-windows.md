@@ -1,21 +1,18 @@
 # Multiple charge windows per destination pair
 
-**Date:** 2026-09-16 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** in-progress (steps 1–4 in prod; step 5 prerequisite templates#376 built, awaiting render approval)
+**Date:** 2026-09-16 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** in-progress (steps 1–4 in prod; templates#378 released; core#114 built)
 **Origin:** hotspot rentals billed only for their activation windows; owner design sessions 2026-09-16
-**Related:** api-cloudrun#1028, core#112 (§3 comparator), core#113 (pair invariant guard), templates#376 (partials read windows), core#114 (multi-window line Duration vs billable money)
+**Related:** api-cloudrun#1028, core#112 (§3 comparator), core#113 (pair invariant guard), templates#376 (partials read windows), core#114 (closed: multi-window lines store billable days)
 
 ## START HERE
-**Step 4 (beta B) is in prod as of 2026-09-17**: manager 26.26.0, then API 0.277.0, and templates#375 is merged. **templates#376 is built as PR #378** (base component, not released, waiting for the owner to approve renders). Once it is approved and published, the rest of step 5's prerequisites (status block below) are next. First command: `gh pr view 378 -R chicago-film-supplies/templates`.
+**Step 4 (beta B) is in prod as of 2026-09-17**: manager 26.26.0, then API 0.277.0, templates#375 merged. **templates#378 is released** (auto-merge armed, publishes on merge). **core#114 is built** (core `e9cbd48`). Next: confirm #378 merged, the templates#376 multi-window fixture, pin the new core beta in every consumer, then the rest of step 5's prerequisites (status block below). First command: `gh pr view 378 -R chicago-film-supplies/templates`.
 
-> ## ⚠️ STATUS UPDATE 2026-09-17 (later): templates#376 built
-> - **PR #378** (prod MCP, base-component draft `yjhH2SaFUgV3wMcAg3n9`, branch `draft/base/982437e2`, base `main`). `partials/shared/destinations.eta` and `items-grid.eta` read `charge_windows` and no longer read the legacy fields. **Committed, not released** (`templates_release_draft` arms auto-merge).
-> - Single window: `visual-diff` on `5bb8955` matched all 45 fixtures in 7 families.
-> - 2+ windows: one row per window with its own days, then **Total Charged in billable days** (Σ max(d,5)). **Owner decision 2026-09-17:** billable, not Σ days, so the total matches the money. Previewed locally for the invoice, and for the quote, plus #343's quote body (the only consumer of the items-grid destination section).
-> - **Found and fixed:** `formatChargeDays` throws on 0, and a 0-day window is valid. The partials route window counts through a local `chargePeriod` guard.
-> - **Left for #376, after #378 merges:** a committed multi-window fixture on `invoice` (and on `quote` once #343 lands). It must follow the base merge so its golden is blessed against the new partials.
-> - **New decision, filed core#114 (`blocked:owner-decision`, before step 6):** a multi-window line stores and shows `chargeable_days` = Σ days while its money is billable days.
-> - api-cloudrun#1002 recurred on the first draft. Re-sending the edit did not recover it this time; the draft was abandoned and a new one was edited after its 7 golden persists landed.
-> - Context recommendation reaffirmed (CLEAR / opus).
+> ## ⚠️ STATUS UPDATE 2026-09-17 (latest): templates#378 released; core#114 decided and built
+> - **templates#378** (base component, prod MCP draft `yjhH2SaFUgV3wMcAg3n9`): `destinations.eta` / `items-grid.eta` read `charge_windows`. Released by owner instruction; `templates_release_draft` arms auto-merge. Single window: `visual-diff` matched all 45 fixtures in 7 families. 2+ windows: one row per window with its days, then **Total Charged in billable days**. `formatChargeDays` throws on 0, so the partials guard 0-day windows.
+> - **Left for templates#376, after #378 merges:** a committed multi-window fixture on `invoice` (and `quote` once #343 lands); its golden must be blessed against the new partials.
+> - **core#114, owner decision 2026-09-17: a 2+ window line stores its BILLABLE days** (Σ max(d,5)), so quantity × base × days ÷ 5 = subtotal on the line itself and the Duration column agrees with the money. Core `e9cbd48`: `lineChargeableDays` stamps `billableDays` on 2+ windows; the pricer's separate multi-window input is gone (`LinePricingOptions.windowDays`, `priceLine`'s 4th argument, `CreditSourceLine.window_days`), so every path reads the line's days. This also fixed `priceCreditNote`, which no caller fed `window_days`. Latent: prod has no 2+ window pair.
+> - **Consequences for later steps:** core#113's invariant is now "every rental `five_day_week` line on a 2+ window pair has `chargeable_days === billableDays(windows)`". Step 6's multi-window Duration cell shows the stored line days (billable), read-only.
+> - api-cloudrun#1002 recurred on the first #378 draft; the draft was abandoned and redone.
 
 > ## ⚠️ STATUS UPDATE 2026-09-17 (compacted): beta B in prod
 > **Shipped to prod earlier the same day (steps 1–3).** Core beta.481, manager 26.25.0, API 0.276.0. Backfill applied dev then prod: every pair has windows whose Σ days = `days_charged`; one total moved (#990, owner decision). Details in api-cloudrun `9fb93eca`.
@@ -138,7 +135,7 @@ chargeable_days: z.int().nullable().meta({ derived: true })   // key stays prese
   - `isNonTerminatingWindow` runs on each window.
   - Where: `assertWalkableWindow` (`services/orders.ts:684`) and `pairEdit.ts:128-140`.
   - A 0-day window is valid.
-- **Pair invariant, checked on write:** in a pair with 2+ windows, every rental `five_day_week` line has `chargeable_days === Σ days`. Because of it, readers never have to guess whether a line follows its pair.
+- **Pair invariant, checked on write:** in a pair with 2+ windows, every rental `five_day_week` line has `chargeable_days === billableDays(days)` (core#114). Because of it, readers never have to guess whether a line follows its pair.
 - **Bookings** (`booking.ts:427-430`) drop the charge fields. The only reader is display in `BookingDetail.tsx:64-67`, which reads the order instead. `buildBookingDates` stops copying them.
 
 ### 2. One author per derived value
@@ -205,7 +202,7 @@ chargeable_days: z.int().nullable().meta({ derived: true })   // key stays prese
 
 | Line | `chargeable_days` |
 |---|---|
-| `rental` + `five_day_week`, in a normal section | `chargedDays(pair)` |
+| `rental` + `five_day_week`, in a normal section | one window: its `days`; 2+ windows: `billableDays(days)` (core#114) |
 | any line in an extension section | `extensionAddedDays` (today's rule) |
 | every other type or formula (`sale`/`service`/`surcharge` stored as `five_day_week` included) | `null` (priced at factor 1, as today) |
 | rental `five_day_week` line with **no pair** (e.g. under the order divider; manager `addCustomItem` can put it there, `stores/invoices.ts:1166`) | **refused** with a named 400, rather than billing a week |
@@ -237,8 +234,7 @@ chargeable_days: z.int().nullable().meta({ derived: true })   // key stays prese
 - **`PriceDocumentContext.charge_windows: { divider_path; days: number[] }[]`** is required: every caller fails to compile until it passes one.
   - Build it with `chargeWindowContext(destinations)` from **stored** window days; no holidays.
 - **`perUnitSubtotal` for rental `five_day_week`:**
-  - Pair with 2+ windows → factor `billableDays(days)/5`.
-  - Single window → today's `max(line days, 5)/5`.
+  - Every pair → `max(line days, 5)/5`; a 2+ window line already stores `billableDays(days)` (core#114), so no separate window input.
   - Extension → `extensionAddedDays/5`, with no floor.
   - Integer arithmetic, rounded once (cfs-money).
 - **Line seeds: delete the money call** and let `priceDocument` fill it in:
@@ -249,7 +245,7 @@ chargeable_days: z.int().nullable().meta({ derived: true })   // key stays prese
   - Legacy divergent lines all sit in single-window pairs after the backfill, so they re-derive exactly as today.
   - Pass `extensions` too; it omits them today, and extension invoices probably show as drift. Check prod.
   - Callers: `settlementProjection.ts:235`, `api-cloudrun/scripts/audit-transaction-fee-lines.ts:230`.
-- **`priceCreditNote` credits as billed:** stored line days, plus the stored pair window count (multi-window factor only when the credited line's pair had 2+ windows).
+- **`priceCreditNote` credits as billed:** stored line days, plus the stored pair window count (a 2+ window line's stored days are already billable, core#114).
   - Credit notes have never stored non-null days (146/146), so test crediting an extension line, a multi-window line and a legacy divergent line explicitly.
 
 ### 5. Shared-field merge
