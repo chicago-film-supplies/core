@@ -14599,6 +14599,12 @@
         },
         {
           "kind": "interface",
+          "name": "ChargeWindowPairViolation",
+          "declaration": "interface ChargeWindowPairViolation {\n  item_uid: string;\n  path: readonly string[];\n  divider_path: readonly string[];\n  window_days: readonly number[];\n  stored: number | null;\n  expected: number;\n}",
+          "doc": "One line that breaks the charge-window pair invariant (core#113).\n\n`stored` is what the document carries; `expected` is what the pair's windows\nbill. Both are stated so a report can show the difference without re-deriving\neither."
+        },
+        {
+          "kind": "interface",
           "name": "CreditLinePrice",
           "declaration": "interface CreditLinePrice {\n  base_cents: number;\n  chargeable_days: number | null;\n  formula: indexedAccess;\n}",
           "doc": "The stored price of one credit-note line: the invoice line's declared half plus money."
@@ -14668,6 +14674,14 @@
           "name": "chargeWindowContext",
           "signature": "chargeWindowContext(destinations: readonly ChargeWindowPair[]): PairChargeWindows[]",
           "doc": "**Build {@link PriceDocumentContext.charge_windows}** from a document's stored\n`destinations`. Reads stored window days only.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "chargeWindowPairViolations",
+          "signature": "chargeWindowPairViolations(items: readonly LineItem[], ctx: Pick<PriceDocumentContext, \"document\" | \"charge_windows\" | \"extensions\">): ChargeWindowPairViolation[]",
+          "doc": "**The charge-window pair invariant, checked (core#113):** in a pair holding\ntwo or more charge windows, every `rental` + `five_day_week` line outside an\nextension section states `chargeable_days === billableDays(window days)`.\n\nBecause it holds, a reader never has to ask whether a line follows its pair —\nwhich is what lets `perUnitSubtotal` price a multi-window line from its stored\ndays alone, with no window input (charge-windows plan §4).\n\nIt holds **by construction** today: {@link lineChargeableDays} is the one\nauthor of a line's days and every order/invoice writer prices through\n{@link priceDocument}. This function exists for the writers that do not — a\n`scripts/` repair, a direct Firestore write, a future service — and is called\nfrom api-cloudrun's `assertValidForWrite`, so a divergent document is refused\nat the write rather than found later by an audit.\n\n⚠️ **Returns violations rather than throwing**, because the two callers need\ndifferent outcomes from the same answer: the write path turns one into an\noperator-facing 400 (core throws plain `Error`, which api's middleware maps to\na 500 — see api-cloudrun's `src/lib/linePrice.ts`, the same reasoning), while\nthe audit script reports every row across both projects and exits non-zero.\n\n⚠️ **Single-window pairs are NOT checked, and that is the invariant's scope\nrather than an omission.** A one-window line whose stored days differ from its\nwindow is legacy CRMS divergence, which the 2026-09-16 census measured and the\nbackfill resolved per owner decision; re-asserting it here would refuse\ndocuments the campaign deliberately left alone.",
           "paramTags": [],
           "returnsTag": null
         },

@@ -449,6 +449,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // them at render time is how a document comes to disagree with the doc it
   // renders — so nothing here belongs in a render context.
   "price-document": [
+    // The write-path guard for the charge-window pair invariant (core#113). It
+    // answers "should this document be REFUSED", which is a question about a
+    // write; by the time a template runs, the write has already been accepted.
+    // A template that found a violation could do nothing with it but print one.
+    "chargeWindowPairViolations",
     // The credit-note author (#997 D4). A credit note template renders its stored money.
     "priceCreditNote",
     "priceDocument",

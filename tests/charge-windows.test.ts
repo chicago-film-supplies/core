@@ -29,6 +29,7 @@ import {
 import type { LineItem } from "../src/utils/orders.ts";
 import {
   chargeWindowContext,
+  chargeWindowPairViolations,
   type CreditSourceLine,
   lineChargeableDays,
   PriceRefusalError,
@@ -491,4 +492,92 @@ Deno.test("priceCreditNote: a line billed on a multi-window pair is credited at 
   const billed = priced(line(["D"]), priceCtx(pairWith([3, 4, 2])));
   assertEquals(priceCreditNote([{ line: src(billed.chargeable_days!), quantity: 1 }], [], []).prices[0].subtotal_cents, billed.subtotal_cents);
   assertEquals(priceCreditNote([{ line: src(9), quantity: 1 }], [], []).prices[0].subtotal_cents, 18000, "one window: its own days");
+});
+
+// ── The pair invariant, checked on write (core#113) ──────────────────────────
+
+/**
+ * A line stating `days`, under pair `D`, so a test can put a WRONG count on a
+ * multi-window pair — which the pricer itself cannot produce.
+ */
+const storedLine = (days: number | null, path = ["D"]) => line(path, { chargeable_days: days });
+
+Deno.test("chargeWindowPairViolations: a 2+ window pair requires billableDays, and reports the difference", () => {
+  const ctx = (document: PriceDocumentContext["document"] = { kind: "order", status: "active" }) => ({
+    document,
+    charge_windows: pairWith([3, 4, 2]),
+  });
+  // [3,4,2] → Σ max(d,5) = 15. The pricer's own output is the clean case.
+  const clean = priced(line(["D"]), priceCtx(pairWith([3, 4, 2])));
+  assertEquals(clean.chargeable_days, 15);
+  assertEquals(chargeWindowPairViolations([storedLine(15)], ctx()), []);
+
+  // …and the guard BITES on a line that skipped the pricer. Without this arm
+  // every other assertion here could pass over a walker that reaches nothing.
+  const offender = storedLine(9);
+  const bad = chargeWindowPairViolations([offender], ctx());
+  assertEquals(bad.length, 1);
+  assertEquals([bad[0].stored, bad[0].expected], [9, 15], "it states both counts, so a report need not re-derive either");
+  assertEquals(bad[0].window_days, [3, 4, 2]);
+  assertEquals(bad[0].divider_path, ["D"]);
+  // `path` is the LINE's own path — the row identity within this document.
+  // `item_uid` is not one: it repeats within an array on 18% of prod orders.
+  assertEquals(bad[0].path, offender.path);
+  assertEquals(bad[0].item_uid, offender.uid);
+
+  // A null count is a violation, not an exemption — it is how an unpriced write looks.
+  assertEquals(chargeWindowPairViolations([storedLine(null)], ctx()).length, 1);
+});
+
+Deno.test("chargeWindowPairViolations: a SINGLE-window pair is out of scope", () => {
+  // Legacy CRMS divergence the 2026-09-16 census measured and the backfill
+  // settled. Re-asserting it here would refuse documents the campaign left alone.
+  const ctx = { document: { kind: "order", status: "active" } as const, charge_windows: pairWith([9]) };
+  assertEquals(chargeWindowPairViolations([storedLine(4)], ctx), []);
+  assertEquals(chargeWindowPairViolations([storedLine(9)], ctx), []);
+});
+
+Deno.test("chargeWindowPairViolations: only a rental five_day_week line is checked", () => {
+  const ctx = { document: { kind: "order", status: "active" } as const, charge_windows: pairWith([3, 4, 2]) };
+  // A sale/service/surcharge is stored as five_day_week with null days and prices at factor 1.
+  assertEquals(chargeWindowPairViolations([line(["D"], { chargeable_days: null }, { type: "sale" })], ctx), []);
+  assertEquals(chargeWindowPairViolations([line(["D"], { chargeable_days: null, formula: "fixed" })], ctx), []);
+  // A rental with NO pair is lineChargeableDays' refusal to make, not this one's.
+  assertEquals(chargeWindowPairViolations([storedLine(9, [])], ctx), []);
+});
+
+Deno.test("chargeWindowPairViolations: a document that keeps its stored days is exempt", () => {
+  const items = [storedLine(9)];
+  const windows = pairWith([3, 4, 2]);
+  const exempt: PriceDocumentContext["document"][] = [
+    { kind: "order", status: "complete" },
+    { kind: "order", status: "canceled" },
+    { kind: "invoice", status: "void", has_settlement: false },
+    { kind: "invoice", status: "paid", has_settlement: false },
+    { kind: "invoice", status: "issued", has_settlement: true },
+  ];
+  for (const document of exempt) {
+    const label = `${document.kind}/${document.status}${"has_settlement" in document && document.has_settlement ? "+settled" : ""}`;
+    assertEquals(chargeWindowPairViolations(items, { document, charge_windows: windows }), [], label);
+  }
+  // …and the live ones are NOT exempt, so the arm above cannot pass vacuously.
+  const live: PriceDocumentContext["document"][] = [
+    { kind: "order", status: "draft" },
+    { kind: "order", status: "active" },
+    { kind: "invoice", status: "issued", has_settlement: false },
+  ];
+  for (const document of live) {
+    assertEquals(chargeWindowPairViolations(items, { document, charge_windows: windows }).length, 1, `${document.kind}/${document.status}`);
+  }
+});
+
+Deno.test("chargeWindowPairViolations: an extension line bills the days it ADDS, not its pair's total", () => {
+  const ext = line(["O", "E"], { chargeable_days: 2 });
+  const windows = chargeWindowContext([{ uid: "E", uid_order: "O", dates: { charge_windows: [{ days: 3 }, { days: 4 }] } }]);
+  const document = { kind: "invoice", status: "draft", has_settlement: false } as const;
+  // Under the section: exempt — 2 is the added days, while billableDays is 10.
+  assertEquals(chargeWindowPairViolations([ext], { document, charge_windows: windows, extensions: [{ divider_path: ["O", "E"] }] }), []);
+  // The SAME line with no extension section declared is checked, so the
+  // exemption is the section's doing rather than the line's shape.
+  assertEquals(chargeWindowPairViolations([ext], { document, charge_windows: windows }).length, 1);
 });

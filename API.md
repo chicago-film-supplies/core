@@ -31648,6 +31648,25 @@ interface ChargeWindowPair {
 }
 ```
 
+### `ChargeWindowPairViolation`
+
+One line that breaks the charge-window pair invariant (core#113).
+
+`stored` is what the document carries; `expected` is what the pair's windows
+bill. Both are stated so a report can show the difference without re-deriving
+either.
+
+```ts
+interface ChargeWindowPairViolation {
+  item_uid: string;
+  path: readonly string[];
+  divider_path: readonly string[];
+  window_days: readonly number[];
+  stored: number | null;
+  expected: number;
+}
+```
+
 ### `CreditLinePrice`
 
 The stored price of one credit-note line: the invoice line's declared half plus money.
@@ -31774,6 +31793,35 @@ interface PricedDocument {
 
 **Build {@link PriceDocumentContext.charge_windows}** from a document's stored
 `destinations`. Reads stored window days only.
+
+### `chargeWindowPairViolations(items: readonly LineItem[], ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">): ChargeWindowPairViolation[]`
+
+**The charge-window pair invariant, checked (core#113):** in a pair holding
+two or more charge windows, every `rental` + `five_day_week` line outside an
+extension section states `chargeable_days === billableDays(window days)`.
+
+Because it holds, a reader never has to ask whether a line follows its pair —
+which is what lets `perUnitSubtotal` price a multi-window line from its stored
+days alone, with no window input (charge-windows plan §4).
+
+It holds **by construction** today: {@link lineChargeableDays} is the one
+author of a line's days and every order/invoice writer prices through
+{@link priceDocument}. This function exists for the writers that do not — a
+`scripts/` repair, a direct Firestore write, a future service — and is called
+from api-cloudrun's `assertValidForWrite`, so a divergent document is refused
+at the write rather than found later by an audit.
+
+⚠️ **Returns violations rather than throwing**, because the two callers need
+different outcomes from the same answer: the write path turns one into an
+operator-facing 400 (core throws plain `Error`, which api's middleware maps to
+a 500 — see api-cloudrun's `src/lib/linePrice.ts`, the same reasoning), while
+the audit script reports every row across both projects and exits non-zero.
+
+⚠️ **Single-window pairs are NOT checked, and that is the invariant's scope
+rather than an omission.** A one-window line whose stored days differ from its
+window is legacy CRMS divergence, which the 2026-09-16 census measured and the
+backfill resolved per owner decision; re-asserting it here would refuse
+documents the campaign deliberately left alone.
 
 ### `invoiceExtensionSections(items: readonly typeLiteral[]): PriceDocumentExtension[]`
 
