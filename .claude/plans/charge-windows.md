@@ -5,7 +5,7 @@
 **Related:** api-cloudrun#1028
 
 ## START HERE
-Step 2 is half landed. **Core is `@cfs/core@10.0.0-beta.479`. The manager is on `main` (`40831b9d`) but not released to prod. The API half is committed, not pushed**, on branch `feat/charge-windows-api` (`d7e6af6d`) in the api-cloudrun worktree `.claude/worktrees/charge-windows`. Next: migrate api-cloudrun's integration tests to `charge_windows` input (list below), run the suite, and land the branch. The release order is the manager to prod, then the API to prod, then the backfill (step 3) right away. First command: `cd api-cloudrun/.claude/worktrees/charge-windows && grep -rln "charge_start\|charge_end\|chargeable_days\|days_charged" tests | wc -l` (53 files, 33 of them integration).
+Step 2 is half landed. **Core is `@cfs/core@10.0.0-beta.480`. The manager is on `main` (`ecb2445b`, pinned to beta.480) but not released to prod. The API half is committed, not pushed**, on branch `feat/charge-windows-api` (`d7e6af6d`, plus uncommitted work) in the api-cloudrun worktree `.claude/worktrees/charge-windows`. Next: finish migrating api-cloudrun's integration tests to `charge_windows` input, get the suite green, and land the branch. The release order is the manager to prod, then the API to prod, then the backfill (step 3) right away.
 
 > ## ⚠️ STATUS UPDATE 2026-09-16 (compacted): step 1 done, step 2 half done
 > **Core.** Beta A is `beta.478` (`2ecb85f`). `beta.479` (`4589ef1`) fixed a typing gap that beta A shipped: `isSameAsDeliveryDates`, `getDefaultChargeDays` and the three destination helpers took the INPUT types, where `charge_windows` is required, so no stored pair fit them. They now take the structural `ChargeDates` / a `Pick`, and `isSameAsDeliveryDates` reads a pair stored before windows by its charge bounds. api-cloudrun was type-checked against the local tree with `file://` pins before that publish.
@@ -32,11 +32,13 @@ Step 2 is half landed. **Core is `@cfs/core@10.0.0-beta.479`. The manager is on 
 > - Input line days are ignored.
 >
 > **Still to do for step 2 (API):**
-> 1. **Migrate the integration tests.** 33 integration files and `api-cloudrun/tests/helpers/seedPickableOrder.ts` spell `charge_start`/`charge_end` or input days by hand. ⚠️ **Any test that `copyDoc`s a dev order and PUTs its destinations now 400s**, because the order input requires `charge_windows` and dev's pairs predate them. Dev cannot be backfilled first: dev's API deploys from `main`, and the old API's strict stored schema refuses the new key. So those tests have to state windows themselves.
-> 2. §2b: after `resolveMergedPairDates`, re-apply the follow rule against the MERGED previous possession. Not done.
-> 3. `updateInvoice`'s `destinationsMoved` second clause (`input.items === undefined && !isEqual(items)`) is dead now that no sync moves items. Delete it.
-> 4. Write the release order into the API PR: manager prod release first, then the API, then the backfill.
+> 1. **Migrate the integration tests.** A first run of the 50 affected integration suites (2026-09-16) failed 53 files / 91 steps, almost all `destinations.0.dates.charge_windows` 400s. **Any test that `copyDoc`s a dev order and PUTs its destinations 400s**, because the order input requires `charge_windows` and dev's pairs predate them. Dev cannot be backfilled first: dev's API deploys from `main`, and the old API's strict stored schema refuses the new key. So those tests state windows themselves. In progress in the worktree (uncommitted).
+> 2. Write the release order into the API PR: manager prod release first, then the API, then the backfill.
 >
+> **Done since the last update (2026-09-16):**
+> - §2b landed in core `beta.480` (`28ade1e`): `resolveMergedPairDates` lets a downstream's single window that equalled its own possession follow a merged possession move (instants; a legacy pair follows by its charge bounds). The API worktree and manager are pinned to it. **Templates is still on beta.466** (its checkout was on another session's `chore/core-beta-466` branch).
+> - `updateInvoice`'s dead `destinationsMoved` items clause is deleted (worktree, uncommitted).
+> - The census script's 5 double casts are gone; `typeEscapeRatchet` passes. The script stays untracked here and lands with the backfill.
 > **Design calls made while building (flag to the owner):**
 > 1. **A pair stored before windows keeps its lines' stored days** (a new line takes `days_charged`). ⚠️ The protection ends the moment such a pair is canonicalized: a manager or API date edit, a merged-window sync, a holiday recompute, or (manager only) the copy-not-recount guard followed by any reprice. Live exposure is #1003 and #979. **Run the backfill right after the step-2 API prod deploy.** The rule is removed in beta B.
 > 2. **A `complete`/`canceled` order keeps stored line days** (the owner's census decision). What reopening one should do is undecided.
