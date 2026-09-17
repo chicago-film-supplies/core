@@ -35,7 +35,7 @@ import type {
 } from "../schemas/mod.ts";
 import isEqual from "lodash-es/isEqual";
 import { itemContract, zeroPricedFlaggedNonComponents } from "../schemas/mod.ts";
-import { billableDays, canonicalChargeWindows, type ChargeDates, chargedDays, chargeEnvelope, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
+import { canonicalChargeWindows, type ChargeDates, chargedDays, chargeEnvelope, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
 import {
   fromCents,
   roundDivHalfAwayFromZero,
@@ -726,16 +726,6 @@ export interface LinePricingOptions {
    * and 7→4 is −2. Only a `five_day_week` line can be extended.
    */
   extensionDays?: number;
-  /**
-   * The stored day counts of the charge windows of a pair with TWO OR MORE
-   * windows. A `five_day_week` line is then priced at
-   * `billableDays(windowDays) ÷ 5` — every window carries the one-week minimum —
-   * instead of from its own `chargeable_days` (charge-windows decision 2).
-   *
-   * A single-window pair passes nothing: `max(days, 5)` of one window is exactly
-   * the line's own floor, so a one-window pair prices as it always has.
-   */
-  windowDays?: readonly number[];
 }
 
 /**
@@ -772,14 +762,7 @@ function perUnitSubtotal(
   // `pricingFactor = Math.max(chargeable_days / 5, 1)` — so the day factor bites
   // only above the one-week floor. At exactly 5 days it is 1, as is `fixed`.
   // An extension skips that floor: its day count is signed and always applies.
-  const windowDays = extension === undefined && formula === "five_day_week" && (opts?.windowDays?.length ?? 0) >= 2
-    ? opts!.windowDays!
-    : undefined;
-  const days = extension !== undefined
-    ? Math.round(extension)
-    : windowDays !== undefined
-    ? billableDays(windowDays)
-    : Math.round(chargeable_days ?? 0);
+  const days = Math.round(extension ?? chargeable_days ?? 0);
   const useDays = extension !== undefined || (formula === "five_day_week" && days > 5);
 
   // `base_cents` is ALREADY an integer count of cents, so this is a widening

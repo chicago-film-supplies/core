@@ -402,13 +402,23 @@ const priced = (it: LineItem, ctx: PriceDocumentContext) => {
 
 Deno.test("priceDocument: the worked multi-window cases", () => {
   const cases: Array<[number[], number, number]> = [
-    [[3, 4, 2], 9, 30000], // 15 billable → 3.0×
-    [[3, 0, 4], 7, 30000], // 15 billable → 3.0×
+    [[3, 4, 2], 15, 30000], // 15 billable → 3.0×
+    [[3, 0, 4], 15, 30000], // 15 billable → 3.0×
     [[8, 7, 6], 21, 42000], // 21 billable → 4.2×
   ];
   for (const [windows, days, cents] of cases) {
     const out = priced(line(["D"]), priceCtx(pairWith(windows)));
     assertEquals([out.chargeable_days, out.subtotal_cents], [days, cents], JSON.stringify(windows));
+  }
+});
+
+Deno.test("priceDocument: a multi-window line's own numbers multiply out to its subtotal (core#114)", () => {
+  for (const windows of [[3, 4, 2], [3, 0, 4], [8, 7, 6], [0, 0], [12, 1]]) {
+    for (const quantity of [1, 3, 7]) {
+      const out = priced(line(["D"], {}, { quantity }), priceCtx(pairWith(windows)));
+      assertEquals(out.chargeable_days, billableDays(windows), JSON.stringify(windows));
+      assertEquals(out.subtotal_cents, quantity * 10000 * out.chargeable_days! / 5, `${JSON.stringify(windows)} × ${quantity}`);
+    }
   }
 });
 
@@ -477,7 +487,7 @@ Deno.test("chargeWindowContext: an invoice pair's divider path is [uid_order, ui
   const ctx = chargeWindowContext([{ uid: "D", uid_order: "O", dates: { charge_windows: [{ days: 3 }, { days: 4 }] } }]);
   assertEquals(ctx, [{ divider_path: ["O", "D"], days: [3, 4] }]);
   const onInvoice = line(["O", "D"]);
-  assertEquals(lineChargeableDays(onInvoice, priceCtx(ctx)), { chargeable_days: 7, windowDays: [3, 4] });
+  assertEquals(lineChargeableDays(onInvoice, priceCtx(ctx)), { chargeable_days: 10 });
 });
 
 Deno.test("priceDocument: an extension line bills its pair's added days, unfloored", () => {
@@ -494,16 +504,15 @@ Deno.test("priceDocument: an extension line bills its pair's added days, unfloor
   assertEquals(priceExt(7, { charge_windows: [{ days: 2 }] }).chargeable_days, 2, "the window wins over a stale line count");
 });
 
-Deno.test("priceCreditNote: a line billed on a multi-window pair is credited as billed", () => {
-  const src = (window_days: number[] | null): CreditSourceLine => ({
+Deno.test("priceCreditNote: a line billed on a multi-window pair is credited at its stored billable days", () => {
+  const src = (chargeable_days: number): CreditSourceLine => ({
     uid: "r1",
     path: ["O", "D", "r1"],
     type: "rental",
     quantity: 1,
-    price: { base_cents: 10000, chargeable_days: 9, formula: "five_day_week", discount: null, taxes: [] },
-    window_days,
+    price: { base_cents: 10000, chargeable_days, formula: "five_day_week", discount: null, taxes: [] },
   });
-  assertEquals(priceCreditNote([{ line: src([3, 4, 2]), quantity: 1 }], [], []).prices[0].subtotal_cents, 30000);
-  assertEquals(priceCreditNote([{ line: src(null), quantity: 1 }], [], []).prices[0].subtotal_cents, 18000, "legacy: its own 9 days");
-  assertEquals(priceCreditNote([{ line: src([9]), quantity: 1 }], [], []).prices[0].subtotal_cents, 18000, "one window: its own days");
+  const billed = priced(line(["D"]), priceCtx(pairWith([3, 4, 2])));
+  assertEquals(priceCreditNote([{ line: src(billed.chargeable_days!), quantity: 1 }], [], []).prices[0].subtotal_cents, billed.subtotal_cents);
+  assertEquals(priceCreditNote([{ line: src(9), quantity: 1 }], [], []).prices[0].subtotal_cents, 18000, "one window: its own days");
 });

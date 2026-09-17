@@ -59,6 +59,7 @@ import {
   type PriceObject,
   type Tax,
 } from "./orders.ts";
+import { billableDays } from "./dates.ts";
 import { assignLineTaxes, type DocumentTaxContext, type UnreviewedTaxWarning } from "./taxes.ts";
 import { pricingTaxesOf } from "./tax-classes.ts";
 
@@ -236,11 +237,9 @@ export function priceLine(
   item: LineItem,
   taxes: Tax[],
   extensionDays?: number,
-  windowDays?: readonly number[],
 ): LinePriceMoney {
   const opts: LinePricingOptions = {};
   if (extensionDays !== undefined) opts.extensionDays = extensionDays;
-  if (windowDays !== undefined) opts.windowDays = windowDays;
   return computeLineMoney(item, taxes, item.uid, opts);
 }
 
@@ -286,19 +285,22 @@ function keepsStoredDays(document: PriceDocumentKind): boolean {
  * |---|---|
  * | in an extension section | Σ its pair's window days (the days added) |
  * | on a `complete`/`canceled` order | its own stored days |
- * | `rental` + `five_day_week` on a pair with windows | Σ window days |
+ * | `rental` + `five_day_week` on a one-window pair | that window's days |
+ * | `rental` + `five_day_week` on a 2+ window pair | `billableDays(windows)` |
  * | `rental` + `five_day_week` on no pair | refused |
  * | anything else | `null` |
  *
- * `windowDays` is set only for a pair with two or more windows, where the price
- * is `billableDays(windows) ÷ 5` rather than the line's own floor.
+ * A 2+ window pair stores its BILLABLE days, Σ `max(days, 5)`, so the line's
+ * own numbers multiply out to its subtotal: `quantity × base × days ÷ 5` (owner,
+ * 2026-09-17, core#114). A one window pair keeps its raw count; the pricer's
+ * `max(days, 5)` floor is the same thing for one window.
  *
  * @throws Error on a rental `five_day_week` line that hangs under no pair.
  */
 export function lineChargeableDays(
   item: LineItem,
   ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">,
-): { chargeable_days: number | null; windowDays?: readonly number[] } {
+): { chargeable_days: number | null } {
   const stored = item.price?.chargeable_days ?? null;
   if (extensionFor(item, ctx.extensions)) {
     // An extension pair's one window carries the days the section ADDS, never
@@ -316,8 +318,7 @@ export function lineChargeableDays(
         "Move it under a destination",
     );
   }
-  const sum = pair.days.reduce((total, d) => total + d, 0);
-  return pair.days.length >= 2 ? { chargeable_days: sum, windowDays: pair.days } : { chargeable_days: sum };
+  return { chargeable_days: pair.days.length >= 2 ? billableDays(pair.days) : pair.days[0] };
 }
 
 /** The added days an extension line bills: its own `chargeable_days`, which it must state. */
@@ -393,7 +394,7 @@ export function priceDocument<T extends LineItem>(
     const derived = isPreTaxItem(item) ? lineChargeableDays(item, ctx) : { chargeable_days: null };
     if (isPreTaxItem(item)) item.price = { ...item.price, chargeable_days: derived.chargeable_days };
     const price = item.price;
-    const money: LinePriceMoney = priceLine(item, pricing, extension && extensionDaysOf(item), derived.windowDays);
+    const money: LinePriceMoney = priceLine(item, pricing, extension && extensionDaysOf(item));
     // ⚠️ Stage 1 has ALREADY written `taxes_base` on every pre-tax line, so it is
     // always present here, as the deleted `materializeDocumentTax` also left it.
     // That widens the key set of a stored line that never carried it (measured
@@ -456,12 +457,6 @@ export interface CreditSourceLine {
     discount: { rate: number; type: "percent" | "flat" } | null;
     taxes: readonly { uid: string }[];
   };
-  /**
-   * The stored window days of the invoice pair the line billed under. A line
-   * whose pair had two or more windows is credited at the multi-window factor,
-   * as it was billed; otherwise its own stored `chargeable_days` price it.
-   */
-  window_days?: readonly number[] | null;
 }
 
 /** One invoice line to credit, and how many of it. */
@@ -539,12 +534,7 @@ export function priceCreditNote(
     }
     const price = assembleLinePrice(
       { base_cents: line.price.base_cents, chargeable_days: line.price.chargeable_days, formula: line.price.formula },
-      priceLine(
-        item,
-        taxes,
-        extension && extensionDaysOf(item),
-        !extension && (line.window_days?.length ?? 0) >= 2 ? line.window_days! : undefined,
-      ),
+      priceLine(item, taxes, extension && extensionDaysOf(item)),
       item,
     ) as CreditLinePrice;
     prices.push(price);

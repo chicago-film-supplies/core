@@ -13981,7 +13981,7 @@
         {
           "kind": "interface",
           "name": "LinePricingOptions",
-          "declaration": "interface LinePricingOptions {\n  extensionDays?: number;\n  windowDays?: readonly number[];\n}",
+          "declaration": "interface LinePricingOptions {\n  extensionDays?: number;\n}",
           "doc": "Pricing inputs that come from the DOCUMENT rather than the line.\n\nOnly `priceDocument` (`@cfs/core/utils/price-document`) derives these. A\nwriter that prices a line on its own never passes them, which is the point:\nthe document decides, so no per-line caller can forget to (D1 of the\npriceDocument campaign, api-cloudrun#997)."
         },
         {
@@ -14612,7 +14612,7 @@
         {
           "kind": "interface",
           "name": "CreditSourceLine",
-          "declaration": "interface CreditSourceLine {\n  uid: string;\n  path: readonly string[];\n  type: indexedAccess;\n  quantity: number;\n  price: typeLiteral;\n  window_days?: readonly number[] | null;\n}",
+          "declaration": "interface CreditSourceLine {\n  uid: string;\n  path: readonly string[];\n  type: indexedAccess;\n  quantity: number;\n  price: typeLiteral;\n}",
           "doc": "The invoice-line surface a credit is priced from (api-cloudrun#997 D4)."
         },
         {
@@ -14683,7 +14683,7 @@
           "kind": "function",
           "name": "lineChargeableDays",
           "signature": "lineChargeableDays(item: LineItem, ctx: Pick<PriceDocumentContext, \"document\" | \"charge_windows\" | \"extensions\">): typeLiteral",
-          "doc": "**A line's `chargeable_days`, the one derivation of it** (charge-windows\ndecision 3), and the window days that price it.\n\n| line | `chargeable_days` |\n|---|---|\n| in an extension section | Σ its pair's window days (the days added) |\n| on a `complete`/`canceled` order | its own stored days |\n| `rental` + `five_day_week` on a pair with windows | Σ window days |\n| `rental` + `five_day_week` on no pair | refused |\n| anything else | `null` |\n\n`windowDays` is set only for a pair with two or more windows, where the price\nis `billableDays(windows) ÷ 5` rather than the line's own floor.",
+          "doc": "**A line's `chargeable_days`, the one derivation of it** (charge-windows\ndecision 3), and the window days that price it.\n\n| line | `chargeable_days` |\n|---|---|\n| in an extension section | Σ its pair's window days (the days added) |\n| on a `complete`/`canceled` order | its own stored days |\n| `rental` + `five_day_week` on a one-window pair | that window's days |\n| `rental` + `five_day_week` on a 2+ window pair | `billableDays(windows)` |\n| `rental` + `five_day_week` on no pair | refused |\n| anything else | `null` |\n\nA 2+ window pair stores its BILLABLE days, Σ `max(days, 5)`, so the line's\nown numbers multiply out to its subtotal: `quantity × base × days ÷ 5` (owner,\n2026-09-17, core#114). A one window pair keeps its raw count; the pricer's\n`max(days, 5)` floor is the same thing for one window.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -14706,7 +14706,7 @@
         {
           "kind": "function",
           "name": "priceLine",
-          "signature": "priceLine(item: LineItem, taxes: Tax[], extensionDays?: number, windowDays?: readonly number[]): LinePriceMoney",
+          "signature": "priceLine(item: LineItem, taxes: Tax[], extensionDays?: number): LinePriceMoney",
           "doc": "**Stage 2 for one line: the line pricer.** `priceDocument` prices every line\nthrough it, and so does the one reader that must price a line outside a\ndocument — `accountLine` (`./quantityAccounting.ts`), which prices a\nremainder and a billed row's extension (#997 D11).\n\n`extensionDays` is D7: the line is priced for that many days with the\none-week minimum skipped, which is what an extension section on an invoice\nbills. A document line passes its own `chargeable_days`; `accountLine` passes\nthe days an extension group adds for a billed row.",
           "paramTags": [],
           "returnsTag": null

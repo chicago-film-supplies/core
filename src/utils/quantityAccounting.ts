@@ -323,10 +323,10 @@ export interface LineAccount {
  * The line's tax refs are dropped first: only the pre-tax subtotal is read, and
  * the pricer resolves every ref it is handed against the catalog it is given.
  */
-function subtotalCents(item: LineItem, extensionDays?: number, windowDays?: readonly number[]): number {
+function subtotalCents(item: LineItem, extensionDays?: number): number {
   if (!isPreTaxItem(item)) return 0;
   const untaxed = { ...item, price: { ...item.price, taxes: [] } } as LineItem;
-  return priceLine(untaxed, [], extensionDays, windowDays).subtotal_discounted_cents;
+  return priceLine(untaxed, [], extensionDays).subtotal_discounted_cents;
 }
 
 /**
@@ -343,12 +343,11 @@ export function accountLine(orderLine: LineItem, billed: BilledAtPath | undefine
 
   // The pricer rounds a non-negative quantity; an over-billed remainder is
   // priced at its magnitude and given back its sign.
-  // A pair with 2+ windows prices every window at its one-week minimum, as
-  // `priceDocument` does; a single window prices at the line's own days.
-  const windowDays = orderWindow && orderWindow.days.length >= 2 ? orderWindow.days : undefined;
+  // The line's own days: `priceDocument` stamps a 2+ window pair's line with its
+  // billable days (core#114), so they already carry every window's minimum.
   const quantityCents = quantity === 0
     ? 0
-    : Math.sign(quantity) * subtotalCents({ ...orderLine, quantity: Math.abs(quantity) }, undefined, windowDays);
+    : Math.sign(quantity) * subtotalCents({ ...orderLine, quantity: Math.abs(quantity) });
 
   // What the order's days add to the units already billed, each group priced as
   // the ONE extension line that would bill it — so a remainder invoice built

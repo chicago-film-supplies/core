@@ -30358,7 +30358,6 @@ priceDocument campaign, api-cloudrun#997).
 ```ts
 interface LinePricingOptions {
   extensionDays?: number;
-  windowDays?: readonly number[];
 }
 ```
 
@@ -31710,7 +31709,6 @@ interface CreditSourceLine {
   type: indexedAccess;
   quantity: number;
   price: typeLiteral;
-  window_days?: readonly number[] | null;
 }
 ```
 
@@ -31822,12 +31820,15 @@ decision 3), and the window days that price it.
 |---|---|
 | in an extension section | Σ its pair's window days (the days added) |
 | on a `complete`/`canceled` order | its own stored days |
-| `rental` + `five_day_week` on a pair with windows | Σ window days |
+| `rental` + `five_day_week` on a one-window pair | that window's days |
+| `rental` + `five_day_week` on a 2+ window pair | `billableDays(windows)` |
 | `rental` + `five_day_week` on no pair | refused |
 | anything else | `null` |
 
-`windowDays` is set only for a pair with two or more windows, where the price
-is `billableDays(windows) ÷ 5` rather than the line's own floor.
+A 2+ window pair stores its BILLABLE days, Σ `max(days, 5)`, so the line's
+own numbers multiply out to its subtotal: `quantity × base × days ÷ 5` (owner,
+2026-09-17, core#114). A one window pair keeps its raw count; the pricer's
+`max(days, 5)` floor is the same thing for one window.
 
 ### `priceCreditNote(selection: readonly CreditSelectionLine[], taxes: Tax[], extensions: readonly PriceDocumentExtension[]): PricedCreditNote`
 
@@ -31850,7 +31851,7 @@ The server stores this result, and the manager renders it as a preview.
 
 Price a document: taxes, line money, fee amounts and totals, in one pass.
 
-### `priceLine(item: LineItem, taxes: Tax[], extensionDays?: number, windowDays?: readonly number[]): LinePriceMoney`
+### `priceLine(item: LineItem, taxes: Tax[], extensionDays?: number): LinePriceMoney`
 
 **Stage 2 for one line: the line pricer.** `priceDocument` prices every line
 through it, and so does the one reader that must price a line outside a

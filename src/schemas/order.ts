@@ -1120,7 +1120,7 @@ export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObjec
   // line has no replacement value", which is not the fact `0` states, and
   // `checkItemContract`'s `forbidden` arm reads the difference.
   replacement_cents: z.int().nullable().optional().meta({ column: true, label: "Replacement" }),
-  // Derived: `priceDocument` stamps it from the pair's charge windows (Σ days)
+  // Derived: `priceDocument` stamps it from the pair's charge windows (one window's days; `billableDays` of 2+)
   // on a rental `five_day_week` line, `null` on every other line. The key stays
   // present. See `lineChargeableDays` in `@cfs/core/utils/price-document`.
   chargeable_days: z.int().nullable().meta({ column: true, label: "Chargeable Days", derived: true }),
