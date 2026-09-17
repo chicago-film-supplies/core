@@ -5,7 +5,7 @@
 **Related:** api-cloudrun#1028
 
 ## START HERE
-Step 2 is built and tested; nothing is released to prod. **Core is `@cfs/core@10.0.0-beta.481`. The manager is on `main` pinned to beta.481. The API is one commit (`aa480865`) on branch `feat/charge-windows-api`**, pushed with an open PR that carries the release order. Next: the owner releases the manager to prod, then merges and releases the API, then runs the backfill (step 3) right away. First command: `gh pr list -R chicago-film-supplies/api-cloudrun --head feat/charge-windows-api`.
+Step 2 is built, tested and waiting on releases; nothing is in prod. **Core is `@cfs/core@10.0.0-beta.481`. Manager `main` is pinned to it (`749b64d9`). The API half is api-cloudrun#1033** (branch `feat/charge-windows-api`, head `9d54d696`, CI green, not merged); its body carries the release order. **Templates is templates#363** (pin → beta.481, checks green, not merged). Next, in order: the owner releases the manager to prod; merges and releases #1033; runs the backfill (step 3) right away. Then merge templates#363. First command: `gh pr view 1033 -R chicago-film-supplies/api-cloudrun`.
 
 > ## ⚠️ STATUS UPDATE 2026-09-16 (compacted): step 1 done, step 2 half done
 > **Core.** Beta A is `beta.478` (`2ecb85f`). `beta.479` (`4589ef1`) fixed a typing gap that beta A shipped: `isSameAsDeliveryDates`, `getDefaultChargeDays` and the three destination helpers took the INPUT types, where `charge_windows` is required, so no stored pair fit them. They now take the structural `ChargeDates` / a `Pick`, and `isSameAsDeliveryDates` reads a pair stored before windows by its charge bounds. api-cloudrun was type-checked against the local tree with `file://` pins before that publish.
@@ -39,7 +39,8 @@ Step 2 is built and tested; nothing is released to prod. **Core is `@cfs/core@10
 >   3. **Pricer refusals were 500s.** Core beta.481 throws `PriceRefusalError` for refusals caused by the document; the API error handler answers 400. Other pricer throws stay 500.
 > - §2b landed in core beta.480: `resolveMergedPairDates` lets a downstream's single window that equalled its own possession follow a merged possession move.
 > - `updateInvoice`'s dead `destinationsMoved` items clause is deleted. The census script's casts are fixed; it stays untracked and lands with the backfill.
-> - **Templates is still on beta.466** (its checkout was on another session's `chore/core-beta-466` branch).
+> - Templates: templates#363 (rebased, pinned to beta.481) is open with checks green. Its `visual-diff` only renders changed `git_path`s, so it did not render fixtures against the new core.
+> - core#111: `getInitialValues` seeds `charge_windows: []`, which the stored schema refuses; decide with beta B.
 >
 > **Design calls made while building (flag to the owner):**
 > 1. **A pair stored before windows keeps its lines' stored days** (a new line takes `days_charged`). ⚠️ The protection ends the moment such a pair is canonicalized: a manager or API date edit, a merged-window sync, a holiday recompute, or (manager only) the copy-not-recount guard followed by any reprice. Live exposure is #1003 and #979. **Run the backfill right after the step-2 API prod deploy.** The rule is removed in beta B.
