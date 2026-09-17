@@ -1,21 +1,21 @@
 # Multiple charge windows per destination pair
 
-**Date:** 2026-09-16 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** in-progress (steps 1–3 in prod; step 4, beta B, on `main`/published and awaiting prod releases)
+**Date:** 2026-09-16 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** in-progress (steps 1–4 in prod; step 5 next)
 **Origin:** hotspot rentals billed only for their activation windows; owner design sessions 2026-09-16
 **Related:** api-cloudrun#1028, core#112 (§3 comparator), core#113 (pair invariant guard), templates#376 (partials read windows)
 
 ## START HERE
-**Beta B is built and on every `main` (2026-09-17). What's left for step 4 is releasing it to prod in order.** First: `gh pr list -R chicago-film-supplies/manager --search release` and merge manager **26.26.0** (carries `4a6c78ba`). Only after its prod deploy, merge the api-cloudrun release carrying `5ce32faf`; its `Requires-Manager: >= 26.26.0` trailer and the pin arm both gate it. Merge templates#375 (pin + fixture windows) whenever. Then step 5.
+**Step 4 (beta B) is in prod as of 2026-09-17**: manager 26.26.0, then API 0.277.0, and templates#375 is merged. Next is **step 5** (stop writing the legacy fields, purge, remove); its prerequisites are listed in the status block below, and templates#376 goes first. First command: `gh issue view 376 -R chicago-film-supplies/templates`.
 
-> ## ⚠️ STATUS UPDATE 2026-09-17 (compacted): beta B published, on main, not yet in prod
+> ## ⚠️ STATUS UPDATE 2026-09-17 (compacted): beta B in prod
 > **Shipped to prod earlier the same day (steps 1–3).** Core beta.481, manager 26.25.0, API 0.276.0. Backfill applied dev then prod: every pair has windows whose Σ days = `days_charged`; one total moved (#990, owner decision). Details in api-cloudrun `9fb93eca`.
 >
 > **Beta B (step 4).**
 > - **Core `6c7c984` → `@cfs/core@10.0.0-beta.482`.** `OrderDocDates.charge_windows` required. Legacy fallbacks gone: `chargeWindowsOf`, `storedWindows`, `legacy_days_charged`; `chargeWindowContext` refuses a windowless pair. §2c: `BilledWindow` = last end + window days; groups track billable days; `extensionChargeDays` removed. `buildRemainingInvoice` writes the extension pair's ONE window (day after billed end at the order's start time → order's last end, `days` = ADDED days; **owner decision 2026-09-17: one window, not clipped windows**). `accountLine` prices a remainder on a 2+ window pair at `billableDays ÷ 5` (it used the line's own floor, a bug). `deriveOrderDateEnvelope` derives its charge fields from windows. `getDuration` lost its charge half. New `chicagoDayAtTimeOf`.
-> - **Manager `4a6c78ba` on main** (release 26.26.0 open). Pin beta.482; `ensurePairWindows` removed; date editor, collapsed summary, invoice drawer and item search read windows; BookingDetail drops charge rows; `documentTax` passes every pair's windows.
-> - **API `5ce32faf` on main** (dev deploy). Pin beta.482; `canonicalizeDestinationDates` always writes windows; reprice key reads window days; `canonicalNewInvoicePair` takes the extension window as built; **bookings write `charge_*` null** (not optional: core's stored-optionality ratchet refuses a new `.nullable().optional()`, so the removal goes optional → purge → delete in step 5); census script deleted. Dev's two void test invoices #1000001/#1000002 were given windows by the backfill rule (the pre-push suite reads dev).
-> - **Templates #375** (open, green): pin beta.482 + windows on 31 fixture pairs; renders unchanged.
-> - **Release order (write into the release PRs):** manager 26.26.0 → prod deploy → API release. The manager stops reading booking charge fields before the API nulls them.
+> - **Manager `4a6c78ba`, prod as 26.26.0.** Pin beta.482; `ensurePairWindows` removed; date editor, collapsed summary, invoice drawer and item search read windows; BookingDetail drops charge rows; `documentTax` passes every pair's windows.
+> - **API `5ce32faf`, prod as 0.277.0** (the `requires-manager` gate went green once 26.26.0 released; no prod errors logged after the deploy). Pin beta.482; `canonicalizeDestinationDates` always writes windows; reprice key reads window days; `canonicalNewInvoicePair` takes the extension window as built; **bookings write `charge_*` null** (not optional: core's stored-optionality ratchet refuses a new `.nullable().optional()`, so the removal goes optional → purge → delete in step 5); census script deleted. Dev's two void test invoices #1000001/#1000002 were given windows by the backfill rule (the pre-push suite reads dev).
+> - **Templates #375** (merged): pin beta.482 + windows on 31 fixture pairs; renders unchanged.
+> - **Released in order:** manager 26.26.0, its prod deploy, then API 0.277.0. The manager stopped reading booking charge fields before the API nulled them.
 >
 > **Deferred, filed:** core#112 (§3: `computeInvoiceSyncStatus` badges an invoice whose own windows bill different days; not a regression), core#113 (nothing asserts the 2+ window pair invariant on write), templates#376 (partials still read `charge_start`/`charge_end`/`days_charged`; **must land before step 5**). core#111 closed (moot: required windows mean a seed with none is correctly refused).
 >
@@ -23,7 +23,7 @@
 >
 > **Step 5 prerequisites found while building beta B:** templates#376; typesense `dates.charge_*_fs`/`days_charged` fields and `display-columns.ts` still project the mirrors (remove with a forced prod resync before the manager release that stops reading them); `deriveOrderDateEnvelope`'s charge fields; `xeroQuoteStatus`'s `charge_end` fallback (now window-derived); booking charge fields optional → stop → purge → delete; api-cloudrun `scripts/_stockReconciliationPlan.ts` and `reconcile-physical-stock-count.ts` read booking `charge_start` as a fallback.
 >
-> **Open design question for the owner:** what reopening a `complete`/`canceled` order should do with its stored line days.
+> **Decided (owner, 2026-09-17): reopening re-derives, in the reopening write.** api-cloudrun `cf4b9673` adds a `reopened` arm to `updateOrder`'s reprice gate, so `canceled` → `draft`/`quoted`/`reserved` reprices from the windows in the same write, and that write's activity row carries the totals delta. Stored days are not carried past a reopen; issued invoices are protected by the invoice freeze. `complete` has no reopen path today (`finalizeOrderBookings` treats it as terminal); the predicate covers it for any future one. On `main`; not yet released.
 
 ## Census (prod, 2026-09-16; dev agrees to within 2 invoices)
 Script: the charge-windows census script, uncommitted on api-cloudrun branch `chore/charge-windows-census` (worktree `charge-windows`); it lands with the backfill. Prod: 1,033 orders, 1,051 invoices.
