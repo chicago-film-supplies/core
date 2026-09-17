@@ -7,7 +7,11 @@
 ## START HERE
 🎉 **Steps 1–5 are COMPLETE and in prod, and core#113 is DONE.** The legacy charge fields no longer exist (`@cfs/core@10.0.0-beta.485` deleted the declarations, both projects census 0), and `beta.486` added the pair-invariant guard. **What is left is step 6 (the multi-window UI) and core#112 (the sync-status comparator).** **Delete this plan doc when step 6 lands.**
 
-🔴 **TEMPLATES IS DONE — do not raise it as a blocker again.** templates#376 is CLOSED: `destinations.eta` and `items-grid.eta` read `charge_windows` on `main` and render one row per window with a BILLABLE-days total, which is what shipped ahead of step 5. Templates PR #381 (the multi-window fixture) is **parked and blocks nothing** — it is extra coverage, its render gate PASSES on every fixture (`match`), and the only finding is a missing `goldens/sandbox/` baseline that `templates-lint` wants for branch parity. ⚠️ **That is NOT an approval and the manager cannot perform it**: the Approve control is gated on a `diff`/`no-golden` verdict so it is correctly hidden, and the manager carries no base-branch parameter at all — it can only bless the branch the PR targets. The instrument is `api-cloudrun/scripts/rebless-goldens.ts --branch=sandbox`. **Owner ruling 2026-09-17: the dev/sandbox template surface is not worth time.**
+✅ **TEMPLATES IS FULLY DONE — nothing here is outstanding.** templates#376 CLOSED (`destinations.eta` / `items-grid.eta` read `charge_windows` on `main` and render one row per window with a BILLABLE-days total, shipped ahead of step 5). **PR #381 MERGED** — the multi-window invoice fixture, the only fixture on any family rendering the 2+ window branch. **PR #391 MERGED** — its `goldens/sandbox/` baseline, and templates#390 closed with it. `main`'s `templates-lint` is GREEN.
+
+⚠️ **Two things from that worth not re-learning.** (1) A missing golden is **not an approval** — the manager's Approve control is gated on a `diff`/`no-golden` verdict (so it is correctly invisible on an all-`match` draft) and carries **no base-branch parameter at all**, so it can only ever bless the branch the PR targets. A `goldens/sandbox/` baseline is only reachable through `api-cloudrun/scripts/rebless-goldens.ts --branch=sandbox`. (2) `templates-lint` is blame-scoped to changed files on a PR but runs **UNBLAMED on `main`** — so merging over a red lint makes it everyone's red, not just the next PR's in that family.
+
+📋 **Left behind deliberately: templates#392.** Rendering that one baseline revealed **18 of 19 goldens would change** — the whole `quote` family (several at delta `1.000000`) plus three `statement` fixtures. Pre-existing drift, unrelated to charge windows, reverted rather than folded in. **Do not `--write` it blind**: a delta says the baseline and the render disagree, not which is right.
 
 ⭐ **Step 6 is smaller than this doc implies — read §6-UI below before planning it.** The manager is ALREADY fully converted: no legacy field anywhere in `src/`, every mutation already dispatches `applyDateEdit`, and both `ItemDuration` twins already go read-only on a 2+ window pair. What is missing is UI, not migration.
 
@@ -430,8 +434,22 @@ it is reachable from the first partial bill a user creates.
 - api-cloudrun#1028 (credit-note offer for over-billing) gains a population once windows can be removed after billing. Comment on it when this lands.
 - If census bucket 1 shows live CRMS divergence beyond #2408, decide with the owner before the backfill. It must not be silently repriced.
 
-No open issue overlaps (api-cloudrun#680 belongs to the quantity-accounting campaign, which finishes first). Promote this to `core/.claude/plans/charge-windows.md` when implementation starts, because it spans sessions and four repos.
+No open issue overlaps (api-cloudrun#680 belongs to the quantity-accounting campaign, which finishes first).
+
+## Next session: core#112, then step 6
+
+**Start with `gh issue view 112 -R chicago-film-supplies/core`, and read §3 *Comparators* above beside it.**
+
+**What it is.** `computeInvoiceSyncStatus` (`core/src/utils/invoices.ts`) compares each invoice line against the order line projected by `projectOrderItemToInvoiceItem`. Since beta A a rental line's days and money derive from **its own pair's** windows, so an invoice stating its own windows — a partial bill, decision 3 — differs from its order on `price.chargeable_days`, `subtotal_cents`, `subtotal_discounted_cents`, `taxes` and `total_cents`. None of the three explanation arms (`coa_untaxes`, `tax_date_version`, `tax_zero_money`) covers that cause, so every such line badges `out_of_sync`.
+
+**Why it is the REAL step-6 prerequisite, ahead of the guard.** Not a regression — a hand-set day count badged the same way before windows existed — but today the population is ~0 because nobody edits invoice windows. Step 6 is exactly what makes it routine: it is reachable from the first partial bill anyone creates.
+
+**The design call is already made in §3:** option 1, *re-derive then compare* (price the projected order line at the invoice pair's window days via `lineChargeableDays` + `priceLine`), not the cheaper predicate. The house rule on `explainInvoiceItemDifferences` prefers an under-explained line to an invisible one, and a predicate can over-explain a money change hiding behind a day change. Cost: `InvoiceSyncContext` (`core/src/utils/invoices.ts:967`) gains the tax catalog and the invoice's own `PairChargeWindows[]`, and every caller must pass them — manager's coverage badge and api-cloudrun's audits.
+
+⚠️ **It is a core change, so it carries the publish/pin dance**: `cfs-release-order` skill, then sweep all three consumer pins. Current: **`@cfs/core@10.0.0-beta.486`**, all three consumers pinned to it and pushed.
+
+**Then step 6** — read §6-UI above; it is UI plus one wiring key, not a migration.
 
 ## Context recommendation
-**Context:** CLEAR CONTEXT — the doc carries the decisions, census counts and file map; implementation is large.
-**Execute with:** opus — derived days and the pricer are money paths where a wrong diff compiles and passes.
+**Context:** CLEAR CONTEXT — steps 1–5 and core#113 are done and this doc carries the decisions, the census, the §6-UI survey and the core#112 brief. Nothing in the completed work needs to be re-derived.
+**Execute with:** opus — the comparator decides whether an operator is shown a false `out_of_sync`, and derived days and the pricer are money paths where a wrong diff compiles and passes.
