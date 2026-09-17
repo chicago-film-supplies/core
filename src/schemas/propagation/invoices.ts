@@ -2,7 +2,9 @@
  * Invoice propagation rules — bidirectional invoice↔order cross-references.
  *
  * 1. create-invoice: co-writes invoice summary (uid, number, status) to each
- *    referenced order's `invoices` array and `query_by_invoices`.
+ *    referenced order's `invoices` array and `query_by_invoices`, and
+ *    floor-raises a referenced order's `status` from `draft` to `reserved`
+ *    (any other status is left untouched).
  *
  * 2. update-invoice: CONVERGES each order's `invoices` array entry on the
  *    invoice document — on every invoice write, not only when the status moved.
@@ -133,7 +135,7 @@ const createInvoiceRules: CollectionRule[] = [
     target: "orders",
     mode: "co-write",
     invariant:
-      "Orders carry a denormalized array of their invoices so the UI can show invoice status without a collection-group query",
+      "Orders carry a denormalized array of their invoices so the UI can show invoice status without a collection-group query. A draft order is promoted to reserved the moment a real invoice exists against it.",
     enforced_by: [INVOICE_BACKREF_CREATED],
     transaction: "create-invoice",
     fields: [
@@ -144,6 +146,12 @@ const createInvoiceRules: CollectionRule[] = [
         source: ["uid"],
         target: ["query_by_invoices"],
         transform: "append invoice uid to array",
+      },
+      {
+        source: ["status"],
+        target: ["status"],
+        transform:
+          "draft → reserved floor-raise; any other order status is left untouched",
       },
     ],
   },
