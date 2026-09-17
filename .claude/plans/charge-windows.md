@@ -5,9 +5,47 @@
 **Related:** api-cloudrun#1038 (step 5, closed), api-cloudrun#1028, core#112 (§3 comparator), core#113 (pair invariant guard), templates#376 (partials read windows), core#114 (closed: multi-window lines store billable days)
 
 ## START HERE
-🎉 **Steps 1–5 are COMPLETE and in prod.** The legacy charge fields no longer exist: `@cfs/core@10.0.0-beta.485` deleted the declarations, both projects census 0, and all three consumers are pinned and released. **What is left is step 6 (the multi-window UI) and the two deferred issues — core#112 (the sync-status comparator) and core#113 (the pair invariant guard).** Also open: templates PR #381, the multi-window invoice fixture, which needs its golden approved. **Delete this plan doc when step 6 lands.** First command: `gh issue view 113 -R chicago-film-supplies/core`.
+🎉 **Steps 1–5 are COMPLETE and in prod, and core#113 is DONE.** The legacy charge fields no longer exist (`@cfs/core@10.0.0-beta.485` deleted the declarations, both projects census 0), and `beta.486` added the pair-invariant guard. **What is left is step 6 (the multi-window UI) and core#112 (the sync-status comparator).** Also open: templates PR #381, the multi-window invoice fixture, which needs its **sandbox golden approved** — one press, and it closes templates#376. **Delete this plan doc when step 6 lands.**
 
-> ## ⚠️ STATUS UPDATE 2026-09-17 (latest): step 5 complete — the fields are gone
+⭐ **Step 6 is smaller than this doc implies — read §6-UI below before planning it.** The manager is ALREADY fully converted: no legacy field anywhere in `src/`, every mutation already dispatches `applyDateEdit`, and both `ItemDuration` twins already go read-only on a 2+ window pair. What is missing is UI, not migration.
+
+> ## ⚠️ STATUS UPDATE 2026-09-17 (latest): core#113 done — the pair invariant is checked on write
+> **`@cfs/core@10.0.0-beta.486`** adds `chargeWindowPairViolations` (core `338fbe3`), called from
+> api-cloudrun's `assertValidForWrite` (`da808d6a`), with `scripts/audit-charge-window-pairs.ts`
+> over both projects. Manager pinned (`38d0ddbc`) — no client consumer, but the `requires-manager`
+> gate compares pins, not meanings.
+>
+> **Four things worth carrying:**
+> 1. ⭐ **The guard went in CORE, not api-cloudrun, and the reason generalises.** The issue proposed
+>    an api-side write guard to sidestep the REFINE ordering. But `pairOf` / `extensionFor` /
+>    `daysFromWindows` are FILE-LOCAL to `utils/price-document.ts`, so an api-side guard would have
+>    reimplemented pair resolution and extension detection — a second copy of a pairing rule in one
+>    domain, which is what api-cloudrun#593 was. A pure exported function avoids the ordering problem
+>    just as well as a write guard does: **it is the `superRefine` that forces REFINE ordering, not
+>    the repo the code lives in.** Core returns violations rather than throwing, so api still owns the
+>    400 (core's plain `Error` maps to a 500) — the `api-cloudrun/src/lib/linePrice.ts` split.
+> 2. 🔴 **The guard is INERT and the audit says so out loud.** Measured 2026-09-17: **0 pairs carrying
+>    2+ windows in either project** (2,084 prod / 2,086 dev documents). So every arm of it is
+>    unexercised by real data, and the script prints `⚠️ VACUOUS` rather than a reassuring `0`. It
+>    lands now precisely BECAUSE it is inert — step 6 creates the first population it governs, and a
+>    guard added after the data exists has to be retrofitted against whatever is already stored.
+> 3. ⚠️ **The exemption predicate is WIDER than the pricer's own `keepsStoredDays`, deliberately.**
+>    The pricer names only the order arm (`complete`/`canceled`) because `assertRepriceable` refuses a
+>    frozen invoice before `lineChargeableDays` is reached. A WRITE is the other case — a paid or void
+>    invoice IS still written (non-money edits) and keeps its stored days by decision 10. Using the
+>    pricer's predicate would have flagged exactly the documents this campaign promised never to
+>    re-derive. **Do not merge the two.**
+> 4. ⚠️ **Single-window divergence stays OUT of scope.** Re-asserting it would refuse the legacy CRMS
+>    documents the census measured and the backfill settled.
+>
+> **Incidental, and both were blocking other people:** three citations naming the retired
+> `backfill-invoice-destination-windows.ts` were failing `audit:citations`, which gates `release` in
+> CI — **core was unpublishable by anyone** until `1aff9b0`. And `describesDeletion` reads a ±240-char
+> window from the START of a citation, so a deletion verb at the end of a long sentence about it still
+> reads BROKEN; put the verb immediately after the path. A bare `src/lib/…` citation naming an
+> api-cloudrun file also passes locally and FAILS in CI, where core is checked out alone (`1fcc323`).
+
+> ## ⚠️ STATUS UPDATE 2026-09-17: step 5 complete — the fields are gone
 > **Three publishes, in the order the `cfs-release-order` skill prescribes (optional + stop → purge → delete).**
 > - **beta.484** (core `5bb03f7`): the fields went `.nullable().optional()`, every writer stopped, `canonicalChargeWindows` deleted them on rewrite, and the Typesense/display-column entries went. Released as manager 26.26.2, then API 0.277.2.
 > - **The purge** (`scripts/purge-legacy-charge-fields.ts`, now deleted as an applied one-shot): **10,266 prod documents in 17 minutes** — 1,032 orders, 1,020 invoices, 1,034 fulfillments, 7,180 bookings — then dev's 69 dev-native stragglers after `devReplica` carried the rest. Both projects verified 0.
@@ -348,6 +386,42 @@ The api pre-push gate runs against dev data, so dev has to be converted before e
   - one window follows possession
   - an invoice pair edit
 - **templates:** single-window goldens don't change. Add a multi-window fixture and render a preview.
+
+## §6-UI — what step 6 actually needs (surveyed 2026-09-17)
+
+**The manager is already converted.** No `charge_start`/`charge_end`/`days_charged` anywhere in
+`manager/src/`; every date mutation already goes through `handle().editPairDates?.(index, edit)` →
+`applyDateEdit`, and `OrderDestinationDates.tsx` holds no date rules of its own. The remaining work
+is UI plus one wiring key:
+
+1. **A windows list/editor in `OrderDestinationDates.tsx`.** It reads windows only as a SPAN today —
+   `windows()`, `multiWindow()`, first-start/last-end — and dispatches `set_window` / `set_window_days`
+   at a hardcoded `index: 0`. Needs per-window rows at a real index, plus `add_window` / `remove_window`
+   controls, which have **no production call site at all** today (one test calls `remove_window`).
+2. **Lift the `multiWindow()` disables.** Charge Start / Charge End / Charge Duration are all
+   `disabled={… || multiWindow()}`, and `setChargeChargePeriod` bails on it — the deliberate
+   placeholder ("a pair with several shows their span read-only until the multi-window editor lands").
+   ⚠️ **Reset Charge Dates is NOT disabled by it** and is the one control that already mutates a
+   multi-window pair.
+3. 🔴 **Surface the refusals.** `edit()` DISCARDS the `DateEditError` return, and both `ItemDuration`
+   twins only use it as a bail. `overlap`, `adjacent`, `last_window` and `holidays_unloaded` all
+   become reachable from an operator gesture the moment add/remove exists — today they would fail
+   silently. The one place a refusal IS handled is `OrderItems.tsx`'s holiday re-seed effect.
+4. **Wire `editPairDates` onto `getInvoiceViewHandle`** (`manager/src/stores/invoices.ts`) if invoice
+   windows are in scope — and they are, since a partial bill is decision 3's whole use case. The store
+   function `editInvoicePairDates` already exists, resolves the pair by `(uid_order, pair.uid)` and
+   handles the extension refusal; it is simply absent from the handle, so the shared editor renders
+   inert on an invoice. ⭐ **This is one key, and it is the difference between "the invoice's pair is
+   editable" being true and false** — manager's `order-items` skill claimed the former and was
+   corrected on 2026-09-17.
+5. **Multi-window rendering in the read-only summaries** — `DestinationDatesSummary.tsx` and
+   `InvoiceDestinationSummary.tsx` each render ONE envelope row.
+6. **Tests** at `manager/tests/components/orders/OrderDestinationDates.test.tsx` assert
+   `charge_windows?.[0]` exactly, in three places.
+
+⚠️ **core#112 is the truer step-6 prerequisite, not core#113.** The moment invoice windows are edited
+deliberately, every such line badges `out_of_sync` against its order — that is the comparator gap, and
+it is reachable from the first partial bill a user creates.
 
 ## Follow-ups
 
