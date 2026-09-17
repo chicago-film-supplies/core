@@ -38,6 +38,14 @@ import {
   priceDocument,
 } from "../src/utils/price-document.ts";
 import { classifySharedFields, fieldsUnder, mergeSharedFields, resolveMergedPairDates } from "../src/utils/shared-fields.ts";
+import {
+  computeInvoiceSyncStatus,
+  explainInvoiceItemDifferences,
+  type InvoiceItem,
+  invoiceItemDifferences,
+  type InvoiceSyncContext,
+  projectOrderItemToInvoiceItem,
+} from "../src/utils/invoices.ts";
 
 const at = (day: number, time: string, month = 10, offset = "-05:00") =>
   `2026-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${time}.000${offset}`;
@@ -580,4 +588,184 @@ Deno.test("chargeWindowPairViolations: an extension line bills the days it ADDS,
   // The SAME line with no extension section declared is checked, so the
   // exemption is the section's doing rather than the line's shape.
   assertEquals(chargeWindowPairViolations([ext], { document, charge_windows: windows }).length, 1);
+});
+
+// ── The sync comparator's `invoice_windows` arm (core#112) ────────────────────
+//
+// Since beta A a rental line's days and money come from ITS OWN document's pair
+// windows, so an invoice that states its own — a partial bill, decision 3 —
+// differs from its order on the day count and every money field below it. The
+// arm re-prices the projected order line at the invoice's windows and covers only
+// what then agrees exactly.
+//
+// ⚠️ Every context here states the INVOICE's windows. `invoices.test.ts` passes
+// an EMPTY array throughout so that this arm cannot fire there and rebase the
+// tax-arm tests; this file is the arm's own population.
+
+const ORDER_UID = "order-1";
+const PAIR_UID = "pair-1";
+
+/** The pair as the ORDER states it — divider path `[pair.uid]`. */
+const orderWindows = (days: number[]) =>
+  chargeWindowContext([{ uid: PAIR_UID, dates: { charge_windows: days.map((d) => ({ days: d })) } }]);
+/** The same pair as the INVOICE states it — divider path `[uid_order, pair.uid]`. */
+const invoiceWindows = (days: number[]) =>
+  chargeWindowContext([{ uid: PAIR_UID, uid_order: ORDER_UID, dates: { charge_windows: days.map((d) => ({ days: d })) } }]);
+
+const syncCtx = (invoiceChargeWindows: ReturnType<typeof invoiceWindows>, over: Partial<InvoiceSyncContext> = {}): InvoiceSyncContext => ({
+  taxNameByUid: new Map<string, string>(),
+  orderFrozen: false,
+  invoiceChargeWindows,
+  ...over,
+});
+
+/**
+ * One order line and the invoice line billed from it, each priced by the REAL
+ * writer at its OWN windows — which is how the corpus comes to look this way.
+ * The assertions below are about the comparator's verdict, never about the money.
+ */
+function billedPair(orderDays: number[], invoiceDays: number[], invoiceOverride: Record<string, unknown> = {}) {
+  const src = line([PAIR_UID], {}, { uid_tax_class: "class-1" });
+  const orderLine = priceDocument([src], priceCtx(orderWindows(orderDays))).items[0];
+  const projected = projectOrderItemToInvoiceItem(orderLine, ORDER_UID);
+  const projectedPrice = (projected as unknown as { price: Record<string, unknown> }).price;
+  const seed = { ...projected, price: { ...projectedPrice, ...invoiceOverride } } as unknown as LineItem;
+  const invoiceLine = priceDocument([seed], priceCtx(invoiceWindows(invoiceDays), { kind: "invoice", status: "issued", has_settlement: false })).items[0];
+  return { orderLine, expected: projected as unknown as InvoiceItem, current: invoiceLine as unknown as InvoiceItem };
+}
+
+const explainBilled = (expected: InvoiceItem, current: InvoiceItem, context: InvoiceSyncContext) =>
+  explainInvoiceItemDifferences(expected, current, invoiceItemDifferences(expected, current), context);
+
+Deno.test("invoice_windows: a partial bill is explained, and the arm says so", () => {
+  // The order's pair bills 20 days; the invoice bills 15 of them.
+  const { expected, current } = billedPair([20], [15]);
+  assert(invoiceItemDifferences(expected, current).includes("price.chargeable_days"), "the naive comparison must still see the difference");
+
+  const verdict = explainBilled(expected, current, syncCtx(invoiceWindows([15])));
+  assertEquals(verdict.unexplained, []);
+  assertEquals(verdict.arms, ["invoice_windows"]);
+});
+
+Deno.test("invoice_windows: prod #2408's shape — identical bounds, a different day count", () => {
+  // Order #1012 stores 14 days on the pair; issued invoice #2408 stores 15 on the
+  // same bounds, because the backfill kept the money it had already billed
+  // (charge-windows census, 2026-09-16). Measured in prod 2026-09-17.
+  const { expected, current } = billedPair([14], [15]);
+  assertEquals(explainBilled(expected, current, syncCtx(invoiceWindows([15]))).unexplained, []);
+});
+
+Deno.test("invoice_windows: a MULTI-window invoice pair is explained at its billable days", () => {
+  const { expected, current } = billedPair([20], [3, 4, 2]);
+  const verdict = explainBilled(expected, current, syncCtx(invoiceWindows([3, 4, 2])));
+  assertEquals(verdict.unexplained, []);
+  assertEquals((current.price as { chargeable_days: number }).chargeable_days, billableDays([3, 4, 2]));
+});
+
+Deno.test("invoice_windows: the arm does NOT fire when the two documents state the same windows", () => {
+  const { expected, current } = billedPair([15], [15]);
+  const verdict = explainBilled(expected, current, syncCtx(invoiceWindows([15])));
+  assertEquals(invoiceItemDifferences(expected, current), [], "nothing to explain in the first place");
+  assertEquals(verdict.arms, []);
+});
+
+Deno.test("🔴 invoice_windows: passing the ORDER's windows explains NOTHING — the tautology guard", () => {
+  // The projection is ALREADY priced at the order's windows, so a caller that
+  // sources the context from the order instead of the invoice gets a no-op. This
+  // is the mutation control for the two tests above: without it, an arm that
+  // never fired would be indistinguishable from one that explained everything.
+  const { expected, current } = billedPair([20], [15]);
+  const wrong = explainBilled(expected, current, syncCtx(orderWindows([20]) as ReturnType<typeof invoiceWindows>));
+  assertEquals(wrong.arms, []);
+  assert(wrong.unexplained.includes("price.chargeable_days"));
+});
+
+Deno.test("invoice_windows: a REAL drift under a partial bill still reports", () => {
+  // Same partial bill, but the invoice's base price was also changed. The day
+  // difference is explained; the price change and the money it moves are not.
+  const { expected, current } = billedPair([20], [15], { base_cents: 12000 });
+  const verdict = explainBilled(expected, current, syncCtx(invoiceWindows([15])));
+  assertEquals(verdict.arms, ["invoice_windows"]);
+  assertEquals(verdict.unexplained, ["price.base_cents", "price.subtotal_cents", "price.subtotal_discounted_cents", "price.total_cents"]);
+});
+
+Deno.test("invoice_windows: a line whose stored days disagree with its OWN windows stays red", () => {
+  // Legacy CRMS divergence: the line bills a count its own pair does not state —
+  // here 9 days against a 15-day invoice window. Re-deriving reproduces neither
+  // the count nor the money, so NOTHING is explained and the verdict is the one
+  // this line got before windows existed. That is what "not a regression" has to
+  // mean, and it is the arm's floor: it explains an invoice that bills its own
+  // windows, never one that bills something else again.
+  const { expected } = billedPair([20], [15]);
+  const { current: billedAtNine } = billedPair([20], [9]);
+  const verdict = explainBilled(expected, billedAtNine, syncCtx(invoiceWindows([15])));
+  assertEquals(verdict.arms, []);
+  assert(verdict.unexplained.includes("price.chargeable_days"));
+});
+
+Deno.test("invoice_windows: a line stating the wrong DAYS beside the right money is red on the days alone", () => {
+  // The other half of the case above, and the reason the arm is a per-field
+  // filter rather than a whole-row verdict. This line's money IS what its own
+  // windows bill; only the stored count disagrees. Covering the money and
+  // badging the count is more useful than either extreme — an operator is shown
+  // the one field that is actually wrong.
+  const { expected, current } = billedPair([20], [15]);
+  const inconsistent = { ...current, price: { ...(current.price as object), chargeable_days: 9 } } as unknown as InvoiceItem;
+  const verdict = explainBilled(expected, inconsistent, syncCtx(invoiceWindows([15])));
+  assertEquals(verdict.arms, ["invoice_windows"]);
+  assertEquals(verdict.unexplained, ["price.chargeable_days"]);
+});
+
+Deno.test("🔴 invoice_windows REBASES the tax arms, and `totalFollowsTax` proves it", () => {
+  // A partial bill on a line whose tax ALSO moved a rate version. Money is
+  // hand-stated from the pricing rule (base 10000, ×days÷5, then the rate), never
+  // from the code under test.
+  //
+  // order : 20 days → 40000, Chicago v1 @10% → 4000, total 44000
+  // invoice: 15 days → 30000, Chicago v2 @9%  → 2700, total 32700
+  // rebased: 15 days → 30000, Chicago v1 @10% → 3000, total 33000
+  //
+  // `tax_date_version` covers `price.total_cents` only when the total moved by
+  // EXACTLY the tax delta. Against the rebased baseline that is −300 vs −300 and
+  // holds; against the raw projection it is −11300 vs −1300 and does not. So this
+  // assertion fails if the arms stop composing in that order.
+  const taxed = (days: number, subtotal: number, tax: { uid: string; rate: number; amount_cents: number }, total: number) => ({
+    uid: "L", type: "rental", name: "Hotspot", description: "", quantity: 1,
+    path: [ORDER_UID, PAIR_UID, "L"], uid_tax_class: "class-1", zero_priced: null,
+    price: {
+      base_cents: 10000, base_percent: null, chargeable_days: days, formula: "five_day_week",
+      subtotal_cents: subtotal, subtotal_discounted_cents: subtotal, discount: null,
+      taxes: [{ uid: tax.uid, name: "Chicago", rate: tax.rate, type: "percent", amount_cents: tax.amount_cents }],
+      total_cents: total,
+    },
+  }) as unknown as InvoiceItem;
+
+  const expected = taxed(20, 40000, { uid: "rate-v1", rate: 10, amount_cents: 4000 }, 44000);
+  const current = taxed(15, 30000, { uid: "rate-v2", rate: 9, amount_cents: 2700 }, 32700);
+  const context = syncCtx(invoiceWindows([15]), {
+    taxNameByUid: new Map([["rate-v1", "Chicago"], ["rate-v2", "Chicago"]]),
+    orderFrozen: true,
+  });
+
+  const verdict = explainBilled(expected, current, context);
+  assertEquals(verdict.arms, ["invoice_windows", "tax_date_version"]);
+  assertEquals(verdict.unexplained, []);
+});
+
+Deno.test("invoice_windows: computeInvoiceSyncStatus reads a partial bill as in_sync, and real drift as out_of_sync", () => {
+  const { orderLine, current } = billedPair([20], [15]);
+  const divider: LineItem = { uid: PAIR_UID, type: "destination", name: "Venue", description: "", path: [PAIR_UID] } as unknown as LineItem;
+  const orderItems = [divider, orderLine];
+  const invoiceItems = [
+    { uid: ORDER_UID, type: "order", name: "Order 1", description: "", path: [ORDER_UID] },
+    { uid: PAIR_UID, type: "destination", name: "Venue", description: "", path: [ORDER_UID, PAIR_UID] },
+    current,
+  ] as unknown as InvoiceItem[];
+  const key = [ORDER_UID, ...(orderLine.path ?? [])].join("/");
+
+  assertEquals(computeInvoiceSyncStatus(invoiceItems, orderItems, ORDER_UID, syncCtx(invoiceWindows([15]))).get(key), "in_sync");
+
+  const drifted = billedPair([20], [15], { base_cents: 12000 });
+  const withDrift = [...invoiceItems.slice(0, 2), drifted.current];
+  assertEquals(computeInvoiceSyncStatus(withDrift, orderItems, ORDER_UID, syncCtx(invoiceWindows([15]))).get(key), "out_of_sync");
 });

@@ -43,6 +43,7 @@ export {
   validateItemPaths,
   validateItemUniqueness,
 } from "./orders.ts";
+import { type PairChargeWindows, priceLine, windowChargeableDays } from "./price-document.ts";
 
 /**
  * The **shared document sub-interface** — helpers a template partial may call
@@ -984,6 +985,23 @@ export interface InvoiceSyncContext {
    * never true of.
    */
   orderFrozen: boolean;
+  /**
+   * **The INVOICE's own destination pairs' charge windows** — build it with
+   * `chargeWindowContext(invoice.destinations)` (`utils/price-document.ts`), the
+   * same call the invoice's own pricer makes. It is what the `invoice_windows`
+   * arm re-prices the projected order line at.
+   *
+   * ⚠️ **The invoice's, never the order's.** The projection is ALREADY priced at
+   * the order's windows, so passing those makes the arm a tautology that
+   * reproduces `expected` and explains nothing — a silent no-op rather than a
+   * loud failure.
+   *
+   * Required and never defaulted, for the reason on this interface: an optional
+   * context is a caller that forgot it silently getting the naive comparator
+   * back. An invoice whose pairs carry no windows yields an empty array, and the
+   * arm then never fires.
+   */
+  invoiceChargeWindows: readonly PairChargeWindows[];
 }
 
 /** Whole-cent tax a line carries. Integer addition — closed under the quantum, exact. */
@@ -1013,6 +1031,81 @@ const sameList = (a: readonly string[], b: readonly string[]) =>
 const TAX_EXPLAINABLE_FIELDS = new Set(["price.taxes", "price.taxes_base", "price.total_cents"]);
 
 /**
+ * The price fields a CHARGE-WINDOW explanation is allowed to cover: the day
+ * count, and the money that follows from it.
+ *
+ * Bounded rather than "whatever the reprojection reproduces", for the reason the
+ * tax arm is bounded: the reprojection only ever rewrites `price`, so a `name` or
+ * `quantity` difference could not agree anyway — but an arm that says which
+ * fields it owns cannot silently grow one when something upstream changes what
+ * it rewrites.
+ */
+const WINDOW_EXPLAINABLE_FIELDS = new Set([
+  "price.chargeable_days",
+  "price.subtotal_cents",
+  "price.subtotal_discounted_cents",
+  "price.discount",
+  "price.taxes",
+  "price.total_cents",
+]);
+
+/** Do two items agree on one `price.*` key, with absent ≡ null as {@link invoicePriceDifferences} has it? */
+function priceKeyAgrees(a: InvoiceItem, b: InvoiceItem, field: string): boolean {
+  const key = field.slice("price.".length);
+  const read = (it: InvoiceItem) => {
+    const v = (it as unknown as { price?: Record<string, unknown> }).price?.[key];
+    return v === undefined || v === null ? undefined : v;
+  };
+  return stableStringify(read(a)) === stableStringify(read(b));
+}
+
+/**
+ * **The projected order line, re-priced at the INVOICE's own charge windows**
+ * (core#112) — or `undefined` when that question does not arise.
+ *
+ * Since charge-windows beta A a rental line's days and money derive from *its own
+ * document's* pair windows ({@link windowChargeableDays}), so an invoice that
+ * states its own — a partial bill, charge-windows decision 3 — differs from its
+ * order on the day count and every money field below it. This re-derives what the
+ * order line WOULD be if billed at the invoice's windows, and the caller explains
+ * only the fields that then agree exactly.
+ *
+ * 🔴 **The tax catalog is the line's OWN resolved rates, not a rate catalog the
+ * context carries, and that is a correctness choice rather than a saving.** Two
+ * reasons, both measured on the code:
+ *
+ * 1. {@link calculateItemTax} **throws** `"Unknown tax uid"` for a ref absent from
+ *    the catalog it is handed (`utils/orders.ts`). A sync badge that 500s because
+ *    a caller passed a filtered catalog is worse than one that over-reports, and
+ *    every ref here is a hit by construction.
+ * 2. It isolates the variable. Only the day count moves, so a line whose rate
+ *    VERSION also differs does not agree here and falls through to
+ *    `tax_date_version` — which is the arm that owns that question. Re-pricing at
+ *    today's catalog would conflate the two and let a rate change hide inside a
+ *    day change.
+ *
+ * ⚠️ **An extension-section line must not reach this.** It bills the days its
+ * section ADDS, priced with the one-week floor SKIPPED, while this prices its
+ * pair's total WITH the floor — so the money will not agree and nothing is
+ * explained. That is the safe direction, and both callers exclude extension lines
+ * before comparing anyway ({@link computeInvoiceSyncStatus} marks them `in_sync`;
+ * `computeDocumentDiffs` skips them when it scopes).
+ */
+function reprojectAtInvoiceWindows(
+  expected: InvoiceItem,
+  context: InvoiceSyncContext,
+): InvoiceItem | undefined {
+  const days = windowChargeableDays(expected as unknown as LineItem, context.invoiceChargeWindows);
+  if (days === null) return undefined;
+  const price = (expected as unknown as { price?: PriceObject }).price;
+  // Nothing to explain: the invoice's windows bill what the order's already did.
+  if (!price || days === price.chargeable_days) return undefined;
+  const item = { ...expected, price: { ...price, chargeable_days: days } } as unknown as LineItem;
+  const ownRates: Tax[] = (price.taxes ?? []).map((t) => ({ uid: t.uid, name: t.name, rate: t.rate, type: t.type }));
+  return { ...expected, price: { ...price, chargeable_days: days, ...priceLine(item, ownRates) } } as InvoiceItem;
+}
+
+/**
  * Strip the differences that are **explained** — leaving only the ones an
  * operator should act on (api-cloudrun#481).
  *
@@ -1024,10 +1117,19 @@ const TAX_EXPLAINABLE_FIELDS = new Set(["price.taxes", "price.taxes_base", "pric
  * 8,792 lines flagged against **0** the audit called real. This is the audit's
  * reasoning, moved to where both callers share it.
  *
- * Three arms, all narrow, and none of them a field exclusion — an excluded field
+ * Four arms, all narrow, and none of them a field exclusion — an excluded field
  * is blind forever, whereas an explained one goes red the moment its explanation
  * stops holding:
  *
+ * 0. **`invoice_windows`** — the invoice states its own charge windows, so its
+ *    rental lines bill a different number of days than the order's (core#112). A
+ *    partial bill is exactly this: charge-windows decision 3 sets the invoice's
+ *    own pair windows to the part being billed. The arm re-prices the projected
+ *    order line at those windows and covers only the fields that then agree
+ *    EXACTLY, so a money change hiding behind a day change is not covered.
+ *    ⚠️ It runs first and rebases what the three tax arms compare — see
+ *    {@link reprojectAtInvoiceWindows} and the comment at the top of
+ *    {@link explainInvoiceItemDifferences}.
  * 1. **`coa_untaxes`** — the invoice knows the line is non-revenue and the order
  *    does not, so the retired account-keyed taxability gate fired on one side
  *    only. ⚠️ **HISTORICAL, and deliberately kept.** Nothing prices this way
@@ -1065,7 +1167,7 @@ export function unexplainedInvoiceItemDifferences(
 }
 
 /** Which explanation accounted for a difference. */
-export type InvoiceSyncArm = "coa_untaxes" | "tax_date_version" | "tax_zero_money";
+export type InvoiceSyncArm = "invoice_windows" | "coa_untaxes" | "tax_date_version" | "tax_zero_money";
 
 /** {@link explainInvoiceItemDifferences}'s verdict: what is left, and what accounted for the rest. */
 export interface InvoiceSyncExplanation {
@@ -1086,6 +1188,48 @@ export interface InvoiceSyncExplanation {
  * 8,792 prod lines.
  */
 export function explainInvoiceItemDifferences(
+  expected: InvoiceItem,
+  current: InvoiceItem,
+  differences: readonly string[],
+  context: InvoiceSyncContext,
+): InvoiceSyncExplanation {
+  if (differences.length === 0) return { unexplained: [], arms: [] };
+
+  // ── Arm 0: the invoice bills its own charge windows (core#112) ──
+  //
+  // 🔴 **It runs FIRST and REBASES the comparison, because every arm below is a
+  // statement about money, and the day count is upstream of all of it.** Priced
+  // at the order's windows, a partial bill's tax rows differ for a reason that
+  // has nothing to do with tax, and `tax_zero_money` would happily "explain" the
+  // pair on an untaxed line. Re-deriving first means the tax arms see the
+  // question they were written for: what is left once the days agree.
+  const reprojected = reprojectAtInvoiceWindows(expected, context);
+  const windowArms: InvoiceSyncArm[] = [];
+  let remaining: readonly string[] = differences;
+  if (reprojected) {
+    // A field is explained only when pricing the order line at the INVOICE's
+    // windows reproduces the invoice's stored value EXACTLY. Two causes at once
+    // (a day change and a rate change) reproduce neither, so the line stays
+    // badged — the house rule's preferred direction.
+    const covered = differences.filter((d) => WINDOW_EXPLAINABLE_FIELDS.has(d) && priceKeyAgrees(reprojected, current, d));
+    if (covered.length > 0) {
+      windowArms.push("invoice_windows");
+      const coveredSet = new Set(covered);
+      remaining = differences.filter((d) => !coveredSet.has(d));
+    }
+  }
+
+  const tax = explainTaxDifferences(reprojected ?? expected, current, remaining, context);
+  return { unexplained: tax.unexplained, arms: [...windowArms, ...tax.arms] };
+}
+
+/**
+ * The three TAX arms, over whatever the charge-window arm left
+ * ({@link explainInvoiceItemDifferences}). `expected` is the rebased baseline, so
+ * the `totalFollowsTax` arithmetic below is against the same line the residue was
+ * measured from.
+ */
+function explainTaxDifferences(
   expected: InvoiceItem,
   current: InvoiceItem,
   differences: readonly string[],
@@ -2156,8 +2300,17 @@ export function resyncInvoiceLines(
  * `path`, ignoring the invoice-only override fields
  * ({@link INVOICE_ONLY_ITEM_FIELDS}) **and ignoring any difference that is
  * EXPLAINED** ({@link unexplainedInvoiceItemDifferences}); otherwise `in_sync`.
- * Surfaced by `GET /invoices/{uid}/sync-status`, to badge lines and offer
- * per-line/whole resync (see {@link resyncInvoiceLines}).
+ * Surfaced by `GET /invoices/{uid}/sync-status` and its MCP twin
+ * (`get_invoices_uid_sync_status`), to offer per-line/whole resync (see
+ * {@link resyncInvoiceLines}).
+ *
+ * ⚠️ **It does NOT drive a manager badge, and this line used to say it did.**
+ * Measured 2026-09-17: nothing under `manager/src` calls that endpoint. What an
+ * operator sees is {@link computeDocumentDiffs}, which reuses the explanation
+ * arms but then suppresses every `derived` field — so the two answer different
+ * questions and only this one reports derived money. The stale claim mattered:
+ * it is what made core#112 read as an operator-facing regression rather than a
+ * wrong answer on an API surface.
  *
  * ⚠️ **A line goes green because its difference is EXPLAINED, never because a
  * field was skipped** (api-cloudrun#481). The distinction is the whole design: an

@@ -25972,7 +25972,7 @@ interface InvoiceItem {
 Which explanation accounted for a difference.
 
 ```ts
-type InvoiceSyncArm = "coa_untaxes" | "tax_date_version" | "tax_zero_money";
+type InvoiceSyncArm = "invoice_windows" | "coa_untaxes" | "tax_date_version" | "tax_zero_money";
 ```
 
 ### `InvoiceSyncContext`
@@ -25988,6 +25988,7 @@ regression this exists to remove, and it would be invisible.
 interface InvoiceSyncContext {
   taxNameByUid: ReadonlyMap<string, string>;
   orderFrozen: boolean;
+  invoiceChargeWindows: readonly PairChargeWindows[];
 }
 ```
 
@@ -26558,8 +26559,17 @@ when it differs from `projectOrderItemToInvoiceItem(orderItem)` at the same
 `path`, ignoring the invoice-only override fields
 ({@link INVOICE_ONLY_ITEM_FIELDS}) **and ignoring any difference that is
 EXPLAINED** ({@link unexplainedInvoiceItemDifferences}); otherwise `in_sync`.
-Surfaced by `GET /invoices/{uid}/sync-status`, to badge lines and offer
-per-line/whole resync (see {@link resyncInvoiceLines}).
+Surfaced by `GET /invoices/{uid}/sync-status` and its MCP twin
+(`get_invoices_uid_sync_status`), to offer per-line/whole resync (see
+{@link resyncInvoiceLines}).
+
+⚠️ **It does NOT drive a manager badge, and this line used to say it did.**
+Measured 2026-09-17: nothing under `manager/src` calls that endpoint. What an
+operator sees is {@link computeDocumentDiffs}, which reuses the explanation
+arms but then suppresses every `derived` field — so the two answer different
+questions and only this one reports derived money. The stale claim mattered:
+it is what made core#112 read as an operator-facing regression rather than a
+wrong answer on an API surface.
 
 ⚠️ **A line goes green because its difference is EXPLAINED, never because a
 field was skipped** (api-cloudrun#481). The distinction is the whole design: an
@@ -27462,10 +27472,19 @@ while the badge had none and so reported every one of them. On prod that was
 8,792 lines flagged against **0** the audit called real. This is the audit's
 reasoning, moved to where both callers share it.
 
-Three arms, all narrow, and none of them a field exclusion — an excluded field
+Four arms, all narrow, and none of them a field exclusion — an excluded field
 is blind forever, whereas an explained one goes red the moment its explanation
 stops holding:
 
+0. **`invoice_windows`** — the invoice states its own charge windows, so its
+   rental lines bill a different number of days than the order's (core#112). A
+   partial bill is exactly this: charge-windows decision 3 sets the invoice's
+   own pair windows to the part being billed. The arm re-prices the projected
+   order line at those windows and covers only the fields that then agree
+   EXACTLY, so a money change hiding behind a day change is not covered.
+   ⚠️ It runs first and rebases what the three tax arms compare — see
+   {@link reprojectAtInvoiceWindows} and the comment at the top of
+   {@link explainInvoiceItemDifferences}.
 1. **`coa_untaxes`** — the invoice knows the line is non-revenue and the order
    does not, so the retired account-keyed taxability gate fired on one side
    only. ⚠️ **HISTORICAL, and deliberately kept.** Nothing prices this way
@@ -31890,6 +31909,27 @@ one-week minimum skipped, which is what an extension section on an invoice
 bills. A document line passes its own `chargeable_days`; `accountLine` passes
 the days an extension group adds for a billed row.
 
+### `statedChargeWindows(destinations: readonly ChargeWindowPair[]): PairChargeWindows[]`
+
+**The windows a document STATES** — the same traversal as
+{@link chargeWindowContext} with the pricer's refusal left off, for a READER
+rather than a writer (core#112).
+
+The two differ on one input and it is not a style choice. A pair with no
+windows is unpriceable — its rental lines have no days to bill — so
+{@link chargeWindowContext} refuses it. A pair with no windows is perfectly
+*readable*: the answer is simply that this pair states none, and a comparator's
+correct response is to explain nothing about the lines under it.
+
+🔴 **Use this one wherever a throw would be the wrong outcome**, which is every
+comparator: `computeDocumentDiffs` documents itself as pure and never-throwing
+(*"a source the caller did not pass yields no entries — never an 'in sync'
+answer"*), and raising a `PriceRefusalError` out of a diff view because one pair
+predates the windows campaign would take the whole page down to say nothing.
+The stored schema requires `.min(1)`, so in practice this only diverges on a
+partial or hand-built document — which is exactly the population a comparator
+has to survive and a pricer does not.
+
 ### `sumPricedLines(items: readonly LineItem[]): DocumentTotalsCore`
 
 **Stage 5 on its own: a document's totals as the SUM of its stored line
@@ -31909,6 +31949,24 @@ loaded, where the contract is "fold the stored lines, never re-price".
 ⚠️ A percent fee line stored before D6 carries `total_cents: 0`, so a document
 not yet re-priced by `priceDocument` folds with no fee. Re-pricing it stores
 the amount (api-cloudrun#997 step 7 re-prices the two live ones).
+
+### `windowChargeableDays(item: LineItem, pairs: readonly PairChargeWindows[]): number | null`
+
+**What a line's pair's windows bill it for** — the window half of
+{@link lineChargeableDays}, split out so the invoice sync comparator can ask
+the same question without re-deriving the rule (core#112).
+
+`null` means *this line does not take its days from windows at all*: it is not
+a `rental` priced `five_day_week`, or it hangs under no pair. The two cases are
+deliberately not distinguished here — {@link lineChargeableDays} owns the
+refusal, because a pairless rental is a document defect and reporting it twice
+would be two findings for one fault (the same split {@link chargeWindowPairViolations}
+makes).
+
+⚠️ **It knows nothing about extension sections**, which bill the days their
+section ADDS rather than their pair's total. A caller holding items that may
+sit in one must exclude them first, as {@link lineChargeableDays} does through
+{@link extensionFor}.
 
 ## `@cfs/core/utils/organizations`
 

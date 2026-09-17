@@ -108,13 +108,41 @@ export interface ChargeWindowPair {
  *   days to bill.
  */
 export function chargeWindowContext(destinations: readonly ChargeWindowPair[]): PairChargeWindows[] {
+  for (const pair of destinations) {
+    if (!pair.uid) continue;
+    if (!pair.dates?.charge_windows?.length) {
+      throw new PriceRefusalError(`Destination pair ${pair.uid} has no charge windows`);
+    }
+  }
+  return statedChargeWindows(destinations);
+}
+
+/**
+ * **The windows a document STATES** — the same traversal as
+ * {@link chargeWindowContext} with the pricer's refusal left off, for a READER
+ * rather than a writer (core#112).
+ *
+ * The two differ on one input and it is not a style choice. A pair with no
+ * windows is unpriceable — its rental lines have no days to bill — so
+ * {@link chargeWindowContext} refuses it. A pair with no windows is perfectly
+ * *readable*: the answer is simply that this pair states none, and a comparator's
+ * correct response is to explain nothing about the lines under it.
+ *
+ * 🔴 **Use this one wherever a throw would be the wrong outcome**, which is every
+ * comparator: `computeDocumentDiffs` documents itself as pure and never-throwing
+ * (*"a source the caller did not pass yields no entries — never an 'in sync'
+ * answer"*), and raising a `PriceRefusalError` out of a diff view because one pair
+ * predates the windows campaign would take the whole page down to say nothing.
+ * The stored schema requires `.min(1)`, so in practice this only diverges on a
+ * partial or hand-built document — which is exactly the population a comparator
+ * has to survive and a pricer does not.
+ */
+export function statedChargeWindows(destinations: readonly ChargeWindowPair[]): PairChargeWindows[] {
   const out: PairChargeWindows[] = [];
   for (const pair of destinations) {
     if (!pair.uid) continue;
     const windows = pair.dates?.charge_windows;
-    if (!windows || windows.length === 0) {
-      throw new PriceRefusalError(`Destination pair ${pair.uid} has no charge windows`);
-    }
+    if (!windows || windows.length === 0) continue;
     out.push({
       divider_path: pair.uid_order ? [pair.uid_order, pair.uid] : [pair.uid],
       days: windows.map((w) => w.days),
@@ -311,14 +339,41 @@ export function lineChargeableDays(
   }
   if (keepsStoredDays(ctx.document)) return { chargeable_days: stored };
   if (!daysFromWindows(item)) return { chargeable_days: null };
-  const pair = pairOf(item, ctx.charge_windows);
-  if (!pair) {
+  const days = windowChargeableDays(item, ctx.charge_windows);
+  if (days === null) {
     throw new PriceRefusalError(
       `Rental line ${item.uid} is not under a destination pair, so it has no charge windows to bill. ` +
         "Move it under a destination",
     );
   }
-  return { chargeable_days: pair.days.length >= 2 ? billableDays(pair.days) : pair.days[0] };
+  return { chargeable_days: days };
+}
+
+/**
+ * **What a line's pair's windows bill it for** — the window half of
+ * {@link lineChargeableDays}, split out so the invoice sync comparator can ask
+ * the same question without re-deriving the rule (core#112).
+ *
+ * `null` means *this line does not take its days from windows at all*: it is not
+ * a `rental` priced `five_day_week`, or it hangs under no pair. The two cases are
+ * deliberately not distinguished here — {@link lineChargeableDays} owns the
+ * refusal, because a pairless rental is a document defect and reporting it twice
+ * would be two findings for one fault (the same split {@link chargeWindowPairViolations}
+ * makes).
+ *
+ * ⚠️ **It knows nothing about extension sections**, which bill the days their
+ * section ADDS rather than their pair's total. A caller holding items that may
+ * sit in one must exclude them first, as {@link lineChargeableDays} does through
+ * {@link extensionFor}.
+ */
+export function windowChargeableDays(
+  item: LineItem,
+  pairs: readonly PairChargeWindows[],
+): number | null {
+  if (!daysFromWindows(item)) return null;
+  const pair = pairOf(item, pairs);
+  if (!pair) return null;
+  return pair.days.length >= 2 ? billableDays(pair.days) : pair.days[0];
 }
 
 /**

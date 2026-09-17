@@ -155,6 +155,7 @@ import {
   projectOrderItemToInvoiceItem,
 } from "./invoices.ts";
 import type { LineItem } from "./orders.ts";
+import { statedChargeWindows } from "./price-document.ts";
 import {
   collectSubstitutionAnchors,
   isAtOrBelow,
@@ -464,6 +465,7 @@ function lineFields(
   }
   // order ↔ invoice: the badge's comparator and explanation arms, then the owner's field filter.
   const order = (viewed.kind === "order" ? viewed.doc : source.doc) as Order;
+  const invoice = (viewed.kind === "invoice" ? viewed.doc : source.doc) as Invoice;
   const orderLine = viewed.kind === "order" ? here : there;
   const invoiceLine = (viewed.kind === "invoice" ? here : there) as unknown as InvoiceItem;
   const expected = projectOrderItemToInvoiceItem(orderLine, orderUid) as unknown as InvoiceItem;
@@ -471,7 +473,17 @@ function lineFields(
     expected,
     invoiceLine,
     invoiceItemDifferences(expected, invoiceLine),
-    { taxNameByUid: context.taxNameByUid, orderFrozen: context.isOrderFrozen(order) },
+    {
+      taxNameByUid: context.taxNameByUid,
+      orderFrozen: context.isOrderFrozen(order),
+      // ⚠️ The `invoice_windows` arm cannot change this function's OUTPUT — the
+      // day count and every money field it covers are `derived`, and the filters
+      // below drop those unconditionally (see the G2 comment). It is passed
+      // anyway, and truthfully: the alternative is an empty array that reads as
+      // "this invoice states no windows", which is a lie that would rot the day a
+      // non-derived field joined the arm's coverage.
+      invoiceChargeWindows: statedChargeWindows(invoice.destinations ?? []),
+    },
   );
   const derived = derivedLineFields();
   return unexplained

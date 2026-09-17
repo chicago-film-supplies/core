@@ -920,7 +920,7 @@ Deno.test("substitution: the sync badge reads the pair as tracked, not as drift"
     [substitutedLine() as InvoiceItem],
     [orderShapedLine()],
     ORDER_DIV_1,
-    { taxNameByUid: new Map(), orderFrozen: false },
+    { taxNameByUid: new Map(), orderFrozen: false, invoiceChargeWindows: [] },
   );
 
   assertEquals([...status.values()], ["in_sync"]);
@@ -1819,8 +1819,14 @@ Deno.test("buildInvoiceDestinationDivider accepts an explicit path and matches t
  * below still measures the raw comparison it was written to measure. A context
  * that quietly explained things away would rewrite those tests without touching
  * them.
+ *
+ * ⚠️ **`invoiceChargeWindows: []` is the same decision for core#112's arm**, and
+ * it is empty on `FROZEN` and `LIVE` too. With no pair windows,
+ * `windowChargeableDays` returns `null` for every line and `invoice_windows`
+ * cannot fire — so none of the tax-arm tests below is quietly rebased. The arm's
+ * own population is built explicitly in `tests/charge-windows.test.ts`.
  */
-const NO_EXPLANATIONS = { taxNameByUid: new Map<string, string>(), orderFrozen: false };
+const NO_EXPLANATIONS = { taxNameByUid: new Map<string, string>(), orderFrozen: false, invoiceChargeWindows: [] };
 
 // ── resyncInvoiceLines + computeInvoiceSyncStatus ───────────────
 
@@ -2892,8 +2898,8 @@ const TAX_NAMES = new Map([
   [TAX_CHI_V2, "Chicago Rental Tax"],
   [TAX_OTHER, "Chicago Sales Tax"],
 ]);
-const FROZEN = { taxNameByUid: TAX_NAMES, orderFrozen: true };
-const LIVE = { taxNameByUid: TAX_NAMES, orderFrozen: false };
+const FROZEN = { taxNameByUid: TAX_NAMES, orderFrozen: true, invoiceChargeWindows: [] };
+const LIVE = { taxNameByUid: TAX_NAMES, orderFrozen: false, invoiceChargeWindows: [] };
 
 /** A line taxed by `uid` at `rate`, collecting `amount` cents, totalling accordingly. */
 function taxedLine(uid: string, rate: number, amount: number): InvoiceItem {
