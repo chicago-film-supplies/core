@@ -36,8 +36,6 @@ export const fulfillments: TypesenseCollectionConfig = {
       { name: "dates.delivery_end_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "dates.collection_start_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "dates.collection_end_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
-      { name: "dates.charge_start_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
-      { name: "dates.charge_end_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "destinations", type: "object[]" },
       { name: "destinations.delivery", type: "object[]", optional: true },
       ...typesenseAddressFields("destinations.delivery.address", { array: true }),
@@ -64,10 +62,7 @@ export const fulfillments: TypesenseCollectionConfig = {
       { name: "destinations.dates.delivery_end_fs", type: "int64[]", index: true, facet: false, optional: true },
       { name: "destinations.dates.collection_start_fs", type: "int64[]", index: true, facet: false, optional: true },
       { name: "destinations.dates.collection_end_fs", type: "int64[]", index: true, facet: false, optional: true },
-      { name: "destinations.dates.charge_start_fs", type: "int64[]", index: true, facet: false, optional: true },
-      { name: "destinations.dates.charge_end_fs", type: "int64[]", index: true, facet: false, optional: true },
       { name: "destinations.dates.days_active", type: "int32[]", optional: true },
-      { name: "destinations.dates.days_charged", type: "int32[]", optional: true },
       // The by-destination roll-up key, one entry per destination pair.
       //
       // 🔴 **Customer collect is its OWN bucket, and it has to be settled at

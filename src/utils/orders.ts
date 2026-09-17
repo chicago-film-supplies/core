@@ -35,7 +35,7 @@ import type {
 } from "../schemas/mod.ts";
 import isEqual from "lodash-es/isEqual";
 import { itemContract, zeroPricedFlaggedNonComponents } from "../schemas/mod.ts";
-import { canonicalChargeWindows, type ChargeDates, chargedDays, chargeEnvelope, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
+import { canonicalChargeWindows, type ChargeDates, chargedDays, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
 import {
   fromCents,
   roundDivHalfAwayFromZero,
@@ -383,12 +383,7 @@ export interface OrderDateEnvelope {
   collection_start_fs: FirestoreTimestampType | null;
   collection_end: string | null;
   collection_end_fs: FirestoreTimestampType | null;
-  charge_start: string | null;
-  charge_start_fs: FirestoreTimestampType | null;
-  charge_end: string | null;
-  charge_end_fs: FirestoreTimestampType | null;
   days_active: number | null;
-  days_charged: number | null;
 }
 
 /**
@@ -432,11 +427,8 @@ function pickEnvelopeBound(
  * `*_start` boundaries take the earliest value across destinations, `*_end`
  * boundaries take the latest; `days_active` takes the largest non-null value.
  *
- * The charge half is read from the WINDOWS, never the legacy mirrors:
- * `charge_start` is the earliest first-window start, `charge_end` the latest
- * last-window end, and `days_charged` the largest Σ window days. Each `_fs` is
- * the owning destination's legacy mirror when it still holds the same instant,
- * else `null` (charge-windows step 5 removes the mirrors and these fields).
+ * There is no charge half (charge-windows step 5): a pair's charge is its
+ * windows, read with `chargeEnvelope` / `chargedDays` from `utils/dates`.
  */
 export function deriveOrderDateEnvelope(
   destinations: ReadonlyArray<Pick<DocDestinationType, "dates">>,
@@ -445,32 +437,10 @@ export function deriveOrderDateEnvelope(
   const de = pickEnvelopeBound(destinations, "delivery_end", "delivery_end_fs", "max");
   const cs = pickEnvelopeBound(destinations, "collection_start", "collection_start_fs", "min");
   const ce = pickEnvelopeBound(destinations, "collection_end", "collection_end_fs", "max");
-  // Each pair's window envelope, written into the legacy keys `pickEnvelopeBound`
-  // reads, carrying its `_fs` only while the mirror still agrees.
-  const windowed = destinations.map((d) => {
-    const envelope = d.dates ? chargeEnvelope(d.dates) : null;
-    const fsOf = (key: "charge_start" | "charge_end", iso: string | null) =>
-      iso !== null && d.dates?.[key] && Date.parse(d.dates[key]!) === Date.parse(iso) ? d.dates[`${key}_fs`] ?? null : null;
-    return {
-      dates: {
-        charge_start: envelope?.start ?? null,
-        charge_start_fs: fsOf("charge_start", envelope?.start ?? null),
-        charge_end: envelope?.end ?? null,
-        charge_end_fs: fsOf("charge_end", envelope?.end ?? null),
-      } as unknown as OrderDocDatesType,
-    };
-  });
-  const chs = pickEnvelopeBound(windowed, "charge_start", "charge_start_fs", "min");
-  const che = pickEnvelopeBound(windowed, "charge_end", "charge_end_fs", "max");
-
   let days_active: number | null = null;
-  let days_charged: number | null = null;
   for (const d of destinations) {
     if (d.dates?.days_active != null) {
       days_active = Math.max(days_active ?? 0, d.dates.days_active);
-    }
-    if (d.dates?.charge_windows?.length) {
-      days_charged = Math.max(days_charged ?? 0, chargedDays(d.dates));
     }
   }
 
@@ -479,10 +449,7 @@ export function deriveOrderDateEnvelope(
     delivery_end: de.iso, delivery_end_fs: de.fs,
     collection_start: cs.iso, collection_start_fs: cs.fs,
     collection_end: ce.iso, collection_end_fs: ce.fs,
-    charge_start: chs.iso, charge_start_fs: chs.fs,
-    charge_end: che.iso, charge_end_fs: che.fs,
     days_active,
-    days_charged,
   };
 }
 

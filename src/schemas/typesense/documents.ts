@@ -71,8 +71,6 @@ export interface BookingDocument {
   dates: {
     start_fs?: number;
     end_fs?: number;
-    charge_start_fs?: number;
-    charge_end_fs?: number;
   };
   destinations?: {
     delivery?: {
@@ -230,8 +228,6 @@ export interface InvoiceDocument {
       delivery_end_fs?: number;
       collection_start_fs?: number;
       collection_end_fs?: number;
-      charge_start_fs?: number;
-      charge_end_fs?: number;
     };
   }>;
   totals?: {
@@ -357,10 +353,7 @@ export interface OrderDocument {
     delivery_end_fs?: number;
     collection_start_fs?: number;
     collection_end_fs?: number;
-    charge_start_fs?: number;
-    charge_end_fs?: number;
     days_active?: number;
-    days_charged?: number;
   };
   destinations: Array<{
     delivery?: {
@@ -456,8 +449,6 @@ export interface FulfillmentDocument {
     delivery_end_fs?: number;
     collection_start_fs?: number;
     collection_end_fs?: number;
-    charge_start_fs?: number;
-    charge_end_fs?: number;
   };
   destinations: Array<{
     delivery?: {
@@ -497,10 +488,7 @@ export interface FulfillmentDocument {
       delivery_end_fs?: number;
       collection_start_fs?: number;
       collection_end_fs?: number;
-      charge_start_fs?: number;
-      charge_end_fs?: number;
       days_active?: number;
-      days_charged?: number;
     };
     /** Derived at index time — see `DERIVED_FIELDS["fulfillments:destinations.pick_bucket"]`. */
     pick_bucket?: string;

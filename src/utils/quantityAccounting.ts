@@ -585,8 +585,7 @@ export interface RemainingInvoice {
  *   the section's ADDED days, never a count of the window (owner, 2026-09-17),
  *   so its lines derive exactly that. An extension is only owed on a window
  *   that ends before the order's, so the section never starts after it ends.
- *   The legacy mirrors follow; the `_fs` companion of the moved `charge_start`
- *   is `null` here, for the writer to stamp.
+ *   It carries none of the legacy charge fields.
  * - **Over-billing is never netted in.** A negative quantity or extension is
  *   returned in `overbilled`, for the credit-note flow.
  *
@@ -722,17 +721,13 @@ export function buildRemainingInvoice(
       const orderWindows = orderPair.dates.charge_windows;
       const start = chicagoDayAtTimeOf(section.billedEnd, 1, orderWindows[0].start);
       const end = orderWindows[orderWindows.length - 1].end;
+      // The order pair's legacy charge fields are not carried (charge-windows step 5).
+      const { charge_start: _cs, charge_start_fs: _csf, charge_end: _ce, charge_end_fs: _cef, days_charged: _dc, ...pairDates } =
+        projectedPair.dates;
       extensionPairs.push({
         ...projectedPair,
         uid: E,
-        dates: {
-          ...projectedPair.dates,
-          charge_windows: [{ start, end, days: section.extensionDays }],
-          charge_start: start,
-          charge_start_fs: null,
-          charge_end: end,
-          days_charged: section.extensionDays,
-        },
+        dates: { ...pairDates, charge_windows: [{ start, end, days: section.extensionDays }] },
       });
     }
   }

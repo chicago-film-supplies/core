@@ -178,10 +178,14 @@ export interface Booking {
     start_fs: FirestoreTimestampType | null;
     end: string | null;
     end_fs: FirestoreTimestampType | null;
-    charge_start: string | null;
-    charge_start_fs: FirestoreTimestampType | null;
-    charge_end: string | null;
-    charge_end_fs: FirestoreTimestampType | null;
+    /** Legacy, being removed (charge-windows step 5). Bookings carry possession only. */
+    charge_start?: string | null;
+    /** Legacy, being removed (charge-windows step 5). */
+    charge_start_fs?: FirestoreTimestampType | null;
+    /** Legacy, being removed (charge-windows step 5). */
+    charge_end?: string | null;
+    /** Legacy, being removed (charge-windows step 5). */
+    charge_end_fs?: FirestoreTimestampType | null;
   };
   destinations: {
     delivery: BookingDestinationRef | null;
@@ -424,10 +428,12 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
     start_fs: FirestoreTimestamp.nullable(),
     end: chicagoInstant().meta({ serverSortVia: "dates.end_fs", column: true, label: "End" }).nullable(),
     end_fs: FirestoreTimestamp.nullable(),
-    charge_start: chicagoInstant().nullable().meta({ column: true, label: "Charge Start" }),
-    charge_start_fs: FirestoreTimestamp.nullable(),
-    charge_end: chicagoInstant().nullable().meta({ column: true, label: "Charge End" }),
-    charge_end_fs: FirestoreTimestamp.nullable(),
+    // Legacy, mid-removal (charge-windows step 5): writers stopped at beta B
+    // (null), stop entirely here, then purge → delete. Not a column any more.
+    charge_start: chicagoInstant().nullable().optional(),
+    charge_start_fs: FirestoreTimestamp.nullable().optional(),
+    charge_end: chicagoInstant().nullable().optional(),
+    charge_end_fs: FirestoreTimestamp.nullable().optional(),
   }),
   destinations: z.strictObject({
     delivery: BookingDestinationRefSchema.nullable().meta({ label: "Delivery" }),

@@ -43,8 +43,6 @@ export const bookings: TypesenseCollectionConfig = {
       { name: "dates", type: "object" },
       { name: "dates.start_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "dates.end_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
-      { name: "dates.charge_start_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
-      { name: "dates.charge_end_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "destinations", type: "object", optional: true },
       { name: "destinations.delivery", type: "object", optional: true },
       { name: "destinations.delivery.uid", type: "string", optional: true },

@@ -339,11 +339,8 @@ Deno.test("buildRemainingInvoice: a new line, a quantity increase and an extensi
   ]);
   // The section's pair charges from the day after the billed window ended (Sep 9) to the order's end (Sep 13).
   const pair = built.destinations.find((p) => p.uid === E)!;
-  assertEquals([pair.dates.charge_start, pair.dates.charge_end, pair.dates.days_charged], [
-    "2026-09-10T00:00:00.000-05:00",
-    "2026-09-13T00:00:00.000-05:00",
-    2,
-  ]);
+  // The order pair's legacy charge fields are not carried onto the section (charge-windows step 5).
+  assertEquals(["charge_start", "charge_start_fs", "charge_end", "charge_end_fs", "days_charged"].filter((k) => k in pair.dates), []);
   // ONE window holding the ADDED days, which its lines derive (owner, 2026-09-17).
   assertEquals(pair.dates.charge_windows, [{ start: "2026-09-10T00:00:00.000-05:00", end: "2026-09-13T00:00:00.000-05:00", days: 2 }]);
   assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)], pairs(7)).lines, []);
@@ -377,7 +374,7 @@ Deno.test("buildRemainingInvoice: units billed at different days extend in one s
   const extensions = built.items.filter((it) => it.type === "rental").map((it) => [(it as { quantity: number }).quantity, (it as { price: { chargeable_days: number } }).price.chargeable_days]);
   assertEquals(extensions, [[3, 5], [2, 2]]);
   // a's window ended Sep 11, b's Sep 14.
-  assertEquals(built.destinations.slice(1).map((p) => p.dates.charge_start), ["2026-09-12T00:00:00.000-05:00", "2026-09-15T00:00:00.000-05:00"]);
+  assertEquals(built.destinations.slice(1).map((p) => p.dates.charge_windows[0].start), ["2026-09-12T00:00:00.000-05:00", "2026-09-15T00:00:00.000-05:00"]);
   assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)], pairs(10)).lines, []);
 });
 
@@ -484,7 +481,7 @@ Deno.test("quantityAccounting: a later window extends by the PAIRS' days, not th
   assertEquals(remainingForOrder(O, lightOrder(2, 10), invoices, pairs(10)).lines.map((l) => [l.quantity, l.extension_cents]), [[0, 2000]]);
   const built = buildRemainingInvoice(orderSource(lightOrder(2, 10), 10), invoices, mint);
   const section = built.destinations.find((p) => p.uid !== D)!;
-  assertEquals([section.dates.charge_start, section.dates.charge_end, section.dates.days_charged], [
+  assertEquals([section.dates.charge_windows[0].start, section.dates.charge_windows[0].end, section.dates.charge_windows[0].days], [
     "2026-09-12T00:00:00.000-05:00",
     "2026-09-16T00:00:00.000-05:00",
     5,

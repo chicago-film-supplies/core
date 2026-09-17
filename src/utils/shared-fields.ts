@@ -495,8 +495,6 @@ const PAIR_FS_BOUNDARIES = [
   "delivery_end",
   "collection_start",
   "collection_end",
-  "charge_start",
-  "charge_end",
 ] as const;
 
 type DateRecord = Record<string, unknown>;
@@ -543,9 +541,10 @@ function followPossession(merged: DateRecord, downstream: DateRecord): void {
  * merged, and recompute the derived fields the merge deliberately left alone.
  *
  * {@link mergeSharedFields} runs per `dates` field and skips the `derived` ones —
- * the `_fs` Timestamp mirrors, the day counts, and the legacy
- * `charge_start`/`charge_end` — so it leaves them as the downstream document had
- * them. That is correct when the merged window came wholly from one side and
+ * the `_fs` Timestamp mirrors and the day counts — so it leaves them as the
+ * downstream document had them. (A pair not yet purged of the legacy
+ * `charge_start`/`charge_end`/`days_charged` carries them through the first two
+ * cases below unchanged; the mixed case drops them.) That is correct when the merged window came wholly from one side and
  * internally inconsistent when it did not, which is exactly what an operator
  * editing one endpoint in the pair editor produces. Four cases:
  *

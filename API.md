@@ -6362,12 +6362,12 @@ interface OrderDocDatesType {
   collection_start_fs: FirestoreTimestampType | null;
   collection_end: string | null;
   collection_end_fs: FirestoreTimestampType | null;
-  charge_start: string | null;
-  charge_start_fs: FirestoreTimestampType | null;
-  charge_end: string | null;
-  charge_end_fs: FirestoreTimestampType | null;
+  charge_start?: string | null;
+  charge_start_fs?: FirestoreTimestampType | null;
+  charge_end?: string | null;
+  charge_end_fs?: FirestoreTimestampType | null;
   days_active: number | null;
-  days_charged: number | null;
+  days_charged?: number | null;
   charge_windows: ChargeWindowType[];
 }
 ```
@@ -17026,12 +17026,12 @@ interface OrderDocDatesType {
   collection_start_fs: FirestoreTimestampType | null;
   collection_end: string | null;
   collection_end_fs: FirestoreTimestampType | null;
-  charge_start: string | null;
-  charge_start_fs: FirestoreTimestampType | null;
-  charge_end: string | null;
-  charge_end_fs: FirestoreTimestampType | null;
+  charge_start?: string | null;
+  charge_start_fs?: FirestoreTimestampType | null;
+  charge_end?: string | null;
+  charge_end_fs?: FirestoreTimestampType | null;
   days_active: number | null;
-  days_charged: number | null;
+  days_charged?: number | null;
   charge_windows: ChargeWindowType[];
 }
 ```
@@ -24761,7 +24761,7 @@ The date fields the charge-window helpers read and write.
 
 Structural, so an `OrderDocDatesType`, a manager draft and an invoice pair's
 dates all fit. Every key is optional here because a draft pair may not have
-its dates yet. The legacy keys are written, never read.
+its dates yet.
 
 ```ts
 interface ChargeDates {
@@ -24770,10 +24770,7 @@ interface ChargeDates {
   collection_start?: string | null;
   collection_end?: string | null;
   charge_windows?: readonly ChargeWindowLike[] | null;
-  charge_start?: string | null;
-  charge_end?: string | null;
   days_active?: number | null;
-  days_charged?: number | null;
 }
 ```
 
@@ -24966,10 +24963,9 @@ the pair's `days_active` against `holidays`.
   no windows is left without them.
 - **Extension pairs keep their days** (`opts.extension`): the count is the
   days added past what was billed, not a count of the window.
-- **The legacy fields follow the windows** — `charge_start`/`charge_end` are
-  the envelope and `days_charged` is Σ days — until they are removed. When a
-  legacy boundary moves, its `_fs` mirror is set to `null`, because a utility
-  cannot mint a Firestore Timestamp. The writer must stamp it.
+- **The legacy fields are deleted** — `charge_start`/`charge_end` (+`_fs`) and
+  `days_charged` (charge-windows step 5). Every stored pair passes through
+  here on its next write, so a rewrite drops them; the purge takes the rest.
 
 Pure: returns a copy.
 
@@ -25717,8 +25713,7 @@ manager's preview.
   the section's ADDED days, never a count of the window (owner, 2026-09-17),
   so its lines derive exactly that. An extension is only owed on a window
   that ends before the order's, so the section never starts after it ends.
-  The legacy mirrors follow; the `_fs` companion of the moved `charge_start`
-  is `null` here, for the writer to stamp.
+  It carries none of the legacy charge fields.
 - **Over-billing is never netted in.** A negative quantity or extension is
   returned in `overbilled`, for the credit-note flow.
 
@@ -30415,12 +30410,7 @@ interface OrderDateEnvelope {
   collection_start_fs: FirestoreTimestampType | null;
   collection_end: string | null;
   collection_end_fs: FirestoreTimestampType | null;
-  charge_start: string | null;
-  charge_start_fs: FirestoreTimestampType | null;
-  charge_end: string | null;
-  charge_end_fs: FirestoreTimestampType | null;
   days_active: number | null;
-  days_charged: number | null;
 }
 ```
 
@@ -31178,11 +31168,8 @@ and the quote / Xero / Calendar / Trello exporters.
 `*_start` boundaries take the earliest value across destinations, `*_end`
 boundaries take the latest; `days_active` takes the largest non-null value.
 
-The charge half is read from the WINDOWS, never the legacy mirrors:
-`charge_start` is the earliest first-window start, `charge_end` the latest
-last-window end, and `days_charged` the largest Σ window days. Each `_fs` is
-the owning destination's legacy mirror when it still holds the same instant,
-else `null` (charge-windows step 5 removes the mirrors and these fields).
+There is no charge half (charge-windows step 5): a pair's charge is its
+windows, read with `chargeEnvelope` / `chargedDays` from `utils/dates`.
 
 ### `getDefaultChargeDays(dates: ChargeDates, holidays: string[]): number | null`
 
@@ -32623,9 +32610,10 @@ Resolve the `dates` object to STORE for a pair whose fields have just been
 merged, and recompute the derived fields the merge deliberately left alone.
 
 {@link mergeSharedFields} runs per `dates` field and skips the `derived` ones —
-the `_fs` Timestamp mirrors, the day counts, and the legacy
-`charge_start`/`charge_end` — so it leaves them as the downstream document had
-them. That is correct when the merged window came wholly from one side and
+the `_fs` Timestamp mirrors and the day counts — so it leaves them as the
+downstream document had them. (A pair not yet purged of the legacy
+`charge_start`/`charge_end`/`days_charged` carries them through the first two
+cases below unchanged; the mixed case drops them.) That is correct when the merged window came wholly from one side and
 internally inconsistent when it did not, which is exactly what an operator
 editing one endpoint in the pair editor produces. Four cases:
 

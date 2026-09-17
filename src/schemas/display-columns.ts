@@ -153,10 +153,7 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
     "dates.delivery_end_fs": { label: "Delivery End", cell: "date" },
     "dates.collection_start_fs": { label: "Collection Start", cell: "date" },
     "dates.collection_end_fs": { label: "Collection End", cell: "date" },
-    "dates.charge_start_fs": { label: "Charge Start", cell: "date" },
-    "dates.charge_end_fs": { label: "Charge End", cell: "date" },
     "dates.days_active": { label: "Days Active", cell: "plain" },
-    "dates.days_charged": { label: "Days Charged", cell: "plain" },
   },
   // The THIRD key. `level` has no Firestore field to hang a label on — it is
   // `ORG_LEVELS[path.length - 1]`, derived at index time because Typesense
@@ -225,15 +222,8 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
     // `linkTo: "organizationDetail"` annotation provided.
     name: { label: "Name", cell: "link", meta: { linkTo: "organizationDetail" } },
   },
-  // The two charge dates only. Every other `bookings` field resolves through a
-  // declared column or an `_fs` mirror; these two do not, because the ISO
-  // fields they mirror carry no `serverSortVia` and `mirrorSources` inverts
-  // exactly that annotation. Without an entry here they are indexed, sortable,
-  // and invisible.
   bookings: {
     "organization.name": { label: "Organization", cell: "link", meta: { linkTo: "organizationDetail" } },
-    "dates.charge_start_fs": { label: "Charge Start", cell: "date" },
-    "dates.charge_end_fs": { label: "Charge End", cell: "date" },
   },
   fulfillments: {
     "organization.name": { label: "Organization", cell: "link", meta: { linkTo: "organizationDetail" } },
@@ -244,8 +234,6 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
     "dates.delivery_end_fs": { label: "Delivery End", cell: "date" },
     "dates.collection_start_fs": { label: "Collection Start", cell: "date" },
     "dates.collection_end_fs": { label: "Collection End", cell: "date" },
-    "dates.charge_start_fs": { label: "Charge Start", cell: "date" },
-    "dates.charge_end_fs": { label: "Charge End", cell: "date" },
   },
 };
 

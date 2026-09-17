@@ -665,7 +665,7 @@ export interface CountedChargeWindow {
  *
  * Structural, so an `OrderDocDatesType`, a manager draft and an invoice pair's
  * dates all fit. Every key is optional here because a draft pair may not have
- * its dates yet. The legacy keys are written, never read.
+ * its dates yet.
  */
 export interface ChargeDates {
   delivery_start?: string | null;
@@ -673,13 +673,7 @@ export interface ChargeDates {
   collection_start?: string | null;
   collection_end?: string | null;
   charge_windows?: readonly ChargeWindowLike[] | null;
-  /** Legacy: the first window's start, kept in step until the field is removed. */
-  charge_start?: string | null;
-  /** Legacy: the last window's end, kept in step until the field is removed. */
-  charge_end?: string | null;
   days_active?: number | null;
-  /** Legacy: Σ window days, kept in step until the field is removed. */
-  days_charged?: number | null;
 }
 
 /**
@@ -769,10 +763,9 @@ export interface CanonicalChargeWindowsOptions {
  *   no windows is left without them.
  * - **Extension pairs keep their days** (`opts.extension`): the count is the
  *   days added past what was billed, not a count of the window.
- * - **The legacy fields follow the windows** — `charge_start`/`charge_end` are
- *   the envelope and `days_charged` is Σ days — until they are removed. When a
- *   legacy boundary moves, its `_fs` mirror is set to `null`, because a utility
- *   cannot mint a Firestore Timestamp. The writer must stamp it.
+ * - **The legacy fields are deleted** — `charge_start`/`charge_end` (+`_fs`) and
+ *   `days_charged` (charge-windows step 5). Every stored pair passes through
+ *   here on its next write, so a rewrite drops them; the purge takes the rest.
  *
  * Pure: returns a copy.
  *
@@ -807,11 +800,8 @@ export function canonicalChargeWindows<D extends ChargeDates>(
       return { start, end, days: countWindowDays(start, end, holidays) };
     });
     out.charge_windows = counted;
-    const envelope = chargeEnvelope({ charge_windows: counted })!;
-    setLegacyBound(out, "charge_start", envelope.start);
-    setLegacyBound(out, "charge_end", envelope.end);
-    out.days_charged = chargedDays({ charge_windows: counted });
   }
+  for (const key of LEGACY_CHARGE_KEYS) delete out[key];
 
   if (dates.delivery_start && dates.collection_start) {
     if (isNonTerminatingWindow(dates.delivery_start, dates.collection_start)) {
@@ -824,13 +814,8 @@ export function canonicalChargeWindows<D extends ChargeDates>(
   return out;
 }
 
-/** Write a legacy boundary, clearing its `_fs` mirror when the instant moved. */
-function setLegacyBound(out: Record<string, unknown>, key: "charge_start" | "charge_end", value: string): void {
-  const previous = out[key];
-  const moved = typeof previous !== "string" || toChicagoInstant(previous) !== value;
-  out[key] = value;
-  if (moved && `${key}_fs` in out) out[`${key}_fs`] = null;
-}
+/** The pre-window charge fields, removed from every pair `canonicalChargeWindows` writes. */
+const LEGACY_CHARGE_KEYS = ["charge_start", "charge_start_fs", "charge_end", "charge_end_fs", "days_charged"] as const;
 
 // ── applyDateEdit ───────────────────────────────────────────────────
 

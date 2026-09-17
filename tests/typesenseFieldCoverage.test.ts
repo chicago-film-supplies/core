@@ -173,17 +173,12 @@ const DERIVED_FIELDS: Record<string, string> = {
   "orders:dates.delivery_end_fs": "deriveOrderDateEnvelope — envelope max over destinations[]",
   "orders:dates.collection_start_fs": "deriveOrderDateEnvelope — envelope min over destinations[]",
   "orders:dates.collection_end_fs": "deriveOrderDateEnvelope — envelope max over destinations[]",
-  "orders:dates.charge_start_fs": "deriveOrderDateEnvelope — envelope min over destinations[]",
-  "orders:dates.charge_end_fs": "deriveOrderDateEnvelope — envelope max over destinations[]",
   "orders:dates.days_active": "deriveOrderDateEnvelope — spanned days across the envelope",
-  "orders:dates.days_charged": "deriveOrderDateEnvelope — chargeable days across the envelope",
   "fulfillments:dates": "deriveOrderDateEnvelope — same as orders:dates",
   "fulfillments:dates.delivery_start_fs": "deriveOrderDateEnvelope — same as orders",
   "fulfillments:dates.delivery_end_fs": "deriveOrderDateEnvelope — same as orders",
   "fulfillments:dates.collection_start_fs": "deriveOrderDateEnvelope — same as orders",
   "fulfillments:dates.collection_end_fs": "deriveOrderDateEnvelope — same as orders",
-  "fulfillments:dates.charge_start_fs": "deriveOrderDateEnvelope — same as orders",
-  "fulfillments:dates.charge_end_fs": "deriveOrderDateEnvelope — same as orders",
 
   // ── orgLevel (@cfs/core/utils/organizations), applied in api-cloudrun's
   //    `translateForTypesense` before `translateObject`.
@@ -796,12 +791,15 @@ Deno.test("typesense integer parity: the census, so an inert walker cannot repor
     "every int declaration must land in exactly one bucket",
   );
   // The floor. `>= `, not `===`: growth is expected, collapse is the failure.
-  assertEquals(intDeclared >= 190, true, `only ${intDeclared} int declarations seen — the walk went inert`);
+  // Lowered 190 → 180 on 2026-09-17: charge-windows step 5 deleted 15 int
+  // declarations (the `charge_*_fs` / `days_charged` mirrors) from four indexes.
+  assertEquals(intDeclared >= 180, true, `only ${intDeclared} int declarations seen — the walk went inert`);
+  // Lowered 70 → 63 with the int floor above: 7 of those 15 were timestamp-backed.
   assertEquals(
-    timestampBacked >= 70,
+    timestampBacked >= 63,
     true,
     `only ${timestampBacked} timestamp-backed — the meta exemption stopped matching, ` +
-      `which would make the arm above red on 73 correct fields`,
+      `which would make the arm above red on 66 correct fields`,
   );
   assertEquals(
     schemaBacked >= 100,

@@ -100,7 +100,7 @@ Deno.test("chargedDays and chargeEnvelope read stored windows only", () => {
 
 const FS = { seconds: 1, nanoseconds: 0 };
 
-Deno.test("canonicalChargeWindows: recounts each window and derives the legacy mirrors", () => {
+Deno.test("canonicalChargeWindows: recounts each window and DELETES the legacy fields (charge-windows step 5)", () => {
   const out = canonicalChargeWindows({
     delivery_start: at(5, "09:00:00"),
     collection_start: at(16, "15:00:00"),
@@ -109,29 +109,28 @@ Deno.test("canonicalChargeWindows: recounts each window and derives the legacy m
     charge_end: at(16, "15:00:00"),
     charge_end_fs: FS,
     days_active: null,
-    days_charged: null,
+    days_charged: 11,
     charge_windows: [
       { start: at(5, "09:00:00"), end: at(7, "15:00:00"), days: 99 },
       { start: at(12, "09:00:00"), end: at(13, "15:00:00") },
     ],
   } as ChargeDates & Record<string, unknown>, ["2026-10-06"]) as ChargeDates & Record<string, unknown>;
   assertEquals(out.charge_windows?.map((w) => w.days), [2, 2], "the stored 99 is recounted, the holiday on the 6th excluded");
-  assertEquals(out.days_charged, 4);
   assertEquals(out.days_active, 9);
-  assertEquals(out.charge_start, at(5, "09:00:00"));
-  assertEquals(out.charge_start_fs, FS, "an unmoved legacy boundary keeps its _fs");
-  assertEquals(out.charge_end, at(13, "15:00:00"));
-  assertEquals(out.charge_end_fs, null, "a moved legacy boundary's _fs is cleared for the writer to stamp");
+  for (const key of ["charge_start", "charge_start_fs", "charge_end", "charge_end_fs", "days_charged"]) {
+    assertEquals(key in out, false, `${key} is deleted, not nulled — a purged pair must stay purged on rewrite`);
+  }
 });
 
-Deno.test("canonicalChargeWindows: the legacy charge bounds never imply a window", () => {
+Deno.test("canonicalChargeWindows: the legacy charge bounds never imply a window, and are dropped without one", () => {
   const out = canonicalChargeWindows({
     delivery_start: at(5, "09:00:00"),
     collection_start: at(16, "15:00:00"),
     charge_start: at(6, "09:00:00"),
     charge_end: null,
-  }, []);
+  } as ChargeDates & Record<string, unknown>, []) as ChargeDates & Record<string, unknown>;
   assertEquals(out.charge_windows, undefined);
+  assertEquals(["charge_start" in out, "charge_end" in out], [false, false]);
 });
 
 Deno.test("canonicalChargeWindows: an extension pair keeps its stated days, and must state them", () => {
@@ -161,9 +160,6 @@ Deno.test("applyDateEdit default_dates: 09:00 next business day, collection 5 bu
     collection_start: at(9, "15:00:00"),
     collection_end: at(9, "15:00:00"),
     charge_windows: [{ start: at(5, "09:00:00"), end: at(9, "15:00:00"), days: 5 }],
-    charge_start: at(5, "09:00:00"),
-    charge_end: at(9, "15:00:00"),
-    days_charged: 5,
     days_active: 5,
   });
   const late = defaults(at(5, "10:00:00"));
@@ -176,7 +172,6 @@ Deno.test("applyDateEdit set_possession: one window over possession FOLLOWS it, 
   const moved = ok(applyDateEdit(defaults(), { type: "set_possession", collection_start: at(16, "15:00:00") }, H));
   assertEquals(moved.charge_windows, [{ start: at(5, "09:00:00"), end: at(16, "15:00:00"), days: 10 }]);
   assertEquals(moved.collection_end, at(16, "15:00:00"), "an end equal to its start follows it");
-  assertEquals(moved.days_charged, 10);
 });
 
 Deno.test("applyDateEdit set_possession: an EDITED window does not follow", () => {
@@ -239,7 +234,6 @@ Deno.test("applyDateEdit add/remove/reset windows, and the refusals", () => {
   const first = ok(applyDateEdit(base, { type: "set_window", index: 0, end: at(7, "15:00:00") }, H));
   const two = ok(applyDateEdit(first, { type: "add_window", start: at(19, "09:00:00"), end: at(20, "15:00:00") }, H));
   assertEquals(two.charge_windows?.map((w) => w.days), [3, 2]);
-  assertEquals(two.days_charged, 5);
 
   const three = ok(applyDateEdit(two, { type: "add_window", start: at(12, "09:00:00"), end: at(12, "15:00:00") }, H));
   assertEquals(three.charge_windows?.map((w) => w.start), [at(5, "09:00:00"), at(12, "09:00:00"), at(19, "09:00:00")], "inserted in order");
@@ -326,7 +320,7 @@ Deno.test("resolveMergedPairDates: a mix recounts the windows and carries each _
   assertEquals(out.charge_windows, [{ start: at(5, "09:00:00"), end: at(7, "15:00:00"), days: 3 }]);
   assertEquals(out.days_active, 10);
   assertEquals(out.collection_start_fs, source.collection_start_fs);
-  assertEquals(out.charge_end_fs, downstream.charge_end_fs);
+  assertEquals(["charge_start", "charge_end_fs", "days_charged"].filter((k) => k in out), [], "a recount drops the legacy fields");
   assertEquals(merged.collection_start_fs, downstream.collection_start_fs, "the caller's merged object is not mutated");
 
   const invalid = { ...merged, charge_windows: [{ start: at(9, "09:00:00"), end: at(5, "15:00:00"), days: 0 }] };
@@ -351,8 +345,7 @@ Deno.test("resolveMergedPairDates: a kept window equal to the downstream's posse
   const merged = { ...downstream, collection_start: source.collection_start, collection_end: source.collection_end };
   const out = resolveMergedPairDates(merged, source, downstream, [], canonicalChargeWindows)!;
   assertEquals(out.charge_windows, [{ start: at(5, "09:00:00"), end: at(16, "15:00:00"), days: 10 }]);
-  assertEquals(out.charge_end, at(16, "15:00:00"));
-  assertEquals(out.days_charged, 10);
+  assertEquals(["charge_end", "days_charged"].filter((k) => k in out), [], "a recount drops the legacy fields");
 
   // Compared as instants: the same moment in another offset still follows.
   const utc = { ...downstream, charge_windows: [{ start: "2026-10-05T14:00:00.000Z", end: "2026-10-09T20:00:00.000Z", days: 5 }] };

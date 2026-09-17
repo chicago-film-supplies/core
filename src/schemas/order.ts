@@ -219,18 +219,20 @@ export interface OrderDocDatesType {
   collection_start_fs: FirestoreTimestampType | null;
   collection_end: string | null;
   collection_end_fs: FirestoreTimestampType | null;
-  charge_start: string | null;
-  charge_start_fs: FirestoreTimestampType | null;
-  charge_end: string | null;
-  charge_end_fs: FirestoreTimestampType | null;
+  /** Legacy, being removed (charge-windows step 5). Written by nothing; read by nothing. */
+  charge_start?: string | null;
+  /** Legacy, being removed (charge-windows step 5). */
+  charge_start_fs?: FirestoreTimestampType | null;
+  /** Legacy, being removed (charge-windows step 5). */
+  charge_end?: string | null;
+  /** Legacy, being removed (charge-windows step 5). */
+  charge_end_fs?: FirestoreTimestampType | null;
   days_active: number | null;
-  days_charged: number | null;
+  /** Legacy, being removed (charge-windows step 5). */
+  days_charged?: number | null;
   /**
    * The pair's charge windows, in order. Required since every stored pair was
    * backfilled (charge-windows release step 3, 2026-09-17, both projects).
-   * `charge_start`/`charge_end`(+`_fs`)/`days_charged` are legacy mirrors a
-   * writer still derives from the windows until step 5 removes them; nothing
-   * reads them.
    */
   charge_windows: ChargeWindowType[];
 }
@@ -282,14 +284,16 @@ export const OrderDocDates: z.ZodType<OrderDocDatesType> = z.strictObject({
   collection_start_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
   collection_end: chicagoInstant().nullable(),
   collection_end_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
-  // Legacy mirrors of the charge windows' envelope, derived by
-  // `canonicalChargeWindows` until they are removed (charge-windows step 5).
-  charge_start: chicagoInstant().nullable().meta({ derived: true }),
-  charge_start_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
-  charge_end: chicagoInstant().nullable().meta({ derived: true }),
-  charge_end_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
+  // Legacy mirrors of the charge windows' envelope, mid-removal (charge-windows
+  // step 5): optional → nothing writes them (`canonicalChargeWindows` deletes
+  // them) → purge → delete. Optional so a purged pair still parses; still
+  // declared so an unpurged one does.
+  charge_start: chicagoInstant().nullable().optional().meta({ derived: true }),
+  charge_start_fs: FirestoreTimestamp.nullable().optional().meta({ derived: true }),
+  charge_end: chicagoInstant().nullable().optional().meta({ derived: true }),
+  charge_end_fs: FirestoreTimestamp.nullable().optional().meta({ derived: true }),
   days_active: z.int().nullable().meta({ derived: true }),
-  days_charged: z.int().nullable().meta({ derived: true }),
+  days_charged: z.int().nullable().optional().meta({ derived: true }),
   charge_windows: z.array(ChargeWindow).min(1).superRefine(checkChargeWindowsOrdered)
     .meta({ shared: "value" }),
 });

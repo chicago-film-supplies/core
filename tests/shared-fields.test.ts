@@ -296,7 +296,7 @@ Deno.test("🔴 resolveMergedPairDates: a MIXED window takes each _fs from its o
     [],
   );
   assertEquals(out.days_active, expected.activeDays);
-  assertEquals(out.days_charged, expected.activeDays);
+  assertEquals("days_charged" in out, false, "a recount drops the legacy fields");
   assert(out.days_active !== pairDates().days_active, "the stale count did not simply survive");
 });
 

@@ -42,8 +42,6 @@ export const invoices: TypesenseCollectionConfig = {
       { name: "destinations.dates.delivery_end_fs", type: "int64[]", index: true, facet: false, optional: true },
       { name: "destinations.dates.collection_start_fs", type: "int64[]", index: true, facet: false, optional: true },
       { name: "destinations.dates.collection_end_fs", type: "int64[]", index: true, facet: false, optional: true },
-      { name: "destinations.dates.charge_start_fs", type: "int64[]", index: true, facet: false, optional: true },
-      { name: "destinations.dates.charge_end_fs", type: "int64[]", index: true, facet: false, optional: true },
       { name: "items", type: "object[]", optional: true },
       { name: "items.uid", type: "string[]", facet: false, optional: true },
       { name: "items.name", type: "string[]", stem: true, optional: true },

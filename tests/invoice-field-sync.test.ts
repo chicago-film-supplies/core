@@ -234,7 +234,8 @@ Deno.test("per field: pair dates merge per leaf — a mixed window takes each _f
   assertEquals([out.delivery_start, out.collection_start], [iso(6), iso(16)]);
   assertEquals((out.delivery_start_fs as { nanoseconds: number }).nanoseconds, 3, "delivery kept → the invoice's own _fs");
   assertEquals((out.collection_start_fs as { nanoseconds: number }).nanoseconds, 2, "collection followed → the order's _fs");
-  assertEquals(out.days_charged, daysFor(iso(6), iso(16)));
+  assertEquals((out.charge_windows as unknown as { days: number }[])[0].days, daysFor(iso(6), iso(16)));
+  assertEquals("days_charged" in out, false, "a recount drops the legacy fields");
   assertNotEquals(daysFor(iso(6), iso(16)), daysFor(iso(5), iso(16)), "anti-vacuity: the two windows bill differently");
 });
 
