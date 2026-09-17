@@ -31820,7 +31820,7 @@ at the write rather than found later by an audit.
 ⚠️ **Returns violations rather than throwing**, because the two callers need
 different outcomes from the same answer: the write path turns one into an
 operator-facing 400 (core throws plain `Error`, which api's middleware maps to
-a 500 — see api-cloudrun's `src/lib/linePrice.ts`, the same reasoning), while
+a 500 — see `api-cloudrun/src/lib/linePrice.ts`, the same reasoning), while
 the audit script reports every row across both projects and exits non-zero.
 
 ⚠️ **Single-window pairs are NOT checked, and that is the invariant's scope
