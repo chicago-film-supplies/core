@@ -1,46 +1,66 @@
 # Multiple charge windows per destination pair
 
-**Date:** 2026-09-16 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** in-progress
+**Date:** 2026-09-16 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** in-progress (step 2)
 **Origin:** hotspot rentals billed only for their activation windows; owner design sessions 2026-09-16
 **Related:** api-cloudrun#1028
 
 ## START HERE
-Core beta A is **published as `@cfs/core@10.0.0-beta.478`** (commit `2ecb85f`). Next is release step 2: bump the manager to `.478` and write its `applyDateEdit` / window changes, then do the same for api-cloudrun, with the manager released to prod first. Each pin bump has to land with its code change, because `.478` breaks both compiles. ⚠️ Run the backfill (step 3) right after the step-2 API prod deploy; see design call 1 below. First command: `grep -rn "charge_start\|days_charged\|syncChargeDaysToItems\|resolveMergedPairDates" manager/src | wc -l`.
+Step 2 is half landed. **Core is `@cfs/core@10.0.0-beta.479`. The manager is on `main` (`40831b9d`) but not released to prod. The API half is committed, not pushed**, on branch `feat/charge-windows-api` (`d7e6af6d`) in the api-cloudrun worktree `.claude/worktrees/charge-windows`. Next: migrate api-cloudrun's integration tests to `charge_windows` input (list below), run the suite, and land the branch. The release order is the manager to prod, then the API to prod, then the backfill (step 3) right away. First command: `cd api-cloudrun/.claude/worktrees/charge-windows && grep -rln "charge_start\|charge_end\|chargeable_days\|days_charged" tests | wc -l` (53 files, 33 of them integration).
 
-> ## ⚠️ STATUS UPDATE 2026-09-16: core beta A published (`10.0.0-beta.478`)
-> **What landed in core** (all gates green: suite, `check`, `lint`, `check:generated`, `check:declarations`; `tests/charge-windows.test.ts` has 34 tests, and mutating the multi-window factor and the follow rule turns them red):
-> - **Schema:** `ChargeWindowInput`, `ChargeWindow` (strict, `days` int ≥ 0, derived), both on the `schemas` barrel. `OrderDocDates.charge_windows` is optional with `shared: "value"` and a calendar-day order/overlap refine. `OrderDates.charge_windows` is **required**, and `charge_start`/`charge_end` are gone from input (stripped). `charge_start`/`charge_end` are now tagged derived. Line `chargeable_days` is derived on orders and invoices and dropped from both line inputs. Credit-note days are `z.int()`.
-> - **`utils/dates`:** `chargedDays`, `billableDays`, `chargeEnvelope`, `chargeWindowsOf` (emitted as template helpers), plus `canonicalChargeWindows` and `applyDateEdit` (denylisted: write path). `canonicalChargeWindows` also writes the legacy mirrors (`charge_start`/`charge_end` = the envelope, `days_charged` = Σ) and nulls a moved mirror's `_fs` for the writer to stamp. It synthesizes one window for a pair stored before windows. `applyDateEdit` errors are `holidays_unloaded`, `non_terminating`, `overlap`, `adjacent`, `missing_dates`, `invalid_days`, `no_such_window`, `last_window`, `extension_window` and `invalid_instant`.
-> - **Shared fields:** `SharedField.derived_keys`. The merge compares `charge_windows` without `days`. `resolveMergedPairDates(merged, source, downstream, holidays, canonicalize)` takes `canonicalChargeWindows` in place of `getDuration` + `isNonTerminatingWindow` (**breaking for api-cloudrun**).
-> - **Pricer:** `PriceDocumentKind` order arm needs `status`. `PriceDocumentContext.charge_windows` is required (build it with `chargeWindowContext(destinations)`). `lineChargeableDays` is the one derivation. `LinePricingOptions.windowDays` prices 2+ windows at `billableDays ÷ 5`. `CreditSourceLine.window_days` credits a multi-window line as it was billed.
-> - **Deleted:** `syncChargeDaysToItems`, `reconcileChargeDaysByDestination`, `resolveDownstreamChargeDays` and `settleScopedChargeDays` (with its row-origin plumbing), plus their tests. `isSameAsDeliveryDates` now means "one window equal to possession" and `getDefaultChargeDays` sums the windows.
+> ## ⚠️ STATUS UPDATE 2026-09-16 (compacted): step 1 done, step 2 half done
+> **Core.** Beta A is `beta.478` (`2ecb85f`). `beta.479` (`4589ef1`) fixed a typing gap that beta A shipped: `isSameAsDeliveryDates`, `getDefaultChargeDays` and the three destination helpers took the INPUT types, where `charge_windows` is required, so no stored pair fit them. They now take the structural `ChargeDates` / a `Pick`, and `isSameAsDeliveryDates` reads a pair stored before windows by its charge bounds. api-cloudrun was type-checked against the local tree with `file://` pins before that publish.
+> - Schema: `ChargeWindowInput`, `ChargeWindow` (strict, `days` int ≥ 0, derived). `OrderDocDates.charge_windows` is optional (`shared: "value"`, calendar-day order/overlap refine). `OrderDates.charge_windows` is **required**, and `charge_start`/`charge_end` are gone from input. The stored `charge_start`/`charge_end`/`days_charged` are tagged derived. Line `chargeable_days` is derived on orders and invoices and dropped from both line inputs. **`UpdateInvoiceInput.destinations` is the STORED pair schema**, so its windows are optional; the order's are not.
+> - `utils/dates`: `chargedDays`, `billableDays`, `chargeEnvelope`, `chargeWindowsOf`, `canonicalChargeWindows` (the one writer of counts; it keeps the legacy mirrors in step and nulls a moved mirror's `_fs`), `applyDateEdit` (errors: `holidays_unloaded`, `non_terminating`, `overlap`, `adjacent`, `missing_dates`, `invalid_days`, `no_such_window`, `last_window`, `extension_window`, `invalid_instant`). ⭐ **`applyDateEdit(dates, { type: "set_possession" }, …)` with no fields moves nothing and only checks and recounts.** The API uses it as the validator.
+> - Pricer: `PriceDocumentKind`'s order arm needs `status`. `PriceDocumentContext.charge_windows` is required (`chargeWindowContext(destinations)`; an invoice pair's divider path is `[uid_order, pair.uid]`). A 2+ window pair prices at `billableDays ÷ 5`. `CreditSourceLine.window_days` exists.
+> - Deleted: `syncChargeDaysToItems`, `reconcileChargeDaysByDestination`, `resolveDownstreamChargeDays`, `settleScopedChargeDays`. `resolveMergedPairDates` takes `canonicalChargeWindows`.
 >
-> **Two design calls made while building (flag to the owner):**
-> 1. **A pair stored before windows keeps its lines' stored days** (a new line takes the pair's `days_charged`). Without this, the prod deploy of step 2 would re-derive the census's live divergent documents (#1003, #979, #2396, #2408, #2399) on their next reprice, before the backfill runs. ⚠️ **The protection ends the moment such a pair is canonicalized**: a manager date edit, an API date PUT, a merged-window sync or a holiday recompute synthesizes and recounts its window. **Run the backfill right after the step-2 API deploy.** The rule is removed in beta B.
-> 2. **A `complete`/`canceled` order keeps stored line days** (the owner's census decision). The check lives in `lineChargeableDays`. What reopening such an order should do is still undecided.
+> **Manager (`40831b9d` on `main`; pre-push unit + rules + e2e green).**
+> - Every pair date edit goes through `editPairDates` (orders) / `editInvoicePairDates` (invoices, keyed `(uid_order, pair.uid)`; refuses window edits on an extension pair). Both apply `applyDateEdit` and reprice.
+> - Deleted: the end mirroring, the charge-window follow effect, the charge-day baselines and `syncChargeDays`. manager#339 went with them.
+> - New pairs and the draft seed use `copy_from` / `default_dates`.
+> - Both Duration cells edit their pair's single window (`set_window_days`). A pair with several windows is read-only.
+> - Invoice drafts scope order pairs with `uid_order`, so the pricer finds each line's pair.
+> - ⚠️ **Transitional guard, remove after the backfill:** `updateOrder` (for any save reaching `destinations`) and `createOrder` give a pair stored before windows its backfill window, with `days` COPIED from `days_charged`, not recounted, and no reprice. A stashed draft with no count is recounted. Without it, every destinations save on a legacy order failed client validation.
+> - Against today's prod API, the manager still sends the legacy mirrors, and line days ride on the items. ⚠️ **An invoice Duration edit therefore persists its money but NOT its window** until the new API ships: the old `pairEdit` does not treat `charge_windows` as editable.
 >
-> **Deferred from beta A** (still in the design below; do not forget them):
-> - §2c extensions: `clipWindowsAfter` and `extensionAddedDays`. `quantityAccounting` still reads `charge_end`/`days_charged`, which `canonicalChargeWindows` keeps in step. ⚠️ `buildRemainingInvoice`'s extension pair states no `charge_windows`, so **the API must call `canonicalChargeWindows(…, { extension: true })` with a window carrying the section's days**, or a recount replaces the added days.
-> - §3 comparators: `computeInvoiceSyncStatus` still badges an invoice whose own windows bill different days, because the money differs too. Making that an explained difference needs the pair's windows in its context. It was not a tag change, so it was not done.
-> - The pair invariant (every rental `five_day_week` line on a 2+ window pair has days = Σ) holds because `priceDocument` stamps it. There is no schema-level check.
-> - §6 readers (`deriveOrderDateEnvelope`, Typesense, `getDuration`'s charge half) and bookings are beta B, as planned.
-> - `getInitialValues(OrderDocDates)` seeds `charge_windows: []`, which the stored schema refuses. The manager must seed with `applyDateEdit` `default_dates` (already planned).
+> **API (`d7e6af6d`, unpushed).** It compiles and lints, and the hermetic unit set passes. The only `deno task gate` failure is the uncommitted census script: **5 whole-object double casts** trip `typeEscapeRatchet`, so fix those before it lands.
+> - `canonicalizeDestinationDates` goes through `applyDateEdit`. It replays `set_possession` against the STORED pair when the input windows are unchanged, so an API PUT follows exactly like the manager.
+> - The status and `chargeWindowContext` are passed by `priceOrderItems`, `priceInvoice` and the order→invoice sync.
+> - The holiday recompute recanonicalizes and reprices. Its positional divider mapping is gone.
+> - `pairEdit` merges possession plus `charge_windows` as one value through `applyDateEdit` and refuses extension window edits. The fulfillment route takes `charge_windows`.
+> - `createInvoice` counts stated and remainder pairs. An extension pair gets one window carrying `buildRemainingInvoice`'s added days, never recounted. `stampMovedChargeStart` is deleted.
+> - Input line days are ignored.
+>
+> **Still to do for step 2 (API):**
+> 1. **Migrate the integration tests.** 33 integration files and `api-cloudrun/tests/helpers/seedPickableOrder.ts` spell `charge_start`/`charge_end` or input days by hand. ⚠️ **Any test that `copyDoc`s a dev order and PUTs its destinations now 400s**, because the order input requires `charge_windows` and dev's pairs predate them. Dev cannot be backfilled first: dev's API deploys from `main`, and the old API's strict stored schema refuses the new key. So those tests have to state windows themselves.
+> 2. §2b: after `resolveMergedPairDates`, re-apply the follow rule against the MERGED previous possession. Not done.
+> 3. `updateInvoice`'s `destinationsMoved` second clause (`input.items === undefined && !isEqual(items)`) is dead now that no sync moves items. Delete it.
+> 4. Write the release order into the API PR: manager prod release first, then the API, then the backfill.
+>
+> **Design calls made while building (flag to the owner):**
+> 1. **A pair stored before windows keeps its lines' stored days** (a new line takes `days_charged`). ⚠️ The protection ends the moment such a pair is canonicalized: a manager or API date edit, a merged-window sync, a holiday recompute, or (manager only) the copy-not-recount guard followed by any reprice. Live exposure is #1003 and #979. **Run the backfill right after the step-2 API prod deploy.** The rule is removed in beta B.
+> 2. **A `complete`/`canceled` order keeps stored line days** (the owner's census decision). What reopening one should do is undecided.
+>
+> **Deferred from beta A** (still in the design below):
+> - §2c `clipWindowsAfter` / `extensionAddedDays` (`quantityAccounting` still reads the legacy mirrors).
+> - §3 comparators: `computeInvoiceSyncStatus` badges an invoice whose own windows bill different days.
+> - The pair invariant has no schema-level check.
+> - §6 readers and bookings are beta B.
 
-> ## ⚠️ STATUS UPDATE 2026-09-16: census run on PROD (dev agrees to within 2 invoices)
-> Script: the charge-windows census script, uncommitted on api-cloudrun branch `chore/charge-windows-census` (worktree `charge-windows`); it lands with the backfill. Prod: 1,033 orders, 1,051 invoices.
-> - **Bucket 1:** native (post-cutover) documents have 0 divergent lines. Divergence is CRMS-migrated only, and a floored count differs in every case:
->   - **live orders, only two:** #1003 (active, 18 lines at 5 on a 7-day pair) and #979 (reserved, 16 lines at 15 on a 20-day pair; its invoice #2396 bills the same 15)
->   - complete orders 575 lines, canceled 77
->   - **issued, unpaid:** #2396 (bills 15 of 20, 16 lines), #2408 (15 on a 14-day pair, 6 lines), #2399 (one rental line with null days on a 15-day pair)
->   - paid 1,067 lines, void 95
-> - **Bucket 2:** every non-rental `five_day_week` line is on an invoice; 53 `service` lines carry days, all paid.
-> - **Bucket 3:** 3 pairless rentals, all on paid invoices.
-> - **Bucket 4:** charge ≠ possession on 112 order pairs and 132 invoice pairs; 0 null charge bounds.
-> - **Bucket 5:** 0 extension sections in prod, so nothing to reproduce.
-> - **Decision (owner, 2026-09-16): orders follow the invoice pattern.** Complete and canceled orders keep their stored line days, as paid and void invoices do. ⚠️ Nothing freezes an order today (`assertRepriceable` refuses only invoices), so `priceDocument` must carry stored line days for `complete`/`canceled` orders, and the design must say what reopening one does. Live orders and issued, unpaid invoices are re-derived. Backfill for #2396: its window carries the 15 days billed.
-> - **Backfill decisions (owner, 2026-09-16):** #979's window = 15 days; #1003's window = 5 days; #2408's invoice window = 15 days (keeps its money); #2396's window = 15 days.
-> - **#2399 is a different class:** Combo Hangers are `fixed` products that bill 1 week whatever the rental length, but the migrated line is stored as `five_day_week`. Prod has this product↔line formula mismatch (product `fixed`, line `five_day_week`) on live documents: #2399 (issued, days null, bills 1 week, correct), and on orders #990 (4 × $15 at 24 days = $288.00; `fixed` would be $60.00), #961 (2 × $25 at 15 days = $150.00; `fixed` would be $50.00), plus #865/#867/#869/#871 (1–2 days, so the floor already bills one week). Frozen documents: 71 complete-order lines, 73 paid-invoice lines. **Decision (owner):** the backfill sets the line formula to `fixed` on #990, #865, #867, #869, #871 and #2399 (#990 drops $288.00 → $60.00). **#961 is preserved** as `five_day_week`; its pair is 15 days, so a derived line keeps $150.00.
-
+## Census (prod, 2026-09-16; dev agrees to within 2 invoices)
+Script: the charge-windows census script, uncommitted on api-cloudrun branch `chore/charge-windows-census` (worktree `charge-windows`); it lands with the backfill. Prod: 1,033 orders, 1,051 invoices.
+- **Bucket 1:** native (post-cutover) documents have 0 divergent lines. Divergence is CRMS-migrated only, and a floored count differs in every case:
+  - **live orders, only two:** #1003 (active, 18 lines at 5 on a 7-day pair) and #979 (reserved, 16 lines at 15 on a 20-day pair; its invoice #2396 bills the same 15)
+  - complete orders 575 lines, canceled 77
+  - **issued, unpaid:** #2396 (bills 15 of 20, 16 lines), #2408 (15 on a 14-day pair, 6 lines), #2399 (one rental line with null days on a 15-day pair)
+  - paid 1,067 lines, void 95
+- **Bucket 2:** every non-rental `five_day_week` line is on an invoice; 53 `service` lines carry days, all paid.
+- **Bucket 3:** 3 pairless rentals, all on paid invoices.
+- **Bucket 4:** charge ≠ possession on 112 order pairs and 132 invoice pairs; 0 null charge bounds.
+- **Bucket 5:** 0 extension sections in prod, so nothing to reproduce.
+- **Decision (owner, 2026-09-16): orders follow the invoice pattern.** Complete and canceled orders keep their stored line days, as paid and void invoices do. ⚠️ Nothing freezes an order today (`assertRepriceable` refuses only invoices), so `priceDocument` must carry stored line days for `complete`/`canceled` orders, and the design must say what reopening one does. Live orders and issued, unpaid invoices are re-derived. Backfill for #2396: its window carries the 15 days billed.
+- **Backfill decisions (owner, 2026-09-16):** #979's window = 15 days; #1003's window = 5 days; #2408's invoice window = 15 days (keeps its money); #2396's window = 15 days.
+- **#2399 is a different class:** Combo Hangers are `fixed` products that bill 1 week whatever the rental length, but the migrated line is stored as `five_day_week`. Prod has this product↔line formula mismatch (product `fixed`, line `five_day_week`) on live documents: #2399 (issued, days null, bills 1 week, correct), and on orders #990 (4 × $15 at 24 days = $288.00; `fixed` would be $60.00), #961 (2 × $25 at 15 days = $150.00; `fixed` would be $50.00), plus #865/#867/#869/#871 (1–2 days, so the floor already bills one week). Frozen documents: 71 complete-order lines, 73 paid-invoice lines. **Decision (owner):** the backfill sets the line formula to `fixed` on #990, #865, #867, #869, #871 and #2399 (#990 drops $288.00 → $60.00). **#961 is preserved** as `five_day_week`; its pair is 15 days, so a derived line keeps $150.00.
 ## Context
 
 **Use case:** a hotspot goes out for 3 months. It is billed only for the three separate windows when it was activated remotely.
