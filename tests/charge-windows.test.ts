@@ -1,7 +1,14 @@
 /**
- * Charge windows (core `.claude/plans/charge-windows.md`, beta A): the stored
- * schema, the day-count writer, `applyDateEdit`, the shared-field rule, and the
- * pricer's derived `chargeable_days` and multi-window factor.
+ * Charge windows: the stored schema, the day-count writer, `applyDateEdit`, the
+ * shared-field rule, and the pricer's derived `chargeable_days` and multi-window
+ * factor.
+ *
+ * ⚠️ This named `.claude/plans/charge-windows.md`, which was DELETED when the
+ * campaign's last step (the multi-window UI) landed on 2026-09-17 — a promoted
+ * plan is retired with its final piece, because a stale plan reads as current
+ * intent. The decisions it held are now where they are enforced: the one-week
+ * floor per window in {@link billableDays}, the single author of a line's days in
+ * `lineChargeableDays`, and the pair invariant in `chargeWindowPairViolations`.
  *
  * Dates are October 2026 in Chicago: Monday the 5th, Friday the 9th. DST ends on
  * Sunday 1 November.
