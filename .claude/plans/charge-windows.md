@@ -1,11 +1,21 @@
 # Multiple charge windows per destination pair
 
-**Date:** 2026-09-16 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** in-progress (steps 1–4 in prod; step 5 next)
+**Date:** 2026-09-16 • **Repo:** core (+ api-cloudrun, manager, templates) • **Status:** in-progress (steps 1–4 in prod; step 5 prerequisite templates#376 built, awaiting render approval)
 **Origin:** hotspot rentals billed only for their activation windows; owner design sessions 2026-09-16
-**Related:** api-cloudrun#1028, core#112 (§3 comparator), core#113 (pair invariant guard), templates#376 (partials read windows)
+**Related:** api-cloudrun#1028, core#112 (§3 comparator), core#113 (pair invariant guard), templates#376 (partials read windows), core#114 (multi-window line Duration vs billable money)
 
 ## START HERE
-**Step 4 (beta B) is in prod as of 2026-09-17**: manager 26.26.0, then API 0.277.0, and templates#375 is merged. Next is **step 5** (stop writing the legacy fields, purge, remove); its prerequisites are listed in the status block below, and templates#376 goes first. First command: `gh issue view 376 -R chicago-film-supplies/templates`.
+**Step 4 (beta B) is in prod as of 2026-09-17**: manager 26.26.0, then API 0.277.0, and templates#375 is merged. **templates#376 is built as PR #378** (base component, not released, waiting for the owner to approve renders). Once it is approved and published, the rest of step 5's prerequisites (status block below) are next. First command: `gh pr view 378 -R chicago-film-supplies/templates`.
+
+> ## ⚠️ STATUS UPDATE 2026-09-17 (later): templates#376 built
+> - **PR #378** (prod MCP, base-component draft `yjhH2SaFUgV3wMcAg3n9`, branch `draft/base/982437e2`, base `main`). `partials/shared/destinations.eta` and `items-grid.eta` read `charge_windows` and no longer read the legacy fields. **Committed, not released** (`templates_release_draft` arms auto-merge).
+> - Single window: `visual-diff` on `5bb8955` matched all 45 fixtures in 7 families.
+> - 2+ windows: one row per window with its own days, then **Total Charged in billable days** (Σ max(d,5)). **Owner decision 2026-09-17:** billable, not Σ days, so the total matches the money. Previewed locally for the invoice, and for the quote, plus #343's quote body (the only consumer of the items-grid destination section).
+> - **Found and fixed:** `formatChargeDays` throws on 0, and a 0-day window is valid. The partials route window counts through a local `chargePeriod` guard.
+> - **Left for #376, after #378 merges:** a committed multi-window fixture on `invoice` (and on `quote` once #343 lands). It must follow the base merge so its golden is blessed against the new partials.
+> - **New decision, filed core#114 (`blocked:owner-decision`, before step 6):** a multi-window line stores and shows `chargeable_days` = Σ days while its money is billable days.
+> - api-cloudrun#1002 recurred on the first draft. Re-sending the edit did not recover it this time; the draft was abandoned and a new one was edited after its 7 golden persists landed.
+> - Context recommendation reaffirmed (CLEAR / opus).
 
 > ## ⚠️ STATUS UPDATE 2026-09-17 (compacted): beta B in prod
 > **Shipped to prod earlier the same day (steps 1–3).** Core beta.481, manager 26.25.0, API 0.276.0. Backfill applied dev then prod: every pair has windows whose Σ days = `days_charged`; one total moved (#990, owner decision). Details in api-cloudrun `9fb93eca`.
