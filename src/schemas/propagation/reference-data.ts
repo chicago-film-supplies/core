@@ -461,7 +461,7 @@ const recomputeHolidayDraftOrderRules: CollectionRule[] = [
         source: [],
         target: ["destinations", "dates"],
         transform:
-          "re-run canonicalizeDestinationDates → getDuration with the new holiday set, then syncChargeDaysToItems + recompute totals",
+          "recanonicalize each pair (canonicalChargeWindows recounts charge_windows[].days and days_active) with the new holiday set, then priceDocument re-derives line chargeable_days + totals",
       },
     ],
   },

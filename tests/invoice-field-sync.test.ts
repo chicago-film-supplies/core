@@ -45,7 +45,7 @@ const FIELD: OrderInvoiceFieldSync = { holidays: [] };
 
 
 const iso = (day: number, time = "00:00:00") => `2026-10-${String(day).padStart(2, "0")}T${time}.000-05:00`;
-const daysFor = (from: string, to: string) => getDuration({ delivery_start: from, collection_start: to }, []).chargeDays;
+const daysFor = (from: string, to: string) => getDuration({ delivery_start: from, collection_start: to }, []).activeDays;
 const activeFor = (from: string, to: string) => getDuration({ delivery_start: from, collection_start: to }, []).activeDays;
 
 /** A pair's `dates`. `tag` marks every `_fs` so a test can tell which side one came from. */
@@ -60,6 +60,7 @@ function dates(from: string, to: string, tag: number) {
     charge_end: null, charge_end_fs: null,
     days_active: activeFor(from, to),
     days_charged: daysFor(from, to),
+    charge_windows: [{ start: from, end: to, days: daysFor(from, to) }],
   };
 }
 

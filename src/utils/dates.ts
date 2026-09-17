@@ -138,6 +138,24 @@ export function addChicagoDays(input: string, days: number): string {
 }
 
 /**
+ * The Chicago calendar date `days` after `instant`'s, at `timeOf`'s Chicago time
+ * of day, in Chicago offset form. Unlike {@link addChicagoDays} it keeps a time
+ * of day, which is what a window bound needs.
+ *
+ * ```ts
+ * chicagoDayAtTimeOf("2026-03-06T15:00:00.000-06:00", 1, "2026-03-02T09:00:00.000-06:00");
+ * // "2026-03-07T09:00:00.000-06:00"
+ * ```
+ */
+export function chicagoDayAtTimeOf(instant: string, days: number, timeOf: string): string {
+  const day = addDays(parseISO(instant, { in: tz("America/Chicago") }), days);
+  const t = parseISO(timeOf, { in: tz("America/Chicago") });
+  return toChicagoInstant(
+    set(day, { hours: t.getHours(), minutes: t.getMinutes(), seconds: t.getSeconds(), milliseconds: t.getMilliseconds() }).toISOString(),
+  );
+}
+
+/**
  * Whole Chicago calendar days from `earlier` to `later` — positive when `later`
  * is the later date, negative when it is not, `0` on the same calendar date.
  *
@@ -564,24 +582,23 @@ export function countCfsBusinessDays(
 export interface DurationDates {
   delivery_start: string | null;
   collection_start: string | null;
-  charge_start?: string | null;
-  charge_end?: string | null;
 }
 
-/** Active and chargeable duration breakdown returned by {@link getDuration}. */
+/**
+ * The possession duration returned by {@link getDuration}.
+ *
+ * There is no charge half: a pair's charged days are its stored window counts
+ * (`chargedDays`), counted once by `canonicalChargeWindows`.
+ */
 export interface DurationResult {
   activeDays: number;
   activeWeeks: number;
   activeLabel: string;
   activePeriodLabel: string;
-  chargeDays: number;
-  chargeWeeks: number;
-  chargeLabel: string;
-  chargePeriodLabel: string;
 }
 
 /**
- * Calculate active and chargeable durations for an order's dates.
+ * Calculate the possession (delivery → collection) duration for a pair's dates.
  */
 export function getDuration(
   dates: DurationDates,
@@ -614,36 +631,11 @@ export function getDuration(
 
   const active = countCfsBusinessDays(deliveryStart, collectionStart, holidays);
 
-  const chargeStart = dates.charge_start
-    ? dates.charge_start
-    : dates.delivery_start;
-  const chargeEnd = dates.charge_end
-    ? dates.charge_end
-    : dates.collection_start;
-
-  let charge: BusinessDaysResult;
-  if (
-    chargeStart === dates.delivery_start &&
-    chargeEnd === dates.collection_start
-  ) {
-    charge = active;
-  } else {
-    const parsedChargeStart = parseISO(chargeStart, {
-      in: tz("America/Chicago"),
-    });
-    const parsedChargeEnd = parseISO(chargeEnd, { in: tz("America/Chicago") });
-    charge = countCfsBusinessDays(parsedChargeStart, parsedChargeEnd, holidays);
-  }
-
   return {
     activeDays: active.days,
     activeWeeks: active.weeks,
     activeLabel: active.label,
     activePeriodLabel: active.periodLabel,
-    chargeDays: charge.days,
-    chargeWeeks: charge.weeks,
-    chargeLabel: charge.label,
-    chargePeriodLabel: charge.periodLabel,
   };
 }
 
@@ -672,8 +664,8 @@ export interface CountedChargeWindow {
  * The date fields the charge-window helpers read and write.
  *
  * Structural, so an `OrderDocDatesType`, a manager draft and an invoice pair's
- * dates all fit. Every key is optional here because the helpers must accept a
- * pair stored before windows existed (`charge_start`/`charge_end` only).
+ * dates all fit. Every key is optional here because a draft pair may not have
+ * its dates yet. The legacy keys are written, never read.
  */
 export interface ChargeDates {
   delivery_start?: string | null;
@@ -737,18 +729,12 @@ export function chargeEnvelope(
 }
 
 /**
- * A pair's windows, or the one window a legacy pair implies: `charge_start`
- * (else `delivery_start`) to `charge_end` (else `collection_start`). `null` when
- * neither form yields both bounds.
+ * A copy of a pair's windows, or `null` when it states none (a draft whose dates
+ * have not been authored yet). Every stored pair has at least one window.
  */
 export function chargeWindowsOf(dates: ChargeDates): ChargeWindowLike[] | null {
-  if (dates.charge_windows && dates.charge_windows.length > 0) {
-    return dates.charge_windows.map((w) => ({ ...w }));
-  }
-  const start = dates.charge_start ?? dates.delivery_start ?? null;
-  const end = dates.charge_end ?? dates.collection_start ?? null;
-  if (!start || !end) return null;
-  return [{ start, end }];
+  if (!dates.charge_windows || dates.charge_windows.length === 0) return null;
+  return dates.charge_windows.map((w) => ({ ...w }));
 }
 
 /** Business days in one window, counted in Chicago. */
@@ -779,9 +765,8 @@ export interface CanonicalChargeWindowsOptions {
  * **The one writer of stored day counts.** Recounts every window's `days` and
  * the pair's `days_active` against `holidays`.
  *
- * - **Windows.** A pair stored before windows existed gets the one window its
- *   `charge_start`/`charge_end` imply ({@link chargeWindowsOf}). Instants are
- *   canonicalized to Chicago offset form.
+ * - **Windows.** Instants are canonicalized to Chicago offset form. A pair with
+ *   no windows is left without them.
  * - **Extension pairs keep their days** (`opts.extension`): the count is the
  *   days added past what was billed, not a count of the window.
  * - **The legacy fields follow the windows** — `charge_start`/`charge_end` are

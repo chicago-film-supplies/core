@@ -234,8 +234,16 @@ function pairDates(over: Record<string, unknown> = {}): Record<string, unknown> 
     charge_end_fs: null,
     days_active: 8,
     days_charged: 6,
-    ...over,
+    ...windowOver(over),
   };
+}
+
+/** `over`, plus one window over its possession (the default's when unstated) unless it states windows. */
+function windowOver(over: Record<string, unknown>): Record<string, unknown> {
+  if ("charge_windows" in over) return over;
+  const start = (over.delivery_start ?? "2026-05-01T09:00:00.000-05:00") as string;
+  const end = (over.collection_start ?? "2026-05-10T15:00:00.000-05:00") as string;
+  return { ...over, charge_windows: [{ start, end, days: (over.days_charged ?? 6) as number }] };
 }
 
 const resolve4 = (merged: Record<string, unknown>, source: Record<string, unknown>, downstream: Record<string, unknown>) =>
@@ -284,11 +292,11 @@ Deno.test("🔴 resolveMergedPairDates: a MIXED window takes each _fs from its o
   assertEquals(out.collection_start_fs, source.collection_start_fs, "_fs follows its own boundary's side");
   // Recomputed against the merged window, so neither input's stale count survives.
   const expected = getDuration(
-    { delivery_start: "2026-05-04T09:00:00.000-05:00", collection_start: "2026-05-14T15:00:00.000-05:00", charge_start: null, charge_end: null },
+    { delivery_start: "2026-05-04T09:00:00.000-05:00", collection_start: "2026-05-14T15:00:00.000-05:00" },
     [],
   );
   assertEquals(out.days_active, expected.activeDays);
-  assertEquals(out.days_charged, expected.chargeDays);
+  assertEquals(out.days_charged, expected.activeDays);
   assert(out.days_active !== pairDates().days_active, "the stale count did not simply survive");
 });
 

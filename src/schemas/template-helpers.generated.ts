@@ -47,8 +47,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "dates": [
     { name: "billableDays", expr: "it.dates.billableDays(days)", desc: "**The days a set of windows bills: Σ `max(days, 5)`.** Every window carries the one-week minimum, a 0-day window included (charge-windows decision 2).", returns: "number" },
     { name: "chargeEnvelope", expr: "it.dates.chargeEnvelope(dates)", desc: "**The span a pair's windows cover**: the first window's start and the last window's end. `null` when the pair has no windows.", returns: "typeLiteral | null" },
-    { name: "chargeWindowsOf", expr: "it.dates.chargeWindowsOf(dates)", desc: "A pair's windows, or the one window a legacy pair implies: `charge_start` (else `delivery_start`) to `charge_end` (else `collection_start`). `null` when neither form yields both bounds.", returns: "ChargeWindowLike[] | null" },
+    { name: "chargeWindowsOf", expr: "it.dates.chargeWindowsOf(dates)", desc: "A copy of a pair's windows, or `null` when it states none (a draft whose dates have not been authored yet). Every stored pair has at least one window.", returns: "ChargeWindowLike[] | null" },
     { name: "chargedDays", expr: "it.dates.chargedDays(dates)", desc: "**The days a pair charges: Σ `window.days`.** Reads stored counts only.", returns: "number" },
+    { name: "chicagoDayAtTimeOf", expr: "it.dates.chicagoDayAtTimeOf(instant, days, timeOf)", desc: "The Chicago calendar date `days` after `instant`'s, at `timeOf`'s Chicago time of day, in Chicago offset form. Unlike {@link addChicagoDays} it keeps a time of day, which is what a window bound needs.", returns: "string" },
     { name: "countCfsBusinessDays", expr: "it.dates.countCfsBusinessDays(start, end, holidays)", desc: "Count CFS business days between two dates (excludes weekends and CFS holidays).", returns: "BusinessDaysResult" },
     { name: "formatChargeDays", expr: "it.dates.formatChargeDays(days, unit)", desc: "Format a chargeable days number into display values for a duration input.", returns: "FormatChargeDaysResult" },
     { name: "formatChicagoDate", expr: "it.dates.formatChicagoDate(input)", desc: "A date as a CFS document prints it — `\"September 1, 2026\"`.", returns: "string" },
@@ -57,7 +58,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "formatChicagoTime", expr: "it.dates.formatChicagoTime(input)", desc: "The time of day alone — `\"9:00 AM\"`.", returns: "string" },
     { name: "formatChicagoWeekdayDate", expr: "it.dates.formatChicagoWeekdayDate(input)", desc: "A weekday and a compact date — `\"Wed 9/1/26\"`.", returns: "string" },
     { name: "getDefaultStartDate", expr: "it.dates.getDefaultStartDate(holidays)", desc: "Get the default start date for a rental (next business day at 9am). If after 8am today, defaults to tomorrow. Skips weekends and holidays.", returns: "Date" },
-    { name: "getDuration", expr: "it.dates.getDuration(dates, holidays)", desc: "Calculate active and chargeable durations for an order's dates.", returns: "DurationResult" },
+    { name: "getDuration", expr: "it.dates.getDuration(dates, holidays)", desc: "Calculate the possession (delivery → collection) duration for a pair's dates.", returns: "DurationResult" },
     { name: "getEndDateByChargePeriod", expr: "it.dates.getEndDateByChargePeriod(startDate, chargePeriod, holidays)", desc: "Calculate end date based on start date and number of chargeable days. Chargeable days exclude weekends and holidays.", returns: "Date" },
     { name: "isHoliday", expr: "it.dates.isHoliday(testDate, holidays)", desc: "Test if a given date is a CFS holiday.", returns: "boolean" },
     { name: "isNonTerminatingWindow", expr: "it.dates.isNonTerminatingWindow(start, end)", desc: "Would {@link countCfsBusinessDays} fail to terminate on this window?", returns: "boolean" },
@@ -211,7 +212,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "crmsAuthoredInvoices", expr: "it.quantityAccounting.crmsAuthoredInvoices(invoices)", desc: "The uids of the LIVE invoices CRMS authored — a remainder refuses when any exist.", returns: "string[]" },
     { name: "extensionGroups", expr: "it.quantityAccounting.extensionGroups(orderLine, billed, orderWindow)", desc: "The extension still owed on an order line, as groups of billed units that share their terms and their cumulative billed days (api-cloudrun#680 R1).", returns: "ExtensionGroup[]" },
     { name: "orderLineWindow", expr: "it.quantityAccounting.orderLineWindow(destinations, path)", desc: "The window of the order pair an order line hangs under (`path[0]`), or `null`.", returns: "BilledWindow | null" },
-    { name: "pairWindow", expr: "it.quantityAccounting.pairWindow(pair)", desc: "A pair's {@link BilledWindow}, or `null` when it has no end or no day count.", returns: "BilledWindow | null" },
+    { name: "pairWindow", expr: "it.quantityAccounting.pairWindow(pair)", desc: "A pair's {@link BilledWindow}, or `null` when it has no windows.", returns: "BilledWindow | null" },
   ],
   "reporting": [
     { name: "agingAccountRows", expr: "it.reporting.agingAccountRows(report)", desc: "The account × bucket matrix: one row per account, plus a residual row when the accounts do not add up to the report's own totals.", returns: "AgingAccountRow[]" },

@@ -63,10 +63,10 @@ Deno.test("OrderDocDates: windows must be in order and not overlap, by calendar 
   const sameDay = OrderDocDates.safeParse({ ...dates, charge_windows: [w(5, 7, 3), w(7, 9, 3)] });
   assertEquals(sameDay.success, false, "a window starting on the day the previous one ends overlaps");
   assertEquals(OrderDocDates.safeParse({ ...dates, charge_windows: [w(12, 13, 2), w(5, 7, 3)] }).success, false, "out of order");
-  assertEquals(OrderDocDates.safeParse({ ...dates, charge_windows: [] }).success, false, "never empty when present");
-  // Optional until the backfill: a legacy pair still parses.
-  const { charge_windows: _omit, ...legacy } = { ...dates, charge_windows: undefined };
-  assertEquals(OrderDocDates.safeParse(legacy).success, true);
+  assertEquals(OrderDocDates.safeParse({ ...dates, charge_windows: [] }).success, false, "never empty");
+  // Required since the backfill (beta B): a pair with no windows is refused.
+  const { charge_windows: _omit, ...windowless } = { ...dates, charge_windows: undefined };
+  assertEquals(OrderDocDates.safeParse(windowless).success, false);
 });
 
 Deno.test("ChargeWindow: days is a non-negative integer and a window is strict", () => {
@@ -124,14 +124,14 @@ Deno.test("canonicalChargeWindows: recounts each window and derives the legacy m
   assertEquals(out.charge_end_fs, null, "a moved legacy boundary's _fs is cleared for the writer to stamp");
 });
 
-Deno.test("canonicalChargeWindows: a pair stored before windows gets the one window its charge bounds imply", () => {
+Deno.test("canonicalChargeWindows: the legacy charge bounds never imply a window", () => {
   const out = canonicalChargeWindows({
     delivery_start: at(5, "09:00:00"),
     collection_start: at(16, "15:00:00"),
     charge_start: at(6, "09:00:00"),
     charge_end: null,
   }, []);
-  assertEquals(out.charge_windows, [{ start: at(6, "09:00:00"), end: at(16, "15:00:00"), days: 9 }]);
+  assertEquals(out.charge_windows, undefined);
 });
 
 Deno.test("canonicalChargeWindows: an extension pair keeps its stated days, and must state them", () => {
@@ -363,19 +363,6 @@ Deno.test("resolveMergedPairDates: a kept window equal to the downstream's posse
   const two = { ...downstream, charge_windows: [{ start: at(5, "09:00:00"), end: at(6, "15:00:00"), days: 2 }, { start: at(8, "09:00:00"), end: at(9, "15:00:00"), days: 2 }] };
   const twoOut = resolveMergedPairDates({ ...two, collection_start: source.collection_start }, source, two, [], canonicalChargeWindows)!;
   assertEquals(twoOut.charge_windows?.map((w) => w.days), [2, 2]);
-
-  // A pair stored before windows follows by its charge bounds.
-  const { charge_windows: _a, ...legacy } = downstream;
-  const { charge_windows: _b, ...legacySource } = source;
-  const legacyOut = resolveMergedPairDates(
-    { ...legacy, collection_start: source.collection_start, collection_end: source.collection_end } as typeof downstream,
-    legacySource as typeof downstream,
-    legacy as typeof downstream,
-    [],
-    canonicalChargeWindows,
-  )!;
-  assertEquals(legacyOut.charge_windows, [{ start: at(5, "09:00:00"), end: at(16, "15:00:00"), days: 10 }]);
-  assertEquals(legacyOut.charge_end, at(16, "15:00:00"));
 });
 
 // ── The pricer ───────────────────────────────────────────────────────────────
@@ -404,9 +391,9 @@ const TAX: PriceDocumentContext["tax"] = {
   asOf: "2026-10-05T00:00:00.000-05:00",
 };
 const priceCtx = (charge_windows: PriceDocumentContext["charge_windows"], document: PriceDocumentContext["document"] = { kind: "order", status: "active" }): PriceDocumentContext => ({ document, tax: TAX, charge_windows });
-const pairWith = (days: number[] | null, legacy: number | null = null) => chargeWindowContext([{
+const pairWith = (days: number[]) => chargeWindowContext([{
   uid: "D",
-  dates: { charge_windows: days?.map((d) => ({ days: d })) ?? null, days_charged: legacy },
+  dates: { charge_windows: days.map((d) => ({ days: d })) },
 }]);
 const priced = (it: LineItem, ctx: PriceDocumentContext) => {
   const out = priceDocument([it], ctx).items[0].price as unknown as { chargeable_days: number | null; subtotal_cents: number; subtotal_discounted_cents: number };
@@ -452,7 +439,8 @@ Deno.test("priceDocument: property — a single-window pair prices exactly as a 
     };
     const quantity = 1 + rand(40);
     const windowed = priced(line(["D"], { ...price, chargeable_days: 999 }, { quantity }), priceCtx(pairWith([days])));
-    const legacy = priced(line(["D"], { ...price, chargeable_days: days }, { quantity }), priceCtx(pairWith(null)));
+    // A complete order keeps the line's own stored days: the pricing before windows.
+    const legacy = priced(line(["D"], { ...price, chargeable_days: days }, { quantity }), priceCtx(pairWith([0]), { kind: "order", status: "complete" }));
     assertEquals(windowed, legacy, `days ${days} ${JSON.stringify(price)} × ${quantity}`);
   }
   assert(factorBit > 1000, "anti-vacuity: the day factor was exercised");
@@ -481,22 +469,19 @@ Deno.test("priceDocument: a complete or canceled order keeps its lines' stored d
   assertEquals(live.chargeable_days, 7, "an issued, unpaid invoice is re-derived");
 });
 
-Deno.test("priceDocument: a pair stored before windows keeps its lines' days; a new line takes the pair's", () => {
-  const kept = priced(line(["D"], { chargeable_days: 5 }), priceCtx(pairWith(null, 7)));
-  assertEquals(kept.chargeable_days, 5);
-  const fresh = priced(line(["D"], { chargeable_days: null }), priceCtx(pairWith(null, 7)));
-  assertEquals([fresh.chargeable_days, fresh.subtotal_cents], [7, 14000]);
+Deno.test("chargeWindowContext: a pair with no windows is refused", () => {
+  assertThrows(() => chargeWindowContext([{ uid: "D", dates: { charge_windows: [] } }]), PriceRefusalError, "no charge windows");
 });
 
 Deno.test("chargeWindowContext: an invoice pair's divider path is [uid_order, uid]", () => {
   const ctx = chargeWindowContext([{ uid: "D", uid_order: "O", dates: { charge_windows: [{ days: 3 }, { days: 4 }] } }]);
-  assertEquals(ctx, [{ divider_path: ["O", "D"], days: [3, 4], legacy_days_charged: null }]);
+  assertEquals(ctx, [{ divider_path: ["O", "D"], days: [3, 4] }]);
   const onInvoice = line(["O", "D"]);
   assertEquals(lineChargeableDays(onInvoice, priceCtx(ctx)), { chargeable_days: 7, windowDays: [3, 4] });
 });
 
 Deno.test("priceDocument: an extension line bills its pair's added days, unfloored", () => {
-  const priceExt = (stored: number | null, dates: Record<string, unknown>) => {
+  const priceExt = (stored: number | null, dates: { charge_windows: { days: number }[] }) => {
     const ext = line(["O", "E"], { chargeable_days: stored });
     return priceDocument([ext], {
       ...priceCtx(chargeWindowContext([{ uid: "E", uid_order: "O", dates }]), { kind: "invoice", status: "draft", has_settlement: false }),
@@ -507,9 +492,6 @@ Deno.test("priceDocument: an extension line bills its pair's added days, unfloor
   const fromWindow = priceExt(null, { charge_windows: [{ days: 2 }] });
   assertEquals([fromWindow.chargeable_days, fromWindow.subtotal_cents], [2, 4000]);
   assertEquals(priceExt(7, { charge_windows: [{ days: 2 }] }).chargeable_days, 2, "the window wins over a stale line count");
-  // A pair stored before windows keeps the line's own days.
-  const legacy = priceExt(3, { charge_windows: null, days_charged: 9 });
-  assertEquals([legacy.chargeable_days, legacy.subtotal_cents], [3, 6000]);
 });
 
 Deno.test("priceCreditNote: a line billed on a multi-window pair is credited as billed", () => {

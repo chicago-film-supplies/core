@@ -26,6 +26,7 @@ const validDocDates = {
   charge_end_fs: mockTimestamp,
   days_active: null,
   days_charged: null,
+  charge_windows: [{ start: "2026-03-01T00:00:00.000-06:00", end: "2026-03-10T00:00:00.000-06:00", days: 7 }],
 };
 
 const validDestination = {

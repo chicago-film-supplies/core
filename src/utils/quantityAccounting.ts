@@ -40,15 +40,16 @@
  * An order whose dates were extended after it was billed has no quantity left to
  * bill and still has money left to bill. That remainder is each billed row priced
  * as a D7 EXTENSION (api-cloudrun#997): for
- * `max(order charge days, 5) − max(billed charge days, 5)` days with the
+ * `billableDays(order windows) − billableDays(billed windows)` days with the
  * one-week minimum skipped, through `priceDocument`'s line pricer — so it is
  * exactly what an extension section on an invoice bills (#997 D11).
  *
  * 🔴 **An extension is a change of WINDOW, and its days are the PAIRS' days.**
  * A billed row is extended only when the order pair's charge end is LATER than
  * the end of the window that billed it (earlier is a shortening, the same is
- * nothing), and the day counts are the two pairs' `days_charged` — never a
- * line's `chargeable_days`. A {@link BilledWindow} is that pair's end and count.
+ * nothing), and the day counts are the two pairs' stored window days — never a
+ * line's `chargeable_days`. A {@link BilledWindow} is that pair's last window end
+ * and its window days.
  * A sign that disagrees with the window's direction is no extension either.
  *
  * This reverses the first cut, which read line `chargeable_days` on both sides.
@@ -126,9 +127,9 @@ import {
 import { isAtOrBelow, standInUnits, substitutionCredit } from "./substitutions.ts";
 
 export { substitutionCredit };
-import { addChicagoDays } from "./dates.ts";
+import { billableDays, chargeEnvelope, chicagoDayAtTimeOf } from "./dates.ts";
 import { isPreTaxItem, type LineItem } from "./orders.ts";
-import { extensionChargeDays, priceLine } from "./price-document.ts";
+import { priceLine } from "./price-document.ts";
 
 /** The invoice shape these functions read — every linked invoice, live or void. */
 export interface AccountedInvoice {
@@ -141,20 +142,20 @@ export interface AccountedInvoice {
   crms_id?: number | string | null;
 }
 
-/** A pair's charge window, as an extension compares it: where it ends, and the days it charges. */
+/** A pair's charge windows, as an extension compares them: where the last one ends, and each one's days. */
 export interface BilledWindow {
-  /** `charge_end`, or `collection_start` when the pair charges to collection. */
+  /** The last window's end. */
   end: string;
-  days_charged: number;
+  /** Each window's stored `days`, in order. */
+  days: readonly number[];
 }
 
-/** A pair's {@link BilledWindow}, or `null` when it has no end or no day count. */
+/** A pair's {@link BilledWindow}, or `null` when it has no windows. */
 export function pairWindow(pair: { dates?: unknown } | undefined): BilledWindow | null {
-  const dates = pair?.dates as { charge_end?: string | null; collection_start?: string | null; days_charged?: number | null } | undefined;
-  const end = dates?.charge_end ?? dates?.collection_start ?? null;
-  const days = dates?.days_charged;
-  if (end === null || typeof days !== "number" || Number.isNaN(Date.parse(end))) return null;
-  return { end, days_charged: days };
+  const dates = pair?.dates as { charge_windows?: readonly { start: string; end: string; days: number }[] } | undefined;
+  const envelope = chargeEnvelope({ charge_windows: dates?.charge_windows });
+  if (envelope === null || Number.isNaN(Date.parse(envelope.end))) return null;
+  return { end: envelope.end, days: dates!.charge_windows!.map((w) => w.days) };
 }
 
 /** The window of the order pair an order line hangs under (`path[0]`), or `null`. */
@@ -322,10 +323,10 @@ export interface LineAccount {
  * The line's tax refs are dropped first: only the pre-tax subtotal is read, and
  * the pricer resolves every ref it is handed against the catalog it is given.
  */
-function subtotalCents(item: LineItem, extensionDays?: number): number {
+function subtotalCents(item: LineItem, extensionDays?: number, windowDays?: readonly number[]): number {
   if (!isPreTaxItem(item)) return 0;
   const untaxed = { ...item, price: { ...item.price, taxes: [] } } as LineItem;
-  return priceLine(untaxed, [], extensionDays).subtotal_discounted_cents;
+  return priceLine(untaxed, [], extensionDays, windowDays).subtotal_discounted_cents;
 }
 
 /**
@@ -342,7 +343,12 @@ export function accountLine(orderLine: LineItem, billed: BilledAtPath | undefine
 
   // The pricer rounds a non-negative quantity; an over-billed remainder is
   // priced at its magnitude and given back its sign.
-  const quantityCents = quantity === 0 ? 0 : Math.sign(quantity) * subtotalCents({ ...orderLine, quantity: Math.abs(quantity) });
+  // A pair with 2+ windows prices every window at its one-week minimum, as
+  // `priceDocument` does; a single window prices at the line's own days.
+  const windowDays = orderWindow && orderWindow.days.length >= 2 ? orderWindow.days : undefined;
+  const quantityCents = quantity === 0
+    ? 0
+    : Math.sign(quantity) * subtotalCents({ ...orderLine, quantity: Math.abs(quantity) }, undefined, windowDays);
 
   // What the order's days add to the units already billed, each group priced as
   // the ONE extension line that would bill it — so a remainder invoice built
@@ -363,11 +369,14 @@ export interface ExtensionGroup {
   via: "direct" | "substitute";
   /** Units in the group. */
   quantity: number;
-  /** Charge days billed so far: the row's pair's, plus every extension applied to these units. */
+  /**
+   * Billable days billed so far: `billableDays` of the row's pair's windows, plus
+   * every extension applied to these units.
+   */
   billed_days: number;
   /** Where the billed window ends: the row's pair's end, or the last extension's. */
   billed_end: string;
-  /** `extensionChargeDays(order pair days, billed_days)`. Never 0; negative is a shortening. */
+  /** `billableDays(order pair windows) − billed_days`. Never 0; negative is a shortening. */
   extension_days: number;
   /** The invoice section that last billed these units: `[invoiceUid, section divider uid]`. */
   section: [string, string];
@@ -378,15 +387,15 @@ export interface ExtensionGroup {
  * share their terms and their cumulative billed days (api-cloudrun#680 R1).
  *
  * The walk: every `five_day_week` unit row on a known {@link BilledWindow}
- * starts a group at its pair's days and end. Each extension row then moves its
+ * starts a group at its pair's billable days and end. Each extension row then moves its
  * quantity from the groups whose window ENDS earliest (then fewest days), in
- * invoice order, to `max(days, 5) + the extension pair's days`, ending where the
+ * invoice order, to `billed days + the extension pair's days`, ending where the
  * extension's pair ends. A remainder invoice brings every group to the order's
  * window at once, so a later remainder always extends from a single cumulative
  * window; the earliest-first rule only has to choose for an extension built by
  * hand. Extension quantity beyond the units billed is ignored.
  *
- * A group is owed `extensionChargeDays(order pair days, billed days)` only when
+ * A group is owed `billableDays(order pair windows) − billed days` only when
  * its sign agrees with the window's direction: a later order end and more days,
  * or an earlier end and fewer. The same end is nothing, whatever the counts say.
  *
@@ -414,7 +423,7 @@ export function extensionGroups(
       item: row.item,
       via: row.via,
       quantity,
-      billed_days: row.window.days_charged,
+      billed_days: billableDays(row.window.days),
       billed_end: row.window.end,
       section: [row.invoiceUid, (row.item.path ?? [])[1] ?? ""],
     });
@@ -422,7 +431,8 @@ export function extensionGroups(
   for (const row of extensions) {
     if (row.window === null) continue;
     let left = row.item.quantity ?? 0;
-    const added = row.window.days_charged;
+    // An extension pair's one window stores the days it ADDED: no floor.
+    const added = row.window.days.reduce((total, d) => total + d, 0);
     const billedEnd = row.window.end;
     const section: [string, string] = [row.invoiceUid, (row.item.path ?? [])[1] ?? ""];
     while (left > 0) {
@@ -433,7 +443,7 @@ export function extensionGroups(
         return byEnd < 0 || (byEnd === 0 && b.billed_days < a.billed_days) ? b : a;
       });
       const moved = Math.min(left, earliest.quantity);
-      const billedDays = Math.max(earliest.billed_days, 5) + added;
+      const billedDays = earliest.billed_days + added;
       earliest.quantity -= moved;
       left -= moved;
       const same = groups.find((g) =>
@@ -448,7 +458,7 @@ export function extensionGroups(
     .filter((g) => g.quantity > 0)
     .map((g) => {
       const direction = Math.sign(orderEnd - Date.parse(g.billed_end));
-      const days = extensionChargeDays(orderWindow.days_charged, g.billed_days);
+      const days = billableDays(orderWindow.days) - g.billed_days;
       return { ...g, extension_days: Math.sign(days) === direction ? days : 0 };
     })
     .filter((g) => g.extension_days !== 0);
@@ -570,12 +580,14 @@ export interface RemainingInvoice {
  *   is a new uid carrying `path_extension_for`; each line in it is the billed
  *   row's terms at the group's added days. A path already in the section (the
  *   same product billed on different terms) opens another section.
- * - **Its pair** is the order's pair re-keyed to the section, charging from the
- *   day after the billed window's end to the order's. An extension is only
- *   owed on a window that ends before the order's, so the section never starts
- *   after it ends. The `_fs`
- *   companion of a moved `charge_start` is `null` here: the writer stamps it,
- *   because a utility cannot mint a Firestore Timestamp.
+ * - **Its pair** is the order's pair re-keyed to the section, with ONE charge
+ *   window from the day after the billed window's end (at the order's first
+ *   window start's time of day) to the order's last window end. Its `days` is
+ *   the section's ADDED days, never a count of the window (owner, 2026-09-17),
+ *   so its lines derive exactly that. An extension is only owed on a window
+ *   that ends before the order's, so the section never starts after it ends.
+ *   The legacy mirrors follow; the `_fs` companion of the moved `charge_start`
+ *   is `null` here, for the writer to stamp.
  * - **Over-billing is never netted in.** A negative quantity or extension is
  *   returned in `overbilled`, for the credit-note flow.
  *
@@ -708,13 +720,18 @@ export function buildRemainingInvoice(
       }
 
       const projectedPair = toInvoiceDestinationPair(O, orderPair);
+      const orderWindows = orderPair.dates.charge_windows;
+      const start = chicagoDayAtTimeOf(section.billedEnd, 1, orderWindows[0].start);
+      const end = orderWindows[orderWindows.length - 1].end;
       extensionPairs.push({
         ...projectedPair,
         uid: E,
         dates: {
           ...projectedPair.dates,
-          charge_start: addChicagoDays(section.billedEnd, 1),
+          charge_windows: [{ start, end, days: section.extensionDays }],
+          charge_start: start,
           charge_start_fs: null,
+          charge_end: end,
           days_charged: section.extensionDays,
         },
       });

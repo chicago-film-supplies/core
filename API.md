@@ -6368,7 +6368,7 @@ interface OrderDocDatesType {
   charge_end_fs: FirestoreTimestampType | null;
   days_active: number | null;
   days_charged: number | null;
-  charge_windows?: ChargeWindowType[];
+  charge_windows: ChargeWindowType[];
 }
 ```
 
@@ -17032,7 +17032,7 @@ interface OrderDocDatesType {
   charge_end_fs: FirestoreTimestampType | null;
   days_active: number | null;
   days_charged: number | null;
-  charge_windows?: ChargeWindowType[];
+  charge_windows: ChargeWindowType[];
 }
 ```
 
@@ -24760,8 +24760,8 @@ interface CanonicalChargeWindowsOptions {
 The date fields the charge-window helpers read and write.
 
 Structural, so an `OrderDocDatesType`, a manager draft and an invoice pair's
-dates all fit. Every key is optional here because the helpers must accept a
-pair stored before windows existed (`charge_start`/`charge_end` only).
+dates all fit. Every key is optional here because a draft pair may not have
+its dates yet. The legacy keys are written, never read.
 
 ```ts
 interface ChargeDates {
@@ -24853,14 +24853,15 @@ Date strings required by {@link getDuration}. Nullable to mirror OrderDocDatesTy
 interface DurationDates {
   delivery_start: string | null;
   collection_start: string | null;
-  charge_start?: string | null;
-  charge_end?: string | null;
 }
 ```
 
 ### `DurationResult`
 
-Active and chargeable duration breakdown returned by {@link getDuration}.
+The possession duration returned by {@link getDuration}.
+
+There is no charge half: a pair's charged days are its stored window counts
+(`chargedDays`), counted once by `canonicalChargeWindows`.
 
 ```ts
 interface DurationResult {
@@ -24868,10 +24869,6 @@ interface DurationResult {
   activeWeeks: number;
   activeLabel: string;
   activePeriodLabel: string;
-  chargeDays: number;
-  chargeWeeks: number;
-  chargeLabel: string;
-  chargePeriodLabel: string;
 }
 ```
 
@@ -24965,9 +24962,8 @@ billableDays([8, 7, 6]); // 21 → 4.2 × base
 **The one writer of stored day counts.** Recounts every window's `days` and
 the pair's `days_active` against `holidays`.
 
-- **Windows.** A pair stored before windows existed gets the one window its
-  `charge_start`/`charge_end` imply ({@link chargeWindowsOf}). Instants are
-  canonicalized to Chicago offset form.
+- **Windows.** Instants are canonicalized to Chicago offset form. A pair with
+  no windows is left without them.
 - **Extension pairs keep their days** (`opts.extension`): the count is the
   days added past what was billed, not a count of the window.
 - **The legacy fields follow the windows** — `charge_start`/`charge_end` are
@@ -24986,9 +24982,8 @@ It is not a window: the gaps between windows charge nothing.
 
 ### `chargeWindowsOf(dates: ChargeDates): ChargeWindowLike[] | null`
 
-A pair's windows, or the one window a legacy pair implies: `charge_start`
-(else `delivery_start`) to `charge_end` (else `collection_start`). `null` when
-neither form yields both bounds.
+A copy of a pair's windows, or `null` when it states none (a draft whose dates
+have not been authored yet). Every stored pair has at least one window.
 
 ### `chargedDays(dates: typeLiteral): number`
 
@@ -24996,6 +24991,17 @@ neither form yields both bounds.
 
 ```ts
 chargedDays({ charge_windows: [{ start, end, days: 3 }, { start, end, days: 4 }] }); // 7
+```
+
+### `chicagoDayAtTimeOf(instant: string, days: number, timeOf: string): string`
+
+The Chicago calendar date `days` after `instant`'s, at `timeOf`'s Chicago time
+of day, in Chicago offset form. Unlike {@link addChicagoDays} it keeps a time
+of day, which is what a window bound needs.
+
+```ts
+chicagoDayAtTimeOf("2026-03-06T15:00:00.000-06:00", 1, "2026-03-02T09:00:00.000-06:00");
+// "2026-03-07T09:00:00.000-06:00"
 ```
 
 ### `chicagoDaysBetween(later: string, earlier: string): number`
@@ -25125,7 +25131,7 @@ If after 8am today, defaults to tomorrow. Skips weekends and holidays.
 
 ### `getDuration(dates: DurationDates, holidays: string[]): DurationResult`
 
-Calculate active and chargeable durations for an order's dates.
+Calculate the possession (delivery → collection) duration for a pair's dates.
 
 ### `getEndDateByChargePeriod(startDate: Date, chargePeriod: number, holidays: string[]): Date`
 
@@ -25439,15 +25445,16 @@ each X. So:
 An order whose dates were extended after it was billed has no quantity left to
 bill and still has money left to bill. That remainder is each billed row priced
 as a D7 EXTENSION (api-cloudrun#997): for
-`max(order charge days, 5) − max(billed charge days, 5)` days with the
+`billableDays(order windows) − billableDays(billed windows)` days with the
 one-week minimum skipped, through `priceDocument`'s line pricer — so it is
 exactly what an extension section on an invoice bills (#997 D11).
 
 🔴 **An extension is a change of WINDOW, and its days are the PAIRS' days.**
 A billed row is extended only when the order pair's charge end is LATER than
 the end of the window that billed it (earlier is a shortening, the same is
-nothing), and the day counts are the two pairs' `days_charged` — never a
-line's `chargeable_days`. A {@link BilledWindow} is that pair's end and count.
+nothing), and the day counts are the two pairs' stored window days — never a
+line's `chargeable_days`. A {@link BilledWindow} is that pair's last window end
+and its window days.
 A sign that disagrees with the window's direction is no extension either.
 
 This reverses the first cut, which read line `chargeable_days` on both sides.
@@ -25558,12 +25565,12 @@ interface BilledRow {
 
 ### `BilledWindow`
 
-A pair's charge window, as an extension compares it: where it ends, and the days it charges.
+A pair's charge windows, as an extension compares them: where the last one ends, and each one's days.
 
 ```ts
 interface BilledWindow {
   end: string;
-  days_charged: number;
+  days: readonly number[];
 }
 ```
 
@@ -25704,12 +25711,14 @@ manager's preview.
   is a new uid carrying `path_extension_for`; each line in it is the billed
   row's terms at the group's added days. A path already in the section (the
   same product billed on different terms) opens another section.
-- **Its pair** is the order's pair re-keyed to the section, charging from the
-  day after the billed window's end to the order's. An extension is only
-  owed on a window that ends before the order's, so the section never starts
-  after it ends. The `_fs`
-  companion of a moved `charge_start` is `null` here: the writer stamps it,
-  because a utility cannot mint a Firestore Timestamp.
+- **Its pair** is the order's pair re-keyed to the section, with ONE charge
+  window from the day after the billed window's end (at the order's first
+  window start's time of day) to the order's last window end. Its `days` is
+  the section's ADDED days, never a count of the window (owner, 2026-09-17),
+  so its lines derive exactly that. An extension is only owed on a window
+  that ends before the order's, so the section never starts after it ends.
+  The legacy mirrors follow; the `_fs` companion of the moved `charge_start`
+  is `null` here, for the writer to stamp.
 - **Over-billing is never netted in.** A negative quantity or extension is
   returned in `overbilled`, for the credit-note flow.
 
@@ -25726,15 +25735,15 @@ The extension still owed on an order line, as groups of billed units that
 share their terms and their cumulative billed days (api-cloudrun#680 R1).
 
 The walk: every `five_day_week` unit row on a known {@link BilledWindow}
-starts a group at its pair's days and end. Each extension row then moves its
+starts a group at its pair's billable days and end. Each extension row then moves its
 quantity from the groups whose window ENDS earliest (then fewest days), in
-invoice order, to `max(days, 5) + the extension pair's days`, ending where the
+invoice order, to `billed days + the extension pair's days`, ending where the
 extension's pair ends. A remainder invoice brings every group to the order's
 window at once, so a later remainder always extends from a single cumulative
 window; the earliest-first rule only has to choose for an extension built by
 hand. Extension quantity beyond the units billed is ignored.
 
-A group is owed `extensionChargeDays(order pair days, billed days)` only when
+A group is owed `billableDays(order pair windows) − billed days` only when
 its sign agrees with the window's direction: a later order end and more days,
 or an earlier end and fewer. The same end is nothing, whatever the counts say.
 
@@ -25747,7 +25756,7 @@ The window of the order pair an order line hangs under (`path[0]`), or `null`.
 
 ### `pairWindow(pair: typeLiteral | undefined): BilledWindow | null`
 
-A pair's {@link BilledWindow}, or `null` when it has no end or no day count.
+A pair's {@link BilledWindow}, or `null` when it has no windows.
 
 ### `remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], orderDestinations: readonly DocDestinationType[]): RemainingForOrder`
 
@@ -31168,9 +31177,13 @@ that still want one order-level range: the Typesense projection's sort key
 and the quote / Xero / Calendar / Trello exporters.
 
 `*_start` boundaries take the earliest value across destinations, `*_end`
-boundaries take the latest; `days_active` / `days_charged` take the largest
-non-null value. For a single-destination order the envelope equals that
-destination's dates exactly.
+boundaries take the latest; `days_active` takes the largest non-null value.
+
+The charge half is read from the WINDOWS, never the legacy mirrors:
+`charge_start` is the earliest first-window start, `charge_end` the latest
+last-window end, and `days_charged` the largest Σ window days. Each `_fs` is
+the owning destination's legacy mirror when it still holds the same instant,
+else `null` (charge-windows step 5 removes the mirrors and these fields).
 
 ### `getDefaultChargeDays(dates: ChargeDates, holidays: string[]): number | null`
 
@@ -31659,7 +31672,7 @@ The pair shape {@link chargeWindowContext} reads.
 interface ChargeWindowPair {
   uid?: string | null;
   uid_order?: string | null;
-  dates?: typeLiteral | null;
+  dates: typeLiteral;
 }
 ```
 
@@ -31720,8 +31733,7 @@ day counts only, so pricing never needs the holiday list.
 ```ts
 interface PairChargeWindows {
   divider_path: readonly string[];
-  days: readonly number[] | null;
-  legacy_days_charged?: number | null;
+  days: readonly number[];
 }
 ```
 
@@ -31792,14 +31804,6 @@ interface PricedDocument {
 **Build {@link PriceDocumentContext.charge_windows}** from a document's stored
 `destinations`. Reads stored window days only.
 
-### `extensionChargeDays(orderChargeDays: number, billedChargeDays: number): number`
-
-The extension day count for D7: `max(order, 5) − max(billed, 5)`.
-
-Both sides floor at the one-week minimum, because each window was (or would
-be) charged at least a week. The difference is therefore what the extension
-adds on top, and it can be negative when the order's window shrank.
-
 ### `invoiceExtensionSections(items: readonly typeLiteral[]): PriceDocumentExtension[]`
 
 The date-extension sections of an invoice's items: one per destination
@@ -31816,10 +31820,9 @@ decision 3), and the window days that price it.
 
 | line | `chargeable_days` |
 |---|---|
-| in an extension section | Σ its pair's window days (the days added); its own stored days on a pair stored before windows |
+| in an extension section | Σ its pair's window days (the days added) |
 | on a `complete`/`canceled` order | its own stored days |
 | `rental` + `five_day_week` on a pair with windows | Σ window days |
-| `rental` + `five_day_week` on a pair stored before windows | its own stored days, else the pair's `days_charged` |
 | `rental` + `five_day_week` on no pair | refused |
 | anything else | `null` |
 
@@ -31857,7 +31860,7 @@ remainder and a billed row's extension (#997 D11).
 `extensionDays` is D7: the line is priced for that many days with the
 one-week minimum skipped, which is what an extension section on an invoice
 bills. A document line passes its own `chargeable_days`; `accountLine` passes
-{@link extensionChargeDays}`(order, billed)` for a billed row.
+the days an extension group adds for a billed row.
 
 ### `sumPricedLines(items: readonly LineItem[]): DocumentTotalsCore`
 

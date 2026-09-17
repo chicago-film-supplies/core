@@ -84,6 +84,7 @@ function dates(deliveryStart: string | null, collectionStart: string | null): Or
     charge_end_fs: null,
     days_active: null,
     days_charged: null,
+    charge_windows: [],
   };
 }
 

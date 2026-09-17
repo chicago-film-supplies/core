@@ -68,6 +68,7 @@ const NO_DOC_DATES: OrderDocDatesType = {
   charge_start: null, charge_start_fs: TS0,
   charge_end: null, charge_end_fs: TS0,
   days_active: null, days_charged: null,
+  charge_windows: [{ start: "2026-01-05T09:00:00.000-06:00", end: "2026-01-05T09:00:00.000-06:00", days: 0 }],
 };
 
 // ── Schema bases ────────────────────────────────────────────────

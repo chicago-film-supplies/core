@@ -1597,11 +1597,9 @@ Deno.test("isSameAsDeliveryDates is false with two windows, even when they span 
   );
 });
 
-Deno.test("isSameAsDeliveryDates reads a pair stored before windows by its charge bounds", () => {
-  const { charge_windows: _, ...legacy } = baseDates;
-  assertEquals(isSameAsDeliveryDates({ ...legacy, charge_start: legacy.delivery_start, charge_end: legacy.collection_start }), true);
-  assertEquals(isSameAsDeliveryDates({ ...legacy, charge_start: null, charge_end: null }), true);
-  assertEquals(isSameAsDeliveryDates({ ...legacy, charge_start: "2025-01-07T15:00:00.000Z", charge_end: legacy.collection_start }), false);
+Deno.test("isSameAsDeliveryDates never reads the legacy charge bounds", () => {
+  const { charge_windows: _, ...windowless } = baseDates;
+  assertEquals(isSameAsDeliveryDates({ ...windowless, charge_start: windowless.delivery_start, charge_end: windowless.collection_start }), false);
 });
 
 // ── isSameAsDeliveryDestination ─────────────────────────────────
@@ -2619,6 +2617,7 @@ function docDates(over: Partial<OrderDocDatesType> = {}): OrderDocDatesType {
     charge_start: null, charge_start_fs: fsTs(0),
     charge_end: null, charge_end_fs: fsTs(0),
     days_active: null, days_charged: null,
+    charge_windows: [],
     ...over,
   };
 }
@@ -2632,8 +2631,15 @@ Deno.test("deriveOrderDateEnvelope: single destination returns its own dates", (
     charge_start: "2026-03-01T09:00:00.000-06:00", charge_start_fs: fsTs(105),
     charge_end: "2026-03-10T17:00:00.000-06:00", charge_end_fs: fsTs(106),
     days_active: 8, days_charged: 6,
+    charge_windows: [
+      { start: "2026-03-01T09:00:00.000-06:00", end: "2026-03-03T17:00:00.000-06:00", days: 3 },
+      { start: "2026-03-06T09:00:00.000-06:00", end: "2026-03-10T17:00:00.000-06:00", days: 3 },
+    ],
   });
   const env = deriveOrderDateEnvelope([{ dates }]);
+  // The charge half reads the windows; each `_fs` is kept while its mirror agrees.
+  assertEquals([env.charge_start, env.charge_start_fs], ["2026-03-01T09:00:00.000-06:00", fsTs(105)]);
+  assertEquals([env.charge_end, env.charge_end_fs], ["2026-03-10T17:00:00.000-06:00", fsTs(106)]);
   assertEquals(env.delivery_start, "2026-03-01T09:00:00.000-06:00");
   assertEquals(env.delivery_start_fs, fsTs(101));
   assertEquals(env.collection_end, "2026-03-10T17:00:00.000-06:00");
@@ -2647,11 +2653,17 @@ Deno.test("deriveOrderDateEnvelope: starts take min, ends take max across destin
     delivery_start: "2026-03-05T09:00:00.000-06:00", delivery_start_fs: fsTs(1),
     collection_end: "2026-03-12T17:00:00.000-06:00", collection_end_fs: fsTs(2),
     days_active: 5, days_charged: 5,
+    charge_windows: [{ start: "2026-03-05T09:00:00.000-06:00", end: "2026-03-12T09:00:00.000-06:00", days: 5 }],
   });
   const b = docDates({
     delivery_start: "2026-03-02T09:00:00.000-06:00", delivery_start_fs: fsTs(3),
     collection_end: "2026-03-20T17:00:00.000-06:00", collection_end_fs: fsTs(4),
-    days_active: 9, days_charged: 7,
+    days_active: 9, days_charged: 99,
+    charge_start: "2026-03-01T09:00:00.000-06:00", charge_start_fs: fsTs(5),
+    charge_windows: [
+      { start: "2026-03-02T09:00:00.000-06:00", end: "2026-03-04T09:00:00.000-06:00", days: 2 },
+      { start: "2026-03-09T09:00:00.000-06:00", end: "2026-03-20T09:00:00.000-06:00", days: 5 },
+    ],
   });
   const env = deriveOrderDateEnvelope([{ dates: a }, { dates: b }]);
   // earliest delivery_start (b) carries its own _fs companion
@@ -2662,7 +2674,11 @@ Deno.test("deriveOrderDateEnvelope: starts take min, ends take max across destin
   assertEquals(env.collection_end_fs, fsTs(4));
   // days take the largest non-null value
   assertEquals(env.days_active, 9);
+  // Σ window days, never the stale legacy mirror (99).
   assertEquals(env.days_charged, 7);
+  // A mirror that disagrees with the windows lends no `_fs`.
+  assertEquals([env.charge_start, env.charge_start_fs], ["2026-03-02T09:00:00.000-06:00", null]);
+  assertEquals(env.charge_end, "2026-03-20T09:00:00.000-06:00");
 });
 
 Deno.test("deriveOrderDateEnvelope: compares instants across the DST boundary", () => {

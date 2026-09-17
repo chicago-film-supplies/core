@@ -166,6 +166,7 @@ Deno.test("InvoiceDocDestination REFUSES a pair that omits customer_collecting/r
       charge_end_fs: fsTs("2026-01-09T09:00:00.000-06:00"),
       days_active: 5,
       days_charged: 5,
+      charge_windows: [{ start: "2026-01-05T08:00:00.000-06:00", end: "2026-01-09T09:00:00.000-06:00", days: 5 }],
     },
     delivery: { uid: null, address: null, instructions: null, contact: null },
     collection: { uid: null, address: null, instructions: null, contact: null },

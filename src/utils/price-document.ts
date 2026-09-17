@@ -85,14 +85,8 @@ export interface PairChargeWindows {
    * divider path is a prefix of its own.
    */
   divider_path: readonly string[];
-  /**
-   * Each window's stored `days`, in order. `null` for a pair stored before
-   * charge windows existed: its lines keep the day counts they already carry.
-   * Removed once every pair is backfilled (charge-windows release step 4).
-   */
-  days: readonly number[] | null;
-  /** A legacy pair's `days_charged`: the days a NEW line on it starts with. */
-  legacy_days_charged?: number | null;
+  /** Each window's stored `days`, in order. */
+  days: readonly number[];
 }
 
 /** The pair shape {@link chargeWindowContext} reads. */
@@ -100,25 +94,29 @@ export interface ChargeWindowPair {
   uid?: string | null;
   /** Set on an invoice pair: the order the pair is scoped to. */
   uid_order?: string | null;
-  dates?: {
-    charge_windows?: readonly { days: number }[] | null;
-    days_charged?: number | null;
-  } | null;
+  dates: {
+    charge_windows: readonly { days: number }[];
+  };
 }
 
 /**
  * **Build {@link PriceDocumentContext.charge_windows}** from a document's stored
  * `destinations`. Reads stored window days only.
+ *
+ * @throws PriceRefusalError on a pair with no windows: its lines would have no
+ *   days to bill.
  */
 export function chargeWindowContext(destinations: readonly ChargeWindowPair[]): PairChargeWindows[] {
   const out: PairChargeWindows[] = [];
   for (const pair of destinations) {
     if (!pair.uid) continue;
     const windows = pair.dates?.charge_windows;
+    if (!windows || windows.length === 0) {
+      throw new PriceRefusalError(`Destination pair ${pair.uid} has no charge windows`);
+    }
     out.push({
       divider_path: pair.uid_order ? [pair.uid_order, pair.uid] : [pair.uid],
-      days: windows && windows.length > 0 ? windows.map((w) => w.days) : null,
-      legacy_days_charged: pair.dates?.days_charged ?? null,
+      days: windows.map((w) => w.days),
     });
   }
   return out;
@@ -206,17 +204,6 @@ export interface PricedDocument<T extends LineItem> {
   warnings: UnreviewedTaxWarning[];
 }
 
-/**
- * The extension day count for D7: `max(order, 5) − max(billed, 5)`.
- *
- * Both sides floor at the one-week minimum, because each window was (or would
- * be) charged at least a week. The difference is therefore what the extension
- * adds on top, and it can be negative when the order's window shrank.
- */
-export function extensionChargeDays(orderChargeDays: number, billedChargeDays: number): number {
-  return Math.max(orderChargeDays, 5) - Math.max(billedChargeDays, 5);
-}
-
 /** Refuse a document whose money may not move (D3). */
 function assertRepriceable(document: PriceDocumentKind): void {
   if (document.kind !== "invoice") return;
@@ -240,7 +227,7 @@ function assertRepriceable(document: PriceDocumentKind): void {
  * `extensionDays` is D7: the line is priced for that many days with the
  * one-week minimum skipped, which is what an extension section on an invoice
  * bills. A document line passes its own `chargeable_days`; `accountLine` passes
- * {@link extensionChargeDays}`(order, billed)` for a billed row.
+ * the days an extension group adds for a billed row.
  *
  * @throws Error on a line with no pricing rule, and on an extension of a line
  *   that is not `five_day_week` or carries a flat tax.
@@ -297,10 +284,9 @@ function keepsStoredDays(document: PriceDocumentKind): boolean {
  *
  * | line | `chargeable_days` |
  * |---|---|
- * | in an extension section | Σ its pair's window days (the days added); its own stored days on a pair stored before windows |
+ * | in an extension section | Σ its pair's window days (the days added) |
  * | on a `complete`/`canceled` order | its own stored days |
  * | `rental` + `five_day_week` on a pair with windows | Σ window days |
- * | `rental` + `five_day_week` on a pair stored before windows | its own stored days, else the pair's `days_charged` |
  * | `rental` + `five_day_week` on no pair | refused |
  * | anything else | `null` |
  *
@@ -316,10 +302,9 @@ export function lineChargeableDays(
   const stored = item.price?.chargeable_days ?? null;
   if (extensionFor(item, ctx.extensions)) {
     // An extension pair's one window carries the days the section ADDS, never
-    // recounted, so its lines bill that. A pair stored before windows keeps the
-    // line's own stored days.
+    // recounted, so its lines bill that.
     const pair = pairOf(item, ctx.charge_windows);
-    if (pair?.days) return { chargeable_days: pair.days.reduce((total, d) => total + d, 0) };
+    if (pair) return { chargeable_days: pair.days.reduce((total, d) => total + d, 0) };
     return { chargeable_days: stored };
   }
   if (keepsStoredDays(ctx.document)) return { chargeable_days: stored };
@@ -331,7 +316,6 @@ export function lineChargeableDays(
         "Move it under a destination",
     );
   }
-  if (pair.days === null) return { chargeable_days: stored ?? pair.legacy_days_charged ?? null };
   const sum = pair.days.reduce((total, d) => total + d, 0);
   return pair.days.length >= 2 ? { chargeable_days: sum, windowDays: pair.days } : { chargeable_days: sum };
 }

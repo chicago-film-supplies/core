@@ -221,7 +221,7 @@ const updateFulfillmentDestinationsRules: CollectionRule[] = [
       "An operator's pair edit writes destinations + version + query_by_dates + " +
       "query_by_contacts on the same doc atomically. The editable fields are DERIVED " +
       "from the order → fulfillment shared-field classification — `propagated` and " +
-      "`atom` are writable, `derived` (`dates.*_fs`, `days_active`, `days_charged`) is " +
+      "`atom` are writable, `derived` (`dates.*_fs`, `days_active`, `charge_windows[].days`) is " +
       "recomputed and never read from the request — so there is no list to drift. " +
       "Row MEMBERSHIP is not editable: a pair can be corrected, never added or removed.",
     enforced_by: [PAIR_EDIT_STORES_AND_DERIVES],

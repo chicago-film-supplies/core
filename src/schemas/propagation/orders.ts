@@ -359,7 +359,7 @@ const createOrderRules: CollectionRule[] = [
         source: ["destinations"],
         target: ["destinations"],
         transform:
-          "per-destination dates: each ISO string gets a Firestore timestamp companion (*_fs); getDuration → days_active/days_charged",
+          "per-destination dates: each ISO string gets a Firestore timestamp companion (*_fs); applyDateEdit → canonicalChargeWindows counts charge_windows[].days and days_active",
       },
       {
         source: [],
@@ -683,7 +683,7 @@ const updateOrderRules: CollectionRule[] = [
         source: ["destinations"],
         target: ["destinations"],
         transform:
-          "per-destination dates recanonicalized: Timestamp.fromDate() companions (*_fs) + getDuration recompute",
+          "per-destination dates recanonicalized: Timestamp.fromDate() companions (*_fs) + canonicalChargeWindows recount",
       },
     ],
   },

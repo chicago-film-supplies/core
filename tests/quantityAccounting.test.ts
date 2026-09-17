@@ -54,7 +54,7 @@ const GROUP_ITEM = { uid: G, type: "group", name: "Grip", description: "", path:
 const START = "2026-09-06T00:00:00.000-05:00";
 const endFor = (days: number) => addChicagoDays(START, days);
 const pairFor = (uid: string, days: number, end = endFor(days)) =>
-  ({ uid, dates: { charge_start: START, charge_end: end, days_charged: days } }) as unknown as DocDestinationType;
+  ({ uid, dates: { charge_windows: [{ start: START, end, days }] } }) as unknown as DocDestinationType;
 /** The order's pairs: D charging `days`. */
 const pairs = (days = 5, end?: string): DocDestinationType[] => [pairFor(D, days, end)];
 
@@ -344,6 +344,8 @@ Deno.test("buildRemainingInvoice: a new line, a quantity increase and an extensi
     "2026-09-13T00:00:00.000-05:00",
     2,
   ]);
+  // ONE window holding the ADDED days, which its lines derive (owner, 2026-09-17).
+  assertEquals(pair.dates.charge_windows, [{ start: "2026-09-10T00:00:00.000-05:00", end: "2026-09-13T00:00:00.000-05:00", days: 2 }]);
   assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)], pairs(7)).lines, []);
   // What the API's write guards assert: paths are what the one author computes, and rows are unique.
   assertEquals(validateInvoiceItemPaths(built.items as unknown as InvoiceItem[]), []);
@@ -487,6 +489,7 @@ Deno.test("quantityAccounting: a later window extends by the PAIRS' days, not th
     "2026-09-16T00:00:00.000-05:00",
     5,
   ]);
+  assertEquals(section.dates.charge_windows, [{ start: "2026-09-12T00:00:00.000-05:00", end: "2026-09-16T00:00:00.000-05:00", days: 5 }]);
 });
 
 Deno.test("quantityAccounting: an earlier window is a shortening, returned for a credit note", () => {

@@ -560,7 +560,7 @@ Deno.test("documentDiff: line days that disagree on an unmoved window are no bil
 function dated<T extends Order | Invoice>(doc: T, days: number, endDay: string): T {
   const destinations = (doc as unknown as { destinations: { dates: Record<string, unknown> }[] }).destinations.map((pair) => ({
     ...pair,
-    dates: { ...pair.dates, charge_start: "2026-09-01T00:00:00.000-05:00", charge_end: `${endDay}T00:00:00.000-05:00`, days_charged: days },
+    dates: { ...pair.dates, charge_windows: [{ start: "2026-09-01T00:00:00.000-05:00", end: `${endDay}T00:00:00.000-05:00`, days }] },
   }));
   return { ...doc, destinations } as T;
 }

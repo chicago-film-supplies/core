@@ -511,11 +511,9 @@ const sameWindowKey = (key: string, a: unknown, b: unknown): boolean =>
 const sameInstantValue = (a: unknown, b: unknown): boolean =>
   typeof a === "string" && typeof b === "string" && Date.parse(a) === Date.parse(b);
 
-/** A dates record's windows, reading a pair stored before windows by its charge bounds. */
+/** A dates record's windows. */
 function storedWindows(d: DateRecord): { start: unknown; end: unknown }[] | null {
-  if (Array.isArray(d.charge_windows)) return d.charge_windows as { start: unknown; end: unknown }[];
-  if (d.charge_start != null && d.charge_end != null) return [{ start: d.charge_start, end: d.charge_end }];
-  return null;
+  return Array.isArray(d.charge_windows) ? d.charge_windows as { start: unknown; end: unknown }[] : null;
 }
 
 /**

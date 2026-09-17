@@ -226,12 +226,13 @@ export interface OrderDocDatesType {
   days_active: number | null;
   days_charged: number | null;
   /**
-   * The pair's charge windows, in order. Optional until every stored pair has
-   * been backfilled (charge-windows release step 3); then required, and
-   * `charge_start`/`charge_end`(+`_fs`)/`days_charged` are removed. Until then a
-   * writer states both, the old fields derived from the windows.
+   * The pair's charge windows, in order. Required since every stored pair was
+   * backfilled (charge-windows release step 3, 2026-09-17, both projects).
+   * `charge_start`/`charge_end`(+`_fs`)/`days_charged` are legacy mirrors a
+   * writer still derives from the windows until step 5 removes them; nothing
+   * reads them.
    */
-  charge_windows?: ChargeWindowType[];
+  charge_windows: ChargeWindowType[];
 }
 
 /**
@@ -290,7 +291,7 @@ export const OrderDocDates: z.ZodType<OrderDocDatesType> = z.strictObject({
   days_active: z.int().nullable().meta({ derived: true }),
   days_charged: z.int().nullable().meta({ derived: true }),
   charge_windows: z.array(ChargeWindow).min(1).superRefine(checkChargeWindowsOrdered)
-    .optional().meta({ shared: "value" }),
+    .meta({ shared: "value" }),
 });
 
 /**

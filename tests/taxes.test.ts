@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import { linePairs } from "./helpers/charge-windows.ts";
 import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
 import {
   assignLineTaxes,
@@ -204,7 +205,7 @@ const ctx = (overrides: Partial<DocumentTaxContext> & { taxes?: LegacyTax[] } = 
  * written back into `items` so the assertions below read the priced lines.
  */
 function materialize(items: LineItem[], taxCtx: DocumentTaxContext) {
-  const priced = priceDocument(items, { document: { kind: "order", status: "draft" }, tax: taxCtx, charge_windows: [{ divider_path: [], days: null }] });
+  const priced = priceDocument(items, { document: { kind: "order", status: "draft" }, tax: taxCtx, charge_windows: linePairs(items) });
   items.splice(0, items.length, ...priced.items);
   return priced.warnings;
 }

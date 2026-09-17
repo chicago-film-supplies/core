@@ -210,33 +210,12 @@ Deno.test("getDuration calculates active duration", () => {
   assertEquals(result.activeLabel, "days");
 });
 
-Deno.test("getDuration computes charge independently when dates differ", () => {
-  const deliveryStart = new TZDate(2024, 5, 17, 9, 0, 0, "America/Chicago");
-  const collectionStart = new TZDate(2024, 5, 21, 17, 0, 0, "America/Chicago");
-  const chargeStart = new TZDate(2024, 5, 18, 9, 0, 0, "America/Chicago");
-  const chargeEnd = new TZDate(2024, 5, 20, 17, 0, 0, "America/Chicago");
+Deno.test("getDuration has no charge half: charged days are the stored window counts", () => {
   const result = getDuration({
-    delivery_start: deliveryStart.toISOString(),
-    collection_start: collectionStart.toISOString(),
-    charge_start: chargeStart.toISOString(),
-    charge_end: chargeEnd.toISOString(),
+    delivery_start: new TZDate(2024, 5, 17, 9, 0, 0, "America/Chicago").toISOString(),
+    collection_start: new TZDate(2024, 5, 21, 17, 0, 0, "America/Chicago").toISOString(),
   }, []);
-  assertEquals(result.activeDays, 5);
-  assertEquals(result.chargeDays, 3);
-});
-
-Deno.test("getDuration reuses active when charge dates match", () => {
-  const start = new TZDate(2024, 5, 17, 9, 0, 0, "America/Chicago");
-  const end = new TZDate(2024, 5, 21, 17, 0, 0, "America/Chicago");
-  const iso1 = start.toISOString();
-  const iso2 = end.toISOString();
-  const result = getDuration({
-    delivery_start: iso1,
-    collection_start: iso2,
-    charge_start: iso1,
-    charge_end: iso2,
-  }, []);
-  assertEquals(result.chargeDays, result.activeDays);
+  assertEquals(Object.keys(result).sort(), ["activeDays", "activeLabel", "activePeriodLabel", "activeWeeks"]);
 });
 
 Deno.test("getDuration throws for non-object dates", () => {

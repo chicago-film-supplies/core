@@ -9,13 +9,13 @@ import {
   rederiveDocumentTotalsForAudit,
 } from "../src/utils/orders.ts";
 import {
-  extensionChargeDays,
   invoiceExtensionSections,
   type PriceDocumentContext,
   priceCreditNote,
   priceDocument,
   sumPricedLines,
 } from "../src/utils/price-document.ts";
+import { linePairs } from "./helpers/charge-windows.ts";
 import { assignLineTaxes, type DocumentTaxContext, type TaxDestination } from "../src/utils/taxes.ts";
 import { pricingTaxesOf, type TaxCatalog } from "../src/utils/tax-classes.ts";
 import { type LegacyTax, type LegacyTaxRow, migrateLegacyTaxCatalog } from "./helpers/legacyTaxCatalog.ts";
@@ -64,17 +64,19 @@ const taxCtx = (city = "Chicago", exempt = false): DocumentTaxContext => ({
 
 const ORDER: PriceDocumentContext["document"] = { kind: "order", status: "draft" };
 /**
- * One catch-all pair stored before charge windows existed, so a line keeps the
- * `chargeable_days` a test gives it. The charge-window tests below build their
- * own pairs.
+ * `ctx()` leaves `charge_windows` to {@link priceDoc}, which gives every rental
+ * line its own single-window pair carrying the line's days, so a test keeps the
+ * `chargeable_days` it gives a line. The charge-window tests build their own pairs.
  */
-const LEGACY_PAIRS: PriceDocumentContext["charge_windows"] = [{ divider_path: [], days: null }];
 const ctx = (over: Partial<PriceDocumentContext> = {}): PriceDocumentContext => ({
   document: ORDER,
   tax: taxCtx(),
-  charge_windows: LEGACY_PAIRS,
+  charge_windows: LINE_PAIRS,
   ...over,
 });
+const LINE_PAIRS: PriceDocumentContext["charge_windows"] = [];
+const priceDoc = (items: LineItem[], c: PriceDocumentContext) =>
+  priceDocument(items, c.charge_windows === LINE_PAIRS ? { ...c, charge_windows: linePairs(items, c.extensions) } : c);
 
 let uidSeq = 0;
 function line(over: Partial<LineItem> = {}, price: Record<string, unknown> = {}): LineItem {
@@ -103,7 +105,7 @@ const p = (it: LineItem) => it.price as unknown as {
 
 Deno.test("priceDocument: a percent fee is costed on subtotal + tax and STORED on its line (D6)", () => {
   // Rental 10000, Chicago Rental Tax 15% = 1500. Basis 11500; 3% = 345.
-  const r = priceDocument([line(), fee()], ctx());
+  const r = priceDoc([line(), fee()], ctx());
   assertEquals(p(r.items[0]).total_cents, 11500);
   assertEquals(p(r.items[1]), { ...p(r.items[1]), subtotal_cents: 345, subtotal_discounted_cents: 345, total_cents: 345, discount: null, taxes: [] });
   assertEquals(r.totals.transaction_fees.map((f) => [f.name, f.type, f.rate, f.amount_cents]), [["Card Fee", "percent", 3, 345]]);
@@ -113,7 +115,7 @@ Deno.test("priceDocument: a percent fee is costed on subtotal + tax and STORED o
 
 Deno.test("priceDocument: a flat fee keeps its pre-discount subtotal and its discount", () => {
   // Fixed 500 with 10% off: subtotal 500, discounted 450, discount 50, no tax.
-  const r = priceDocument(
+  const r = priceDoc(
     [line(), fee({}, { formula: "fixed", base_cents: 500, base_percent: null, discount: { type: "percent", rate: 10, amount_cents: 0 } })],
     ctx(),
   );
@@ -124,8 +126,8 @@ Deno.test("priceDocument: a flat fee keeps its pre-discount subtotal and its dis
 });
 
 Deno.test("priceDocument: a split bill — two invoices at 2 and 3 units total the order at 5", () => {
-  const order = priceDocument([line({ quantity: 5 }, { base_cents: 1999 })], ctx());
-  const inv = (q: number) => priceDocument([line({ quantity: q }, { base_cents: 1999 })], ctx({ document: { kind: "invoice", status: "draft", has_settlement: false } }));
+  const order = priceDoc([line({ quantity: 5 }, { base_cents: 1999 })], ctx());
+  const inv = (q: number) => priceDoc([line({ quantity: q }, { base_cents: 1999 })], ctx({ document: { kind: "invoice", status: "draft", has_settlement: false } }));
   // 1999×2 = 3998 + 599.70→600 tax; 1999×3 = 5997 + 899.55→900 tax; order 9995 + 1499.25→1499.
   assertEquals(inv(2).totals.total_cents, 4598);
   assertEquals(inv(3).totals.total_cents, 6897);
@@ -135,7 +137,6 @@ Deno.test("priceDocument: a split bill — two invoices at 2 and 3 units total t
 });
 
 Deno.test("priceDocument: an extension line bills its OWN added days with the week minimum skipped (D7)", () => {
-  assertEquals([extensionChargeDays(4, 2), extensionChargeDays(7, 3), extensionChargeDays(4, 7)], [0, 2, -2]);
   const section = (addedDays: number | null) => {
     const divider = {
       ...lineItemBase,
@@ -147,7 +148,7 @@ Deno.test("priceDocument: an extension line bills its OWN added days with the we
     } as unknown as LineItem;
     const rental = line({ path: ["dest-ext", "r1"] }, { base_cents: 10000, chargeable_days: addedDays });
     const items = [divider, rental];
-    return priceDocument(items, ctx({
+    return priceDoc(items, ctx({
       document: { kind: "invoice", status: "draft", has_settlement: false },
       extensions: invoiceExtensionSections(items as unknown as Parameters<typeof invoiceExtensionSections>[0]),
     }));
@@ -156,12 +157,12 @@ Deno.test("priceDocument: an extension line bills its OWN added days with the we
   assertEquals([p(section(2).items[1]).subtotal_cents, p(section(2).items[1]).total_cents], [4000, 4600]);
   assertEquals(section(2).totals.total_cents, 4600);
   // Idempotent: a re-price of the stored line reproduces the same money.
-  assertEquals(p(priceDocument(section(2).items, ctx({
+  assertEquals(p(priceDoc(section(2).items, ctx({
     document: { kind: "invoice", status: "draft", has_settlement: false },
     extensions: [{ divider_path: ["dest-ext"] }],
   })).items[1]).subtotal_cents, 4000);
   // The same line outside a section is charged its week minimum: 2 days → 10000.
-  assertEquals(p(priceDocument([line({}, { chargeable_days: 2 })], ctx()).items[0]).subtotal_cents, 10000);
+  assertEquals(p(priceDoc([line({}, { chargeable_days: 2 })], ctx()).items[0]).subtotal_cents, 10000);
   // A section line with no day count has nothing to extend by.
   assertThrows(() => section(null), Error, "chargeable_days");
 });
@@ -181,7 +182,7 @@ Deno.test("invoiceExtensionSections: only destination dividers carrying path_ext
 
 Deno.test("priceDocument: an extension section refuses a fixed-formula line", () => {
   assertThrows(
-    () => priceDocument([line({ type: "sale", path: ["dx", "s"] }, { formula: "fixed", chargeable_days: 2 })], ctx({ extensions: [{ divider_path: ["dx"] }] })),
+    () => priceDoc([line({ type: "sale", path: ["dx", "s"] }, { formula: "fixed", chargeable_days: 2 })], ctx({ extensions: [{ divider_path: ["dx"] }] })),
     Error,
     "five_day_week",
   );
@@ -193,22 +194,22 @@ Deno.test("priceDocument: a settled invoice is refused (D3)", () => {
     { kind: "invoice", status: "issued", has_settlement: true },
     { kind: "invoice", status: "paid", has_settlement: false },
   ] as const) {
-    assertThrows(() => priceDocument([line()], ctx({ document })), Error, "settled");
+    assertThrows(() => priceDoc([line()], ctx({ document })), Error, "settled");
   }
 });
 
 Deno.test("priceDocument: a void invoice is refused, even with no settlement (D3)", () => {
-  assertThrows(() => priceDocument([line()], ctx({ document: { kind: "invoice", status: "void", has_settlement: false } })), Error, "void");
+  assertThrows(() => priceDoc([line()], ctx({ document: { kind: "invoice", status: "void", has_settlement: false } })), Error, "void");
 });
 
 Deno.test("priceDocument: a percent fee line at quantity 2 is refused (D6)", () => {
-  assertThrows(() => priceDocument([line(), fee({ quantity: 2 })], ctx()), Error, "quantity 1");
+  assertThrows(() => priceDoc([line(), fee({ quantity: 2 })], ctx()), Error, "quantity 1");
 });
 
 Deno.test("priceDocument: the input items are not mutated", () => {
   const items = [line(), fee()];
   const before = structuredClone(items);
-  priceDocument(items, ctx());
+  priceDoc(items, ctx());
   assertEquals(items, before);
 });
 
@@ -227,7 +228,7 @@ Deno.test("priceDocument: an ISSUED invoice and a DRAFT both take the rate whose
     taxes_base: [{ uid: "chi-sales-old", name: "Chicago Sales Tax", rate: 10.25, type: "percent" }],
   })];
   const price = (status: "draft" | "issued") =>
-    priceDocument(stored(), ctx({ document: { kind: "invoice", status, has_settlement: false }, tax: { ...taxCtx(), catalog: versions } }));
+    priceDoc(stored(), ctx({ document: { kind: "invoice", status, has_settlement: false }, tax: { ...taxCtx(), catalog: versions } }));
 
   // The stored uid is not an input: the window decides, whatever the status. 40000 × 10.5% = 4200.
   for (const status of ["issued", "draft"] as const) {
@@ -236,7 +237,7 @@ Deno.test("priceDocument: an ISSUED invoice and a DRAFT both take the rate whose
   }
 
   // The SAME document dated inside the old window takes the old rate: 40000 × 10.25% = 4100.
-  const early = priceDocument(stored(), ctx({
+  const early = priceDoc(stored(), ctx({
     document: { kind: "invoice", status: "issued", has_settlement: false },
     tax: { ...taxCtx(), catalog: versions, asOf: "2026-05-15T00:00:00.000-05:00" },
   }));
@@ -303,7 +304,7 @@ Deno.test("priceDocument: totals equal the legacy reprice + the audit oracle on 
     const legacy = legacyPrice(items, taxCtx(city, exempt));
     const expected = legacy.totals;
 
-    const r = priceDocument(items, ctx({ tax: taxCtx(city, exempt) }));
+    const r = priceDoc(items, ctx({ tax: taxCtx(city, exempt) }));
     assertEquals(r.totals, expected, `document ${n}`);
     assertEquals(r.replacement_total_cents, legacy.replacement_total_cents, `document ${n} replacement`);
     // Stage 5 alone over the priced lines is the same sum.
@@ -334,7 +335,7 @@ Deno.test("…and a fee costed on the PRE-TAX basis DOES disagree with it", () =
   let disagreements = 0;
   for (let n = 0; n < 2000; n++) {
     const { items, city, exempt } = generateDocument(rand);
-    const r = priceDocument(items, ctx({ tax: taxCtx(city, exempt) }));
+    const r = priceDoc(items, ctx({ tax: taxCtx(city, exempt) }));
     const feeLine = r.items.find((it) => it.price?.formula === "percent_of_total");
     if (!feeLine) continue;
     const wrong = calculateTransactionFeeAmountCents(feeLine, r.totals.subtotal_discounted_cents);
