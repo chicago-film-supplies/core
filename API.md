@@ -24398,6 +24398,22 @@ already carries the item's own uid as its last segment — is a separate,
 explicit parameter: callers that only have a bare uid and a path (as
 opposed to a full line item) can still call this directly.
 
+Delegates to {@link buildBookingIdFromSignature} for the assembly itself —
+see that function for the caller this one can't serve directly: one whose
+item shape carries `component_signature_hash` already and no `path` to
+recompute it from.
+
+### `buildBookingIdFromSignature(orderUid: string, itemUid: string, destUid: string, signatureHash: string | null): string`
+
+The same assembly {@link buildBookingId} performs, taking an
+already-computed signature hash directly instead of a `path` to derive one
+from. For a caller whose item shape carries `component_signature_hash` but
+no `path` — `ConsolidatedItemType` (`@cfs/core/schemas/order`) is exactly
+this shape by design: `consolidateItems` computes the hash once, per group,
+and the per-line `path`s that produced it are not carried forward, since
+they may differ in their trailing (own-uid) segment across the group's
+merged lines while agreeing on ancestry.
+
 ### `componentAncestry(path: readonly string[]): string[]`
 
 The chain of PRODUCT ancestors above one item occurrence — a pure filter of

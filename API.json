@@ -10878,7 +10878,15 @@
           "kind": "function",
           "name": "buildBookingId",
           "signature": "buildBookingId(orderUid: string, item: typeLiteral, path: readonly string[], destUid: string): string",
-          "doc": "The one place a `BookingId` is assembled from parts. Sparse by\nconstruction: a top-level occurrence (empty ancestry) gets the unchanged\n3-segment id — `{uid_order}:{item uid}:{uid_destination}` — byte-for-byte\nwhat every booking id has always been; a component occurrence gets a 4th\nsegment, the signature hash, appended AFTER the destination. The\ndestination segment's position and meaning are otherwise untouched.\n\n`item` takes just the uid (not the whole line) because `path` — which\nalready carries the item's own uid as its last segment — is a separate,\nexplicit parameter: callers that only have a bare uid and a path (as\nopposed to a full line item) can still call this directly.",
+          "doc": "The one place a `BookingId` is assembled from parts. Sparse by\nconstruction: a top-level occurrence (empty ancestry) gets the unchanged\n3-segment id — `{uid_order}:{item uid}:{uid_destination}` — byte-for-byte\nwhat every booking id has always been; a component occurrence gets a 4th\nsegment, the signature hash, appended AFTER the destination. The\ndestination segment's position and meaning are otherwise untouched.\n\n`item` takes just the uid (not the whole line) because `path` — which\nalready carries the item's own uid as its last segment — is a separate,\nexplicit parameter: callers that only have a bare uid and a path (as\nopposed to a full line item) can still call this directly.\n\nDelegates to {@link buildBookingIdFromSignature} for the assembly itself —\nsee that function for the caller this one can't serve directly: one whose\nitem shape carries `component_signature_hash` already and no `path` to\nrecompute it from.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "buildBookingIdFromSignature",
+          "signature": "buildBookingIdFromSignature(orderUid: string, itemUid: string, destUid: string, signatureHash: string | null): string",
+          "doc": "The same assembly {@link buildBookingId} performs, taking an\nalready-computed signature hash directly instead of a `path` to derive one\nfrom. For a caller whose item shape carries `component_signature_hash` but\nno `path` — `ConsolidatedItemType` (`@cfs/core/schemas/order`) is exactly\nthis shape by design: `consolidateItems` computes the hash once, per group,\nand the per-line `path`s that produced it are not carried forward, since\nthey may differ in their trailing (own-uid) segment across the group's\nmerged lines while agreeing on ancestry.",
           "paramTags": [],
           "returnsTag": null
         },

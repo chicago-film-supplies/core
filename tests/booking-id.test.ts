@@ -5,7 +5,12 @@
  */
 import { assertEquals, assertMatch, assertNotEquals } from "@std/assert";
 import { BookingId } from "../src/schemas/_uid.ts";
-import { buildBookingId, componentAncestry, componentSignatureHash } from "../src/utils/booking-id.ts";
+import {
+  buildBookingId,
+  buildBookingIdFromSignature,
+  componentAncestry,
+  componentSignatureHash,
+} from "../src/utils/booking-id.ts";
 import { fid } from "./helpers/ids.ts";
 
 const ORDER = fid("order");
@@ -92,4 +97,25 @@ Deno.test("buildBookingId: custom-product item uid flows through untouched", () 
   const id = buildBookingId(ORDER, { uid: customUid }, [DIVIDER, customUid], DEST);
   assertEquals(id, `${ORDER}:${customUid}:${DEST}`);
   assertEquals(BookingId.safeParse(id).success, true);
+});
+
+Deno.test("buildBookingIdFromSignature: null hash → the unchanged 3-segment id", () => {
+  const id = buildBookingIdFromSignature(ORDER, PRODUCT, DEST, null);
+  assertEquals(id, `${ORDER}:${PRODUCT}:${DEST}`);
+  assertEquals(BookingId.safeParse(id).success, true);
+});
+
+Deno.test("buildBookingIdFromSignature: a hash appends the 4th segment", () => {
+  const hash = componentSignatureHash([DIVIDER, KIT_A, PRODUCT]);
+  const id = buildBookingIdFromSignature(ORDER, PRODUCT, DEST, hash);
+  assertEquals(id, `${ORDER}:${PRODUCT}:${DEST}:${hash}`);
+  assertEquals(BookingId.safeParse(id).success, true);
+});
+
+Deno.test("buildBookingIdFromSignature: agrees with buildBookingId given the same path's derived hash", () => {
+  for (const path of [[DIVIDER, PRODUCT], [DIVIDER, KIT_A, PRODUCT], [DIVIDER, KIT_A, KIT_B, PRODUCT]]) {
+    const viaPath = buildBookingId(ORDER, { uid: PRODUCT }, path, DEST);
+    const viaHash = buildBookingIdFromSignature(ORDER, PRODUCT, DEST, componentSignatureHash(path));
+    assertEquals(viaHash, viaPath);
+  }
 });
