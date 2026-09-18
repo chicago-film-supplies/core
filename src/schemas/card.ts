@@ -254,10 +254,10 @@ export const CardDates: z.ZodType<CardDatesType> = z.strictObject({
   // and, because they are the same value under two encodings, it is also what
   // tells the Typesense surface that its `date_fs` column IS this one. The two
   // names do not correspond, so nothing but a declaration could pair them.
-  // The annotation sits on the PIPE, before `.nullable()`, matching `booking.ts`
-  // and `schemas/out-of-service.ts`: `getServerSortableColumns` unwraps to the pipe and
-  // reads meta THERE, so a tag on the outer `.default()` is invisible to it —
-  // and with it invisible, the Typesense `date_fs` column loses its pairing.
+  // `readMetaThroughWrappers` (`zod-walk.ts`) reads THROUGH wrappers rather than
+  // unwrapping first, so the tag resolves whether it sits on the pipe (here,
+  // matching `booking.ts`) or on the outer `.default()` (`invoice.due_date`
+  // uses that form today) — factory placement is convention, not necessity.
   start: chicagoInstant().meta({ column: true, label: "Date", serverSortVia: "date_fs" }).nullable(),
   end: chicagoInstant().meta({ column: true, label: "End Date" }).nullable(),
 });
