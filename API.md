@@ -766,6 +766,7 @@ interface Booking {
   type: ComponentTypeType;
   status: BookingStatusType;
   quantity: number;
+  quantity_ordered?: number;
   shortage: number;
   subject: string;
   crms_id?: number | null;
@@ -14402,6 +14403,7 @@ interface Booking {
   type: ComponentTypeType;
   status: BookingStatusType;
   quantity: number;
+  quantity_ordered?: number;
   shortage: number;
   subject: string;
   crms_id?: number | null;

@@ -200,7 +200,40 @@ export interface Booking {
   number: number;
   type: ComponentTypeType;
   status: BookingStatusType;
+  /**
+   * The PHYSICAL number — how many units of this product this booking's
+   * custody actually accounts for, defined as `sumBookingBreakdown(breakdown)`.
+   *
+   * ⚠️ **It is no longer a synonym for what the order asked for.** It was, for
+   * every booking written before this field's twin existed, and the runtime
+   * check in `api-cloudrun`'s `src/services/bookings.ts` (`sum(breakdown) ===
+   * quantity`) read as a CONSTRAINT on the warehouse. It is now the
+   * DEFINITION of this field: the warehouse may hold more units than were
+   * ordered (an over-send) or fewer, and availability has to reflect the shelf
+   * rather than the paperwork. What the order asked for is
+   * {@link Booking.quantity_ordered}.
+   */
   quantity: number;
+  /**
+   * What the ORDER asked for at this booking's grain — Σ `item.quantity` over
+   * the consolidated order lines, which is exactly what `quantity` alone used
+   * to carry.
+   *
+   * ⚠️ **Optional, not required, and for the same reason as
+   * `component_signature_hash` directly above** — every booking stored before
+   * this field existed carries no such key, and this repo's required-field
+   * procedure (`core/CLAUDE.md`) is measure + backfill BEFORE tightening, not
+   * in the commit that introduces the field. An absent key means "never
+   * diverged from `quantity`", which is what it was for the whole corpus.
+   *
+   * 🔴 **Growing `quantity` in place without this field ERASES the order's
+   * number from the booking** and turns "we over-sent" into "this is what was
+   * ordered" — which is why the two-operand split exists here rather than a
+   * single mutable number. The same split already exists one document over:
+   * `FulfillmentLineItem` carries `quantity` (picker-owned, physical) beside
+   * `quantity_order` (server-stamped when they diverge).
+   */
+  quantity_ordered?: number;
   shortage: number;
   subject: string;
   crms_id?: number | null;
@@ -446,6 +479,10 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   type: ComponentTypeEnum.meta({ column: true, label: "Type" }),
   status: BookingStatus.meta({ column: true, label: "Status" }),
   quantity: z.int().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
+  // Optional, not required — see the interface field's own note. No `column`
+  // meta on purpose: every stored booking reads it as absent today, and a
+  // column that is blank on 7,306 rows is not a column.
+  quantity_ordered: z.int().min(0).optional(),
   shortage: z.int().meta({ column: true, label: "Shortage" }),
   // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.
   subject: z.string().meta({ pii: "mask", column: true, label: "Subject" }),
