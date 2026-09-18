@@ -389,6 +389,74 @@ Deno.test("priceCreditNote: keeps the charged rate VERSION, never today's, and a
   assertEquals(r.totals.total_cents, 47100);
 });
 
+// ── Crediting DAYS: a shortened charge window (api-cloudrun#1028 phase 1c) ──
+
+Deno.test("priceCreditNote: credited_days credits DAYS at the line's terms, with the week floor skipped", () => {
+  // Billed 3 units × 10000 at 10 billable days. The order shortened the window by
+  // 4 billable days, so the credit is 3 × 10000 × 4 ÷ 5 = 24000, 15% tax → 27600.
+  // 🔴 Priced as an ordinary line of 4 days it would FLOOR to a week —
+  // 3 × 10000 = 30000 — and credit more than those days were ever billed at.
+  const src = creditSource({ quantity: 3 }, {
+    base_cents: 10000,
+    chargeable_days: 10,
+    taxes: [{ uid: "chi-rental-tax", name: "Chicago Rental Tax", rate: 15, type: "percent", amount_cents: 0 }],
+  });
+  const r = priceCreditNote([{ line: src, quantity: 3, credited_days: 4 }], pricingTaxesOf(CAT), []);
+  assertEquals([r.prices[0].subtotal_cents, r.prices[0].total_cents], [24000, 27600]);
+  // The stored line says how many days it CREDITED, not how many the invoice charged.
+  assertEquals(r.prices[0].chargeable_days, 4);
+});
+
+Deno.test("priceCreditNote: a days credit refuses a line whose formula never read its days", () => {
+  // A `fixed` price has no day factor, so there are no days of it to give back.
+  // Crediting one would silently credit the whole line at its full amount.
+  const fixed = creditSource({ type: "sale" }, { formula: "fixed", base_cents: 40000, chargeable_days: null, taxes: [] });
+  assertThrows(
+    () => priceCreditNote([{ line: fixed, quantity: 1, credited_days: 3 }], pricingTaxesOf(CAT), []),
+    Error,
+    "never read its days",
+  );
+});
+
+Deno.test("priceCreditNote: credited_days must be a positive integer of BILLABLE days", () => {
+  const src = creditSource({ quantity: 1 }, { base_cents: 10000, chargeable_days: 10, taxes: [] });
+  for (const bad of [0, -2, 1.5]) {
+    assertThrows(
+      () => priceCreditNote([{ line: src, quantity: 1, credited_days: bad }], pricingTaxesOf(CAT), []),
+      Error,
+      "BILLABLE days",
+    );
+  }
+});
+
+Deno.test("priceCreditNote: a days credit composes to within a cent or two of re-charging the difference", () => {
+  // ⚠️ The SHIPPED property, stated rather than asserted away. The credit mirrors
+  // the EXTENSION — it is priced at the credited days directly — so
+  // `charged(billed) − credit(credited)` sits a rounding apart from
+  // `charged(billed − credited)`. Both round once; they round different products.
+  // Do NOT "fix" this by pricing the credit as a difference of two charges: a
+  // credit line stores its own declared half beside its money, and
+  // `assembleLinePrice` is the one door.
+  let worst = 0;
+  for (let base = 101; base <= 999; base += 7) {
+    for (let billedDays = 6; billedDays <= 20; billedDays += 3) {
+      for (let credited = 1; credited < billedDays - 4; credited += 2) {
+        const at = (days: number) =>
+          priceCreditNote([{ line: creditSource({ quantity: 1 }, { base_cents: base, chargeable_days: days, taxes: [] }), quantity: 1 }], [], [])
+            .prices[0].subtotal_cents;
+        const credit = priceCreditNote(
+          [{ line: creditSource({ quantity: 1 }, { base_cents: base, chargeable_days: billedDays, taxes: [] }), quantity: 1, credited_days: credited }],
+          [],
+          [],
+        ).prices[0].subtotal_cents;
+        worst = Math.max(worst, Math.abs((at(billedDays) - credit) - at(billedDays - credited)));
+      }
+    }
+  }
+  assert(worst <= 2, `composition residual grew to ${worst}¢ — the pricer changed, not the rounding`);
+  console.log(`  credit composition residual: worst ${worst}¢ (expected ≤ 2¢, a rounding apart)`);
+});
+
 Deno.test("priceCreditNote: an extension line is credited at its own added days, never floored to a week", () => {
   // Billed in an extension section: 10000 × 2 added days ÷ 5 = 4000, 15% tax → 4600.
   // Priced as an ordinary line, 2 days floors to a week: 10000 → 11500 credited.

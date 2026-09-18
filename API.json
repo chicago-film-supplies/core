@@ -14672,7 +14672,7 @@
         {
           "kind": "interface",
           "name": "CreditSelectionLine",
-          "declaration": "interface CreditSelectionLine {\n  line: L;\n  quantity: number;\n}",
+          "declaration": "interface CreditSelectionLine {\n  line: L;\n  quantity: number;\n  credited_days?: number;\n}",
           "doc": "One invoice line to credit, and how many of it."
         },
         {
@@ -14765,7 +14765,7 @@
           "kind": "function",
           "name": "priceCreditNote",
           "signature": "priceCreditNote(selection: readonly CreditSelectionLine[], taxes: Tax[], extensions: readonly PriceDocumentExtension[]): PricedCreditNote",
-          "doc": "**Price a credit note from the invoice lines it credits** (api-cloudrun#997 D4).\nThe server stores this result, and the manager renders it as a preview.\n\n- **Stages 2 + 3 only.** Each line goes through {@link priceLine} and\n  {@link assembleLinePrice} at the credited quantity. Nothing scales money by\n  `credited ÷ billed`: that would be a float factor on cents.\n- **Stage 1 is deliberately skipped.** The line keeps the tax refs STORED on\n  the invoice line, so a credit is taxed at the rate that was charged. It never\n  re-resolves jurisdiction, exemption or version. An exempt line carries\n  `taxes: []` and credits untaxed. `taxes` must therefore be the WHOLE rate\n  catalog, superseded versions included.\n- **No D3 refusal.** Credit is raised on settled invoices as a matter of\n  course; crediting prices a NEW document and moves no invoice money.\n- **Totals are stage 5's sum** ({@link sumPricedLines}).",
+          "doc": "**Price a credit note from the invoice lines it credits** (api-cloudrun#997 D4).\nThe server stores this result, and the manager renders it as a preview.\n\n- **Stages 2 + 3 only.** Each line goes through {@link priceLine} and\n  {@link assembleLinePrice} at the credited quantity. Nothing scales money by\n  `credited ÷ billed`: that would be a float factor on cents.\n- **Stage 1 is deliberately skipped.** The line keeps the tax refs STORED on\n  the invoice line, so a credit is taxed at the rate that was charged. It never\n  re-resolves jurisdiction, exemption or version. An exempt line carries\n  `taxes: []` and credits untaxed. `taxes` must therefore be the WHOLE rate\n  catalog, superseded versions included.\n- **No D3 refusal.** Credit is raised on settled invoices as a matter of\n  course; crediting prices a NEW document and moves no invoice money.\n- **Totals are stage 5's sum** ({@link sumPricedLines}).\n- **A line may credit DAYS instead of whole units** —\n  {@link CreditSelectionLine.credited_days}, for a charge window the order\n  shortened after it was billed (api-cloudrun#1028). It takes the same day arm\n  the extension branch uses, so the one-week minimum is skipped, and it is\n  refused on a line whose formula never read its days.\n\n⚠️ **The credit composes to within a rounding of re-charging the difference,\nand that is the SHIPPED property rather than a defect.** It mirrors the\nextension — priced at the credited days directly — so\n`charged(billed) − credit(credited)` sits a cent or so from\n`charged(billed − credited)`; both round once, they just round different\nproducts. Measured worst 1¢ over the sweep in\n`tests/price-document.test.ts`. 🔴 **Do not \"fix\" it by pricing the credit as a\ndifference of two charges**: a credit line stores its own declared half beside\nits money, and {@link assembleLinePrice} is the one door.",
           "paramTags": [],
           "returnsTag": null
         },

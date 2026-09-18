@@ -617,6 +617,24 @@ export interface CreditSourceLine {
 export interface CreditSelectionLine<L extends CreditSourceLine = CreditSourceLine> {
   line: L;
   quantity: number;
+  /**
+   * Credit DAYS rather than whole units: a charge window the order SHORTENED
+   * after this line was billed (api-cloudrun#1028 phase 1c).
+   *
+   * 🔴 **A BILLABLE-day count — `−extension_days` — never a count of calendar
+   * days.** `billableDays` floors EACH window at five, and both the billed and
+   * the ordered side are already floored before their difference is taken, so a
+   * window that shrank from 7 calendar days to 6 credits nothing at all. Passing
+   * a calendar delta here credits days the invoice never charged.
+   *
+   * Priced through the same `priceLine` day arm the extension branch uses, so
+   * the one-week minimum is SKIPPED — pricing it as an ordinary line of N days
+   * would floor to a week and credit more than was billed.
+   *
+   * ⚠️ Refused on a `fixed` line: a `fixed` price never read its days, so there
+   * are no days of it to give back.
+   */
+  credited_days?: number;
 }
 
 /** The stored price of one credit-note line: the invoice line's declared half plus money. */
@@ -649,6 +667,21 @@ export interface PricedCreditNote {
  * - **No D3 refusal.** Credit is raised on settled invoices as a matter of
  *   course; crediting prices a NEW document and moves no invoice money.
  * - **Totals are stage 5's sum** ({@link sumPricedLines}).
+ * - **A line may credit DAYS instead of whole units** —
+ *   {@link CreditSelectionLine.credited_days}, for a charge window the order
+ *   shortened after it was billed (api-cloudrun#1028). It takes the same day arm
+ *   the extension branch uses, so the one-week minimum is skipped, and it is
+ *   refused on a line whose formula never read its days.
+ *
+ * ⚠️ **The credit composes to within a rounding of re-charging the difference,
+ * and that is the SHIPPED property rather than a defect.** It mirrors the
+ * extension — priced at the credited days directly — so
+ * `charged(billed) − credit(credited)` sits a cent or so from
+ * `charged(billed − credited)`; both round once, they just round different
+ * products. Measured worst 1¢ over the sweep in
+ * `tests/price-document.test.ts`. 🔴 **Do not "fix" it by pricing the credit as a
+ * difference of two charges**: a credit line stores its own declared half beside
+ * its money, and {@link assembleLinePrice} is the one door.
  *
  * @throws Error on a line that is not a pre-tax line (a divider or a fee has no
  *   credit), on a quantity that is not a positive integer, and when assembled
@@ -661,9 +694,21 @@ export function priceCreditNote(
 ): PricedCreditNote {
   const prices: CreditLinePrice[] = [];
   const priced: LineItem[] = [];
-  for (const { line, quantity } of selection) {
+  for (const { line, quantity, credited_days } of selection) {
     if (!Number.isInteger(quantity) || quantity <= 0) {
       throw new PriceRefusalError(`Credit quantity for line ${line.uid} must be a positive integer, got ${quantity}`);
+    }
+    if (credited_days !== undefined) {
+      if (!Number.isInteger(credited_days) || credited_days <= 0) {
+        throw new PriceRefusalError(
+          `Credited days for line ${line.uid} must be a positive integer of BILLABLE days, got ${credited_days}`,
+        );
+      }
+      if (line.price.formula !== "five_day_week") {
+        throw new PriceRefusalError(
+          `Line ${line.uid} is priced "${line.price.formula}", which never read its days — there are no days of it to credit`,
+        );
+      }
     }
     // A line in an extension section is credited as it was billed: at its own
     // added days with the week minimum skipped. Priced as an ordinary line it
@@ -686,9 +731,18 @@ export function priceCreditNote(
     if (!isPreTaxItem(item)) {
       throw new PriceRefusalError(`Line ${line.uid} has type "${line.type}", which cannot be credited — only a pre-tax line has a credit`);
     }
+    // The day arm, in priority order: an explicit shortening credit, else the
+    // added days of an extension section, else none (an ordinary whole-unit
+    // credit, priced at the line's own stored days).
+    //
+    // ⚠️ `chargeable_days` on the DECLARED half is what the stored line says it
+    // credited, so a days credit carries `credited_days` there rather than the
+    // invoice line's own count. Re-stating the invoice's days beside a smaller
+    // money figure would make the stored line describe a charge nobody made.
+    const dayArm = credited_days ?? (extension ? extensionDaysOf(item) : undefined);
     const price = assembleLinePrice(
-      { base_cents: line.price.base_cents, chargeable_days: line.price.chargeable_days, formula: line.price.formula },
-      priceLine(item, taxes, extension && extensionDaysOf(item)),
+      { base_cents: line.price.base_cents, chargeable_days: credited_days ?? line.price.chargeable_days, formula: line.price.formula },
+      priceLine(item, taxes, dayArm),
       item,
     ) as CreditLinePrice;
     prices.push(price);

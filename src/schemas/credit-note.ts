@@ -281,8 +281,9 @@ export interface CreditNoteDocLineItem {
    * order: requiring it first makes every stored note fail a whole-document
    * write, and backfilling first makes the still-deployed API reject the unknown
    * key. This is the api-cloudrun#443 class exactly, so it takes #443's answer —
-   * `scripts/backfill-credit-note-reverses-billing.ts`, run against a project
-   * immediately before that project's API takes the pin, never as a follow-up.
+   * `api-cloudrun/scripts/backfill-credit-note-reverses-billing.ts`, run against a
+   * project immediately before that project's API takes the pin, never as a
+   * follow-up.
    *
    * ⚠️ **The backfilled value is DERIVED, not a plausible default.** The only
    * writer that ever sets this true is the over-billing offer, which did not

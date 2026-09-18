@@ -31888,6 +31888,7 @@ One invoice line to credit, and how many of it.
 interface CreditSelectionLine {
   line: L;
   quantity: number;
+  credited_days?: number;
 }
 ```
 
@@ -32068,6 +32069,21 @@ The server stores this result, and the manager renders it as a preview.
 - **No D3 refusal.** Credit is raised on settled invoices as a matter of
   course; crediting prices a NEW document and moves no invoice money.
 - **Totals are stage 5's sum** ({@link sumPricedLines}).
+- **A line may credit DAYS instead of whole units** —
+  {@link CreditSelectionLine.credited_days}, for a charge window the order
+  shortened after it was billed (api-cloudrun#1028). It takes the same day arm
+  the extension branch uses, so the one-week minimum is skipped, and it is
+  refused on a line whose formula never read its days.
+
+⚠️ **The credit composes to within a rounding of re-charging the difference,
+and that is the SHIPPED property rather than a defect.** It mirrors the
+extension — priced at the credited days directly — so
+`charged(billed) − credit(credited)` sits a cent or so from
+`charged(billed − credited)`; both round once, they just round different
+products. Measured worst 1¢ over the sweep in
+`tests/price-document.test.ts`. 🔴 **Do not "fix" it by pricing the credit as a
+difference of two charges**: a credit line stores its own declared half beside
+its money, and {@link assembleLinePrice} is the one door.
 
 ### `priceDocument(items: readonly T[], ctx: PriceDocumentContext): PricedDocument<T>`
 
