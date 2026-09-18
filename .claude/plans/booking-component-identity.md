@@ -216,10 +216,47 @@ built through one shared function** — this is the "survey every closed vocabul
 the beta" step `cfs-release-order` requires, and it matters more than usual here because three
 independent constructors already exist (`bookingId()` in `api-cloudrun/src/services/orders.ts`,
 `bookingUidFor()` in `core/src/utils/pick-sheet-fold.ts`, `bookingUidForItem()` in
-`manager/src/utils/orderBookingJoin.ts`) — three re-implementations of one derivation is the exact
-pattern that let this defect class exist in the first place, and the fix must not add a fourth.
-Consolidate all three onto one shared builder (`core/src/utils/booking-id.ts`, new) as part of
-step 3.2, not after.
+`manager/src/utils/orderBookingJoin.ts` — `core`'s own `bookingUidForItem` and `manager`'s
+`joinBookings` both correctly delegate to a shared function already, confirmed by reading them;
+only these three actually construct an id from parts) — three re-implementations of one derivation
+is the exact pattern that let this defect class exist in the first place, and the fix must not add
+a fourth. Consolidate all three onto one shared builder (`core/src/utils/booking-id.ts`, new) as
+part of step 3.2, not after.
+
+**Survey done — a real, concrete finding, not a hypothetical the "naive 3-way split" warning in §2
+was hedging against.** `api-cloudrun/src/lib/bookingDestination.ts` has two functions that parse a
+`BookingId` string by hand and both **require exactly 3 segments**:
+
+- `bookingDestUid(bookingId)` — `parts.length === 3 && parts[2] !== ""`, else `null`. Feeds
+  `isStrandedBookingId`/`classifyStrandedBookings`, which back `scripts/repair-missing-bookings.ts`,
+  `scripts/cleanup-orphan-bookings.ts`, and `scripts/audit-order-projection.ts`'s booking-side arm.
+  Under the new scheme, **every 4-segment (kit-component) booking id returns `null` from this
+  function unchanged**, which makes `isStrandedBookingId` return `false` unconditionally for it —
+  the orphan-detection/repair machinery would go silently blind to exactly the class of booking
+  this migration exists to disambiguate.
+- `pairRepointedBookings(orphanIds, newIds)` — both loops `continue` on `parts.length !== 3`. This
+  is the function `updateOrder`'s reconciliation uses to carry a booking's custody `breakdown`
+  forward across a destination change (keyed by `(order, product)`) instead of seeding it from
+  nothing — its own docblock documents the exact bug this prevents (api-cloudrun#724: a destination
+  change on a booking with no match seeds custody from `undefined`, and a `complete` order ends up
+  reporting `returned: quantity` with no event log). Under the new scheme, **every kit-component
+  booking's destination change would silently skip repointing and hit that exact bug again.**
+
+**Required fix, same commit as the id-shape change:** both functions parse by fixed position, and
+under this design the destination segment's position never moves (§2 — the new segment is
+appended *after* destination, not inserted before it), so the fix is a one-line arity widening in
+each — `(parts.length === 3 || parts.length === 4)` instead of `parts.length === 3` in
+`bookingDestUid`; `(parts.length === 3 || parts.length === 4)` instead of `!== 3` (i.e., don't skip
+on 4 either) in `pairRepointedBookings`, still reading `parts[0]`/`parts[1]` for the pairing key.
+**Also worth doing in the same edit, not required for correctness:** widen `pairRepointedBookings`'
+pairing key from `(order, product)` to `(order, product, signature)` — the coarser key is still
+*safe* post-migration (the function declines ambiguous pairs rather than guessing, per its own
+stated philosophy), just less precise than it could be once a product can genuinely have several
+independent booking identities on one order.
+
+`scripts/audit-order-projection.ts` has a third hand-parse (`d.id.split(":")`, line ~433) that only
+reads `parts[0]`/`parts[1]` with no length check at all — already arity-tolerant by construction,
+confirmed safe, no fix needed.
 
 ### 3.2 Writer changes
 
@@ -446,7 +483,9 @@ known:
 `chooseBookingOwner`, `foldPickSheet`), `core/src/utils/allocation.ts` (precedent + new
 `allocateSubstitutionAcrossBookings`), `api-cloudrun/src/services/orders.ts` (`bookingId()`,
 `buildBookingIdMap`, substitution netting, and the reconciliation block to extract into
-`recomputeOrderBookings`), `manager/src/utils/orderBookingJoin.ts`, new
+`recomputeOrderBookings`), `api-cloudrun/src/lib/bookingDestination.ts` (`bookingDestUid`,
+`pairRepointedBookings` — both currently reject a 4-segment id outright; see §3.1's survey finding,
+required fixes not optional), `manager/src/utils/orderBookingJoin.ts`, new
 `api-cloudrun/scripts/audit-booking-identity-collisions.ts` and
 `api-cloudrun/scripts/backfill-booking-signature-reconciliation.ts`.
 
@@ -455,8 +494,9 @@ known:
 - `api-cloudrun/scripts/audit-booking-identity-collisions.ts` run against both envs **before**
   writing any migration code — its output decides §5's sizing band, and whether the manual-review
   path is needed depends on it plus the §3.3 breakdown-apportionment flag.
-- Read `splitItem`'s real structural-split implementation (§1's open question) and confirm or
-  correct the fungibility claim before the schema ships.
+- `api-cloudrun`: unit tests for `bookingDestUid`/`pairRepointedBookings` (`bookingDestination.ts`)
+  against a planted 4-segment id, asserting both now resolve/pair instead of silently treating it
+  as unparseable — this is the regression §3.1's survey found, not a hypothetical.
 - `core`: `deno task test` with planted collision/fungible-duplicate fixtures for
   `componentAncestry`/`componentSignatureHash`/`consolidateItems`/`buildBookingId`;
   `deno task check:declarations`
@@ -481,7 +521,11 @@ known:
 ## Status
 
 > ## ⚠️ STATUS UPDATE 2026-09-18
-> §1's `splitItem` open question is resolved (see §1 — confirmed uid-reuse, with the nested-
-> component asymmetry noted). Remaining before any schema change: §3.1's measurement (the audit
-> script, `api-cloudrun/scripts/audit-booking-identity-collisions.ts`) and its `BookingId`
-> hand-constructor vocabulary survey. Not started yet.
+> §1's `splitItem` open question is resolved (uid-reuse confirmed, nested-component asymmetry
+> noted). §3.1's `BookingId` vocabulary survey is done — found a real regression the schema change
+> would otherwise cause silently: `api-cloudrun/src/lib/bookingDestination.ts`'s
+> `bookingDestUid`/`pairRepointedBookings` both hard-require exactly 3 segments and would go blind
+> to every kit-component booking (orphan detection, and the api-cloudrun#724 custody-carry-forward
+> fix) — required one-line arity widenings folded into §3.1/§3.2/Critical files/Verification above.
+> Remaining before any schema change: §3.1's collision-count measurement itself (the audit script,
+> `api-cloudrun/scripts/audit-booking-identity-collisions.ts` — not yet written).
