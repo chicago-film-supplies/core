@@ -32709,11 +32709,10 @@ merged, and recompute the derived fields the merge deliberately left alone.
 
 {@link mergeSharedFields} runs per `dates` field and skips the `derived` ones —
 the `_fs` Timestamp mirrors and the day counts — so it leaves them as the
-downstream document had them. (A pair not yet purged of the legacy
-`charge_start`/`charge_end`/`days_charged` carries them through the first two
-cases below unchanged; the mixed case drops them.) That is correct when the merged window came wholly from one side and
-internally inconsistent when it did not, which is exactly what an operator
-editing one endpoint in the pair editor produces. Four cases:
+downstream document had them. That is correct when the merged window came
+wholly from one side and internally inconsistent when it did not, which is
+exactly what an operator editing one endpoint in the pair editor produces.
+Four cases:
 
 First the follow rule: a downstream whose single window equalled its own
 possession follows a possession the merge took from the source (see
