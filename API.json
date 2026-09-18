@@ -10872,7 +10872,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/booking-id",
-      "moduleDoc": "The ONE deterministic constructor for a `bookings.uid` — `componentAncestry`,\n`componentSignatureHash` and {@link buildBookingId}. Before this module\nexisted, three call sites built the id by hand from its parts:\napi-cloudrun's `bookingId()` (`services/orders.ts`), this repo's own\n`bookingUidFor` (`pick-sheet-fold.ts`), and the manager's\n`bookingUidForItem` (`src/utils/orderBookingJoin.ts`). Three\nre-implementations of one derivation is exactly the pattern that let a\nproduct repeating within one order — standalone, as a component of kit A,\nas a component of kit B, or split via `splitItem` — collapse onto a single\nbooking document for years (`core/.claude/plans/booking-component-identity.md`\nwhile that plan lives; see it for the full design this module lands).",
+      "moduleDoc": "The ONE deterministic constructor for a `bookings.uid` — `componentAncestry`,\n`componentSignatureHash` and {@link buildBookingId}. Before this module\nexisted, three call sites built the id by hand from its parts:\napi-cloudrun's `bookingId()` (`api-cloudrun/src/services/orders.ts`), this\nrepo's own `bookingUidFor` (`src/utils/pick-sheet-fold.ts`), and the manager's\n`bookingUidForItem` (`manager/src/utils/orderBookingJoin.ts`). Three\nre-implementations of one derivation is exactly the pattern that let a\nproduct repeating within one order — standalone, as a component of kit A,\nas a component of kit B, or split via `splitItem` — collapse onto a single\nbooking document for years (`core/.claude/plans/booking-component-identity.md`\nwhile that plan lives; see it for the full design this module lands).",
       "symbols": [
         {
           "kind": "function",
