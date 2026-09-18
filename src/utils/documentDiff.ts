@@ -165,7 +165,7 @@ import {
   standInUnits,
   type SubstitutionAnchor,
 } from "./substitutions.ts";
-import { accountLine, type AccountedInvoice, type BilledByPath, billedByPath, orderLineWindow, substitutionCredit } from "./quantityAccounting.ts";
+import { accountLine, type AccountedInvoice, type BilledByPath, billedByPath, crmsAuthoredInvoices, orderLineWindow, substitutionCredit } from "./quantityAccounting.ts";
 import { orderFulfillmentSharedFields, type SharedField } from "./shared-fields.ts";
 
 /** The three document kinds a diff can be viewed from or sourced from. */
@@ -261,6 +261,29 @@ export interface DocumentBilledEntry {
   quantity_cents: number;
   /** Pre-tax cents the order's current chargeable days add to the rows already billed. */
   extension_cents: number;
+  /**
+   * A live CRMS-authored invoice bills this order, so
+   * `buildOverbillingCredits` refuses it and this entry's NEGATIVE money has no
+   * remedy behind it (api-cloudrun#1028 gap 7).
+   *
+   * 🔴 **Stated here rather than left to each reader.** Deciding it needs the
+   * billing invoices' `crms_id`, which `invoices` above does not carry — a
+   * `DocumentRef` is `{kind, uid, number, version}`. So a consumer that wants to
+   * stop rendering over-billed copy nobody can act on would have to re-fetch the
+   * invoices, or have them threaded down beside the entry. Every reader would
+   * derive the same value from the same inputs, which is the definition of a
+   * fact the writer should state.
+   *
+   * ⚠️ **ANY live CRMS invoice, not all of them** — `buildOverbillingCredits`'
+   * own refusal condition. The two must agree, or the copy and the offer refuse
+   * differently one case narrower than before: on a MIXED order an "all CRMS"
+   * test says the line is actionable while the builder returns nothing.
+   *
+   * ⚠️ It says nothing about the POSITIVE half. An unbilled line on a
+   * CRMS-billed order is still unbilled, and a remainder refusing it is a
+   * separate refusal with its own reason.
+   */
+  crms_blocked: boolean;
 }
 
 /** One entry at one key of the viewed document. Discriminated on `kind`. */
@@ -542,6 +565,14 @@ function push<K>(map: Map<K, DocumentDiffEntry[]>, k: K, entry: DocumentDiffEntr
 interface InvoiceCoverage {
   billed: BilledByPath;
   invoices: DocumentRef[];
+  /**
+   * The invoice DOCUMENTS the sum was taken over — the aligned, non-void ones.
+   *
+   * ⚠️ Not the same as {@link invoices}, which is refs for display: a
+   * `DocumentRef` is `{kind, uid, number, version}` and carries no `crms_id`, so
+   * only this half can answer whether the over-billing offer refuses the order.
+   */
+  alignedInvoices: AccountedInvoice[];
 }
 
 /** Does some aligned invoice bill this order-relative line, directly or as a substitute? */
@@ -811,6 +842,9 @@ export function computeDocumentDiffs(
       billed: account.billed,
       quantity_cents: account.quantity_cents,
       extension_cents: account.extension_cents,
+      // The builder's own condition, so the copy and the offer cannot refuse
+      // differently. `alignedInvoices` is what the sum was taken over.
+      crms_blocked: crmsAuthoredInvoices(coverage.alignedInvoices).length > 0,
     });
   };
 

@@ -11364,7 +11364,7 @@
         {
           "kind": "interface",
           "name": "DocumentBilledEntry",
-          "declaration": "interface DocumentBilledEntry {\n  kind: \"billed\";\n  invoices: DocumentRef[];\n  ordered: number;\n  billed: number;\n  quantity_cents: number;\n  extension_cents: number;\n}",
+          "declaration": "interface DocumentBilledEntry {\n  kind: \"billed\";\n  invoices: DocumentRef[];\n  ordered: number;\n  billed: number;\n  quantity_cents: number;\n  extension_cents: number;\n  crms_blocked: boolean;\n}",
           "doc": "\"Billed N of M\" — what every aligned invoice, summed, bills at one order line\nagainst what the order asks for. Like `uninvoiced` it is a statement about all\nof the invoices, so it names every one that was summed.\n\nEmitted only when something bills the line (nothing billing it is\n`uninvoiced`) and the answer is not zero on both money axes. Cents are PRE-TAX\nand signed: negative is over-billing."
         },
         {

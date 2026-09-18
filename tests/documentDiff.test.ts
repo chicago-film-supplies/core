@@ -538,6 +538,32 @@ Deno.test("documentDiff: a remainder — 4 billed of 6 — is one billed entry o
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-a" }, CONTEXT).lines), { [`${O}/${D}/${G}/${LIGHT}`]: entry });
 });
 
+Deno.test("documentDiff: a billed entry says whether the over-billing offer is BLOCKED by CRMS (gap 7)", () => {
+  // The copy and the offer must refuse on the SAME condition, or a surface keeps
+  // rendering "over-billed" that no button can ever clear. Deciding it needs the
+  // invoices' `crms_id`, which the entry's `invoices` refs do not carry — so the
+  // entry states it.
+  const native = { orders: [billedOrder(6)], invoices: [billing("inv-a", 2241, 4)] };
+  const nativeEntry = computeDocumentDiffs(native, { kind: "order", uid: O }, CONTEXT).lines.get(`${D}/${G}/${LIGHT}`);
+  assertEquals((nativeEntry?.[0] as { crms_blocked: boolean }).crms_blocked, false);
+
+  const crms = { ...native, invoices: [{ ...billing("inv-a", 2241, 4), crms_id: 1087 }] };
+  const crmsEntry = computeDocumentDiffs(crms, { kind: "order", uid: O }, CONTEXT).lines.get(`${D}/${G}/${LIGHT}`);
+  assertEquals((crmsEntry?.[0] as { crms_blocked: boolean }).crms_blocked, true);
+});
+
+Deno.test("documentDiff: ANY live CRMS invoice blocks the offer, not only an all-CRMS order", () => {
+  // 🔴 The MIXED order, which is where "any" and "all" disagree — and where an
+  // "all CRMS" test would say the line is actionable while
+  // `buildOverbillingCredits` returns nothing. The 2026-09-16 census found one.
+  const mixed = {
+    orders: [billedOrder(6)],
+    invoices: [billing("inv-a", 2241, 2), { ...billing("inv-b", 2242, 2), crms_id: 1087 }],
+  };
+  const entry = computeDocumentDiffs(mixed, { kind: "order", uid: O }, CONTEXT).lines.get(`${D}/${G}/${LIGHT}`);
+  assertEquals((entry?.[0] as { crms_blocked: boolean }).crms_blocked, true);
+});
+
 Deno.test("documentDiff: a date extension is money on the billed entry, not a chargeable_days differs", () => {
   // Billed 2 at 3 chargeable days (floored to one week: 2 × 1000 = 2000¢); the
   // order now charges 7 days (2 × 1000 × 7 ÷ 5 = 2800¢). 800¢ left to bill —

@@ -25250,6 +25250,7 @@ interface DocumentBilledEntry {
   billed: number;
   quantity_cents: number;
   extension_cents: number;
+  crms_blocked: boolean;
 }
 ```
 
