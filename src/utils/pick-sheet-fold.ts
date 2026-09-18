@@ -60,7 +60,7 @@ import {
 import type { OrgPathNodeType } from "../schemas/mod.ts";
 import { buildBookingId } from "./booking-id.ts";
 import { emptyBookingsBreakdown } from "./bookings.ts";
-import { getItemSubtreeRange, getParentProductUid, getStructuralUids } from "./orders.ts";
+import { getItemSubtreeRange } from "./orders.ts";
 
 /** What {@link foldPickSheet} produces before any page is clipped. */
 export interface PickSheetFoldResult {
@@ -185,7 +185,7 @@ export function compareSheetOrders(a: PickSheetOrder, b: PickSheetOrder): number
 // ── The owner rule ──────────────────────────────────────────────────
 
 /**
- * One occurrence of an aggregate booking — the three facts the owner rule reads.
+ * One occurrence of an aggregate booking — the two facts the owner rule reads.
  *
  * Structural rather than a named document type on purpose: the two callers hand
  * it different rows. This fold builds it from a `PickSheetItem`'s
@@ -195,11 +195,6 @@ export function compareSheetOrders(a: PickSheetOrder, b: PickSheetOrder): number
 export interface BookingOccurrence {
   /** The row's own `path`, carried verbatim from its document. */
   path: string[];
-  /**
-   * Whether the row's immediate parent is a DIVIDER rather than another product
-   * — `getParentProductUid(item, structuralUids) === null`.
-   */
-  isStructural: boolean;
   /** The row's ordered line quantity. */
   quantity: number;
 }
@@ -208,58 +203,39 @@ export interface BookingOccurrence {
  * Which of an aggregate booking's occurrences carries its quantities.
  *
  * 🔴 **ONE author, two callers, and the second one is why this is exported.** A
- * booking is aggregate per `(order, product, destination)`, so the same product
- * legitimately repeats inside one leg — a priced principal beside zero-priced
- * accessories, a `splitItem`, or a product appearing both standalone and as a
- * kit component. Exactly one occurrence renders the quantities; the rest render
- * booking-less and point at it. {@link foldPickSheet} stamps that answer onto
- * `PickSheetItem.owner_path`, and the manager's order-grain join
+ * booking is aggregate per `(order, product, destination,
+ * component_signature_hash)`, so the same product legitimately repeats inside
+ * one leg — a priced principal beside its own zero-priced accessories, or a
+ * `splitItem` clone. Exactly one occurrence renders the quantities; the rest
+ * render booking-less and point at it. {@link foldPickSheet} stamps that
+ * answer onto `PickSheetItem.owner_path`, and the manager's order-grain join
  * (`orderBookingJoin.ts`, which serves the whole fulfillment detail including
  * legs with nothing open) asks the same question about rows this fold never
  * sees. Two implementations of one rule is precisely what moving the fold to
  * core was for.
  *
- * ⚠️ **Kept unsimplified here, even though `bookingUidFor`'s own
- * ancestry-awareness (below) already makes arm 1 UNREACHABLE through both of
- * THIS module's callers.** Once `uidBooking` is computed by
- * {@link buildBookingId}, two occurrences only ever land in the same
- * `occurrences.get(uidBooking)` bucket when their `componentAncestry` — and
- * therefore `isStructural` — already agree, so arm 1 can no longer fire in
- * `foldPickSheet` or `bookingOccurrencesByBooking`. But this function is
- * `export`ed for exactly one more reason: **the manager's own
- * `orderBookingJoin.ts` calls it too**, and as of this comment it still
- * builds a `uidBooking` by hand with the OLD flat (non-ancestry-aware)
- * template — the manager-side half of
- * `core/.claude/plans/booking-component-identity.md` §3.2/§3.4 (while that
- * plan lives) has not landed yet. Until it does, manager can still hand this
- * function occurrences that genuinely differ in `isStructural`, and arm 1 is
- * what stops prod order 961's bug from reappearing THERE. Simplifying this
- * function is safe only in the same beta wave as the manager's own builder
- * update (§3.4 step 5) — doing it here, alone, would ship a core version that
- * silently regresses manager's display the moment it bumps its pin.
+ * ⭐ **Simplified from a two-arm rule (structural parentage, THEN quantity) to
+ * quantity alone** — the structural-parentage override existed to rescue
+ * cases where the OLD (non-ancestry-aware) booking id had wrongly merged
+ * structurally-different occurrences of one product (prod order 961: a milk
+ * crate under a steamer, two tents and an extension cord, all one booking).
+ * Under {@link buildBookingId}'s ancestry-aware id, that collision is
+ * unrepresentable: two occurrences only ever share one `uid_booking` when
+ * their `componentAncestry` already agrees, so every candidate this function
+ * chooses among is, by construction, genuinely fungible — the override arm
+ * had nothing left to correct. Landed together with the matching update to
+ * manager's `orderBookingJoin.ts` (same beta wave, `core/.claude/plans/
+ * booking-component-identity.md` §3.4/§3.5 while that plan lives) — simplifying
+ * it in core alone, ahead of manager's own builder update, would have shipped
+ * a core version that silently regressed manager's display the moment it
+ * bumped its pin.
  *
- * The rule, in order:
- *
- * 1. **Structural parentage** — a strict OVERRIDE, not a tiebreak, and it is
- *    load-bearing. A booking-less structurally-parented row is exactly the one
- *    the manager's row classifier cannot rescue through a product ancestor: it
- *    has none. It still classifies, but only because SOME occurrence owns, so
- *    the structural class must win outright whenever it is non-empty.
- * 2. **The largest ordered line quantity.** Exactly one row carries the picker,
- *    the action and the reserved/prepped cells for every unit of the product in
- *    this section, so it should be the row where the largest share of those
- *    units physically belongs.
- *
- *    ⚠️ **This used to be document order alone, and that is arbitrary with
- *    respect to placement.** Prod order 961 had a Long Milk Crate at four
- *    component-parented occurrences (qty 1 / 1 / 2 / 1) under a steamer, two
- *    tents and an extension cord; document order handed all 5 units to the
- *    steamer's copy, so the crates were prepped from inside *Wardrobe* — and
- *    dragged the steamer, itself fully checked out, back into the *Reserved*
- *    pane as the ancestor shell needed to place its owner child.
- * 3. **Document order** — implicit. `occurrences` must be in it, and a tie never
- *    displaces the incumbent, so the earliest of the best `(structural,
- *    quantity)` pair keeps the booking.
+ * The rule: **the largest ordered line quantity**, document order breaking a
+ * tie. Exactly one row carries the picker, the action and the
+ * reserved/prepped cells for every unit of the product in this section, so it
+ * should be the row where the largest share of those units physically
+ * belongs; a tie never displaces the incumbent, so the earliest of the best
+ * quantity keeps the booking.
  *
  * Returns `null` for an empty list, which is the honest answer: a booking with
  * no occurrence on this sheet has no owner on it either.
@@ -269,15 +245,7 @@ export function chooseBookingOwner<T extends BookingOccurrence>(
 ): T | null {
   let best: T | null = null;
   for (const candidate of occurrences) {
-    if (best === null) {
-      best = candidate;
-      continue;
-    }
-    if (candidate.isStructural !== best.isStructural) {
-      if (candidate.isStructural) best = candidate;
-      continue;
-    }
-    if (candidate.quantity > best.quantity) best = candidate;
+    if (best === null || candidate.quantity > best.quantity) best = candidate;
   }
   return best;
 }
@@ -330,10 +298,6 @@ export function foldPickSheet(input: {
     }
 
     const bookingByUid = new Map(orderBookings.map((b) => [b.uid, b]));
-    // Structural uids are a property of the WHOLE document, not of one leg: a
-    // line's parent is structural if the uid two segments back is any divider in
-    // this document. Computed once per order rather than per leg.
-    const structuralUids = getStructuralUids(fulfillment.items);
     const legs: PickSheetDestination[] = [];
 
     for (let i = 0; i < fulfillment.items.length; i++) {
@@ -384,7 +348,6 @@ export function foldPickSheet(input: {
         const list = occurrences.get(uidBooking);
         const occurrence: BookingOccurrence = {
           path: item.path,
-          isStructural: getParentProductUid(item, structuralUids) === null,
           quantity: item.quantity,
         };
         if (list) list.push(occurrence);
@@ -531,14 +494,12 @@ function bookingUidForItem(
  */
 export function bookingOccurrencesByBooking(
   orderUid: string,
-  // Non-readonly to match `getStructuralUids` / `getItemSubtreeRange`, which the
-  // fold hands the same array. Neither mutates it.
+  // Non-readonly to match `getItemSubtreeRange`, which the fold hands the
+  // same array. Does not mutate it.
   items: FulfillmentItemType[],
   destinations: readonly { uid: string; delivery: { uid: string | null } }[],
 ): Map<string, BookingOccurrence[]> {
   const out = new Map<string, BookingOccurrence[]>();
-  // A property of the WHOLE document, not of one leg — same as the fold.
-  const structuralUids = getStructuralUids(items);
 
   for (let i = 0; i < items.length; i++) {
     const divider = items[i];
@@ -554,7 +515,6 @@ export function bookingOccurrencesByBooking(
       const uidBooking = bookingUidFor(orderUid, item, deliveryUid);
       const occurrence: BookingOccurrence = {
         path: item.path,
-        isStructural: getParentProductUid(item, structuralUids) === null,
         quantity: item.quantity,
       };
       const list = out.get(uidBooking);
