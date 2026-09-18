@@ -24381,8 +24381,7 @@ repo's own `bookingUidFor` (`src/utils/pick-sheet-fold.ts`), and the manager's
 re-implementations of one derivation is exactly the pattern that let a
 product repeating within one order — standalone, as a component of kit A,
 as a component of kit B, or split via `splitItem` — collapse onto a single
-booking document for years (`core/.claude/plans/booking-component-identity.md`
-while that plan lives; see it for the full design this module lands).
+booking document for years.
 
 ### `buildBookingId(orderUid: string, item: typeLiteral, path: readonly string[], destUid: string): string`
 
@@ -28269,8 +28268,7 @@ swept into each other.
 
 A standalone unit of a product and an occurrence of the same product nested
 inside a kit are genuinely different bookings (`@cfs/core/utils/booking-id`'s
-`componentSignatureHash`, `core/.claude/plans/booking-component-identity.md`
-while that plan lives) — grouping on the bare uid alone is exactly the
+`componentSignatureHash`) — grouping on the bare uid alone is exactly the
 conflation that let a fully-checked-out kit component and a still-reserved
 standalone unit of the same product collapse onto one seed row. Two
 occurrences with the SAME signature (including two top-level ones, both
@@ -31547,8 +31545,7 @@ swept into each other.
 
 A standalone unit of a product and an occurrence of the same product nested
 inside a kit are genuinely different bookings (`@cfs/core/utils/booking-id`'s
-`componentSignatureHash`, `core/.claude/plans/booking-component-identity.md`
-while that plan lives) — grouping on the bare uid alone is exactly the
+`componentSignatureHash`) — grouping on the bare uid alone is exactly the
 conflation that let a fully-checked-out kit component and a still-reserved
 standalone unit of the same product collapse onto one seed row. Two
 occurrences with the SAME signature (including two top-level ones, both
@@ -33478,8 +33475,7 @@ swept into each other.
 
 A standalone unit of a product and an occurrence of the same product nested
 inside a kit are genuinely different bookings (`@cfs/core/utils/booking-id`'s
-`componentSignatureHash`, `core/.claude/plans/booking-component-identity.md`
-while that plan lives) — grouping on the bare uid alone is exactly the
+`componentSignatureHash`) — grouping on the bare uid alone is exactly the
 conflation that let a fully-checked-out kit component and a still-reserved
 standalone unit of the same product collapse onto one seed row. Two
 occurrences with the SAME signature (including two top-level ones, both
@@ -33705,8 +33701,7 @@ unrepresentable: two occurrences only ever share one `uid_booking` when
 their `componentAncestry` already agrees, so every candidate this function
 chooses among is, by construction, genuinely fungible — the override arm
 had nothing left to correct. Landed together with the matching update to
-manager's `orderBookingJoin.ts` (same beta wave, `core/.claude/plans/
-booking-component-identity.md` §3.4/§3.5 while that plan lives) — simplifying
+manager's `orderBookingJoin.ts` (same beta wave) — simplifying
 it in core alone, ahead of manager's own builder update, would have shipped
 a core version that silently regressed manager's display the moment it
 bumped its pin.

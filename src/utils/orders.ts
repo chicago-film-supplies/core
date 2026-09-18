@@ -2653,8 +2653,7 @@ export function getGroupPath(items: LineItem[], index: number): GroupPath {
  *
  * A standalone unit of a product and an occurrence of the same product nested
  * inside a kit are genuinely different bookings (`@cfs/core/utils/booking-id`'s
- * `componentSignatureHash`, `core/.claude/plans/booking-component-identity.md`
- * while that plan lives) — grouping on the bare uid alone is exactly the
+ * `componentSignatureHash`) — grouping on the bare uid alone is exactly the
  * conflation that let a fully-checked-out kit component and a still-reserved
  * standalone unit of the same product collapse onto one seed row. Two
  * occurrences with the SAME signature (including two top-level ones, both

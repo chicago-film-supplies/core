@@ -1,7 +1,6 @@
 /**
  * `src/utils/booking-id.ts` — the ONE deterministic constructor for a
- * `bookings.uid`. See `core/.claude/plans/booking-component-identity.md` §1-§2
- * while that plan lives.
+ * `bookings.uid`.
  */
 import { assertEquals, assertMatch, assertNotEquals } from "@std/assert";
 import { BookingId } from "../src/schemas/_uid.ts";

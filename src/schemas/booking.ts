@@ -181,8 +181,7 @@ export interface Booking {
    * change that would change this value produces a genuinely different
    * `uid`, which the booking-reconciliation diff (`api-cloudrun`'s
    * `writableEntries`) already creates/orphans through its existing
-   * missing-id arm — see `core/.claude/plans/booking-component-identity.md`
-   * §2 while that plan lives.
+   * missing-id arm.
    *
    * ⚠️ **Optional, not required — deliberately, against §2's literal
    * one-line field spec.** ~7,266 bookings stored before this field existed

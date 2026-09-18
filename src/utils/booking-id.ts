@@ -8,8 +8,7 @@
  * re-implementations of one derivation is exactly the pattern that let a
  * product repeating within one order — standalone, as a component of kit A,
  * as a component of kit B, or split via `splitItem` — collapse onto a single
- * booking document for years (`core/.claude/plans/booking-component-identity.md`
- * while that plan lives; see it for the full design this module lands).
+ * booking document for years.
  *
  * @module
  */

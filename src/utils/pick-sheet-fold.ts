@@ -224,8 +224,7 @@ export interface BookingOccurrence {
  * their `componentAncestry` already agrees, so every candidate this function
  * chooses among is, by construction, genuinely fungible — the override arm
  * had nothing left to correct. Landed together with the matching update to
- * manager's `orderBookingJoin.ts` (same beta wave, `core/.claude/plans/
- * booking-component-identity.md` §3.4/§3.5 while that plan lives) — simplifying
+ * manager's `orderBookingJoin.ts` (same beta wave) — simplifying
  * it in core alone, ahead of manager's own builder update, would have shipped
  * a core version that silently regressed manager's display the moment it
  * bumped its pin.

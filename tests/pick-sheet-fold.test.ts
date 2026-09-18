@@ -703,11 +703,10 @@ Deno.test("owner: two lines on one booking — exactly one OWNS, and the others 
     items: [
       divider(LEG_1, "Stage 4"),
       // Two top-level occurrences of the SAME product, in different GROUPS. A
-      // group divider is structural — never a product parent
-      // (`core/.claude/plans/booking-component-identity.md` §1's
-      // "group-divider identity is deliberately excluded", while that plan
-      // lives) — so both have EMPTY component ancestry and resolve to the
-      // SAME booking id: a genuine "one booking, two rows" case.
+      // group divider is structural — never a product parent ("group-divider
+      // identity is deliberately excluded" from the signature) — so both have
+      // EMPTY component ancestry and resolve to the SAME booking id: a
+      // genuine "one booking, two rows" case.
       group(GROUP_1, "Camera A", [LEG_1, GROUP_1]),
       line(CAMERA, "Alexa 35", 2, [LEG_1, GROUP_1, CAMERA]),
       line(TRIPOD, "Sachtler", 1, [LEG_1, TRIPOD]),
