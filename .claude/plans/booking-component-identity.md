@@ -67,18 +67,35 @@ sibling group) resolve to the same signature as the original, correctly staying 
 (four distinct single-element chains) — this is not a new heuristic tuned to that incident, it's
 the general case the incident was a symptom of.
 
-**Open question, not settled — verify before finalizing the schema:** if an operator `splitItem`s
-a *kit* and then independently re-edits one copy's child product, whether the two copies' matching
-children correctly stay fungible depends on whether `splitItem` re-mints new item uids for the
-kit's carried-along children or reuses the originals. Nobody has read `splitItem`'s actual
-structural-split implementation yet this session (only `manager/src/utils/splitQuantity.ts`, the
-quantity-*scaling* half — the real mover is one of `core/src/utils/item-pairing.ts` /
-`core/src/utils/fulfillment-items.ts` / `manager/src/components/SplitQuantityPopover.tsx`, none
-opened). If it reuses uids, ancestry-based fungibility is correct as designed. If it re-mints new
-component uids per copy, the ambiguity dissolves on its own (different uids never collide
-regardless of signature) — also fine, just for a different reason. **Read the real implementation
-in migration step 0** before treating this as closed; don't ship the schema docblock's claim on
-faith.
+**Resolved.** The real mover is `splitOrderItem` (`manager/src/stores/orders.ts:559`), reached via
+`handle.splitItem`. It clones the source item's whole subtree (`getItemSubtreeRange`) into a new
+sibling group, and every clone is built as `{ ...origLine, quantity: newQty }` — a shallow spread
+that **reuses the original `uid`**, only overwriting `quantity`. The function's own comment
+confirms this is deliberate: *"Clones deliberately reuse the source subtree's uids
+(same-uid-at-two-paths)."* Only the new enclosing **group** divider gets a freshly minted uid
+(`newGroupUid = crypto.randomUUID()`); every product/component uid inside the cloned subtree is
+preserved. Since `componentAncestry` strips structural (group/destination) segments and keeps only
+product uids, a split clone's ancestry is identical to the original's — group-divider identity was
+already excluded from the signature for exactly this reason (§1 above), and this confirms it holds
+for the whole nested kit tree, not just the split root: a cloned kit's own components keep their
+original uids too, so their ancestry (`[...,sourceProduct.uid]`) is unchanged.
+
+⚠️ **One real asymmetry, worth noting rather than treating as settled-and-forgotten:**
+`splitOrderItem` always inserts the new group (and its clones) as a **top-level** sibling within
+the destination — `working = [...before, ...updatedSubtree, ...afterSubtreeUntilDestEnd, newGroup,
+...clones, ...after]`, unconditional on where the split *source* sat. So splitting a **top-level**
+product's quantity produces a fungible clone (ancestry unchanged, correctly merges) — the common
+case, and the one `SplitQuantityPopover` is normally reached from. Splitting a **nested
+kit-component** row (if ever exposed there) would produce a clone whose ancestry changes from
+`[...,kitProduct.uid]` to `[]`, because the clone lands as a new top-level group rather than
+staying nested under its original kit — a genuinely different booking, correctly, not a bug: a
+component pulled out and re-grouped on its own really is a different physical/logical draw than
+one still nested inside its kit. **Confirmed reachable, not hypothetical:** `OrderItemRow.tsx`/
+`InvoiceItemRow.tsx` gate `SplitQuantityPopover` only on `!disabled() && !isCustom() &&
+!isTransactionFee() && item.type !== "surcharge" && !isZeroPriced() && quantity > 1` — nothing
+excludes a nested (non-zero-priced) kit-component row. So this asymmetry will actually occur, not
+just in principle; downstream language should say "fungible for a top-level split" rather than
+"fungible," full stop.
 
 ## 2. Where it lives
 
@@ -463,6 +480,8 @@ known:
 
 ## Status
 
-Approved 2026-09-18. Not yet started. Next step: §3.1's measurement (the audit script) and
-resolving §1's `splitItem` open question — both read-only research, no schema change until both
-report back.
+> ## ⚠️ STATUS UPDATE 2026-09-18
+> §1's `splitItem` open question is resolved (see §1 — confirmed uid-reuse, with the nested-
+> component asymmetry noted). Remaining before any schema change: §3.1's measurement (the audit
+> script, `api-cloudrun/scripts/audit-booking-identity-collisions.ts`) and its `BookingId`
+> hand-constructor vocabulary survey. Not started yet.
