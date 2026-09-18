@@ -2910,6 +2910,7 @@ interface CreditNoteDocLineItem {
   xero_tracking_option_id: string | null;
   uid_invoice_item: string | null;
   path_invoice_item?: string[];
+  reverses_billing: boolean;
 }
 ```
 
@@ -18855,6 +18856,7 @@ interface CreditNoteDocLineItem {
   xero_tracking_option_id: string | null;
   uid_invoice_item: string | null;
   path_invoice_item?: string[];
+  reverses_billing: boolean;
 }
 ```
 
@@ -25535,6 +25537,31 @@ the rest cannot be told apart from it with what is stored.
 
 Pure: no reads.
 
+### `AccountedCreditNote`
+
+A credit note as quantity accounting reads it.
+
+```ts
+interface AccountedCreditNote {
+  uid: string;
+  status: CreditNoteStatusType;
+  items: readonly AccountedCreditNoteItem[];
+  sources?: readonly typeLiteral[];
+}
+```
+
+### `AccountedCreditNoteItem`
+
+One credit-note line, as {@link billingReversals} reads it.
+
+```ts
+interface AccountedCreditNoteItem {
+  quantity: number;
+  path_invoice_item?: readonly string[];
+  reverses_billing: boolean;
+}
+```
+
 ### `AccountedInvoice`
 
 The invoice shape these functions read — every linked invoice, live or void.
@@ -25567,6 +25594,7 @@ interface BilledByPath {
   byPath: Map<string, BilledAtPath>;
   compared: string[];
   unaligned: string[];
+  credits_unkeyed: string[];
 }
 ```
 
@@ -25593,6 +25621,15 @@ interface BilledWindow {
   end: string;
   days: readonly number[];
   windows: readonly WindowBounds[];
+}
+```
+
+### `BillingReversals`
+
+```ts
+interface BillingReversals {
+  byRow: Map<string, number>;
+  unkeyed: string[];
 }
 ```
 
@@ -25634,6 +25671,7 @@ interface RemainingForOrder {
   compared: string[];
   unaligned: string[];
   crms_authored: string[];
+  credits_unkeyed: string[];
 }
 ```
 
@@ -25704,7 +25742,7 @@ Account for one order line against what the invoices bill at its path.
 - `billed` — {@link billedByPath}'s entry for the line's path, if any
 - `orderWindow` — {@link orderLineWindow} for the line; `null` extends nothing
 
-### `billedByPath(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[]): BilledByPath`
+### `billedByPath(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], _: unknown): BilledByPath`
 
 How much each order path is billed, summed across every non-void, aligned
 invoice (D3).
@@ -25719,11 +25757,50 @@ uncounted, so everything it bills reads unbilled.
 An invoice line at a path the order does not carry is still keyed here; it is
 the order's absence, not the sum's, that makes it unmatched.
 
+## Credit notes net the units they reverse (api-cloudrun#1028 phase 1b)
+
+A credit note this feature authored subtracts the units it reverses from the
+row that billed them, so taking the over-billing offer CLEARS the offer rather
+than leaving it standing for ever. {@link billingReversals} decides which lines
+qualify; `credits_unkeyed` names the notes it could not key.
+
+⚠️ **The subtraction happens on the ROW, before the substitution ratio walk** —
+not on the path total afterwards. That ordering is what makes a credit against
+a substitute Y reduce the units standing in for each X, and then flow down the
+order's own ratio to X's components. Netting the total afterwards would leave
+every descendant crediting units their parent no longer bills.
+
+⚠️ **Units only. Days are NOT netted here** — a credited shortening is reported
+as a suppressed offer instead. `billed_days` is derived inside
+{@link extensionGroups}, where extension rows split and merge groups, so a
+`(path, quantity, days)` triple cannot say which group loses the days.
+
 **Parameters**
 
 - `orderUid` — The order's uid, which is its divider's uid on every invoice
 - `orderItems` — The order's CURRENT `items`, dividers included
 - `invoices` — Every invoice linked to the order, live or void
+- `creditNotes` — Every credit note on those invoices. Omitted ⇒ nothing nets.
+
+### `billingReversals(creditNotes: readonly AccountedCreditNote[]): BillingReversals`
+
+The units each invoice row's billing has been REVERSED by, from credit notes.
+
+A line counts only when all four hold, and each one is load-bearing:
+
+- the note is `issued` or `applied` — a draft has not credited anything, and a
+  void one has been taken back;
+- the line sets `reverses_billing`. 🔴 **Never gate on `reason` instead**:
+  `bad_debt` is a write-off and `order_adjustment` covers loss-and-damage, so
+  netting by reason would make {@link remainingForOrder} offer to RE-BILL units
+  that were written off rather than returned;
+- the line names `path_invoice_item`, the invoice row it credits. `uid` alone
+  is not a row identity — it repeats within one document;
+- the note names exactly ONE invoice in `sources`. A path key is only unique
+  within one document, so without that the same path on two invoices is
+  indistinguishable and the credit could be subtracted from the wrong row.
+
+Anything else is reported in `unkeyed` rather than guessed at.
 
 ### `buildRemainingInvoice(order: RemainingOrderSource, invoices: readonly RemainingInvoiceSource[], _: unknown): RemainingInvoice`
 
@@ -25812,7 +25889,7 @@ The window of the order pair an order line hangs under (`path[0]`), or `null`.
 
 A pair's {@link BilledWindow}, or `null` when it has no windows.
 
-### `remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], orderDestinations: readonly DocDestinationType[]): RemainingForOrder`
+### `remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], orderDestinations: readonly DocDestinationType[], _: unknown): RemainingForOrder`
 
 What is left to bill on an order: new lines in full, quantity deltas at
 existing paths, and date-extension money on rows already billed (D4).

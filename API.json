@@ -1287,7 +1287,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocLineItem",
-          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType | null;\n  coa_posting: number;\n  tracking_category: string | null;\n  xero_id: string | null;\n  xero_tracking_option_id: string | null;\n  uid_invoice_item: string | null;\n  path_invoice_item?: string[];\n}",
+          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType | null;\n  coa_posting: number;\n  tracking_category: string | null;\n  xero_id: string | null;\n  xero_tracking_option_id: string | null;\n  uid_invoice_item: string | null;\n  path_invoice_item?: string[];\n  reverses_billing: boolean;\n}",
           "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**No dividers.** A credit note has no destinations and bills no orders, so the\nwhole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`\nmachinery that goes with it — has nothing to organize here. Lines are flat.\n\n## `coa_revenue` and `coa_posting` are TWO facts, and a line has both\n\nThey are routinely different, and collapsing them loses real information.\nMeasured on the live tenant: CN-1009 writes off 35 lines whose products are\nrentals — `product.price.coa_revenue` 4000 Rental Income — and every one of\nthem posts to **6900 Bad Debt**. Store only the posting account and the\nrevenue attribution that tracking-category rollups and the tax tables depend\non is gone; store only the revenue account and the write-off is invisible.\n\n- **`coa_revenue`** — the revenue account of the *thing being credited*.\n  Product-sourced, same vocabulary as the invoice line it mirrors. Never the\n  account the credit posts to, and — since the owner ruling of 2026-08-20 —\n  never an input to what the line is taxed either.\n- **`coa_posting`** — where this credit lands in the ledger. Any account in\n  the `chart-of-accounts` catalog, including the expense range, which is\n  exactly why it cannot be `COARevenueEnum`: that enum is shared with\n  `Product.price.coa_revenue`, and widening it would make a catalog product\n  whose revenue account is Bad Debt Expense representable."
         },
         {
@@ -8478,7 +8478,7 @@
         {
           "kind": "interface",
           "name": "CreditNoteDocLineItem",
-          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType | null;\n  coa_posting: number;\n  tracking_category: string | null;\n  xero_id: string | null;\n  xero_tracking_option_id: string | null;\n  uid_invoice_item: string | null;\n  path_invoice_item?: string[];\n}",
+          "declaration": "interface CreditNoteDocLineItem {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: CreditNoteDocItemPrice;\n  coa_revenue: COARevenueType | null;\n  coa_posting: number;\n  tracking_category: string | null;\n  xero_id: string | null;\n  xero_tracking_option_id: string | null;\n  uid_invoice_item: string | null;\n  path_invoice_item?: string[];\n  reverses_billing: boolean;\n}",
           "doc": "A credited line.\n\n**`coa_revenue` is required, not optional.** A credit spanning lines with\ndifferent revenue accounts (#1689 hits 4000 and 4100; #1322 is all 4210)\ncannot be posted correctly from a document-level amount, and apportioning it\nafterwards is inferring cause from effect — the thing `schemas/transaction.ts` warns\nagainst. This is also the gap Xero *has*: its allocation view carries\n`LineItems: []`, and Odoo's users pay OCA for a module that adds line-level\nprovenance.\n\n**No dividers.** A credit note has no destinations and bills no orders, so the\nwhole `ORDER_ITEM_LEVELS` / `INVOICE_ITEM_LEVELS` hierarchy — and the `path`\nmachinery that goes with it — has nothing to organize here. Lines are flat.\n\n## `coa_revenue` and `coa_posting` are TWO facts, and a line has both\n\nThey are routinely different, and collapsing them loses real information.\nMeasured on the live tenant: CN-1009 writes off 35 lines whose products are\nrentals — `product.price.coa_revenue` 4000 Rental Income — and every one of\nthem posts to **6900 Bad Debt**. Store only the posting account and the\nrevenue attribution that tracking-category rollups and the tax tables depend\non is gone; store only the revenue account and the write-off is invisible.\n\n- **`coa_revenue`** — the revenue account of the *thing being credited*.\n  Product-sourced, same vocabulary as the invoice line it mirrors. Never the\n  account the credit posts to, and — since the owner ruling of 2026-08-20 —\n  never an input to what the line is taxed either.\n- **`coa_posting`** — where this credit lands in the ledger. Any account in\n  the `chart-of-accounts` catalog, including the expense range, which is\n  exactly why it cannot be `COARevenueEnum`: that enum is shared with\n  `Product.price.coa_revenue`, and widening it would make a catalog product\n  whose revenue account is Bad Debt Expense representable."
         },
         {
@@ -11468,6 +11468,18 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "AccountedCreditNote",
+          "declaration": "interface AccountedCreditNote {\n  uid: string;\n  status: CreditNoteStatusType;\n  items: readonly AccountedCreditNoteItem[];\n  sources?: readonly typeLiteral[];\n}",
+          "doc": "A credit note as quantity accounting reads it."
+        },
+        {
+          "kind": "interface",
+          "name": "AccountedCreditNoteItem",
+          "declaration": "interface AccountedCreditNoteItem {\n  quantity: number;\n  path_invoice_item?: readonly string[];\n  reverses_billing: boolean;\n}",
+          "doc": "One credit-note line, as {@link billingReversals} reads it."
+        },
+        {
+          "kind": "interface",
           "name": "AccountedInvoice",
           "declaration": "interface AccountedInvoice {\n  uid: string;\n  status: InvoiceStatusType;\n  items: InvoiceItem[];\n  destinations?: readonly InvoiceDocDestinationType[];\n  crms_id?: number | string | null;\n}",
           "doc": "The invoice shape these functions read — every linked invoice, live or void."
@@ -11481,7 +11493,7 @@
         {
           "kind": "interface",
           "name": "BilledByPath",
-          "declaration": "interface BilledByPath {\n  byPath: Map<string, BilledAtPath>;\n  compared: string[];\n  unaligned: string[];\n}",
+          "declaration": "interface BilledByPath {\n  byPath: Map<string, BilledAtPath>;\n  compared: string[];\n  unaligned: string[];\n  credits_unkeyed: string[];\n}",
           "doc": ""
         },
         {
@@ -11498,6 +11510,12 @@
         },
         {
           "kind": "interface",
+          "name": "BillingReversals",
+          "declaration": "interface BillingReversals {\n  byRow: Map<string, number>;\n  unkeyed: string[];\n}",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
           "name": "ExtensionGroup",
           "declaration": "interface ExtensionGroup {\n  item: LineItem;\n  via: \"direct\" | \"substitute\";\n  quantity: number;\n  billed_days: number;\n  billed_end: string;\n  billed_set: readonly WindowBounds[];\n  extension_days: number;\n  section: [string, string];\n  last_billed: typeLiteral;\n}",
           "doc": "Units billed at one cumulative day count, still owed (or over-billed) an extension."
@@ -11511,7 +11529,7 @@
         {
           "kind": "interface",
           "name": "RemainingForOrder",
-          "declaration": "interface RemainingForOrder {\n  lines: RemainingLine[];\n  compared: string[];\n  unaligned: string[];\n  crms_authored: string[];\n}",
+          "declaration": "interface RemainingForOrder {\n  lines: RemainingLine[];\n  compared: string[];\n  unaligned: string[];\n  crms_authored: string[];\n  credits_unkeyed: string[];\n}",
           "doc": ""
         },
         {
@@ -11568,8 +11586,8 @@
         {
           "kind": "function",
           "name": "billedByPath",
-          "signature": "billedByPath(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[]): BilledByPath",
-          "doc": "How much each order path is billed, summed across every non-void, aligned\ninvoice (D3).\n\n⚠️ **An unaligned scope is left out of the sum and named in `unaligned`**;\nthis does not fail closed on its own, because `computeDocumentDiffs`\nreports an unaligned scope as its own entry and still compares the aligned\nones. A caller about to ACT on the sum — {@link remainingForOrder} — must\nrefuse when `unaligned` is non-empty: an unaligned scope's lines are\nuncounted, so everything it bills reads unbilled.\n\nAn invoice line at a path the order does not carry is still keyed here; it is\nthe order's absence, not the sum's, that makes it unmatched.",
+          "signature": "billedByPath(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], _: unknown): BilledByPath",
+          "doc": "How much each order path is billed, summed across every non-void, aligned\ninvoice (D3).\n\n⚠️ **An unaligned scope is left out of the sum and named in `unaligned`**;\nthis does not fail closed on its own, because `computeDocumentDiffs`\nreports an unaligned scope as its own entry and still compares the aligned\nones. A caller about to ACT on the sum — {@link remainingForOrder} — must\nrefuse when `unaligned` is non-empty: an unaligned scope's lines are\nuncounted, so everything it bills reads unbilled.\n\nAn invoice line at a path the order does not carry is still keyed here; it is\nthe order's absence, not the sum's, that makes it unmatched.\n\n## Credit notes net the units they reverse (api-cloudrun#1028 phase 1b)\n\nA credit note this feature authored subtracts the units it reverses from the\nrow that billed them, so taking the over-billing offer CLEARS the offer rather\nthan leaving it standing for ever. {@link billingReversals} decides which lines\nqualify; `credits_unkeyed` names the notes it could not key.\n\n⚠️ **The subtraction happens on the ROW, before the substitution ratio walk** —\nnot on the path total afterwards. That ordering is what makes a credit against\na substitute Y reduce the units standing in for each X, and then flow down the\norder's own ratio to X's components. Netting the total afterwards would leave\nevery descendant crediting units their parent no longer bills.\n\n⚠️ **Units only. Days are NOT netted here** — a credited shortening is reported\nas a suppressed offer instead. `billed_days` is derived inside\n{@link extensionGroups}, where extension rows split and merge groups, so a\n`(path, quantity, days)` triple cannot say which group loses the days.",
           "paramTags": [
             {
               "name": "orderUid",
@@ -11582,8 +11600,20 @@
             {
               "name": "invoices",
               "doc": "Every invoice linked to the order, live or void"
+            },
+            {
+              "name": "creditNotes",
+              "doc": "Every credit note on those invoices. Omitted ⇒ nothing nets."
             }
           ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "billingReversals",
+          "signature": "billingReversals(creditNotes: readonly AccountedCreditNote[]): BillingReversals",
+          "doc": "The units each invoice row's billing has been REVERSED by, from credit notes.\n\nA line counts only when all four hold, and each one is load-bearing:\n\n- the note is `issued` or `applied` — a draft has not credited anything, and a\n  void one has been taken back;\n- the line sets `reverses_billing`. 🔴 **Never gate on `reason` instead**:\n  `bad_debt` is a write-off and `order_adjustment` covers loss-and-damage, so\n  netting by reason would make {@link remainingForOrder} offer to RE-BILL units\n  that were written off rather than returned;\n- the line names `path_invoice_item`, the invoice row it credits. `uid` alone\n  is not a row identity — it repeats within one document;\n- the note names exactly ONE invoice in `sources`. A path key is only unique\n  within one document, so without that the same path on two invoices is\n  indistinguishable and the credit could be subtracted from the wrong row.\n\nAnything else is reported in `unkeyed` rather than guessed at.",
+          "paramTags": [],
           "returnsTag": null
         },
         {
@@ -11629,7 +11659,7 @@
         {
           "kind": "function",
           "name": "remainingForOrder",
-          "signature": "remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], orderDestinations: readonly DocDestinationType[]): RemainingForOrder",
+          "signature": "remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], orderDestinations: readonly DocDestinationType[], _: unknown): RemainingForOrder",
           "doc": "What is left to bill on an order: new lines in full, quantity deltas at\nexisting paths, and date-extension money on rows already billed (D4).\n\n🔴 **Fails closed on any unaligned scope** — `lines` comes back empty and the\nuids are in `unaligned`. A remainder built over a partial sum bills again\nwhatever the unaligned invoice already billed.\n\n🔴 **Fails closed on any live CRMS-authored invoice**, the same way, naming it\nin `crms_authored` — see the module header.\n\nEvery order LINE is considered, dividers never. A line whose quantity and\nextension are both zero is omitted; a negative one (over-billing) is returned,\nfor the caller to route to a credit note rather than a remainder.",
           "paramTags": [
             {

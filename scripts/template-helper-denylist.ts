@@ -428,6 +428,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   quantityAccounting: [
     "accountLine",
     "billedByPath",
+    // Needs the order's CREDIT NOTES, which a render context holds even less
+    // often than it holds the sibling invoices — and its whole output is a
+    // key into `billedByPath`'s sum, which is denied directly above.
+    "billingReversals",
     "remainingForOrder",
     "substitutionCredit",
   ],

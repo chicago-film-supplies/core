@@ -64,6 +64,10 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
       xero_id: null,
       xero_tracking_option_id: null,
       uid_invoice_item: null,
+      // Required, and false on every line this feature did not write — see
+      // `schemas/credit-note.ts`. Stated explicitly rather than omitted, which is
+      // the whole reason it is not optional.
+      reverses_billing: false,
     }],
     totals: {
       subtotal_cents: 219600,

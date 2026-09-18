@@ -253,6 +253,47 @@ export interface CreditNoteDocLineItem {
    * both run the beta that declares it (the schema is strict).
    */
   path_invoice_item?: string[];
+  /**
+   * This line reverses BILLING at {@link path_invoice_item} — it credits units
+   * the invoices billed beyond the order, so quantity accounting must stop
+   * counting them as billed (api-cloudrun#1028).
+   *
+   * 🔴 **This marker, and nothing else, is what lets a credit note NET against
+   * what the invoices bill.** It is deliberately not inferred from `reason`:
+   * `bad_debt` is a write-off and `order_adjustment` covers loss-and-damage, so
+   * netting by reason would make `remainingForOrder` offer to RE-BILL units that
+   * were written off rather than returned — CN-1009 alone credits ~35 lines at
+   * full quantity. A reason says why money moved; only this says that the
+   * BILLING was reversed.
+   *
+   * ⚠️ **Units only.** A credit of DAYS (a shortened charge window) is not netted
+   * by this — see `utils/quantityAccounting.ts`.
+   *
+   * 🔴 **REQUIRED, deliberately — there is no absent-means-false.** An optional
+   * marker would be a declared guard that is opt-in: a writer that says nothing
+   * gets the netting behaviour by default, and the one fact a reader most needs
+   * (*did anyone actually decide this line reverses billing?*) becomes
+   * unaskable. Every line states it.
+   *
+   * ⚠️ **Requiring it obliges a MIGRATION IN THE SAME SITTING as the deploy**, and
+   * that is the whole cost of this choice. The grain is a `z.strictObject` and
+   * 146 stored line rows predate the field, so between the two there is no safe
+   * order: requiring it first makes every stored note fail a whole-document
+   * write, and backfilling first makes the still-deployed API reject the unknown
+   * key. This is the api-cloudrun#443 class exactly, so it takes #443's answer —
+   * `scripts/backfill-credit-note-reverses-billing.ts`, run against a project
+   * immediately before that project's API takes the pin, never as a follow-up.
+   *
+   * ⚠️ **The backfilled value is DERIVED, not a plausible default.** The only
+   * writer that ever sets this true is the over-billing offer, which did not
+   * exist before this beta — so no stored line can be reversing billing, and
+   * `false` is a fact about the corpus. That is what makes the backfill legal
+   * under this package's own *"find the value's AUTHOR"* rule, and it is why this
+   * field could be required in one step where `path_invoice_item` beside it could
+   * not: that one's value is a row identity nothing ever recorded
+   * (api-cloudrun#1045).
+   */
+  reverses_billing: boolean;
 }
 
 const CreditNoteDocLineItemInner = z.strictObject({
@@ -278,6 +319,7 @@ const CreditNoteDocLineItemInner = z.strictObject({
   xero_tracking_option_id: z.uuid().nullable(),
   uid_invoice_item: ItemUid.nullable(),
   path_invoice_item: z.array(ItemUid).min(1).optional(),
+  reverses_billing: z.boolean(),
 }).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a credit-note line item. */

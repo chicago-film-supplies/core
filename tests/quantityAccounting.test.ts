@@ -15,6 +15,7 @@ import type { LineItem } from "../src/utils/orders.ts";
 import { addChicagoDays } from "../src/utils/dates.ts";
 import type { DocDestinationType } from "../src/schemas/mod.ts";
 import {
+  type AccountedCreditNote,
   type AccountedInvoice,
   accountLine,
   billedByPath,
@@ -222,7 +223,7 @@ Deno.test("quantityAccounting: an unaligned scope fails remainingForOrder closed
   const unaligned = invoice("b", [DEST_ITEM, line(LIGHT, [D, LIGHT], 3, 1000)]);
   const billed = billedByPath(O, order, [aligned, unaligned]);
   assertEquals([billed.compared, billed.unaligned], [["a"], ["b"]]);
-  assertEquals(remainingForOrder(O, order, [aligned, unaligned], pairs()), { lines: [], compared: ["a"], unaligned: ["b"], crms_authored: [] });
+  assertEquals(remainingForOrder(O, order, [aligned, unaligned], pairs()), { lines: [], compared: ["a"], unaligned: ["b"], crms_authored: [], credits_unkeyed: [] });
 });
 
 Deno.test("quantityAccounting: accountLine with nothing billed is the whole line", () => {
@@ -413,7 +414,7 @@ const crms = (inv: AccountedInvoice, crmsId: number | string = 4711): AccountedI
 Deno.test("quantityAccounting: a live CRMS-authored invoice fails the remainder closed, and names it", () => {
   const order = [...lightOrder(6), line("prod-tripod", [D, "prod-tripod"], 1, 3000)];
   const billedBy = [crms(invoice("a", lightOrder(4), "paid")), invoice("b", lightOrder(1), "issued")];
-  assertEquals(remainingForOrder(O, order, billedBy, pairs()), { lines: [], compared: ["a", "b"], unaligned: [], crms_authored: ["a"] });
+  assertEquals(remainingForOrder(O, order, billedBy, pairs()), { lines: [], compared: ["a", "b"], unaligned: [], crms_authored: ["a"], credits_unkeyed: [] });
   const built = buildRemainingInvoice(orderSource(order), billedBy, mint);
   assertEquals([built.items, built.destinations, built.overbilled, built.crms_authored], [[], [], [], ["a"]]);
   // The sum is not a remainder: a diff still reads what CRMS billed.
@@ -586,6 +587,93 @@ Deno.test("quantityAccounting: a window set re-authored at a different TIME OF D
   const invoices = [multiInvoice("a", lightOrder(2, 15), [W1, W2, W3])];
   const order = { uid: O, number: 1012, items: lightOrder(2, 15), destinations: [multiPair(D, atNine)] };
   assertEquals(remainingForOrder(O, order.items, invoices, order.destinations).lines, []);
+});
+
+// ── Credit notes net the units they reverse (api-cloudrun#1028 phase 1b) ─────
+
+/** A credit note reversing `quantity` units of invoice `inv` at the light line's path. */
+const reversal = (
+  uid: string,
+  inv: string,
+  quantity: number,
+  over: Partial<AccountedCreditNote> & { reverses_billing?: boolean; path?: string[] } = {},
+): AccountedCreditNote => ({
+  uid,
+  status: over.status ?? "issued",
+  sources: over.sources ?? [{ collection: "invoices", uid: inv }],
+  items: [{
+    quantity,
+    path_invoice_item: over.path ?? [O, D, G, LIGHT],
+    reverses_billing: over.reverses_billing ?? true,
+  }],
+});
+
+/** Ordered 2, billed 5 — over-billed by 3 until something credits them back. */
+const overBilled = () => ({ order: lightOrder(2), invoices: [invoice("a", lightOrder(5), "issued")] });
+
+Deno.test("quantityAccounting: a credit note that reverses billing NETS its units, and the over-billing clears", () => {
+  const { order, invoices } = overBilled();
+  // Before: 5 billed against 2 ordered = −3 units, 3 × 1000 = −3000¢.
+  assertEquals(remainingForOrder(O, order, invoices, pairs()).lines.map((l) => [l.billed, l.quantity, l.quantity_cents]), [[5, -3, -3000]]);
+  // After a note reversing exactly those 3: billed 2, nothing left either way.
+  assertEquals(remainingForOrder(O, order, invoices, pairs(), [reversal("cn1", "a", 3)]).lines, []);
+});
+
+Deno.test("quantityAccounting: a credit note WITHOUT the marker does not net — a write-off is not a billing reversal", () => {
+  // 🔴 The trap this guards. `bad_debt` writes money off and `order_adjustment`
+  // covers loss-and-damage; neither returns units, so neither may reduce what the
+  // invoices bill. Gating on `reason` instead of on an explicit marker is what
+  // would make the remainder offer to RE-BILL written-off units — CN-1009 alone
+  // credits ~35 lines at full quantity.
+  const { order, invoices } = overBilled();
+  const writeOff = reversal("cn1", "a", 3, { reverses_billing: false });
+  assertEquals(remainingForOrder(O, order, invoices, pairs(), [writeOff]).lines.map((l) => l.quantity), [-3]);
+  // …and it is not silently swallowed either: an unmarked line is simply not a
+  // reversal, so it is not "unkeyed" — there is nothing to key.
+  assertEquals(remainingForOrder(O, order, invoices, pairs(), [writeOff]).credits_unkeyed, []);
+});
+
+Deno.test("quantityAccounting: only an issued or applied note nets — a draft and a void one do not", () => {
+  const { order, invoices } = overBilled();
+  const at = (status: AccountedCreditNote["status"]) =>
+    remainingForOrder(O, order, invoices, pairs(), [reversal("cn1", "a", 3, { status })]).lines.map((l) => l.quantity);
+  assertEquals(at("issued"), []);
+  assertEquals(at("applied"), []);
+  // A draft has credited nothing yet; a void one has been taken back.
+  assertEquals(at("draft"), [-3]);
+  assertEquals(at("void"), [-3]);
+});
+
+Deno.test("quantityAccounting: a reversal this cannot KEY is reported, never silently dropped", () => {
+  // 🔴 "No credits found" and "no credits" must not print the same thing. A note
+  // with no row identity, or one naming two invoices, is named in `credits_unkeyed`
+  // so a caller can say so rather than reporting a clean zero.
+  const { order, invoices } = overBilled();
+  const noPath = { ...reversal("cn1", "a", 3), items: [{ quantity: 3, reverses_billing: true }] } as AccountedCreditNote;
+  const twoInvoices = reversal("cn2", "a", 3, { sources: [{ collection: "invoices", uid: "a" }, { collection: "invoices", uid: "b" }] });
+  for (const note of [noPath, twoInvoices]) {
+    const out = remainingForOrder(O, order, invoices, pairs(), [note]);
+    // Nothing netted — the over-billing still stands…
+    assertEquals(out.lines.map((l) => l.quantity), [-3]);
+    // …and the note is NAMED, which is the whole point.
+    assertEquals(out.credits_unkeyed, [note.uid]);
+  }
+});
+
+Deno.test("quantityAccounting: a reversal is keyed to ONE invoice — the same path on a sibling does not net", () => {
+  // A path key is unique only within one document, so the invoice uid is part of
+  // the key. A note against invoice "b" must not reduce what "a" bills.
+  const order = lightOrder(2);
+  const invoices = [invoice("a", lightOrder(5), "issued")];
+  assertEquals(remainingForOrder(O, order, invoices, pairs(), [reversal("cn1", "b", 3)]).lines.map((l) => l.quantity), [-3]);
+});
+
+Deno.test("quantityAccounting: netting is capped at the row — a credit beyond what it billed does not go negative", () => {
+  const order = lightOrder(2);
+  const invoices = [invoice("a", lightOrder(5), "issued")];
+  // Reversing 99 of a 5-unit row bills 0, never −94.
+  const { lines } = remainingForOrder(O, order, invoices, pairs(), [reversal("cn1", "a", 99)]);
+  assertEquals(lines.map((l) => [l.billed, l.quantity]), [[0, 2]]);
 });
 
 Deno.test("quantityAccounting: a row billed on no known window extends nothing", () => {
