@@ -152,6 +152,22 @@ export function applyBookingBreakdownDelta(
  * — the previous `quoted` and `reserved` values are intentionally dropped, which
  * is what fixes the "two open buckets after a status flip" data corruption that
  * surfaced in opportunity webhook ingestion.
+ *
+ * 🔴 **The open bucket is FLOORED AT ZERO, so the movement journal wins on
+ * committed buckets and the order wins only on open ones.** It was not, and an
+ * order edit that shrank a booking below what the warehouse already held
+ * balanced the books by writing a NEGATIVE `reserved` — carry 5, quantity 3
+ * gave `{prepped: 5, reserved: -2}`, whose sum is 3, so every
+ * `sum(breakdown) === quantity` check passed on it. Nothing in the schema
+ * refuses a negative bucket (`z.int()`, not `z.int().min(0)`), and
+ * `unavailableFromBooking` folds the breakdown to a single number, so those two
+ * units came off the shelf's unavailable total while still physically out.
+ *
+ * ⚠️ **The consequence is that the caller can no longer assume
+ * `sum(result) === quantity`** — it is `max(quantity, carry)`. That is the
+ * point: the result is the PHYSICAL number, and a caller storing it must take
+ * `sumBookingBreakdown(result)` as the booking's `quantity` and keep what was
+ * asked for in `quantity_ordered`. See `Booking.quantity`'s docblock.
  */
 function openBucket(
   key: "quoted" | "reserved",
@@ -159,7 +175,7 @@ function openBucket(
   prev: Booking["breakdown"],
 ): Booking["breakdown"] {
   const carry = prev.prepped + prev.out + prev.returned + prev.lost + prev.damaged;
-  const open = quantity - carry;
+  const open = Math.max(0, quantity - carry);
   return {
     ...emptyBookingsBreakdown(),
     prepped: prev.prepped,

@@ -203,6 +203,32 @@ Deno.test("calculateBookingBreakdown: reserved preserves in-flight progress", ()
   assertEquals(sumBookingBreakdown(next), 10);
 });
 
+Deno.test("calculateBookingBreakdown: the open bucket floors at zero — it never goes negative", () => {
+  // The order shrinks to 3 while the warehouse already holds 5 prepped.
+  const prev = sample({ prepped: 5 });
+  const next = calculateBookingBreakdown("reserved", "rental", 3, prev);
+
+  // Before the floor this was `{prepped: 5, reserved: -2}` — whose sum is 3, so
+  // every `sum(breakdown) === quantity` check passed on it while two physically
+  // prepped units came off the shelf's unavailable total.
+  assertEquals(next, sample({ prepped: 5, reserved: 0 }));
+  assertEquals(sumBookingBreakdown(next), 5);
+});
+
+Deno.test("calculateBookingBreakdown: the floor covers every carry bucket, not just prepped", () => {
+  for (const key of ["prepped", "out", "returned", "lost", "damaged"] as const) {
+    const next = calculateBookingBreakdown("reserved", "rental", 1, sample({ [key]: 4 }));
+    assertEquals(next.reserved, 0, `${key} must not mint a negative open bucket`);
+    assertEquals(sumBookingBreakdown(next), 4, `${key} carry must survive the shrink`);
+  }
+});
+
+Deno.test("calculateBookingBreakdown: a shrink to exactly the carry still empties the open bucket", () => {
+  const next = calculateBookingBreakdown("quoted", "rental", 4, sample({ out: 4 }));
+  assertEquals(next, sample({ out: 4 }));
+  assertEquals(sumBookingBreakdown(next), 4);
+});
+
 Deno.test("calculateBookingBreakdown: complete rental → returned + lost + damaged sum to quantity", () => {
   const prev = sample({ out: 8, lost: 1, damaged: 1 });
   const next = calculateBookingBreakdown("complete", "rental", 10, prev);
