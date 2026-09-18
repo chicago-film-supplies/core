@@ -109,7 +109,7 @@ BookingId =
   | {uid_order}:{item uid}:{uid_destination}:{signature_hash}    // component occurrence — NEW, 4th segment
 ```
 
-`signature_hash` = first 12 hex chars of `sha256(ancestry.join(""))` — `` can't appear
+`signature_hash` = first 12 hex chars of `sha256(ancestry.join(SEP)`, where `SEP` is the ASCII Unit Separator (U+001F))` — which can't appear
 in any `ItemUid`-shaped segment, so the join is unambiguous. A hash, not the raw joined chain,
 keeps the id bounded regardless of nesting depth — same shape of choice as `registerDocId`'s
 20-hex-char SHA-256 truncation (`api-cloudrun/src/services/templates/publishFromMerge.ts`, cited
@@ -196,19 +196,45 @@ booking, so net availability is unaffected — worth a targeted regression check
 
 ## 3. Migration
 
-### 3.1 Measure first
+### 3.1 Measure first — DONE, and the answer changes §5's sizing
 
 Firestore can't answer "how many bookings aggregate 2+ genuinely different configurations" with a
-query — build `api-cloudrun/scripts/audit-booking-identity-collisions.ts` (read-only, both envs):
-walk `fulfillments.items[]` grouped by `(uid_order, item.uid, deliveryUid)`, flag groups whose
-occurrences carry more than one distinct `componentAncestry`. This becomes the write-time drift
-guard once the new scheme ships. Prod `bookings` currently holds **7,266 documents** — the scale
-this moves.
+query — built and ran `api-cloudrun/scripts/audit-booking-identity-collisions.ts` (read-only, both
+envs, self-test proves the detector fires before touching real data). Walks `fulfillments.items[]`
+grouped by `(item.uid, deliveryUid)` per the writer's own forward destination-walk (restated from
+`src/lib/orderProjection.ts`'s `bookableLines` without its dedupe, so per-occurrence `path`
+survives), flags groups whose occurrences carry more than one distinct `componentAncestry`.
 
-For every flagged collision, classify: genuinely-fungible (false positive, one signature) vs.
-genuinely-colliding, and for the latter, whether it's on a **non-terminal** order (draft/canceled/
-complete orders are read-only history and are deliberately left alone — no operational value in
-touching them). **This measurement decides the real size of the project** — say which band, once
+**Measured against prod (2026-09-18):** 1,033 fulfillments scanned, **332 colliding `(order,
+product, destination)` groups** — **37 non-terminal**, 295 on `complete` orders (read-only
+history, correctly left alone). Dev tracks within 4 (328/33) — expected, since `mirror-top-level`
+replicates prod writes into dev near-real-time, not a discrepancy to chase.
+
+**Spot-checked genuine, not an audit-script artifact:** `orders/0nqm8igLxfyz6HFQrU6z`, product
+"25' Extension Cord" — one occurrence nested under "Pipe & Drape (2 Rooms)" (qty 2), a second under
+"Hair & Makeup Mirror" (qty 1), both today collapsed onto one booking (`quantity: 3`).
+
+**The §3.3 "unverified, flag before relying on it" custody-apportionment question is now
+resolved, not open — and it resolves unfavorably.** Added a custody-commitment pass to the audit
+script (batch-`getAll` the 37 non-terminal collisions' existing booking documents, check
+`breakdown` for any `prepped`/`out`/`returned`/`lost`/`damaged` unit). **26 of 37 (70%) are
+custody-COMMITTED**, not quoted/reserved-only. Checked the worked example's actual history
+(`transactions` query on that booking): one `prep` + one `check_out` movement, quantity 3,
+`breakdown.out: 3` — and the movement's `lines[]` records only `{quantity, location: {from, to}}`,
+**never which item occurrence a unit belonged to**. There is no historical record anywhere that
+says which 2 of the 3 checked-out units were for the Pipe&Drape context and which 1 was for
+Hair&Makeup — the journal was never designed to carry that, because the booking it's about was
+never disambiguated in the first place. **This is not a script that needs to be smarter; the
+information to auto-split does not exist.** 26 collisions need a human decision (which occurrence
+the committed units belong to, or an explicit "split unknown, assign arbitrarily and flag"
+convention the owner signs off on) — §3.3's `recomputeOrderBookings` cannot correctly guess this,
+and should not try to. Only the remaining 11 (quoted/reserved-only) are safe to auto-apportion by
+ordered quantity.
+
+For every flagged collision the script also classifies genuinely-fungible (false positive, one
+signature, not counted above) vs. genuinely-colliding, and terminal vs. **non-terminal** (draft/
+canceled/complete orders are read-only history and are deliberately left alone — no operational
+value in touching them). **This measurement decides the real size of the project** — say which band, once
 measured, rather than assuming either (§5 expands the two bands).
 
 Also, as part of this same step: **grep every place a `BookingId` is hand-constructed rather than
@@ -314,9 +340,14 @@ with its own transaction logic:
    version fans out to Xero for EVERY one of them").
 
 Then a thin backfill script (`api-cloudrun/scripts/backfill-booking-signature-reconciliation.ts`,
-dry-run default, `--write`) calls `recomputeOrderBookings` once per **non-terminal-order** in
-§3.1's flagged set, batched, verified by re-running §3.1's audit script and asserting zero
-remaining ambiguous multi-signature bookings among non-terminal orders.
+dry-run default, `--write`) calls `recomputeOrderBookings` once per **non-terminal order** in
+§3.1's flagged set, batched, verified by re-running the audit script and asserting zero remaining
+ambiguous multi-signature bookings among non-terminal orders. **Per §3.3's custody-commitment
+finding, it needs a `--review-queue` mode**: before calling `recomputeOrderBookings` on a flagged
+order, check whether any of its colliding bookings carry committed custody (the same check the
+audit script's custody pass already does) — clean ones proceed automatically, committed ones are
+written to a review file instead and skipped until a human resolves them (re-run with an explicit
+per-occurrence assignment, or an accepted "unknown, assign to X" override).
 
 **`transactions` history needs no correction-entry append.** Because most bookings never move at
 all (only kit-component ones with an actual collision do, and only on their next touch), and
@@ -324,16 +355,18 @@ because `MovementId`'s dual-shape union is permanent by design (§2), old moveme
 referencing whatever booking id was current when they were recorded — there's no "carried forward"
 pointer to invent, and nothing to reconcile on the journal side.
 
-⚠️ **Unverified, flag before relying on it:** confirm what the existing reconciliation actually
-does to `breakdown` (custody progress) when it cancels an old aggregated booking and creates its
-disambiguated replacements — does it apportion `reserved`/`prepped`/`out`/etc. across the new
-bookings by each occurrence's ordered quantity, or does a fresh booking start at zero custody
-(losing in-flight progress)? This is exactly the question my first, since-superseded draft of this
-plan tried to answer with a bespoke "journal replay or manual review" step — the reconciliation
-machinery may already handle it correctly (it's designed to keep bookings consistent with order
-state on every edit today), or it may not have needed to handle a *split* before, only
-create/cancel of whole bookings. Read `recomputeOrderBookings`'s actual breakdown-handling before
-committing to "no manual review needed" — don't carry that assumption further than this flag.
+**Resolved by §3.1's measurement — and it resolves unfavorably.** 26 of the 37 measured
+non-terminal collisions carry committed custody, and the worked example's own `transactions`
+history proves the split is genuinely unrecoverable: the movement journal records
+`{quantity, location}` per event, never which item OCCURRENCE a unit belonged to, because the
+booking it's about was never disambiguated. So `recomputeOrderBookings`'s plain create/cancel
+diff — correct for every collision-free booking, and for the 11 quoted/reserved-only collisions
+(safe to auto-apportion by ordered quantity) — **must not run unattended on the 26
+custody-committed ones.** It needs a `--review-queue` mode: detect a collision whose existing
+booking carries committed custody, DO NOT auto-split it, and instead emit a row for a human to
+resolve (which occurrence the committed units belong to, or an explicit "unknown, assign
+arbitrarily" call the owner signs off on) before `recomputeOrderBookings` proceeds on that one.
+This is now a concrete backfill-script requirement, not an open question.
 
 ### 3.4 The one place execution order is forced, and why that's not "steps"
 
@@ -459,21 +492,26 @@ routes, though:
 
 ## 5. Cost and risk
 
-Real production-data migration on money-adjacent custody state, 7,266 live documents, no dev-twin
-exemption (ordinary Firestore — dev exists to rehearse against, but prod is the real risk
-surface). Sizing is gated on §3.1's measurement, and both bands are worth saying plainly once
-known:
-- **Rare, mostly-uncommitted collisions** (consistent with order 961 being cited as *the*
-  incident, not one of a cluster): a contained single-cycle change — one `core` beta, one API
-  deploy, `recomputeOrderBookings` extracted and run as a bounded backfill over the flagged
-  non-terminal orders, one manager deploy. Days, not weeks.
-- **Common or custody-committed collisions**, *and* the §3.3 breakdown-apportionment question
-  above resolves unfavorably (existing reconciliation doesn't already split custody correctly):
-  a manual-review tail becomes the real project — flag unresolvable splits for a human to clear
-  before the backfill proceeds on the rest. Multi-week, with a real backlog. Say so to the owner
-  once measured, not mid-migration.
-- Either way, the design in §1-§4 doesn't change — only how much of §3.3's backfill runs
-  automatically versus needs a human decision per flagged order first.
+Real production-data migration on money-adjacent custody state, 7,266 live booking documents, no
+dev-twin exemption (ordinary Firestore — dev exists to rehearse against and tracks prod closely
+via mirroring, but prod is the real risk surface). **Measured, not assumed (§3.1, 2026-09-18):
+332 colliding groups, 37 non-terminal, 26 of those custody-committed with no recoverable split.**
+This is the manual-review band, not the contained one — say so plainly:
+
+- **Not a weekend migration.** 26 non-terminal collisions need a human decision before
+  `recomputeOrderBookings` may touch them (§3.3) — realistically the owner reviewing each one
+  against what's physically checked out today, or accepting an explicit documented convention
+  ("assign committed units to the largest-ordered-quantity occurrence, flag the order for a
+  physical recount") rather than pretending the split is knowable. The other 11 non-terminal
+  collisions and the schema/writer work (§2-§3.2) are the "days" part; the 26-row review queue is
+  the part that sets the real timeline, and it's owner-availability-bound, not engineering-bound.
+- **295 terminal/complete collisions are correctly out of scope** — read-only history,
+  `chooseBookingOwner` already handles their display, no operational reason to touch them. Their
+  count (comparable to the non-terminal one) is still worth knowing: it says this pattern has been
+  happening at a steady rate for as long as orders have been completing, not just recently.
+- The design in §1-§4 doesn't change because of this number — it changes the *backfill script's
+  required shape* (§3.3's `--review-queue` mode is now load-bearing, not a nice-to-have) and the
+  *honest timeline* to tell the owner before starting.
 
 ## Critical files
 
@@ -520,12 +558,19 @@ required fixes not optional), `manager/src/utils/orderBookingJoin.ts`, new
 
 ## Status
 
-> ## ⚠️ STATUS UPDATE 2026-09-18
-> §1's `splitItem` open question is resolved (uid-reuse confirmed, nested-component asymmetry
-> noted). §3.1's `BookingId` vocabulary survey is done — found a real regression the schema change
-> would otherwise cause silently: `api-cloudrun/src/lib/bookingDestination.ts`'s
-> `bookingDestUid`/`pairRepointedBookings` both hard-require exactly 3 segments and would go blind
-> to every kit-component booking (orphan detection, and the api-cloudrun#724 custody-carry-forward
-> fix) — required one-line arity widenings folded into §3.1/§3.2/Critical files/Verification above.
-> Remaining before any schema change: §3.1's collision-count measurement itself (the audit script,
-> `api-cloudrun/scripts/audit-booking-identity-collisions.ts` — not yet written).
+Compacted 2026-09-18 (was two stacked status blocks; folded into one current statement).
+
+**§1 and §3.1 are done, not just planned.** `splitItem`'s open question is resolved (uid-reuse
+confirmed, nested-component asymmetry noted and confirmed reachable). The `BookingId`
+hand-constructor vocabulary survey is done and found a real regression
+(`api-cloudrun/src/lib/bookingDestination.ts`'s `bookingDestUid`/`pairRepointedBookings`, both
+folded into §3.1/§3.2/Critical files/Verification as required one-line fixes). The measurement
+itself is done: `api-cloudrun/scripts/audit-booking-identity-collisions.ts` is written, self-tested,
+and run against both envs — **332 colliding groups in prod, 37 non-terminal, 26 of those
+custody-committed with a confirmed-unrecoverable split** (§3.1, §3.3, §5). This is the
+manual-review band, not the contained one, and the plan above reflects that throughout, not just
+in one caveat.
+
+**Not yet started:** everything from §3.2 onward — the shared `booking-id.ts` builder, the schema
+publish, `recomputeOrderBookings`'s extraction and its now-required `--review-queue` mode, the
+backfill run, and §4's merged surface. Next concrete step: §3.2's writer changes in `core`.
