@@ -45,7 +45,9 @@ import {
 } from "../src/utils/pick-sheet-fold.ts";
 import { pickSheetLineBooking } from "../src/utils/pickSheets.ts";
 import { composeOrgName } from "../src/utils/organizations.ts";
+import { componentSignatureHash } from "../src/utils/booking-id.ts";
 import { tsAt } from "./helpers/timestamp.ts";
+import { bookingId } from "./helpers/ids.ts";
 
 const TS = tsAt("2023-11-14T22:13:20.000Z");
 
@@ -67,6 +69,7 @@ const DELIVERY_FEE = "f".repeat(20);
 const LEG_1 = "11111111-1111-4111-8111-111111111111";
 const LEG_2 = "22222222-2222-4222-8222-222222222222";
 const GROUP_1 = "33333333-3333-4333-8333-333333333333";
+const GROUP_2 = "44444444-4444-4444-8444-444444444444";
 
 function dates(deliveryStart: string | null, collectionStart: string | null): OrderDocDatesType {
   return {
@@ -165,6 +168,7 @@ function booking(productUid: string, deliveryUid: string, opts: BookingOpts = {}
     uid: `${orderUid}:${productUid}:${deliveryUid}`,
     uid_order: orderUid,
     uid_product: productUid,
+    component_signature_hash: null,
     name: productUid === CAMERA ? "Alexa 35" : "Sachtler",
     number: 1,
     type: opts.type ?? "rental",
@@ -676,27 +680,39 @@ Deno.test("organizations: a sheet spanning two customers names both", () => {
  * 🔴 **The arm the whole `owner_path` field exists for, and it is measured
  * rather than hypothetical:** on prod, **384 legs carry a booking that stands
  * for 2 or more lines**. A booking is aggregate per
- * `(order, product, destination)`, so drawing its seven buckets on every line
- * that names it states its units N times.
+ * `(order, product, destination, component_signature_hash)`, so drawing its
+ * seven buckets on every line that names it states its units N times.
  *
  * ⚠️ **Assert the OWNER, not merely that one exists.** "Exactly one owns" passes
  * against a fold that picks arbitrarily, and picking arbitrarily is the defect
  * that put prod order 961's milk crates in the wrong pane — see the quantity arm
  * below.
+ *
+ * ⚠️ **Every fixture below is GENUINELY fungible under `componentAncestry`** —
+ * same ancestry, hence the same `bookingUidFor` output — not merely
+ * occurrences of the same product. Before `BookingId`'s 4th segment, a
+ * differently-*parented* occurrence of one product collapsed onto one booking
+ * regardless of ancestry; `bookingUidFor` now computes a DIFFERENT id per
+ * distinct ancestry, so two occurrences only ever land on one booking here
+ * when they are the same booking. See "owner: differently-parented
+ * occurrences of one product now resolve to SEPARATE bookings" below for the
+ * case these fixtures used to (wrongly) collapse.
  */
 Deno.test("owner: two lines on one booking — exactly one OWNS, and the others name it", () => {
   const f = fulfillment({
     items: [
       divider(LEG_1, "Stage 4"),
-      // A priced principal parented by the divider, and the same product again
-      // as a zero-priced accessory inside another PRODUCT. Both resolve to one
-      // booking. ⚠️ The accessory hangs off the tripod rather than off a
-      // `group`: a group divider IS structural parentage, so a group-parented
-      // copy would tie on rule 1 and be decided by quantity instead — which is
-      // the distinction the next arm is about.
-      line(CAMERA, "Alexa 35", 2, [LEG_1, CAMERA]),
+      // Two top-level occurrences of the SAME product, in different GROUPS. A
+      // group divider is structural — never a product parent
+      // (`core/.claude/plans/booking-component-identity.md` §1's
+      // "group-divider identity is deliberately excluded", while that plan
+      // lives) — so both have EMPTY component ancestry and resolve to the
+      // SAME booking id: a genuine "one booking, two rows" case.
+      group(GROUP_1, "Camera A", [LEG_1, GROUP_1]),
+      line(CAMERA, "Alexa 35", 2, [LEG_1, GROUP_1, CAMERA]),
       line(TRIPOD, "Sachtler", 1, [LEG_1, TRIPOD]),
-      line(CAMERA, "Alexa 35", 0, [LEG_1, TRIPOD, CAMERA]),
+      group(GROUP_2, "Camera B", [LEG_1, GROUP_2]),
+      line(CAMERA, "Alexa 35", 0, [LEG_1, GROUP_2, CAMERA]),
     ],
   });
   const { orders } = foldPickSheet({
@@ -708,65 +724,37 @@ Deno.test("owner: two lines on one booking — exactly one OWNS, and the others 
   });
   const items = orders[0].destinations[0].items;
 
-  const owners = items.filter((i) => i.item.uid === CAMERA).filter(pickSheetItemOwnsBooking);
+  const cameraRows = items.filter((i) => i.item.uid === CAMERA);
+  const owners = cameraRows.filter(pickSheetItemOwnsBooking);
   assertEquals(owners.length, 1, "one booking, one owner — N owners is N× the units");
-  assertEquals(owners[0].item.path, [LEG_1, CAMERA], "the structurally-parented occurrence owns");
+  assertEquals(owners[0].item.path, [LEG_1, GROUP_1, CAMERA], "the larger-quantity occurrence owns");
 
-  const nonOwner = items.find((i) => i.item.path.length === 3)!;
+  const nonOwner = cameraRows.find((i) => !pickSheetItemOwnsBooking(i))!;
   assertEquals(nonOwner.uid_booking, owners[0].uid_booking, "it names the same booking");
   assertEquals(
     nonOwner.owner_path,
-    [LEG_1, CAMERA],
+    [LEG_1, GROUP_1, CAMERA],
     "and points at the owner's own path, so it can say WHERE its units are counted",
   );
   assertEquals(pickSheetItemOwnsBooking(nonOwner), false);
 });
 
 /**
- * 🔴 **Structural parentage is a strict OVERRIDE, not a tiebreak** — it wins
- * even against a larger quantity.
+ * ⭐ **Prod order 961, restated as the FIXED case.** The incident had a Long
+ * Milk Crate at four component-parented occurrences under a steamer, two
+ * tents and an extension cord, all wrongly collapsed onto ONE booking —
+ * document order handed all five units to the steamer's copy, so the crates
+ * were prepped from inside *Wardrobe*, and dragged the steamer — itself fully
+ * checked out — back into the *Reserved* pane as the ancestor shell needed to
+ * place its owner child.
  *
- * A booking-less structurally-parented row is precisely the one the manager's
- * row classifier cannot rescue through a product ancestor: it has none. It still
- * classifies, but only because SOME occurrence owns, so the structural class has
- * to win outright whenever it is non-empty.
+ * That is no longer representable: three genuinely different ancestor
+ * chains (`[uid_steamer]`, `[uid_tent]`, `[uid_cord]`) now produce three
+ * genuinely different booking ids, so there is no ambiguity left for
+ * `chooseBookingOwner` to resolve — each occurrence owns its own,
+ * single-occurrence booking outright.
  */
-Deno.test("owner: structural parentage beats a LARGER component-parented quantity", () => {
-  const f = fulfillment({
-    items: [
-      divider(LEG_1, "Stage 4"),
-      line(CAMERA, "Alexa 35", 1, [LEG_1, CAMERA]),
-      line(TRIPOD, "Sachtler", 1, [LEG_1, TRIPOD]),
-      line(CAMERA, "Alexa 35", 9, [LEG_1, TRIPOD, CAMERA]),
-    ],
-  });
-  const { orders } = foldPickSheet({
-    scope: DESTINATION_SCOPE,
-    gate: "all",
-    leg: null,
-    bookings: [booking(CAMERA, STAGE, { quantity: 10 }), booking(TRIPOD, STAGE, { quantity: 1 })],
-    fulfillments: docs(f),
-  });
-  const owners = orders[0].destinations[0].items
-    .filter((i) => i.item.uid === CAMERA)
-    .filter(pickSheetItemOwnsBooking);
-  assertEquals(owners.length, 1);
-  assertEquals(owners[0].item.path, [LEG_1, CAMERA], "quantity 1 still outranks quantity 9");
-});
-
-/**
- * ⭐ **Prod order 961, restated as a fixture.** A Long Milk Crate sat at four
- * component-parented occurrences — qty 1 / 1 / 2 / 1 — under a steamer, two
- * tents and an extension cord. **Document order handed all five units to the
- * steamer's copy**, so the crates were prepped from inside *Wardrobe*, and
- * dragged the steamer — itself fully checked out — back into the *Reserved*
- * pane as the ancestor shell needed to place its owner child.
- *
- * ⚠️ The fail-closed half: document order alone would pick the FIRST occurrence,
- * so this fixture puts the largest quantity third. An arm whose expected value
- * happens to be the first row cannot tell the two rules apart.
- */
-Deno.test("owner: among component-parented occurrences the LARGEST ordered quantity owns", () => {
+Deno.test("owner: differently-parented occurrences of one product now resolve to SEPARATE bookings", () => {
   const STEAMER = "e".repeat(20);
   const TENT = "n".repeat(20);
   const CORD = "d".repeat(20);
@@ -781,6 +769,11 @@ Deno.test("owner: among component-parented occurrences the LARGEST ordered quant
       line(TRIPOD, "Long Milk Crate", 1, [LEG_1, CORD, TRIPOD]),
     ],
   });
+  const steamerHash = componentSignatureHash([LEG_1, STEAMER, TRIPOD])!;
+  const tentHash = componentSignatureHash([LEG_1, TENT, TRIPOD])!;
+  const cordHash = componentSignatureHash([LEG_1, CORD, TRIPOD])!;
+  assertEquals(new Set([steamerHash, tentHash, cordHash]).size, 3, "three distinct ancestries — the whole premise of the fix");
+
   const { orders } = foldPickSheet({
     scope: DESTINATION_SCOPE,
     gate: "all",
@@ -789,7 +782,68 @@ Deno.test("owner: among component-parented occurrences the LARGEST ordered quant
       booking(STEAMER, STAGE, { quantity: 1 }),
       booking(TENT, STAGE, { quantity: 1 }),
       booking(CORD, STAGE, { quantity: 1 }),
-      booking(TRIPOD, STAGE, { quantity: 4 }),
+      { ...booking(TRIPOD, STAGE, { quantity: 1 }), uid: bookingId(ORDER, TRIPOD, STAGE, steamerHash) },
+      { ...booking(TRIPOD, STAGE, { quantity: 2 }), uid: bookingId(ORDER, TRIPOD, STAGE, tentHash) },
+      { ...booking(TRIPOD, STAGE, { quantity: 1 }), uid: bookingId(ORDER, TRIPOD, STAGE, cordHash) },
+    ],
+    fulfillments: docs(f),
+  });
+
+  const items = orders[0].destinations[0].items;
+  const crateRows = items.filter((i) => i.item.uid === TRIPOD);
+  assertEquals(crateRows.length, 3);
+  for (const row of crateRows) {
+    assert(row.uid_booking !== null, `${row.item.path.join("/")} resolves to a real booking`);
+    assertEquals(row.owner_path, null, `${row.item.path.join("/")} owns its own booking outright — no other row names it`);
+  }
+  assertEquals(
+    new Set(crateRows.map((r) => r.uid_booking)).size,
+    3,
+    "three DIFFERENT bookings, not one aggregate the owner rule has to arbitrate",
+  );
+
+  const leg = orders[0].destinations[0];
+  assertEquals(leg.bookings.length, 6, "steamer + tent + cord + 3 distinct crate bookings");
+});
+
+/**
+ * 🔴 **The largest-ordered-quantity rule, on a GENUINELY fungible component
+ * case** — two independent kits of the same product (two Steamers, ordered as
+ * separate groups), each carrying its own Long Milk Crate component. Both
+ * crates share ancestry `[uid_steamer]` — the SAME product ordered twice, not
+ * two different products — so they resolve to the SAME booking id, and
+ * `chooseBookingOwner`'s quantity rule decides between them.
+ *
+ * ⚠️ The fail-closed half: document order alone would pick the FIRST
+ * occurrence, so this fixture puts the largest quantity second.
+ */
+Deno.test("owner: among fungible component occurrences, the LARGEST ordered quantity owns", () => {
+  const STEAMER = "e".repeat(20);
+  const f = fulfillment({
+    items: [
+      divider(LEG_1, "Stage 4"),
+      group(GROUP_1, "Steamer A", [LEG_1, GROUP_1]),
+      line(STEAMER, "Steamer", 1, [LEG_1, GROUP_1, STEAMER]),
+      line(TRIPOD, "Long Milk Crate", 1, [LEG_1, GROUP_1, STEAMER, TRIPOD]),
+      group(GROUP_2, "Steamer B", [LEG_1, GROUP_2]),
+      line(STEAMER, "Steamer", 1, [LEG_1, GROUP_2, STEAMER]),
+      line(TRIPOD, "Long Milk Crate", 2, [LEG_1, GROUP_2, STEAMER, TRIPOD]),
+    ],
+  });
+  const crateHash = componentSignatureHash([LEG_1, GROUP_1, STEAMER, TRIPOD])!;
+  assertEquals(
+    crateHash,
+    componentSignatureHash([LEG_1, GROUP_2, STEAMER, TRIPOD]),
+    "same ancestor PRODUCT uid, different group — same signature",
+  );
+
+  const { orders } = foldPickSheet({
+    scope: DESTINATION_SCOPE,
+    gate: "all",
+    leg: null,
+    bookings: [
+      booking(STEAMER, STAGE, { quantity: 2 }),
+      { ...booking(TRIPOD, STAGE, { quantity: 3 }), uid: bookingId(ORDER, TRIPOD, STAGE, crateHash) },
     ],
     fulfillments: docs(f),
   });
@@ -798,7 +852,7 @@ Deno.test("owner: among component-parented occurrences the LARGEST ordered quant
   assertEquals(crateOwner.length, 1);
   assertEquals(
     crateOwner[0].item.path,
-    [LEG_1, TENT, TRIPOD],
+    [LEG_1, GROUP_2, STEAMER, TRIPOD],
     "the qty-2 occurrence owns — not the first one in document order",
   );
 
@@ -806,8 +860,8 @@ Deno.test("owner: among component-parented occurrences the LARGEST ordered quant
   // exactly one owner, so this stays a statement about ALL of them rather than
   // about the one the fixture was built around.
   const leg = orders[0].destinations[0];
-  assertEquals(leg.bookings.length, 4);
-  assertEquals(items.filter(pickSheetItemOwnsBooking).length, 4);
+  assertEquals(leg.bookings.length, 2);
+  assertEquals(items.filter(pickSheetItemOwnsBooking).length, 2);
 });
 
 /**

@@ -149,13 +149,21 @@ export interface BookingStore {
 
 /**
  * Full Firestore document for a booking — an AGGREGATE per
- * `(order, product, destination)`, **not a line**. The same product may repeat
- * within one destination (a priced principal plus zero-priced accessories,
- * `splitItem`, a standalone unit plus a kit component) and every occurrence
- * resolves to this ONE row.
+ * `(order, product, destination, component_signature_hash)`, **not a line**.
+ * The same product may repeat within one destination in ways that ARE
+ * fungible (a priced principal plus its own zero-priced accessories, a
+ * `splitItem` clone of the same subtree) and every such occurrence resolves
+ * to this ONE row.
  *
- * ⚠️ Reading it as a line is what renders one booking's quantities N times —
- * every unit total N× wrong. Stated the same way in
+ * ⚠️ **It is NOT one row per `(order, product, destination)` alone** — a
+ * standalone unit of a product and an occurrence of the same product nested
+ * inside a kit are genuinely different bookings, disambiguated by
+ * `component_signature_hash` / `uid`'s 4th segment
+ * (`@cfs/core/utils/booking-id`). Reading a shared `(order, product,
+ * destination)` as one booking is the prod-961 defect class this field
+ * exists to close; reading a shared `(…, component_signature_hash)` row as a
+ * line is the OTHER standing defect — it renders one booking's quantities N
+ * times, every unit total N× wrong. Stated the same way in
  * `api-cloudrun/src/lib/orderProjection.ts`, `manager/src/utils/orderBookingJoin.ts`,
  * `core/src/schemas/pick-sheet.ts` and `manager/src/utils/pickSheet.ts`.
  */
@@ -163,6 +171,32 @@ export interface Booking {
   uid: string;
   uid_order: string;
   uid_product: string;
+  /**
+   * `null` for a top-level (non-component) occurrence; else the 12-hex digest
+   * of `componentAncestry(item's current path)` (`@cfs/core/utils/booking-id`)
+   * — the fact that distinguishes this booking's `uid` from another
+   * occurrence of the same product elsewhere in the order. Mirrors `uid`'s
+   * own 4th segment 1:1; needs its own indexed field because Firestore
+   * cannot filter on a value computed at read time. Never goes stale: a path
+   * change that would change this value produces a genuinely different
+   * `uid`, which the booking-reconciliation diff (`api-cloudrun`'s
+   * `writableEntries`) already creates/orphans through its existing
+   * missing-id arm — see `core/.claude/plans/booking-component-identity.md`
+   * §2 while that plan lives.
+   *
+   * ⚠️ **Optional, not required — deliberately, against §2's literal
+   * one-line field spec.** ~7,266 bookings stored before this field existed
+   * carry no such key at all, and this repo's own "Making a field REQUIRED"
+   * procedure (`core/CLAUDE.md`) says measure the corpus and let the writer
+   * populate it BEFORE tightening — not in the same commit that introduces
+   * it. Nothing read-parses a stored `Booking` through this schema today (a
+   * fork verified both repos, 2026-09-18: every read is a bare TS cast), so
+   * an absent key would not throw — but the TS type would still be lying
+   * about ~7,266 documents' actual shape, which is the narrower defect this
+   * repo's own docs call out repeatedly. Tighten to required once §3.3's
+   * backfill reaches the corpus.
+   */
+  component_signature_hash?: string | null;
   name: string;
   number: number;
   type: ComponentTypeType;
@@ -403,6 +437,11 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   uid: BookingId,
   uid_order: FirestoreId,
   uid_product: FirestoreId,
+  // Optional, not required — see the interface field's own note: ~7,266
+  // pre-existing bookings carry no such key, and this repo's own
+  // required-field procedure says measure + backfill before tightening.
+  component_signature_hash: z.string().regex(/^[0-9a-f]{12}$/, "Must be a 12-hex component signature hash")
+    .nullable().optional(),
   name: z.string().meta({ column: true, label: "Product", linkTo: "productDetail" }),
   number: z.int().meta({ column: true, label: "#", linkTo: "fulfillmentDetail", serverSortVia: "number" }),
   type: ComponentTypeEnum.meta({ column: true, label: "Type" }),

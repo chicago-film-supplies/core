@@ -9,9 +9,20 @@ export function fid(seed: string): string {
   return (compact + "0".repeat(20)).slice(0, 20);
 }
 
-/** A booking composite id: `{uid_order}:{uid_product}:{uid_destination}`. */
-export function bookingId(uidOrder: string, uidProduct: string, uidDest: string): string {
-  return `${uidOrder}:${uidProduct}:${uidDest}`;
+/**
+ * A booking composite id: `{uid_order}:{uid_product}:{uid_destination}`, or,
+ * with `signatureHash` supplied, the 4-segment kit-component form
+ * (`core/src/utils/booking-id.ts`'s `buildBookingId`).
+ */
+export function bookingId(
+  uidOrder: string,
+  uidProduct: string,
+  uidDest: string,
+  signatureHash?: string,
+): string {
+  return signatureHash
+    ? `${uidOrder}:${uidProduct}:${uidDest}:${signatureHash}`
+    : `${uidOrder}:${uidProduct}:${uidDest}`;
 }
 
 // No stock id builder: `stock/{P}` and `stock-locks/{P}` are both keyed by the

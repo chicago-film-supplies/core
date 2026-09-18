@@ -737,13 +737,21 @@ const BlobRefSchema: z.ZodType<BlobRef>;
 ### `Booking`
 
 Full Firestore document for a booking — an AGGREGATE per
-`(order, product, destination)`, **not a line**. The same product may repeat
-within one destination (a priced principal plus zero-priced accessories,
-`splitItem`, a standalone unit plus a kit component) and every occurrence
-resolves to this ONE row.
+`(order, product, destination, component_signature_hash)`, **not a line**.
+The same product may repeat within one destination in ways that ARE
+fungible (a priced principal plus its own zero-priced accessories, a
+`splitItem` clone of the same subtree) and every such occurrence resolves
+to this ONE row.
 
-⚠️ Reading it as a line is what renders one booking's quantities N times —
-every unit total N× wrong. Stated the same way in
+⚠️ **It is NOT one row per `(order, product, destination)` alone** — a
+standalone unit of a product and an occurrence of the same product nested
+inside a kit are genuinely different bookings, disambiguated by
+`component_signature_hash` / `uid`'s 4th segment
+(`@cfs/core/utils/booking-id`). Reading a shared `(order, product,
+destination)` as one booking is the prod-961 defect class this field
+exists to close; reading a shared `(…, component_signature_hash)` row as a
+line is the OTHER standing defect — it renders one booking's quantities N
+times, every unit total N× wrong. Stated the same way in
 `api-cloudrun/src/lib/orderProjection.ts`, `manager/src/utils/orderBookingJoin.ts`,
 `core/src/schemas/pick-sheet.ts` and `manager/src/utils/pickSheet.ts`.
 
@@ -752,6 +760,7 @@ interface Booking {
   uid: string;
   uid_order: string;
   uid_product: string;
+  component_signature_hash?: string | null;
   name: string;
   number: number;
   type: ComponentTypeType;
@@ -840,9 +849,14 @@ interface BookingDestinationRef {
 
 ### `BookingId`
 
-`bookings.uid` — deterministic composite
-`{uid_order}:{item uid}:{uid_destination}` (the middle segment is the order
-item's uid, which for a custom product is `custom-{uuid}`).
+`bookings.uid` — deterministic composite, sparse by construction:
+`{uid_order}:{item uid}:{uid_destination}` for a top-level occurrence
+(unchanged, byte-for-byte, from before the 4-segment form existed; the
+middle segment is the order item's uid, which for a custom product is
+`custom-{uuid}`), or `{uid_order}:{item uid}:{uid_destination}:{hash}` for
+an occurrence that is a component of a kit — see the "`BookingId`'s 4th
+segment" section above. Built only through `booking-id.ts`'s
+`buildBookingId`; never assembled by hand at a second call site.
 
 ```ts
 const BookingId: z.ZodType<string>;
@@ -2048,6 +2062,7 @@ interface ConsolidatedItemType {
   type: string;
   quantity: number;
   stock_method: string;
+  component_signature_hash: string | null;
 }
 ```
 
@@ -5711,6 +5726,10 @@ anyway. The id only has to be well-formed and stable.
 This is the sanctioned use of a derived id: it is what makes an append-only
 event idempotent under the manager's retry-on-409, exactly as the derived
 `bookings` id makes a booking upsert idempotent.
+
+⚠️ The subject arm is `firestoreId | bookingIdTopLevel | bookingIdComponent`
+— a permanent union, not a transitional one. See the "`BookingId`'s 4th
+segment" section above.
 
 ```ts
 const MovementId: z.ZodType<string>;
@@ -11974,6 +11993,17 @@ question**: see {@link isFulfillableItemType}.
 Takes a `string` because callers hold item types from loosely-typed sources.
 A value outside {@link ITEM_TYPES} has no contract and answers `false`.
 
+### `isProductShapedUid(uid: string): boolean`
+
+Whether an `ItemUid`-shaped `path` segment names a PRODUCT (including a
+custom product) rather than a structural (destination/group) divider — see
+the "`BookingId`'s 4th segment" section above. A bare `z.uuid()` is always a
+divider; a `FirestoreId` or a `custom-`-prefixed uid is always a product,
+and the two are distinguishable by this one check because a `FirestoreId`
+never contains a `-`. This is `core/src/utils/booking-id.ts`'s
+`componentAncestry` filter, exported from the grammar it reads rather than
+from the booking-specific module that consumes it.
+
 ### `isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: "manual" | "propagation"): boolean`
 
 Server-side gate for an order status write. `source: "manual"` rejects
@@ -12635,9 +12665,14 @@ const AnyUid: z.ZodType<string>;
 
 ### `BookingId`
 
-`bookings.uid` — deterministic composite
-`{uid_order}:{item uid}:{uid_destination}` (the middle segment is the order
-item's uid, which for a custom product is `custom-{uuid}`).
+`bookings.uid` — deterministic composite, sparse by construction:
+`{uid_order}:{item uid}:{uid_destination}` for a top-level occurrence
+(unchanged, byte-for-byte, from before the 4-segment form existed; the
+middle segment is the order item's uid, which for a custom product is
+`custom-{uuid}`), or `{uid_order}:{item uid}:{uid_destination}:{hash}` for
+an occurrence that is a component of a kit — see the "`BookingId`'s 4th
+segment" section above. Built only through `booking-id.ts`'s
+`buildBookingId`; never assembled by hand at a second call site.
 
 ```ts
 const BookingId: z.ZodType<string>;
@@ -13201,6 +13236,10 @@ anyway. The id only has to be well-formed and stable.
 This is the sanctioned use of a derived id: it is what makes an append-only
 event idempotent under the manager's retry-on-409, exactly as the derived
 `bookings` id makes a booking upsert idempotent.
+
+⚠️ The subject arm is `firestoreId | bookingIdTopLevel | bookingIdComponent`
+— a permanent union, not a transitional one. See the "`BookingId`'s 4th
+segment" section above.
 
 ```ts
 const MovementId: z.ZodType<string>;
@@ -14171,6 +14210,17 @@ question**: see {@link isFulfillableItemType}.
 Takes a `string` because callers hold item types from loosely-typed sources.
 A value outside {@link ITEM_TYPES} has no contract and answers `false`.
 
+### `isProductShapedUid(uid: string): boolean`
+
+Whether an `ItemUid`-shaped `path` segment names a PRODUCT (including a
+custom product) rather than a structural (destination/group) divider — see
+the "`BookingId`'s 4th segment" section above. A bare `z.uuid()` is always a
+divider; a `FirestoreId` or a `custom-`-prefixed uid is always a product,
+and the two are distinguishable by this one check because a `FirestoreId`
+never contains a `-`. This is `core/src/utils/booking-id.ts`'s
+`componentAncestry` filter, exported from the grammar it reads rather than
+from the booking-specific module that consumes it.
+
 ### `itemContract(type: string): ItemContract | undefined`
 
 The contract for an item `type`, or `undefined` for a value outside
@@ -14323,13 +14373,21 @@ const BOOKING_STATUSES: "draft" | "quoted" | "reserved" | "part-prepped" | "prep
 ### `Booking`
 
 Full Firestore document for a booking — an AGGREGATE per
-`(order, product, destination)`, **not a line**. The same product may repeat
-within one destination (a priced principal plus zero-priced accessories,
-`splitItem`, a standalone unit plus a kit component) and every occurrence
-resolves to this ONE row.
+`(order, product, destination, component_signature_hash)`, **not a line**.
+The same product may repeat within one destination in ways that ARE
+fungible (a priced principal plus its own zero-priced accessories, a
+`splitItem` clone of the same subtree) and every such occurrence resolves
+to this ONE row.
 
-⚠️ Reading it as a line is what renders one booking's quantities N times —
-every unit total N× wrong. Stated the same way in
+⚠️ **It is NOT one row per `(order, product, destination)` alone** — a
+standalone unit of a product and an occurrence of the same product nested
+inside a kit are genuinely different bookings, disambiguated by
+`component_signature_hash` / `uid`'s 4th segment
+(`@cfs/core/utils/booking-id`). Reading a shared `(order, product,
+destination)` as one booking is the prod-961 defect class this field
+exists to close; reading a shared `(…, component_signature_hash)` row as a
+line is the OTHER standing defect — it renders one booking's quantities N
+times, every unit total N× wrong. Stated the same way in
 `api-cloudrun/src/lib/orderProjection.ts`, `manager/src/utils/orderBookingJoin.ts`,
 `core/src/schemas/pick-sheet.ts` and `manager/src/utils/pickSheet.ts`.
 
@@ -14338,6 +14396,7 @@ interface Booking {
   uid: string;
   uid_order: string;
   uid_product: string;
+  component_signature_hash?: string | null;
   name: string;
   number: number;
   type: ComponentTypeType;
@@ -16572,6 +16631,7 @@ interface ConsolidatedItemType {
   type: string;
   quantity: number;
   stock_method: string;
+  component_signature_hash: string | null;
 }
 ```
 
@@ -24310,6 +24370,68 @@ interface UpdateCommentInputType {
 }
 ```
 
+## `@cfs/core/utils/booking-id`
+
+The ONE deterministic constructor for a `bookings.uid` — `componentAncestry`,
+`componentSignatureHash` and {@link buildBookingId}. Before this module
+existed, three call sites built the id by hand from its parts:
+api-cloudrun's `bookingId()` (`services/orders.ts`), this repo's own
+`bookingUidFor` (`pick-sheet-fold.ts`), and the manager's
+`bookingUidForItem` (`src/utils/orderBookingJoin.ts`). Three
+re-implementations of one derivation is exactly the pattern that let a
+product repeating within one order — standalone, as a component of kit A,
+as a component of kit B, or split via `splitItem` — collapse onto a single
+booking document for years (`core/.claude/plans/booking-component-identity.md`
+while that plan lives; see it for the full design this module lands).
+
+### `buildBookingId(orderUid: string, item: typeLiteral, path: readonly string[], destUid: string): string`
+
+The one place a `BookingId` is assembled from parts. Sparse by
+construction: a top-level occurrence (empty ancestry) gets the unchanged
+3-segment id — `{uid_order}:{item uid}:{uid_destination}` — byte-for-byte
+what every booking id has always been; a component occurrence gets a 4th
+segment, the signature hash, appended AFTER the destination. The
+destination segment's position and meaning are otherwise untouched.
+
+`item` takes just the uid (not the whole line) because `path` — which
+already carries the item's own uid as its last segment — is a separate,
+explicit parameter: callers that only have a bare uid and a path (as
+opposed to a full line item) can still call this directly.
+
+### `componentAncestry(path: readonly string[]): string[]`
+
+The chain of PRODUCT ancestors above one item occurrence — a pure filter of
+`path`, nothing else. `path` is self-inclusive (`[...parent path, own
+uid]`), so this keeps every product-shaped segment and drops the item's own
+trailing one; structural (destination/group divider) segments are dropped
+by `isProductShapedUid` rather than sliced off separately, because they can
+only ever appear ABOVE the first product segment — `ORDER_ITEM_LEVELS`
+fixes dividers to the top of a subtree, never nested inside a product's own
+components.
+
+`[]` for a top-level (non-component) occurrence.
+
+Two occurrences are the SAME booking iff their ancestries match exactly,
+and genuinely DIFFERENT ones iff they differ at any position — the full
+root-to-leaf chain, not just the immediate parent, is what distinguishes
+"component of kit A" from "component of kit B nested two deep." Dropping
+only structural segments (not group-divider identity specifically) is what
+lets a `splitItem` clone — same product uids throughout, only a fresh GROUP
+uid — resolve to the same ancestry as its source and stay correctly merged.
+
+### `componentSignatureHash(path: readonly string[]): string | null`
+
+`sha256(componentAncestry(path).join(SEP))`, first 12 hex chars — `null`
+for a top-level occurrence (empty ancestry), matching
+`Booking.component_signature_hash`.
+
+A hash, not the raw joined chain, keeps {@link buildBookingId}'s output
+bounded regardless of nesting depth — the same shape of choice as
+`registerDocId`'s 20-hex-char SHA-256 truncation
+(`api-cloudrun/src/services/templates/publishFromMerge.ts`, cited in
+`schemas/_uid.ts`), just shorter since this doesn't have to satisfy
+`FirestoreId`'s exact 20-char form.
+
 ## `@cfs/core/utils/bookings`
 
 Pure helpers over the booking breakdown shape and the order's denormalized
@@ -28127,6 +28249,18 @@ residual IS real money because Xero recomputes `LineAmount = UnitAmount ×
 Quantity` on the other side of a wire; that one stays, and the two must not be
 swept into each other.
 
+## Groups on `(uid, component_signature_hash)`, not bare `uid`
+
+A standalone unit of a product and an occurrence of the same product nested
+inside a kit are genuinely different bookings (`@cfs/core/utils/booking-id`'s
+`componentSignatureHash`, `core/.claude/plans/booking-component-identity.md`
+while that plan lives) — grouping on the bare uid alone is exactly the
+conflation that let a fully-checked-out kit component and a still-reserved
+standalone unit of the same product collapse onto one seed row. Two
+occurrences with the SAME signature (including two top-level ones, both
+`null`) still merge, which is what keeps a priced principal and its own
+zero-priced accessories, or a `splitItem` clone, on one row.
+
 ### `getDestinationPairItemName(destination: Pick<DestinationType, "delivery" | "collection">, index: number): string`
 
 Build a display name for a destination pair from its delivery/collection addresses.
@@ -31393,6 +31527,18 @@ residual IS real money because Xero recomputes `LineAmount = UnitAmount ×
 Quantity` on the other side of a wire; that one stays, and the two must not be
 swept into each other.
 
+## Groups on `(uid, component_signature_hash)`, not bare `uid`
+
+A standalone unit of a product and an occurrence of the same product nested
+inside a kit are genuinely different bookings (`@cfs/core/utils/booking-id`'s
+`componentSignatureHash`, `core/.claude/plans/booking-component-identity.md`
+while that plan lives) — grouping on the bare uid alone is exactly the
+conflation that let a fully-checked-out kit component and a still-reserved
+standalone unit of the same product collapse onto one seed row. Two
+occurrences with the SAME signature (including two top-level ones, both
+`null`) still merge, which is what keeps a priced principal and its own
+zero-priced accessories, or a `splitItem` clone, on one row.
+
 ### `declaredInvoicePrice(price: DeclaredPriceInput): InvoiceDeclaredPrice`
 
 Copy exactly {@link INVOICE_DECLARED_PRICE_KEYS} — see {@link declaredOrderPrice}.
@@ -33312,6 +33458,18 @@ residual IS real money because Xero recomputes `LineAmount = UnitAmount ×
 Quantity` on the other side of a wire; that one stays, and the two must not be
 swept into each other.
 
+## Groups on `(uid, component_signature_hash)`, not bare `uid`
+
+A standalone unit of a product and an occurrence of the same product nested
+inside a kit are genuinely different bookings (`@cfs/core/utils/booking-id`'s
+`componentSignatureHash`, `core/.claude/plans/booking-component-identity.md`
+while that plan lives) — grouping on the bare uid alone is exactly the
+conflation that let a fully-checked-out kit component and a still-reserved
+standalone unit of the same product collapse onto one seed row. Two
+occurrences with the SAME signature (including two top-level ones, both
+`null`) still merge, which is what keeps a priced principal and its own
+zero-priced accessories, or a `splitItem` clone, on one row.
+
 ### `getDestinationsLegend(destinations: readonly Pick<DestinationType, "customer_collecting" | "customer_returning">[] | undefined | null): typeLiteral`
 
 Pair-derived legend strings for the order's start/end dates.
@@ -33496,7 +33654,8 @@ leg's endpoint. So an order-scoped walk cannot merge two legs' occurrences of
 one booking — there is no such thing.
 
 ⭐ **It needs no `bookings` read.** `bookingUidFor` is a pure composite of
-`(order, product, destination)`, so the keys are DERIVED; a caller that
+`(order, product, destination)` — plus the item's own component ancestry,
+for a kit-component occurrence — so the keys are DERIVED; a caller that
 already holds a real booking uid — a movement does — looks it up directly and
 a key naming no real booking is simply never asked for. The fold passes a
 `bookingByUid` only because it must also decide which lines are on the sheet
@@ -33520,6 +33679,25 @@ booking-less and point at it. {@link foldPickSheet} stamps that answer onto
 legs with nothing open) asks the same question about rows this fold never
 sees. Two implementations of one rule is precisely what moving the fold to
 core was for.
+
+⚠️ **Kept unsimplified here, even though `bookingUidFor`'s own
+ancestry-awareness (below) already makes arm 1 UNREACHABLE through both of
+THIS module's callers.** Once `uidBooking` is computed by
+{@link buildBookingId}, two occurrences only ever land in the same
+`occurrences.get(uidBooking)` bucket when their `componentAncestry` — and
+therefore `isStructural` — already agree, so arm 1 can no longer fire in
+`foldPickSheet` or `bookingOccurrencesByBooking`. But this function is
+`export`ed for exactly one more reason: **the manager's own
+`orderBookingJoin.ts` calls it too**, and as of this comment it still
+builds a `uidBooking` by hand with the OLD flat (non-ancestry-aware)
+template — the manager-side half of
+`core/.claude/plans/booking-component-identity.md` §3.2/§3.4 (while that
+plan lives) has not landed yet. Until it does, manager can still hand this
+function occurrences that genuinely differ in `isStructural`, and arm 1 is
+what stops prod order 961's bug from reappearing THERE. Simplifying this
+function is safe only in the same beta wave as the manager's own builder
+update (§3.4 step 5) — doing it here, alone, would ship a core version that
+silently regresses manager's display the moment it bumps its pin.
 
 The rule, in order:
 

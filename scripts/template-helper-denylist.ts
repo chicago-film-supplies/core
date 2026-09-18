@@ -157,6 +157,15 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "buildReservedByLocation", // netting building block
     "addAllocationToReserved", // netting building block
   ],
+  // `bookings.uid` construction — a template renders a document that already
+  // carries its own `uid`; it never derives one. All three take a `path`,
+  // which no render context holds independent of the document it already
+  // belongs to.
+  "booking-id": [
+    "componentAncestry",
+    "componentSignatureHash",
+    "buildBookingId",
+  ],
   orders: [
     // The divider ↔ pair join, derived at WRITE time and then stored as
     // `destinations[i].uid`. A render context reads that field directly; a

@@ -1532,11 +1532,18 @@ Deno.test("buildPackingList scoped to destination", () => {
 });
 
 Deno.test("buildPackingList consolidated deduplicates by uid", () => {
+  // ⚠️ Divider ids here are REAL uuid-shaped (`z.uuid()` per the schema, and
+  // what `componentAncestry`'s `isProductShapedUid` grammar check assumes) —
+  // a short synthetic id like "d1" would misparse as a PRODUCT ancestor and
+  // give the two `p1` occurrences below different signatures, wrongly
+  // un-merging them.
+  const D1 = "11111111-1111-4111-8111-111111111111";
+  const D2 = "22222222-2222-4222-8222-222222222222";
   const items: LineItem[] = [
-    { type: "destination", uid: "d1", name: "", path: ["d1"] },
-    makeItem({ uid: "p1", type: "rental", quantity: 2, path: ["d1", "p1"] }),
-    { type: "destination", uid: "d2", name: "", path: ["d2"] },
-    makeItem({ uid: "p1", type: "rental", quantity: 3, path: ["d2", "p1"] }),
+    { type: "destination", uid: D1, name: "", path: [D1] },
+    makeItem({ uid: "p1", type: "rental", quantity: 2, path: [D1, "p1"] }),
+    { type: "destination", uid: D2, name: "", path: [D2] },
+    makeItem({ uid: "p1", type: "rental", quantity: 3, path: [D2, "p1"] }),
   ];
   const result = buildPackingList(items, true);
   assertEquals(result.length, 1);

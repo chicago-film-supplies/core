@@ -27,6 +27,7 @@ import { assert, assertEquals, assertExists, assertGreater } from "@std/assert";
 
 import * as stockUtils from "../src/utils/stock.ts";
 import * as allocationUtils from "../src/utils/allocation.ts";
+import * as bookingIdUtils from "../src/utils/booking-id.ts";
 import * as bookingUtils from "../src/utils/bookings.ts";
 import * as cardUtils from "../src/utils/cards.ts";
 import * as contactNameUtils from "../src/utils/contact-name.ts";
@@ -82,6 +83,10 @@ import { TEMPLATE_HELPER_DENYLIST } from "../scripts/template-helper-denylist.ts
 // completeness against `deno.json`; this comment must not restate it.
 const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   allocation: allocationUtils,
+  // Id-construction machinery for the `bookings` collection's OWN identity —
+  // a template renders a document that already carries its ids; it never
+  // derives one. Listed so the drift guard sees its exports.
+  "booking-id": bookingIdUtils,
   bookings: bookingUtils,
   cards: cardUtils,
   "contact-name": contactNameUtils,

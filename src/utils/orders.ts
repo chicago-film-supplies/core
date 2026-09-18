@@ -37,6 +37,7 @@ import type {
 } from "../schemas/mod.ts";
 import isEqual from "lodash-es/isEqual";
 import { itemContract, legDirectionFromBreakdown, zeroPricedFlaggedNonComponents } from "../schemas/mod.ts";
+import { componentSignatureHash } from "./booking-id.ts";
 import { canonicalChargeWindows, type ChargeDates, chargedDays, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
 import {
   fromCents,
@@ -2647,13 +2648,25 @@ export function getGroupPath(items: LineItem[], index: number): GroupPath {
  * residual IS real money because Xero recomputes `LineAmount = UnitAmount ×
  * Quantity` on the other side of a wire; that one stays, and the two must not be
  * swept into each other.
+ *
+ * ## Groups on `(uid, component_signature_hash)`, not bare `uid`
+ *
+ * A standalone unit of a product and an occurrence of the same product nested
+ * inside a kit are genuinely different bookings (`@cfs/core/utils/booking-id`'s
+ * `componentSignatureHash`, `core/.claude/plans/booking-component-identity.md`
+ * while that plan lives) — grouping on the bare uid alone is exactly the
+ * conflation that let a fully-checked-out kit component and a still-reserved
+ * standalone unit of the same product collapse onto one seed row. Two
+ * occurrences with the SAME signature (including two top-level ones, both
+ * `null`) still merge, which is what keeps a priced principal and its own
+ * zero-priced accessories, or a `splitItem` clone, on one row.
  */
 export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
   if (!Array.isArray(lineItems)) {
     throw new Error("lineItems must be an array");
   }
 
-  const map: Record<
+  const map = new Map<
     string,
     {
       uid: string;
@@ -2661,32 +2674,40 @@ export function consolidateItems(lineItems: LineItem[]): ConsolidatedItem[] {
       type: string;
       quantity: number;
       stock_method: string;
+      component_signature_hash: string | null;
     }
-  > = {};
+  >();
 
   for (const item of lineItems) {
     if (NON_PRODUCT_TYPES.has(item.type)) continue;
     if (!item.uid) continue;
 
-    if (map[item.uid]) {
-      map[item.uid].quantity += item.quantity || 0;
+    const signatureHash = componentSignatureHash(item.path);
+    // A hash cannot collide with `""`: it is `null` or 12 hex chars.
+    const key = `${item.uid}:${signatureHash ?? ""}`;
+
+    const existing = map.get(key);
+    if (existing) {
+      existing.quantity += item.quantity || 0;
     } else {
-      map[item.uid] = {
+      map.set(key, {
         uid: item.uid,
         name: item.name || "",
         type: item.type || "",
         quantity: item.quantity || 0,
         stock_method: item.stock_method || "none",
-      };
+        component_signature_hash: signatureHash,
+      });
     }
   }
 
-  return Object.values(map).map((entry) => ({
+  return [...map.values()].map((entry) => ({
     uid: entry.uid,
     name: entry.name,
     type: entry.type,
     quantity: entry.quantity,
     stock_method: entry.stock_method,
+    component_signature_hash: entry.component_signature_hash,
   }));
 }
 

@@ -24,6 +24,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "allocation": [
 
   ],
+  "booking-id": [
+
+  ],
   "bookings": [
     { name: "applyBookingBreakdownDelta", expr: "it.bookings.applyBookingBreakdownDelta(orderBreakdown, prev, next)", desc: "Apply a per-key delta to an order's bookings_breakdown roll-up in place.", returns: "void" },
     { name: "calculateBookingBreakdown", expr: "it.bookings.calculateBookingBreakdown(status, type, quantity, existingBreakdown)", desc: "Project a booking's breakdown for a given **order** status, item type, and total quantity. Pure sync — no I/O.", returns: "indexedAccess" },

@@ -1752,6 +1752,15 @@ export interface ConsolidatedItemType {
   type: string;
   quantity: number;
   stock_method: string;
+  /**
+   * `null` for a top-level (non-component) row; else the 12-hex component
+   * signature (`@cfs/core/utils/booking-id`'s `componentSignatureHash`) that
+   * disambiguates this row from another occurrence of the same product
+   * elsewhere in the order — `consolidateItems` now groups on
+   * `(uid, component_signature_hash)`, not bare `uid`, so a standalone unit
+   * and a kit-component occurrence of one product are two rows here too.
+   */
+  component_signature_hash: string | null;
 }
 
 /**

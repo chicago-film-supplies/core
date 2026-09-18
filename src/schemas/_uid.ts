@@ -10,7 +10,7 @@
  * | Validator        | Shape                                   | Used for |
  * |------------------|-----------------------------------------|----------|
  * | `FirestoreId`    | `[A-Za-z0-9]{20}`                       | own `uid` on normal collections + every `uid_*` doc reference |
- * | `BookingId`      | `{id}:{itemUid}:{id}`                   | `bookings.uid` = `{uid_order}:{item uid}:{uid_destination}` |
+ * | `BookingId`      | `{id}:{itemUid}:{id}` or `{id}:{itemUid}:{id}:{hash}` | `bookings.uid` = `{uid_order}:{item uid}:{uid_destination}`, +4th segment for a kit-component occurrence — see below |
  * | `ItemUid`        | `FirestoreId | uuid | custom-{uuid}`    | order/invoice/fulfillment `items[].uid` + `path[]` segments |
  * | `QuoteId`        | `{id}:v{N}` / `{id}:draft`              | `quotes.uid` (saved versions + working draft) |
  * | `StatementDocumentId` | `{id}:v{N}`                        | `statement-documents.uid` (saved org statements) |
@@ -51,6 +51,35 @@
  * form was written first and failed `validateBeforeWrite` at every register;
  * widening `FirestoreId` would have weakened a guard covering 41 document types
  * for the sake of two.
+ *
+ * ## `BookingId`'s 4th segment, and why `isProductShapedUid` lives here
+ *
+ * `bookings` aggregates one row per `(order, product, destination)` — but a
+ * product's `item.uid` repeats within one order's `items[]` in 18% of prod
+ * orders, standalone and as a component of one or more kits, and the bare
+ * 3-segment id could not tell those occurrences apart. `BookingId` is now the
+ * union of that unchanged 3-segment form and a 4-segment one that appends a
+ * signature hash of the item's *component ancestry* — its chain of product
+ * (never divider) ancestors — for exactly the occurrences that need it. The
+ * derivation lives in `core/src/utils/booking-id.ts`
+ * (`componentAncestry`/`componentSignatureHash`/`buildBookingId`), the one
+ * place a `BookingId` is assembled from parts.
+ *
+ * **`isProductShapedUid` is exported from HERE, not from `booking-id.ts`**,
+ * because it is a fact about `ItemUid`'s own grammar, not about bookings: a
+ * bare `z.uuid()` path segment is always a structural divider
+ * (`getStructuralUids`' domain — `ORDER_ITEM_LEVELS` fixes dividers to the top
+ * of a subtree, never nested inside a product's own components), while a bare
+ * `FirestoreId` or a `custom-`-prefixed segment is always a product. So the
+ * predicate is derivable from `ItemUid`'s union alone — no `structuralUids` set
+ * has to travel alongside a `path` for `componentAncestry` to read it correctly.
+ *
+ * ⚠️ **`MovementId`'s subject arm is a permanent union of the 3- and
+ * 4-segment forms**, not a transitional one. `transactions` is an
+ * append-only journal, so a historical movement's stored id records what its
+ * subject's id *was at the time* and is never rewritten — old rows keep the
+ * 3-segment shape indefinitely for bookings that existed before the 4-segment
+ * form shipped.
  *
  * ## Naming: `uid` is a document id, `uuid` is someone else's id
  *
@@ -115,8 +144,24 @@ const customItemUid = z.union([
  */
 export const ItemUid: z.ZodType<string> = z.union([firestoreId, z.uuid(), customItemUid]);
 
+const BARE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Whether an `ItemUid`-shaped `path` segment names a PRODUCT (including a
+ * custom product) rather than a structural (destination/group) divider — see
+ * the "`BookingId`'s 4th segment" section above. A bare `z.uuid()` is always a
+ * divider; a `FirestoreId` or a `custom-`-prefixed uid is always a product,
+ * and the two are distinguishable by this one check because a `FirestoreId`
+ * never contains a `-`. This is `core/src/utils/booking-id.ts`'s
+ * `componentAncestry` filter, exported from the grammar it reads rather than
+ * from the booking-specific module that consumes it.
+ */
+export function isProductShapedUid(uid: string): boolean {
+  return !BARE_UUID.test(uid);
+}
+
 /** Internal, un-annotated so `MovementId` can embed its pattern. */
-const bookingId = z.templateLiteral([
+const bookingIdTopLevel = z.templateLiteral([
   firestoreId,
   ":",
   z.union([firestoreId, customItemUid]),
@@ -125,11 +170,31 @@ const bookingId = z.templateLiteral([
 ]);
 
 /**
- * `bookings.uid` — deterministic composite
- * `{uid_order}:{item uid}:{uid_destination}` (the middle segment is the order
- * item's uid, which for a custom product is `custom-{uuid}`).
+ * Internal, un-annotated so `MovementId` can embed its pattern. The 4th
+ * segment is the first 12 hex chars of a SHA-256 digest — see
+ * `booking-id.ts`'s `componentSignatureHash`.
  */
-export const BookingId: z.ZodType<string> = bookingId;
+const bookingIdComponent = z.templateLiteral([
+  firestoreId,
+  ":",
+  z.union([firestoreId, customItemUid]),
+  ":",
+  firestoreId,
+  ":",
+  z.string().regex(/^[0-9a-f]{12}$/, "Must be a 12-hex component signature hash"),
+]);
+
+/**
+ * `bookings.uid` — deterministic composite, sparse by construction:
+ * `{uid_order}:{item uid}:{uid_destination}` for a top-level occurrence
+ * (unchanged, byte-for-byte, from before the 4-segment form existed; the
+ * middle segment is the order item's uid, which for a custom product is
+ * `custom-{uuid}`), or `{uid_order}:{item uid}:{uid_destination}:{hash}` for
+ * an occurrence that is a component of a kit — see the "`BookingId`'s 4th
+ * segment" section above. Built only through `booking-id.ts`'s
+ * `buildBookingId`; never assembled by hand at a second call site.
+ */
+export const BookingId: z.ZodType<string> = z.union([bookingIdTopLevel, bookingIdComponent]);
 
 /**
  * `transactions.uid` for a movement-journal event — the deterministic composite
@@ -152,13 +217,17 @@ export const BookingId: z.ZodType<string> = bookingId;
  * This is the sanctioned use of a derived id: it is what makes an append-only
  * event idempotent under the manager's retry-on-409, exactly as the derived
  * `bookings` id makes a booking upsert idempotent.
+ *
+ * ⚠️ The subject arm is `firestoreId | bookingIdTopLevel | bookingIdComponent`
+ * — a permanent union, not a transitional one. See the "`BookingId`'s 4th
+ * segment" section above.
  */
 export const MovementId: z.ZodType<string> = z.templateLiteral([
   z.uuid(),
   "|",
   z.string().regex(/^[a-z][a-z_]*$/, "Must be a movement type segment"),
   "|",
-  z.union([firestoreId, bookingId]),
+  z.union([firestoreId, bookingIdTopLevel, bookingIdComponent]),
 ]);
 
 /**

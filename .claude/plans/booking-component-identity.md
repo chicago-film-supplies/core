@@ -155,13 +155,23 @@ this plan exists to stop.
 Add to `Booking` only:
 
 ```ts
-component_signature_hash: string | null;  // null for a top-level occurrence; else the 12-hex
-                                           // digest of componentAncestry(item's current path) —
-                                           // the one field that's actually load-bearing. It needs
-                                           // to be its own indexed field (Firestore can't filter
-                                           // on a value computed at read time), even though it's
-                                           // mechanically a pure function of the item's `path`.
+component_signature_hash?: string | null;  // null for a top-level occurrence; else the 12-hex
+                                            // digest of componentAncestry(item's current path) —
+                                            // the one field that's actually load-bearing. It needs
+                                            // to be its own indexed field (Firestore can't filter
+                                            // on a value computed at read time), even though it's
+                                            // mechanically a pure function of the item's `path`.
 ```
+
+⚠️ **`?:`, not required — a correction found while implementing, not in the original draft.**
+`BookingSchema` is `z.strictObject`, and ~7,266 bookings stored before this field existed carry no
+such key at all. A fork verified (2026-09-18) that nothing in api-cloudrun or manager read-parses a
+stored `Booking` through this schema — every read is a bare TS cast — so a required key would not
+throw on read; but the TS type would still assert a shape ~7,266 documents don't have, which is
+exactly the defect class `core/CLAUDE.md`'s "Making a field REQUIRED" section exists to prevent:
+measure the corpus and let the writer populate it BEFORE tightening, not in the same commit that
+introduces the field. Catalogued in `tests/stored-optionality.test.ts` as `mid-expand`. Tighten to
+required once §3.3's backfill has run.
 
 **Why this can't go stale — proven by the actual write-gate mechanism, not an opportunistic-refresh
 promise.** The booking-write gate (`writableEntries` in `api-cloudrun/src/services/orders.ts`) has
@@ -202,7 +212,7 @@ Firestore can't answer "how many bookings aggregate 2+ genuinely different confi
 query — built and ran `api-cloudrun/scripts/audit-booking-identity-collisions.ts` (read-only, both
 envs, self-test proves the detector fires before touching real data). Walks `fulfillments.items[]`
 grouped by `(item.uid, deliveryUid)` per the writer's own forward destination-walk (restated from
-`src/lib/orderProjection.ts`'s `bookableLines` without its dedupe, so per-occurrence `path`
+`api-cloudrun/src/lib/orderProjection.ts`'s `bookableLines` without its dedupe, so per-occurrence `path`
 survives), flags groups whose occurrences carry more than one distinct `componentAncestry`.
 
 **Measured against prod (2026-09-18):** 1,033 fulfillments scanned, **332 colliding `(order,
@@ -254,8 +264,10 @@ was hedging against.** `api-cloudrun/src/lib/bookingDestination.ts` has two func
 `BookingId` string by hand and both **require exactly 3 segments**:
 
 - `bookingDestUid(bookingId)` — `parts.length === 3 && parts[2] !== ""`, else `null`. Feeds
-  `isStrandedBookingId`/`classifyStrandedBookings`, which back `scripts/repair-missing-bookings.ts`,
-  `scripts/cleanup-orphan-bookings.ts`, and `scripts/audit-order-projection.ts`'s booking-side arm.
+  `isStrandedBookingId`/`classifyStrandedBookings`, which back
+  `api-cloudrun/scripts/repair-missing-bookings.ts`,
+  `api-cloudrun/scripts/cleanup-orphan-bookings.ts`, and
+  `api-cloudrun/scripts/audit-order-projection.ts`'s booking-side arm.
   Under the new scheme, **every 4-segment (kit-component) booking id returns `null` from this
   function unchanged**, which makes `isStrandedBookingId` return `false` unconditionally for it —
   the orphan-detection/repair machinery would go silently blind to exactly the class of booking
@@ -280,7 +292,7 @@ pairing key from `(order, product)` to `(order, product, signature)` — the coa
 stated philosophy), just less precise than it could be once a product can genuinely have several
 independent booking identities on one order.
 
-`scripts/audit-order-projection.ts` has a third hand-parse (`d.id.split(":")`, line ~433) that only
+`api-cloudrun/scripts/audit-order-projection.ts` has a third hand-parse (`d.id.split(":")`, line ~433) that only
 reads `parts[0]`/`parts[1]` with no length check at all — already arity-tolerant by construction,
 confirmed safe, no fix needed.
 
@@ -339,7 +351,7 @@ with its own transaction logic:
    `updateOrder` bulk pass would (`api-cloudrun/CLAUDE.md`: "a bulk write to orders that bumps
    version fans out to Xero for EVERY one of them").
 
-Then a thin backfill script — not yet created; plan to add it at
+Then a thin backfill script — not yet written; plan to add it at
 `api-cloudrun/scripts/` as `backfill-booking-signature-reconciliation.ts` once §3.2 lands —
 dry-run default, `--write`, calls `recomputeOrderBookings` once per **non-terminal order** in
 §3.1's flagged set, batched, verified by re-running the audit script and asserting zero remaining
@@ -396,14 +408,20 @@ changes, reconciliation mechanism, permanent `MovementId` dual-shape) is fully d
 
 ### 3.5 `chooseBookingOwner` / `joinBookings` after the fix
 
-Kept, simplified — not deleted. `splitItem` output still legitimately puts multiple *rows* under
-one booking, so a read surface still needs to pick which row carries the controls. What's removed
-is the "structural parentage as override" arm — it existed to rescue cases where the *old*
-ambiguous id had wrongly merged structurally-different occurrences; under the new id that scenario
-is unrepresentable, so the arm has nothing left to correct. The tiebreak collapses to
-largest-ordered-quantity-then-document-order, which is now the honest answer rather than a
-compensating heuristic, because every candidate it's choosing among is, by construction, genuinely
-fungible. `joinBookings` needs only the id-formula update — it already delegates correctly.
+Kept — **NOT simplified in the core-only commit that lands §3.2**, which corrects this section's
+original plan. `splitItem` output still legitimately puts multiple *rows* under one booking, so a
+read surface still needs to pick which row carries the controls. The "structural parentage as
+override" arm does become genuinely unreachable through `foldPickSheet`/`bookingOccurrencesByBooking`
+the moment `bookingUidFor` is ancestry-aware — a same-`uidBooking` bucket can now only ever hold
+occurrences that already share `componentAncestry`, hence share `isStructural` — **but
+`chooseBookingOwner` is `export`ed specifically because `manager/src/utils/orderBookingJoin.ts` calls
+it too, and manager still builds its `uidBooking` the OLD (non-ancestry-aware) way until its own
+§3.2 bullet lands.** Simplifying the exported function in core alone, ahead of manager's matching
+update, would ship a core version whose `chooseBookingOwner` silently regresses manager's display
+(prod order 961's bug) the moment manager bumps its pin — before manager's own writer changes are
+even in flight. **Do the simplification in the SAME beta wave as manager's update (this step's own
+original point, restated correctly)**, not preemptively. `joinBookings` needs only the id-formula
+update — it already delegates correctly.
 
 ## 4. The merged surface, built on the fixed identity
 
@@ -525,7 +543,7 @@ This is the manual-review band, not the contained one — say so plainly:
 `recomputeOrderBookings`), `api-cloudrun/src/lib/bookingDestination.ts` (`bookingDestUid`,
 `pairRepointedBookings` — both currently reject a 4-segment id outright; see §3.1's survey finding,
 required fixes not optional), `manager/src/utils/orderBookingJoin.ts`, new
-`api-cloudrun/scripts/audit-booking-identity-collisions.ts` (built, §3.1) and a not-yet-created
+`api-cloudrun/scripts/audit-booking-identity-collisions.ts` (built, §3.1) and a not-yet-written
 `backfill-booking-signature-reconciliation.ts` in the same directory (§3.3).
 
 ## Verification
@@ -559,6 +577,38 @@ required fixes not optional), `manager/src/utils/orderBookingJoin.ts`, new
 
 ## Status
 
+> ## ⚠️ STATUS UPDATE 2026-09-18
+>
+> **§3.2's `core`-side writer changes are DONE, tested, and committed on `beta`** (not yet
+> pushed/published as of this update): the shared `core/src/utils/booking-id.ts` builder
+> (`componentAncestry`/`componentSignatureHash`/`buildBookingId`, with a self-contained sync SHA-256
+> since the module must run in the manager's browser too — verified against `shasum` vectors);
+> `BookingId` widened to the 3-/4-segment union and `MovementId`'s subject arm updated to match;
+> `Booking.component_signature_hash` added; `consolidateItems` regrouped on `(uid, signatureHash)`;
+> `pick-sheet-fold.ts`'s `bookingUidFor` now delegates to the shared builder. Full test coverage
+> (new `tests/booking-id.test.ts`, updates to `_uid`/`orders`/`pick-sheet-fold`/`template-helpers`
+> tests), `deno task check`/`lint`/`test`/`check:declarations`/`check:generated`/`audit:citations`
+> all clean, `deno publish --dry-run` succeeds.
+>
+> **Two corrections to this doc's earlier text, found while implementing, both already folded in
+> above rather than left as a diff to reconcile later:**
+> 1. §2's `component_signature_hash` ships `?:` (optional), not required — `BookingSchema` is
+>    `z.strictObject` and ~7,266 pre-existing bookings carry no such key; core's own
+>    "Making a field REQUIRED" procedure says measure + backfill before tightening, not in the
+>    same commit that introduces the field. Catalogued in `tests/stored-optionality.test.ts` as
+>    `mid-expand`. A fork confirmed nothing read-parses a stored `Booking` through this schema in
+>    either api-cloudrun or manager (every read is a bare TS cast), so this was a type-honesty fix,
+>    not a crash-prevention one — but a real fix regardless.
+> 2. §3.5's `chooseBookingOwner` simplification is **NOT done in this commit** — it is genuinely
+>    unreachable through core's own two callers now, but `manager/src/utils/orderBookingJoin.ts`
+>    still calls the same exported function with occurrences built from its OWN (still
+>    non-ancestry-aware) id computation. Simplifying `chooseBookingOwner` here, ahead of manager's
+>    matching update, would ship a core version that silently regresses manager's display (prod
+>    order 961's bug) the moment manager bumps its pin. Do it in the same beta wave as manager's
+>    own §3.2 bullet, not preemptively.
+>
+> Next concrete step: publish the `core` beta (§3.4 step 1), then api-cloudrun's bump+deploy.
+
 Compacted 2026-09-18 (was two stacked status blocks; folded into one current statement).
 
 **§1 and §3.1 are done, not just planned.** `splitItem`'s open question is resolved (uid-reuse
@@ -571,7 +621,3 @@ and run against both envs — **332 colliding groups in prod, 37 non-terminal, 2
 custody-committed with a confirmed-unrecoverable split** (§3.1, §3.3, §5). This is the
 manual-review band, not the contained one, and the plan above reflects that throughout, not just
 in one caveat.
-
-**Not yet started:** everything from §3.2 onward — the shared `booking-id.ts` builder, the schema
-publish, `recomputeOrderBookings`'s extraction and its now-required `--review-queue` mode, the
-backfill run, and §4's merged surface. Next concrete step: §3.2's writer changes in `core`.

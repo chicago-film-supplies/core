@@ -374,6 +374,7 @@ export {
   FIRESTORE_TIMESTAMP_META,
   FirestoreId,
   ItemUid,
+  isProductShapedUid,
   BookingId,
   AnyUid,
   CardId,

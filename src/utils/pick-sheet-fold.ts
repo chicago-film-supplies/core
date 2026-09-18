@@ -58,6 +58,7 @@ import {
   type PickSheetScope,
 } from "../schemas/mod.ts";
 import type { OrgPathNodeType } from "../schemas/mod.ts";
+import { buildBookingId } from "./booking-id.ts";
 import { emptyBookingsBreakdown } from "./bookings.ts";
 import { getItemSubtreeRange, getParentProductUid, getStructuralUids } from "./orders.ts";
 
@@ -76,16 +77,24 @@ export interface PickSheetFoldResult {
 }
 
 /**
- * The deterministic booking id, restated here rather than imported from
- * api-cloudrun's `services/orders.ts` so this module stays db-free.
+ * The deterministic booking id — delegates to {@link buildBookingId}
+ * (`./booking-id.ts`), the ONE shared constructor, rather than assembling its
+ * own template. Kept as a thin wrapper (not called bare at each site) because
+ * the two callers below hand it different item shapes, and this keeps their
+ * call sites reading "the booking id for this occurrence" rather than four
+ * positional args apiece.
  *
- * ⚠️ The third segment is the pair's `delivery.uid` — a `destinations/{uid}`
+ * ⚠️ The third parameter is the pair's `delivery.uid` — a `destinations/{uid}`
  * ADDRESS-BOOK id — never the destination divider's uid. The two are different
  * values and only one of them joins across documents; api-cloudrun#663 is that
  * pair confused the other way round.
  */
-function bookingUidFor(orderUid: string, productUid: string, deliveryUid: string): string {
-  return `${orderUid}:${productUid}:${deliveryUid}`;
+function bookingUidFor(
+  orderUid: string,
+  item: { uid: string; path: string[] },
+  deliveryUid: string,
+): string {
+  return buildBookingId(orderUid, item, item.path, deliveryUid);
 }
 
 /**
@@ -209,6 +218,25 @@ export interface BookingOccurrence {
  * legs with nothing open) asks the same question about rows this fold never
  * sees. Two implementations of one rule is precisely what moving the fold to
  * core was for.
+ *
+ * ⚠️ **Kept unsimplified here, even though `bookingUidFor`'s own
+ * ancestry-awareness (below) already makes arm 1 UNREACHABLE through both of
+ * THIS module's callers.** Once `uidBooking` is computed by
+ * {@link buildBookingId}, two occurrences only ever land in the same
+ * `occurrences.get(uidBooking)` bucket when their `componentAncestry` — and
+ * therefore `isStructural` — already agree, so arm 1 can no longer fire in
+ * `foldPickSheet` or `bookingOccurrencesByBooking`. But this function is
+ * `export`ed for exactly one more reason: **the manager's own
+ * `orderBookingJoin.ts` calls it too**, and as of this comment it still
+ * builds a `uidBooking` by hand with the OLD flat (non-ancestry-aware)
+ * template — the manager-side half of
+ * `core/.claude/plans/booking-component-identity.md` §3.2/§3.4 (while that
+ * plan lives) has not landed yet. Until it does, manager can still hand this
+ * function occurrences that genuinely differ in `isStructural`, and arm 1 is
+ * what stops prod order 961's bug from reappearing THERE. Simplifying this
+ * function is safe only in the same beta wave as the manager's own builder
+ * update (§3.4 step 5) — doing it here, alone, would ship a core version that
+ * silently regresses manager's display the moment it bumps its pin.
  *
  * The rule, in order:
  *
@@ -477,7 +505,7 @@ function bookingUidForItem(
 ): string | null {
   if (item.type === "destination" || item.type === "group") return null;
   if (deliveryUid === null) return null;
-  const uid = bookingUidFor(orderUid, item.uid, deliveryUid);
+  const uid = bookingUidFor(orderUid, item, deliveryUid);
   return bookingByUid.has(uid) ? uid : null;
 }
 
@@ -491,7 +519,8 @@ function bookingUidForItem(
  * one booking — there is no such thing.
  *
  * ⭐ **It needs no `bookings` read.** `bookingUidFor` is a pure composite of
- * `(order, product, destination)`, so the keys are DERIVED; a caller that
+ * `(order, product, destination)` — plus the item's own component ancestry,
+ * for a kit-component occurrence — so the keys are DERIVED; a caller that
  * already holds a real booking uid — a movement does — looks it up directly and
  * a key naming no real booking is simply never asked for. The fold passes a
  * `bookingByUid` only because it must also decide which lines are on the sheet
@@ -522,7 +551,7 @@ export function bookingOccurrencesByBooking(
     for (let j = i + 1; j <= endIndex; j++) {
       const item = items[j];
       if (item.type === "destination" || item.type === "group") continue;
-      const uidBooking = bookingUidFor(orderUid, item.uid, deliveryUid);
+      const uidBooking = bookingUidFor(orderUid, item, deliveryUid);
       const occurrence: BookingOccurrence = {
         path: item.path,
         isStructural: getParentProductUid(item, structuralUids) === null,

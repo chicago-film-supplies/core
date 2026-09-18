@@ -4,8 +4,10 @@ import {
   BookingId,
   EventCardId,
   FirestoreId,
+  isProductShapedUid,
   ItemUid,
   ListId,
+  MovementId,
   QuoteId,
   RoleId,
   SEEDED_ROLE_NAMES,
@@ -54,6 +56,35 @@ Deno.test("BookingId accepts {order}:{item}:{dest}, incl. custom middle", () => 
 Deno.test("BookingId rejects wrong arity / bad segments", () => {
   rejects(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk"); // 2 parts
   rejects(BookingId, "00iNtfho7YCp6FllPi9f:bad:gka5vla5wQO1xlSsR7UG");
+});
+
+Deno.test("BookingId accepts the 4-segment kit-component form", () => {
+  accepts(
+    BookingId,
+    "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG:0123456789ab",
+  );
+  accepts(
+    BookingId,
+    bookingId(fid("o"), fid("p"), fid("d"), "0123456789ab"),
+  );
+});
+
+Deno.test("BookingId rejects a malformed 4th segment", () => {
+  // Wrong length, and uppercase — the hash is lowercase-hex, first 12 chars.
+  rejects(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG:0123456789a");
+  rejects(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG:0123456789ABCD");
+  rejects(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG:0123456789AB");
+});
+
+Deno.test("MovementId accepts a 4-segment (kit-component) booking subject", () => {
+  const subject = bookingId(fid("o"), fid("p"), fid("d"), "0123456789ab");
+  accepts(MovementId, `fe847108-d824-4f3a-aac8-ce60a9743ffc|check_out|${subject}`);
+});
+
+Deno.test("isProductShapedUid: false for a bare divider uuid, true for a product/custom id", () => {
+  assertEquals(isProductShapedUid("fe847108-d824-4f3a-aac8-ce60a9743ffc"), false);
+  assertEquals(isProductShapedUid(fid("p")), true);
+  assertEquals(isProductShapedUid("custom-fe847108-d824-4f3a-aac8-ce60a9743ffc"), true);
 });
 
 Deno.test("QuoteId accepts {order}:v{N} and {order}:draft", () => {
