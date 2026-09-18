@@ -206,7 +206,7 @@ export interface Booking {
    *
    * ⚠️ **It is no longer a synonym for what the order asked for.** It was, for
    * every booking written before this field's twin existed, and the runtime
-   * check in `api-cloudrun`'s `src/services/bookings.ts` (`sum(breakdown) ===
+   * check in `api-cloudrun/src/services/bookings.ts` (`sum(breakdown) ===
    * quantity`) read as a CONSTRAINT on the warehouse. It is now the
    * DEFINITION of this field: the warehouse may hold more units than were
    * ordered (an over-send) or fewer, and availability has to reflect the shelf
