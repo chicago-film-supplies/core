@@ -120,7 +120,7 @@ const SENTINEL_DEFAULTS: ReadonlyMap<string, string> = new Map([
  * is debt — but `fulfillments.due_at`/`due_at_fs` are inert **by design, not
  * by omission**: 1,022 fulfillments predate the field, the 962 terminal ones
  * are never backfilled (only non-terminal rows are, via
- * `scripts/repair-fulfillment-projection.ts`), and neither a REQUIRED field
+ * `api-cloudrun/scripts/repair-fulfillment-projection.ts`), and neither a REQUIRED field
  * nor a bare `.nullable()` tolerates a permanently-absent key on a document
  * that will never be rewritten. **This set only ever shrinks** for the
  * backlog half; these two entries are not expected to.
