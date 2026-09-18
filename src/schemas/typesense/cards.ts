@@ -102,6 +102,5 @@ export const cards: TypesenseCollectionConfig = {
     // returns, plus a declared column to carry the heading.
     columns: ["subject", "status", "date_fs", "created_by"],
     filters: {},
-    sort: { column: "position", direction: "asc" },
   },
 };

@@ -35,6 +35,5 @@ export const locations: TypesenseCollectionConfig = {
   displayDefaults: {
     columns: ["name", "active", "default"],
     filters: { active: [true] },
-    sort: { column: "name", direction: "asc" },
   },
 };

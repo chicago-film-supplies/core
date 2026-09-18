@@ -129,6 +129,5 @@ export const orders: TypesenseCollectionConfig = {
   displayDefaults: {
     columns: ["number", "organization.name", "subject", "dates.delivery_start_fs", "dates.collection_start_fs", "status"],
     filters: { status: [] },
-    sort: { column: "number", direction: "desc" },
   },
 };

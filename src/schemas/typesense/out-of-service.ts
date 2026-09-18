@@ -48,6 +48,5 @@ export const outOfService: TypesenseCollectionConfig = {
     // start with no end cannot say whether a record is still open.
     columns: ["number", "reason", "status", "organization.name", "quantity", "dates.start_fs", "dates.end_fs"],
     filters: { status: [] },
-    sort: { column: "number", direction: "desc" },
   },
 };

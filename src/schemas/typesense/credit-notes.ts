@@ -106,6 +106,5 @@ export const creditNotes: TypesenseCollectionConfig = {
       "remaining_credit_cents",
     ],
     filters: { status: [] },
-    sort: { column: "number", direction: "desc" },
   },
 };

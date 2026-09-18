@@ -167,6 +167,5 @@ export const products: TypesenseCollectionConfig = {
   displayDefaults: {
     columns: ["name", "type", "tracking_category_name", "tags.name", "components.name", "component_of.name", "alternates.name"],
     filters: { type: ["rental", "sale", "service"], active: [true] },
-    sort: { column: "name", direction: "asc" },
   },
 };

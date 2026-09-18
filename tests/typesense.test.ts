@@ -107,19 +107,13 @@ Deno.test("displayDefaults.columns reference valid field names", () => {
   }
 });
 
-Deno.test("displayDefaults.sort.column is null or a valid field name", () => {
-  for (const config of allConfigs) {
-    const { column } = config.displayDefaults.sort;
-    if (column !== null) {
-      const fieldNames = new Set(config.schema.fields.map((f) => f.name));
-      assertEquals(
-        fieldNames.has(column),
-        true,
-        `${config.alias}: sort column "${column}" not found in schema fields`,
-      );
-    }
-  }
-});
+// "displayDefaults.sort.column is null or a valid field name" stood here and
+// is deleted with the key it covered (B4). `displayDefaults.sort` on a
+// Typesense config was never read by any rendering path —
+// `user.prefs_typesense[].sort` is the operator's own pick and is a
+// different, live, per-user schema — so asserting its column resolved was
+// coverage of a field nobody consulted. See `typesense/types.ts`'s
+// `TypesenseDisplayDefaults` docstring.
 
 // Two tests stood here and both are deleted with the keys they covered
 // (core#50). They are worth a note, because each was evidence of the problem

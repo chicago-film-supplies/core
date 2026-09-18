@@ -152,8 +152,9 @@ export const organizations: TypesenseCollectionConfig = {
     //
     // `updated_at` is `int64`, `sort: true` and the only non-optional sortable
     // numeric here. ⚠️ This is Typesense's TIE-BREAKER for relevance ranking,
-    // not the table's default sort — that is `displayDefaults.sort` below, which
-    // still reads `name` ascending.
+    // not an operator-visible resting sort — the table's own resting order is
+    // this field, and any other order is a per-user pick
+    // (`user.prefs_typesense`), never a config default.
     default_sorting_field: "updated_at",
   },
   synonyms: [],
@@ -161,6 +162,5 @@ export const organizations: TypesenseCollectionConfig = {
   displayDefaults: {
     columns: ["name", "contacts", "emails", "phones"],
     filters: {},
-    sort: { column: "name", direction: "asc" },
   },
 };

@@ -119,6 +119,5 @@ export const bookings: TypesenseCollectionConfig = {
       "dates.end_fs",
     ],
     filters: { status: [] },
-    sort: { column: "number", direction: "desc" },
   },
 };

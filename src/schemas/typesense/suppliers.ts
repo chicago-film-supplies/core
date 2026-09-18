@@ -56,6 +56,5 @@ export const suppliers: TypesenseCollectionConfig = {
   displayDefaults: {
     columns: ["name", "active"],
     filters: { active: [true] },
-    sort: { column: "name", direction: "asc" },
   },
 };

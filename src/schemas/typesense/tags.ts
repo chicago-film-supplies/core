@@ -31,6 +31,5 @@ export const tags: TypesenseCollectionConfig = {
   displayDefaults: {
     columns: ["name", "count", "products.name"],
     filters: {},
-    sort: { column: "name", direction: "asc" },
   },
 };

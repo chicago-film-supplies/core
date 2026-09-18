@@ -31,6 +31,5 @@ export const chartOfAccounts: TypesenseCollectionConfig = {
   displayDefaults: {
     columns: ["code", "name", "type"],
     filters: { type: [] },
-    sort: { column: "code", direction: "asc" },
   },
 };

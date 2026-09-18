@@ -32,6 +32,5 @@ export const templateComponents: TypesenseCollectionConfig = {
   displayDefaults: {
     columns: ["name", "git_path", "version_count"],
     filters: {},
-    sort: { column: "name", direction: "asc" },
   },
 };

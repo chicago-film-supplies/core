@@ -265,7 +265,6 @@ export const GroupByAxisSchema: z.ZodType<GroupByAxis> = z.strictObject({
 export interface TypesenseDisplayDefaults {
   columns: string[];
   filters: Record<string, (string | boolean)[]>;
-  sort: { column: string | null; direction: "asc" | "desc" };
   /** Available groupBy axes the UI can offer for this collection. */
   groupBy?: GroupByAxis[];
 }
@@ -274,10 +273,6 @@ export interface TypesenseDisplayDefaults {
 export const TypesenseDisplayDefaultsSchema: z.ZodType<TypesenseDisplayDefaults> = z.strictObject({
   columns: z.array(z.string()),
   filters: z.record(z.string(), z.array(z.union([z.string(), z.boolean()]))),
-  sort: z.strictObject({
-    column: z.string().nullable(),
-    direction: z.enum(["asc", "desc"]),
-  }),
   groupBy: z.array(GroupByAxisSchema).optional(),
 });
 
