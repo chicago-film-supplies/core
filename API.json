@@ -11481,7 +11481,7 @@
         {
           "kind": "interface",
           "name": "AccountedInvoice",
-          "declaration": "interface AccountedInvoice {\n  uid: string;\n  status: InvoiceStatusType;\n  items: InvoiceItem[];\n  destinations?: readonly InvoiceDocDestinationType[];\n  crms_id?: number | string | null;\n}",
+          "declaration": "interface AccountedInvoice {\n  uid: string;\n  status: InvoiceStatusType;\n  items: InvoiceItem[];\n  number?: number;\n  amount_due_cents?: number;\n  destinations?: readonly InvoiceDocDestinationType[];\n  crms_id?: number | string | null;\n}",
           "doc": "The invoice shape these functions read — every linked invoice, live or void."
         },
         {
@@ -11524,6 +11524,24 @@
           "kind": "interface",
           "name": "LineAccount",
           "declaration": "interface LineAccount {\n  ordered: number;\n  billed: number;\n  quantity: number;\n  quantity_cents: number;\n  extension_cents: number;\n}",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "OverbillingCreditLine",
+          "declaration": "interface OverbillingCreditLine {\n  path_invoice_item: string[];\n  uid_invoice_item: string;\n  order_path: string[];\n  quantity: number;\n  credited_days?: number;\n  preview_cents: number;\n}",
+          "doc": "One credit-note line the offer would raise."
+        },
+        {
+          "kind": "interface",
+          "name": "OverbillingCreditNote",
+          "declaration": "interface OverbillingCreditNote {\n  uid_invoice: string;\n  lines: OverbillingCreditLine[];\n  preview_cents: number;\n}",
+          "doc": "One credit note the offer would raise — a note belongs to exactly ONE invoice."
+        },
+        {
+          "kind": "interface",
+          "name": "OverbillingCredits",
+          "declaration": "interface OverbillingCredits {\n  notes: OverbillingCreditNote[];\n  refused: Array<typeLiteral>;\n  unaligned: string[];\n  crms_authored: string[];\n  credits_unkeyed: string[];\n}",
           "doc": ""
         },
         {
@@ -11613,6 +11631,14 @@
           "name": "billingReversals",
           "signature": "billingReversals(creditNotes: readonly AccountedCreditNote[]): BillingReversals",
           "doc": "The units each invoice row's billing has been REVERSED by, from credit notes.\n\nA line counts only when all four hold, and each one is load-bearing:\n\n- the note is `issued` or `applied` — a draft has not credited anything, and a\n  void one has been taken back;\n- the line sets `reverses_billing`. 🔴 **Never gate on `reason` instead**:\n  `bad_debt` is a write-off and `order_adjustment` covers loss-and-damage, so\n  netting by reason would make {@link remainingForOrder} offer to RE-BILL units\n  that were written off rather than returned;\n- the line names `path_invoice_item`, the invoice row it credits. `uid` alone\n  is not a row identity — it repeats within one document;\n- the note names exactly ONE invoice in `sources`. A path key is only unique\n  within one document, so without that the same path on two invoices is\n  indistinguishable and the credit could be subtracted from the wrong row.\n\nAnything else is reported in `unkeyed` rather than guessed at.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "buildOverbillingCredits",
+          "signature": "buildOverbillingCredits(order: RemainingOrderSource, invoices: readonly AccountedInvoice[], _: unknown): OverbillingCredits",
+          "doc": "**Build the credit notes that give back what an order's invoices over-billed\nit** (api-cloudrun#1028). The ONE author of the offer: the server rebuilds it\ninside the create transaction and the manager renders it as a preview, so the\ntwo cannot answer differently.\n\n## The ROW is the unit of work, not the path\n\n🔴 An over-billed path with no rows of its own is a kit component credited\nthrough its PARENT's substitute. It has nothing to raise a credit against, it\nemits no line, and it clears when the anchor is credited — so it is neither\noffered nor refused. Driving this off paths instead would mint a credit line\nwith no invoice row behind it.\n\n## Which invoice, and the ordering is a choice of MONEY\n\nA credit note belongs to one invoice, so over-billing spanning several is\nseveral notes. They are ordered by **outstanding balance first**, then by\nnumber — not by recency. A note against a fully paid invoice is issuable but\nnot ALLOCATABLE to it, so it would leave the money sitting as unconsumed credit\nrather than settling anything.\n\n⚠️ For a shortening the target row is {@link ExtensionGroup.last_billed}, never\n`group.section`. In the ordinary case `group.item` and `group.section` name one\ninvoice; once an extension row has moved units they do not, and `section[1]` is\na divider uid rather than a line.\n\n## Refusals\n\nFails closed exactly as {@link remainingForOrder} does — an unaligned scope or a\nlive CRMS-authored invoice — **plus**, per path:\n\n- a **draft** invoice among the billers: a draft has billed nothing to give\n  back, and crediting one is not a correction but a reason to edit it;\n- a path with **no attributable row** that is not the kit-component case above;\n- a path attributable only through a **substitute**: one Y row can stand in for\n  several X paths, and the cap is Y's full quantity, so a credit raised there\n  could exceed what any single X was billed.\n\n⚠️ **Preview cents come from the ROW the note will be priced from**, not from\n{@link accountLine}. `accountLine.quantity_cents` prices at the ORDER line's\nterms, while `priceCreditNote` prices the stored INVOICE line — and where the\ntwo disagree, the second is what the operator will be asked to approve.",
           "paramTags": [],
           "returnsTag": null
         },

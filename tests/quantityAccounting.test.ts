@@ -19,6 +19,7 @@ import {
   type AccountedInvoice,
   accountLine,
   billedByPath,
+  buildOverbillingCredits,
   buildRemainingInvoice,
   crmsAuthoredInvoices,
   remainingForOrder,
@@ -674,6 +675,82 @@ Deno.test("quantityAccounting: netting is capped at the row — a credit beyond 
   // Reversing 99 of a 5-unit row bills 0, never −94.
   const { lines } = remainingForOrder(O, order, invoices, pairs(), [reversal("cn1", "a", 99)]);
   assertEquals(lines.map((l) => [l.billed, l.quantity]), [[0, 2]]);
+});
+
+// ── The over-billing OFFER (api-cloudrun#1028 phase 1d) ──────────────────────
+
+/** An issued invoice with a document number and an outstanding balance. */
+const biller = (uid: string, items: LineItem[], number: number, due: number, window?: { days: number; end?: string }): AccountedInvoice => ({
+  ...invoice(uid, items, "issued", window),
+  number,
+  amount_due_cents: due,
+});
+
+const src = (items: LineItem[], days = 5) => ({ uid: O, number: 1012, items, destinations: pairs(days) });
+
+Deno.test("buildOverbillingCredits: over-billed units become one credit line against the row that billed them", () => {
+  // Ordered 2, billed 5 on one invoice: credit 3 units at the INVOICE line's terms.
+  const invoices = [biller("a", lightOrder(5), 2001, 5000)];
+  const out = buildOverbillingCredits(src(lightOrder(2)), invoices);
+  assertEquals(out.notes.length, 1);
+  assertEquals(out.notes[0].uid_invoice, "a");
+  assertEquals(out.notes[0].lines.map((l) => [l.order_path.join("/"), l.quantity, l.preview_cents]), [[lightKey, 3, 3000]]);
+  // The row identity it will credit is the INVOICE path, not the order path.
+  assertEquals(out.notes[0].lines[0].path_invoice_item, [O, D, G, LIGHT]);
+  assertEquals([out.refused, out.crms_authored, out.unaligned], [[], [], []]);
+});
+
+Deno.test("buildOverbillingCredits: a credit note this feature already raised CLEARS the offer", () => {
+  // The whole point of phase 1b's netting: taking the offer must end it.
+  const invoices = [biller("a", lightOrder(5), 2001, 5000)];
+  const order = src(lightOrder(2));
+  assertEquals(buildOverbillingCredits(order, invoices).notes.length, 1);
+  assertEquals(buildOverbillingCredits(order, invoices, [reversal("cn1", "a", 3)]).notes, []);
+});
+
+Deno.test("buildOverbillingCredits: ordering is a choice of MONEY — an invoice with a balance is offered first", () => {
+  // Both over-bill. #2001 is fully paid, #2002 still owes. A note against a paid
+  // invoice is issuable and NOT allocatable to it, so it would leave the money
+  // sitting as unconsumed credit — the one with a balance goes first, even though
+  // it is the higher number.
+  const invoices = [biller("paid", lightOrder(3), 2001, 0), biller("owing", lightOrder(3), 2002, 9000)];
+  const out = buildOverbillingCredits(src(lightOrder(2)), invoices);
+  assertEquals(out.notes.map((n) => n.uid_invoice), ["owing", "paid"]);
+});
+
+Deno.test("buildOverbillingCredits: a DRAFT biller is refused — edit the draft, do not credit it", () => {
+  const invoices = [{ ...invoice("a", lightOrder(5), "draft"), number: 2001, amount_due_cents: 5000 }];
+  const out = buildOverbillingCredits(src(lightOrder(2)), invoices);
+  assertEquals(out.notes, []);
+  assertEquals(out.refused.map((r) => [r.order_path.join("/"), r.reason.includes("DRAFT")]), [[lightKey, true]]);
+});
+
+Deno.test("buildOverbillingCredits: a shortened window credits DAYS against the row that last billed them", () => {
+  // Billed 18 days ending later; the order now charges 15 — a 3-day shortening.
+  // 2 × 1000 × 3 ÷ 5 = 1200¢, and the line carries `credited_days`, not units.
+  const invoices = [biller("a", lightOrder(2, 18), 2001, 5000)];
+  const out = buildOverbillingCredits(src(lightOrder(2, 15), 15), invoices);
+  assertEquals(out.notes.length, 1);
+  assertEquals(
+    out.notes[0].lines.map((l) => [l.quantity, l.credited_days, l.preview_cents]),
+    [[2, 3, 1200]],
+  );
+});
+
+Deno.test("buildOverbillingCredits: fails closed exactly as a remainder does", () => {
+  // A live CRMS-authored invoice: the offer must not act, and must say why.
+  const crms = { ...biller("a", lightOrder(5), 2001, 5000), crms_id: 1087 };
+  const out = buildOverbillingCredits(src(lightOrder(2)), [crms]);
+  assertEquals([out.notes, out.crms_authored], [[], ["a"]]);
+});
+
+Deno.test("buildOverbillingCredits: over-billing across two invoices is two notes, never one", () => {
+  // A credit note belongs to ONE invoice, so this cannot be a single note.
+  // Ordered 2, billed 3 + 3 = 6 → 4 units over, taken from the larger rows first.
+  const invoices = [biller("a", lightOrder(3), 2001, 9000), biller("b", lightOrder(3), 2002, 9000)];
+  const out = buildOverbillingCredits(src(lightOrder(2)), invoices);
+  assertEquals(out.notes.map((n) => n.uid_invoice), ["a", "b"]);
+  assertEquals(out.notes.reduce((t, n) => t + n.lines.reduce((s, l) => s + l.quantity, 0), 0), 4);
 });
 
 Deno.test("quantityAccounting: a row billed on no known window extends nothing", () => {

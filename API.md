@@ -25571,6 +25571,8 @@ interface AccountedInvoice {
   uid: string;
   status: InvoiceStatusType;
   items: InvoiceItem[];
+  number?: number;
+  amount_due_cents?: number;
   destinations?: readonly InvoiceDocDestinationType[];
   crms_id?: number | string | null;
 }
@@ -25660,6 +25662,45 @@ interface LineAccount {
   quantity: number;
   quantity_cents: number;
   extension_cents: number;
+}
+```
+
+### `OverbillingCreditLine`
+
+One credit-note line the offer would raise.
+
+```ts
+interface OverbillingCreditLine {
+  path_invoice_item: string[];
+  uid_invoice_item: string;
+  order_path: string[];
+  quantity: number;
+  credited_days?: number;
+  preview_cents: number;
+}
+```
+
+### `OverbillingCreditNote`
+
+One credit note the offer would raise — a note belongs to exactly ONE invoice.
+
+```ts
+interface OverbillingCreditNote {
+  uid_invoice: string;
+  lines: OverbillingCreditLine[];
+  preview_cents: number;
+}
+```
+
+### `OverbillingCredits`
+
+```ts
+interface OverbillingCredits {
+  notes: OverbillingCreditNote[];
+  refused: Array<typeLiteral>;
+  unaligned: string[];
+  crms_authored: string[];
+  credits_unkeyed: string[];
 }
 ```
 
@@ -25801,6 +25842,51 @@ A line counts only when all four hold, and each one is load-bearing:
   indistinguishable and the credit could be subtracted from the wrong row.
 
 Anything else is reported in `unkeyed` rather than guessed at.
+
+### `buildOverbillingCredits(order: RemainingOrderSource, invoices: readonly AccountedInvoice[], _: unknown): OverbillingCredits`
+
+**Build the credit notes that give back what an order's invoices over-billed
+it** (api-cloudrun#1028). The ONE author of the offer: the server rebuilds it
+inside the create transaction and the manager renders it as a preview, so the
+two cannot answer differently.
+
+## The ROW is the unit of work, not the path
+
+🔴 An over-billed path with no rows of its own is a kit component credited
+through its PARENT's substitute. It has nothing to raise a credit against, it
+emits no line, and it clears when the anchor is credited — so it is neither
+offered nor refused. Driving this off paths instead would mint a credit line
+with no invoice row behind it.
+
+## Which invoice, and the ordering is a choice of MONEY
+
+A credit note belongs to one invoice, so over-billing spanning several is
+several notes. They are ordered by **outstanding balance first**, then by
+number — not by recency. A note against a fully paid invoice is issuable but
+not ALLOCATABLE to it, so it would leave the money sitting as unconsumed credit
+rather than settling anything.
+
+⚠️ For a shortening the target row is {@link ExtensionGroup.last_billed}, never
+`group.section`. In the ordinary case `group.item` and `group.section` name one
+invoice; once an extension row has moved units they do not, and `section[1]` is
+a divider uid rather than a line.
+
+## Refusals
+
+Fails closed exactly as {@link remainingForOrder} does — an unaligned scope or a
+live CRMS-authored invoice — **plus**, per path:
+
+- a **draft** invoice among the billers: a draft has billed nothing to give
+  back, and crediting one is not a correction but a reason to edit it;
+- a path with **no attributable row** that is not the kit-component case above;
+- a path attributable only through a **substitute**: one Y row can stand in for
+  several X paths, and the cap is Y's full quantity, so a credit raised there
+  could exceed what any single X was billed.
+
+⚠️ **Preview cents come from the ROW the note will be priced from**, not from
+{@link accountLine}. `accountLine.quantity_cents` prices at the ORDER line's
+terms, while `priceCreditNote` prices the stored INVOICE line — and where the
+two disagree, the second is what the operator will be asked to approve.
 
 ### `buildRemainingInvoice(order: RemainingOrderSource, invoices: readonly RemainingInvoiceSource[], _: unknown): RemainingInvoice`
 

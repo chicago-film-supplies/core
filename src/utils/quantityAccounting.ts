@@ -146,6 +146,16 @@ export interface AccountedInvoice {
   uid: string;
   status: InvoiceStatusType;
   items: InvoiceItem[];
+  /** Its document number. {@link buildOverbillingCredits} orders on it, last. */
+  number?: number;
+  /**
+   * What is still owed on it, in integer cents.
+   *
+   * ⚠️ Read by {@link buildOverbillingCredits} to prefer an invoice a credit can
+   * actually be ALLOCATED to. A note against a fully paid invoice is issuable and
+   * not allocatable to it, so it leaves the money sitting as unconsumed credit.
+   */
+  amount_due_cents?: number;
   /** The pairs that date its sections. Without one, a row it bills has no {@link BilledWindow} and extends by nothing. */
   destinations?: readonly InvoiceDocDestinationType[];
   /** Set on a CRMS-authored invoice. A remainder refuses an order any live one bills. */
@@ -758,6 +768,201 @@ export function remainingForOrder(
     lines.push({ ...account, path, item, new: at === undefined });
   }
   return { lines, compared: billed.compared, unaligned: [], crms_authored: [], credits_unkeyed: billed.credits_unkeyed };
+}
+
+// ── The over-billing OFFER (api-cloudrun#1028 phase 1d) ─────────
+
+/** One credit-note line the offer would raise. */
+export interface OverbillingCreditLine {
+  /** The invoice row this credits — its row identity on that invoice. */
+  path_invoice_item: string[];
+  /** That row's own uid, for the `uid_invoice_item` a credit note also stores. */
+  uid_invoice_item: string;
+  /** The order-relative path the over-billing was found at. */
+  order_path: string[];
+  /** Whole units to credit. `0` on a days-only credit. */
+  quantity: number;
+  /**
+   * Billable days to credit, for a window the order SHORTENED — `−extension_days`.
+   * Absent on an ordinary unit credit.
+   */
+  credited_days?: number;
+  /** Pre-tax preview cents, priced from the row the note will be priced from. */
+  preview_cents: number;
+}
+
+/** One credit note the offer would raise — a note belongs to exactly ONE invoice. */
+export interface OverbillingCreditNote {
+  uid_invoice: string;
+  lines: OverbillingCreditLine[];
+  /** Σ `preview_cents`, pre-tax. */
+  preview_cents: number;
+}
+
+/** @see {@link buildOverbillingCredits} */
+export interface OverbillingCredits {
+  /** One per invoice to credit, in the order they should be offered. Empty ⇒ no offer. */
+  notes: OverbillingCreditNote[];
+  /**
+   * Over-billing found but NOT offered, with the reason. 🔴 Surface it: an offer
+   * that silently drops part of what the diff surface renders leaves an operator
+   * looking at "over-billed" copy that the button does not clear.
+   */
+  refused: Array<{ order_path: string[]; reason: string }>;
+  /** As {@link remainingForOrder} — non-empty ⇒ `notes` is empty. */
+  unaligned: string[];
+  crms_authored: string[];
+  /** @see {@link BilledByPath.credits_unkeyed} */
+  credits_unkeyed: string[];
+}
+
+/**
+ * **Build the credit notes that give back what an order's invoices over-billed
+ * it** (api-cloudrun#1028). The ONE author of the offer: the server rebuilds it
+ * inside the create transaction and the manager renders it as a preview, so the
+ * two cannot answer differently.
+ *
+ * ## The ROW is the unit of work, not the path
+ *
+ * 🔴 An over-billed path with no rows of its own is a kit component credited
+ * through its PARENT's substitute. It has nothing to raise a credit against, it
+ * emits no line, and it clears when the anchor is credited — so it is neither
+ * offered nor refused. Driving this off paths instead would mint a credit line
+ * with no invoice row behind it.
+ *
+ * ## Which invoice, and the ordering is a choice of MONEY
+ *
+ * A credit note belongs to one invoice, so over-billing spanning several is
+ * several notes. They are ordered by **outstanding balance first**, then by
+ * number — not by recency. A note against a fully paid invoice is issuable but
+ * not ALLOCATABLE to it, so it would leave the money sitting as unconsumed credit
+ * rather than settling anything.
+ *
+ * ⚠️ For a shortening the target row is {@link ExtensionGroup.last_billed}, never
+ * `group.section`. In the ordinary case `group.item` and `group.section` name one
+ * invoice; once an extension row has moved units they do not, and `section[1]` is
+ * a divider uid rather than a line.
+ *
+ * ## Refusals
+ *
+ * Fails closed exactly as {@link remainingForOrder} does — an unaligned scope or a
+ * live CRMS-authored invoice — **plus**, per path:
+ *
+ * - a **draft** invoice among the billers: a draft has billed nothing to give
+ *   back, and crediting one is not a correction but a reason to edit it;
+ * - a path with **no attributable row** that is not the kit-component case above;
+ * - a path attributable only through a **substitute**: one Y row can stand in for
+ *   several X paths, and the cap is Y's full quantity, so a credit raised there
+ *   could exceed what any single X was billed.
+ *
+ * ⚠️ **Preview cents come from the ROW the note will be priced from**, not from
+ * {@link accountLine}. `accountLine.quantity_cents` prices at the ORDER line's
+ * terms, while `priceCreditNote` prices the stored INVOICE line — and where the
+ * two disagree, the second is what the operator will be asked to approve.
+ */
+export function buildOverbillingCredits(
+  order: RemainingOrderSource,
+  invoices: readonly AccountedInvoice[],
+  creditNotes: readonly AccountedCreditNote[] = [],
+): OverbillingCredits {
+  const O = order.uid;
+  const billed = billedByPath(O, order.items, invoices, creditNotes);
+  const crmsAuthored = crmsAuthoredInvoices(invoices);
+  const empty: OverbillingCredits = {
+    notes: [],
+    refused: [],
+    unaligned: billed.unaligned,
+    crms_authored: crmsAuthored,
+    credits_unkeyed: billed.credits_unkeyed,
+  };
+  if (billed.unaligned.length > 0 || crmsAuthored.length > 0) return empty;
+
+  const byUid = new Map(invoices.map((inv) => [inv.uid, inv]));
+  const refused: OverbillingCredits["refused"] = [];
+  /** invoice uid → the lines to credit on it. */
+  const perInvoice = new Map<string, OverbillingCreditLine[]>();
+  const add = (invoiceUid: string, line: OverbillingCreditLine) => {
+    if (!perInvoice.has(invoiceUid)) perInvoice.set(invoiceUid, []);
+    perInvoice.get(invoiceUid)!.push(line);
+  };
+
+  for (const item of order.items) {
+    if (!isLineItemType(item.type)) continue;
+    const path = item.path ?? [];
+    const at = billed.byPath.get(key(path));
+    const account = accountLine(item, at, orderLineWindow(order.destinations, path));
+
+    // ── Units billed beyond the order ──
+    if (account.quantity < 0) {
+      let owed = -account.quantity;
+      // Direct rows only, largest first, so the fewest lines carry the credit.
+      const rows = (at?.rows ?? []).filter((r) => r.via === "direct" && r.quantity > 0);
+      if (rows.length === 0) {
+        // A substitute-only path is refusable; a path with NO rows at all is the
+        // kit component credited through its parent, which clears on its own.
+        const substituteOnly = (at?.rows ?? []).some((r) => r.via === "substitute");
+        if (substituteOnly) {
+          refused.push({
+            order_path: [...path],
+            reason: "billed only through a substitute — one substitute row can stand in for several order lines, so its cap is not this line's",
+          });
+        }
+      } else if (rows.some((r) => byUid.get(r.invoiceUid)?.status === "draft")) {
+        refused.push({ order_path: [...path], reason: "billed by a DRAFT invoice — edit the draft rather than crediting it" });
+      } else {
+        for (const row of [...rows].sort((a, b) => b.quantity - a.quantity)) {
+          if (owed <= 0) break;
+          const take = Math.min(owed, row.quantity);
+          owed -= take;
+          add(row.invoiceUid, {
+            path_invoice_item: [...(row.item.path ?? [])],
+            uid_invoice_item: row.item.uid,
+            order_path: [...path],
+            quantity: take,
+            preview_cents: subtotalCents({ ...row.item, quantity: take } as LineItem),
+          });
+        }
+        if (owed > 0) {
+          refused.push({ order_path: [...path], reason: `${owed} unit(s) over-billed beyond any attributable invoice row` });
+        }
+      }
+    }
+
+    // ── Days billed beyond the order: a SHORTENED charge window ──
+    for (const group of extensionGroups(item, at, orderLineWindow(order.destinations, path))) {
+      if (group.extension_days >= 0) continue;
+      const days = -group.extension_days;
+      const invoice = byUid.get(group.last_billed.invoiceUid);
+      if (invoice?.status === "draft") {
+        refused.push({ order_path: [...path], reason: "window shortened on a DRAFT invoice — edit the draft rather than crediting it" });
+        continue;
+      }
+      if (group.via === "substitute") {
+        refused.push({ order_path: [...path], reason: "window shortened on a substituted row — the credit's cap is not this line's" });
+        continue;
+      }
+      add(group.last_billed.invoiceUid, {
+        path_invoice_item: [...group.last_billed.path],
+        uid_invoice_item: group.last_billed.uid,
+        order_path: [...path],
+        quantity: group.quantity,
+        credited_days: days,
+        preview_cents: Math.abs(subtotalCents({ ...group.item, quantity: group.quantity } as LineItem, group.extension_days)),
+      });
+    }
+  }
+
+  // Outstanding balance first — a note against a fully paid invoice is issuable
+  // and not allocatable to it — then by number, so the order is stable.
+  const notes = [...perInvoice.entries()]
+    .map(([uid_invoice, lines]) => ({ uid_invoice, lines, preview_cents: lines.reduce((t, l) => t + l.preview_cents, 0) }))
+    .sort((a, b) => {
+      const owed = (uid: string) => byUid.get(uid)?.amount_due_cents ?? 0;
+      if ((owed(a.uid_invoice) > 0) !== (owed(b.uid_invoice) > 0)) return owed(a.uid_invoice) > 0 ? -1 : 1;
+      return (byUid.get(a.uid_invoice)?.number ?? 0) - (byUid.get(b.uid_invoice)?.number ?? 0);
+    });
+
+  return { ...empty, notes, refused };
 }
 
 // ── The remainder invoice (api-cloudrun#680 R1) ─────────────────
