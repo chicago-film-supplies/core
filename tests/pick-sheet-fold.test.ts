@@ -134,6 +134,8 @@ function fulfillment(overrides: Partial<Fulfillment> = {}): Fulfillment {
     items: [divider(LEG_1, "Stage 4"), line(CAMERA, "Alexa 35", 2, [LEG_1, CAMERA])],
     subject: "Ep 101",
     reference: null,
+    due_at: null,
+    due_at_fs: null,
     query_by_items: [],
     query_by_contacts: [],
     query_by_dates: [],

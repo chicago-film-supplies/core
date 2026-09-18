@@ -32,9 +32,11 @@ import type {
   RateType,
   TaxRefType,
   XeroTaxComponentType,
+  BookingBreakdown,
+  OrderStatusType,
 } from "../schemas/mod.ts";
 import isEqual from "lodash-es/isEqual";
-import { itemContract, zeroPricedFlaggedNonComponents } from "../schemas/mod.ts";
+import { itemContract, legDirectionFromBreakdown, zeroPricedFlaggedNonComponents } from "../schemas/mod.ts";
 import { canonicalChargeWindows, type ChargeDates, chargedDays, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
 import {
   fromCents,
@@ -451,6 +453,68 @@ export function deriveOrderDateEnvelope(
     collection_end: ce.iso, collection_end_fs: ce.fs,
     days_active,
   };
+}
+
+/**
+ * When an order's fulfillment is next due — the minimum, across destinations,
+ * of each destination's LEG-APPROPRIATE start. Backs `fulfillments.due_at` /
+ * `due_at_fs`.
+ *
+ * The leg is resolved once, order-wide, from the summed `bookings_breakdown`
+ * ({@link legDirectionFromBreakdown}) — not per destination — because the
+ * field answers "when is this FULFILLMENT next due", one leg at a time,
+ * mirroring `dueAtForLeg` (`core/src/utils/pick-sheet-fold.ts`) per
+ * destination: a `collection` leg reads `collection_start`, falling back to
+ * `delivery_start` when a pair states only one date; a `delivery` leg reads
+ * the reverse.
+ *
+ * `{ iso: null, fs: null }` for a `complete`/`canceled` order — there is
+ * nothing left to be due for, and returning a stale date would rank a closed
+ * order ahead of live work on an ascending sort.
+ *
+ * Returns the `_fs` companion FROM THE SAME destination as the winning ISO
+ * value, the same reason {@link pickEnvelopeBound} carries one: this module
+ * cannot mint a Firestore `Timestamp`, so the caller needs the source
+ * destination's own value rather than re-deriving it.
+ */
+export function deriveNextEventDate(
+  order: {
+    status: OrderStatusType;
+    bookings_breakdown: BookingBreakdown;
+    destinations: ReadonlyArray<Pick<DocDestinationType, "dates">>;
+  },
+): { iso: string | null; fs: FirestoreTimestampType | null } {
+  if (order.status === "complete" || order.status === "canceled") {
+    return { iso: null, fs: null };
+  }
+  const leg = legDirectionFromBreakdown(order.bookings_breakdown);
+  const [primaryIso, primaryFs, fallbackIso, fallbackFs]: [
+    keyof OrderDocDatesType,
+    keyof OrderDocDatesType,
+    keyof OrderDocDatesType,
+    keyof OrderDocDatesType,
+  ] = leg === "collection"
+    ? ["collection_start", "collection_start_fs", "delivery_start", "delivery_start_fs"]
+    : ["delivery_start", "delivery_start_fs", "collection_start", "collection_start_fs"];
+
+  let bestT: number | null = null;
+  let iso: string | null = null;
+  let fs: FirestoreTimestampType | null = null;
+  for (const d of order.destinations) {
+    const primaryValue = d.dates?.[primaryIso] as string | null | undefined;
+    const value = primaryValue ?? (d.dates?.[fallbackIso] as string | null | undefined);
+    if (!value) continue;
+    const t = new Date(value).getTime();
+    if (Number.isNaN(t)) continue;
+    if (bestT === null || t < bestT) {
+      bestT = t;
+      iso = value;
+      fs = (primaryValue
+        ? (d.dates[primaryFs] as FirestoreTimestampType | undefined)
+        : (d.dates[fallbackFs] as FirestoreTimestampType | undefined)) ?? null;
+    }
+  }
+  return { iso, fs };
 }
 
 /** Minimal destination shape consumed by {@link buildQueryByDates}. */

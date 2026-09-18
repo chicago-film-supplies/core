@@ -212,6 +212,28 @@ export function pickSheetLegDirection(
 }
 
 /**
+ * The same direction as {@link pickSheetLegDirection}, from an ORDER's summed
+ * `bookings_breakdown` rather than its individual bookings — `Σ > 0 ⟺ ∃ > 0`
+ * over non-negative buckets, so the two agree everywhere the per-booking
+ * predicate can be evaluated at all.
+ *
+ * ⚠️ **One asymmetry, and it is contained rather than absent.** This has no
+ * `type` axis, so `inFlight` reads any `out > 0` as in-flight — including a
+ * SALE's, which the per-booking predicate excludes. It cannot bite: a
+ * non-rental `out` is terminal (`isBookingClosed`,
+ * `@cfs/core/utils/bookings`), so an order whose only `out` is a sale has
+ * already completed and returns `null` before this runs (see
+ * {@link deriveNextEventDate}). The defence depends on that status invariant
+ * — pin it against {@link pickSheetLegDirection} over constructed bookings,
+ * never re-derive an oracle from this function itself.
+ */
+export function legDirectionFromBreakdown(bd: BookingBreakdown): PickSheetLegType {
+  const pendingBefore = bd.reserved > 0 || bd.prepped > 0;
+  const inFlight = bd.out > 0;
+  return !pendingBefore && inFlight ? "collection" : "delivery";
+}
+
+/**
  * Does this leg belong on a sheet drawn for `leg`? Mirrors
  * {@link pickSheetGateAdmits}.
  *

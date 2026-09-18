@@ -178,6 +178,17 @@ const resetFulfillmentRules: CollectionRule[] = [
       { source: ["query_by_dates"], target: ["query_by_dates"] },
       {
         source: [],
+        target: ["due_at"],
+        transform:
+          "deriveNextEventDate(order) — the leg-appropriate start (from bookings_breakdown's custody) nearest across destinations; null on a complete/canceled order",
+      },
+      {
+        source: [],
+        target: ["due_at_fs"],
+        transform: "the Timestamp companion of due_at, from the same winning destination",
+      },
+      {
+        source: [],
         target: ["version"],
         transform: "incremented off the STORED fulfillment, not the order",
       },

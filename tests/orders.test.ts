@@ -40,6 +40,7 @@ import {
   buildPackingList,
   buildPackingListForLeg,
   buildQueryByDates,
+  deriveNextEventDate,
   deriveOrderDateEnvelope,
   computeItemPaths,
   consolidateItems,
@@ -78,7 +79,14 @@ import {
   orderHasRentals,
   orderHasTax,
 } from "../src/utils/orders.ts";
-import type { OrderDatesType, DestinationType, OrderDocDatesType, FirestoreTimestampType } from "../src/schemas/mod.ts";
+import type {
+  OrderDatesType,
+  DestinationType,
+  OrderDocDatesType,
+  FirestoreTimestampType,
+  BookingBreakdown,
+  OrderStatusType,
+} from "../src/schemas/mod.ts";
 import type { PackingListItem } from "../src/utils/orders.ts";
 
 const lineItemBase = getInitialValues(OrderDocLineItem) as Record<string, unknown>;
@@ -2684,6 +2692,87 @@ Deno.test("deriveOrderDateEnvelope: all-null and empty inputs yield a null envel
   const empty = deriveOrderDateEnvelope([]);
   assertEquals(empty.delivery_start, null);
   assertEquals(empty.days_active, null);
+});
+
+// ── deriveNextEventDate ────────────────────────────────────────────
+
+function bd(over: Partial<BookingBreakdown> = {}): BookingBreakdown {
+  return { damaged: 0, lost: 0, out: 0, prepped: 0, quoted: 0, reserved: 0, returned: 0, ...over };
+}
+
+function orderFor(
+  status: OrderStatusType,
+  breakdown: BookingBreakdown,
+  destinations: ReadonlyArray<{ dates: OrderDocDatesType }>,
+) {
+  return { status, bookings_breakdown: breakdown, destinations };
+}
+
+Deno.test("deriveNextEventDate: a DELIVERY leg reads delivery_start, falling back to collection_start", () => {
+  const dates = docDates({
+    delivery_start: "2026-03-01T09:00:00.000-06:00", delivery_start_fs: fsTs(11),
+    collection_start: "2026-03-10T09:00:00.000-06:00", collection_start_fs: fsTs(12),
+  });
+  const result = deriveNextEventDate(orderFor("reserved", bd({ reserved: 1 }), [{ dates }]));
+  assertEquals(result.iso, "2026-03-01T09:00:00.000-06:00");
+  assertEquals(result.fs, fsTs(11));
+
+  const noDelivery = docDates({
+    delivery_start: null,
+    collection_start: "2026-03-10T09:00:00.000-06:00", collection_start_fs: fsTs(12),
+  });
+  const fallback = deriveNextEventDate(orderFor("reserved", bd({ reserved: 1 }), [{ dates: noDelivery }]));
+  assertEquals(fallback.iso, "2026-03-10T09:00:00.000-06:00");
+  assertEquals(fallback.fs, fsTs(12));
+});
+
+Deno.test("deriveNextEventDate: a COLLECTION leg reads collection_start, falling back to delivery_start", () => {
+  const dates = docDates({
+    delivery_start: "2026-03-01T09:00:00.000-06:00", delivery_start_fs: fsTs(21),
+    collection_start: "2026-03-10T09:00:00.000-06:00", collection_start_fs: fsTs(22),
+  });
+  const result = deriveNextEventDate(orderFor("active", bd({ out: 3 }), [{ dates }]));
+  assertEquals(result.iso, "2026-03-10T09:00:00.000-06:00");
+  assertEquals(result.fs, fsTs(22));
+
+  const noCollection = docDates({
+    delivery_start: "2026-03-01T09:00:00.000-06:00", delivery_start_fs: fsTs(21),
+    collection_start: null,
+  });
+  const fallback = deriveNextEventDate(orderFor("active", bd({ out: 3 }), [{ dates: noCollection }]));
+  assertEquals(fallback.iso, "2026-03-01T09:00:00.000-06:00");
+  assertEquals(fallback.fs, fsTs(21));
+});
+
+Deno.test("deriveNextEventDate: takes the MINIMUM across destinations, carrying that destination's own _fs", () => {
+  const near = docDates({ delivery_start: "2026-03-05T09:00:00.000-06:00", delivery_start_fs: fsTs(1) });
+  const far = docDates({ delivery_start: "2026-03-20T09:00:00.000-06:00", delivery_start_fs: fsTs(2) });
+  const result = deriveNextEventDate(
+    orderFor("reserved", bd({ reserved: 1 }), [{ dates: far }, { dates: near }]),
+  );
+  assertEquals(result.iso, "2026-03-05T09:00:00.000-06:00");
+  assertEquals(result.fs, fsTs(1));
+});
+
+Deno.test("deriveNextEventDate: null on a complete or canceled order, even with live-looking dates", () => {
+  const dates = docDates({ delivery_start: "2026-03-01T09:00:00.000-06:00", delivery_start_fs: fsTs(1) });
+  for (const status of ["complete", "canceled"] as const) {
+    const result = deriveNextEventDate(orderFor(status, bd({ out: 3 }), [{ dates }]));
+    assertEquals(result.iso, null, status);
+    assertEquals(result.fs, null, status);
+  }
+});
+
+Deno.test("deriveNextEventDate: no destination states the leg's date, or no destinations at all", () => {
+  const empty = deriveNextEventDate(orderFor("reserved", bd({ reserved: 1 }), []));
+  assertEquals(empty.iso, null);
+  assertEquals(empty.fs, null);
+
+  const stateless = deriveNextEventDate(
+    orderFor("reserved", bd({ reserved: 1 }), [{ dates: docDates({ delivery_start: null, collection_start: null }) }]),
+  );
+  assertEquals(stateless.iso, null);
+  assertEquals(stateless.fs, null);
 });
 
 Deno.test("buildQueryByDates: dedupes and sorts Chicago boundary days", () => {

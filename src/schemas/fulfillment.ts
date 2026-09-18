@@ -22,9 +22,11 @@
  */
 import { z } from "zod";
 import { FirestoreId, ItemUid } from "./_uid.ts";
+import { chicagoInstant } from "./_datetime.ts";
 import {
   checkZeroPricedAmount,
   checkZeroPricedComponents,
+  FirestoreTimestamp,
   type FirestoreTimestampType,
   type FulfillableItemType,
   FULFILLMENT_LINE_ITEM_TYPES,
@@ -420,6 +422,17 @@ export interface Fulfillment {
   items: FulfillmentItemType[];
   subject: string;
   reference: string | null;
+  /**
+   * When this fulfillment is next due — the leg-appropriate start, minimum
+   * across destinations. Authored by `buildFulfillment`
+   * (`api-cloudrun/src/services/fulfillment.ts`) from
+   * `orderNew.bookings_breakdown`/`.destinations` via
+   * `deriveNextEventDate` (`@cfs/core/utils/orders`). `null` on a
+   * `complete`/`canceled` order.
+   */
+  due_at: string | null;
+  /** The `Timestamp` mirror of {@link due_at} — see `serverSortVia` below. */
+  due_at_fs: FirestoreTimestampType | null;
   query_by_items: string[];
   query_by_contacts: string[];
   query_by_dates: string[];
@@ -466,6 +479,11 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
     label: "Reference",
     linkTo: "fulfillmentDetail",
   }),
+  due_at: chicagoInstant().meta({ column: true, label: "Due", serverSortVia: "due_at_fs" })
+    .nullable().default(null),
+  // Never a column — an `_fs` mirror is `due_at` under the Timestamp encoding,
+  // not a second fact (`core/CLAUDE.md` § *Display columns*).
+  due_at_fs: FirestoreTimestamp.nullable().default(null),
   query_by_items: z.array(z.string()),
   query_by_contacts: z.array(z.string()),
   query_by_dates: z.array(z.string()),
@@ -475,7 +493,7 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   title: "Fulfillment",
   collection: "fulfillments",
   displayDefaults: {
-    columns: ["number", "organization.path", "subject", "status"],
+    columns: ["number", "organization.path", "subject", "status", "due_at"],
     filters: { status: [] },
     sort: { column: "number", direction: "desc" },
   },

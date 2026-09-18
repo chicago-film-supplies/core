@@ -597,6 +597,17 @@ const createOrderRules: CollectionRule[] = [
       { source: ["query_by_items"], target: ["query_by_items"] },
       { source: ["query_by_contacts"], target: ["query_by_contacts"] },
       { source: ["query_by_dates"], target: ["query_by_dates"] },
+      {
+        source: [],
+        target: ["due_at"],
+        transform:
+          "deriveNextEventDate(order) — the leg-appropriate start (from bookings_breakdown's custody) nearest across destinations; null on a complete/canceled order",
+      },
+      {
+        source: [],
+        target: ["due_at_fs"],
+        transform: "the Timestamp companion of due_at, from the same winning destination",
+      },
     ],
   },
 ];
@@ -857,6 +868,17 @@ const updateOrderRules: CollectionRule[] = [
       { source: ["query_by_items"], target: ["query_by_items"] },
       { source: ["query_by_contacts"], target: ["query_by_contacts"] },
       { source: ["query_by_dates"], target: ["query_by_dates"] },
+      {
+        source: [],
+        target: ["due_at"],
+        transform:
+          "deriveNextEventDate(order) — the leg-appropriate start (from bookings_breakdown's custody) nearest across destinations; null on a complete/canceled order",
+      },
+      {
+        source: [],
+        target: ["due_at_fs"],
+        transform: "the Timestamp companion of due_at, from the same winning destination",
+      },
     ],
   },
 ];
@@ -1168,6 +1190,7 @@ const updateBookingTransaction: TransactionDefinition = {
     "update-booking:transactions-to-ledger",
     "update-booking:transactions-to-locations",
     "update-booking:booking-to-order",
+    "update-order:order-to-fulfillment",
     "update-booking:booking-to-cards",
     // OOS cowrites pull these in when a new OOS record is created:
     "create-out-of-service-record:sources-to-record",

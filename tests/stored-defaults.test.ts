@@ -113,12 +113,22 @@ const SENTINEL_DEFAULTS: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
- * Stored defaults with no sentinel behind them — the campaign backlog (core#95).
+ * Stored defaults with no sentinel behind them.
  *
  * Each is inert: it cannot put a value in Firestore, and its only effect is to
- * let a writer omit the key. **This set only ever shrinks.**
+ * let a writer omit the key. Mostly the core#95 campaign backlog, where that
+ * is debt — but `fulfillments.due_at`/`due_at_fs` are inert **by design, not
+ * by omission**: 1,022 fulfillments predate the field, the 962 terminal ones
+ * are never backfilled (only non-terminal rows are, via
+ * `scripts/repair-fulfillment-projection.ts`), and neither a REQUIRED field
+ * nor a bare `.nullable()` tolerates a permanently-absent key on a document
+ * that will never be rewritten. **This set only ever shrinks** for the
+ * backlog half; these two entries are not expected to.
  */
-const INERT_DEFAULTS: ReadonlySet<string> = new Set([]);
+const INERT_DEFAULTS: ReadonlySet<string> = new Set([
+  "fulfillments.due_at",
+  "fulfillments.due_at_fs",
+]);
 
 // deno-lint-ignore no-explicit-any
 function defOf(node: any): any {

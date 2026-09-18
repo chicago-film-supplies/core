@@ -3892,6 +3892,8 @@ interface Fulfillment {
   items: FulfillmentItemType[];
   subject: string;
   reference: string | null;
+  due_at: string | null;
+  due_at_fs: FirestoreTimestampType | null;
   query_by_items: string[];
   query_by_contacts: string[];
   query_by_dates: string[];
@@ -11985,6 +11987,23 @@ The contract for an item `type`, or `undefined` for a value outside
 `@cfs/core/utils/orders` types `type` as `string`; an unrecognized type has no
 contract and every derived predicate answers `false` for it.
 
+### `legDirectionFromBreakdown(bd: BookingBreakdown): PickSheetLegType`
+
+The same direction as {@link pickSheetLegDirection}, from an ORDER's summed
+`bookings_breakdown` rather than its individual bookings — `Σ > 0 ⟺ ∃ > 0`
+over non-negative buckets, so the two agree everywhere the per-booking
+predicate can be evaluated at all.
+
+⚠️ **One asymmetry, and it is contained rather than absent.** This has no
+`type` axis, so `inFlight` reads any `out > 0` as in-flight — including a
+SALE's, which the per-booking predicate excludes. It cannot bite: a
+non-rental `out` is terminal (`isBookingClosed`,
+`@cfs/core/utils/bookings`), so an order whose only `out` is a sale has
+already completed and returns `null` before this runs (see
+{@link deriveNextEventDate}). The defence depends on that status invariant
+— pin it against {@link pickSheetLegDirection} over constructed bookings,
+never re-derive an oracle from this function itself.
+
 ### `pickSheetGateAdmits(pair: PickSheetGatePair, gate: PickSheetGateType): boolean`
 
 Does this leg have work on a sheet gated this way? See {@link PICK_SHEET_GATES}.
@@ -17500,6 +17519,8 @@ interface Fulfillment {
   items: FulfillmentItemType[];
   subject: string;
   reference: string | null;
+  due_at: string | null;
+  due_at_fs: FirestoreTimestampType | null;
   query_by_items: string[];
   query_by_contacts: string[];
   query_by_dates: string[];
@@ -20336,6 +20357,7 @@ interface FulfillmentDocument {
   dates: typeLiteral;
   destinations: Array<typeLiteral>;
   items?: Array<typeLiteral>;
+  due_at_fs?: number;
   created_at?: number;
   updated_at: number;
 }
@@ -20854,7 +20876,6 @@ day something actually renders it.
 interface TypesenseDisplayDefaults {
   columns: string[];
   filters: Record<string, parenthesized[]>;
-  sort: typeLiteral;
   groupBy?: GroupByAxis[];
 }
 ```
@@ -21165,8 +21186,9 @@ Typesense collection config for the sanitized fulfillment order view.
 Mirrors `orders` by uid but strips all pricing, totals, tax profile,
 invoice refs, CRM/Xero ids, and financial line-item fields. The default
 sort is `number` (non-optional, always set) because Typesense rejects
-optional fields as default_sorting_field; the fulfillment UI overrides
-this at query time via `displayDefaults.sort` to order by delivery date.
+optional fields as default_sorting_field; `due_at_fs` (optional — null on
+a terminal fulfillment) is a click-to-sort column an operator picks at
+query time, not the resting sort.
 
 ```ts
 const fulfillments: TypesenseCollectionConfig;
@@ -31166,6 +31188,29 @@ an absent nullable key to `null`. Extra keys (computed money, `discount`,
 ⚠️ **Every order line therefore carries `base_percent`** — `null` on all but a
 `percent_of_total` line. That matches what `buildOrderLineFromProduct` already
 stages, and `invoicePriceDifferences` drops null keys before comparing.
+
+### `deriveNextEventDate(order: typeLiteral): typeLiteral`
+
+When an order's fulfillment is next due — the minimum, across destinations,
+of each destination's LEG-APPROPRIATE start. Backs `fulfillments.due_at` /
+`due_at_fs`.
+
+The leg is resolved once, order-wide, from the summed `bookings_breakdown`
+({@link legDirectionFromBreakdown}) — not per destination — because the
+field answers "when is this FULFILLMENT next due", one leg at a time,
+mirroring `dueAtForLeg` (`core/src/utils/pick-sheet-fold.ts`) per
+destination: a `collection` leg reads `collection_start`, falling back to
+`delivery_start` when a pair states only one date; a `delivery` leg reads
+the reverse.
+
+`{ iso: null, fs: null }` for a `complete`/`canceled` order — there is
+nothing left to be due for, and returning a stale date would rank a closed
+order ahead of live work on an ascending sort.
+
+Returns the `_fs` companion FROM THE SAME destination as the winning ISO
+value, the same reason {@link pickEnvelopeBound} carries one: this module
+cannot mint a Firestore `Timestamp`, so the caller needs the source
+destination's own value rather than re-deriving it.
 
 ### `deriveOrderDateEnvelope(destinations: ReadonlyArray<Pick<DocDestinationType, "dates">>): OrderDateEnvelope`
 

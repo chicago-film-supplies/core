@@ -519,6 +519,7 @@ export const templateSchemaFields: Partial<
     { path: "items[] (type: group).description", type: "string" },
     { path: "subject", type: "string" },
     { path: "reference", type: "string | null" },
+    { path: "due_at", type: "string | null" },
     { path: "version", type: "number" },
   ],
   "movement-sessions": [

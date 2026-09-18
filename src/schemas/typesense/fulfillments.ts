@@ -7,8 +7,9 @@ import { typesenseAddressFields } from "./types.ts";
  * Mirrors `orders` by uid but strips all pricing, totals, tax profile,
  * invoice refs, CRM/Xero ids, and financial line-item fields. The default
  * sort is `number` (non-optional, always set) because Typesense rejects
- * optional fields as default_sorting_field; the fulfillment UI overrides
- * this at query time via `displayDefaults.sort` to order by delivery date.
+ * optional fields as default_sorting_field; `due_at_fs` (optional — null on
+ * a terminal fulfillment) is a click-to-sort column an operator picks at
+ * query time, not the resting sort.
  */
 export const fulfillments: TypesenseCollectionConfig = {
   alias: "fulfillments",
@@ -89,6 +90,7 @@ export const fulfillments: TypesenseCollectionConfig = {
       { name: "items.path", type: "string[]", optional: true, facet: false },
       { name: "items.order_number", type: "int32[]", optional: true },
       { name: "items.uid_order", type: "string[]", optional: true },
+      { name: "due_at_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "created_at", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "updated_at", type: "int64", sort: true, index: true, facet: false },
     ],
@@ -97,8 +99,7 @@ export const fulfillments: TypesenseCollectionConfig = {
   synonyms: [],
   pulseShards: 1,
   displayDefaults: {
-    columns: ["number", "organization.name", "subject", "dates.delivery_start_fs", "dates.collection_start_fs", "status"],
+    columns: ["number", "organization.name", "subject", "dates.delivery_start_fs", "dates.collection_start_fs", "status", "due_at_fs"],
     filters: { status: [] },
-    sort: { column: "dates.delivery_start_fs", direction: "desc" },
   },
 };

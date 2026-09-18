@@ -9,6 +9,7 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import {
+  legDirectionFromBreakdown,
   PICK_SHEET_GATES,
   PICK_SHEET_LEGS,
   type PickSheet,
@@ -22,6 +23,7 @@ import {
   type PickSheetLegType,
   PickSheetSchema,
 } from "../src/schemas/pick-sheet.ts";
+import type { BookingBreakdown } from "../src/schemas/booking.ts";
 
 /** A leg's custody, spelled as the seven buckets so a zero is stated. */
 function custody(
@@ -193,6 +195,59 @@ Deno.test("leg: the vocabulary is closed, two-valued, and every member is decida
     pickSheetLegDirection([custody("rental", { out: 1 })]),
   ]);
   assertEquals(produced.size, PICK_SHEET_LEGS.length, "every member must be reachable");
+});
+
+/** A rollup breakdown, spelled as the seven buckets so a zero is stated. */
+function breakdown(
+  over: Partial<Record<"damaged" | "lost" | "out" | "prepped" | "quoted" | "reserved" | "returned", number>>,
+): BookingBreakdown {
+  return { damaged: 0, lost: 0, out: 0, prepped: 0, quoted: 0, reserved: 0, returned: 0, ...over };
+}
+
+Deno.test("breakdown leg: agrees with the per-booking predicate over representative custody shapes", () => {
+  // Σ > 0 ⟺ ∃ > 0 over non-negative buckets, so the rollup and per-booking
+  // forms must agree everywhere except the one documented asymmetry (below).
+  // Deliberately NOT derived from `legDirectionFromBreakdown` itself — each
+  // case pins the per-booking oracle, `pickSheetLegDirection`, which has its
+  // own independent test coverage above.
+  const cases: Array<[string, PickSheetLegCustody[], BookingBreakdown]> = [
+    ["nothing open", [], breakdown({})],
+    ["a rental holding out", [custody("rental", { out: 3 })], breakdown({ out: 3 })],
+    [
+      "reserved pulls it back to delivery",
+      [custody("rental", { out: 3 }), custody("rental", { reserved: 1 })],
+      breakdown({ out: 3, reserved: 1 }),
+    ],
+    [
+      "prepped pulls it back to delivery",
+      [custody("rental", { out: 3 }), custody("rental", { prepped: 1 })],
+      breakdown({ out: 3, prepped: 1 }),
+    ],
+    ["only terminal buckets", [custody("rental", { returned: 4 })], breakdown({ returned: 4 })],
+    ["only quoted", [custody("rental", { quoted: 4 })], breakdown({ quoted: 4 })],
+  ];
+  for (const [label, bookings, bd] of cases) {
+    assertEquals(legDirectionFromBreakdown(bd), pickSheetLegDirection(bookings), label);
+  }
+});
+
+Deno.test("breakdown leg: DISAGREES on a sale-only `out`, and the disagreement is confined to an already-closed order", () => {
+  // The rollup has no `type` axis, so it reads ANY `out > 0` as in-flight —
+  // including a sale's, which the per-booking predicate correctly excludes
+  // (checkout IS delivery for a sale). This is the one documented asymmetry.
+  const bookings = [custody("sale", { out: 5 })];
+  const bd = breakdown({ out: 5 });
+  assertEquals(pickSheetLegDirection(bookings), "delivery");
+  assertEquals(legDirectionFromBreakdown(bd), "collection");
+  // The defence: a non-rental `out` is terminal (`isBookingClosed`,
+  // `@cfs/core/utils/bookings`), so an order whose ONLY `out` is a sale has
+  // already completed — `quantity === out` here IS that terminal condition —
+  // and `deriveNextEventDate` returns null for a completed order before this
+  // function ever runs. The invariant lives there, not here; this test only
+  // pins that the disagreement this depends on is real.
+  const quantity = bd.quoted + bd.reserved + bd.prepped + bd.out + bd.returned + bd.lost + bd.damaged;
+  assertEquals(bd.returned + bd.lost + bd.damaged === quantity, false, "not terminal by the RENTAL rule");
+  assertEquals(bd.out === quantity, true, "terminal by the SALE rule — the order is already complete");
 });
 
 Deno.test("schema: `leg` is a required key, so `null` is a STATED both-directions", () => {

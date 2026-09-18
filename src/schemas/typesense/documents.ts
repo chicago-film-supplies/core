@@ -504,6 +504,7 @@ export interface FulfillmentDocument {
     order_number?: number;
     uid_order?: string;
   }>;
+  due_at_fs?: number;
   created_at?: number;
   updated_at: number;
 }

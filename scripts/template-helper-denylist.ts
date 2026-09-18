@@ -181,6 +181,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "getItemSubtreeRange", // path machinery
     "getRemovalIndices", // editor delete machinery
     "deriveOrderDateEnvelope", // superseded by per-destination dates; not for rendering
+    "deriveNextEventDate", // fulfillment-projection helper — a stored `due_at`, not a render input
     "buildQueryByDates", // Typesense projection helper
     "buildQueryByContacts", // Typesense projection helper — the sibling of buildQueryByDates
     "computeItemTaxAmountCents", // single-tax building block used by calculateItemTax — not a render helper

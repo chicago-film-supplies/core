@@ -1749,7 +1749,7 @@
         {
           "kind": "interface",
           "name": "Fulfillment",
-          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  due_at: string | null;\n  due_at_fs: FirestoreTimestampType | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Sanitized order document for the fulfillment client view.\nMirrors the order by uid — one fulfillment doc per order."
         },
         {
@@ -5337,6 +5337,14 @@
         },
         {
           "kind": "function",
+          "name": "legDirectionFromBreakdown",
+          "signature": "legDirectionFromBreakdown(bd: BookingBreakdown): PickSheetLegType",
+          "doc": "The same direction as {@link pickSheetLegDirection}, from an ORDER's summed\n`bookings_breakdown` rather than its individual bookings — `Σ > 0 ⟺ ∃ > 0`\nover non-negative buckets, so the two agree everywhere the per-booking\npredicate can be evaluated at all.\n\n⚠️ **One asymmetry, and it is contained rather than absent.** This has no\n`type` axis, so `inFlight` reads any `out > 0` as in-flight — including a\nSALE's, which the per-booking predicate excludes. It cannot bite: a\nnon-rental `out` is terminal (`isBookingClosed`,\n`@cfs/core/utils/bookings`), so an order whose only `out` is a sale has\nalready completed and returns `null` before this runs (see\n{@link deriveNextEventDate}). The defence depends on that status invariant\n— pin it against {@link pickSheetLegDirection} over constructed bookings,\nnever re-derive an oracle from this function itself.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "pickSheetGateAdmits",
           "signature": "pickSheetGateAdmits(pair: PickSheetGatePair, gate: PickSheetGateType): boolean",
           "doc": "Does this leg have work on a sheet gated this way? See {@link PICK_SHEET_GATES}.\n\n⚠️ **One owner, deliberately, and it lives in a schema module rather than a\nutil.** The rule is the closed vocabulary's own semantics — a second copy\nbeside the enum is exactly how the `||` defect above survived as long as it\ndid — and `src/utils/*` entrypoints are walked by the template-helper\ngenerator, which would advertise a warehouse predicate to PDF authors.",
@@ -7926,7 +7934,7 @@
         {
           "kind": "interface",
           "name": "Fulfillment",
-          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  due_at: string | null;\n  due_at_fs: FirestoreTimestampType | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Sanitized order document for the fulfillment client view.\nMirrors the order by uid — one fulfillment doc per order."
         },
         {
@@ -9114,7 +9122,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentDocument",
-          "declaration": "interface FulfillmentDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  deliveries?: boolean;\n  pickups?: boolean;\n  has_conflicts?: boolean;\n  subject?: string;\n  reference?: string;\n  organization: typeLiteral;\n  dates: typeLiteral;\n  destinations: Array<typeLiteral>;\n  items?: Array<typeLiteral>;\n  created_at?: number;\n  updated_at: number;\n}",
+          "declaration": "interface FulfillmentDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  status: string;\n  deliveries?: boolean;\n  pickups?: boolean;\n  has_conflicts?: boolean;\n  subject?: string;\n  reference?: string;\n  organization: typeLiteral;\n  dates: typeLiteral;\n  destinations: Array<typeLiteral>;\n  items?: Array<typeLiteral>;\n  due_at_fs?: number;\n  created_at?: number;\n  updated_at: number;\n}",
           "doc": "Typesense document type for the sanitized fulfillment order view.\n\nMirrors `OrderDocument` but strips pricing, totals, tax profile,\ninvoice refs, CRM/Xero ids, and financial line-item fields."
         },
         {
@@ -9258,7 +9266,7 @@
         {
           "kind": "interface",
           "name": "TypesenseDisplayDefaults",
-          "declaration": "interface TypesenseDisplayDefaults {\n  columns: string[];\n  filters: Record<string, parenthesized[]>;\n  sort: typeLiteral;\n  groupBy?: GroupByAxis[];\n}",
+          "declaration": "interface TypesenseDisplayDefaults {\n  columns: string[];\n  filters: Record<string, parenthesized[]>;\n  groupBy?: GroupByAxis[];\n}",
           "doc": "Display defaults for a Typesense collection in the UI.\n\n**`facet` and `group` used to sit here and were write-only.** Both were\ncarried into every saved prefs blob by manager's `buildTypesensePrefs` and\nread back by nothing — measured 2026-08-09: `typesenseDisplayDefaults` is read\nin three places, all for `columns` or `filters`.\n\n`facet: string[]` is easy to mistake for Typesense's own faceting. It is not:\nthat is {@linkcode TypesenseField.facet}, a per-field boolean on the index\nschema, which is load-bearing. This was a list of field NAMES — the facet\nanalogue of `columns`, meaning \"which filters does this collection open with\".\nThe filter bar was built on a different mechanism (`getFilters()` derives what\nis *offered* from `TypesenseField.facet` + a covering column; the sibling\n`filters` key holds what is *active*), so it never acquired a reader.\n\nBecause the object is strict and both keys were required, all 22 collections\nhad to declare them, 21 of them `facet: []` purely to satisfy the type — and\nan entry inside a field nothing reads is unfalsifiable. `cards` named\n`uid_list` there and carried a comment asserting the facet UI resolved it to a\nlist name; no such resolution existed anywhere (core#50).\n\nDeleted rather than left empty, so a future entry cannot be inert: with the\nkey gone every reference is a compile error. Re-adding either is ~2 lines the\nday something actually renders it."
         },
         {
@@ -9415,7 +9423,7 @@
           "kind": "variable",
           "name": "fulfillments",
           "declaration": "const fulfillments: TypesenseCollectionConfig;",
-          "doc": "Typesense collection config for the sanitized fulfillment order view.\n\nMirrors `orders` by uid but strips all pricing, totals, tax profile,\ninvoice refs, CRM/Xero ids, and financial line-item fields. The default\nsort is `number` (non-optional, always set) because Typesense rejects\noptional fields as default_sorting_field; the fulfillment UI overrides\nthis at query time via `displayDefaults.sort` to order by delivery date."
+          "doc": "Typesense collection config for the sanitized fulfillment order view.\n\nMirrors `orders` by uid but strips all pricing, totals, tax profile,\ninvoice refs, CRM/Xero ids, and financial line-item fields. The default\nsort is `number` (non-optional, always set) because Typesense rejects\noptional fields as default_sorting_field; `due_at_fs` (optional — null on\na terminal fulfillment) is a click-to-sort column an operator picks at\nquery time, not the resting sort."
         },
         {
           "kind": "function",
@@ -14288,6 +14296,14 @@
           "name": "declaredOrderPrice",
           "signature": "declaredOrderPrice(price: DeclaredPriceInput): OrderDeclaredPrice",
           "doc": "Copy exactly {@link ORDER_DECLARED_PRICE_KEYS} off an input price, normalizing\nan absent nullable key to `null`. Extra keys (computed money, `discount`,\n`taxes`) are ignored — they are the pricer's, not the caller's.\n\n⚠️ **Every order line therefore carries `base_percent`** — `null` on all but a\n`percent_of_total` line. That matches what `buildOrderLineFromProduct` already\nstages, and `invoicePriceDifferences` drops null keys before comparing.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveNextEventDate",
+          "signature": "deriveNextEventDate(order: typeLiteral): typeLiteral",
+          "doc": "When an order's fulfillment is next due — the minimum, across destinations,\nof each destination's LEG-APPROPRIATE start. Backs `fulfillments.due_at` /\n`due_at_fs`.\n\nThe leg is resolved once, order-wide, from the summed `bookings_breakdown`\n({@link legDirectionFromBreakdown}) — not per destination — because the\nfield answers \"when is this FULFILLMENT next due\", one leg at a time,\nmirroring `dueAtForLeg` (`core/src/utils/pick-sheet-fold.ts`) per\ndestination: a `collection` leg reads `collection_start`, falling back to\n`delivery_start` when a pair states only one date; a `delivery` leg reads\nthe reverse.\n\n`{ iso: null, fs: null }` for a `complete`/`canceled` order — there is\nnothing left to be due for, and returning a stale date would rank a closed\norder ahead of live work on an ascending sort.\n\nReturns the `_fs` companion FROM THE SAME destination as the winning ISO\nvalue, the same reason {@link pickEnvelopeBound} carries one: this module\ncannot mint a Firestore `Timestamp`, so the caller needs the source\ndestination's own value rather than re-deriving it.",
           "paramTags": [],
           "returnsTag": null
         },

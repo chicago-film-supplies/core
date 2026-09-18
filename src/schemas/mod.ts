@@ -957,6 +957,7 @@ export {
   PickSheetItemSchema,
   pickSheetItemOwnsBooking,
   PickSheetLegEnum,
+  legDirectionFromBreakdown,
   pickSheetLegAdmits,
   pickSheetLegDirection,
   PickSheetOrderSchema,
