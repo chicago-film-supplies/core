@@ -408,20 +408,23 @@ changes, reconciliation mechanism, permanent `MovementId` dual-shape) is fully d
 
 ### 3.5 `chooseBookingOwner` / `joinBookings` after the fix
 
-Kept — **NOT simplified in the core-only commit that lands §3.2**, which corrects this section's
-original plan. `splitItem` output still legitimately puts multiple *rows* under one booking, so a
-read surface still needs to pick which row carries the controls. The "structural parentage as
-override" arm does become genuinely unreachable through `foldPickSheet`/`bookingOccurrencesByBooking`
-the moment `bookingUidFor` is ancestry-aware — a same-`uidBooking` bucket can now only ever hold
-occurrences that already share `componentAncestry`, hence share `isStructural` — **but
-`chooseBookingOwner` is `export`ed specifically because `manager/src/utils/orderBookingJoin.ts` calls
-it too, and manager still builds its `uidBooking` the OLD (non-ancestry-aware) way until its own
-§3.2 bullet lands.** Simplifying the exported function in core alone, ahead of manager's matching
-update, would ship a core version whose `chooseBookingOwner` silently regresses manager's display
-(prod order 961's bug) the moment manager bumps its pin — before manager's own writer changes are
-even in flight. **Do the simplification in the SAME beta wave as manager's update (this step's own
-original point, restated correctly)**, not preemptively. `joinBookings` needs only the id-formula
-update — it already delegates correctly.
+**DONE.** Kept, simplified — not deleted. `splitItem` output still legitimately puts multiple
+*rows* under one booking, so a read surface still needs to pick which row carries the controls.
+What's removed is the "structural parentage as override" arm: once `bookingUidFor` is
+ancestry-aware, a same-`uidBooking` bucket can only ever hold occurrences that already share
+`componentAncestry` — the arm had nothing left to correct. `BookingOccurrence` drops
+`isStructural` entirely (core `beta.492`).
+
+⚠️ **Landed in two steps within one session, not two betas apart — the ordering caution below is
+what made that safe, not something skipped.** `chooseBookingOwner` is `export`ed specifically
+because `manager/src/utils/orderBookingJoin.ts` calls it too, and simplifying it in core BEFORE
+manager's own builder update would have shipped a core version whose `chooseBookingOwner` silently
+regressed manager's display (prod order 961's bug) the moment manager bumped its pin. What
+actually happened: core `beta.491` (the id shape) → core `beta.492` (the `chooseBookingOwner`
+simplification) → manager's own `orderBookingJoin.ts` update to the ancestry-aware builder, pinned
+to `beta.492`, committed and pushed in the same continuous session — so no consumer ever observed
+`beta.492` with manager still on the old builder. `joinBookings` needed only the id-formula
+update — it already delegated correctly.
 
 ## 4. The merged surface, built on the fixed identity
 
@@ -577,21 +580,40 @@ required fixes not optional), `manager/src/utils/orderBookingJoin.ts`, new
 
 ## Status
 
-> ## ⚠️ STATUS UPDATE 2026-09-18
+> ## ⚠️ STATUS UPDATE 2026-09-18 (supersedes the two blocks this replaced)
 >
-> **§3.2's `core`-side writer changes are DONE, tested, and committed on `beta`** (not yet
-> pushed/published as of this update): the shared `core/src/utils/booking-id.ts` builder
-> (`componentAncestry`/`componentSignatureHash`/`buildBookingId`, with a self-contained sync SHA-256
-> since the module must run in the manager's browser too — verified against `shasum` vectors);
-> `BookingId` widened to the 3-/4-segment union and `MovementId`'s subject arm updated to match;
-> `Booking.component_signature_hash` added; `consolidateItems` regrouped on `(uid, signatureHash)`;
-> `pick-sheet-fold.ts`'s `bookingUidFor` now delegates to the shared builder. Full test coverage
-> (new `tests/booking-id.test.ts`, updates to `_uid`/`orders`/`pick-sheet-fold`/`template-helpers`
-> tests), `deno task check`/`lint`/`test`/`check:declarations`/`check:generated`/`audit:citations`
-> all clean, `deno publish --dry-run` succeeds.
+> **§3.2 is DONE end to end, in `core` AND `manager`, published and pushed — not just committed
+> locally.**
 >
-> **Two corrections to this doc's earlier text, found while implementing, both already folded in
-> above rather than left as a diff to reconcile later:**
+> `core`: the shared `core/src/utils/booking-id.ts` builder
+> (`componentAncestry`/`componentSignatureHash`/`buildBookingId`, self-contained sync SHA-256 since
+> the module must run in the manager browser too); `BookingId` widened to the 3-/4-segment union,
+> `MovementId`'s subject arm updated to match; `Booking.component_signature_hash` added
+> (**optional, not required** — see correction 1 below); `consolidateItems` regrouped on
+> `(uid, signatureHash)`; `pick-sheet-fold.ts`'s `bookingUidFor` delegates to the shared builder.
+> Published as **`10.0.0-beta.491`**.
+>
+> `core`, second beta: §3.5's `chooseBookingOwner` simplification landed too — the
+> structural-parentage-override arm is deleted (`BookingOccurrence` drops `isStructural`), because
+> once `manager` also adopts the ancestry-aware builder (below, same session) the arm is
+> unreachable through EITHER caller. Published as **`10.0.0-beta.492`**.
+>
+> `manager`: `orderBookingJoin.ts`'s `bookingUidForItem`/`joinBookings` now delegate to the same
+> shared builder (closing the third of the three independent hand-constructors §3.1's survey
+> found); `countProductOccurrencesInDestination` gates on `componentSignatureHash` too, not product
+> uid alone. Pin bumped to `beta.492`. Committed `757ffccb` and **pushed to `main`** (preview
+> auto-deploy).
+>
+> Full test coverage both sides (new `core/tests/booking-id.test.ts`; reworked
+> `manager/tests/utils/orderBookingJoin.test.ts` and `pickSheet.test.ts` — several fixtures used
+> non-uuid-shaped divider/group ids, which `isProductShapedUid` misparses as product ancestors, and
+> several scenarios relied on structurally-different occurrences colliding onto one aggregate
+> booking, which is now unrepresentable by design and had to be rewritten rather than patched).
+> `core`: `check`/`lint`/`test`/`check:declarations`/`check:generated`/`audit:citations` clean,
+> `deno publish --dry-run` succeeds. `manager`: `npm run gate` (lint + typecheck + citations) and
+> the full unit suite (2240 tests) clean.
+>
+> **Two corrections to this doc's earlier text, found while implementing:**
 > 1. §2's `component_signature_hash` ships `?:` (optional), not required — `BookingSchema` is
 >    `z.strictObject` and ~7,266 pre-existing bookings carry no such key; core's own
 >    "Making a field REQUIRED" procedure says measure + backfill before tightening, not in the
@@ -599,15 +621,18 @@ required fixes not optional), `manager/src/utils/orderBookingJoin.ts`, new
 >    `mid-expand`. A fork confirmed nothing read-parses a stored `Booking` through this schema in
 >    either api-cloudrun or manager (every read is a bare TS cast), so this was a type-honesty fix,
 >    not a crash-prevention one — but a real fix regardless.
-> 2. §3.5's `chooseBookingOwner` simplification is **NOT done in this commit** — it is genuinely
->    unreachable through core's own two callers now, but `manager/src/utils/orderBookingJoin.ts`
->    still calls the same exported function with occurrences built from its OWN (still
->    non-ancestry-aware) id computation. Simplifying `chooseBookingOwner` here, ahead of manager's
->    matching update, would ship a core version that silently regresses manager's display (prod
->    order 961's bug) the moment manager bumps its pin. Do it in the same beta wave as manager's
->    own §3.2 bullet, not preemptively.
+> 2. §3.5's ordering caveat ("do not simplify `chooseBookingOwner` in core alone, ahead of
+>    manager") held for exactly one intermediate commit, not across the whole session — both sides
+>    landed in the same continuous work, so the caution was exercised rather than skipped.
 >
-> Next concrete step: publish the `core` beta (§3.4 step 1), then api-cloudrun's bump+deploy.
+> **Not yet started:** `api-cloudrun`'s own `bookingId()` (`services/orders.ts`) still hand-builds
+> the old flat form — the survey's THIRD constructor, now the only one left; `bookingDestUid`/
+> `pairRepointedBookings` arity widening (§3.1's found regression, required fixes, not yet applied);
+> `recomputeOrderBookings`'s extraction + `--review-queue` mode; the backfill script; and §4's
+> merged surface. Next concrete step: `api-cloudrun`'s bump+deploy (§3.4 step 2) — bump its
+> `@cfs/core` pin to `beta.492`, land the `bookingId()`/`bookingDestUid`/`pairRepointedBookings`
+> changes together, deploy, THEN start the backfill (never before the deploy — new-shape documents
+> must not exist before the deployed reader can parse them).
 
 Compacted 2026-09-18 (was two stacked status blocks; folded into one current statement).
 
