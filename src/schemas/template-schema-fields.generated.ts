@@ -525,7 +525,7 @@ export const templateSchemaFields: Partial<
   "movement-sessions": [
     { path: "uuid_session", type: "string" },
     { path: "date", type: "string" },
-    { path: "types", type: "prep | check_out | check_in | mark_damaged | mark_lost | sale | sale_return | opening_balance | purchase | find | make | adjustment_increase | adjustment_decrease | trade_in | write_off | transfer[]" },
+    { path: "types", type: "prep | check_out | check_in | mark_damaged | mark_lost | unprep | check_out_undo | check_in_undo | sale | sale_return | opening_balance | purchase | find | make | adjustment_increase | adjustment_decrease | trade_in | write_off | transfer[]" },
     { path: "numbers", type: "number[]" },
     { path: "quantity", type: "number" },
     { path: "created_by", type: "object" },
@@ -543,7 +543,7 @@ export const templateSchemaFields: Partial<
     { path: "items", type: "object[]" },
     { path: "items[].uid", type: "string" },
     { path: "items[].number", type: "number" },
-    { path: "items[].type", type: "prep | check_out | check_in | mark_damaged | mark_lost | sale | sale_return | opening_balance | purchase | find | make | adjustment_increase | adjustment_decrease | trade_in | write_off | transfer" },
+    { path: "items[].type", type: "prep | check_out | check_in | mark_damaged | mark_lost | unprep | check_out_undo | check_in_undo | sale | sale_return | opening_balance | purchase | find | make | adjustment_increase | adjustment_decrease | trade_in | write_off | transfer" },
     { path: "items[].quantity", type: "number" },
     { path: "items[].uid_product", type: "string" },
     { path: "items[].name", type: "string" },

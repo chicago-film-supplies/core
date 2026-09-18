@@ -133,6 +133,44 @@ export const MOVEMENT_TYPES = [
   "check_in",
   "mark_damaged",
   "mark_lost",
+  // The five above, run backwards. A picker can move custody DOWN the ladder —
+  // un-prepping a pick, pulling back a check-out, undoing a return or a
+  // damaged/lost mark — and until api-cloudrun#1053 those transitions emitted
+  // NOTHING, because `deriveCustodyTransitions` mapped only the forward
+  // direction and an unmapped transition yields no movement by design. The
+  // breakdown moved and the journal did not, so the next forward action
+  // legitimately re-emitted its `prep`/`check_out` and the two disagreed
+  // forever: 16 of the 23 `audit-custody-replay` divergences measured on prod
+  // 2026-09-18 are exactly this, across orders #971, #1012 and #897.
+  //
+  // 🔴 **These are events in their own right, NOT reversals.** A reversal keeps
+  // its original's type, names it in `reverses`, and negates its lines; an
+  // operator putting units back on the shelf is a new physical fact that undoes
+  // no single row — one un-prep can walk back part of each of several earlier
+  // preps. Spelling them as their own types is what keeps `reverses` meaning
+  // only what it says, and it costs nothing else: all five are ownership-neutral
+  // and `cost: "forbidden"`, so `getTransactionMultiplier` returns 0 and
+  // `xeroPostingFor` skips them on `no_cost_contract` — both DERIVED from the
+  // contract, so neither needed an arm.
+  //
+  // ⚠️ **There are THREE, not five — `lost` and `damaged` have no rewind member
+  // because the ladder cannot produce one.** `applyBookingUpdate` refuses a
+  // decrease of either outright (*"Cannot decrease breakdown.lost or
+  // breakdown.damaged via PUT /bookings — adjust the OOS record itself"*), so
+  // `damaged → out` is a 400 rather than a silent unmapped transition. The
+  // out-of-service record is the lever there, and it already has
+  // `returned_to_service`. Minting a type for a transition no writer can emit
+  // would be a declared-and-unpopulated vocabulary member — the thing this
+  // comment block exists to avoid, not an extension of it.
+  //
+  // ⚠️ **And no `sale` rewind.** `sale`/`sale_return` move ownership and carry a
+  // required cost, so undoing one owes a basis and a posting decision the
+  // contract cannot derive — the two gates the depreciation note above keeps
+  // shut. No sale rewind exists in either corpus (all 23 measured divergences
+  // are `type: "rental"`), so the gap is recorded rather than guessed.
+  "unprep",
+  "check_out_undo",
+  "check_in_undo",
   // Custody + ownership + cost.
   "sale",
   "sale_return",
@@ -237,6 +275,25 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     custody: "required",
     cost: "forbidden",
     places: { from: ["bookings"], to: ["out-of-service"] },
+    booking: "required",
+  },
+  // ── the three reachable rewinds, mirrored ──
+  // Each is its forward twin's `places` swapped end for end. Mirroring here
+  // rather than exempting them keeps the check real: a rewind must still name
+  // places of the RIGHT KIND, just in the opposite order — the same reasoning
+  // `checkMovementContract` applies to a reversal, stated once per type instead
+  // of inferred from a `reverses` that a rewind has no business setting.
+  unprep: { custody: "required", cost: "forbidden", places: null, booking: "required" },
+  check_out_undo: {
+    custody: "required",
+    cost: "forbidden",
+    places: { from: ["bookings"], to: ["locations"] },
+    booking: "required",
+  },
+  check_in_undo: {
+    custody: "required",
+    cost: "forbidden",
+    places: { from: ["locations"], to: ["bookings"] },
     booking: "required",
   },
   // A one-sided line: the units leave both the shelf and ownership, and that is

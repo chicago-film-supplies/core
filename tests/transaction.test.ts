@@ -48,14 +48,34 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     (contract.custody === "with_booking" && booking !== null);
 
   // Pick a custody pair whose implied places match the contract's line places.
-  const custodyFor: Partial<Record<MovementTypeType, { from: string | null; to: string | null }>> = {
+  // TOTAL over `MOVEMENT_TYPES`, deliberately — it was `Partial` with a `?? null`
+  // fallback, so adding a custody-bearing type left the fixture silently
+  // custody-less and the failure arrived as an assertion about the SCHEMA
+  // ("unprep requires a custody transition") rather than about the missing
+  // fixture. A total record makes the next one a compile error at this
+  // declaration. The `forbidden` types carry an explicit null for the same
+  // reason: so "no custody" is stated rather than defaulted.
+  const custodyFor: Record<MovementTypeType, { from: string | null; to: string | null } | null> = {
     prep: { from: "reserved", to: "prepped" },
     check_out: { from: "prepped", to: "out" },
     check_in: { from: "out", to: "returned" },
     mark_damaged: { from: "out", to: "damaged" },
     mark_lost: { from: "out", to: "lost" },
+    // Each the mirror of its forward twin above.
+    unprep: { from: "prepped", to: "reserved" },
+    check_out_undo: { from: "out", to: "prepped" },
+    check_in_undo: { from: "returned", to: "out" },
     sale: { from: "prepped", to: "out" },
     sale_return: { from: "out", to: "returned" },
+    opening_balance: null,
+    purchase: null,
+    find: null,
+    make: null,
+    adjustment_increase: null,
+    adjustment_decrease: null,
+    trade_in: null,
+    write_off: null,
+    transfer: null,
   };
 
   let lines: unknown[] = [];
@@ -82,7 +102,7 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     uid_booking: booking,
     type,
     quantity: 2,
-    custody: custodyNeeded ? custodyFor[type] ?? null : null,
+    custody: custodyNeeded ? custodyFor[type] : null,
     cost: contract.cost === "required" ? { amount_cents: -40000, unit_cost: 200, unit_costs_cents: [200, 200] } : null,
     // ⚠️ A `purchase` MUST carry one — `base` comes from `getInitialValues`,
     // which resolves a nullable to `null`, and a stored purchase with an
