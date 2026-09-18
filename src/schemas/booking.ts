@@ -164,7 +164,7 @@ export interface BookingStore {
  * exists to close; reading a shared `(…, component_signature_hash)` row as a
  * line is the OTHER standing defect — it renders one booking's quantities N
  * times, every unit total N× wrong. Stated the same way in
- * `api-cloudrun/src/lib/orderProjection.ts`, `manager/src/utils/orderBookingJoin.ts`,
+ * `api-cloudrun/src/lib/orderProjection.ts`, the manager's since-deleted `orderBookingJoin`,
  * `core/src/schemas/pick-sheet.ts` and `manager/src/utils/pickSheet.ts`.
  */
 export interface Booking {

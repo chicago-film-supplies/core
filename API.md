@@ -752,7 +752,7 @@ destination)` as one booking is the prod-961 defect class this field
 exists to close; reading a shared `(…, component_signature_hash)` row as a
 line is the OTHER standing defect — it renders one booking's quantities N
 times, every unit total N× wrong. Stated the same way in
-`api-cloudrun/src/lib/orderProjection.ts`, `manager/src/utils/orderBookingJoin.ts`,
+`api-cloudrun/src/lib/orderProjection.ts`, the manager's since-deleted `orderBookingJoin`,
 `core/src/schemas/pick-sheet.ts` and `manager/src/utils/pickSheet.ts`.
 
 ```ts
@@ -14389,7 +14389,7 @@ destination)` as one booking is the prod-961 defect class this field
 exists to close; reading a shared `(…, component_signature_hash)` row as a
 line is the OTHER standing defect — it renders one booking's quantities N
 times, every unit total N× wrong. Stated the same way in
-`api-cloudrun/src/lib/orderProjection.ts`, `manager/src/utils/orderBookingJoin.ts`,
+`api-cloudrun/src/lib/orderProjection.ts`, the manager's since-deleted `orderBookingJoin`,
 `core/src/schemas/pick-sheet.ts` and `manager/src/utils/pickSheet.ts`.
 
 ```ts
@@ -24379,7 +24379,7 @@ The ONE deterministic constructor for a `bookings.uid` — `componentAncestry`,
 existed, three call sites built the id by hand from its parts:
 api-cloudrun's `bookingId()` (`api-cloudrun/src/services/orders.ts`), this
 repo's own `bookingUidFor` (`src/utils/pick-sheet-fold.ts`), and the manager's
-`bookingUidForItem` (`manager/src/utils/orderBookingJoin.ts`). Three
+`bookingUidForItem` (`orderBookingJoin` in the manager, since deleted with the per-order screen). Three
 re-implementations of one derivation is exactly the pattern that let a
 product repeating within one order — standalone, as a component of kit A,
 as a component of kit B, or split via `splitItem` — collapse onto a single
@@ -28942,9 +28942,8 @@ bucket, so a booking holding only `quoted` lands on the `target` side of
 ## 🔴 NOT the same question as the picker's per-stage target test
 
 The manager spells `qtyOnStageSide(b, stage, "target") > 0` in three places
-(`manager/src/utils/fulfillmentClassify.ts`,
-`manager/src/components/orders/FulfillmentDestinationSection.tsx`,
-`manager/src/components/orders/FulfillmentItemRow.tsx` — the last reads it as
+(the manager's since-deleted per-order screen: its column classifier,
+destination section and item row — the last read it as
 a quantity rather than a predicate), and it looks like this predicate written
 out. It is
 not, and the difference is the `stage` argument: the picker passes the
@@ -33635,7 +33634,7 @@ One occurrence of an aggregate booking — the two facts the owner rule reads.
 
 Structural rather than a named document type on purpose: the two callers hand
 it different rows. This fold builds it from a `PickSheetItem`'s
-`FulfillmentItem`; `manager/src/utils/orderBookingJoin.ts` builds it while
+`FulfillmentItem`; the manager's since-deleted `orderBookingJoin` builds it while
 walking a whole order's `items[]`, including legs this fold would drop.
 
 ```ts
@@ -33688,7 +33687,7 @@ one leg — a priced principal beside its own zero-priced accessories, or a
 `splitItem` clone. Exactly one occurrence renders the quantities; the rest
 render booking-less and point at it. {@link foldPickSheet} stamps that
 answer onto `PickSheetItem.owner_path`, and the manager's order-grain join
-(`orderBookingJoin.ts`, which serves the whole fulfillment detail including
+(`orderBookingJoin` (since deleted), which serves the whole fulfillment detail including
 legs with nothing open) asks the same question about rows this fold never
 sees. Two implementations of one rule is precisely what moving the fold to
 core was for.
@@ -33703,7 +33702,7 @@ unrepresentable: two occurrences only ever share one `uid_booking` when
 their `componentAncestry` already agrees, so every candidate this function
 chooses among is, by construction, genuinely fungible — the override arm
 had nothing left to correct. Landed together with the matching update to
-manager's `orderBookingJoin.ts` (same beta wave) — simplifying
+manager's `orderBookingJoin` (since deleted) (same beta wave) — simplifying
 it in core alone, ahead of manager's own builder update, would have shipped
 a core version that silently regressed manager's display the moment it
 bumped its pin.

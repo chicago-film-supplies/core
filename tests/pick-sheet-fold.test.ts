@@ -1034,7 +1034,7 @@ Deno.test("helper: pickSheetLineBooking refuses a row from a DIFFERENT leg", () 
 /**
  * 🔴 **`chooseBookingOwner` has TWO callers and this is where the rule is
  * pinned**, rather than only through the fold. The other caller is
- * `manager/src/utils/orderBookingJoin.ts`, which walks a whole order — including
+ * the manager's since-deleted `orderBookingJoin`, which walks a whole order — including
  * the legs the fold drops for having nothing open — so a rule tested only
  * through `foldPickSheet` is a rule half its callers exercise.
  *

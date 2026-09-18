@@ -189,7 +189,7 @@ export function compareSheetOrders(a: PickSheetOrder, b: PickSheetOrder): number
  *
  * Structural rather than a named document type on purpose: the two callers hand
  * it different rows. This fold builds it from a `PickSheetItem`'s
- * `FulfillmentItem`; `manager/src/utils/orderBookingJoin.ts` builds it while
+ * `FulfillmentItem`; the manager's since-deleted `orderBookingJoin` builds it while
  * walking a whole order's `items[]`, including legs this fold would drop.
  */
 export interface BookingOccurrence {
@@ -209,7 +209,7 @@ export interface BookingOccurrence {
  * `splitItem` clone. Exactly one occurrence renders the quantities; the rest
  * render booking-less and point at it. {@link foldPickSheet} stamps that
  * answer onto `PickSheetItem.owner_path`, and the manager's order-grain join
- * (`orderBookingJoin.ts`, which serves the whole fulfillment detail including
+ * (`orderBookingJoin` (since deleted), which serves the whole fulfillment detail including
  * legs with nothing open) asks the same question about rows this fold never
  * sees. Two implementations of one rule is precisely what moving the fold to
  * core was for.
@@ -224,7 +224,7 @@ export interface BookingOccurrence {
  * their `componentAncestry` already agrees, so every candidate this function
  * chooses among is, by construction, genuinely fungible — the override arm
  * had nothing left to correct. Landed together with the matching update to
- * manager's `orderBookingJoin.ts` (same beta wave) — simplifying
+ * manager's `orderBookingJoin` (since deleted) (same beta wave) — simplifying
  * it in core alone, ahead of manager's own builder update, would have shipped
  * a core version that silently regressed manager's display the moment it
  * bumped its pin.

@@ -4,7 +4,7 @@
  * existed, three call sites built the id by hand from its parts:
  * api-cloudrun's `bookingId()` (`api-cloudrun/src/services/orders.ts`), this
  * repo's own `bookingUidFor` (`src/utils/pick-sheet-fold.ts`), and the manager's
- * `bookingUidForItem` (`manager/src/utils/orderBookingJoin.ts`). Three
+ * `bookingUidForItem` (`orderBookingJoin` in the manager, since deleted with the per-order screen). Three
  * re-implementations of one derivation is exactly the pattern that let a
  * product repeating within one order — standalone, as a component of kit A,
  * as a component of kit B, or split via `splitItem` — collapse onto a single

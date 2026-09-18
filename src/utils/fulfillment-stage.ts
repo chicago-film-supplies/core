@@ -537,9 +537,8 @@ export function qtyOnStageSide(
  * ## 🔴 NOT the same question as the picker's per-stage target test
  *
  * The manager spells `qtyOnStageSide(b, stage, "target") > 0` in three places
- * (`manager/src/utils/fulfillmentClassify.ts`,
- * `manager/src/components/orders/FulfillmentDestinationSection.tsx`,
- * `manager/src/components/orders/FulfillmentItemRow.tsx` — the last reads it as
+ * (the manager's since-deleted per-order screen: its column classifier,
+ * destination section and item row — the last read it as
  * a quantity rather than a predicate), and it looks like this predicate written
  * out. It is
  * not, and the difference is the `stage` argument: the picker passes the
