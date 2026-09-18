@@ -25460,21 +25460,31 @@ as a D7 EXTENSION (api-cloudrun#997): for
 one-week minimum skipped, through `priceDocument`'s line pricer — so it is
 exactly what an extension section on an invoice bills (#997 D11).
 
-🔴 **An extension is a change of WINDOW, and its days are the PAIRS' days.**
-A billed row is extended only when the order pair's charge end is LATER than
-the end of the window that billed it (earlier is a shortening, the same is
-nothing), and the day counts are the two pairs' stored window days — never a
-line's `chargeable_days`. A {@link BilledWindow} is that pair's last window end
-and its window days.
-A sign that disagrees with the window's direction is no extension either.
+🔴 **An extension is a change of WINDOW SET, and its days are the PAIRS' days.**
+A billed row is extended, or shortened, only when the order pair's windows
+cover DIFFERENT Chicago calendar dates than the windows that billed it; the
+amount is then `billableDays(order windows) − billed days`, sign and all, from
+the two pairs' stored window days — never a line's `chargeable_days`. A
+{@link BilledWindow} carries that pair's last window end, its window days, and
+each window's bounds.
 
-This reverses the first cut, which read line `chargeable_days` on both sides.
+⚠️ **This widened on 2026-09-17 (api-cloudrun#1028 phase 1a), and the widening
+is the point.** The rule it replaced compared only where the LAST window ended,
+so dropping or shrinking a MIDDLE window moved no end and reported nothing at
+all. The two questions — *did the window move?* and *by how much, which way?* —
+are now asked separately in {@link extensionGroups}; the first is answered by
+dates ({@link sameWindowDates}) and the second by day counts.
+
+Both cuts reverse the first one, which read line `chargeable_days` on both sides.
 The 2026-09-16 census (prod and dev agree) found ONE genuine extension in the
 corpus (#898) against 34 orders reading a positive extension on an UNMOVED
 window — $59.6k — and 60 remainder sections charging from the day after their
 own end: CRMS lines stored with no days, hand-held days, a long rental billed
 in two parts (35 + 10 of 45 days, each invoice carrying the full window), and
-a pair recounted from 10 to 11 days. Every one had identical windows.
+a pair recounted from 10 to 11 days. Every one had identical windows. ⚠️ The
+date-set gate is what keeps all 34 dead: a stored `days` is frozen at write
+while the order's is recounted, so a day delta under identical dates is always
+an artefact of the recount.
 
 The one cost, taken knowingly (owner, 2026-09-16): a row whose days an
 operator held by hand is extended by the pairs' difference on top of whatever
@@ -25576,12 +25586,13 @@ interface BilledRow {
 
 ### `BilledWindow`
 
-A pair's charge windows, as an extension compares them: where the last one ends, and each one's days.
+A pair's charge windows, as an extension compares them: where the last one ends, each one's days, and each one's bounds.
 
 ```ts
 interface BilledWindow {
   end: string;
   days: readonly number[];
+  windows: readonly WindowBounds[];
 }
 ```
 
@@ -25596,8 +25607,10 @@ interface ExtensionGroup {
   quantity: number;
   billed_days: number;
   billed_end: string;
+  billed_set: readonly WindowBounds[];
   extension_days: number;
   section: [string, string];
+  last_billed: typeLiteral;
 }
 ```
 
@@ -25667,6 +25680,17 @@ interface RemainingOrderSource {
   number: number;
   items: readonly LineItem[];
   destinations: readonly DocDestinationType[];
+}
+```
+
+### `WindowBounds`
+
+One charge window's bounds, as the shortening gate compares them.
+
+```ts
+interface WindowBounds {
+  start: string;
+  end: string;
 }
 ```
 
@@ -25752,9 +25776,30 @@ window at once, so a later remainder always extends from a single cumulative
 window; the earliest-first rule only has to choose for an extension built by
 hand. Extension quantity beyond the units billed is ignored.
 
-A group is owed `billableDays(order pair windows) − billed days` only when
-its sign agrees with the window's direction: a later order end and more days,
-or an earlier end and fewer. The same end is nothing, whatever the counts say.
+## Two questions, not one (api-cloudrun#1028)
+
+The gate used to be a single test — *does the day delta's sign agree with the
+direction the LAST window's end moved?* — which is two questions wearing one
+hat, and it answered the second one only for the last window. Dropping or
+shrinking a MIDDLE window leaves the last end where it was, so a genuine
+shortening reported nothing at all. They are now asked separately:
+
+1. **Did the window move?** {@link sameWindowDates} compares the order pair's
+   windows against the group's {@link ExtensionGroup.billed_set}, window for
+   window, as Chicago calendar dates. Identical ⇒ `extension_days = 0`,
+   whatever the day counts say. 🔴 This is the holiday-recount guard, and it is
+   why the comparison is of DATES and not of `days`: a stored `days` is frozen
+   at write while the order's is recounted, so a delta under an identical date
+   set is always an artefact of the recount.
+2. **How much, and which way?** `billableDays(order pair windows) − billed_days`,
+   sign and all. Negative is a shortening — over-billing, for the credit-note
+   flow — and positive is an extension still owed.
+
+⚠️ **There is deliberately no sub-cover test.** A window set that shrinks by
+date while `billableDays` RISES (one window split into several, each floored to
+a week) is a genuine extension, and by owner ruling an invoice stating its own
+windows is never over-billing — so a bill inside a narrower or split cover
+credits nothing.
 
 A `fixed` row never read its days, so it forms no group; nor does a row on no
 known window. A group whose extension is zero is dropped.
@@ -25789,6 +25834,15 @@ for the caller to route to a credit note rather than a remainder.
 - `orderItems` — The order's CURRENT `items`, dividers included
 - `invoices` — Every invoice linked to the order, live or void — ALL of them, never a page
 - `orderDestinations` — The order's CURRENT pairs, which date every extension
+
+### `sameWindowDates(a: readonly WindowBounds[], b: readonly WindowBounds[]): boolean`
+
+Whether two window lists cover the same Chicago calendar dates, window for
+window, in order.
+
+Compared as DATES rather than instants: a pair re-authored at a different time
+of day covers the same days and charges the same, and the stored `days` counts
+are deliberately not consulted.
 
 ### `substitutionCredit(orderItems: readonly CreditableRow[], direct: ReadonlyMap<string, number>): Map<string, number>`
 

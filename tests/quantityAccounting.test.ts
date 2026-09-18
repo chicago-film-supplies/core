@@ -505,6 +505,89 @@ Deno.test("quantityAccounting: a window and a day count that disagree in directi
   assertEquals(remainingForOrder(O, lightOrder(2, 7), invoices, pairs(7, endFor(9))).lines, []);
 });
 
+// ── The window SET, not just its last end (api-cloudrun#1028 phase 1a) ───────
+//
+// The retired gate asked one question — does the day delta agree with the
+// direction the LAST window's end moved? — so it could not see a middle window
+// change at all. These fixtures carry three windows so the last end can be held
+// fixed while the set underneath it moves.
+
+/** Three 5-day windows with gaps: [day 0–5], [day 7–12], [day 14–19]. */
+const W1 = { start: START, end: endFor(5), days: 5 };
+const W2 = { start: endFor(7), end: endFor(12), days: 5 };
+const W3 = { start: endFor(14), end: endFor(19), days: 5 };
+
+const multiPair = (uid: string, windows: readonly { start: string; end: string; days: number }[]) =>
+  ({ uid, dates: { charge_windows: windows } }) as unknown as DocDestinationType;
+
+/** An invoice under order O whose D pair states `windows` verbatim. */
+function multiInvoice(uid: string, items: LineItem[], windows: readonly { start: string; end: string; days: number }[]): AccountedInvoice {
+  const divider = { uid: O, type: "order", name: "Order", description: "", path: [O] } as unknown as InvoiceItem;
+  return {
+    uid,
+    status: "issued",
+    items: [divider, ...(buildOrderScopedItems(items, O) as unknown as InvoiceItem[])],
+    destinations: [{ ...multiPair(D, windows), uid_order: O }] as never,
+  };
+}
+
+Deno.test("quantityAccounting: a DROPPED MIDDLE window is a shortening, though the last end never moved", () => {
+  // 🔴 The defect api-cloudrun#1028 phase 1a fixes. The invoice billed all three
+  // windows (15 billable days); the order now states W1 and W3 only (10). Both
+  // sets END at W3's end, so the retired end-direction gate read direction 0 and
+  // reported NOTHING — a $2,000 over-bill with no remedy offered.
+  // 2 × 1000 × (10 − 15) ÷ 5 = −2000¢.
+  const invoices = [multiInvoice("a", lightOrder(2, 15), [W1, W2, W3])];
+  const order = { uid: O, number: 1012, items: lightOrder(2, 10), destinations: [multiPair(D, [W1, W3])] };
+  assertEquals(remainingForOrder(O, order.items, invoices, order.destinations).lines.map((l) => l.extension_cents), [-2000]);
+  assertEquals(buildRemainingInvoice(order, invoices, mint).overbilled, [
+    { path: [D, G, LIGHT], quantity: 2, extension_days: -5 },
+  ]);
+});
+
+Deno.test("quantityAccounting: a SHRUNK middle window is a shortening, though the last end never moved", () => {
+  // W2 shortened from 5 days to 2 (floored to 5 billable), so the DATES move while
+  // billableDays does not: 15 → 15. The set gate fires on the dates, the day delta
+  // is 0, and a 0 extension is dropped — no phantom credit, no phantom extension.
+  const invoices = [multiInvoice("a", lightOrder(2, 15), [W1, W2, W3])];
+  const shrunk = { ...W2, end: endFor(9), days: 2 };
+  const order = { uid: O, number: 1012, items: lightOrder(2, 15), destinations: [multiPair(D, [W1, shrunk, W3])] };
+  assertEquals(remainingForOrder(O, order.items, invoices, order.destinations).lines, []);
+});
+
+Deno.test("quantityAccounting: an identical multi-window set extends nothing, whatever the stored days say", () => {
+  // The recount guard, across a SET rather than one window: the invoice's pair
+  // froze 5/5/5 at write and the order's has been recounted to 6/6/6 against the
+  // holiday calendar. Identical dates ⇒ 0, and the day delta of +3 is the artefact.
+  const invoices = [multiInvoice("a", lightOrder(2, 15), [W1, W2, W3])];
+  const recounted = [{ ...W1, days: 6 }, { ...W2, days: 6 }, { ...W3, days: 6 }];
+  const order = { uid: O, number: 1012, items: lightOrder(2, 18), destinations: [multiPair(D, recounted)] };
+  assertEquals(remainingForOrder(O, order.items, invoices, order.destinations).lines, []);
+  assertEquals(buildRemainingInvoice(order, invoices, mint).overbilled, []);
+});
+
+Deno.test("quantityAccounting: an invoice stating its OWN narrower windows credits nothing (owner ruling)", () => {
+  // A partial bill (core#112): the invoice states W1 alone while the order states
+  // W1+W2+W3. The sets differ, so the gate does not fire — but the delta is
+  // POSITIVE (15 − 5 = +10), an extension still owed, never an over-bill.
+  // There is deliberately no sub-cover test that would read this as a shortening.
+  const invoices = [multiInvoice("a", lightOrder(2, 5), [W1])];
+  const order = { uid: O, number: 1012, items: lightOrder(2, 15), destinations: [multiPair(D, [W1, W2, W3])] };
+  const { lines } = remainingForOrder(O, order.items, invoices, order.destinations);
+  // 2 × 1000 × (15 − 5) ÷ 5 = +4000¢.
+  assertEquals(lines.map((l) => l.extension_cents), [4000]);
+  assertEquals(buildRemainingInvoice(order, invoices, mint).overbilled, []);
+});
+
+Deno.test("quantityAccounting: a window set re-authored at a different TIME OF DAY extends nothing", () => {
+  // The gate compares Chicago calendar DATES, not instants: a pair re-saved at
+  // 09:00 covers the same days and charges the same.
+  const atNine = [W1, W2, W3].map((w) => ({ ...w, start: w.start.replace("T00:", "T09:"), end: w.end.replace("T00:", "T09:") }));
+  const invoices = [multiInvoice("a", lightOrder(2, 15), [W1, W2, W3])];
+  const order = { uid: O, number: 1012, items: lightOrder(2, 15), destinations: [multiPair(D, atNine)] };
+  assertEquals(remainingForOrder(O, order.items, invoices, order.destinations).lines, []);
+});
+
 Deno.test("quantityAccounting: a row billed on no known window extends nothing", () => {
   const bare = { ...invoice("a", lightOrder(2, 3)), destinations: undefined };
   assertEquals(remainingForOrder(O, lightOrder(2, 10), [bare], pairs(10)).lines, []);

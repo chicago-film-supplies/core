@@ -44,21 +44,31 @@
  * one-week minimum skipped, through `priceDocument`'s line pricer — so it is
  * exactly what an extension section on an invoice bills (#997 D11).
  *
- * 🔴 **An extension is a change of WINDOW, and its days are the PAIRS' days.**
- * A billed row is extended only when the order pair's charge end is LATER than
- * the end of the window that billed it (earlier is a shortening, the same is
- * nothing), and the day counts are the two pairs' stored window days — never a
- * line's `chargeable_days`. A {@link BilledWindow} is that pair's last window end
- * and its window days.
- * A sign that disagrees with the window's direction is no extension either.
+ * 🔴 **An extension is a change of WINDOW SET, and its days are the PAIRS' days.**
+ * A billed row is extended, or shortened, only when the order pair's windows
+ * cover DIFFERENT Chicago calendar dates than the windows that billed it; the
+ * amount is then `billableDays(order windows) − billed days`, sign and all, from
+ * the two pairs' stored window days — never a line's `chargeable_days`. A
+ * {@link BilledWindow} carries that pair's last window end, its window days, and
+ * each window's bounds.
  *
- * This reverses the first cut, which read line `chargeable_days` on both sides.
+ * ⚠️ **This widened on 2026-09-17 (api-cloudrun#1028 phase 1a), and the widening
+ * is the point.** The rule it replaced compared only where the LAST window ended,
+ * so dropping or shrinking a MIDDLE window moved no end and reported nothing at
+ * all. The two questions — *did the window move?* and *by how much, which way?* —
+ * are now asked separately in {@link extensionGroups}; the first is answered by
+ * dates ({@link sameWindowDates}) and the second by day counts.
+ *
+ * Both cuts reverse the first one, which read line `chargeable_days` on both sides.
  * The 2026-09-16 census (prod and dev agree) found ONE genuine extension in the
  * corpus (#898) against 34 orders reading a positive extension on an UNMOVED
  * window — $59.6k — and 60 remainder sections charging from the day after their
  * own end: CRMS lines stored with no days, hand-held days, a long rental billed
  * in two parts (35 + 10 of 45 days, each invoice carrying the full window), and
- * a pair recounted from 10 to 11 days. Every one had identical windows.
+ * a pair recounted from 10 to 11 days. Every one had identical windows. ⚠️ The
+ * date-set gate is what keeps all 34 dead: a stored `days` is frozen at write
+ * while the order's is recounted, so a day delta under identical dates is always
+ * an artefact of the recount.
  *
  * The one cost, taken knowingly (owner, 2026-09-16): a row whose days an
  * operator held by hand is extended by the pairs' difference on top of whatever
@@ -127,7 +137,7 @@ import {
 import { isAtOrBelow, standInUnits, substitutionCredit } from "./substitutions.ts";
 
 export { substitutionCredit };
-import { billableDays, chargeEnvelope, chicagoDayAtTimeOf } from "./dates.ts";
+import { billableDays, chargeEnvelope, chicagoDayAtTimeOf, toChicagoYmd } from "./dates.ts";
 import { isPreTaxItem, type LineItem } from "./orders.ts";
 import { priceLine } from "./price-document.ts";
 
@@ -142,12 +152,27 @@ export interface AccountedInvoice {
   crms_id?: number | string | null;
 }
 
-/** A pair's charge windows, as an extension compares them: where the last one ends, and each one's days. */
+/** One charge window's bounds, as the shortening gate compares them. */
+export interface WindowBounds {
+  start: string;
+  end: string;
+}
+
+/** A pair's charge windows, as an extension compares them: where the last one ends, each one's days, and each one's bounds. */
 export interface BilledWindow {
   /** The last window's end. */
   end: string;
   /** Each window's stored `days`, in order. */
   days: readonly number[];
+  /**
+   * Each window's bounds, in order — parallel to {@link days}.
+   *
+   * 🔴 **This, not {@link days}, is what says whether a window MOVED.** A stored
+   * `days` is frozen at write while the order's is recounted against the holiday
+   * calendar, so a day delta under an identical set of dates is always an
+   * artefact of that recount and never a shortening. See {@link extensionGroups}.
+   */
+  windows: readonly WindowBounds[];
 }
 
 /** A pair's {@link BilledWindow}, or `null` when it has no windows. */
@@ -155,7 +180,26 @@ export function pairWindow(pair: { dates?: unknown } | undefined): BilledWindow 
   const dates = pair?.dates as { charge_windows?: readonly { start: string; end: string; days: number }[] } | undefined;
   const envelope = chargeEnvelope({ charge_windows: dates?.charge_windows });
   if (envelope === null || Number.isNaN(Date.parse(envelope.end))) return null;
-  return { end: envelope.end, days: dates!.charge_windows!.map((w) => w.days) };
+  return {
+    end: envelope.end,
+    days: dates!.charge_windows!.map((w) => w.days),
+    windows: dates!.charge_windows!.map((w) => ({ start: w.start, end: w.end })),
+  };
+}
+
+/**
+ * Whether two window lists cover the same Chicago calendar dates, window for
+ * window, in order.
+ *
+ * Compared as DATES rather than instants: a pair re-authored at a different time
+ * of day covers the same days and charges the same, and the stored `days` counts
+ * are deliberately not consulted.
+ */
+export function sameWindowDates(a: readonly WindowBounds[], b: readonly WindowBounds[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((w, i) =>
+    toChicagoYmd(w.start) === toChicagoYmd(b[i].start) && toChicagoYmd(w.end) === toChicagoYmd(b[i].end)
+  );
 }
 
 /** The window of the order pair an order line hangs under (`path[0]`), or `null`. */
@@ -375,10 +419,26 @@ export interface ExtensionGroup {
   billed_days: number;
   /** Where the billed window ends: the row's pair's end, or the last extension's. */
   billed_end: string;
+  /**
+   * Every window billed on these units, in order: the row's pair's windows, then
+   * each extension's. Compared against the order pair's set to decide whether the
+   * window MOVED at all — see {@link BilledWindow.windows}.
+   */
+  billed_set: readonly WindowBounds[];
   /** `billableDays(order pair windows) − billed_days`. Never 0; negative is a shortening. */
   extension_days: number;
   /** The invoice section that last billed these units: `[invoiceUid, section divider uid]`. */
   section: [string, string];
+  /**
+   * The invoice ROW that last billed these units — the originating row, or the
+   * extension row that last moved them.
+   *
+   * 🔴 **{@link section} does not name a line.** `section[1]` is a divider uid, and
+   * once an extension row has moved units the group's `item` and `section` name
+   * different invoices. A credit has to be raised against the row that actually
+   * billed the units, so that row states itself here.
+   */
+  last_billed: { invoiceUid: string; uid: string; path: readonly string[] };
 }
 
 /**
@@ -394,9 +454,30 @@ export interface ExtensionGroup {
  * window; the earliest-first rule only has to choose for an extension built by
  * hand. Extension quantity beyond the units billed is ignored.
  *
- * A group is owed `billableDays(order pair windows) − billed days` only when
- * its sign agrees with the window's direction: a later order end and more days,
- * or an earlier end and fewer. The same end is nothing, whatever the counts say.
+ * ## Two questions, not one (api-cloudrun#1028)
+ *
+ * The gate used to be a single test — *does the day delta's sign agree with the
+ * direction the LAST window's end moved?* — which is two questions wearing one
+ * hat, and it answered the second one only for the last window. Dropping or
+ * shrinking a MIDDLE window leaves the last end where it was, so a genuine
+ * shortening reported nothing at all. They are now asked separately:
+ *
+ * 1. **Did the window move?** {@link sameWindowDates} compares the order pair's
+ *    windows against the group's {@link ExtensionGroup.billed_set}, window for
+ *    window, as Chicago calendar dates. Identical ⇒ `extension_days = 0`,
+ *    whatever the day counts say. 🔴 This is the holiday-recount guard, and it is
+ *    why the comparison is of DATES and not of `days`: a stored `days` is frozen
+ *    at write while the order's is recounted, so a delta under an identical date
+ *    set is always an artefact of the recount.
+ * 2. **How much, and which way?** `billableDays(order pair windows) − billed_days`,
+ *    sign and all. Negative is a shortening — over-billing, for the credit-note
+ *    flow — and positive is an extension still owed.
+ *
+ * ⚠️ **There is deliberately no sub-cover test.** A window set that shrinks by
+ * date while `billableDays` RISES (one window split into several, each floored to
+ * a week) is a genuine extension, and by owner ruling an invoice stating its own
+ * windows is never over-billing — so a bill inside a narrower or split cover
+ * credits nothing.
  *
  * A `fixed` row never read its days, so it forms no group; nor does a row on no
  * known window. A group whose extension is zero is dropped.
@@ -407,7 +488,6 @@ export function extensionGroups(
   orderWindow: BilledWindow | null,
 ): ExtensionGroup[] {
   if (!isPreTaxItem(orderLine) || orderWindow === null) return [];
-  const orderEnd = Date.parse(orderWindow.end);
   const groups: Array<Omit<ExtensionGroup, "extension_days">> = [];
   const extensions: BilledRow[] = [];
   for (const row of billed?.rows ?? []) {
@@ -424,7 +504,9 @@ export function extensionGroups(
       quantity,
       billed_days: billableDays(row.window.days),
       billed_end: row.window.end,
+      billed_set: row.window.windows,
       section: [row.invoiceUid, (row.item.path ?? [])[1] ?? ""],
+      last_billed: { invoiceUid: row.invoiceUid, uid: row.item.uid, path: row.item.path ?? [] },
     });
   }
   for (const row of extensions) {
@@ -443,23 +525,39 @@ export function extensionGroups(
       });
       const moved = Math.min(left, earliest.quantity);
       const billedDays = earliest.billed_days + added;
+      // The extension bills its own window ON TOP of what the group already carried.
+      const billedSet = [...earliest.billed_set, ...row.window.windows];
       earliest.quantity -= moved;
       left -= moved;
+      // `billed_set` joins the merge key: two groups can agree on their day count
+      // and their end and still have been billed across different windows, and
+      // merging those would hand the shortening gate a set neither of them has.
       const same = groups.find((g) =>
         g.item === earliest.item && g.billed_days === billedDays && g.billed_end === billedEnd &&
-        g.section[0] === section[0] && g.section[1] === section[1]
+        g.section[0] === section[0] && g.section[1] === section[1] && sameWindowDates(g.billed_set, billedSet)
       );
       if (same) same.quantity += moved;
-      else groups.push({ ...earliest, quantity: moved, billed_days: billedDays, billed_end: billedEnd, section });
+      else {
+        groups.push({
+          ...earliest,
+          quantity: moved,
+          billed_days: billedDays,
+          billed_end: billedEnd,
+          billed_set: billedSet,
+          section,
+          last_billed: { invoiceUid: row.invoiceUid, uid: row.item.uid, path: row.item.path ?? [] },
+        });
+      }
     }
   }
+  const orderDays = billableDays(orderWindow.days);
   return groups
     .filter((g) => g.quantity > 0)
-    .map((g) => {
-      const direction = Math.sign(orderEnd - Date.parse(g.billed_end));
-      const days = billableDays(orderWindow.days) - g.billed_days;
-      return { ...g, extension_days: Math.sign(days) === direction ? days : 0 };
-    })
+    .map((g) => ({
+      ...g,
+      // (1) did the window move? (2) if so, by how much and which way?
+      extension_days: sameWindowDates(g.billed_set, orderWindow.windows) ? 0 : orderDays - g.billed_days,
+    }))
     .filter((g) => g.extension_days !== 0);
 }
 

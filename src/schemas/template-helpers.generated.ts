@@ -215,6 +215,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "extensionGroups", expr: "it.quantityAccounting.extensionGroups(orderLine, billed, orderWindow)", desc: "The extension still owed on an order line, as groups of billed units that share their terms and their cumulative billed days (api-cloudrun#680 R1).", returns: "ExtensionGroup[]" },
     { name: "orderLineWindow", expr: "it.quantityAccounting.orderLineWindow(destinations, path)", desc: "The window of the order pair an order line hangs under (`path[0]`), or `null`.", returns: "BilledWindow | null" },
     { name: "pairWindow", expr: "it.quantityAccounting.pairWindow(pair)", desc: "A pair's {@link BilledWindow}, or `null` when it has no windows.", returns: "BilledWindow | null" },
+    { name: "sameWindowDates", expr: "it.quantityAccounting.sameWindowDates(a, b)", desc: "Whether two window lists cover the same Chicago calendar dates, window for window, in order.", returns: "boolean" },
   ],
   "reporting": [
     { name: "agingAccountRows", expr: "it.reporting.agingAccountRows(report)", desc: "The account × bucket matrix: one row per account, plus a residual row when the accounts do not add up to the report's own totals.", returns: "AgingAccountRow[]" },
