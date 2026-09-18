@@ -339,8 +339,9 @@ with its own transaction logic:
    `updateOrder` bulk pass would (`api-cloudrun/CLAUDE.md`: "a bulk write to orders that bumps
    version fans out to Xero for EVERY one of them").
 
-Then a thin backfill script (`api-cloudrun/scripts/backfill-booking-signature-reconciliation.ts`,
-dry-run default, `--write`) calls `recomputeOrderBookings` once per **non-terminal order** in
+Then a thin backfill script — not yet created; plan to add it at
+`api-cloudrun/scripts/` as `backfill-booking-signature-reconciliation.ts` once §3.2 lands —
+dry-run default, `--write`, calls `recomputeOrderBookings` once per **non-terminal order** in
 §3.1's flagged set, batched, verified by re-running the audit script and asserting zero remaining
 ambiguous multi-signature bookings among non-terminal orders. **Per §3.3's custody-commitment
 finding, it needs a `--review-queue` mode**: before calling `recomputeOrderBookings` on a flagged
@@ -524,8 +525,8 @@ This is the manual-review band, not the contained one — say so plainly:
 `recomputeOrderBookings`), `api-cloudrun/src/lib/bookingDestination.ts` (`bookingDestUid`,
 `pairRepointedBookings` — both currently reject a 4-segment id outright; see §3.1's survey finding,
 required fixes not optional), `manager/src/utils/orderBookingJoin.ts`, new
-`api-cloudrun/scripts/audit-booking-identity-collisions.ts` and
-`api-cloudrun/scripts/backfill-booking-signature-reconciliation.ts`.
+`api-cloudrun/scripts/audit-booking-identity-collisions.ts` (built, §3.1) and a not-yet-created
+`backfill-booking-signature-reconciliation.ts` in the same directory (§3.3).
 
 ## Verification
 
