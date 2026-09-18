@@ -133,9 +133,9 @@ export const MOVEMENT_TYPES = [
   "check_in",
   "mark_damaged",
   "mark_lost",
-  // The five above, run backwards. A picker can move custody DOWN the ladder —
-  // un-prepping a pick, pulling back a check-out, undoing a return or a
-  // damaged/lost mark — and until api-cloudrun#1053 those transitions emitted
+  // The three reachable rewinds. A picker can move custody DOWN the ladder —
+  // un-prepping a pick, pulling back a check-out, undoing a return — and until
+  // these types existed those transitions emitted
   // NOTHING, because `deriveCustodyTransitions` mapped only the forward
   // direction and an unmapped transition yields no movement by design. The
   // breakdown moved and the journal did not, so the next forward action
@@ -167,7 +167,9 @@ export const MOVEMENT_TYPES = [
   // required cost, so undoing one owes a basis and a posting decision the
   // contract cannot derive — the two gates the depreciation note above keeps
   // shut. No sale rewind exists in either corpus (all 23 measured divergences
-  // are `type: "rental"`), so the gap is recorded rather than guessed.
+  // are `type: "rental"`), so the gap is recorded rather than guessed:
+  // api-cloudrun#1054. The forward direction has its own open question at the
+  // same spot — api-cloudrun#1053.
   "unprep",
   "check_out_undo",
   "check_in_undo",
