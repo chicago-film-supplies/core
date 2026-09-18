@@ -625,14 +625,64 @@ required fixes not optional), `manager/src/utils/orderBookingJoin.ts`, new
 >    manager") held for exactly one intermediate commit, not across the whole session — both sides
 >    landed in the same continuous work, so the caution was exercised rather than skipped.
 >
-> **Not yet started:** `api-cloudrun`'s own `bookingId()` (`services/orders.ts`) still hand-builds
-> the old flat form — the survey's THIRD constructor, now the only one left; `bookingDestUid`/
-> `pairRepointedBookings` arity widening (§3.1's found regression, required fixes, not yet applied);
-> `recomputeOrderBookings`'s extraction + `--review-queue` mode; the backfill script; and §4's
-> merged surface. Next concrete step: `api-cloudrun`'s bump+deploy (§3.4 step 2) — bump its
-> `@cfs/core` pin to `beta.492`, land the `bookingId()`/`bookingDestUid`/`pairRepointedBookings`
-> changes together, deploy, THEN start the backfill (never before the deploy — new-shape documents
-> must not exist before the deployed reader can parse them).
+> **Not yet started:** `recomputeOrderBookings`'s extraction + `--review-queue` mode; the backfill
+> script; and §4's merged surface.
+>
+> ## ⚠️ STATUS UPDATE 2026-09-18, later same day — §3.4 step 2 landed
+>
+> **`api-cloudrun`'s third `BookingId` hand-constructor is closed, and the survey's found
+> regression is fixed — both committed and pushed, `main` deploying to dev.**
+>
+> `core`, third beta (`10.0.0-beta.493`): added `buildBookingIdFromSignature(orderUid, itemUid,
+> destUid, signatureHash)` to `core/src/utils/booking-id.ts` — `buildBookingId` now delegates to
+> it. Needed because `ConsolidatedItemType` (what `bookingId()`'s call sites in `services/orders.ts`
+> actually have) carries `component_signature_hash` but no `path` to re-derive a hash from;
+> `buildBookingId`'s existing signature takes a `path`, which this shape doesn't have. Purely
+> additive — no existing signature changed. Denylisted for template helpers (same reasoning as the
+> other three booking-id exports). Tests added to `core/tests/booking-id.test.ts`, incl. an
+> agreement check against `buildBookingId` given the same path's derived hash.
+>
+> `api-cloudrun`: `services/orders.ts`'s `bookingId()` now takes a `signatureHash` parameter and
+> delegates to `buildBookingIdFromSignature` — all 6 call sites updated (`createOrder`'s booking
+> build, the substitution custody-anchor pairing, the prep-move pairing, `buildBookingIdMap`, and
+> `updateOrder`'s `candidateEntries` loop), each passing either a `ConsolidatedItem`'s
+> `component_signature_hash` directly or `componentSignatureHash(path)` computed from a `LineItem`/
+> `SubstitutionAnchor`'s own `path`. `api-cloudrun/src/lib/bookingDestination.ts`'s `bookingDestUid` and
+> `pairRepointedBookings` widened to accept 3- **or** 4-segment ids (both previously hard-coded
+> arity 3, silently treating every kit-component booking as unparseable — the regression §3.1's
+> survey found, confirmed live in the code, not hypothetical); `pairRepointedBookings`' pairing key
+> also widened from `(order, product)` to `(order, product, signature)` per the plan's "worth doing,
+> not required" note. `@cfs/core` pin bumped to `beta.493` across all 45 subpath entries in
+> `deno.json` (`deno.lock` regenerated via `deno cache`), plus a new `@cfs/core/utils/booking-id`
+> entry that didn't exist yet. Unit tests added/extended in
+> `api-cloudrun/tests/unit/bookingDestination.test.ts`
+> (4-segment `bookingDestUid`, 4-segment repointing, and a same-product 3-vs-4-segment
+> non-collision case) — all passing, alongside the existing 3-segment cases. `deno task check`,
+> `deno task lint` and `deno task gate` clean across the whole repo (the gate's propagation-diagram
+> staleness check fired on unrelated diagram content and was regenerated via `deno task
+> docs:diagrams` — inert relative to this change).
+>
+> **Committed (`19661e7d`) and PUSHED to `main`** — full suite green twice (once run directly,
+> once by the pre-push hook), verified landed by fetching `origin/main` content rather than trusting
+> the push report. Also carried the already-committed-but-unpushed `d7ea2ce2` (§3.1's audit script)
+> along, same author, same session's earlier work. Dev Cloud Build deploy triggers automatically
+> from this push, per the standing `main` → dev convention.
+>
+> **Not yet done, deliberately out of scope for this landing:** the Verification section's
+> integration test ("creating an order with a standalone-plus-two-differently-parented-kit-component
+> occurrence of one product, asserting three distinct booking documents land, not one") — building
+> it correctly needs the full kit/divider/group item-construction machinery `createOrder`'s input
+> accepts, which is a bigger task than the arity-fix landing itself. The unit coverage above exercises
+> the exact regressions this step fixes (id round-tripping through `bookingDestUid`/
+> `pairRepointedBookings` at both arities); the end-to-end create-path assertion is real remaining
+> work, most naturally done alongside §3.3's `recomputeOrderBookings` extraction (same booking-build
+> code paths). Flagged here rather than silently dropped.
+>
+> Next concrete step: §3.3 — extract `recomputeOrderBookings` as a standalone callable, land the
+> backfill script's `--review-queue` mode, and only then run the backfill against prod's flagged
+> non-terminal orders (never before this step's deploy is live in prod — new-shape documents must
+> not exist before the deployed reader can parse them). The createOrder integration test above
+> should land alongside it.
 
 Compacted 2026-09-18 (was two stacked status blocks; folded into one current statement).
 
