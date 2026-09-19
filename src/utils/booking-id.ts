@@ -111,6 +111,48 @@ export function buildBookingIdFromSignature(
     : `${orderUid}:${itemUid}:${destUid}:${signatureHash}`;
 }
 
+/** The parts {@link buildBookingId} assembled, as {@link parseBookingId} returns them. */
+export interface ParsedBookingId {
+  orderUid: string;
+  itemUid: string;
+  destUid: string;
+  /** `null` for a top-level occurrence — the 3-segment form carries no 4th segment. */
+  signatureHash: string | null;
+}
+
+/**
+ * The inverse of {@link buildBookingIdFromSignature}, and it lives here so the
+ * assembler and the parser share one module and one statement of the format.
+ *
+ * 🔴 **The reason this exists is that hand-splitting is WRONG on the sparse
+ * form, silently.** A booking id is 3 segments for a top-level occurrence and 4
+ * for a component one, so `id.indexOf(":")` after stripping the order prefix
+ * yields `dest` in the first case and **`dest:signature`** in the second — a
+ * string that compares equal to no destination uid there is. That is not a
+ * hypothetical: `frozenBookingGrains` in
+ * `api-cloudrun/src/lib/orderFulfillmentSync.ts` did exactly this, so the
+ * custody freeze was ABSENT (not coarse — absent) for every component-nested
+ * row (api-cloudrun#1060).
+ *
+ * Returns `null` rather than throwing when the id is not the shape this module
+ * assembles — callers walk stored corpora, where a refusal to classify is more
+ * useful than an exception, and every caller already has a "not mine" branch.
+ *
+ * ⚠️ **Segment COUNT is the only discriminator, deliberately.** A signature
+ * hash is 12 lowercase hex characters and a destination uid is a Firestore id,
+ * so a shape test would also pass on some ids and is a second, weaker statement
+ * of the format. Count is exact: `buildBookingIdFromSignature` emits 3 or 4
+ * segments and nothing else.
+ */
+export function parseBookingId(id: string): ParsedBookingId | null {
+  const parts = id.split(":");
+  if (parts.length !== 3 && parts.length !== 4) return null;
+  const [orderUid, itemUid, destUid, signatureHash] = parts;
+  if (!orderUid || !itemUid || !destUid) return null;
+  if (parts.length === 4 && !signatureHash) return null;
+  return { orderUid, itemUid, destUid, signatureHash: parts.length === 4 ? signatureHash : null };
+}
+
 // ── Synchronous SHA-256 ──────────────────────────────────────────
 //
 // This module sits under `@cfs/core/utils`, which the manager imports into a

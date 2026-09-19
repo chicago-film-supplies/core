@@ -167,16 +167,22 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "buildReservedByLocation", // netting building block
     "addAllocationToReserved", // netting building block
   ],
-  // `bookings.uid` construction — a template renders a document that already
-  // carries its own `uid`; it never derives one. The first three take a
-  // `path`, which no render context holds independent of the document it
-  // already belongs to; `buildBookingIdFromSignature` takes an
-  // already-computed signature hash instead, for the same reason.
+  // `bookings.uid` construction and DEcomposition — a template renders a
+  // document that already carries its own `uid`; it never derives one and
+  // never takes one apart. The first three take a `path`, which no render
+  // context holds independent of the document it already belongs to;
+  // `buildBookingIdFromSignature` takes an already-computed signature hash
+  // instead, for the same reason. `parseBookingId` is the inverse and is
+  // excluded for the mirror of it: every part it would recover — the order,
+  // the item, the destination — is a field the rendered document already
+  // states, so a template reaching for it would be re-deriving identity from
+  // a string rather than reading it.
   "booking-id": [
     "componentAncestry",
     "componentSignatureHash",
     "buildBookingId",
     "buildBookingIdFromSignature",
+    "parseBookingId",
   ],
   orders: [
     // The divider ↔ pair join, derived at WRITE time and then stored as

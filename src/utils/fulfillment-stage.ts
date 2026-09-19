@@ -523,11 +523,25 @@ export function qtyOnStageSide(
  * the target side of `prep` for both types, so the branch is a no-op here and
  * the function is honest about not needing it.
  *
- * ⚠️ **The grain is the BOOKING, which is coarser than the items row.** One
- * booking covers `(order, product, destination)`, so two occurrences of the same
- * product under one destination share it and therefore freeze together. A
- * per-row mental model of this predicate is wrong, and would look right in every
- * single-occurrence test.
+ * ⚠️ **The grain is the BOOKING, and a booking is keyed on the COMPONENT
+ * SIGNATURE as well as the destination.** A booking id is
+ * `{order}:{item}:{dest}` for a top-level occurrence and
+ * `{order}:{item}:{dest}:{signature}` for a component one ({@link
+ * buildBookingIdFromSignature}), so what shares a booking — and therefore
+ * freezes together — is two occurrences of the same product under one
+ * destination **with the same component ancestry**. The same product standalone
+ * and nested inside a kit are different bookings and freeze independently.
+ *
+ * 🔴 **This paragraph previously said the grain was `(order, product,
+ * destination)`, full stop, and that reading is what a caller acts on.** It
+ * predates the signature segment and it is the wrong mental model in the
+ * expensive direction: a consumer that keys its own freeze set on
+ * `(product, destination)` cannot match the ids it derives them from, so the
+ * freeze goes ABSENT rather than merely coarse. That is api-cloudrun#1060.
+ * **Parse a booking id with {@link parseBookingId}; never hand-split it.**
+ *
+ * A per-row mental model of this predicate is still wrong, and would still look
+ * right in every single-occurrence test.
  *
  * ⚠️ Replaced `partitionByStage`, which beta.348 kept for precisely this caller
  * and which turned out to be the wrong instrument: it partitions on the source

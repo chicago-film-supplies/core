@@ -24387,6 +24387,19 @@ product repeating within one order — standalone, as a component of kit A,
 as a component of kit B, or split via `splitItem` — collapse onto a single
 booking document for years.
 
+### `ParsedBookingId`
+
+The parts {@link buildBookingId} assembled, as {@link parseBookingId} returns them.
+
+```ts
+interface ParsedBookingId {
+  orderUid: string;
+  itemUid: string;
+  destUid: string;
+  signatureHash: string | null;
+}
+```
+
 ### `buildBookingId(orderUid: string, item: typeLiteral, path: readonly string[], destUid: string): string`
 
 The one place a `BookingId` is assembled from parts. Sparse by
@@ -24450,6 +24463,31 @@ bounded regardless of nesting depth — the same shape of choice as
 (`api-cloudrun/src/services/templates/publishFromMerge.ts`, cited in
 `schemas/_uid.ts`), just shorter since this doesn't have to satisfy
 `FirestoreId`'s exact 20-char form.
+
+### `parseBookingId(id: string): ParsedBookingId | null`
+
+The inverse of {@link buildBookingIdFromSignature}, and it lives here so the
+assembler and the parser share one module and one statement of the format.
+
+🔴 **The reason this exists is that hand-splitting is WRONG on the sparse
+form, silently.** A booking id is 3 segments for a top-level occurrence and 4
+for a component one, so `id.indexOf(":")` after stripping the order prefix
+yields `dest` in the first case and **`dest:signature`** in the second — a
+string that compares equal to no destination uid there is. That is not a
+hypothetical: `frozenBookingGrains` in
+`api-cloudrun/src/lib/orderFulfillmentSync.ts` did exactly this, so the
+custody freeze was ABSENT (not coarse — absent) for every component-nested
+row (api-cloudrun#1060).
+
+Returns `null` rather than throwing when the id is not the shape this module
+assembles — callers walk stored corpora, where a refusal to classify is more
+useful than an exception, and every caller already has a "not mine" branch.
+
+⚠️ **Segment COUNT is the only discriminator, deliberately.** A signature
+hash is 12 lowercase hex characters and a destination uid is a Firestore id,
+so a shape test would also pass on some ids and is a second, weaker statement
+of the format. Count is exact: `buildBookingIdFromSignature` emits 3 or 4
+segments and nothing else.
 
 ## `@cfs/core/utils/bookings`
 
@@ -29020,11 +29058,25 @@ every bit as much as a rented one, and it is *less* recoverable. `out` is on
 the target side of `prep` for both types, so the branch is a no-op here and
 the function is honest about not needing it.
 
-⚠️ **The grain is the BOOKING, which is coarser than the items row.** One
-booking covers `(order, product, destination)`, so two occurrences of the same
-product under one destination share it and therefore freeze together. A
-per-row mental model of this predicate is wrong, and would look right in every
-single-occurrence test.
+⚠️ **The grain is the BOOKING, and a booking is keyed on the COMPONENT
+SIGNATURE as well as the destination.** A booking id is
+`{order}:{item}:{dest}` for a top-level occurrence and
+`{order}:{item}:{dest}:{signature}` for a component one ({@link
+buildBookingIdFromSignature}), so what shares a booking — and therefore
+freezes together — is two occurrences of the same product under one
+destination **with the same component ancestry**. The same product standalone
+and nested inside a kit are different bookings and freeze independently.
+
+🔴 **This paragraph previously said the grain was `(order, product,
+destination)`, full stop, and that reading is what a caller acts on.** It
+predates the signature segment and it is the wrong mental model in the
+expensive direction: a consumer that keys its own freeze set on
+`(product, destination)` cannot match the ids it derives them from, so the
+freeze goes ABSENT rather than merely coarse. That is api-cloudrun#1060.
+**Parse a booking id with {@link parseBookingId}; never hand-split it.**
+
+A per-row mental model of this predicate is still wrong, and would still look
+right in every single-occurrence test.
 
 ⚠️ Replaced `partitionByStage`, which beta.348 kept for precisely this caller
 and which turned out to be the wrong instrument: it partitions on the source

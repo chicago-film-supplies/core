@@ -9,6 +9,7 @@ import {
   buildBookingIdFromSignature,
   componentAncestry,
   componentSignatureHash,
+  parseBookingId,
 } from "../src/utils/booking-id.ts";
 import { fid } from "./helpers/ids.ts";
 
@@ -116,5 +117,43 @@ Deno.test("buildBookingIdFromSignature: agrees with buildBookingId given the sam
     const viaPath = buildBookingId(ORDER, { uid: PRODUCT }, path, DEST);
     const viaHash = buildBookingIdFromSignature(ORDER, PRODUCT, DEST, componentSignatureHash(path));
     assertEquals(viaHash, viaPath);
+  }
+});
+
+// ── parseBookingId — the inverse, api-cloudrun#1060 ──────────────
+
+Deno.test("parseBookingId: round-trips both arities of buildBookingIdFromSignature", () => {
+  for (const hash of [null, componentSignatureHash([DIVIDER, KIT_A, PRODUCT])]) {
+    const id = buildBookingIdFromSignature(ORDER, PRODUCT, DEST, hash);
+    assertEquals(parseBookingId(id), {
+      orderUid: ORDER,
+      itemUid: PRODUCT,
+      destUid: DEST,
+      signatureHash: hash,
+    });
+  }
+});
+
+Deno.test("parseBookingId: the 4-segment form does NOT leak the signature into destUid", () => {
+  // 🔴 This is the exact defect the function exists to remove. Hand-splitting on
+  // the FIRST ':' after the order prefix yields `dest:signature` as the
+  // destination, which compares equal to no destination uid there is — so a
+  // freeze set keyed that way can never match a lookup keyed on the bare dest.
+  const hash = componentSignatureHash([DIVIDER, KIT_A, PRODUCT]);
+  const parsed = parseBookingId(buildBookingIdFromSignature(ORDER, PRODUCT, DEST, hash));
+  assertEquals(parsed?.destUid, DEST);
+  assertEquals(parsed?.destUid.includes(":"), false);
+  assertEquals(parsed?.signatureHash, hash);
+});
+
+Deno.test("parseBookingId: a custom-product item uid survives the round trip", () => {
+  const customUid = "custom-fe847108-d824-4f3a-aac8-ce60a9743ffc";
+  const id = buildBookingId(ORDER, { uid: customUid }, [DIVIDER, customUid], DEST);
+  assertEquals(parseBookingId(id)?.itemUid, customUid);
+});
+
+Deno.test("parseBookingId: returns null rather than throwing on anything it did not assemble", () => {
+  for (const bad of ["", "a", "a:b", "a:b:c:d:e", ":b:c", "a::c", "a:b:", "a:b:c:"]) {
+    assertEquals(parseBookingId(bad), null, `expected null for ${JSON.stringify(bad)}`);
   }
 });
