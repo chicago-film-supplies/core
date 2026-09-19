@@ -270,6 +270,16 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // targets as text. `tests/template-helpers.test.ts` now asserts every
     // entry resolves to a real export, so a rename breaks the build instead.
     "recomputeSettlementTotals", // settlement projection — a template reads STORED totals
+    // ⚠️ **EDITABILITY predicates, not document facts.** `invoiceIsFrozen`
+    // answers *"may an operator still change this invoice's organization or its
+    // date?"* and `invoiceHasSettlement` is its money-only half. A rendered
+    // invoice is a statement of what IS; whether a field is still editable is a
+    // question about the operator UI and the write path, and putting it in a
+    // template would invite a document that reads differently depending on
+    // whether it had been paid yet. A template that wants to show a payment
+    // reads the stored totals.
+    "invoiceHasSettlement",
+    "invoiceIsFrozen",
     // ── Path + uniqueness machinery (invoice variants of the order ones above) ──
     "computeInvoiceItemPaths", // canonical path computation — write-path only
     "validateInvoiceItemPaths", // invariant assertion — write-path only

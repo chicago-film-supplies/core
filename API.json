@@ -4599,7 +4599,7 @@
         {
           "kind": "interface",
           "name": "UpdateInvoiceInputType",
-          "declaration": "interface UpdateInvoiceInputType {\n  status?: InvoiceStatusType;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  version: number;\n}",
+          "declaration": "interface UpdateInvoiceInputType {\n  organization?: typeLiteral;\n  status?: InvoiceStatusType;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  version: number;\n}",
           "doc": "Input schema for PUT /invoices/:uid — partial update."
         },
         {
@@ -7332,7 +7332,7 @@
         {
           "kind": "interface",
           "name": "UpdateInvoiceInputType",
-          "declaration": "interface UpdateInvoiceInputType {\n  status?: InvoiceStatusType;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  version: number;\n}",
+          "declaration": "interface UpdateInvoiceInputType {\n  organization?: typeLiteral;\n  status?: InvoiceStatusType;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  items?: InvoiceItemInputType[];\n  destinations?: InvoiceDocDestinationType[];\n  date?: string;\n  due_date?: string | null;\n  subject?: string;\n  reference?: string | null;\n  notes?: string | null;\n  version: number;\n}",
           "doc": "Input schema for PUT /invoices/:uid — partial update."
         },
         {
@@ -12343,6 +12343,22 @@
             }
           ],
           "returnsTag": "Per-unit amount for Xero **in dollars**, or 0 if quantity is 0"
+        },
+        {
+          "kind": "function",
+          "name": "invoiceHasSettlement",
+          "signature": "invoiceHasSettlement(invoice: typeLiteral): boolean",
+          "doc": "Does this invoice record money having moved — paid, credited or voided?\n\n⭐ **Tests the settled VALUE, not a row count**, which is what makes the\nunfreeze work with no stored state anywhere: reversing a payment to zero\nleaves the journal rows in place and this predicate answers `false` again.\nNothing caches \"was settled\".\n\n⚠️ **An empty settlement list is not benign** — recomputing totals against one\nzeroes `amount_paid_cents` and `amount_credited_cents` and restores\n`amount_due_cents` to the full total. This predicate is what stands between\nthat recompute and a settled invoice's balance.\n\nMoved here from `api-cloudrun/src/lib/settlementProjection.ts`, which\nre-exports it: it is a pure predicate over three numbers, three repos want it,\nand {@link invoiceIsFrozen} below needs it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "invoiceIsFrozen",
+          "signature": "invoiceIsFrozen(invoice: typeLiteral): boolean",
+          "doc": "🔴 **The authoritative freeze predicate: may an operator still change this\ninvoice's ORGANIZATION or its DATE?**\n\n`invoiceHasSettlement(invoice) || status === \"paid\" || status === \"void\"`.\n\n**The rule follows Xero's**: once a payment is applied, the organization, the\ninvoice date, the items and the money freeze — item descriptions, `reference`,\n`subject`, `notes` and `due_date` do not. Reversing the payment to zero\nunfreezes it, because {@link invoiceHasSettlement} reads a VALUE and no field\nrecords that the invoice was once settled.\n\n⚠️ **This is NOT {@link SETTLED_STATUSES}, and the difference is the whole\nreason it exists.** That constant is the STATUS column — `[\"paid\", \"void\"]` —\nand it is strictly weaker: it misses a `part_paid` invoice carrying a partial\npayment, which has real money against it and must not be re-addressed. A gate\nwritten on the status alone is wrong in both directions at once — stricter\nthan the server on a `paid` invoice, whose text fields are still editable, and\nweaker on a `part_paid` one.\n\n⚠️ **It answers the FIELD-CLASS question, not the money question.** The money\ngate (`lineMoneyAgrees`) asks *did the amount move?*; this asks *is this field\nthe operator's to change at all?* Both exist, and neither subsumes the other.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",

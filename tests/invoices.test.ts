@@ -1,8 +1,10 @@
 import { assertEquals } from "@std/assert";
-import { getInitialValues, InvoiceDocLineItem, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
+import { getInitialValues, InvoiceDocLineItem, SETTLED_STATUSES, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
 import { computeItemPaths, rederiveDocumentTotalsForAudit, validateItemPaths } from "../src/utils/orders.ts";
 import type { OrderInvoiceFieldSync } from "../src/utils/invoices.ts";
 import {
+  invoiceHasSettlement,
+  invoiceIsFrozen,
   adoptOrderDividerStructure,
   buildInvoiceDestinationDivider,
   buildOrderScopedItems,
@@ -3673,4 +3675,53 @@ Deno.test("substituted_for sync status: a merged Y and a partial X are in_sync (
   assertEquals(status.get([ORDER_DIV_1, ...Y_PATH].join("/")), "in_sync");
   const drifted = computeInvoiceSyncStatus(invoice, [orderX(5), orderY(2)], ORDER_DIV_1, NO_EXPLANATIONS);
   assertEquals(drifted.get([ORDER_DIV_1, ...X_PATH].join("/")), "out_of_sync", "D2 relaxes exactly the substituted units");
+});
+
+// ── invoiceIsFrozen — the field-class freeze (api-cloudrun#1063) ─────────────
+
+const frozenFixture = (
+  status: string,
+  paid = 0,
+  credited = 0,
+  voided = 0,
+) => ({
+  status,
+  totals: { amount_paid_cents: paid, amount_credited_cents: credited, amount_void_cents: voided },
+}) as unknown as Parameters<typeof invoiceIsFrozen>[0];
+
+Deno.test("invoiceIsFrozen: an unsettled draft or issued invoice is NOT frozen", () => {
+  assertEquals(invoiceIsFrozen(frozenFixture("draft")), false);
+  assertEquals(invoiceIsFrozen(frozenFixture("issued")), false);
+});
+
+Deno.test("invoiceIsFrozen: `paid` and `void` freeze on STATUS alone, with no money recorded", () => {
+  assertEquals(invoiceIsFrozen(frozenFixture("paid")), true);
+  assertEquals(invoiceIsFrozen(frozenFixture("void")), true);
+});
+
+Deno.test("🔴 invoiceIsFrozen: a part_paid invoice carrying a payment IS frozen", () => {
+  // The case `SETTLED_STATUSES` misses, and the whole reason this predicate is
+  // not that constant. A gate written on the status alone leaves every field
+  // editable here and then 400s at the server.
+  assertEquals(SETTLED_STATUSES.includes("part_paid" as never), false);
+  assertEquals(invoiceIsFrozen(frozenFixture("part_paid", 5_000)), true);
+});
+
+Deno.test("🔴 invoiceIsFrozen: reversing the payment to zero UNFREEZES — no stored flag", () => {
+  // The unfreeze requirement. `invoiceHasSettlement` reads the settled VALUE,
+  // not a row count, so the journal rows stay and the answer flips back. If
+  // anything ever caches "was settled", this test is what catches it.
+  assertEquals(invoiceIsFrozen(frozenFixture("part_paid", 5_000)), true);
+  assertEquals(invoiceIsFrozen(frozenFixture("issued", 0)), false);
+});
+
+Deno.test("invoiceIsFrozen: a CREDIT alone freezes, and so does a void amount", () => {
+  assertEquals(invoiceIsFrozen(frozenFixture("issued", 0, 2_500, 0)), true);
+  assertEquals(invoiceIsFrozen(frozenFixture("issued", 0, 0, 2_500)), true);
+});
+
+Deno.test("invoiceHasSettlement: absent credited/void keys read as zero, not as settled", () => {
+  const bare = { totals: { amount_paid_cents: 0 } };
+  assertEquals(invoiceHasSettlement(bare), false);
+  assertEquals(invoiceHasSettlement({ totals: { amount_paid_cents: 1 } }), true);
 });

@@ -10463,6 +10463,7 @@ Input schema for PUT /invoices/:uid — partial update.
 
 ```ts
 interface UpdateInvoiceInputType {
+  organization?: typeLiteral;
   status?: InvoiceStatusType;
   tax_exempt?: boolean;
   uid_store?: string | null;
@@ -16224,6 +16225,7 @@ Input schema for PUT /invoices/:uid — partial update.
 
 ```ts
 interface UpdateInvoiceInputType {
+  organization?: typeLiteral;
   status?: InvoiceStatusType;
   tax_exempt?: boolean;
   uid_store?: string | null;
@@ -27318,6 +27320,49 @@ half-done.
 narrowed, so a non-integer cannot throw on the Xero push path.
 
 **Returns** — Per-unit amount for Xero **in dollars**, or 0 if quantity is 0
+
+### `invoiceHasSettlement(invoice: typeLiteral): boolean`
+
+Does this invoice record money having moved — paid, credited or voided?
+
+⭐ **Tests the settled VALUE, not a row count**, which is what makes the
+unfreeze work with no stored state anywhere: reversing a payment to zero
+leaves the journal rows in place and this predicate answers `false` again.
+Nothing caches "was settled".
+
+⚠️ **An empty settlement list is not benign** — recomputing totals against one
+zeroes `amount_paid_cents` and `amount_credited_cents` and restores
+`amount_due_cents` to the full total. This predicate is what stands between
+that recompute and a settled invoice's balance.
+
+Moved here from `api-cloudrun/src/lib/settlementProjection.ts`, which
+re-exports it: it is a pure predicate over three numbers, three repos want it,
+and {@link invoiceIsFrozen} below needs it.
+
+### `invoiceIsFrozen(invoice: typeLiteral): boolean`
+
+🔴 **The authoritative freeze predicate: may an operator still change this
+invoice's ORGANIZATION or its DATE?**
+
+`invoiceHasSettlement(invoice) || status === "paid" || status === "void"`.
+
+**The rule follows Xero's**: once a payment is applied, the organization, the
+invoice date, the items and the money freeze — item descriptions, `reference`,
+`subject`, `notes` and `due_date` do not. Reversing the payment to zero
+unfreezes it, because {@link invoiceHasSettlement} reads a VALUE and no field
+records that the invoice was once settled.
+
+⚠️ **This is NOT {@link SETTLED_STATUSES}, and the difference is the whole
+reason it exists.** That constant is the STATUS column — `["paid", "void"]` —
+and it is strictly weaker: it misses a `part_paid` invoice carrying a partial
+payment, which has real money against it and must not be re-addressed. A gate
+written on the status alone is wrong in both directions at once — stricter
+than the server on a `paid` invoice, whose text fields are still editable, and
+weaker on a `part_paid` one.
+
+⚠️ **It answers the FIELD-CLASS question, not the money question.** The money
+gate (`lineMoneyAgrees`) asks *did the amount move?*; this asks *is this field
+the operator's to change at all?* Both exist, and neither subsumes the other.
 
 ### `invoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem): string[]`
 

@@ -1433,6 +1433,27 @@ export const CreateInvoiceInput: z.ZodType<CreateInvoiceInputType> = z.object({
 
 /** Input schema for PUT /invoices/:uid — partial update. */
 export interface UpdateInvoiceInputType {
+  /**
+   * RE-ADDRESS this invoice — the organization it bills.
+   *
+   * **Uid only, and deliberately non-strict**: every other key a caller sends is
+   * stripped, because the server is the sole author of the stored snapshot
+   * (`buildResolvedOrganizationSnapshot`). A client cannot state the frozen
+   * chain, the resolved billing address or either tax axis.
+   *
+   * ⚠️ **OPTIONAL, not required.** This is a partial update and the manager's
+   * `buildDiff` ships only dirty keys, so requiring it would 400 every
+   * `notes`-only PUT.
+   *
+   * ⚠️ **There is deliberately no clear verb.** An invoice always bills
+   * somebody; `null` would have no meaning.
+   *
+   * 🔴 **FROZEN once the invoice carries a settlement, is `paid`, or is
+   * `void`** — `invoiceIsFrozen`. Reversing the payment to zero unfreezes it,
+   * with no stored flag anywhere. Re-addressing also REPRICES, because the
+   * resolved `jurisdiction_claim` and `tax_exempt` move with the organization.
+   */
+  organization?: { uid: string };
   status?: InvoiceStatusType;
   /**
    * The EXEMPTION axis. Absent = leave unchanged; `false` = this invoice
@@ -1504,6 +1525,8 @@ export interface UpdateInvoiceInputType {
 
 /** Input schema for updating an invoice. */
 export const UpdateInvoiceInput: z.ZodType<UpdateInvoiceInputType> = z.object({
+  // Mirrors `UpdateOrderInput.organization` exactly — see the interface.
+  organization: z.object({ uid: FirestoreId }).optional(),
   status: InvoiceStatus.optional(),
   tax_exempt: z.boolean().optional(),
   uid_store: FirestoreId.nullable().optional(),
