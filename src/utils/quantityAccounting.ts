@@ -489,23 +489,30 @@ export interface LineAccount {
    */
   extension_cents: number;
   /**
-   * Units the FULFILLMENT records as actually sent at this line's path, when a
-   * fulfillment row exists for it. `undefined` means no fulfillment row — not
-   * "nothing was sent".
+   * The FULFILLMENT's quantity for this line, when a fulfillment row exists
+   * for it. `undefined` means no fulfillment row — not "nothing was fulfilled".
+   *
+   * ⚠️ **Not a custody fact, and deliberately not named for one.** This was
+   * `sent` first, which claimed a rung of the ladder (`quoted → prep →
+   * checkout → return → complete`) that the number does not carry: it is the
+   * same figure before anything is picked and after everything has come back.
+   * How many units are physically OUT lives on the booking's breakdown. The
+   * parallel that governs the name is `billed`, which asserts what the
+   * invoices SAY rather than that money moved — payment is settlements' fact.
    *
    * 🔴 **A THIRD authority, not a better version of `ordered`.** The three
    * documents answer three different questions and are all mutable: the ORDER
    * is the quote given to the customer, the FULFILLMENT records what actually
    * happened, and the INVOICE is the operator's decision about what to bill.
    * They are not expected to agree, so a reader must be able to ask "billed
-   * against what was quoted" and "billed against what shipped" separately and
-   * get different answers.
+   * against what was quoted" and "billed against what the warehouse recorded"
+   * separately and get different answers.
    */
-  sent?: number;
-  /** `sent − billed`. Negative means more was billed than shipped. */
-  sent_quantity?: number;
-  /** Pre-tax cents for `sent_quantity` units at the order line's current terms. Signed with it. */
-  sent_quantity_cents?: number;
+  fulfilled?: number;
+  /** `fulfilled − billed`. Negative means more was billed than the fulfillment records. */
+  fulfilled_quantity?: number;
+  /** Pre-tax cents for `fulfilled_quantity` units at the order line's current terms. Signed with it. */
+  fulfilled_quantity_cents?: number;
 }
 
 /**
@@ -528,13 +535,13 @@ function subtotalCents(item: LineItem, extensionDays?: number): number {
  * @param orderLine - The order line, at its current quantity
  * @param billed - {@link billedByPath}'s entry for the line's path, if any
  * @param orderWindow - {@link orderLineWindow} for the line; `null` extends nothing
- * @param sent - the FULFILLMENT row's quantity at this line's path, if one exists
+ * @param fulfilled - the FULFILLMENT row's quantity at this line's path, if one exists
  */
 export function accountLine(
   orderLine: LineItem,
   billed: BilledAtPath | undefined,
   orderWindow: BilledWindow | null,
-  sent?: number,
+  fulfilled?: number,
 ): LineAccount {
   const ordered = orderLine.quantity ?? 0;
   const billedUnits = billed?.quantity ?? 0;
@@ -557,13 +564,13 @@ export function accountLine(
   }
 
   // The same pricing basis as `quantity_cents` — the ORDER line's current
-  // terms — because that is what an operator would bill the shipped-but-unbilled
-  // units at. Priced here rather than by the caller so every number on this
-  // object comes from one author.
-  const sentQuantity = sent === undefined ? undefined : sent - billedUnits;
-  const sentQuantityCents = sentQuantity === undefined || sentQuantity === 0
-    ? sentQuantity === undefined ? undefined : 0
-    : Math.sign(sentQuantity) * subtotalCents({ ...orderLine, quantity: Math.abs(sentQuantity) });
+  // terms — because that is what an operator would bill the unbilled units at.
+  // Priced here rather than by the caller so every number on this object comes
+  // from one author.
+  const fulfilledQuantity = fulfilled === undefined ? undefined : fulfilled - billedUnits;
+  const fulfilledQuantityCents = fulfilledQuantity === undefined || fulfilledQuantity === 0
+    ? fulfilledQuantity === undefined ? undefined : 0
+    : Math.sign(fulfilledQuantity) * subtotalCents({ ...orderLine, quantity: Math.abs(fulfilledQuantity) });
 
   return {
     ordered,
@@ -571,7 +578,13 @@ export function accountLine(
     quantity,
     quantity_cents: quantityCents,
     extension_cents: extensionCents,
-    ...(sent === undefined ? {} : { sent, sent_quantity: sentQuantity, sent_quantity_cents: sentQuantityCents }),
+    ...(fulfilled === undefined
+      ? {}
+      : {
+        fulfilled,
+        fulfilled_quantity: fulfilledQuantity,
+        fulfilled_quantity_cents: fulfilledQuantityCents,
+      }),
   };
 }
 

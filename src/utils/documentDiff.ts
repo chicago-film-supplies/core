@@ -287,9 +287,18 @@ export interface DocumentBilledEntry {
 }
 
 /**
- * What the invoices bill at this line, judged against what the FULFILLMENT
- * records as sent — the sibling of {@link DocumentBilledEntry}, which judges
+ * What the invoices bill at this line, judged against the FULFILLMENT's own
+ * quantity — the sibling of {@link DocumentBilledEntry}, which judges
  * the same billing against the ORDER.
+ *
+ * ⚠️ **Named for the DOCUMENT, not for a custody event.** It was `sent` first,
+ * which claimed a rung of the ladder (`quoted → prep → checkout → return →
+ * complete`) that the number does not carry: a fulfillment row's quantity is
+ * the same figure before anything is picked and after everything has come
+ * back. How many units are physically out lives on the booking's breakdown.
+ * The governing parallel is `billed`, which asserts what the invoices SAY
+ * rather than that money moved — payment is settlements' fact, not the
+ * invoice's.
  *
  * 🔴 **Both entries exist on purpose, and they are MEANT to disagree.** The
  * three documents are three authorities on three different questions, and all
@@ -302,20 +311,20 @@ export interface DocumentBilledEntry {
  *
  * ⚠️ **Summed across invoices, exactly as `billed` is, and for the same
  * reason.** An order is routinely billed across several invoices, so asking
- * this per invoice would report "sent 5, this invoice bills 2" against every
+ * this per invoice would report "fulfilled 5, this invoice bills 2" against every
  * one of them. That is why it is emitted here and not from `lineFields`, whose
  * fulfillment ↔ invoice arm stays empty.
  *
  * ⚠️ Advisory. Nothing refuses a write on it.
  */
-export interface DocumentSentEntry {
-  kind: "sent";
+export interface DocumentFulfilledEntry {
+  kind: "fulfilled";
   invoices: DocumentRef[];
-  /** Units the fulfillment records as sent at this line's path. */
-  sent: number;
+  /** The fulfillment's quantity for this line. */
+  fulfilled: number;
   /** Units billed across `invoices`. */
   billed: number;
-  /** Pre-tax cents for the `sent − billed` units, at the ORDER line's current terms. */
+  /** Pre-tax cents for the `fulfilled − billed` units, at the ORDER line's current terms. */
   quantity_cents: number;
 }
 
@@ -325,7 +334,7 @@ export type DocumentDiffEntry =
   | DocumentUninvoicedEntry
   | DocumentSubstitutionEntry
   | DocumentBilledEntry
-  | DocumentSentEntry;
+  | DocumentFulfilledEntry;
 
 /**
  * The answer for one viewed document.
@@ -865,8 +874,8 @@ export function computeDocumentDiffs(
    * all is `uninvoiced`, not this.
    */
   /**
-   * One `sent` entry at `viewedKey`: what the invoices bill, against what the
-   * FULFILLMENT records as sent. Silent when the two agree, when no fulfillment
+   * One `fulfilled` entry at `viewedKey`: what the invoices bill, against the
+   * FULFILLMENT's own quantity. Silent when the two agree, when no fulfillment
    * row exists for the line, or when a substitution explains the row (the
    * `substituted` entry is that line's answer).
    *
@@ -875,15 +884,15 @@ export function computeDocumentDiffs(
    * all — which is precisely the case where a unit shipped unbilled would
    * otherwise be invisible.
    */
-  const sentEntry = (orderUid: string, coverage: InvoiceCoverage, rel: string, viewedKey: string) => {
+  const fulfilledEntry = (orderUid: string, coverage: InvoiceCoverage, rel: string, viewedKey: string) => {
     const order = orderByUid.get(orderUid);
     const fulfillment = fulfillmentByUid.get(orderUid);
     if (order === undefined || fulfillment === undefined) return;
     const orderLine = scopeOrder(order).byKey.get(rel);
     if (orderLine === undefined) return;
     const scoped = scopeFulfillment(fulfillment);
-    const sentLine = scoped.byKey.get(rel);
-    if (sentLine === undefined) return;
+    const fulfilledLine = scoped.byKey.get(rel);
+    if (fulfilledLine === undefined) return;
     // A substituted row's units moved between products; the `substituted` entry
     // at that line is the answer, and a quantity statement here would double-report it.
     if (scoped.anchors.some((a) => key(a.path) === rel || key(a.substitutedFor) === rel)) return;
@@ -892,25 +901,25 @@ export function computeDocumentDiffs(
       orderLine,
       at,
       orderLineWindow(order.destinations ?? [], orderLine.path ?? []),
-      sentLine.quantity ?? 0,
+      fulfilledLine.quantity ?? 0,
     );
-    if (account.sent_quantity === undefined || account.sent_quantity === 0) return;
+    if (account.fulfilled_quantity === undefined || account.fulfilled_quantity === 0) return;
     // ⚠️ **Silent when the fulfillment agrees with the ORDER**, even though the
     // invoice disagrees with both. There the `billed` entry already says "4 of
     // 6" and this would repeat it word for word — two entries carrying one
     // fact. The pair earns its keep only where the two authorities actually
-    // differ: `ordered 2, sent 3, billed 2` emits NO `billed` entry (billing
+    // differ: `ordered 2, fulfilled 3, billed 2` emits NO `billed` entry (billing
     // matches the quote) and this one alone, which is the case that was
-    // invisible; `ordered 6, sent 5, billed 4` emits both, and they say
+    // invisible; `ordered 6, fulfilled 5, billed 4` emits both, and they say
     // genuinely different things.
-    if (account.sent === account.ordered) return;
-    if (out.lines.get(viewedKey)?.some((e) => e.kind === "sent")) return;
+    if (account.fulfilled === account.ordered) return;
+    if (out.lines.get(viewedKey)?.some((e) => e.kind === "fulfilled")) return;
     push(out.lines, viewedKey, {
-      kind: "sent",
+      kind: "fulfilled",
       invoices: coverage.invoices,
-      sent: account.sent ?? 0,
+      fulfilled: account.fulfilled ?? 0,
       billed: account.billed,
-      quantity_cents: account.sent_quantity_cents ?? 0,
+      quantity_cents: account.fulfilled_quantity_cents ?? 0,
     });
   };
 
@@ -961,7 +970,7 @@ export function computeDocumentDiffs(
     for (const [rel, item] of viewed.lines.byKey) {
       if (!comparable(viewed, orderSide, item)) continue;
       billedEntry(orderUid, coverage, rel, rel);
-      sentEntry(orderUid, coverage, rel, rel);
+      fulfilledEntry(orderUid, coverage, rel, rel);
     }
   };
 
@@ -1012,7 +1021,7 @@ export function computeDocumentDiffs(
       for (const row of at.rows) {
         if (row.invoiceUid === invoice.uid) {
           billedEntry(orderUid, coverage, rel, key(row.item.path));
-          sentEntry(orderUid, coverage, rel, key(row.item.path));
+          fulfilledEntry(orderUid, coverage, rel, key(row.item.path));
         }
       }
     }
