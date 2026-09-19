@@ -244,9 +244,10 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
  * Build a custom (no-product) invoice line item.
  *
  * An invoice line is a strictly smaller shape than an order line: no
- * `stock_method`, no `crms_id`, no `uid_order`, no `inclusion_type`/
- * `zero_priced`, and no `price.replacement_cents` — an invoice does not track
- * replacement value. This used to claim it "strips order-only fields" while the
+ * `stock_method`, no `crms_id`, no `uid_order`, no `inclusion_type`, and no
+ * `price.replacement_cents` — an invoice does not track replacement value. It DOES
+ * carry `zero_priced` (stated `null`: a custom line is never a kit component), since
+ * the key is required on every stored line. This used to claim it "strips order-only fields" while the
  * `initial` spread put `stock_method: "bulk"`, `order_number: 0` and
  * `uid_order: ""` straight back in; constructing the object outright is what
  * makes the docblock true.
@@ -262,6 +263,7 @@ export function buildCustomInvoiceLine(
     type: opts.type,
     quantity: opts.quantity ?? 1,
     path: [],
+    zero_priced: null,
     uid_tax_class: opts.uid_tax_class,
     price: {
       base_cents: opts.base_cents ?? 0,

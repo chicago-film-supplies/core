@@ -112,7 +112,7 @@ export interface FulfillmentLineItemType {
    * the picker's to author — the surface has no drag-reorder — so passing the
    * stored items is what keeps every line in the order the document already had.
    */
-  zero_priced?: boolean | null;
+  zero_priced: boolean | null;
   path: string[];
   /**
    * The line's own order attribution — a DENORMALISED COPY of the document's

@@ -155,6 +155,7 @@ Deno.test("checkZeroPricedAmount now runs when an INVOICE DOCUMENT parses", () =
     description: "",
     quantity: 1,
     path: ["abcdefghij0123456789"],
+    zero_priced: null,
     uid_tax_class: "TaxC1assDefau1tAAAAA",
     price: {
       base_cents: 1000,
@@ -170,7 +171,7 @@ Deno.test("checkZeroPricedAmount now runs when an INVOICE DOCUMENT parses", () =
     ...over,
   });
 
-  // Positive control — the same line without the flag must still parse, so a
+  // Positive control — the same line with the flag stated `null` must still parse, so a
   // failure below is attributable to `zero_priced` and not to the fixture.
   assertEquals(InvoiceDocItem.safeParse(line()).success, true, "control line must parse");
   assertEquals(

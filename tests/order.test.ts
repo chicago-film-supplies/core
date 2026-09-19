@@ -31,6 +31,7 @@ const docLine = (over: Record<string, unknown> = {}) => ({
   description: "",
   quantity: 1,
   stock_method: "none",
+  zero_priced: null,
   uid_tax_class: "TaxC1assDefau1tAAAAA",
   price: priceBase,
   path: [],
@@ -585,6 +586,7 @@ Deno.test("OrderSchema validates a complete document", () => {
           total_cents: 23000,
         },
         stock_method: "bulk",
+        zero_priced: null,
       },
     ],
     query_by_items: ["testprod100000000000"],
@@ -1058,6 +1060,7 @@ const feeLine = {
   // A fee holds no stock, and W5 requires every line type to say so rather than
   // exempting the fee with a contract axis. `"none"` is the honest value.
   stock_method: "none",
+  zero_priced: null,
   uid_tax_class: "TaxC1assDefau1tAAAAA",
   // A `percent_of_total` fee carries its rate in `base_percent` (a 4dp
   // percentage), never in `base_cents` — D1's split, enforced by
@@ -1292,4 +1295,18 @@ Deno.test("OrderItem: a bad discriminator reports at ['type']", () => {
   const bad = OrderItem.safeParse({ uid: "testitem100000000000", type: "nonsense", path: [] });
   assertEquals(bad.success, false);
   assertEquals(bad.error?.issues[0].path, ["type"]);
+});
+
+Deno.test("OrderDocItem: a stored line that omits zero_priced is refused — the key is required, `null` is the answer for a non-component", () => {
+  // Positive control first: the same line with the key stated `null` parses, so the
+  // refusal below is attributable to the ABSENT key and not to the fixture.
+  assertEquals(OrderDocItem.safeParse(docLine()).success, true, "control line must parse");
+  const { zero_priced: _dropped, ...withoutKey } = docLine();
+  const result = OrderDocItem.safeParse(withoutKey);
+  assertEquals(result.success, false);
+  assertEquals(
+    result.error?.issues.some((i) => i.path.at(-1) === "zero_priced"),
+    true,
+    "the refusal must name zero_priced, not something else on the line",
+  );
 });

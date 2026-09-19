@@ -116,7 +116,7 @@ export const LineItemCore: {
   description: z.ZodString;
   quantity: z.ZodNumber;
   path: z.ZodArray<z.ZodType<string>>;
-  zero_priced: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+  zero_priced: z.ZodNullable<z.ZodBoolean>;
 } = {
   uid: ItemUid,
 
@@ -207,15 +207,17 @@ export const LineItemCore: {
   // Mirrored across all three grains with the same display-column metadata
   // (`manager#421`), so the column renders identically wherever it appears.
   //
-  // ⚠️ **`.nullable().optional()` is the CURRENT state, not the intended one.**
-  // A component that states no answer here has its billing decided by a default:
-  // `checkZeroPricedAmount` fires only on `=== true` and the zero-priced-first
-  // sort groups only on `=== true`, so an absent value silently resolves to
-  // *charged*. Making it required on components is a measured ~9,214-row
-  // backfill across the three collections and is tracked as its own campaign —
-  // deliberately NOT a rider on this module. Do not tighten it here without
-  // that backfill.
-  zero_priced: z.boolean().nullable().optional().meta({
+  // ⭐ **A required, NULLABLE key (2026-09-19).** A component that states no answer had
+  // its billing decided by a default — `checkZeroPricedAmount` fires only on `=== true`
+  // and the zero-priced-first sort groups only on `=== true`, so an absent value
+  // silently resolved to *charged*. The corpus was backfilled first (9,213 unstated
+  // components to 0 on 2026-09-10, then every line's KEY: a key-presence census reads
+  // 0 absent across orders, invoices and fulfillments in prod), and every writer now
+  // states the key (`?? null` where the catalog says nothing). `null` is a real answer
+  // on a non-component; the array-level refinement still refuses it on a component.
+  // The INPUT schemas (`OrderItemLine`, the invoice item input) stay optional: a
+  // client states nothing and the writer fills it in.
+  zero_priced: z.boolean().nullable().meta({
     column: true,
     label: "Zero Priced",
     propagate: true,

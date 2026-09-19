@@ -359,7 +359,7 @@ export interface InvoiceDocLineItemType {
    * states nothing.** Absence means a line written before the backfill, not "no
    * answer" — a component with no answer is what the core#100 refine refuses.
    */
-  zero_priced?: boolean | null;
+  zero_priced: boolean | null;
   coa_revenue?: COARevenueType | null;
   /**
    * @see `OrderDocLineItemType.uid_tax_class`. Mirrored onto the invoice so an

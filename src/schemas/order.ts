@@ -1160,7 +1160,7 @@ export interface OrderDocLineItemType {
   uid_order?: string;
   path: string[];
   inclusion_type?: "default" | "mandatory" | "optional" | null;
-  zero_priced?: boolean | null;
+  zero_priced: boolean | null;
   crms_id?: number | null;
   /**
    * Revenue chart-of-accounts code, denormalized from the product at write time

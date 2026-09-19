@@ -4049,7 +4049,7 @@ interface FulfillmentLineItemType {
   description: string;
   quantity: number;
   stock_method?: StockMethodType;
-  zero_priced?: boolean | null;
+  zero_priced: boolean | null;
   path: string[];
   order_number?: number;
   uid_order?: string;
@@ -4665,7 +4665,7 @@ interface InvoiceDocLineItemType {
   quantity: number;
   price: InvoiceDocItemPriceType;
   path: string[];
-  zero_priced?: boolean | null;
+  zero_priced: boolean | null;
   coa_revenue?: COARevenueType | null;
   uid_tax_class: string;
   uid_tax_class_override?: string | null;
@@ -6529,7 +6529,7 @@ interface OrderDocLineItemType {
   uid_order?: string;
   path: string[];
   inclusion_type?: "default" | "mandatory" | "optional" | null;
-  zero_priced?: boolean | null;
+  zero_priced: boolean | null;
   crms_id?: number | null;
   coa_revenue?: COARevenueType | null;
   uid_tax_class: string;
@@ -15951,7 +15951,7 @@ interface InvoiceDocLineItemType {
   quantity: number;
   price: InvoiceDocItemPriceType;
   path: string[];
-  zero_priced?: boolean | null;
+  zero_priced: boolean | null;
   coa_revenue?: COARevenueType | null;
   uid_tax_class: string;
   uid_tax_class_override?: string | null;
@@ -17250,7 +17250,7 @@ interface OrderDocLineItemType {
   uid_order?: string;
   path: string[];
   inclusion_type?: "default" | "mandatory" | "optional" | null;
-  zero_priced?: boolean | null;
+  zero_priced: boolean | null;
   crms_id?: number | null;
   coa_revenue?: COARevenueType | null;
   uid_tax_class: string;
@@ -17722,7 +17722,7 @@ interface FulfillmentLineItemType {
   description: string;
   quantity: number;
   stock_method?: StockMethodType;
-  zero_priced?: boolean | null;
+  zero_priced: boolean | null;
   path: string[];
   order_number?: number;
   uid_order?: string;
@@ -30448,9 +30448,10 @@ interface OrderLineBuildOptions {
 Build a custom (no-product) invoice line item.
 
 An invoice line is a strictly smaller shape than an order line: no
-`stock_method`, no `crms_id`, no `uid_order`, no `inclusion_type`/
-`zero_priced`, and no `price.replacement_cents` — an invoice does not track
-replacement value. This used to claim it "strips order-only fields" while the
+`stock_method`, no `crms_id`, no `uid_order`, no `inclusion_type`, and no
+`price.replacement_cents` — an invoice does not track replacement value. It DOES
+carry `zero_priced` (stated `null`: a custom line is never a kit component), since
+the key is required on every stored line. This used to claim it "strips order-only fields" while the
 `initial` spread put `stock_method: "bulk"`, `order_number: 0` and
 `uid_order: ""` straight back in; constructing the object outright is what
 makes the docblock true.

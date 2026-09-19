@@ -1809,7 +1809,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineItemType",
-          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced?: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  substituted_for?: SubstitutedForEntryType[];\n}",
+          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  substituted_for?: SubstitutedForEntryType[];\n}",
           "doc": "Line item in the fulfillment order view — no price, no financial flags."
         },
         {
@@ -2067,7 +2067,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced?: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -2871,7 +2871,7 @@
         {
           "kind": "interface",
           "name": "OrderDocLineItemType",
-          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced?: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "Line item in the full order document.\n\n`price` and `stock_method` are REQUIRED, and that is a statement about the\nwriters rather than a convenience: every one of the 9,303 line items in prod\n(and in dev) carries both, because `buildOrderLineItem` resolves them off the\nbacking product doc — or off the `custom-` line's own payload — before it can\nbuild anything at all. While they were optional, three call sites downstream\nhad to compensate for a shape no writer has ever produced: two `item.price!`\nassertions, and a `\"stock_method\" in item` duck-type that answered \"not a line\nitem\" for a line item that merely omitted the field.\n\n`uid_delivery` / `uid_collection` are absent, matching the input arm. They\nbelong to the destination divider — 0 of 9,303 stored lines carry either key,\nno writer has ever set one on a line, and both readers in\n`@cfs/core/utils/orders` gate on `type === \"destination\"` before looking. The\nFULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit\n`null` there, so removing it would be a backfill, not a tightening."
         },
         {
@@ -7206,7 +7206,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced?: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -7792,7 +7792,7 @@
         {
           "kind": "interface",
           "name": "OrderDocLineItemType",
-          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced?: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "Line item in the full order document.\n\n`price` and `stock_method` are REQUIRED, and that is a statement about the\nwriters rather than a convenience: every one of the 9,303 line items in prod\n(and in dev) carries both, because `buildOrderLineItem` resolves them off the\nbacking product doc — or off the `custom-` line's own payload — before it can\nbuild anything at all. While they were optional, three call sites downstream\nhad to compensate for a shape no writer has ever produced: two `item.price!`\nassertions, and a `\"stock_method\" in item` duck-type that answered \"not a line\nitem\" for a line item that merely omitted the field.\n\n`uid_delivery` / `uid_collection` are absent, matching the input arm. They\nbelong to the destination divider — 0 of 9,303 stored lines carry either key,\nno writer has ever set one on a line, and both readers in\n`@cfs/core/utils/orders` gate on `type === \"destination\"` before looking. The\nFULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit\n`null` there, so removing it would be a backfill, not a tightening."
         },
         {
@@ -8010,7 +8010,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineItemType",
-          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced?: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  substituted_for?: SubstitutedForEntryType[];\n}",
+          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  substituted_for?: SubstitutedForEntryType[];\n}",
           "doc": "Line item in the fulfillment order view — no price, no financial flags."
         },
         {
@@ -13978,7 +13978,7 @@
           "kind": "function",
           "name": "buildCustomInvoiceLine",
           "signature": "buildCustomInvoiceLine(opts: Omit<CustomLineBuildOptions, \"uidOrder\">): InvoiceDocLineItemType",
-          "doc": "Build a custom (no-product) invoice line item.\n\nAn invoice line is a strictly smaller shape than an order line: no\n`stock_method`, no `crms_id`, no `uid_order`, no `inclusion_type`/\n`zero_priced`, and no `price.replacement_cents` — an invoice does not track\nreplacement value. This used to claim it \"strips order-only fields\" while the\n`initial` spread put `stock_method: \"bulk\"`, `order_number: 0` and\n`uid_order: \"\"` straight back in; constructing the object outright is what\nmakes the docblock true.",
+          "doc": "Build a custom (no-product) invoice line item.\n\nAn invoice line is a strictly smaller shape than an order line: no\n`stock_method`, no `crms_id`, no `uid_order`, no `inclusion_type`, and no\n`price.replacement_cents` — an invoice does not track replacement value. It DOES\ncarry `zero_priced` (stated `null`: a custom line is never a kit component), since\nthe key is required on every stored line. This used to claim it \"strips order-only fields\" while the\n`initial` spread put `stock_method: \"bulk\"`, `order_number: 0` and\n`uid_order: \"\"` straight back in; constructing the object outright is what\nmakes the docblock true.",
           "paramTags": [],
           "returnsTag": null
         },

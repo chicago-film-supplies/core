@@ -453,9 +453,12 @@ Deno.test("buildCustomInvoiceLine emits no order-only field", () => {
   // The old docblock claimed it "strips order-only fields" while the `initial`
   // spread put `stock_method: "bulk"`, `order_number: 0` and `uid_order: ""`
   // straight back in. An invoice line arm is a strictObject with none of them.
-  for (const key of ["stock_method", "crms_id", "uid_order", "order_number", "inclusion_type", "zero_priced"]) {
+  for (const key of ["stock_method", "crms_id", "uid_order", "order_number", "inclusion_type"]) {
     assert(!(key in line), `invoice line must not carry ${key}`);
   }
+  // `zero_priced` is the exception and is REQUIRED on every stored line: a custom line is
+  // never a kit component, so it states `null` rather than leaving the key absent.
+  assertEquals(line.zero_priced, null);
   // An invoice does not track replacement value.
   assert(!("replacement" in line.price));
   assertEquals(line.price.chargeable_days, 5);
