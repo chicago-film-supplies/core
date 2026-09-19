@@ -103,7 +103,15 @@ Deno.test("allocationSide follows the contract, so the client stays direction-ag
   assertEquals(allocationSide("purchase"), "to");
   assertEquals(allocationSide("transfer"), "both");
   assertEquals(allocationSide("prep"), null, "nothing moves");
-  assertEquals(allocationSide("mark_damaged"), null, "booking → OOS, no shelf involved");
+  // 🔴 These three ARE the place-model change, read through the one function the
+  // client uses to decide which side it is picking. A damaged return names a
+  // destination shelf exactly as a clean return does; a shelf-discovered loss
+  // names the source shelf it is going missing from; and a found unit names the
+  // shelf it comes back to. All three were `null` — "no shelf involved" — when
+  // `damaged` and `lost` both meant "somewhere out of service".
+  assertEquals(allocationSide("mark_damaged"), "to", "booking → shelf, same as check_in");
+  assertEquals(allocationSide("mark_lost"), "from", "off a shelf, pending a resolution");
+  assertEquals(allocationSide("return_to_service"), "to", "found, and back on a shelf");
 });
 
 // ── Cost: checked against exact rational arithmetic ─────────────────
@@ -269,6 +277,7 @@ Deno.test("a purchase adds basis and units, and lands them on the shelf", () => 
     ledger(),
     {
       type: "purchase",
+      custody: null,
       quantity: 10,
       lines: [line(10, null, at(LOC_A))],
       cost: { amount_cents: 400000, unit_cost: 400, unit_costs_cents: [] },
@@ -294,6 +303,7 @@ Deno.test("a purchase reports its unit cost as a 4dp RATE, not cent-quantized mo
     ledger(),
     {
       type: "purchase",
+      custody: null,
       quantity: 100,
       lines: [line(100, null, at(LOC_A))],
       cost: { amount_cents: 639, unit_cost: 0, unit_costs_cents: [] },
@@ -318,6 +328,7 @@ Deno.test("a cost-bearing decrease reports its unit cost at 4dp too", () => {
     start,
     {
       type: "sale",
+      custody: null,
       quantity: 30,
       lines: [line(30, at(LOC_A), null)],
       cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] },
@@ -341,7 +352,7 @@ Deno.test("a placement stamps the store's and the location's identity, on create
   // and the ledger is the only place those flags are denormalized.
   const { ledger: created } = applyMovementToLedger(
     ledger(),
-    { type: "purchase", quantity: 4, lines: [line(4, null, at(LOC_A))], cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] } },
+    { type: "purchase", custody: null, quantity: 4, lines: [line(4, null, at(LOC_A))], cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] } },
     placements,
     mockTimestamp,
   );
@@ -366,7 +377,7 @@ Deno.test("a placement stamps the store's and the location's identity, on create
   });
   const { ledger: healed } = applyMovementToLedger(
     stale,
-    { type: "transfer", quantity: 1, lines: [line(1, at(LOC_A), at(LOC_B))], cost: null },
+    { type: "transfer", custody: null, quantity: 1, lines: [line(1, at(LOC_A), at(LOC_B))], cost: null },
     placements,
     mockTimestamp,
   );
@@ -384,6 +395,7 @@ Deno.test("a sale removes the weighted-average share, not the caller's number", 
     start,
     {
       type: "sale",
+      custody: null,
       quantity: 2,
       lines: [line(2, at(LOC_A), null)],
       cost: { amount_cents: 90000, unit_cost: 450, unit_costs_cents: [] },
@@ -417,7 +429,7 @@ Deno.test("a cost-only fold is inert: `lines: []` beside a cost moves no basis",
 
   const { ledger: inert, costAppliedCents: none } = applyMovementToLedger(
     start,
-    { type: "purchase", quantity: 0, lines: [], cost },
+    { type: "purchase", custody: null, quantity: 0, lines: [], cost },
     placements,
     mockTimestamp,
   );
@@ -431,7 +443,7 @@ Deno.test("a cost-only fold is inert: `lines: []` beside a cost moves no basis",
   // fall-through and not a fixture that could never have moved anything.
   const { ledger: moved, costAppliedCents: applied } = applyMovementToLedger(
     start,
-    { type: "purchase", quantity: 10, lines: [line(10, null, at(LOC_A))], cost },
+    { type: "purchase", custody: null, quantity: 10, lines: [line(10, null, at(LOC_A))], cost },
     placements,
     mockTimestamp,
   );
@@ -467,7 +479,7 @@ Deno.test("a transfer leaves the basis exactly where it was (#286 defect 1)", ()
   const start = ledger({ quantity_held: 4, total_cost_basis_cents: 160000, average_unit_cost: 400 });
   const { ledger: next, costAppliedCents } = applyMovementToLedger(
     start,
-    { type: "transfer", quantity: 4, lines: [line(4, at(LOC_A), at(LOC_B))], cost: null },
+    { type: "transfer", custody: null, quantity: 4, lines: [line(4, at(LOC_A), at(LOC_B))], cost: null },
     placements,
     mockTimestamp,
   );
@@ -500,7 +512,7 @@ Deno.test("a full-quantity transfer through held=0 preserves the basis (#286 def
   const start = ledgerAtShelfA(4, { total_cost_basis_cents: 160000, average_unit_cost: 400 });
   const { ledger: mid } = applyMovementToLedger(
     start,
-    { type: "transfer", quantity: 4, lines: [line(4, at(LOC_A), at(LOC_B))], cost: null },
+    { type: "transfer", custody: null, quantity: 4, lines: [line(4, at(LOC_A), at(LOC_B))], cost: null },
     placements,
     mockTimestamp,
   );
@@ -515,6 +527,7 @@ Deno.test("selling the last unit zeroes both basis and average", () => {
     start,
     {
       type: "sale",
+      custody: null,
       quantity: 1,
       lines: [line(1, at(LOC_A), null)],
       cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] },
@@ -534,6 +547,7 @@ Deno.test("the fold never mutates its input ledger", () => {
     start,
     {
       type: "sale",
+      custody: null,
       quantity: 2,
       lines: [line(2, at(LOC_A), null)],
       cost: { amount_cents: 90000, unit_cost: 450, unit_costs_cents: [] },
@@ -550,6 +564,7 @@ Deno.test("a movement into a never-held store creates the entry (#294)", () => {
     ledger(),
     {
       type: "purchase",
+      custody: null,
       quantity: 5,
       lines: [line(5, null, at(LOC_B))],
       cost: { amount_cents: 50000, unit_cost: 100, unit_costs_cents: [] },
@@ -566,6 +581,7 @@ Deno.test("two lines naming the same location sum rather than collide (#287)", (
     ledger(),
     {
       type: "purchase",
+      custody: null,
       quantity: 5,
       lines: [line(3, null, at(LOC_A)), line(2, null, at(LOC_A))],
       cost: { amount_cents: 50000, unit_cost: 100, unit_costs_cents: [] },
@@ -581,25 +597,108 @@ Deno.test("two lines naming the same location sum rather than collide (#287)", (
 
 Deno.test("units at an OOS record leave service without leaving ownership", () => {
   const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
-  const derived = deriveServiceQuantities(start, [line(3, atBooking, atOos)]);
+  const derived = deriveServiceQuantities(start, [line(3, atBooking, atOos)], null);
   assertEquals(derived.quantity_out_of_service, 3);
   assertEquals(derived.quantity_in_service, 7);
 });
 
 Deno.test("returning to service restores the in-service count", () => {
   const start = ledger({ quantity_held: 10, quantity_in_service: 7, quantity_out_of_service: 3 });
-  const derived = deriveServiceQuantities(start, [line(3, atOos, at(LOC_A))]);
+  const derived = deriveServiceQuantities(start, [line(3, atOos, at(LOC_A))], null);
   assertEquals(derived.quantity_out_of_service, 0);
   assertEquals(derived.quantity_in_service, 10);
+});
+
+// ── The in-place term: `damaged` is a STATE, not a place ────────────
+
+Deno.test("a damaged unit leaves service WITHOUT leaving its shelf", () => {
+  // The whole point of the state/place split. The line is `bookings → locations`
+  // — identical to a clean `check_in` — so the placement term sees nothing, and
+  // reading placement alone would report a broken unit as fully in service.
+  const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
+  const derived = deriveServiceQuantities(
+    start,
+    [line(3, atBooking, at(LOC_A))],
+    { from: "out", to: "damaged" },
+  );
+  assertEquals(derived.quantity_out_of_service, 3);
+  assertEquals(derived.quantity_in_service, 7);
+});
+
+Deno.test("a clean return moves nothing out of service", () => {
+  // The discriminator is the custody key alone: same type of line, same places,
+  // same quantity as the damaged case above. Without this the previous test
+  // passes against an implementation that counts every `bookings → locations`
+  // line.
+  const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
+  const derived = deriveServiceQuantities(
+    start,
+    [line(3, atBooking, at(LOC_A))],
+    { from: "out", to: "returned" },
+  );
+  assertEquals(derived.quantity_out_of_service, 0);
+  assertEquals(derived.quantity_in_service, 10);
+});
+
+Deno.test("the placement and in-place terms cannot double-count", () => {
+  // Disjoint by construction rather than by a guard: `CUSTODY_PLACE_KINDS.damaged`
+  // is `["locations"]`, so a movement carrying `custody.to === "damaged"` cannot
+  // also name an out-of-service place on that side — rule 3 of the balance
+  // checker refuses it. This asserts the arithmetic consequence: a lost unit is
+  // counted once by placement and a damaged unit once by state, never both.
+  const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
+  const lost = deriveServiceQuantities(start, [line(2, atBooking, atOos)], {
+    from: "out",
+    to: "lost",
+  });
+  assertEquals(lost.quantity_out_of_service, 2, "placement term only");
+
+  const damaged = deriveServiceQuantities(start, [line(2, atBooking, at(LOC_A))], {
+    from: "out",
+    to: "damaged",
+  });
+  assertEquals(damaged.quantity_out_of_service, 2, "state term only");
+});
+
+Deno.test("a LEGACY mark_damaged row is counted once, not twice", () => {
+  // 🔴 The regression this guard exists for, and it is about STORED data rather
+  // than about anything a writer can emit now. Measured 2026-09-19: all 4
+  // `mark_damaged` movements in prod and all 4 in dev carry `bookings →
+  // out-of-service` AND `custody.to === "damaged"` — legal under the old model,
+  // and satisfying BOTH terms under this one. Rule 3 refuses this shape going
+  // forward, but rule 3 only ever ran at write time, so it cannot speak for a
+  // row already in the corpus.
+  //
+  // Without the guard this returns 8 on a 4-unit movement, and the two audit
+  // scripts that replay the whole journal would report every one of those
+  // products as twice as broken as it is.
+  const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
+  const legacy = deriveServiceQuantities(start, [line(4, atBooking, atOos)], {
+    from: "out",
+    to: "damaged",
+  });
+  assertEquals(legacy.quantity_out_of_service, 4, "counted by placement, once");
+  assertEquals(legacy.quantity_in_service, 6);
 });
 
 Deno.test("in_service and out_of_service always partition held", () => {
   // Before the journal, in_service moved in lockstep with held so it always
   // EQUALLED it, and out_of_service was written once as zero and never moved —
   // the ledger reported every product as 100% in service.
+  //
+  // ⚠️ The fixture moved with the model: this was `bookings → out-of-service`
+  // with no custody, which is now an illegal `mark_damaged` line AND would
+  // report zero out of service. A damaged return goes to the SHELF and carries
+  // its state on the custody axis — that is the whole change.
   const { ledger: next } = applyMovementToLedger(
     ledger({ quantity_held: 10, quantity_in_service: 10 }),
-    { type: "mark_damaged", quantity: 4, lines: [line(4, atBooking, atOos)], cost: null },
+    {
+      type: "mark_damaged",
+      custody: { from: "out", to: "damaged" },
+      quantity: 4,
+      lines: [line(4, atBooking, at(LOC_A))],
+      cost: null,
+    },
     placements,
     mockTimestamp,
   );
@@ -614,6 +713,7 @@ Deno.test("a write-off removes ownership and clears the out-of-service count", (
     ledger({ quantity_held: 10, quantity_in_service: 6, quantity_out_of_service: 4, total_cost_basis_cents: 400000 }),
     {
       type: "write_off",
+      custody: null,
       quantity: 4,
       lines: [line(4, atOos, null)],
       cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] },

@@ -20,6 +20,7 @@
 import type {
   InventoryLedger,
   Movement,
+  MovementCustodyType,
   MovementLineType,
   MovementTypeType,
   ProductTypeType,
@@ -233,7 +234,10 @@ export interface LocationPlacement {
  */
 export function applyMovementToLedger(
   ledger: InventoryLedger,
-  movement: Pick<Movement, "type" | "quantity" | "lines" | "cost">,
+  // `custody` joined this Pick when `damaged` became a STATE: a damaged unit
+  // stays on its shelf, so the fold can no longer read out-of-service off the
+  // line endpoints alone. See `deriveServiceQuantities`.
+  movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody">,
   placements: ReadonlyMap<string, LocationPlacement>,
   now: InventoryLedger["updated_at"],
 ): LedgerFoldResult {
@@ -312,7 +316,7 @@ export function applyMovementToLedger(
   }
 
   // ── The three fields that used to be vestigial ──
-  Object.assign(next, deriveServiceQuantities(next, movement.lines));
+  Object.assign(next, deriveServiceQuantities(next, movement.lines, movement.custody));
 
   next.query_by_uid_store = next.store_breakdown.map((s) => s.uid_store);
   next.query_by_uid_location = next.store_breakdown.flatMap((s) =>
@@ -333,21 +337,81 @@ export function applyMovementToLedger(
  * units at a `locations` doc or a `booking` are in service, units at an
  * `out-of-service` record are not.
  *
+ * 🔴 **TWO terms, because out-of-service is a PLACE for `lost` and a STATE for
+ * `damaged`.** A damaged unit stays on its shelf — see `CUSTODY_PLACE_KINDS` —
+ * so it never touches an `out-of-service` place and the endpoint term alone
+ * cannot see it. Reading placement alone would report a shelf full of broken
+ * units as fully in service.
+ *
+ * 🔴 **The two terms ARE guarded, and the guard is load-bearing on stored data.**
+ * Rule 3 of the balance checker refuses a movement that both carries
+ * `custody: "damaged"` and names an `out-of-service` place — so for anything
+ * written under this contract the terms are disjoint by construction and the
+ * guard is dead weight. **But rule 3 only ever ran at WRITE time, under the
+ * table it had then.** Measured 2026-09-19: all 4 `mark_damaged` movements in
+ * prod and all 4 in dev are `bookings → out-of-service` carrying
+ * `custody.to === "damaged"`, because that is what the old model asked for.
+ * Every one of them satisfies BOTH terms, and replaying one without the guard
+ * doubles its contribution — `audit-ledger-replay` and
+ * `audit-unjournaled-consumption` both fold stored movements through this
+ * function.
+ *
+ * ⚠️ So the guard is not defensive coding: a legacy row keeps being counted
+ * ONCE, by placement, which is the answer that was correct when it was written
+ * and is still the only answer recoverable from it. The shelf those units are
+ * on is not in the document and cannot be reconstructed, which is exactly why
+ * this model had to land before `mark_damaged` became operator-reachable.
+ *
+ * ⚠️ This is an **extension** of the placement term and not a replacement of
+ * it — `lost` is still a genuine movement to an `out-of-service` record, and
+ * dropping the endpoint term would stop counting every lost unit.
+ *
  * `out_of_service_breakdown` needs the OOS record's `reason`, which this module
  * cannot read, so the caller supplies it — see `applyOutOfServiceReason`.
+ *
+ * @param custody The movement's custody axis, or `null` when it has none.
+ *   Required rather than optional: a forgotten argument would silently drop the
+ *   in-place term, which is the exact failure this parameter exists to remove
+ *   and one that reads as "no damage recorded" rather than as an error.
  */
 export function deriveServiceQuantities(
   ledger: InventoryLedger,
   lines: readonly MovementLineType[],
+  custody: MovementCustodyType | null,
 ): Pick<InventoryLedger, "quantity_in_service" | "quantity_out_of_service"> {
   let oosDelta = 0;
+
+  // Term 1 — placement. A unit that moved to or from an out-of-service record.
+  let placementQuantity = 0;
   for (const line of lines) {
+    let touchesOos = false;
     for (const side of ["from", "to"] as const) {
       const source = line.location[side];
       if (source === null || source.collection !== "out-of-service") continue;
+      touchesOos = true;
       oosDelta += (side === "to" ? 1 : -1) * line.quantity;
     }
+    if (touchesOos) placementQuantity += line.quantity;
   }
+
+  // Term 2 — state. A unit flagged damaged in place, which moves no further
+  // than the shelf it is already on.
+  //
+  // ⚠️ Summed over the lines term 1 did NOT account for. Under this contract
+  // that is every line; for the 8 legacy `mark_damaged` rows it is none, and
+  // they stay counted exactly once. See the docblock.
+  //
+  // The `from` arm is unreachable today (`applyBookingUpdate` refuses a decrease
+  // of `breakdown.damaged` outright), and it is written anyway because the
+  // alternative is a one-way ratchet: the day a repair path exists, an absent
+  // arm undercounts service silently rather than failing.
+  if (custody !== null) {
+    const total = lines.reduce((sum, line) => sum + line.quantity, 0);
+    const inPlace = total - placementQuantity;
+    if (custody.to === "damaged") oosDelta += inPlace;
+    if (custody.from === "damaged") oosDelta -= inPlace;
+  }
+
   const outOfService = Math.max(0, ledger.quantity_out_of_service + oosDelta);
   return {
     quantity_out_of_service: outOfService,

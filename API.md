@@ -1175,6 +1175,20 @@ and by every writer, so the mapping exists once.
 at the booking until they come back, a sale's units left ownership at the
 point of sale and are nowhere.
 
+🔴 **`damaged` is a STATE and `lost` is a PLACE, and they are not symmetric
+however much the two keys look alike.** A damaged unit is *on a shelf* — it
+is physically present, CFS knows exactly where it is, and it is merely not
+available; a lost unit is off-shelf and pending a resolution, which is the
+same shape as `out`. Mapping `damaged` to `out-of-service` said a broken unit
+is nowhere in particular, and it contradicted `write_off`'s own contract
+comment below — *"an operator finding a broken unit on a shelf can write it
+off from there"* — which presupposes exactly what this table denied.
+
+⚠️ So `quantity_out_of_service` can no longer be read off the movement
+ENDPOINT alone: a damaged unit never touches an `out-of-service` place. See
+`deriveServiceQuantities`, which carries one term per kind and they are
+disjoint by construction.
+
 ```ts
 const CUSTODY_PLACE_KINDS: Readonly<Record<BookingBreakdownKeyType, readonly PlaceKindType[]>>;
 ```
@@ -5439,7 +5453,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "transfer"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "transfer" | "return_to_service"[];
 ```
 
 ### `MSG_SCHEMA_REGISTRY`
@@ -8991,12 +9005,29 @@ interface StoreBreakdownLocation {
   quantity: number;
   default: boolean;
   max: number | null;
+  quantity_out_of_service?: number;
 }
 ```
 
 ### `StoreBreakdownLocationSchema`
 
 Zod schema for StoreBreakdownLocation.
+
+🔴 **`quantity` is what is ON the shelf, not what is AVAILABLE from it**, and
+the two stopped being the same number the moment `damaged` became a state
+rather than a place (`CUSTODY_PLACE_KINDS`). A damaged unit is physically
+present and counted here, and is not available to book. Anything computing
+availability from a shelf reads `quantity - (quantity_out_of_service ?? 0)`;
+anything asking "what would I find if I walked to this shelf" reads
+`quantity`. Fusing them is correct only while nothing is flagged.
+
+⚠️ **`quantity_out_of_service` is OPTIONAL, and that is a release-ordering
+fact rather than a modelling one.** This is a `z.strictObject` with live
+readers in another repo on an independent release train, so the field ships
+optional, the readers pin and deploy, and only then does the writer populate
+it. `undefined` means "this ledger has not been rebuilt since the field
+landed", which is why every reader coalesces rather than assuming zero is
+stored. Tighten to required — if at all — in a later release.
 
 ```ts
 const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation>;
@@ -13875,12 +13906,29 @@ interface StoreBreakdownLocation {
   quantity: number;
   default: boolean;
   max: number | null;
+  quantity_out_of_service?: number;
 }
 ```
 
 ### `StoreBreakdownLocationSchema`
 
 Zod schema for StoreBreakdownLocation.
+
+🔴 **`quantity` is what is ON the shelf, not what is AVAILABLE from it**, and
+the two stopped being the same number the moment `damaged` became a state
+rather than a place (`CUSTODY_PLACE_KINDS`). A damaged unit is physically
+present and counted here, and is not available to book. Anything computing
+availability from a shelf reads `quantity - (quantity_out_of_service ?? 0)`;
+anything asking "what would I find if I walked to this shelf" reads
+`quantity`. Fusing them is correct only while nothing is flagged.
+
+⚠️ **`quantity_out_of_service` is OPTIONAL, and that is a release-ordering
+fact rather than a modelling one.** This is a `z.strictObject` with live
+readers in another repo on an independent release train, so the field ships
+optional, the readers pin and deploy, and only then does the writer populate
+it. `undefined` means "this ledger has not been rebuilt since the field
+landed", which is why every reader coalesces rather than assuming zero is
+stored. Tighten to required — if at all — in a later release.
 
 ```ts
 const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation>;
@@ -19595,6 +19643,20 @@ and by every writer, so the mapping exists once.
 at the booking until they come back, a sale's units left ownership at the
 point of sale and are nowhere.
 
+🔴 **`damaged` is a STATE and `lost` is a PLACE, and they are not symmetric
+however much the two keys look alike.** A damaged unit is *on a shelf* — it
+is physically present, CFS knows exactly where it is, and it is merely not
+available; a lost unit is off-shelf and pending a resolution, which is the
+same shape as `out`. Mapping `damaged` to `out-of-service` said a broken unit
+is nowhere in particular, and it contradicted `write_off`'s own contract
+comment below — *"an operator finding a broken unit on a shelf can write it
+off from there"* — which presupposes exactly what this table denied.
+
+⚠️ So `quantity_out_of_service` can no longer be read off the movement
+ENDPOINT alone: a damaged unit never touches an `out-of-service` place. See
+`deriveServiceQuantities`, which carries one term per kind and they are
+disjoint by construction.
+
 ```ts
 const CUSTODY_PLACE_KINDS: Readonly<Record<BookingBreakdownKeyType, readonly PlaceKindType[]>>;
 ```
@@ -19735,7 +19797,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "transfer"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "transfer" | "return_to_service"[];
 ```
 
 ### `Movement`
@@ -30313,7 +30375,7 @@ Returning the side rather than letting callers decide is the point: the client
 sends a direction-agnostic `[{uid_location, quantity}]` and never has to know
 which way a type moves.
 
-### `applyMovementToLedger(ledger: InventoryLedger, movement: Pick<Movement, "type" | "quantity" | "lines" | "cost">, placements: ReadonlyMap<string, LocationPlacement>, now: indexedAccess): LedgerFoldResult`
+### `applyMovementToLedger(ledger: InventoryLedger, movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody">, placements: ReadonlyMap<string, LocationPlacement>, now: indexedAccess): LedgerFoldResult`
 
 Fold one movement onto a ledger, returning a NEW ledger.
 
@@ -30361,7 +30423,7 @@ The previous ledger fold did exactly that: it read the stored
 `average_unit_cost` (already quantized) and multiplied. Here the division
 happens last, on exact integer cents.
 
-### `deriveServiceQuantities(ledger: InventoryLedger, lines: readonly MovementLineType[]): Pick<InventoryLedger, "quantity_in_service" | "quantity_out_of_service">`
+### `deriveServiceQuantities(ledger: InventoryLedger, lines: readonly MovementLineType[], custody: MovementCustodyType | null): Pick<InventoryLedger, "quantity_in_service" | "quantity_out_of_service">`
 
 `quantity_in_service` and `quantity_out_of_service` from placement kind.
 
@@ -30372,8 +30434,44 @@ every product as 100% in service. Under the line model they are derived:
 units at a `locations` doc or a `booking` are in service, units at an
 `out-of-service` record are not.
 
+🔴 **TWO terms, because out-of-service is a PLACE for `lost` and a STATE for
+`damaged`.** A damaged unit stays on its shelf — see `CUSTODY_PLACE_KINDS` —
+so it never touches an `out-of-service` place and the endpoint term alone
+cannot see it. Reading placement alone would report a shelf full of broken
+units as fully in service.
+
+🔴 **The two terms ARE guarded, and the guard is load-bearing on stored data.**
+Rule 3 of the balance checker refuses a movement that both carries
+`custody: "damaged"` and names an `out-of-service` place — so for anything
+written under this contract the terms are disjoint by construction and the
+guard is dead weight. **But rule 3 only ever ran at WRITE time, under the
+table it had then.** Measured 2026-09-19: all 4 `mark_damaged` movements in
+prod and all 4 in dev are `bookings → out-of-service` carrying
+`custody.to === "damaged"`, because that is what the old model asked for.
+Every one of them satisfies BOTH terms, and replaying one without the guard
+doubles its contribution — `audit-ledger-replay` and
+`audit-unjournaled-consumption` both fold stored movements through this
+function.
+
+⚠️ So the guard is not defensive coding: a legacy row keeps being counted
+ONCE, by placement, which is the answer that was correct when it was written
+and is still the only answer recoverable from it. The shelf those units are
+on is not in the document and cannot be reconstructed, which is exactly why
+this model had to land before `mark_damaged` became operator-reachable.
+
+⚠️ This is an **extension** of the placement term and not a replacement of
+it — `lost` is still a genuine movement to an `out-of-service` record, and
+dropping the endpoint term would stop counting every lost unit.
+
 `out_of_service_breakdown` needs the OOS record's `reason`, which this module
 cannot read, so the caller supplies it — see `applyOutOfServiceReason`.
+
+**Parameters**
+
+- `custody` — The movement's custody axis, or `null` when it has none.
+Required rather than optional: a forgotten argument would silently drop the
+in-place term, which is the exact failure this parameter exists to remove
+and one that reads as "no damage recorded" rather than as an error.
 
 ### `heldDelta(line: MovementLineType): number`
 

@@ -76,6 +76,7 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     trade_in: null,
     write_off: null,
     transfer: null,
+    return_to_service: null,
   };
 
   let lines: unknown[] = [];

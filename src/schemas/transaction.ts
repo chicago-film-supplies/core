@@ -159,9 +159,20 @@ export const MOVEMENT_TYPES = [
   // breakdown.damaged via PUT /bookings — adjust the OOS record itself"*), so
   // `damaged → out` is a 400 rather than a silent unmapped transition. The
   // out-of-service record is the lever there, and it already has
-  // `returned_to_service`. Minting a type for a transition no writer can emit
-  // would be a declared-and-unpopulated vocabulary member — the thing this
+  // `returned_to_service`. Minting a *rewind* for a transition no writer can
+  // emit would be a declared-and-unpopulated vocabulary member — the thing this
   // comment block exists to avoid, not an extension of it.
+  //
+  // ⚠️ **`return_to_service` is NOT a counter-example to that, and the
+  // discriminator is whether a writer exists — not whether the vocabulary looks
+  // symmetric.** It undoes no breakdown key: the booking keeps its `lost: N`
+  // forever, exactly as it keeps `damaged: N` past a write-off, because a
+  // resolution removes ownership or restores placement without editing history.
+  // And its writer was specified before the type was: the out-of-service
+  // propagation rule already says to cowrite "a 'return-to-service' for
+  // breakdown.returned_to_service > 0" once a record completes
+  // (`schemas/propagation/out-of-service.ts`). The type was the half that was
+  // missing, which is the opposite of declared-and-unpopulated.
   //
   // ⚠️ **And no `sale` rewind.** `sale`/`sale_return` move ownership and carry a
   // required cost, so undoing one owes a basis and a posting decision the
@@ -187,6 +198,7 @@ export const MOVEMENT_TYPES = [
   "write_off",
   // Placement only — nets to zero on ownership and touches no cost.
   "transfer",
+  "return_to_service",
 ] as const;
 
 /** Union of all movement type string literals. */
@@ -212,6 +224,20 @@ export type PlaceKindType = typeof PLACE_KINDS[number];
  * `out` is the one key whose place depends on the booking: a rental's units sit
  * at the booking until they come back, a sale's units left ownership at the
  * point of sale and are nowhere.
+ *
+ * 🔴 **`damaged` is a STATE and `lost` is a PLACE, and they are not symmetric
+ * however much the two keys look alike.** A damaged unit is *on a shelf* — it
+ * is physically present, CFS knows exactly where it is, and it is merely not
+ * available; a lost unit is off-shelf and pending a resolution, which is the
+ * same shape as `out`. Mapping `damaged` to `out-of-service` said a broken unit
+ * is nowhere in particular, and it contradicted `write_off`'s own contract
+ * comment below — *"an operator finding a broken unit on a shelf can write it
+ * off from there"* — which presupposes exactly what this table denied.
+ *
+ * ⚠️ So `quantity_out_of_service` can no longer be read off the movement
+ * ENDPOINT alone: a damaged unit never touches an `out-of-service` place. See
+ * `deriveServiceQuantities`, which carries one term per kind and they are
+ * disjoint by construction.
  */
 export const CUSTODY_PLACE_KINDS: Readonly<
   Record<BookingBreakdownKeyType, readonly PlaceKindType[]>
@@ -222,7 +248,7 @@ export const CUSTODY_PLACE_KINDS: Readonly<
   out: ["bookings", "outside"],
   returned: ["locations"],
   lost: ["out-of-service"],
-  damaged: ["out-of-service"],
+  damaged: ["locations"],
 };
 
 // ── The per-kind contract ───────────────────────────────────────────
@@ -267,16 +293,37 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["bookings"], to: ["locations"] },
     booking: "required",
   },
+  // A damaged return IS a return that also sets a flag — identical in places to
+  // `check_in`, so `allocationSide` answers `"to"` and the return flow picks the
+  // destination shelf exactly as a clean return does. That shelf is knowable
+  // ONLY at the moment of the return and cannot be reconstructed afterwards,
+  // which is why this had to land before `mark_damaged` became operator-
+  // reachable rather than after.
+  //
+  // ⚠️ **`from` is `bookings` alone, and a shelf-discovered damage is NOT a
+  // narrower version of this movement — it is not a movement at all.** An
+  // operator noticing a broken unit on a shelf has no order and no booking, so
+  // there is no breakdown key to move and nothing changes place; the lever is an
+  // out-of-service record naming the shelf through its own `stores[].locations[]`,
+  // which that schema already carries. Widening `from` to `locations` would also
+  // flip `allocationSide` to `"both"` and demand a SOURCE shelf on a return whose
+  // source is the booking.
   mark_damaged: {
     custody: "required",
     cost: "forbidden",
-    places: { from: ["bookings"], to: ["out-of-service"] },
+    places: { from: ["bookings"], to: ["locations"] },
     booking: "required",
   },
+  // `locations` is a legitimate origin here and NOT for `mark_damaged`, and the
+  // asymmetry is the model rather than an oversight: a unit that should be on a
+  // shelf and cannot be found genuinely leaves that shelf — "it's no longer on a
+  // shelf, but it is expecting a resolution" — so the loss is a real movement
+  // with a real source. `allocationSide` therefore answers `"from"`, and the
+  // operator names the shelf the unit is going missing from.
   mark_lost: {
     custody: "required",
     cost: "forbidden",
-    places: { from: ["bookings"], to: ["out-of-service"] },
+    places: { from: ["bookings", "locations"], to: ["out-of-service"] },
     booking: "required",
   },
   // ── the three reachable rewinds, mirrored ──
@@ -382,6 +429,30 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     custody: "forbidden",
     cost: "forbidden",
     places: { from: ["locations"], to: ["locations"] },
+    booking: "forbidden",
+  },
+  // The found-and-returned resolution: a unit recorded lost turns up and goes
+  // back on a shelf. Until this existed `out-of-service` was a ONE-WAY place —
+  // `write_off` was the only contract with `from: ["out-of-service"]`, so a unit
+  // that entered could leave only by being written off, and the other resolution
+  // the workflow actually has had no expression at all.
+  //
+  // ⚠️ **`find` is not this, and reaching for it silently inflates stock.**
+  // `find` is `outside → locations` for a unit CFS did not previously own, so it
+  // is cost-bearing and ADDS to `quantity_held`. A lost unit never left
+  // `quantity_held` — `deriveServiceQuantities` subtracts it from
+  // `quantity_in_service`, not from the held count — so restoring it must be
+  // ownership-neutral. Hence the same shape as `transfer`: no custody, no cost,
+  // and `hasCosts` therefore routes it to `xeroPostingFor`'s
+  // `no_cost_contract` skip with no arm of its own.
+  //
+  // `booking: "forbidden"` because the resolution belongs to the out-of-service
+  // RECORD, not to whichever booking happened to lose the unit — one record can
+  // outlive its order, and `returned_to_service` is keyed on the record.
+  return_to_service: {
+    custody: "forbidden",
+    cost: "forbidden",
+    places: { from: ["out-of-service"], to: ["locations"] },
     booking: "forbidden",
   },
 };

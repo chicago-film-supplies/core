@@ -1843,6 +1843,7 @@ export interface StoreBreakdownLocation {
   quantity: number;
   default: boolean;
   max: number | null;
+  quantity_out_of_service?: number;
 }
 
 /** A single store entry in a stock breakdown, containing its locations. */
@@ -1855,13 +1856,39 @@ export interface StoreBreakdownEntry {
   locations: StoreBreakdownLocation[];
 }
 
-/** Zod schema for StoreBreakdownLocation. */
+/**
+ * Zod schema for StoreBreakdownLocation.
+ *
+ * 🔴 **`quantity` is what is ON the shelf, not what is AVAILABLE from it**, and
+ * the two stopped being the same number the moment `damaged` became a state
+ * rather than a place (`CUSTODY_PLACE_KINDS`). A damaged unit is physically
+ * present and counted here, and is not available to book. Anything computing
+ * availability from a shelf reads `quantity - (quantity_out_of_service ?? 0)`;
+ * anything asking "what would I find if I walked to this shelf" reads
+ * `quantity`. Fusing them is correct only while nothing is flagged.
+ *
+ * ⚠️ **`quantity_out_of_service` is OPTIONAL, and that is a release-ordering
+ * fact rather than a modelling one.** This is a `z.strictObject` with live
+ * readers in another repo on an independent release train, so the field ships
+ * optional, the readers pin and deploy, and only then does the writer populate
+ * it. `undefined` means "this ledger has not been rebuilt since the field
+ * landed", which is why every reader coalesces rather than assuming zero is
+ * stored. Tighten to required — if at all — in a later release.
+ */
 export const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation> = z.strictObject({
   uid_location: FirestoreId,
   name: z.string().meta({ column: true }),
   quantity: z.number().min(0).meta({ column: true, label: "Quantity" }), // physical shelf count — can't go negative
   default: z.boolean(),
   max: z.number().nullable(),
+  // Bounded above by `quantity` — a shelf cannot hold more broken units than
+  // units. Not expressed as a refinement here: this node is validated in
+  // isolation by `validateBeforeWrite`, and a cross-field rule that only
+  // sometimes has both fields in scope reads as enforced while being advisory.
+  quantity_out_of_service: z.number().min(0).optional().meta({
+    column: true,
+    label: "Out Of Service",
+  }),
 });
 
 /** Zod schema for StoreBreakdownEntry. */
