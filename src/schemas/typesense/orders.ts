@@ -50,6 +50,12 @@ export const orders: TypesenseCollectionConfig = {
       { name: "destinations.delivery.contact.middle_name", type: "string[]", stem: true, optional: true },
       { name: "destinations.delivery.contact.last_name", type: "string[]", stem: true, optional: true },
       { name: "destinations.delivery.contact.pronunciation", type: "string[]", stem: true, optional: true },
+      // `name` + `phones` — the person a leg is addressed to, searchable
+      // beside the address. `pii: "mask"` on these governs LOG scrubbing and
+      // template goldens, not storage or the index; `orders.search` +
+      // `orders.read` is the authorization boundary (owner, 2026-09-19).
+      { name: "destinations.delivery.contact.name", type: "string[]", stem: true, facet: true, optional: true },
+      { name: "destinations.delivery.contact.phones", type: "string[]", facet: true, optional: true },
       { name: "destinations.collection", type: "object[]", optional: true },
       ...typesenseAddressFields("destinations.collection.address", { array: true }),
       { name: "destinations.collection.instructions", type: "string[]", stem: true, optional: true },
@@ -59,6 +65,12 @@ export const orders: TypesenseCollectionConfig = {
       { name: "destinations.collection.contact.middle_name", type: "string[]", stem: true, optional: true },
       { name: "destinations.collection.contact.last_name", type: "string[]", stem: true, optional: true },
       { name: "destinations.collection.contact.pronunciation", type: "string[]", stem: true, optional: true },
+      // `name` + `phones` — the person a leg is addressed to, searchable
+      // beside the address. `pii: "mask"` on these governs LOG scrubbing and
+      // template goldens, not storage or the index; `orders.search` +
+      // `orders.read` is the authorization boundary (owner, 2026-09-19).
+      { name: "destinations.collection.contact.name", type: "string[]", stem: true, facet: true, optional: true },
+      { name: "destinations.collection.contact.phones", type: "string[]", facet: true, optional: true },
       { name: "destinations.dates", type: "object[]", optional: true },
       { name: "destinations.dates.delivery_start_fs", type: "int64[]", index: true, facet: false, optional: true },
       { name: "destinations.dates.delivery_end_fs", type: "int64[]", index: true, facet: false, optional: true },

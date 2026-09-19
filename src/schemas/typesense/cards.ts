@@ -16,7 +16,7 @@
  * response, which is exactly why `tests/typesenseFieldCoverage.test.ts` now
  * asserts every declared field resolves against the storage schema.
  */
-import type { TypesenseCollectionConfig } from "./types.ts";
+import { type TypesenseCollectionConfig, typesenseAddressFields } from "./types.ts";
 
 export const cards: TypesenseCollectionConfig = {
   alias: "cards",
@@ -46,13 +46,49 @@ export const cards: TypesenseCollectionConfig = {
       // lexicographic-date trap this field exists to avoid.
       { name: "date_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
 
-      // Destination — lat/lng + city/state for map view + region facets.
-      // The geopoint sits at `destination.address.address_coordinates` because
-      // that is the key `translateForTypesense` rewrites to a `[lat, lng]` tuple
-      // (`GEOPOINT_KEYS`), and it is where `Card.destination` actually stores it.
-      { name: "destination.address.city", type: "string", facet: true, optional: true },
-      { name: "destination.address.region", type: "string", facet: true, optional: true },
-      { name: "destination.address.address_coordinates", type: "geopoint", optional: true },
+      // Destination — the WHOLE endpoint, generated.
+      //
+      // ⚠️ **This block was hand-written until 2026-09-19 and `cards` was the
+      // only collection not calling `typesenseAddressFields`.** It declared
+      // three leaves of eleven, no `destination.uid` and no `user_coordinates`
+      // — and an undeclared leaf is DELETED at index time, not merely left
+      // unindexed (`typesenseTranslate.ts`), so the drift was silent in both
+      // directions. The generator reproduces the two facets this block already
+      // had (`city`, `region`) verbatim and adds the rest, both geopoints
+      // included. **Do not hand-roll it back.**
+      //
+      // The geopoints sit under `destination.address.*` because that is where
+      // `Card.destination` stores them and what `translateForTypesense` rewrites
+      // to a `[lat, lng]` tuple (`GEOPOINT_KEYS`). ⚠️ **A geopoint takes neither
+      // `facet` nor `sort`** — Typesense refuses the collection outright.
+      { name: "destination", type: "object", optional: true },
+      { name: "destination.uid", type: "string", facet: true, index: true, optional: true },
+      ...typesenseAddressFields("destination.address"),
+      { name: "destination.instructions", type: "string", stem: true, optional: true },
+
+      // Contact — name + phones, so a dispatcher can search the person a leg is
+      // addressed to rather than only the address. `pii: "mask"` on these fields
+      // governs LOG scrubbing and template goldens; it is not a storage or index
+      // policy, and `cards.search` + `cards.read` is the authorization boundary
+      // that applies here (owner, 2026-09-19).
+      { name: "destination.contact", type: "object", optional: true },
+      { name: "destination.contact.uid", type: "string", index: true, optional: true },
+      { name: "destination.contact.first_name", type: "string", stem: true, optional: true },
+      { name: "destination.contact.middle_name", type: "string", stem: true, optional: true },
+      { name: "destination.contact.last_name", type: "string", stem: true, optional: true },
+      { name: "destination.contact.pronunciation", type: "string", stem: true, optional: true },
+      { name: "destination.contact.name", type: "string", stem: true, facet: true, optional: true },
+      { name: "destination.contact.phones", type: "string[]", facet: true, optional: true },
+
+      // Organization — the card's own org axis, and its ancestor path, so a
+      // destination roll-up can scope by org without joining back to the order.
+      { name: "organization", type: "object", optional: true },
+      { name: "organization.uid", type: "string", facet: true, index: true, optional: true },
+      { name: "organization.path.uid", type: "string[]", facet: true, index: true, optional: true },
+      { name: "organization.path.name", type: "string[]", facet: true, index: true, optional: true },
+
+      // The denormalized fulfillment verb the card surface buttons off.
+      { name: "action.value", type: "string", facet: true, index: true, optional: true },
 
       // Polymorphic sources — object[] with nested facets for
       // "all cards touching order X" and "all cards touching any order".

@@ -189,9 +189,15 @@ export const CardAttachment: z.ZodType<CardAttachmentType> = z.strictObject({
 /**
  * Denormalized organization snapshot on order-derived event cards. Surfaces
  * "who is this card for?" on every card-rendering surface (list, kanban,
- * calendar, dashboard) without joining back to the order. `uid` is nullable
- * because some organizations exist without a CFS-side uid (legacy CRMS-only
- * customers).
+ * calendar, dashboard) without joining back to the order.
+ *
+ * ⚠️ **`uid` is nullable for the HAND-AUTHORED card, and the reason it used to
+ * give was dead.** The old justification — *"some organizations exist without a
+ * CFS-side uid (legacy CRMS-only customers)"* — outlived CRMS, which was retired
+ * 2026-09-04. Measured 2026-09-19: **0 of 1,175 prod event cards carry a null
+ * here**, and `checkEventCard` now requires it non-null on that kind. What keeps
+ * the nullability is the to-do: a card with no order has no organization, and 7
+ * such cards exist in dev.
  */
 export interface CardOrganizationType {
   uid: string | null;
@@ -263,6 +269,75 @@ export const CardDates: z.ZodType<CardDatesType> = z.strictObject({
 });
 
 /** Zod schema for a card Firestore document. */
+/**
+ * An event card is one the order projection OWNS — `buildEventCards` built it,
+ * `reconcileEventCards` recomputes it, and a uid that does not parse as an
+ * {@link EventCardId} gets it hard-deleted. The discriminator is DERIVED rather
+ * than stored, and `sources` is the only place it can be read from: a card
+ * carrying an `orders` source is this projection's.
+ *
+ * ⚠️ **Do not switch this to an id-shape test.** The id is what the projection
+ * MINTS; the source is what makes the card the projection's to mint. Keying the
+ * refinement on the id would make a malformed id unrepresentable *and* exempt
+ * from every other rule here, which is backwards.
+ * `assertClientAuthoredCardShape` (`api-cloudrun/src/lib/serverOwnedCards.ts`)
+ * refuses an `orders` source from `POST /cards` and from a recurrence
+ * prototype, which is what makes this predicate an authorization fact rather
+ * than a heuristic. `manager/src/utils/cardKind.ts` already spells it the same
+ * way.
+ */
+const isEventCard = (doc: Card): boolean =>
+  doc.sources.some((s) => s.collection === "orders");
+
+/**
+ * Per-KIND requiredness: the five fields an event card always has, and a
+ * hand-authored to-do legitimately does not.
+ *
+ * 🔴 **The corpus is not the argument — the feature is.** All five read 0 nulls
+ * across 1,175 prod and 1,175 dev event cards (2026-09-19), but dev also holds
+ * **7 hand-authored to-do cards** carrying `destination: null` AND
+ * `organization: null` with `sources: []` — the path that has never run in
+ * prod. A blanket `.nonnullable()` would make that path unwritable, so the
+ * nullability stays and the requirement is scoped to the kind that earns it.
+ *
+ * ⚠️ **`destination.instructions` is deliberately ABSENT from this list**, and
+ * it was in the plan that produced this refinement. **19 event cards in each
+ * corpus carry `instructions: null`** — and null MEANS *no special
+ * instructions* there (`ensureDestinationShape` writes `?? null`), so requiring
+ * it would 400 nineteen documents for a correct value.
+ *
+ * ⚠️ **`destination.address` is absent for a different reason — it is a
+ * BACKLOG, not a semantic null.** 11 event cards in each corpus carry it null
+ * because the order they project from has an endpoint with no address; the fix
+ * is upstream and the tightening lands with it.
+ */
+function checkEventCard(doc: Card, ctx: z.RefinementCtx): void {
+  if (!isEventCard(doc)) return;
+
+  const require = (ok: boolean, path: (string | number)[], field: string) => {
+    if (ok) return;
+    ctx.addIssue({
+      code: "custom",
+      path,
+      message: `${field} is required on an order-derived event card`,
+    });
+  };
+
+  require(doc.destination !== null, ["destination"], "destination");
+  require(
+    doc.destination === null || doc.destination.uid !== null,
+    ["destination", "uid"],
+    "destination.uid",
+  );
+  require(doc.organization !== null, ["organization"], "organization");
+  require(
+    doc.organization === null || doc.organization.uid !== null,
+    ["organization", "uid"],
+    "organization.uid",
+  );
+  require(doc.date_fs !== null, ["date_fs"], "date_fs");
+}
+
 export const CardSchema: z.ZodType<Card> = z.strictObject({
   uid: CardId,
   uid_list: ListId,
@@ -328,7 +403,7 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
-}).meta({
+}).superRefine(checkEventCard).meta({
   title: "Card",
   collection: "cards",
   displayDefaults: {

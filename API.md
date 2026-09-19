@@ -1453,9 +1453,15 @@ const CardOrganization: z.ZodType<CardOrganizationType>;
 
 Denormalized organization snapshot on order-derived event cards. Surfaces
 "who is this card for?" on every card-rendering surface (list, kanban,
-calendar, dashboard) without joining back to the order. `uid` is nullable
-because some organizations exist without a CFS-side uid (legacy CRMS-only
-customers).
+calendar, dashboard) without joining back to the order.
+
+⚠️ **`uid` is nullable for the HAND-AUTHORED card, and the reason it used to
+give was dead.** The old justification — *"some organizations exist without a
+CFS-side uid (legacy CRMS-only customers)"* — outlived CRMS, which was retired
+2026-09-04. Measured 2026-09-19: **0 of 1,175 prod event cards carry a null
+here**, and `checkEventCard` now requires it non-null on that kind. What keeps
+the nullability is the to-do: a card with no order has no organization, and 7
+such cards exist in dev.
 
 ```ts
 interface CardOrganizationType {
@@ -1465,8 +1471,6 @@ interface CardOrganizationType {
 ```
 
 ### `CardSchema`
-
-Zod schema for a card Firestore document.
 
 ```ts
 const CardSchema: z.ZodType<Card>;
@@ -3655,10 +3659,6 @@ const EmailVerificationSchema: z.ZodType<EmailVerification>;
 ```
 
 ### `EventCardId`
-
-`cards` event-card composite id — `{uid_order}:{uid_destination}:start|end`
-(one per order delivery/collection endpoint). See `api-cloudrun
-src/lib/eventCards.ts` (`EventPosition = "start" | "end"`).
 
 ```ts
 const EventCardId: z.ZodType<string>;
@@ -9933,7 +9933,7 @@ eight default-thread carriers (`orders`, `invoices`, `products`, `roles`,
 `contacts`, `organizations`, `out-of-service`, `credit-notes`, where it is
 `.optional()`) — either a Firestore auto-id (the default-thread cowrite) or
 an `EventCardId` composite. Event-card threads are minted at a **deterministic
-id equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so
+id equal to their card uid** (`${uid_order}:${uid_pair}:start|end`) so
 the delete→recreate churn of a CRMS opportunity-webhook burst reuses the one
 stable `threads/{cardUid}` doc instead of piling up random-id orphans (and
 comments survive across the cycle). Structurally identical to `CardId`; see
@@ -12944,10 +12944,6 @@ const Email: z.ZodType<string>;
 
 ### `EventCardId`
 
-`cards` event-card composite id — `{uid_order}:{uid_destination}:start|end`
-(one per order delivery/collection endpoint). See `api-cloudrun
-src/lib/eventCards.ts` (`EventPosition = "start" | "end"`).
-
 ```ts
 const EventCardId: z.ZodType<string>;
 ```
@@ -13979,7 +13975,7 @@ eight default-thread carriers (`orders`, `invoices`, `products`, `roles`,
 `contacts`, `organizations`, `out-of-service`, `credit-notes`, where it is
 `.optional()`) — either a Firestore auto-id (the default-thread cowrite) or
 an `EventCardId` composite. Event-card threads are minted at a **deterministic
-id equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so
+id equal to their card uid** (`${uid_order}:${uid_pair}:start|end`) so
 the delete→recreate churn of a CRMS opportunity-webhook burst reuses the one
 stable `threads/{cardUid}` doc instead of piling up random-id orphans (and
 comments survive across the cycle). Structurally identical to `CardId`; see
@@ -14928,9 +14924,15 @@ const CardOrganization: z.ZodType<CardOrganizationType>;
 
 Denormalized organization snapshot on order-derived event cards. Surfaces
 "who is this card for?" on every card-rendering surface (list, kanban,
-calendar, dashboard) without joining back to the order. `uid` is nullable
-because some organizations exist without a CFS-side uid (legacy CRMS-only
-customers).
+calendar, dashboard) without joining back to the order.
+
+⚠️ **`uid` is nullable for the HAND-AUTHORED card, and the reason it used to
+give was dead.** The old justification — *"some organizations exist without a
+CFS-side uid (legacy CRMS-only customers)"* — outlived CRMS, which was retired
+2026-09-04. Measured 2026-09-19: **0 of 1,175 prod event cards carry a null
+here**, and `checkEventCard` now requires it non-null on that kind. What keeps
+the nullability is the to-do: a card with no order has no organization, and 7
+such cards exist in dev.
 
 ```ts
 interface CardOrganizationType {
@@ -14940,8 +14942,6 @@ interface CardOrganizationType {
 ```
 
 ### `CardSchema`
-
-Zod schema for a card Firestore document.
 
 ```ts
 const CardSchema: z.ZodType<Card>;

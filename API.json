@@ -640,13 +640,13 @@
           "kind": "interface",
           "name": "CardOrganizationType",
           "declaration": "interface CardOrganizationType {\n  uid: string | null;\n  path: OrgPathNodeType[];\n}",
-          "doc": "Denormalized organization snapshot on order-derived event cards. Surfaces\n\"who is this card for?\" on every card-rendering surface (list, kanban,\ncalendar, dashboard) without joining back to the order. `uid` is nullable\nbecause some organizations exist without a CFS-side uid (legacy CRMS-only\ncustomers)."
+          "doc": "Denormalized organization snapshot on order-derived event cards. Surfaces\n\"who is this card for?\" on every card-rendering surface (list, kanban,\ncalendar, dashboard) without joining back to the order.\n\n⚠️ **`uid` is nullable for the HAND-AUTHORED card, and the reason it used to\ngive was dead.** The old justification — *\"some organizations exist without a\nCFS-side uid (legacy CRMS-only customers)\"* — outlived CRMS, which was retired\n2026-09-04. Measured 2026-09-19: **0 of 1,175 prod event cards carry a null\nhere**, and `checkEventCard` now requires it non-null on that kind. What keeps\nthe nullability is the to-do: a card with no order has no organization, and 7\nsuch cards exist in dev."
         },
         {
           "kind": "variable",
           "name": "CardSchema",
           "declaration": "const CardSchema: z.ZodType<Card>;",
-          "doc": "Zod schema for a card Firestore document."
+          "doc": ""
         },
         {
           "kind": "typeAlias",
@@ -1642,7 +1642,7 @@
           "kind": "variable",
           "name": "EventCardId",
           "declaration": "const EventCardId: z.ZodType<string>;",
-          "doc": "`cards` event-card composite id — `{uid_order}:{uid_destination}:start|end`\n(one per order delivery/collection endpoint). See `api-cloudrun\nsrc/lib/eventCards.ts` (`EventPosition = \"start\" | \"end\"`)."
+          "doc": ""
         },
         {
           "kind": "interface",
@@ -4348,7 +4348,7 @@
           "kind": "variable",
           "name": "ThreadId",
           "declaration": "const ThreadId: z.ZodType<string>;",
-          "doc": "`threads.uid` and every `uid_thread` reference — `cards`, `comments`, and the\neight default-thread carriers (`orders`, `invoices`, `products`, `roles`,\n`contacts`, `organizations`, `out-of-service`, `credit-notes`, where it is\n`.optional()`) — either a Firestore auto-id (the default-thread cowrite) or\nan `EventCardId` composite. Event-card threads are minted at a **deterministic\nid equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so\nthe delete→recreate churn of a CRMS opportunity-webhook burst reuses the one\nstable `threads/{cardUid}` doc instead of piling up random-id orphans (and\ncomments survive across the cycle). Structurally identical to `CardId`; see\n`services/eventCardReconcile.ts` `eventCardThreadId`."
+          "doc": "`threads.uid` and every `uid_thread` reference — `cards`, `comments`, and the\neight default-thread carriers (`orders`, `invoices`, `products`, `roles`,\n`contacts`, `organizations`, `out-of-service`, `credit-notes`, where it is\n`.optional()`) — either a Firestore auto-id (the default-thread cowrite) or\nan `EventCardId` composite. Event-card threads are minted at a **deterministic\nid equal to their card uid** (`${uid_order}:${uid_pair}:start|end`) so\nthe delete→recreate churn of a CRMS opportunity-webhook burst reuses the one\nstable `threads/{cardUid}` doc instead of piling up random-id orphans (and\ncomments survive across the cycle). Structurally identical to `CardId`; see\n`services/eventCardReconcile.ts` `eventCardThreadId`."
         },
         {
           "kind": "variable",
@@ -5819,7 +5819,7 @@
           "kind": "variable",
           "name": "EventCardId",
           "declaration": "const EventCardId: z.ZodType<string>;",
-          "doc": "`cards` event-card composite id — `{uid_order}:{uid_destination}:start|end`\n(one per order delivery/collection endpoint). See `api-cloudrun\nsrc/lib/eventCards.ts` (`EventPosition = \"start\" | \"end\"`)."
+          "doc": ""
         },
         {
           "kind": "variable",
@@ -6257,7 +6257,7 @@
           "kind": "variable",
           "name": "ThreadId",
           "declaration": "const ThreadId: z.ZodType<string>;",
-          "doc": "`threads.uid` and every `uid_thread` reference — `cards`, `comments`, and the\neight default-thread carriers (`orders`, `invoices`, `products`, `roles`,\n`contacts`, `organizations`, `out-of-service`, `credit-notes`, where it is\n`.optional()`) — either a Firestore auto-id (the default-thread cowrite) or\nan `EventCardId` composite. Event-card threads are minted at a **deterministic\nid equal to their card uid** (`${uid_order}:${uid_destination}:start|end`) so\nthe delete→recreate churn of a CRMS opportunity-webhook burst reuses the one\nstable `threads/{cardUid}` doc instead of piling up random-id orphans (and\ncomments survive across the cycle). Structurally identical to `CardId`; see\n`services/eventCardReconcile.ts` `eventCardThreadId`."
+          "doc": "`threads.uid` and every `uid_thread` reference — `cards`, `comments`, and the\neight default-thread carriers (`orders`, `invoices`, `products`, `roles`,\n`contacts`, `organizations`, `out-of-service`, `credit-notes`, where it is\n`.optional()`) — either a Firestore auto-id (the default-thread cowrite) or\nan `EventCardId` composite. Event-card threads are minted at a **deterministic\nid equal to their card uid** (`${uid_order}:${uid_pair}:start|end`) so\nthe delete→recreate churn of a CRMS opportunity-webhook burst reuses the one\nstable `threads/{cardUid}` doc instead of piling up random-id orphans (and\ncomments survive across the cycle). Structurally identical to `CardId`; see\n`services/eventCardReconcile.ts` `eventCardThreadId`."
         },
         {
           "kind": "variable",
@@ -6715,13 +6715,13 @@
           "kind": "interface",
           "name": "CardOrganizationType",
           "declaration": "interface CardOrganizationType {\n  uid: string | null;\n  path: OrgPathNodeType[];\n}",
-          "doc": "Denormalized organization snapshot on order-derived event cards. Surfaces\n\"who is this card for?\" on every card-rendering surface (list, kanban,\ncalendar, dashboard) without joining back to the order. `uid` is nullable\nbecause some organizations exist without a CFS-side uid (legacy CRMS-only\ncustomers)."
+          "doc": "Denormalized organization snapshot on order-derived event cards. Surfaces\n\"who is this card for?\" on every card-rendering surface (list, kanban,\ncalendar, dashboard) without joining back to the order.\n\n⚠️ **`uid` is nullable for the HAND-AUTHORED card, and the reason it used to\ngive was dead.** The old justification — *\"some organizations exist without a\nCFS-side uid (legacy CRMS-only customers)\"* — outlived CRMS, which was retired\n2026-09-04. Measured 2026-09-19: **0 of 1,175 prod event cards carry a null\nhere**, and `checkEventCard` now requires it non-null on that kind. What keeps\nthe nullability is the to-do: a card with no order has no organization, and 7\nsuch cards exist in dev."
         },
         {
           "kind": "variable",
           "name": "CardSchema",
           "declaration": "const CardSchema: z.ZodType<Card>;",
-          "doc": "Zod schema for a card Firestore document."
+          "doc": ""
         },
         {
           "kind": "typeAlias",

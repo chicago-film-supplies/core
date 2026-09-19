@@ -367,6 +367,7 @@ export interface OrderDocument {
         middle_name?: string;
         last_name?: string;
         pronunciation?: string;
+        phones?: string[];
       };
     };
     collection?: {
@@ -380,6 +381,7 @@ export interface OrderDocument {
         middle_name?: string;
         last_name?: string;
         pronunciation?: string;
+        phones?: string[];
       };
     };
   }>;
@@ -992,8 +994,45 @@ export interface CardDocument {
   subject: string;
   body_text?: string;
   date_fs?: number;
+  /**
+   * The WHOLE destination endpoint, as of 2026-09-19.
+   *
+   * ⚠️ **This used to be `Pick<…, "city" | "region" | "address_coordinates">`,
+   * and the `Pick` was the bug rather than a narrowing.** `cards` was the only
+   * config hand-rolling its address block instead of calling
+   * `typesenseAddressFields`, so it declared three leaves of eleven — and an
+   * undeclared leaf is DELETED at index time, not left unindexed. Both
+   * geopoints, `destination.uid`, the instructions and the contact are all
+   * reachable from `Card` and were simply never declared.
+   */
   destination?: {
-    address?: Pick<TypesenseAddressFields, "city" | "region" | "address_coordinates">;
+    uid?: string;
+    address?: TypesenseAddressFields;
+    instructions?: string;
+    contact?: {
+      uid?: string;
+      name?: string;
+      first_name?: string;
+      middle_name?: string;
+      last_name?: string;
+      pronunciation?: string;
+      phones?: string[];
+    };
+  };
+  /**
+   * The card's own organization axis. `path` flattens to parallel `string[]`s
+   * under Typesense's nested-array flattening, exactly as `orders` does it.
+   */
+  organization?: {
+    uid?: string;
+    path?: {
+      uid?: string[];
+      name?: string[];
+    };
+  };
+  /** The denormalized fulfillment verb the card surface buttons off. */
+  action?: {
+    value?: string;
   };
   sources: Array<{
     collection?: string;
