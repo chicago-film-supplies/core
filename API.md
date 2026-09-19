@@ -3674,6 +3674,34 @@ const EmailVerificationSchema: z.ZodType<EmailVerification>;
 
 ### `EventCardId`
 
+`cards` event-card composite id — `{uid_order}:{uid_pair}:start|end`, one per
+order LEG. See `api-cloudrun src/lib/eventCards.ts` (`EventPosition =
+"start" | "end"`, and `eventCardSlots`, the one author).
+
+🔴 **Segment 2 is the destination PAIR's uid — a `z.uuid()`, the destination
+DIVIDER's `items[].uid` — and it is emphatically NOT a `destinations/{uid}`
+document id.** It was that document id until 2026-09-19, and both halves of
+that were wrong:
+
+- **It named the wrong document on every `:end` card.** Both sides were built
+  from the pair's DELIVERY endpoint, so an `:end` card whose collection
+  address differs from its delivery address carried an id naming an address
+  it does not visit. 7 prod orders measured.
+- **It was not unique per leg.** `findOrCreateDestination` is a global
+  address-book dedupe, so two pairs on one document delivering to one address
+  legitimately SHARE a `delivery.uid` — and therefore shared a card id. This
+  is the same construction `DocDestinationType.uid` records: *"`delivery.uid`
+  cannot be this identity, by construction."*
+
+The pair uid is the LEG's identity and has neither defect.
+
+⚠️ **This accepted BOTH forms between 2026-09-19 and the migration**, because
+a tightened id rejected 1,175 of 1,175 cards in each corpus — the transitional
+arm and the one-shot migrator that emptied it are both DELETED now, the
+migrator having been applied to prod and dev (1,175 and 1,173 cards). The
+standing detector is `api-cloudrun/scripts/audit-cards.ts`, which reports the
+old-form count and is what licensed the tightening.
+
 ```ts
 const EventCardId: z.ZodType<string>;
 ```
@@ -12974,6 +13002,34 @@ const Email: z.ZodType<string>;
 ```
 
 ### `EventCardId`
+
+`cards` event-card composite id — `{uid_order}:{uid_pair}:start|end`, one per
+order LEG. See `api-cloudrun src/lib/eventCards.ts` (`EventPosition =
+"start" | "end"`, and `eventCardSlots`, the one author).
+
+🔴 **Segment 2 is the destination PAIR's uid — a `z.uuid()`, the destination
+DIVIDER's `items[].uid` — and it is emphatically NOT a `destinations/{uid}`
+document id.** It was that document id until 2026-09-19, and both halves of
+that were wrong:
+
+- **It named the wrong document on every `:end` card.** Both sides were built
+  from the pair's DELIVERY endpoint, so an `:end` card whose collection
+  address differs from its delivery address carried an id naming an address
+  it does not visit. 7 prod orders measured.
+- **It was not unique per leg.** `findOrCreateDestination` is a global
+  address-book dedupe, so two pairs on one document delivering to one address
+  legitimately SHARE a `delivery.uid` — and therefore shared a card id. This
+  is the same construction `DocDestinationType.uid` records: *"`delivery.uid`
+  cannot be this identity, by construction."*
+
+The pair uid is the LEG's identity and has neither defect.
+
+⚠️ **This accepted BOTH forms between 2026-09-19 and the migration**, because
+a tightened id rejected 1,175 of 1,175 cards in each corpus — the transitional
+arm and the one-shot migrator that emptied it are both DELETED now, the
+migrator having been applied to prod and dev (1,175 and 1,173 cards). The
+standing detector is `api-cloudrun/scripts/audit-cards.ts`, which reports the
+old-form count and is what licensed the tightening.
 
 ```ts
 const EventCardId: z.ZodType<string>;

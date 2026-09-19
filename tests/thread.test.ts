@@ -35,9 +35,9 @@ Deno.test("ThreadSchema accepts an EventCardId composite uid (deterministic even
   // eventCardReconcile.eventCardThreadId) so churn reuses one stable doc.
   const doc = {
     ...validThread,
-    uid: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start",
+    uid: "order100000000000000:3f1c9b2e-5d4a-4c7b-9e18-2a6f0d3b7c51:start",
     sources: [
-      { collection: "cards", uid: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start" },
+      { collection: "cards", uid: "order100000000000000:3f1c9b2e-5d4a-4c7b-9e18-2a6f0d3b7c51:start" },
       { collection: "orders", uid: "order100000000000000" },
     ],
   };

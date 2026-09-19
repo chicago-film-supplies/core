@@ -275,54 +275,21 @@ export const StatementDocumentId: z.ZodType<string> = z.templateLiteral([
  *   is the same construction `DocDestinationType.uid` records: *"`delivery.uid`
  *   cannot be this identity, by construction."*
  *
- * The pair uid is the LEG's identity and has neither defect. Migrated by
- * `api-cloudrun/scripts/migrate-card-ids-to-pair-uid.ts` (one-shot); the
- * standing detector is `api-cloudrun/scripts/audit-cards.ts`.
+ * The pair uid is the LEG's identity and has neither defect.
+ *
+ * ⚠️ **This accepted BOTH forms between 2026-09-19 and the migration**, because
+ * a tightened id rejected 1,175 of 1,175 cards in each corpus — the transitional
+ * arm and the one-shot migrator that emptied it are both DELETED now, the
+ * migrator having been applied to prod and dev (1,175 and 1,173 cards). The
+ * standing detector is `api-cloudrun/scripts/audit-cards.ts`, which reports the
+ * old-form count and is what licensed the tightening.
  */
-const eventCardIdOfPair = z.templateLiteral([
+export const EventCardId: z.ZodType<string> = z.templateLiteral([
   firestoreId,
   ":",
   z.uuid(),
   ":",
   z.enum(["start", "end"]),
-]);
-
-/**
- * 🔴 **TRANSITIONAL — delete this arm, and this comment, in the `core` release
- * that follows the card-id migration.** It admits the pre-2026-09-19 form whose
- * segment 2 is a `destinations/{uid}` document id, and it exists for exactly one
- * reason: the tightening is a FOUR-STEP and this is step 1 of it.
- *
- * Measured against both live corpora on 2026-09-19, **1,175 of 1,175 prod cards
- * and 1,175 of 1,175 dev cards carry the old form**, on `uid` AND on
- * `uid_thread`. So a `core` release carrying the tightened id alone would make
- * `validateBeforeWrite` 400 every write to every existing card the moment
- * `api-cloudrun` pinned it — every order update, every finalize, every resync —
- * for the whole window between that deploy and the migration finishing.
- *
- * The order is: (1) this union ships and deploys; (2) the writer emits the new
- * form only; (3) a one-shot card-id migration runs in both envs behind paused
- * queues — `migrate-card-ids-to-pair-uid.ts`, which does not exist in
- * `api-cloudrun/scripts/` yet and is Phase 1.3 of the plan cited below; (4)
- * this arm goes.
- *
- * ⚠️ **Step 4 is not optional.** Left standing, this re-admits the id shape that
- * cannot tell two legs to one address apart — which is the entire defect the
- * migration exists to close. `api-cloudrun/scripts/audit-cards.ts` counts
- * old-form ids and is what says step 4 is safe to take; the whole sequence is
- * `api-cloudrun/.claude/plans/destination-identity.md`.
- */
-const eventCardIdLegacyDestination = z.templateLiteral([
-  firestoreId,
-  ":",
-  firestoreId,
-  ":",
-  z.enum(["start", "end"]),
-]);
-
-export const EventCardId: z.ZodType<string> = z.union([
-  eventCardIdOfPair,
-  eventCardIdLegacyDestination,
 ]);
 
 /**

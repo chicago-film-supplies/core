@@ -191,7 +191,7 @@ Deno.test("ProductSchema uid_thread is a ThreadId, not a bare string", () => {
   const accepts = (v: unknown) => ProductSchema.safeParse({ ...validProduct, uid_thread: v }).success;
 
   assertEquals(accepts("testthread0000000001"), true); // Firestore auto-id
-  assertEquals(accepts("testorder00000000001:testdest000000000001:start"), true); // EventCardId
+  assertEquals(accepts("testorder00000000001:3f1c9b2e-5d4a-4c7b-9e18-2a6f0d3b7c51:start"), true); // EventCardId
 
   assertEquals(accepts(""), false); // the walk's zero value — the reason fixtures override it
   assertEquals(accepts("too-short"), false);

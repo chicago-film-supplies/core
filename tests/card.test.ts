@@ -79,18 +79,6 @@ const validTodoCard = {
   dates: { start: null, end: null },
 };
 
-/**
- * The pre-migration id form, whose segment 2 is a `destinations/{uid}` document
- * id. 🔴 **Delete this fixture together with `EventCardId`'s legacy arm** — the
- * two are one change, and a fixture outliving the arm it pins is how a
- * transitional branch becomes permanent.
- */
-const legacyEventCard = {
-  ...validCard,
-  uid: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start",
-  uid_thread: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start",
-};
-
 Deno.test("CardSchema validates a complete document", () => {
   assertEquals(CardSchema.safeParse(validCard).success, true);
 });
@@ -103,10 +91,15 @@ Deno.test("EventCardId: segment 2 is the destination PAIR's uuid", () => {
   assertEquals(CardSchema.safeParse(validCard).success, true);
 });
 
-Deno.test("EventCardId: the legacy destination-keyed form still parses (TRANSITIONAL)", () => {
-  // 🔴 Flip this to `false` and delete `legacyEventCard` in the release that
-  // removes `EventCardId`'s legacy arm — step 4 of the four-step.
-  assertEquals(CardSchema.safeParse(legacyEventCard).success, true);
+Deno.test("EventCardId: the legacy destination-keyed form is REFUSED", () => {
+  // The transitional arm is gone (step 4). Segment 2 is a `destinations/{uid}`
+  // here — a 20-char FirestoreId, not the pair's uuid — and it must not parse.
+  const legacy = {
+    ...validCard,
+    uid: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start",
+    uid_thread: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start",
+  };
+  assertEquals(CardSchema.safeParse(legacy).success, false);
 });
 
 Deno.test("checkEventCard: an order-sourced card with no destination is REFUSED", () => {

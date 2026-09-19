@@ -52,7 +52,7 @@ Deno.test("CommentSchema rejects legacy uid-array reactions", () => {
 Deno.test("CommentSchema accepts an EventCardId composite uid_thread (comment on an event-card thread)", () => {
   const doc = {
     ...validComment,
-    uid_thread: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start",
+    uid_thread: "order100000000000000:3f1c9b2e-5d4a-4c7b-9e18-2a6f0d3b7c51:start",
   };
   assertEquals(CommentSchema.safeParse(doc).success, true);
 });
@@ -138,7 +138,7 @@ Deno.test("CreateCommentInput accepts a composite (event-card) uid_thread", () =
   // without ThreadId here, since event-card threads are keyed by card uid.
   assertEquals(
     CreateCommentInput.safeParse({
-      uid_thread: "order100000000000000:0BIQ73UMiHTtd8mo0yNk:start",
+      uid_thread: "order100000000000000:3f1c9b2e-5d4a-4c7b-9e18-2a6f0d3b7c51:start",
       body: tiptapBody,
       body_text: "Hello",
     }).success,

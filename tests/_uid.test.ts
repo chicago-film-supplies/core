@@ -100,15 +100,19 @@ Deno.test("QuoteId rejects bad order segment / version / arity", () => {
   rejects(QuoteId, "00iNtfho7YCp6FllPi9f"); // plain FirestoreId, not a quote uid
 });
 
-Deno.test("EventCardId accepts {order}:{dest}:start|end", () => {
-  accepts(EventCardId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:start");
-  accepts(EventCardId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:end");
+Deno.test("EventCardId accepts {order}:{PAIR uuid}:start|end", () => {
+  accepts(EventCardId, "00iNtfho7YCp6FllPi9f:3f1c9b2e-5d4a-4c7b-9e18-2a6f0d3b7c51:start");
+  accepts(EventCardId, "00iNtfho7YCp6FllPi9f:3f1c9b2e-5d4a-4c7b-9e18-2a6f0d3b7c51:end");
 });
 
-Deno.test("EventCardId rejects bad position / non-id segments / sentinel middle", () => {
-  rejects(EventCardId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:middle"); // bad position
-  rejects(EventCardId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk"); // missing position
-  rejects(EventCardId, "00iNtfho7YCp6FllPi9f:unknown:start"); // sentinel dest, not a fid
+Deno.test("EventCardId rejects bad position / non-id segments / the LEGACY form", () => {
+  rejects(EventCardId, "00iNtfho7YCp6FllPi9f:3f1c9b2e-5d4a-4c7b-9e18-2a6f0d3b7c51:middle"); // bad position
+  rejects(EventCardId, "00iNtfho7YCp6FllPi9f:3f1c9b2e-5d4a-4c7b-9e18-2a6f0d3b7c51"); // missing position
+  rejects(EventCardId, "00iNtfho7YCp6FllPi9f:unknown:start"); // sentinel, not a uuid
+  // 🔴 The pre-2026-09-19 form: segment 2 is a `destinations/{uid}` FirestoreId,
+  // not the destination PAIR's uuid. It parsed while the transitional arm stood;
+  // both corpora read 0 old-form ids, so it must not now.
+  rejects(EventCardId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:start");
 });
 
 Deno.test("ThreadId accepts a plain FirestoreId (default-thread cowrite)", () => {
@@ -118,14 +122,14 @@ Deno.test("ThreadId accepts a plain FirestoreId (default-thread cowrite)", () =>
 Deno.test("ThreadId accepts an EventCardId composite (deterministic event-card thread)", () => {
   // Event-card threads are minted at id === card uid so a delete→recreate burst
   // reuses the same thread doc; see api-cloudrun eventCardReconcile.eventCardThreadId.
-  accepts(ThreadId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:start");
-  accepts(ThreadId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:end");
+  accepts(ThreadId, "00iNtfho7YCp6FllPi9f:3f1c9b2e-5d4a-4c7b-9e18-2a6f0d3b7c51:start");
+  accepts(ThreadId, "00iNtfho7YCp6FllPi9f:3f1c9b2e-5d4a-4c7b-9e18-2a6f0d3b7c51:end");
 });
 
 Deno.test("ThreadId rejects garbage / wrong-shaped composites", () => {
   rejects(ThreadId, "thread-1"); // hyphens
   rejects(ThreadId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk"); // booking-arity, no position
-  rejects(ThreadId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:start:extra"); // extra segment
+  rejects(ThreadId, "00iNtfho7YCp6FllPi9f:3f1c9b2e-5d4a-4c7b-9e18-2a6f0d3b7c51:start:extra"); // extra segment
   rejects(ThreadId, ""); // empty
 });
 
