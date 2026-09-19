@@ -90,6 +90,8 @@ function summary(map: DocumentDiffMap["lines"] | DocumentDiffMap["pairs"]): Reco
         ? `${e.source.kind}#${e.source.number}:substituted(${e.replaced}→${e.substitute})`
         : e.kind === "billed"
         ? `billed[${e.invoices.map((i) => `#${i.number}`).join(",")}](${e.billed} of ${e.ordered},q${e.quantity_cents},x${e.extension_cents})`
+        : e.kind === "sent"
+        ? `sent[${e.invoices.map((i) => `#${i.number}`).join(",")}](${e.billed} of ${e.sent} sent,q${e.quantity_cents})`
         : `${e.source.kind}#${e.source.number}:${e.kind}` +
           (e.fields.length ? `(${e.fields.map((f) => `${f.field}=${JSON.stringify(f.here)}→${JSON.stringify(f.there)}`).join(",")})` : "")
     );
@@ -536,6 +538,66 @@ Deno.test("documentDiff: a remainder — 4 billed of 6 — is one billed entry o
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), { [`${D}/${G}/${LIGHT}`]: entry });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), { [`${D}/${G}/${LIGHT}`]: entry });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-a" }, CONTEXT).lines), { [`${O}/${D}/${G}/${LIGHT}`]: entry });
+});
+
+Deno.test("documentDiff: the warehouse over-sent and billing matched the QUOTE — one sent entry, no billed entry", () => {
+  // 🔴 The case that was invisible. Ordered 2, shipped 3, billed 2: billing
+  // agrees with the quote, so `accountLine`'s `ordered − billed` is 0 and the
+  // `billed` entry early-returns. Before the `sent` entry the invoice read as
+  // perfectly aligned while a third unit went out the door unbilled.
+  const order = billedOrder(2);
+  const sent = fulfillment(billedOrder(3).items as unknown as LineItem[]);
+  const sources = { orders: [order], fulfillments: [sent], invoices: [billing("inv-a", 2241, 2)] };
+  // ⭐ The order and fulfillment views ALSO carry the pre-existing order ↔
+  // fulfillment `differs` — "you quoted 2, we sent 3". That entry and the
+  // `sent` one are both wanted and say different things: one compares the
+  // shipment to the quote, the other compares the billing to the shipment.
+  const sent_ = "sent[#2241](2 of 3 sent,q1000)";
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
+    [`${D}/${G}/${LIGHT}`]: ["fulfillment#1001:differs(quantity=2→3)", sent_],
+  });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
+    [`${D}/${G}/${LIGHT}`]: ["order#1001:differs(quantity=3→2)", sent_],
+  });
+  // 🔴 On the INVOICE view the order ↔ fulfillment difference is not visible at
+  // all — it is a comparison between two other documents. So the `sent` entry
+  // is the ONLY thing telling an invoice operator that more shipped than they
+  // are billing, which is why it belongs beside `billed` rather than in a new
+  // fulfillment ↔ invoice pair comparison.
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-a" }, CONTEXT).lines), {
+    [`${O}/${D}/${G}/${LIGHT}`]: [sent_],
+  });
+});
+
+Deno.test("documentDiff: under-shipped AND under-billed — BOTH entries, saying different things", () => {
+  // Ordered 6, shipped 5, billed 4. The two authorities disagree with the
+  // invoice by different amounts, which is exactly when the pair earns its
+  // keep: "2 short of the quote" and "1 short of what shipped".
+  const sources = {
+    orders: [billedOrder(6)],
+    fulfillments: [fulfillment(billedOrder(5).items as unknown as LineItem[])],
+    invoices: [billing("inv-a", 2241, 4)],
+  };
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
+    [`${D}/${G}/${LIGHT}`]: [
+      "fulfillment#1001:differs(quantity=6→5)",
+      "billed[#2241](4 of 6,q2000,x0)",
+      "sent[#2241](4 of 5 sent,q1000)",
+    ],
+  });
+});
+
+Deno.test("documentDiff: the fulfillment agreeing with the order emits NO sent entry — it would repeat the billed one", () => {
+  // Ordered 6, shipped 6, billed 4. A `sent` entry here would read "4 of 6
+  // sent" beside "4 of 6" — two entries carrying one fact.
+  const sources = {
+    orders: [billedOrder(6)],
+    fulfillments: [fulfillment(billedOrder(6).items as unknown as LineItem[])],
+    invoices: [billing("inv-a", 2241, 4)],
+  };
+  const entries = computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines.get(`${D}/${G}/${LIGHT}`) ?? [];
+  assertEquals(entries.filter((e) => e.kind === "sent").length, 0);
+  assertEquals(entries.filter((e) => e.kind === "billed").length, 1);
 });
 
 Deno.test("documentDiff: a billed entry says whether the over-billing offer is BLOCKED by CRMS (gap 7)", () => {

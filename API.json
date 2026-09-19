@@ -11430,7 +11430,7 @@
         {
           "kind": "typeAlias",
           "name": "DocumentDiffEntry",
-          "declaration": "type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry | DocumentBilledEntry;",
+          "declaration": "type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry | DocumentBilledEntry | DocumentSentEntry;",
           "doc": "One entry at one key of the viewed document. Discriminated on `kind`."
         },
         {
@@ -11468,6 +11468,12 @@
           "name": "DocumentRef",
           "declaration": "interface DocumentRef {\n  kind: DocumentKind;\n  uid: string;\n  number: number;\n  version: number;\n}",
           "doc": "Which document a diff entry is against — enough to link to it and to CAS a later sync."
+        },
+        {
+          "kind": "interface",
+          "name": "DocumentSentEntry",
+          "declaration": "interface DocumentSentEntry {\n  kind: \"sent\";\n  invoices: DocumentRef[];\n  sent: number;\n  billed: number;\n  quantity_cents: number;\n}",
+          "doc": "What the invoices bill at this line, judged against what the FULFILLMENT\nrecords as sent — the sibling of {@link DocumentBilledEntry}, which judges\nthe same billing against the ORDER.\n\n🔴 **Both entries exist on purpose, and they are MEANT to disagree.** The\nthree documents are three authorities on three different questions, and all\nthree are mutable: the ORDER is the quote given to the customer, the\nFULFILLMENT records what actually happened, and the INVOICE is the operator's\ndecision about what to bill. Reconciling them into one number would pick a\nwinner on the operator's behalf. An invoice that bills exactly what was\nquoted while a unit more went out the door is *aligned with the order* and\n*diverged from reality*, and the operator needs both facts to decide.\n\n⚠️ **Summed across invoices, exactly as `billed` is, and for the same\nreason.** An order is routinely billed across several invoices, so asking\nthis per invoice would report \"sent 5, this invoice bills 2\" against every\none of them. That is why it is emitted here and not from `lineFields`, whose\nfulfillment ↔ invoice arm stays empty.\n\n⚠️ Advisory. Nothing refuses a write on it."
         },
         {
           "kind": "interface",
@@ -11577,7 +11583,7 @@
         {
           "kind": "interface",
           "name": "LineAccount",
-          "declaration": "interface LineAccount {\n  ordered: number;\n  billed: number;\n  quantity: number;\n  quantity_cents: number;\n  extension_cents: number;\n}",
+          "declaration": "interface LineAccount {\n  ordered: number;\n  billed: number;\n  quantity: number;\n  quantity_cents: number;\n  extension_cents: number;\n  sent?: number;\n  sent_quantity?: number;\n  sent_quantity_cents?: number;\n}",
           "doc": ""
         },
         {
@@ -11637,7 +11643,7 @@
         {
           "kind": "function",
           "name": "accountLine",
-          "signature": "accountLine(orderLine: LineItem, billed: BilledAtPath | undefined, orderWindow: BilledWindow | null): LineAccount",
+          "signature": "accountLine(orderLine: LineItem, billed: BilledAtPath | undefined, orderWindow: BilledWindow | null, sent?: number): LineAccount",
           "doc": "Account for one order line against what the invoices bill at its path.",
           "paramTags": [
             {
@@ -11651,6 +11657,10 @@
             {
               "name": "orderWindow",
               "doc": "{@link orderLineWindow} for the line; `null` extends nothing"
+            },
+            {
+              "name": "sent",
+              "doc": "the FULFILLMENT row's quantity at this line's path, if one exists"
             }
           ],
           "returnsTag": null

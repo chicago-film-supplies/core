@@ -488,6 +488,24 @@ export interface LineAccount {
    * billed. Negative when the window shortened.
    */
   extension_cents: number;
+  /**
+   * Units the FULFILLMENT records as actually sent at this line's path, when a
+   * fulfillment row exists for it. `undefined` means no fulfillment row — not
+   * "nothing was sent".
+   *
+   * 🔴 **A THIRD authority, not a better version of `ordered`.** The three
+   * documents answer three different questions and are all mutable: the ORDER
+   * is the quote given to the customer, the FULFILLMENT records what actually
+   * happened, and the INVOICE is the operator's decision about what to bill.
+   * They are not expected to agree, so a reader must be able to ask "billed
+   * against what was quoted" and "billed against what shipped" separately and
+   * get different answers.
+   */
+  sent?: number;
+  /** `sent − billed`. Negative means more was billed than shipped. */
+  sent_quantity?: number;
+  /** Pre-tax cents for `sent_quantity` units at the order line's current terms. Signed with it. */
+  sent_quantity_cents?: number;
 }
 
 /**
@@ -510,8 +528,14 @@ function subtotalCents(item: LineItem, extensionDays?: number): number {
  * @param orderLine - The order line, at its current quantity
  * @param billed - {@link billedByPath}'s entry for the line's path, if any
  * @param orderWindow - {@link orderLineWindow} for the line; `null` extends nothing
+ * @param sent - the FULFILLMENT row's quantity at this line's path, if one exists
  */
-export function accountLine(orderLine: LineItem, billed: BilledAtPath | undefined, orderWindow: BilledWindow | null): LineAccount {
+export function accountLine(
+  orderLine: LineItem,
+  billed: BilledAtPath | undefined,
+  orderWindow: BilledWindow | null,
+  sent?: number,
+): LineAccount {
   const ordered = orderLine.quantity ?? 0;
   const billedUnits = billed?.quantity ?? 0;
   const quantity = ordered - billedUnits;
@@ -532,7 +556,23 @@ export function accountLine(orderLine: LineItem, billed: BilledAtPath | undefine
     extensionCents += subtotalCents({ ...group.item, quantity: group.quantity } as LineItem, group.extension_days);
   }
 
-  return { ordered, billed: billedUnits, quantity, quantity_cents: quantityCents, extension_cents: extensionCents };
+  // The same pricing basis as `quantity_cents` — the ORDER line's current
+  // terms — because that is what an operator would bill the shipped-but-unbilled
+  // units at. Priced here rather than by the caller so every number on this
+  // object comes from one author.
+  const sentQuantity = sent === undefined ? undefined : sent - billedUnits;
+  const sentQuantityCents = sentQuantity === undefined || sentQuantity === 0
+    ? sentQuantity === undefined ? undefined : 0
+    : Math.sign(sentQuantity) * subtotalCents({ ...orderLine, quantity: Math.abs(sentQuantity) });
+
+  return {
+    ordered,
+    billed: billedUnits,
+    quantity,
+    quantity_cents: quantityCents,
+    extension_cents: extensionCents,
+    ...(sent === undefined ? {} : { sent, sent_quantity: sentQuantity, sent_quantity_cents: sentQuantityCents }),
+  };
 }
 
 /** Units billed at one cumulative day count, still owed (or over-billed) an extension. */

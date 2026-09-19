@@ -25409,7 +25409,7 @@ interface DocumentDiffContext {
 One entry at one key of the viewed document. Discriminated on `kind`.
 
 ```ts
-type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry | DocumentBilledEntry;
+type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry | DocumentBilledEntry | DocumentSentEntry;
 ```
 
 ### `DocumentDiffField`
@@ -25489,6 +25489,39 @@ interface DocumentRef {
   uid: string;
   number: number;
   version: number;
+}
+```
+
+### `DocumentSentEntry`
+
+What the invoices bill at this line, judged against what the FULFILLMENT
+records as sent — the sibling of {@link DocumentBilledEntry}, which judges
+the same billing against the ORDER.
+
+🔴 **Both entries exist on purpose, and they are MEANT to disagree.** The
+three documents are three authorities on three different questions, and all
+three are mutable: the ORDER is the quote given to the customer, the
+FULFILLMENT records what actually happened, and the INVOICE is the operator's
+decision about what to bill. Reconciling them into one number would pick a
+winner on the operator's behalf. An invoice that bills exactly what was
+quoted while a unit more went out the door is *aligned with the order* and
+*diverged from reality*, and the operator needs both facts to decide.
+
+⚠️ **Summed across invoices, exactly as `billed` is, and for the same
+reason.** An order is routinely billed across several invoices, so asking
+this per invoice would report "sent 5, this invoice bills 2" against every
+one of them. That is why it is emitted here and not from `lineFields`, whose
+fulfillment ↔ invoice arm stays empty.
+
+⚠️ Advisory. Nothing refuses a write on it.
+
+```ts
+interface DocumentSentEntry {
+  kind: "sent";
+  invoices: DocumentRef[];
+  sent: number;
+  billed: number;
+  quantity_cents: number;
 }
 ```
 
@@ -25802,6 +25835,9 @@ interface LineAccount {
   quantity: number;
   quantity_cents: number;
   extension_cents: number;
+  sent?: number;
+  sent_quantity?: number;
+  sent_quantity_cents?: number;
 }
 ```
 
@@ -25913,7 +25949,7 @@ interface WindowBounds {
 }
 ```
 
-### `accountLine(orderLine: LineItem, billed: BilledAtPath | undefined, orderWindow: BilledWindow | null): LineAccount`
+### `accountLine(orderLine: LineItem, billed: BilledAtPath | undefined, orderWindow: BilledWindow | null, sent?: number): LineAccount`
 
 Account for one order line against what the invoices bill at its path.
 
@@ -25922,6 +25958,7 @@ Account for one order line against what the invoices bill at its path.
 - `orderLine` — The order line, at its current quantity
 - `billed` — {@link billedByPath}'s entry for the line's path, if any
 - `orderWindow` — {@link orderLineWindow} for the line; `null` extends nothing
+- `sent` — the FULFILLMENT row's quantity at this line's path, if one exists
 
 ### `billedByPath(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], _: unknown): BilledByPath`
 

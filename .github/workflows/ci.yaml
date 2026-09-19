@@ -20,6 +20,13 @@ on:
       - beta
   workflow_dispatch:
 
+# Pure checks with no side effects, so a superseded run has nothing worth
+# finishing: pushing again to a PR branch makes the in-flight run's verdict
+# apply to a tree that no longer exists.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     uses: ./.github/workflows/checks.yaml

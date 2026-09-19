@@ -286,8 +286,46 @@ export interface DocumentBilledEntry {
   crms_blocked: boolean;
 }
 
+/**
+ * What the invoices bill at this line, judged against what the FULFILLMENT
+ * records as sent — the sibling of {@link DocumentBilledEntry}, which judges
+ * the same billing against the ORDER.
+ *
+ * 🔴 **Both entries exist on purpose, and they are MEANT to disagree.** The
+ * three documents are three authorities on three different questions, and all
+ * three are mutable: the ORDER is the quote given to the customer, the
+ * FULFILLMENT records what actually happened, and the INVOICE is the operator's
+ * decision about what to bill. Reconciling them into one number would pick a
+ * winner on the operator's behalf. An invoice that bills exactly what was
+ * quoted while a unit more went out the door is *aligned with the order* and
+ * *diverged from reality*, and the operator needs both facts to decide.
+ *
+ * ⚠️ **Summed across invoices, exactly as `billed` is, and for the same
+ * reason.** An order is routinely billed across several invoices, so asking
+ * this per invoice would report "sent 5, this invoice bills 2" against every
+ * one of them. That is why it is emitted here and not from `lineFields`, whose
+ * fulfillment ↔ invoice arm stays empty.
+ *
+ * ⚠️ Advisory. Nothing refuses a write on it.
+ */
+export interface DocumentSentEntry {
+  kind: "sent";
+  invoices: DocumentRef[];
+  /** Units the fulfillment records as sent at this line's path. */
+  sent: number;
+  /** Units billed across `invoices`. */
+  billed: number;
+  /** Pre-tax cents for the `sent − billed` units, at the ORDER line's current terms. */
+  quantity_cents: number;
+}
+
 /** One entry at one key of the viewed document. Discriminated on `kind`. */
-export type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry | DocumentBilledEntry;
+export type DocumentDiffEntry =
+  | DocumentSourceDiffEntry
+  | DocumentUninvoicedEntry
+  | DocumentSubstitutionEntry
+  | DocumentBilledEntry
+  | DocumentSentEntry;
 
 /**
  * The answer for one viewed document.
@@ -826,6 +864,56 @@ export function computeDocumentDiffs(
    * summed invoices bill it and disagree with the order. Nothing billing it at
    * all is `uninvoiced`, not this.
    */
+  /**
+   * One `sent` entry at `viewedKey`: what the invoices bill, against what the
+   * FULFILLMENT records as sent. Silent when the two agree, when no fulfillment
+   * row exists for the line, or when a substitution explains the row (the
+   * `substituted` entry is that line's answer).
+   *
+   * ⚠️ Deliberately independent of {@link billedEntry}'s own condition. An
+   * invoice billing exactly what the ORDER quoted emits no `billed` entry at
+   * all — which is precisely the case where a unit shipped unbilled would
+   * otherwise be invisible.
+   */
+  const sentEntry = (orderUid: string, coverage: InvoiceCoverage, rel: string, viewedKey: string) => {
+    const order = orderByUid.get(orderUid);
+    const fulfillment = fulfillmentByUid.get(orderUid);
+    if (order === undefined || fulfillment === undefined) return;
+    const orderLine = scopeOrder(order).byKey.get(rel);
+    if (orderLine === undefined) return;
+    const scoped = scopeFulfillment(fulfillment);
+    const sentLine = scoped.byKey.get(rel);
+    if (sentLine === undefined) return;
+    // A substituted row's units moved between products; the `substituted` entry
+    // at that line is the answer, and a quantity statement here would double-report it.
+    if (scoped.anchors.some((a) => key(a.path) === rel || key(a.substitutedFor) === rel)) return;
+    const at = coverage.billed.byPath.get(rel);
+    const account = accountLine(
+      orderLine,
+      at,
+      orderLineWindow(order.destinations ?? [], orderLine.path ?? []),
+      sentLine.quantity ?? 0,
+    );
+    if (account.sent_quantity === undefined || account.sent_quantity === 0) return;
+    // ⚠️ **Silent when the fulfillment agrees with the ORDER**, even though the
+    // invoice disagrees with both. There the `billed` entry already says "4 of
+    // 6" and this would repeat it word for word — two entries carrying one
+    // fact. The pair earns its keep only where the two authorities actually
+    // differ: `ordered 2, sent 3, billed 2` emits NO `billed` entry (billing
+    // matches the quote) and this one alone, which is the case that was
+    // invisible; `ordered 6, sent 5, billed 4` emits both, and they say
+    // genuinely different things.
+    if (account.sent === account.ordered) return;
+    if (out.lines.get(viewedKey)?.some((e) => e.kind === "sent")) return;
+    push(out.lines, viewedKey, {
+      kind: "sent",
+      invoices: coverage.invoices,
+      sent: account.sent ?? 0,
+      billed: account.billed,
+      quantity_cents: account.sent_quantity_cents ?? 0,
+    });
+  };
+
   const billedEntry = (orderUid: string, coverage: InvoiceCoverage, rel: string, viewedKey: string) => {
     const order = orderByUid.get(orderUid);
     const at = coverage.billed.byPath.get(rel);
@@ -873,6 +961,7 @@ export function computeDocumentDiffs(
     for (const [rel, item] of viewed.lines.byKey) {
       if (!comparable(viewed, orderSide, item)) continue;
       billedEntry(orderUid, coverage, rel, rel);
+      sentEntry(orderUid, coverage, rel, rel);
     }
   };
 
@@ -921,7 +1010,10 @@ export function computeDocumentDiffs(
     // its own path, or the line a substitute replaced.
     for (const [rel, at] of coverage.billed.byPath) {
       for (const row of at.rows) {
-        if (row.invoiceUid === invoice.uid) billedEntry(orderUid, coverage, rel, key(row.item.path));
+        if (row.invoiceUid === invoice.uid) {
+          billedEntry(orderUid, coverage, rel, key(row.item.path));
+          sentEntry(orderUid, coverage, rel, key(row.item.path));
+        }
       }
     }
     // Invoice ↔ fulfillment goes through the order's path space, so it needs the same alignment.

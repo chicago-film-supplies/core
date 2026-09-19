@@ -29,6 +29,22 @@ on:
   #   gh workflow run "Release & Publish" --ref beta -R chicago-film-supplies/core
   workflow_dispatch:
 
+# ⚠️ `cancel-in-progress` is deliberately FALSE. This workflow's `release` job
+# runs semantic-release, which pushes a git tag and a GitHub release and THEN
+# publishes to JSR. Cancelling between those steps leaves a tag with no
+# published version behind it — a state that reads as "the publish happened"
+# to every consumer pin check, and that the next run will not re-cut, because
+# semantic-release derives the version from the commits since the last tag and
+# the tag is now there.
+#
+# The group is still worth having: core is committed to directly on `beta`, so
+# consecutive pushes otherwise put two semantic-release runs in flight against
+# the same branch, racing to tag. Keyed on `github.ref` so a `beta` publish and
+# a `main` publish still proceed independently.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # Every check core has, from the one place they are defined. On this workflow
   # `release` has `needs: ci`, so nothing reaches JSR that has not passed all of
