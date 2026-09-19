@@ -105,7 +105,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
 
   ],
   "invoices": [
-    { name: "buildInvoiceDestinationDivider", expr: "it.invoices.buildInvoiceDestinationDivider(source, arg2)", desc: "Build an invoice destination divider from a source order's destination item. Single source of truth for the divider shape — reused by `projectOrderItemToInvoiceItem` (order→invoice projection), the CRMS invoice webhook (`createUpdateInvoiceFromCrms`), and the destination-divider backfill.", returns: "OrderDocDestinationItemType" },
+    { name: "buildInvoiceDestinationDivider", expr: "it.invoices.buildInvoiceDestinationDivider(source, arg2)", desc: "Build an invoice destination divider from a source order's destination item. Single source of truth for the divider shape — reused by `projectOrderItemToInvoiceItem` (order→invoice projection) and the destination-divider backfill. ⚠️ **It had a third caller, the CRMS invoice webhook, and that whole ingest is deleted with the cutover.**", returns: "OrderDocDestinationItemType" },
     { name: "calculateItemDiscountCents", expr: "it.invoices.calculateItemDiscountCents(item)", desc: "Calculate the discount amount, in cents, for a single line item.", returns: "number" },
     { name: "calculateItemPrice", expr: "it.invoices.calculateItemPrice(item, taxes, arg3)", desc: "Calculate the complete price for a single line item. Runs the full pipeline: subtotal → discount → taxes → total.", returns: "typeLiteral" },
     { name: "calculateItemSubtotal", expr: "it.invoices.calculateItemSubtotal(item, arg2)", desc: "Calculate the pre-discount and post-discount subtotals for a single line item.", returns: "typeLiteral" },

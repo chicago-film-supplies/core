@@ -635,12 +635,13 @@ export function isInExtensionSection(
 /**
  * Build an invoice destination divider from a source order's destination item.
  * Single source of truth for the divider shape — reused by
- * `projectOrderItemToInvoiceItem` (order→invoice projection), the CRMS invoice
- * webhook (`createUpdateInvoiceFromCrms`), and the destination-divider backfill.
+ * `projectOrderItemToInvoiceItem` (order→invoice projection) and the
+ * destination-divider backfill. ⚠️ **It had a third caller, the CRMS invoice
+ * webhook, and that whole ingest is deleted with the cutover.**
  *
- * `path` defaults to `[]` so callers that run `computeInvoiceItemPaths`
- * afterward (the webhook + backfill) get positional path assignment; the
- * order-projection caller passes the scoped path `[orderDividerUid, ...basePath]`.
+ * `path` defaults to `[]` so a caller that runs `computeInvoiceItemPaths`
+ * afterward (the backfill) gets positional path assignment; the order-projection
+ * caller passes the scoped path `[orderDividerUid, ...basePath]`.
  *
  * ⚠️ **It no longer copies `uid_delivery`/`uid_collection`, and `source` no
  * longer accepts them.** They were the divider's second copy of the pair's
