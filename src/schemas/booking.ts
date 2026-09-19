@@ -183,19 +183,17 @@ export interface Booking {
    * `writableEntries`) already creates/orphans through its existing
    * missing-id arm.
    *
-   * ⚠️ **Optional, not required — deliberately, against §2's literal
-   * one-line field spec.** ~7,266 bookings stored before this field existed
-   * carry no such key at all, and this repo's own "Making a field REQUIRED"
-   * procedure (`core/CLAUDE.md`) says measure the corpus and let the writer
-   * populate it BEFORE tightening — not in the same commit that introduces
-   * it. Nothing read-parses a stored `Booking` through this schema today (a
-   * fork verified both repos, 2026-09-18: every read is a bare TS cast), so
-   * an absent key would not throw — but the TS type would still be lying
-   * about ~7,266 documents' actual shape, which is the narrower defect this
-   * repo's own docs call out repeatedly. Tighten to required once §3.3's
-   * backfill reaches the corpus.
+   * ⭐ **Required (a key, nullable), since the 2026-09-19 backfill.** The field was
+   * declared before anything wrote it, and read `null`/absent on all 7,306 prod
+   * bookings until api-cloudrun v0.281.0 gave both writers (`createOrder`,
+   * `reconcileOrderBookings`) the value. A one-shot api-cloudrun backfill
+   * (deleted once run) then stamped the rest off the id — the 4th segment, else `null` — and the
+   * key-presence census reads 7,306 of 7,306 in prod. `null` therefore means "the
+   * id is the 3-segment form", NOT "unknown": a legacy aggregate booking that
+   * spans several ancestries carries `null` like any top-level one, so read
+   * ancestry off the fulfillment's paths, never off this field, for those.
    */
-  component_signature_hash?: string | null;
+  component_signature_hash: string | null;
   name: string;
   number: number;
   type: ComponentTypeType;
@@ -469,11 +467,10 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   uid: BookingId,
   uid_order: FirestoreId,
   uid_product: FirestoreId,
-  // Optional, not required — see the interface field's own note: ~7,266
-  // pre-existing bookings carry no such key, and this repo's own
-  // required-field procedure says measure + backfill before tightening.
+  // Required and NULLABLE — see the interface field's own note: `null` is the
+  // 3-segment (top-level) id, and every stored booking states one or the other.
   component_signature_hash: z.string().regex(/^[0-9a-f]{12}$/, "Must be a 12-hex component signature hash")
-    .nullable().optional(),
+    .nullable(),
   name: z.string().meta({ column: true, label: "Product", linkTo: "productDetail" }),
   number: z.int().meta({ column: true, label: "#", linkTo: "fulfillmentDetail", serverSortVia: "number" }),
   type: ComponentTypeEnum.meta({ column: true, label: "Type" }),

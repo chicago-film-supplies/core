@@ -204,11 +204,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["products.crms_linked_replacement_id", "crms-pending-removal"],
   ["products.crms_linked_replacement_rate_id", "crms-pending-removal"],
   ["products.crms_rate_id", "crms-pending-removal"],
-  // Booking-component-identity — expand step. ~7,266 pre-existing bookings carry
-  // no such key; the writer populates it going forward, the booking-signature
-  // backfill (api-cloudrun#1051 tracks the remaining custody-committed rows)
-  // reaches the rest, then it tightens to required.
-  ["bookings.component_signature_hash", "mid-expand"],
   // ── mid-expand — deliberately in transit. `DocumentOrganizationSnapshot`'s own
   //    docblock names the three-step dance it is in the first step of.
   ["credit-notes.organization.jurisdiction_claim", "mid-expand"],
