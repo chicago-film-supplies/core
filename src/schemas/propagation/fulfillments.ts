@@ -48,18 +48,26 @@ const PICKER_WRITE_ATOMIC: EnforcementRef = {
 };
 
 /**
- * ⚠️ The NEGATIVE half is asserted only for BOOKINGS, though the step is named
- * for more. It snapshots the order's bookings and re-checks count + `version`
- * after a picker write; it never reads `stock` or
- * `inventory-ledgers`. So "no cascade" is measured on one of the three
- * collections the invariant names.
+ * 🔴 **This ref asserted the OPPOSITE until the over-checkout change, and the
+ * inversion is deliberate.** It named a step called *"picker writes do NOT
+ * cascade to bookings/stock"*, which was right while a booking carried ONE
+ * quantity: an over-send had nowhere to go, so the correct behaviour was to
+ * leave the bookings alone. A booking now carries two numbers — `quantity` is
+ * physical, `quantity_ordered` is what the order asked for — so a picker
+ * quantity write MUST reach the bookings, or availability keeps answering from
+ * the paperwork rather than the shelf.
+ *
+ * ⚠️ **Still measured on BOOKINGS ONLY.** The step reads neither `stock` nor
+ * `inventory-ledgers`, so the ledger third of the claim remains unmeasured —
+ * unchanged from before, and stated here so the gap is not re-discovered as a
+ * regression.
  */
-const PICKER_WRITE_NO_CASCADE: EnforcementRef = {
+const PICKER_WRITE_CASCADES: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/fulfillment/fulfillmentEdits.test.ts::picker writes do NOT cascade to bookings/stock",
+    "api-cloudrun/tests/integration/fulfillment/fulfillmentEdits.test.ts::a picker quantity write cascades to bookings",
   clause:
-    "the `no cascade` half, for BOOKINGS ONLY — booking count and per-booking `version` are unchanged after a picker write. Despite the step's name it reads neither `stock` nor `inventory-ledgers`, so those two thirds of the claim are unmeasured.",
+    "the `cascade` half, for BOOKINGS ONLY — after a picker quantity write the picked product's booking carries the picker's number as `quantity` and the order's as `quantity_ordered`. The booking COUNT is deliberately not asserted equal: the same convergence also retires orphans an earlier non-cascading picker write left behind. Reads neither `stock` nor `inventory-ledgers`.",
   gates: true,
 };
 
@@ -73,9 +81,12 @@ const updateFulfillmentItemsRules: CollectionRule[] = [
     mode: "co-write",
     invariant:
       "Picker writes mutate items + version + query_by_* on the same doc atomically. " +
-      "No cascade to bookings, `stock`, or inventory-ledgers — picker work is " +
-      "operational only and does not change the financial promise.",
-    enforced_by: [PICKER_WRITE_ATOMIC, PICKER_WRITE_NO_CASCADE],
+      "A QUANTITY or SUBSTITUTION change then converges the order's bookings — " +
+      "the picker's number is the booking's PHYSICAL `quantity`, with the order's " +
+      "kept in `quantity_ordered` — because availability must reflect the shelf. " +
+      "Still no cascade to inventory-ledgers: picker work does not change the " +
+      "financial promise, only what is physically out.",
+    enforced_by: [PICKER_WRITE_ATOMIC, PICKER_WRITE_CASCADES],
     transaction: "update-fulfillment-items",
     fields: [
       { source: ["items"], target: ["items"] },
