@@ -760,7 +760,7 @@ interface Booking {
   uid: string;
   uid_order: string;
   uid_product: string;
-  component_signature_hash?: string | null;
+  component_signature_hash: string | null;
   name: string;
   number: number;
   type: ComponentTypeType;
@@ -14397,7 +14397,7 @@ interface Booking {
   uid: string;
   uid_order: string;
   uid_product: string;
-  component_signature_hash?: string | null;
+  component_signature_hash: string | null;
   name: string;
   number: number;
   type: ComponentTypeType;

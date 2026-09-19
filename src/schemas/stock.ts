@@ -3,9 +3,11 @@
  *
  * They replace `stock-summaries` + `public-stock-summaries` (the internal doc and
  * its sanitized twin) with **one** projection, and add the serialization token
- * that gives the oversell gate something to compare-and-set against. See
- * `api-cloudrun/.claude/plans/stock-model.md` for the campaign; the reasoning
- * that has to survive the plan's deletion is here.
+ * that gives the oversell gate something to compare-and-set against. The plan doc
+ * this used to cite is deleted, as a landed plan should be; the reasoning that had
+ * to survive it is here, the availability model and engine are the `cfs-availability`
+ * skill's, and the api-cloudrun writer, token and gate are that repo's
+ * `stock-availability` skill's.
  *
  * ## Why one collection now, when there were two
  *
