@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import { z } from "zod";
 import {
   FulfillmentSchema,
   getInitialValues,
@@ -44,11 +45,19 @@ function line(over: Partial<LineItem>, price: Partial<NonNullable<LineItem["pric
 
 // ── The snapshot: every key the order shares, and how it propagates ──────────
 //
-// 🔴 This is the guard `propagate: false` needs. That tag has the unsafe default:
-// an untagged new HOMONYM (same key, different meaning) reads `propagated`, and
-// the sync would copy the order's value into it. So any new shared key, at any
-// level, fails here until someone decides which kind it is — tag the schema
-// field, then update the literal.
+// 🔴 This is the SECOND arm, and since core#116 it is no longer the only one.
+// `propagate` used to have an unsafe default — an untagged new HOMONYM (same key,
+// different meaning) read `propagated` and the sync copied the order's value into
+// it. It now fails closed: an untagged shared value lands in `undeclared[]` and
+// both `orderInvoiceSharedFields()` and `orderFulfillmentSharedFields()` throw,
+// so the decision is forced at the FIELD rather than here.
+//
+// ⚠️ **What this arm still catches that the throw cannot: a key whose declared
+// kind CHANGED.** A field retagged `derived` → `propagate: true` is declared
+// either way, so `undeclared` stays empty and only this literal moves. Update it
+// deliberately — the diff hands you the new kind, which is not the same as
+// choosing it. The `undeclared` assertion below is what makes a NEW key a schema
+// edit rather than a paste.
 
 const DATES = [
   "propagated destinations[].dates.delivery_start",
@@ -71,6 +80,7 @@ const DATES = [
 Deno.test("classifySharedFields: order → invoice, every shared key and its kind", () => {
   const c = classifySharedFields(OrderSchema, InvoiceSchema);
   assertEquals(c.unhandled, []);
+  assertEquals(c.undeclared, []);
   assertEquals(c.rows, ["destinations[]", "items[]"]);
   assertEquals(render(c), [
     "homonym uid",
@@ -118,6 +128,7 @@ Deno.test("classifySharedFields: order → invoice, every shared key and its kin
 Deno.test("classifySharedFields: order → fulfillment, every shared key and its kind", () => {
   const c = classifySharedFields(OrderSchema, FulfillmentSchema);
   assertEquals(c.unhandled, []);
+  assertEquals(c.undeclared, []);
   assertEquals(c.rows, ["destinations[]", "items[]"]);
   assertEquals(render(c), [
     "homonym uid",
@@ -172,6 +183,51 @@ Deno.test("orderFulfillmentSharedFields: classified once, grouped by merge unit"
       "homonym updated_at",
     ],
   );
+});
+
+// 🔴 The negative control for `undeclared[]` (core#116). The two snapshot arms
+// above assert it is EMPTY over the real schemas, and an assertion that something
+// is empty passes just as well when the walker has stopped reaching it — so this
+// plants an untagged shared value at each of the three levels the walker can
+// classify one at and requires all three back.
+//
+// ⚠️ The levels are not interchangeable: a doc-level leaf, a leaf inside a ROW
+// (which the walker reaches through the row-identity skip), and a leaf inside a
+// nested VALUE OBJECT (which it reaches by recursion). A push site missing from
+// any one of them is invisible to the other two.
+Deno.test("classifySharedFields: an untagged shared value is UNDECLARED, at every level", () => {
+  const tagged = z.string().meta({ propagate: true });
+  const row = (extra: Record<string, z.ZodType>) =>
+    z.array(z.strictObject({ uid: z.string(), declared: tagged, ...extra }));
+  const build = (extra: Record<string, z.ZodType>, rowExtra: Record<string, z.ZodType>) =>
+    z.strictObject({
+      declared: tagged,
+      nested: z.strictObject({ declared: tagged, ...extra }),
+      items: row(rowExtra),
+      ...extra,
+    });
+
+  const untagged = { sneaky: z.string() };
+  const c = classifySharedFields(build(untagged, untagged), build(untagged, untagged));
+  assertEquals([...c.undeclared].sort(), ["items[].sneaky", "nested.sneaky", "sneaky"]);
+  assertEquals(c.unhandled, []);
+  // …and the declared ones still classify, so the control is not passing because
+  // the walker stopped early.
+  assert(c.fields.some((f) => f.path === "declared" && f.kind === "propagated"));
+  assert(c.fields.some((f) => f.path === "items[].declared" && f.kind === "propagated"));
+
+  // With every key tagged, `undeclared` is empty — the arm can pass as well as fail.
+  const clean = classifySharedFields(build({}, {}), build({}, {}));
+  assertEquals(clean.undeclared, []);
+
+  // ⭐ A tag on the DOWNSTREAM schema alone counts, so ONE tag on the order
+  // declaration covers every grain that spreads it. `metaOf` reads both sides;
+  // this is what keeps the edit count at one per field rather than one per pair.
+  const bare = z.strictObject({ shared: z.string() });
+  const onlyDownstream = z.strictObject({ shared: z.string().meta({ propagate: true }) });
+  assertEquals(classifySharedFields(bare, onlyDownstream).undeclared, []);
+  assertEquals(classifySharedFields(onlyDownstream, bare).undeclared, []);
+  assertEquals(classifySharedFields(bare, bare).undeclared, ["shared"]);
 });
 
 // 🔴 A fulfillment pair needs NO projection, and that is a schema fact worth a

@@ -142,7 +142,7 @@ export const LineItemCore: {
   // `api-cloudrun/scripts/audit-document-grain-parity.ts`: 0 invoice lines are
   // empty or over 100 in either project, and 0 of the 154 line items across the
   // 23 committed `invoice`+`quote` fixtures in `templates` (7-46 chars).
-  name: z.string().min(1).max(100).meta({ pii: "none", column: true }),
+  name: z.string().min(1).max(100).meta({ pii: "none", column: true, propagate: true }),
 
   // Line-item text, classified the same as `name` above: it carries equipment,
   // service and destination wording — a PO number, a product name — not customer
@@ -158,6 +158,7 @@ export const LineItemCore: {
     pii: "none",
     column: true,
     label: "Description",
+    propagate: true,
   }),
 
   // ⚠️ **`.min(0)` is the tightening.** The invoice declared `z.int()` with no
@@ -182,6 +183,7 @@ export const LineItemCore: {
   quantity: z.number().int().min(0).meta({
     column: true,
     label: "Quantity",
+    propagate: true,
   }),
 
   // 🔴 The row identity, and it has exactly ONE author — `computeItemPaths` in
@@ -216,6 +218,7 @@ export const LineItemCore: {
   zero_priced: z.boolean().nullable().optional().meta({
     column: true,
     label: "Zero Priced",
+    propagate: true,
   }),
 };
 
@@ -246,8 +249,8 @@ export const LineTaxCore: {
   uid_tax_class: z.ZodType<string>;
   uid_tax_class_override: z.ZodOptional<z.ZodNullable<z.ZodType<string>>>;
 } = {
-  uid_tax_class: FirestoreId,
-  uid_tax_class_override: FirestoreId.nullable().optional(),
+  uid_tax_class: FirestoreId.meta({ propagate: true }),
+  uid_tax_class_override: FirestoreId.nullable().optional().meta({ propagate: true }),
 };
 
 /** The {@link LineTaxCore} keys, for code that copies the levers between grains. */

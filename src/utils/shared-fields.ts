@@ -35,19 +35,36 @@
  *
  * ## Where the kinds come from
  *
- * `derived` and `homonym` are DECLARED on the schema field, as
- * `.meta({ derived: true })` and `.meta({ propagate: false })`. A tag on either
- * schema counts. `atom` and the containers are read from the shape.
+ * Every kind but `atom` and the containers is DECLARED on the schema field:
+ * `.meta({ propagate: true })` for an ordinary shared value,
+ * `.meta({ derived: true })` for one a derivation writes, and
+ * `.meta({ propagate: false })` for a homonym. `atom` and the containers are read
+ * from the shape. **A tag on EITHER schema counts**, so one tag on the order's
+ * declaration covers every downstream grain that spreads it — which is why the
+ * whole corpus needs ~25 tags rather than one per pair.
  *
- * ⚠️ **`propagate: false` has the unsafe default** — an untagged new homonym is
- * reported `propagated`. The guard is the snapshot of this function's output in
- * `tests/shared-fields.test.ts`: a new shared key at any level fails it until
- * someone looks.
+ * ## It fails closed, in two ways
  *
- * ## It fails closed
+ * - A node type the walker does not recognise is reported in `unhandled` rather
+ *   than guessed at.
+ * - A shared VALUE with no `propagate` declaration is reported in `undeclared`
+ *   rather than assumed to propagate.
  *
- * A node type the walker does not recognise is reported in `unhandled` rather than
- * guessed at. Callers assert it is empty.
+ * Callers assert both are empty and throw otherwise.
+ *
+ * ⭐ **`propagate` used to DEFAULT to true, and inverting it is core#116.** An
+ * untagged new homonym read `propagated`, so the merge copied the order's value
+ * over the downstream document's — silently, on a billing document. The old guard
+ * was the output snapshot in `tests/shared-fields.test.ts` alone, and two things
+ * were wrong with resting on it: the cheapest way to green a red snapshot is to
+ * paste the line the diff hands you, already carrying the wrong kind; and meta
+ * keys are untyped (there is no `z.GlobalMeta` augmentation in this package), so
+ * `propgate: false` was a silent no-op that classified `propagated` — the exact
+ * defect, from one keystroke. Both now land in `undeclared`.
+ *
+ * ⚠️ **The snapshot is still needed and still the arm that catches more.** An
+ * untagged key is now a throw, but a key whose declared kind CHANGED is declared
+ * either way, so only the snapshot moves. Do not delete it as redundant.
  *
  * @module
  */
@@ -83,11 +100,24 @@ export interface SharedFieldClassification {
   rows: string[];
   /** Nodes the walker refused to interpret. MUST be empty for the rest to be sound. */
   unhandled: Array<{ path: string; type: string }>;
+  /**
+   * Shared VALUES carrying no `propagate` declaration. MUST be empty: an
+   * undeclared key is a decision nobody has made, and the merge would make it by
+   * copying the source's value over the downstream document's. See the module docs.
+   */
+  undeclared: string[];
 }
 
 /** The meta key that marks a field as written by a derivation. */
 export const DERIVED_META_KEY = "derived";
-/** The meta key that marks a homonym: `.meta({ propagate: false })`. */
+/**
+ * The meta key that declares how a shared field propagates — `true` for an
+ * ordinary shared value, `false` for a homonym.
+ *
+ * 🔴 **There is no third state.** An absent tag is neither, so the field is
+ * reported in `undeclared` and both callers throw (core#116). It read as `true`
+ * until 2026-09-18.
+ */
 export const PROPAGATE_META_KEY = "propagate";
 /**
  * The meta key that marks a value merged whole: `.meta({ shared: "value" })`.
@@ -224,6 +254,7 @@ export function classifySharedFields(
   const fields: SharedField[] = [];
   const rows: string[] = [];
   const unhandled: Array<{ path: string; type: string }> = [];
+  const undeclared: string[] = [];
 
   const join = (base: string, key: string) => (base ? `${base}.${key}` : key);
 
@@ -244,10 +275,15 @@ export function classifySharedFields(
 
   function walkField(aNodes: z.ZodType[], bNodes: z.ZodType[], path: string): void {
     const both = [...aNodes, ...bNodes];
-    if (metaOf(both, PROPAGATE_META_KEY) === false) {
+    const propagate = metaOf(both, PROPAGATE_META_KEY);
+    if (propagate === false) {
       fields.push({ path, kind: "homonym" });
       return;
     }
+    // A value this walker is about to classify `propagated` or `atom` needs an
+    // explicit `propagate: true`. Read from BOTH schemas, so one tag on the
+    // source declaration covers every downstream grain that spreads it.
+    const declared = propagate === true;
     if (metaOf(both, DERIVED_META_KEY) === true) {
       fields.push({ path, kind: "derived" });
       return;
@@ -264,14 +300,16 @@ export function classifySharedFields(
       return;
     }
     if (ra.kind === "scalar" && rb.kind === "scalar") {
-      fields.push({ path, kind: "propagated" });
+      if (!declared) undeclared.push(path);
+      else fields.push({ path, kind: "propagated" });
       return;
     }
     if (ra.kind === "object" && rb.kind === "object") {
       // A snapshot of another document is taken whole: leaf by leaf would build
       // a chimera — another org's uid beside this org's tax axes.
       if (ra.shape.has("uid") && rb.shape.has("uid")) {
-        fields.push({ path, kind: "atom" });
+        if (!declared) undeclared.push(path);
+        else fields.push({ path, kind: "atom" });
         return;
       }
       walkObject(ra.shape, rb.shape, path, false);
@@ -287,7 +325,8 @@ export function classifySharedFields(
       }
       if (ea.kind === "scalar" && eb.kind === "scalar") {
         // An array of scalars (`path`, a tag list) is one value.
-        fields.push({ path, kind: "propagated" });
+        if (!declared) undeclared.push(path);
+        else fields.push({ path, kind: "propagated" });
         return;
       }
       unhandled.push({ path: `${path}[]`, type: `array of ${ea.kind}/${eb.kind}` });
@@ -303,7 +342,7 @@ export function classifySharedFields(
   } else {
     walkObject(ra.shape, rb.shape, "", false);
   }
-  return { fields, rows, unhandled };
+  return { fields, rows, unhandled, undeclared };
 }
 
 /**
@@ -660,6 +699,12 @@ export function orderFulfillmentSharedFields(): OrderFulfillmentSharedFields {
   const c = classifySharedFields(OrderSchema, FulfillmentSchema);
   if (c.unhandled.length > 0) {
     throw new Error(`order → fulfillment shared fields unclassified: ${JSON.stringify(c.unhandled)}`);
+  }
+  if (c.undeclared.length > 0) {
+    throw new Error(
+      `order → fulfillment shared fields undeclared — tag each with .meta({ propagate: true }) ` +
+        `or .meta({ propagate: false }) if it is a homonym: ${c.undeclared.join(", ")}`,
+    );
   }
   orderFulfillmentSharedFieldsMemo = {
     line: fieldsUnder(c, "items[]"),

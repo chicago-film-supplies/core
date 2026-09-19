@@ -1363,6 +1363,12 @@ export function orderInvoiceSharedFields(): OrderInvoiceSharedFields {
   if (c.unhandled.length > 0) {
     throw new Error(`order → invoice shared fields unclassified: ${JSON.stringify(c.unhandled)}`);
   }
+  if (c.undeclared.length > 0) {
+    throw new Error(
+      `order → invoice shared fields undeclared — tag each with .meta({ propagate: true }) ` +
+        `or .meta({ propagate: false }) if it is a homonym: ${c.undeclared.join(", ")}`,
+    );
+  }
   orderInvoiceSharedFieldsMemo = {
     line: fieldsUnder(c, "items[]"),
     pair: fieldsUnder(c, "destinations[]"),

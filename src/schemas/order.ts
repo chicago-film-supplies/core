@@ -269,13 +269,13 @@ export interface OrderDocDatesType {
  * would have gone green.
  */
 export const OrderDocDates: z.ZodType<OrderDocDatesType> = z.strictObject({
-  delivery_start: chicagoInstant().nullable(),
+  delivery_start: chicagoInstant().nullable().meta({ propagate: true }),
   delivery_start_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
-  delivery_end: chicagoInstant().nullable(),
+  delivery_end: chicagoInstant().nullable().meta({ propagate: true }),
   delivery_end_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
-  collection_start: chicagoInstant().nullable(),
+  collection_start: chicagoInstant().nullable().meta({ propagate: true }),
   collection_start_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
-  collection_end: chicagoInstant().nullable(),
+  collection_end: chicagoInstant().nullable().meta({ propagate: true }),
   collection_end_fs: FirestoreTimestamp.nullable().meta({ derived: true }),
   days_active: z.int().nullable().meta({ derived: true }),
   charge_windows: z.array(ChargeWindow).min(1).superRefine(checkChargeWindowsOrdered)
@@ -578,8 +578,8 @@ export const DestinationPairCore: {
   // `DocDestinationEndpoint.meta({ label: "Delivery" }) !== DocDestinationEndpoint`,
   // so the base stays unannotated and every column below each leg inherits its
   // own prefix ("Delivery Address" / "Collection Address").
-  delivery: DocDestinationEndpoint.meta({ label: "Delivery" }),
-  collection: DocDestinationEndpoint.meta({ label: "Collection" }),
+  delivery: DocDestinationEndpoint.meta({ label: "Delivery", propagate: true }),
+  collection: DocDestinationEndpoint.meta({ label: "Collection", propagate: true }),
   // 🔴 **REQUIRED, and the `.default(false)` they carried until 2026-09-08 was
   // doing the opposite of what it looked like.** `validateBeforeWrite` discards
   // `result.data` and writes the RAW doc (`api-cloudrun/src/lib/validate.ts`
@@ -606,8 +606,8 @@ export const DestinationPairCore: {
   // ⚠️ The INPUT (`Destination`, above) stays `.optional()`: a client may leave
   // the flags out and the writer fills them in explicitly. That is the rule —
   // the writer stamps, the storage schema refuses anything else.
-  customer_collecting: z.boolean(),
-  customer_returning: z.boolean(),
+  customer_collecting: z.boolean().meta({ propagate: true }),
+  customer_returning: z.boolean().meta({ propagate: true }),
   // ⭐ **Adding a field to this pair is now ZERO schema edits beyond this
   // object.** It used to be two, and only one was enforced: the invoice
   // inherited the TYPE through `InvoiceDocDestinationType extends
@@ -620,11 +620,15 @@ export const DestinationPairCore: {
   // reads its field set off the two schemas, so a new field is carried and
   // merged PER FIELD for free. The hand-maintained owned-field list this comment
   // used to point at is deleted. What a new field needs instead is a
-  // classification on its declaration — `.meta({ derived })` when a derivation
-  // writes it, `.meta({ propagate: false })` when it is a homonym.
+  // classification on its declaration, and it is NOT optional (core#116):
+  // `.meta({ propagate: true })` for an ordinary shared value,
+  // `.meta({ derived: true })` when a derivation writes it, and
+  // `.meta({ propagate: false })` when it is a homonym. An untagged shared key
+  // lands in `classifySharedFields`' `undeclared[]` and both callers throw.
   jurisdiction: JurisdictionEnum.nullable().optional().meta({
     column: true,
     label: "Jurisdiction",
+    propagate: true,
   }),
 };
 
@@ -748,8 +752,8 @@ function checkDiscountRate(
 
 /** Zod schema for an item discount. */
 export const Discount: z.ZodType<DiscountType> = z.strictObject({
-  rate: z.number().meta({ column: true, label: "Rate", ...RATE_UNIT_META }),
-  type: RateTypeEnum,
+  rate: z.number().meta({ column: true, label: "Rate", ...RATE_UNIT_META, propagate: true }),
+  type: RateTypeEnum.meta({ propagate: true }),
   amount_cents: z.int().min(0).meta({ column: true, label: "Amount", derived: true }),
 }).superRefine(checkDiscountRate);
 
@@ -1102,8 +1106,8 @@ export interface OrderDocItemPriceType {
 }
 
 export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObject({
-  base_cents: z.int().meta({ column: true, label: "Base Price" }),
-  base_percent: z.number().nullable().optional(),
+  base_cents: z.int().meta({ column: true, label: "Base Price", propagate: true }),
+  base_percent: z.number().nullable().optional().meta({ propagate: true }),
   // `.nullable().optional()` and NOT defaulted: a null replacement means "this
   // line has no replacement value", which is not the fact `0` states, and
   // `checkItemContract`'s `forbidden` arm reads the difference.
@@ -1112,7 +1116,7 @@ export const OrderDocItemPrice: z.ZodType<OrderDocItemPriceType> = z.strictObjec
   // on a rental `five_day_week` line, `null` on every other line. The key stays
   // present. See `lineChargeableDays` in `@cfs/core/utils/price-document`.
   chargeable_days: z.int().nullable().meta({ column: true, label: "Chargeable Days", derived: true }),
-  formula: PriceFormulaEnum.meta({ column: true, label: "Formula" }),
+  formula: PriceFormulaEnum.meta({ column: true, label: "Formula", propagate: true }),
   subtotal_cents: z.int().meta({ column: true, label: "Subtotal", derived: true }),
   subtotal_discounted_cents: z.int().meta({ column: true, label: "Discounted Subtotal", derived: true }),
   discount: Discount.nullable().meta({ label: "Discount" }),
@@ -1224,16 +1228,16 @@ const OrderDocLineItemInner = z.strictObject({
   // OMITS one a compile error rather than something only a test can see.
   // `tests/item-shape-parity.test.ts` still holds the SHADOWING case, which no
   // spread can catch.
-  type: z.enum(DOC_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
+  type: z.enum(DOC_LINE_ITEM_TYPES).meta({ column: true, label: "Type", propagate: true }),
   ...LineItemCore,
   price: OrderDocItemPrice,
   // Required for every line type, `transaction_fee` included — a fee holds no
   // stock, which `"none"` says exactly (1,533 prod lines already use it). That
   // keeps the fee an ordinary line item, which is the whole point of W1's
   // collapse of the separate fee arm, rather than earning it a contract axis.
-  stock_method: StockMethodEnum.meta({ column: true, label: "Stock Method" }),
-  order_number: z.int().optional().meta({ column: true, label: "Order #" }),
-  uid_order: FirestoreId.optional(),
+  stock_method: StockMethodEnum.meta({ column: true, label: "Stock Method", propagate: true }),
+  order_number: z.int().optional().meta({ column: true, label: "Order #", propagate: true }),
+  uid_order: FirestoreId.optional().meta({ propagate: true }),
   inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional().meta({ column: true, label: "Inclusion" }),
   // `propagate: false` — the CRMS line id is a different record on each document.
   crms_id: z.int().nullable().optional().meta({ propagate: false }),
@@ -1242,7 +1246,7 @@ const OrderDocLineItemInner = z.strictObject({
   // defaulted: `validateBeforeWrite` persists the RAW doc, so a `.default()`
   // never materializes, and every line written before beta.120 is genuinely
   // absent rather than null.
-  coa_revenue: COARevenueEnum.nullable().optional(),
+  coa_revenue: COARevenueEnum.nullable().optional().meta({ propagate: true }),
   // The class snapshot + the operator's class override — one declaration
   // shared with the invoice line (`_items.ts`).
   ...LineTaxCore,
@@ -1621,7 +1625,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   uid: FirestoreId.meta({ propagate: false }),
   number: z.int().meta({ column: true, label: "#", linkTo: "orderDetail", propagate: false }),
   status: OrderStatus.meta({ column: true, label: "Status", propagate: false }),
-  organization: OrderDocOrganization.meta({ label: "Organization" }),
+  organization: OrderDocOrganization.meta({ label: "Organization", propagate: true }),
   destinations: z.array(DocDestination).min(1),
   // "Item" prefixes every column under here, which is what keeps
   // `items.price.taxes.rate` ("Item Tax Rate") distinct from the order-level
@@ -1647,12 +1651,12 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // the fold is `org.tax_exempt || doc.tax_exempt === true` rather than
   // `doc ?? org`: a `false` on the document must not un-exempt an exempt
   // customer.
-  tax_exempt: z.boolean().nullable().optional().meta({ column: true, label: "Tax Exempt" }),
+  tax_exempt: z.boolean().nullable().optional().meta({ column: true, label: "Tax Exempt", propagate: true }),
   // No `column: true` — `display-columns.test.ts` bans a heading ending in "Uid".
   // 0 of 995 prod orders carry the KEY (2026-08-23) — expected mid-migration,
   // not dead. `null`/absent already means the default store, and
   // `api-cloudrun/src/lib/locationIntegrity.ts` reasons about exactly that.
-  uid_store: FirestoreId.nullable().optional(),
+  uid_store: FirestoreId.nullable().optional().meta({ propagate: true }),
   totals: OrderDocTotals.meta({ derived: true }),
   invoices: z.array(z.strictObject({
     uid: FirestoreId,
@@ -1698,13 +1702,13 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   //
   // Bare `z.string()` — the dropped `.default("")` is core#97 increment 3; the
   // interface above carries the census and the reason.
-  subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "orderDetail" }),
+  subject: z.string().meta({ pii: "mask", column: true, label: "Subject", linkTo: "orderDetail", propagate: true }),
   // Bare `.nullable()` — the dropped `.default(null)` is core#95 batch 10.
   // 1,022 of 1,022 in both projects already carry the key (`createOrder`
   // writes `reference: orderData.reference || null` and `updateOrder` only
   // ever assigns a string-or-null), so nothing produced the absence the
   // declaration allowed.
-  reference: z.string().max(255).nullable().meta({ column: true, label: "Reference", linkTo: "orderDetail" }),
+  reference: z.string().max(255).nullable().meta({ column: true, label: "Reference", linkTo: "orderDetail", propagate: true }),
   xero_id: z.uuid().nullable().meta({ propagate: false }),
   uid_thread: ThreadId.meta({ propagate: false }),
   version: z.int().min(0).default(0).meta({ propagate: false }),

@@ -33014,19 +33014,36 @@ schema" IS the definition of downstream-only.
 
 ## Where the kinds come from
 
-`derived` and `homonym` are DECLARED on the schema field, as
-`.meta({ derived: true })` and `.meta({ propagate: false })`. A tag on either
-schema counts. `atom` and the containers are read from the shape.
+Every kind but `atom` and the containers is DECLARED on the schema field:
+`.meta({ propagate: true })` for an ordinary shared value,
+`.meta({ derived: true })` for one a derivation writes, and
+`.meta({ propagate: false })` for a homonym. `atom` and the containers are read
+from the shape. **A tag on EITHER schema counts**, so one tag on the order's
+declaration covers every downstream grain that spreads it — which is why the
+whole corpus needs ~25 tags rather than one per pair.
 
-⚠️ **`propagate: false` has the unsafe default** — an untagged new homonym is
-reported `propagated`. The guard is the snapshot of this function's output in
-`tests/shared-fields.test.ts`: a new shared key at any level fails it until
-someone looks.
+## It fails closed, in two ways
 
-## It fails closed
+- A node type the walker does not recognise is reported in `unhandled` rather
+  than guessed at.
+- A shared VALUE with no `propagate` declaration is reported in `undeclared`
+  rather than assumed to propagate.
 
-A node type the walker does not recognise is reported in `unhandled` rather than
-guessed at. Callers assert it is empty.
+Callers assert both are empty and throw otherwise.
+
+⭐ **`propagate` used to DEFAULT to true, and inverting it is core#116.** An
+untagged new homonym read `propagated`, so the merge copied the order's value
+over the downstream document's — silently, on a billing document. The old guard
+was the output snapshot in `tests/shared-fields.test.ts` alone, and two things
+were wrong with resting on it: the cheapest way to green a red snapshot is to
+paste the line the diff hands you, already carrying the wrong kind; and meta
+keys are untyped (there is no `z.GlobalMeta` augmentation in this package), so
+`propgate: false` was a silent no-op that classified `propagated` — the exact
+defect, from one keystroke. Both now land in `undeclared`.
+
+⚠️ **The snapshot is still needed and still the arm that catches more.** An
+untagged key is now a throw, but a key whose declared kind CHANGED is declared
+either way, so only the snapshot moves. Do not delete it as redundant.
 
 ### `DERIVED_META_KEY`
 
@@ -33058,7 +33075,12 @@ interface OrderFulfillmentSharedFields {
 
 ### `PROPAGATE_META_KEY`
 
-The meta key that marks a homonym: `.meta({ propagate: false })`.
+The meta key that declares how a shared field propagates — `true` for an
+ordinary shared value, `false` for a homonym.
+
+🔴 **There is no third state.** An absent tag is neither, so the field is
+reported in `undeclared` and both callers throw (core#116). It read as `true`
+until 2026-09-18.
 
 ```ts
 const PROPAGATE_META_KEY: "propagate";
@@ -33097,6 +33119,7 @@ interface SharedFieldClassification {
   fields: SharedField[];
   rows: string[];
   unhandled: Array<typeLiteral>;
+  undeclared: string[];
 }
 ```
 
