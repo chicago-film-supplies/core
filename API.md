@@ -32486,6 +32486,57 @@ the hierarchy**; `path` is the structure and this is a rendering choice.
 const ORG_NAME_DELIMITER: " / ";
 ```
 
+### `OrgAncestorFacts`
+
+The facts an ancestor contributes to a resolution — everything
+{@link resolveBillingAddress} and {@link resolveTaxAxes} read off a node that
+is not the leaf.
+
+```ts
+interface OrgAncestorFacts {
+  billing_address: AddressType | null;
+  jurisdiction_claim: JurisdictionType | null;
+  tax_exempt: boolean;
+}
+```
+
+### `OrgAncestors`
+
+Every uid in `node.path.slice(0, -1)`, and what each of them states.
+
+🔴 **The KEY SET is the invariant, and it is DERIVABLE** — which is what lets
+a resolution check its own argument instead of trusting the caller. A node's
+required ancestors are exactly `path.slice(0, -1)`, and every function here
+already holds `path`. There were five hand-rolled spellings of this read
+across three repos, each with its own projection and its own answer to the
+question below.
+
+**A uid maps to `null` when the caller LOOKED and the document is gone.** That
+tombstone is the whole point of the type:
+
+- **missing key** ⇒ the caller never loaded it ⇒ {@link assertOrgAncestorsComplete}
+  throws, naming the uids. A caller that forgets an ancestor gets a runtime
+  failure at its own call site rather than a wrong snapshot in Firestore.
+- **`null` value** ⇒ a dangling reference ⇒ swallowed, exactly as before. A
+  deleted ancestor must not take down every order write in the subtree;
+  `api-cloudrun/scripts/repair-dangling-organization-refs.ts` is where that
+  finding belongs. ⚠️ The consequence is unchanged and deliberate: **a
+  dangling reference to an exempt root reads as NOT exempt.**
+
+⚠️ **The resolvers below treat the two identically — both state nothing.** The
+distinction is enforced ABOVE them, in {@link buildOrganizationSnapshot},
+because that is where a wrong answer becomes a stored document. A caller that
+legitimately holds a partial map (`resolveSubtreeTaxAxes` in api-cloudrun,
+whose map is built one straggler at a time) goes to a resolver directly and is
+unaffected.
+
+`F` narrows to the facts a given resolver reads, so a caller need only project
+what that walk consults; the un-narrowed form is what the builder requires.
+
+```ts
+type OrgAncestors = ReadonlyMap<string, F | null>;
+```
+
 ### `ResolvedBillingAddress`
 
 What {@link resolveBillingAddress} answers.
@@ -32510,63 +32561,49 @@ interface ResolvedTaxAxes {
 }
 ```
 
-### `buildOrganizationSnapshot(org: Pick<Organization, "uid" | "path" | "crms_id" | "jurisdiction_claim" | "tax_exempt" | "xero_id" | "billing_address">, _: unknown): DocumentOrganizationSnapshotType`
+### `assertOrgAncestorsComplete(node: Pick<Organization, "uid" | "path">, ancestors: ReadonlyMap<string, unknown>): void`
+
+Refuse an `ancestors` map that is missing a node the chain names.
+
+⭐ **A root asserts nothing** — its `path.slice(0, -1)` is empty, so the
+depth-1 case is correct by construction rather than by a caller remembering to
+pass `new Map()`.
+
+### `buildOrganizationSnapshot(org: Pick<Organization, "uid" | "path" | "crms_id" | "jurisdiction_claim" | "tax_exempt" | "xero_id" | "billing_address">, ancestors: OrgAncestors, _: unknown): DocumentOrganizationSnapshotType`
 
 Build the denormalized organization snapshot an order, invoice or credit note
-embeds.
+embeds, with the billing address and the two tax axes **RESOLVED** up the
+chain.
 
-**The one builder, because four hand-maintained literals is what api-cloudrun
-#486 was.** `createOrder`, `updateOrder`'s organization branch, the CRMS
-opportunity webhook and `createInvoice` each assembled this block by hand,
-and the three order-side copies were one field short of the invoice's: they
-carried no `tax_profile`. Nothing on the order write path could see a
-tax-exempt customer, so `repriceOrderItemsForProfile` passed a hardcoded
-`"tax_applied"` — the same customer's invoices went untaxed and their orders
-went taxed, hidden only by CRMS stamping the profile from the opportunity
-header.
+🔴 **The one builder, and the only one — there is no longer a function that
+returns an UNRESOLVED snapshot.** A department states neither a billing
+address nor a tax axis (`OrganizationSchema` invariants 10–12), so a builder
+that froze the addressed node's own fields wrote `null` / `false` onto every
+department document. That used to be a grep with an allowlist in
+api-cloudrun's test suite; it is now unrepresentable.
 
-⚠️ **This pins WHERE the snapshot is built, not WHAT it holds** — the
-Ratchet-G lesson. api-cloudrun's writer-parity test is the value assertion
-beside it: one order created natively and one through the CRMS opportunity
-path, same commercial facts, must produce byte-identical `organization`
-blocks.
+⚠️ **This pins WHERE the snapshot is built, not WHAT it holds.** api-cloudrun's
+writer-parity test is the value assertion beside it: two orders with the same
+commercial facts, created through different paths, must produce byte-identical
+`organization` blocks.
 
-`|| null` rather than `?? null` on `crms_id` and `xero_id` is deliberate and
-matches every call site it replaces — a `crms_id` of `0` is not a CRMS id.
+`overrides` is spread LAST, so an explicit override still wins — the CRMS
+webhooks pass `{ crms_id }` because the member id comes from the payload
+rather than from the organization document.
 
-## The tax axes, and why they are emitted UNCONDITIONALLY
+`|| null` rather than `?? null` on `crms_id` and `xero_id` is deliberate: a
+`crms_id` of `0` is not a CRMS id.
 
-`jurisdiction_claim` and `tax_exempt` are the pair that retires
-`tax_profile` (api-cloudrun#596 item 1). Carrying them HERE is what makes
-every writer dual-write for free — the alternative was two more fields in
-each hand-rolled literal, which is the failure mode this function exists to
-end.
+⚠️ **The axes are written UNCONDITIONALLY, never omitted on absence.** `null` /
+`false` is the real answer for a customer who asserts nothing, and omitting
+would leave a reader unable to tell that apart from a snapshot no writer has
+touched.
 
-⚠️ **Always written, never omitted.** That signal has now done its job and
-changed meaning: while `tax_profile` was still the fallback, an ABSENT axis
-meant *"this snapshot predates the axes, read the enum"*. The whole corpus is
-migrated and this builder no longer emits an enum for anything to fall back
-to, so an absent axis is now simply a snapshot no writer has touched since —
-and `null`/`false` remains the real answer. Omitting on absence would still
-be wrong, for the surviving half of the reason: it would leave a reader
-unable to distinguish it from a customer who asserts nothing.
-
-🔴 **`tax_profile` is NOT emitted any more (api-cloudrun#596 item 3).** It is
-`.optional()` on the snapshot for one release cycle — the expand third — and
-this is the writer half of the same step: storage cannot be emptied while a
-shared builder keeps refilling it. ⚠️ The credit-note idempotency hash reads
-this block, and dropping the field from it moves NOTHING, because
-`creditNoteContentHash` is never persisted — api-cloudrun recomputes it from
-the stored document on both sides of every comparison, so both sides always
-agree. That refutes what api-cloudrun#596 said was the blocker here.
-
-⚠️ **`?? null` / `?? false` is lossless on the measured corpus, not a
-flattening** — prod 2026-08-21: 291 organizations, and the 11 carrying
-`tax_exempt: true` are exactly the 11 whose profile is `tax_exempt`, the 3
-carrying a `jurisdiction_claim` are exactly the 3 with a location profile,
-and the remaining 277 (`tax_applied`) carry neither. Absent on the
-organization already means *asserts nothing*, so there is no third state to
-destroy. See {@link DocumentOrganizationSnapshotType.jurisdiction_claim}.
+The migration history this docblock used to narrate — the four-literal
+unification, `tax_profile`'s retirement, the `name` removal, the `path`
+addition and its pathless-documents post-mortem — is in the
+`organization-tree` skill. Four of the six described fields this function does
+not write.
 
 ### `composeOrgName(path: readonly OrgPathNodeType[], _: unknown): string`
 
@@ -32613,6 +32650,19 @@ Throws rather than returning a partial result, because every caller is a write
 path and a silently-wrong `path` is a row identity that addresses the wrong
 subtree.
 
+### `isOrgDepartment(node: Pick<Organization, "path">): boolean`
+
+Is this node a DEPARTMENT — the deepest level, the one that states neither a
+billing address nor a tax axis and therefore inherits both?
+
+⭐ **The one spelling.** `path.length === 3`, `path?.length === ORG_LEVELS.length`
+and `orgLevel(n) === "department"` were all in live use; the literal `3` was
+sixty lines above two invariants using `ORG_LEVELS.length`, inside one file.
+
+### `isOrgRoot(node: Pick<Organization, "path">): boolean`
+
+Is this node a ROOT — the top of its tree, depth 1?
+
 ### `isOrganizationDormant(node: typeLiteral, nowMs: number): boolean`
 
 Whether a node is dormant at `nowMs`: its last activity is strictly older
@@ -32623,25 +32673,36 @@ active, matching the search sort's `>=`.
 document, but a reader can still hold a projection without it, and muting a
 live customer on a missing value is the wrong direction to fail.
 
-### `orgLevel(node: Pick<Organization, "path">): OrgLevel | null`
+### `orgLevel(node: Pick<Organization, "path">): OrgLevel`
 
 The level a node sits at, read off `path` — never stored, so it cannot drift.
 
-### `orgOwnName(node: Pick<Organization, "path">): string | null`
+⚠️ **THROWS on a path outside `[1, ORG_LEVELS.length]` rather than returning
+`null`.** `path` has been `.min(1).max(3)` and required since
+`@cfs/core@10.0.0-beta.305`, so a pathless or over-deep organization is
+unwritable and every `=== null` test on this was a dead branch — while the
+`| null` return kept callers writing them, and kept the question *"is this a
+department?"* spelled four different ways across three repos. The throw is
+what makes the narrowed type honest: a caller holding RAW Firestore data
+rather than a parsed document (an audit, a Typesense translate) must ask
+about `path` itself before asking this.
+
+### `orgOwnName(node: Pick<Organization, "path">): string`
 
 This node's OWN name — one segment, not the composed label.
 
 ### `orgParentUid(node: Pick<Organization, "path">): string | null`
 
-This node's parent — `path.at(-2).uid`.
+This node's parent — `path.at(-2).uid`, or `null` when this node IS a root.
 
-⚠️ **`null` is TWO answers here and the caller must not conflate them**: a
-root (a one-element `path`) and a node with no `path` yet. Check `orgLevel`
-first when the difference matters.
+⚠️ **`null` now has exactly ONE meaning: a root.** It used to have two — a
+root, and a node with no `path` yet — and the second is gone with the
+pathless document (see {@link orgLevel}). A caller may read `null` as
+*"nothing above this"* without a second check.
 
-### `orgRootUid(node: Pick<Organization, "path">): string | null`
+### `orgRootUid(node: Pick<Organization, "path">): string`
 
-The root of this node's tree — `path[0].uid`. `null` before the backfill.
+The root of this node's tree — `path[0].uid`.
 
 ### `organizationActivityMs(node: typeLiteral): number | null`
 
@@ -32655,7 +32716,7 @@ The epoch-ms instant before which a node's `activity_at` makes it dormant —
 what the manager's Typesense `_eval(activity_at:>=<cutoff>)` sort compares
 against, built once per search.
 
-### `resolveBillingAddress(node: Pick<Organization, "uid" | "path" | "billing_address">, _: unknown): ResolvedBillingAddress`
+### `resolveBillingAddress(node: Pick<Organization, "uid" | "path" | "billing_address">, ancestors: OrgAncestors<Pick<OrgAncestorFacts, "billing_address">>): ResolvedBillingAddress`
 
 The billing address a document addressed to `node` should freeze.
 
@@ -32675,18 +32736,19 @@ passes through it to the root by construction rather than by a filter that
 could drift from the schema. That is the whole return on stating the
 invariant rather than policing it.
 
-⚠️ **`ancestors` may be incomplete, and a missing one states nothing rather
-than throwing.** A chain naming a node that no longer exists is a dangling
-reference — `api-cloudrun/scripts/repair-dangling-organization-refs.ts`'s
-finding, not this function's — and turning it into an exception here would
-take down every order write for the whole subtree instead of one report.
+⚠️ **A missing or tombstoned ancestor states nothing rather than throwing** —
+see {@link OrgAncestors} for why the walk swallows both and where the
+difference IS enforced. A chain naming a node that no longer exists is a
+dangling reference, and `repair-dangling-organization-refs.ts`'s finding
+rather than this function's; an exception here would take down every order
+write for the whole subtree instead of filing one report.
 
 ⚠️ **Reads `node.path`, never a re-fetched chain.** `path` is self-inclusive
 and is the authority on ancestry (invariants 1 and 5), so the caller only has
 to supply the ANCESTOR documents — at most two point-gets, and usually one,
 because a department that inherits stops at its project.
 
-### `resolveTaxAxes(node: Pick<Organization, "uid" | "path" | "jurisdiction_claim" | "tax_exempt">, _: unknown): ResolvedTaxAxes`
+### `resolveTaxAxes(node: Pick<Organization, "uid" | "path" | "jurisdiction_claim" | "tax_exempt">, ancestors: OrgAncestors<Pick<OrgAncestorFacts, "jurisdiction_claim" | "tax_exempt">>): ResolvedTaxAxes`
 
 The two tax AXES a document addressed to `node` should freeze.
 
@@ -32703,9 +32765,8 @@ in exactly this direction, so a project may add one and never remove one.
 walk passes through by construction — the same return `resolveBillingAddress`
 gets from invariants 10 and 11.
 
-⚠️ **A missing ancestor states nothing rather than throwing**, for the same
-reason as the billing walk: a dangling chain is a repair script's finding, and
-an exception here would take down every order write under it. That does mean
+⚠️ **A missing or tombstoned ancestor states nothing rather than throwing**,
+for the same reason as the billing walk ({@link OrgAncestors}). That does mean
 a dangling reference to an exempt root reads as NOT exempt — a missing
 ancestor is reported, not guessed.
 
@@ -32714,14 +32775,17 @@ from `node.path`, never a re-fetched chain.
 
 ### `validateOrganizationTree(node: Pick<Organization, "uid" | "path" | "uid_department_type">, parent: Pick<Organization, "uid" | "path"> | null, siblings: readonly Pick<Organization, "uid" | "path" | "uid_department_type">[]): string[]`
 
-The tree invariants that need MORE than one document — 5 through 8.
+The THREE tree invariants that need MORE than one document — 5, 6 and 6b.
 
-🔴 **1 through 4 are NOT here, deliberately.** They live on
-`OrganizationSchema` as a `superRefine`, because they read one document and
-nothing else, and that independence is what keeps this function honest.
+🔴 **The one-document invariants are NOT here, deliberately** — 1, 2, 3, 4,
+the one-document half of 8, and 10, 11, 12 live on `OrganizationSchema` as a
+`superRefine`, because they read one document and nothing else, and that
+independence is what keeps this function honest. (7, the depth bound, is
+enforced where `path` is BUILT — {@link computeOrganizationNode} throws — so
+there is nothing left for a validator to re-check.)
 Invariant 5 is a fixed-point check — *"my path is my parent's path plus me"* —
 defined in terms of {@link computeOrganizationNode} and therefore only ever
-able to agree with it. It is safe **because** four properties that hold
+able to agree with it. It is safe **because** eight properties that hold
 independently of the walk stand beside it. A guard that can only consult its
 own oracle is not a guard: that is exactly the shape that certified 79
 provably-wrong item paths as clean, corpus-wide.

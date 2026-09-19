@@ -289,15 +289,16 @@ export interface Organization {
 }
 
 /**
- * The four invariants that read **ONE document and nothing else**.
+ * The EIGHT invariants that read **ONE document and nothing else** — 1, 2, 3, 4,
+ * the one-document half of 8, and 10, 11, 12.
  *
  * 🔴 **Their independence is the whole point.** The rest of the tree guard is a
  * fixed-point check — *"`path` equals what the recompute produces"* — which is
  * defined in terms of the normalizer and can therefore only ever agree with it.
  * When `computeInvoiceItemPaths` returned its input unchanged on a divider-less
  * invoice, exactly that shape of guard certified **79 provably-wrong items as
- * clean, corpus-wide**. So these four are asserted DIRECTLY, and the
- * parent-chain recurrence is safe *because* they stand beside it.
+ * clean, corpus-wide**. So these are asserted DIRECTLY, and the parent-chain
+ * recurrence is safe *because* they stand beside it.
  *
  * 🔴 **Invariant 1 is invisible to the existing drift guard, and that is why it
  * is here rather than in api-cloudrun.** `assertValidForWrite` /
@@ -360,12 +361,12 @@ function checkOrganizationNode(doc: Organization, ctx: z.RefinementCtx): void {
   // 8 (the half that is a one-document check). A typed department names a
   //   catalog entry; nothing else may.
   if (doc.uid_department_type !== undefined && path.length > 0) {
-    const isTypedDepartment = path.length === 3 && !path[path.length - 1].derived;
+    const isTypedDepartment = path.length === ORG_LEVELS.length && !path[path.length - 1].derived;
     if ((doc.uid_department_type !== null) !== isTypedDepartment) {
       ctx.addIssue({
         code: "custom",
         path: ["uid_department_type"],
-        message: `uid_department_type is set on exactly the TYPED departments (path.length === 3 and not derived) — this node is depth ${path.length}${path.length > 0 && path[path.length - 1].derived ? " and derived" : ""}`,
+        message: `uid_department_type is set on exactly the TYPED departments (path.length === ${ORG_LEVELS.length} and not derived) — this node is depth ${path.length}${path.length > 0 && path[path.length - 1].derived ? " and derived" : ""}`,
       });
     }
   }

@@ -5,6 +5,7 @@ import { assertEquals, assertThrows } from "@std/assert";
  * wrong reason. */
 const ORG_ID = "x0fdH2hFqKY9HsOsEmi4";
 import {
+  assertOrgAncestorsComplete,
   buildOrganizationSnapshot,
   composeOrgName,
   computeOrganizationNode,
@@ -12,6 +13,8 @@ import {
   ORGANIZATION_DORMANT_AFTER_DAYS,
   organizationActivityMs,
   organizationDormantCutoffMs,
+  isOrgDepartment,
+  isOrgRoot,
   orgLevel,
   orgOwnName,
   orgParentUid,
@@ -59,7 +62,7 @@ Deno.test("buildOrganizationSnapshot carries the AXES, and no longer the enum", 
   // field #486 was missing from three of four hand-rolled literals. The axes
   // now carry that same fact and carry it BETTER: `tax_frankfort` welded a
   // jurisdiction to an exemption slot, and these two say each separately.
-  const snapshot = buildOrganizationSnapshot(ORG);
+  const snapshot = buildOrganizationSnapshot(ORG, new Map());
   assertEquals(snapshot.jurisdiction_claim, "frankfort");
   assertEquals(snapshot.tax_exempt, false);
   // 🔴 The half that makes this a real assertion: the key is ABSENT, not
@@ -82,7 +85,7 @@ Deno.test("buildOrganizationSnapshot FREEZES the chain, not just its composed te
   // point of storing the chain beside the text is that the text cannot be
   // grouped on, joined on, or parsed back — so the test has to read the
   // structure.
-  const snapshot = buildOrganizationSnapshot(ORG);
+  const snapshot = buildOrganizationSnapshot(ORG, new Map());
   assertEquals(snapshot.path, ORG.path);
   assertEquals(snapshot.path?.at(-1)?.uid, ORG_ID);
   // ⭐ **And the composed scalar is NOT emitted — asserted positively, on the
@@ -103,7 +106,7 @@ Deno.test("buildOrganizationSnapshot produces a snapshot the shared schema accep
   // materialize on parse, and `validateBeforeWrite` discards the parsed output
   // anyway — so asserting the output equals the input would only be asserting
   // which keys carry a default.
-  const snapshot = buildOrganizationSnapshot(ORG);
+  const snapshot = buildOrganizationSnapshot(ORG, new Map());
   assertEquals(DocumentOrganizationSnapshot.safeParse(snapshot).success, true);
 });
 
@@ -113,7 +116,7 @@ Deno.test("buildOrganizationSnapshot: falsy crms_id/xero_id/billing_address beco
     crms_id: 0,
     xero_id: "",
     billing_address: null,
-  } as unknown as Organization);
+  } as unknown as Organization, new Map());
   // `|| null`, matching every call site it replaces — a `crms_id` of 0 is not a
   // CRMS id, and Firestore stores an absent xero_id as null rather than "".
   assertEquals(bare.crms_id, null);
@@ -126,7 +129,7 @@ Deno.test("buildOrganizationSnapshot: overrides win, for the CRMS member_id case
   // opportunity payload's `member_id`, not from the org document — that is the
   // one field the four writers legitimately disagree on, so it is a parameter
   // rather than a reason to keep a fourth hand-written literal.
-  const snapshot = buildOrganizationSnapshot(ORG, { crms_id: 9999 });
+  const snapshot = buildOrganizationSnapshot(ORG, new Map(), { crms_id: 9999 });
   assertEquals(snapshot.crms_id, 9999);
   // A depth-1 node composes to its own segment — which is the name the
   // OVERRIDES could still put back, so the assertion is that they did not.
@@ -354,12 +357,10 @@ Deno.test("the derivations are READ OFF path — there is no stored level, root 
   assertEquals(orgLevel(rootDoc), "organization");
   assertEquals(orgLevel(projectDoc), "project");
   assertEquals(orgLevel(deptDoc), "department");
-// ⚠️ Cast: `path` is REQUIRED as of the `name` removal, so this state is
-  // unrepresentable in the TYPE — but a Firestore document is not type-checked,
-  // and these functions still defend against one that lacks it. The cast is what
-  // keeps that runtime guard covered now that the compiler forbids the input.
-  assertEquals(orgLevel({ path: undefined } as unknown as Pick<Organization, "path">), null);
-
+  // ⚠️ The pathless arm moved OUT of here and became a throw — see
+  // "orgLevel THROWS rather than answering null". `path` is required and
+  // `.min(1).max(3)`, so this function no longer has a null to return, and a
+  // reader of RAW Firestore data asks about `path` itself.
   assertEquals(orgRootUid(deptDoc), ROOT_ID);
   assertEquals(orgParentUid(deptDoc), PROJECT_ID);
   assertEquals(orgParentUid(rootDoc), null, "a root's parent is null");
@@ -458,17 +459,140 @@ Deno.test("validateOrganizationTree returns [] for an un-backfilled node rather 
   assertEquals(validateOrganizationTree({ uid: ROOT_ID, path: undefined, uid_department_type: null } as unknown as Parameters<typeof validateOrganizationTree>[0], null, []), []);
 });
 
+// ── The completeness assertion — what REPLACED the ratchet ──────────────────
+//
+// ⭐ **This is a migration, not a deletion.** api-cloudrun's
+// `organizationTreeCoverage` arm E greped `src/` for a bare
+// `buildOrganizationSnapshot(` with a one-entry allowlist — a TEXT guard
+// standing in for a missing type distinction, needing a negative assertion just
+// to avoid flagging `buildResolvedOrganizationSnapshot`, which contains the bare
+// name as a substring. The class it policed is now closed by construction: the
+// builder resolves internally and refuses an ancestors map that cannot support
+// the resolution.
+//
+// 🔴 **Assert the THROW.** A test that only checks the happy path reports zero
+// findings for every way this can break.
+
+const DEPT_ORG = {
+  uid: DEPT_ID,
+  path: [rootNode, projectNode, deptNode],
+  crms_id: null,
+  jurisdiction_claim: null,
+  tax_exempt: false,
+  xero_id: null,
+  billing_address: null,
+} as unknown as Organization;
+
+Deno.test("buildOrganizationSnapshot THROWS for a depth-3 node given an incomplete map", () => {
+  // The exact shape arm E existed to catch: a caller that hand-rolled an empty
+  // map, or forgot one of the two ancestors. Either used to produce a snapshot
+  // freezing `null` / `false` onto a department document — silently, and
+  // correctly-looking, right up until a department stopped stating its own.
+  const err = assertThrows(
+    () => buildOrganizationSnapshot(DEPT_ORG, new Map()),
+    Error,
+    "were not supplied",
+  );
+  // Names the uids, so the failure is actionable at the call site.
+  assertEquals(err.message.includes(ROOT_ID), true);
+  assertEquals(err.message.includes(PROJECT_ID), true);
+
+  // A PARTIAL map is refused too — one ancestor present is not "close enough".
+  assertThrows(
+    () => buildOrganizationSnapshot(DEPT_ORG, new Map([[PROJECT_ID, null]])),
+    Error,
+    ROOT_ID,
+  );
+});
+
+Deno.test("buildOrganizationSnapshot RESOLVES the inherited values given a complete map", () => {
+  // The other half: the throw must not be the only outcome, or the mechanism is
+  // just a refusal. A stating ROOT, a silent project, a department that states
+  // nothing — the case `resolveTaxAxes` and `resolveBillingAddress` exist for,
+  // asserted through the builder that every document writer actually calls.
+  const snapshot = buildOrganizationSnapshot(
+    DEPT_ORG,
+    new Map([
+      [ROOT_ID, { billing_address: BURBANK, jurisdiction_claim: "frankfort" as const, tax_exempt: true }],
+      [PROJECT_ID, { billing_address: null, jurisdiction_claim: null, tax_exempt: false }],
+    ]),
+  );
+  assertEquals(snapshot.billing_address, BURBANK);
+  assertEquals(snapshot.jurisdiction_claim, "frankfort");
+  assertEquals(snapshot.tax_exempt, true);
+  // The chain is frozen whole, and the leaf is still the addressed node.
+  assertEquals(snapshot.path?.at(-1)?.uid, DEPT_ID);
+  assertEquals(DocumentOrganizationSnapshot.safeParse(snapshot).success, true);
+});
+
+Deno.test("buildOrganizationSnapshot: a ROOT asserts nothing — the depth-1 case is correct by construction", () => {
+  // `path.slice(0, -1)` is empty, so `new Map()` is COMPLETE here rather than
+  // tolerated. This is what stops the assertion being a thing every caller has
+  // to remember to satisfy.
+  const snapshot = buildOrganizationSnapshot(ORG, new Map());
+  assertEquals(snapshot.uid, ORG_ID);
+});
+
+Deno.test("assertOrgAncestorsComplete: a TOMBSTONE satisfies it, an absent key does not", () => {
+  // 🔴 The distinction the whole `OrgAncestors` type exists to carry. Both walk
+  // identically inside the resolvers; only here do they differ.
+  assertOrgAncestorsComplete(DEPT_ORG, new Map([[ROOT_ID, null], [PROJECT_ID, null]]));
+  assertThrows(() => assertOrgAncestorsComplete(DEPT_ORG, new Map([[ROOT_ID, null]])), Error, PROJECT_ID);
+});
+
+// ── One spelling of depth ────────────────────────────────────────────────────
+
+Deno.test("orgLevel THROWS rather than answering null for a document outside the tree", () => {
+  // `path` has been required and `.min(1).max(3)` since beta.305, so every
+  // `=== null` test on this was dead — and the `| null` kept callers writing
+  // them. A caller holding RAW Firestore data asks about `path` first.
+  assertThrows(() => orgLevel({ path: undefined } as unknown as Pick<Organization, "path">), Error);
+  assertThrows(() => orgLevel({ path: [] } as unknown as Pick<Organization, "path">), Error);
+  assertThrows(
+    () => orgLevel({ path: [rootNode, projectNode, deptNode, deptNode] } as unknown as Pick<Organization, "path">),
+    Error,
+  );
+});
+
+Deno.test("isOrgRoot / isOrgDepartment agree with orgLevel at every depth", () => {
+  const root = { path: [rootNode] };
+  const project = { path: [rootNode, projectNode] };
+  const department = { path: [rootNode, projectNode, deptNode] };
+  assertEquals([isOrgRoot(root), isOrgRoot(project), isOrgRoot(department)], [true, false, false]);
+  assertEquals([isOrgDepartment(root), isOrgDepartment(project), isOrgDepartment(department)], [false, false, true]);
+  // `orgParentUid`'s `null` now means exactly one thing: a root.
+  assertEquals(orgParentUid(root), null);
+  assertEquals(orgParentUid(department), PROJECT_ID);
+});
+
 // ── resolveBillingAddress — api-cloudrun#777 ────────────────────────────────
 //
 // Organization states, project overrides, department inherits. `null` on a node
 // means "ask my parent".
 
-const CHICAGO = { full: "2558 W 16th St, Chicago, IL, 60608, United States" } as NonNullable<
-  Organization["billing_address"]
->;
-const BURBANK = { full: "500 S Buena Vista St, Burbank, CA, 91521, United States" } as NonNullable<
-  Organization["billing_address"]
->;
+// ⚠️ **COMPLETE, and not behind a cast.** `Address` is a `z.strictObject` with
+// six more required keys, so `{ full } as NonNullable<…>` is a fixture the
+// schema rejects — and any assertion that the builder's output PARSES then fails
+// on the fixture rather than on the code. The same partial-address cast had
+// already killed `api-cloudrun/scripts/audit-organization-tree.ts`'s self-test.
+const CHICAGO: NonNullable<Organization["billing_address"]> = {
+  full: "2558 W 16th St, Chicago, IL, 60608, United States",
+  name: "Cinespace Chicago Film Studios",
+  street: "2558 W 16th St",
+  city: "Chicago",
+  region: "IL",
+  postcode: "60608",
+  country_name: "United States",
+};
+const BURBANK: NonNullable<Organization["billing_address"]> = {
+  full: "500 S Buena Vista St, Burbank, CA, 91521, United States",
+  name: "20th Television",
+  street: "500 S Buena Vista St",
+  city: "Burbank",
+  region: "CA",
+  postcode: "91521",
+  country_name: "United States",
+};
 
 /** A department node; `ancestors` is what the caller would have point-got. */
 const dept = (billing: Organization["billing_address"]) => ({
@@ -478,7 +602,7 @@ const dept = (billing: Organization["billing_address"]) => ({
 });
 
 Deno.test("resolveBillingAddress: a node that states one answers itself", () => {
-  assertEquals(resolveBillingAddress(dept(CHICAGO)), { address: CHICAGO, uid_source: DEPT_ID });
+  assertEquals(resolveBillingAddress(dept(CHICAGO), new Map()), { address: CHICAGO, uid_source: DEPT_ID });
 });
 
 Deno.test("resolveBillingAddress: a department with none inherits its PROJECT's", () => {
@@ -640,7 +764,7 @@ Deno.test("resolveTaxAxes: two exempt nodes source to the TOPMOST, not the neare
 
 Deno.test("resolveTaxAxes: a root answers for itself, with no ancestors at all", () => {
   const root = { uid: ROOT_ID, path: [rootNode], jurisdiction_claim: "frankfort" as const, tax_exempt: true };
-  assertEquals(resolveTaxAxes(root), {
+  assertEquals(resolveTaxAxes(root, new Map()), {
     jurisdiction_claim: "frankfort",
     uid_claim_source: ROOT_ID,
     tax_exempt: true,
@@ -649,11 +773,33 @@ Deno.test("resolveTaxAxes: a root answers for itself, with no ancestors at all",
 });
 
 Deno.test("resolveTaxAxes: nothing stated anywhere → null claim, not exempt, and no sources", () => {
-  const ancestors = new Map([
-    [ROOT_ID, { jurisdiction_claim: null, tax_exempt: false }],
-    [PROJECT_ID, { jurisdiction_claim: undefined, tax_exempt: undefined }],
-  ]);
+  const nothing = { jurisdiction_claim: null, tax_exempt: false };
+  const ancestors = new Map([[ROOT_ID, nothing], [PROJECT_ID, nothing]]);
   assertEquals(resolveTaxAxes(deptAxes(), ancestors), {
+    jurisdiction_claim: null,
+    uid_claim_source: null,
+    tax_exempt: false,
+    uid_exempt_source: null,
+  });
+});
+
+Deno.test("resolveTaxAxes: a TOMBSTONE states nothing, exactly as an absent key does", () => {
+  // ⚠️ The two are deliberately indistinguishable INSIDE the walk — a deleted
+  // ancestor must not take down every order write in the subtree. The
+  // difference is enforced one level up, by `assertOrgAncestorsComplete`.
+  const tombstoned = new Map([
+    [ROOT_ID, { jurisdiction_claim: "frankfort" as const, tax_exempt: true }],
+    [PROJECT_ID, null],
+  ]);
+  assertEquals(resolveTaxAxes(deptAxes(), tombstoned), {
+    jurisdiction_claim: "frankfort",
+    uid_claim_source: ROOT_ID,
+    tax_exempt: true,
+    uid_exempt_source: ROOT_ID,
+  });
+  // And a tombstoned EXEMPT root reads as NOT exempt — the documented,
+  // deliberate consequence of swallowing a dangling reference.
+  assertEquals(resolveTaxAxes(deptAxes(), new Map([[ROOT_ID, null], [PROJECT_ID, null]])), {
     jurisdiction_claim: null,
     uid_claim_source: null,
     tax_exempt: false,

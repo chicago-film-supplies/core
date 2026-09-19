@@ -58,9 +58,16 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   //     template calling either is a category error rather than a mistake.
   //   - `orgRootUid` / `orgParentUid` return document IDs, which a rendered
   //     document never prints.
-  //   - `orgLevel` / `orgOwnName` answer questions about a node's POSITION.
-  //     A document names its customer; it does not report where that customer
-  //     sits in CFS's internal tree.
+  //   - `orgLevel` / `isOrgRoot` / `isOrgDepartment` / `orgOwnName` answer
+  //     questions about a node's POSITION. A document names its customer; it
+  //     does not report where that customer sits in CFS's internal tree. The
+  //     two predicates are the one spelling of a depth comparison that was
+  //     previously written out by hand in three repos — internal by the same
+  //     argument as the function they wrap.
+  //   - `assertOrgAncestorsComplete` refuses an ancestors map that cannot
+  //     support a resolution. Write-path, and unreachable from a template for
+  //     the same reason as the two resolvers below: a render context holds one
+  //     frozen snapshot and cannot build the map it would assert over.
   //   - `resolveBillingAddress` walks the tree for the address a document
   //     should FREEZE (api-cloudrun#777: org states, project overrides,
   //     department inherits). Write-path for the same reason as
@@ -72,8 +79,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   //   - `resolveTaxAxes` is its tax twin — the same ancestors map, frozen into
   //     `it.doc.organization.jurisdiction_claim` / `tax_exempt` at write time.
   organizations: [
+    "assertOrgAncestorsComplete",
     "buildOrganizationSnapshot",
     "computeOrganizationNode",
+    "isOrgDepartment",
+    "isOrgRoot",
     // Dormancy (api-cloudrun#979) is a picker/search concern: a render context
     // holds a frozen document snapshot, which carries no `activity_at`.
     "isOrganizationDormant",
