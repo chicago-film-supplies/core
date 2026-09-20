@@ -184,6 +184,13 @@ export const PERMISSIONS = [
   "dateHelpers.read",
   "destinations.read",
   "destinations.search",
+  // ⚠️ **The FIRST write verb on this collection, and it is narrow on purpose.**
+  // A destination is created only as a side effect of an order write
+  // (`findOrCreateDestination` is a global address-book dedupe), so there is no
+  // `destinations.create` and no `destinations.delete` — the merge verb is an
+  // operator SCRIPT, not a route. This one covers the re-parent: hanging a unit
+  // under a property, or returning it to the root.
+  "destinations.update",
   "ledgers.read",
   "fulfillment.read",
   "fulfillment.search",
