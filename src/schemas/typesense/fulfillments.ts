@@ -80,6 +80,28 @@ export const fulfillments: TypesenseCollectionConfig = {
       // declared field here, so `stripUndeclaredFields` deletes it, and a
       // producer running after the strip reads `undefined` for every leg.
       { name: "destinations.pick_bucket", type: "string[]", facet: true, optional: true },
+      // The by-PROPERTY roll-up key — the same leg, one level up the tree.
+      //
+      // 🔴 **A SECOND field, never a replacement for `pick_bucket` and never a
+      // second element in the same array.** Two files assert that a pick sheet
+      // must reproduce the row that opened it, so parent-only breaks the
+      // gate-default coupling; and emitting both levels into ONE array breaks
+      // facet-count conservation, because Typesense counts array ELEMENTS
+      // independently and the sum would become 2× `found`. The organization
+      // axis already carries its levels as separate fields for the same reason.
+      //
+      // ⚠️ **Produced by `coerceArrayFields` beside `pick_bucket`, NOT
+      // `postProcess`** — same placement, same reason: `customer_collecting` is
+      // undeclared here, so `stripUndeclaredFields` has already deleted it by
+      // the time a `postProcess` producer runs.
+      //
+      // ⚠️ **It is a JOIN, not a read.** A fulfillment's destination block is a
+      // SNAPSHOT and carries no `path` — nothing cascades the tree into
+      // order/invoice/fulfillment snapshots, deliberately — so the property uid
+      // comes from a destinations map loaded from Firestore at index time,
+      // exactly as the org-sourced edges do. Its failure mode is therefore
+      // ABSENCE rather than a wrong value.
+      { name: "destinations.pick_property", type: "string[]", facet: true, optional: true },
       { name: "items", type: "object[]", optional: true },
       { name: "items.uid", type: "string[]", facet: false, optional: true },
       { name: "items.name", type: "string[]", stem: true, optional: true },

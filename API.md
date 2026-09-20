@@ -3020,7 +3020,7 @@ The two levels of the destination tree — `DESTINATION_LEVELS[path.length - 1]`
 a "Cinespace" umbrella over three lots unrepresentable, and that is the
 owner's rule 1 rather than a budget: a second street address held as a unit
 would overwrite the address a driver is actually sent to. The three lots are
-three properties. See `.claude/data/destination-tree/properties.yaml`.
+three properties. See `api-cloudrun/.claude/data/destination-tree/properties.yaml`.
 
 ```ts
 const DESTINATION_LEVELS: "property" | "unit"[];
@@ -15411,7 +15411,7 @@ The two levels of the destination tree — `DESTINATION_LEVELS[path.length - 1]`
 a "Cinespace" umbrella over three lots unrepresentable, and that is the
 owner's rule 1 rather than a budget: a second street address held as a unit
 would overwrite the address a driver is actually sent to. The three lots are
-three properties. See `.claude/data/destination-tree/properties.yaml`.
+three properties. See `api-cloudrun/.claude/data/destination-tree/properties.yaml`.
 
 ```ts
 const DESTINATION_LEVELS: "property" | "unit"[];

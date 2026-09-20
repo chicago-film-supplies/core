@@ -162,14 +162,17 @@ export interface DestinationDocument {
   uid: string;
   mapbox_ids: string[];
   address?: TypesenseAddressFields;
-  organizations?: Array<{
+  /**
+   * The self-inclusive property → unit chain. Indexed NATIVELY — there is no
+   * flat uid mirror on this side; `filter_by: path.uid:=<property>` is what
+   * answers "every unit of this property".
+   */
+  path?: Array<{
     uid?: string;
     name?: string;
   }>;
-  products?: Array<{
-    uid?: string;
-    name?: string;
-  }>;
+  /** The authoring-time jurisdiction SEED — stated on a property, absent on a unit. */
+  jurisdiction?: string;
   contacts?: Array<{
     uid?: string;
     name?: string;
@@ -494,6 +497,12 @@ export interface FulfillmentDocument {
     };
     /** Derived at index time — see `DERIVED_FIELDS["fulfillments:destinations.pick_bucket"]`. */
     pick_bucket?: string;
+    /**
+     * The same leg's PROPERTY — derived at index time by a join through
+     * `destinations`, see `DERIVED_FIELDS["fulfillments:destinations.pick_property"]`.
+     * Absent on a customer-collect leg and on a destination with no `path` yet.
+     */
+    pick_property?: string;
   }>;
   items?: Array<{
     uid?: string;

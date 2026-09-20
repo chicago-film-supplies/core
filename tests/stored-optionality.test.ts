@@ -199,6 +199,13 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["products.crms_rate_id", "crms-pending-removal"],
   // ── mid-expand — deliberately in transit. `DocumentOrganizationSnapshot`'s own
   //    docblock names the three-step dance it is in the first step of.
+  // The destination tree's authoring-time jurisdiction SEED. Absent on 0 of 258
+  // prod / 259 dev documents (2026-09-19), so under `z.strictObject` the reader
+  // has to deploy before the backfill can write one. 🔴 **The `.optional()` comes
+  // off in the same step that makes `path` required** — leave it and the
+  // property-states-it / unit-states-none invariant stops applying to exactly
+  // the documents that skipped the backfill.
+  ["destinations.jurisdiction", "mid-expand"],
   ["credit-notes.organization.jurisdiction_claim", "mid-expand"],
   ["invoices.organization.jurisdiction_claim", "mid-expand"],
   ["orders.organization.jurisdiction_claim", "mid-expand"],

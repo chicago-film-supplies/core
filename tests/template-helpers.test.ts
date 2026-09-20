@@ -32,6 +32,7 @@ import * as bookingUtils from "../src/utils/bookings.ts";
 import * as cardUtils from "../src/utils/cards.ts";
 import * as contactNameUtils from "../src/utils/contact-name.ts";
 import * as dateUtils from "../src/utils/dates.ts";
+import * as destinationUtils from "../src/utils/destinations.ts";
 import * as documentDiffUtils from "../src/utils/documentDiff.ts";
 import * as quantityAccountingUtils from "../src/utils/quantityAccounting.ts";
 import * as iconUtils from "../src/utils/icons.ts";
@@ -88,6 +89,7 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // derives one. Listed so the drift guard sees its exports.
   "booking-id": bookingIdUtils,
   bookings: bookingUtils,
+  destinations: destinationUtils,
   cards: cardUtils,
   "contact-name": contactNameUtils,
   dates: dateUtils,

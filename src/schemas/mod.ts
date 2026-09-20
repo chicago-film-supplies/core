@@ -585,12 +585,14 @@ export {
 } from "./cache-geocodes.ts";
 
 export {
+  DESTINATION_LEVELS,
   DestinationSchema,
   DestinationContactRef,
-  DestinationOrganizationRef,
+  DestinationPathNode,
   type Destination as DestinationDoc,
   type DestinationContactRefType,
-  type DestinationOrganizationRefType,
+  type DestinationLevelType,
+  type DestinationPathNodeType,
 } from "./destination.ts";
 
 export {

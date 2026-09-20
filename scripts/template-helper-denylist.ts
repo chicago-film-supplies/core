@@ -78,6 +78,38 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   //     already this function's output, resolved at write time.
   //   - `resolveTaxAxes` is its tax twin — the same ancestors map, frozen into
   //     `it.doc.organization.jurisdiction_claim` / `tax_exempt` at write time.
+  // The destination tree, denylisted WHOLE — and unlike `organizations`, there
+  // is no promotion condition to write down here, because the tree is
+  // deliberately never cascaded into a document snapshot. *"Snapshot on the
+  // DOCUMENT, derive on the MASTER"* (`merge-destinations.ts`): rewriting a
+  // frozen address would erase, from completed history, the fact that a
+  // delivery went to Stage 25 rather than to the campus gate. So a render
+  // context holds `it.doc.destinations[i].delivery.address` — a frozen address
+  // with `street2` ALREADY on it — and never a destination document with a
+  // `path` to ask questions of.
+  //
+  //   - `computeDestinationNode` is the ONE AUTHOR of `path`, `query_by_path`
+  //     and `street2`, and `applyDestinationStreet2` is how a writer applies it.
+  //     A template calling either is a category error rather than a mistake.
+  //   - `destinationLevel` / `isDestinationProperty` / `isDestinationUnit` /
+  //     `destinationOwnName` answer questions about a node's POSITION in CFS's
+  //     internal tree, which a customer-facing document does not report. The
+  //     paperwork prints two address lines, unchanged.
+  //   - `destinationPropertyUid` / `destinationParentUid` return document ids,
+  //     which a rendered document never prints.
+  //   - `resolveDestinationJurisdictionSeed` is an AUTHORING-time seed for the
+  //     picker (api-cloudrun#591) — it prices nothing, so it renders nothing.
+  destinations: [
+    "applyDestinationStreet2",
+    "computeDestinationNode",
+    "destinationLevel",
+    "destinationOwnName",
+    "destinationParentUid",
+    "destinationPropertyUid",
+    "isDestinationProperty",
+    "isDestinationUnit",
+    "resolveDestinationJurisdictionSeed",
+  ],
   organizations: [
     "assertOrgAncestorsComplete",
     "buildOrganizationSnapshot",

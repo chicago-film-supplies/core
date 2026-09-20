@@ -196,9 +196,11 @@ export const TYPESENSE_ROLLUP_COLUMNS: Record<
   contacts: {
     "organizations.name": { label: "Organizations", cell: "link", meta: { linkTo: "organizationDetail" } },
   },
-  destinations: {
-    "organizations.name": { label: "Organizations", cell: "link", meta: { linkTo: "organizationDetail" } },
-  },
+  // ⭐ **`destinations` has NO rollup table any more.** Its one entry was
+  // `organizations.name`, and `destinations_v6` declares no `organizations.*`
+  // at all — the last step of the four-step removal (api-cloudrun#654). T10
+  // refuses a rollup key naming a field its collection does not declare, which
+  // is what caught it.
   organizations: {
     level: { label: "Level", cell: "plain" },
     // 🔴 **Required, and not for cosmetics** (api-cloudrun#791). `getFilters()`'s

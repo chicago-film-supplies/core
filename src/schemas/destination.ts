@@ -7,46 +7,59 @@ import {
   Address,
   type AddressType,
   type FirestoreTimestampType,
+  JurisdictionEnum,
+  type JurisdictionType,
   NameField,
   type NameParts,
   NamePartsFields,
   TimestampFields,
-  UidNameRef,
-  type UidNameRefType,
 } from "./common.ts";
 
 /**
- * Organization reference embedded in a destination document — **the uid alone**.
+ * The two levels of the destination tree — `DESTINATION_LEVELS[path.length - 1]`.
  *
- * 🔴 **Its OWN type rather than the shared `UidNameRef`, and that is not
- * cosmetic.** `UidNameRef` also backs `tags`, `products` and `alternates` in
- * `product.ts`, `webshop-product.ts` and `tag.ts`, none of which is part of this
- * campaign; removing `name` from it would have changed all four at once.
- * Population A2 of api-cloudrun#782 — see
- * {@link ContactOrganizationType} for why the edge composes rather than stores,
- * and for the four-step removal this is the last step of.
- *
- * ⭐ **This edge was the campaign's clearest evidence, because nothing ever
- * maintained it.** `contacts.organizations[].name` had a cascade and agreed with
- * `composeOrgName(path)` on 214 of 214 prod edges; this one had none, and
- * **218 of 470 disagreed** — fossils like
- * `"20th Television - Deli Boys - S2: Locations"` against the live
- * `"20th Television / Deli Boys S2 / Locations"` (measured 2026-09-02, both
- * environments). A denormalization with no cascade is not a cheaper
- * denormalization; it is a stale one.
- *
- * ⚠️ **`organizations[]` means *the org that first created this address***, not
- * every org that uses it — all three match branches of `findOrCreateDestination`
- * return the found uid and write nothing back. That is unchanged here, and it is
- * why the array has no `query_by_*` mirror (see the field comment below).
+ * ⚠️ **A PROPERTY is one STREET ADDRESS, not a brand.** `.max(2)` is what makes
+ * a "Cinespace" umbrella over three lots unrepresentable, and that is the
+ * owner's rule 1 rather than a budget: a second street address held as a unit
+ * would overwrite the address a driver is actually sent to. The three lots are
+ * three properties. See `api-cloudrun/.claude/data/destination-tree/properties.yaml`.
  */
-export interface DestinationOrganizationRefType {
+export const DESTINATION_LEVELS = ["property", "unit"] as const;
+
+/** The level a destination node sits at, read off `path.length`. */
+export type DestinationLevelType = typeof DESTINATION_LEVELS[number];
+
+/**
+ * One node of a destination's ancestor chain — `{uid, name}`, and deliberately
+ * NOT {@link OrgPathNodeType}.
+ *
+ * Three differences, each load-bearing:
+ *
+ * 1. **No `derived`.** Nothing mints a destination node as a placeholder; the
+ *    one document this campaign creates is minted by the operator-authored
+ *    migration, from a YAML the owner ruled. A flag with one constant value is
+ *    a field that will be read as meaning something.
+ * 2. **`name` may be EMPTY on a property**, where `OrgPathNode.name` is
+ *    `.min(1)`. A property is identified by its STREET ADDRESS, and one of the
+ *    three in the corpus (`211 E Chicago Ave`) has no place name at all — the
+ *    owner's words were *"the building is 211 E Chicago"*. The non-empty
+ *    requirement therefore lands on the UNIT leaf alone, where it is real:
+ *    a unit's name IS `address.street2`, and an empty line 2 is not a unit.
+ * 3. **`path[0].name` mirrors `address.name` on EVERY node of a property**, root
+ *    and unit alike, so the denorm is checkable from ONE document rather than
+ *    by a fan-out. That is the whole reason the migration rewrites a unit's
+ *    `address.name` to the place name: the unit designator moves to `street2`
+ *    and the place name is what is left.
+ */
+export interface DestinationPathNodeType {
   uid: string;
+  name: string;
 }
 
-/** Zod schema for an organization reference embedded in a destination. */
-export const DestinationOrganizationRef: z.ZodType<DestinationOrganizationRefType> = z.strictObject({
+/** Zod schema for one node of a destination's ancestor chain. */
+export const DestinationPathNode: z.ZodType<DestinationPathNodeType> = z.strictObject({
   uid: FirestoreId,
+  name: z.string().max(100).meta({ pii: "mask" }),
 });
 
 /**
@@ -74,12 +87,171 @@ export interface Destination {
   uid: string;
   address: AddressType | null;
   mapbox_ids: string[];
-  organizations?: DestinationOrganizationRefType[];
-  products?: UidNameRefType[];
+  /**
+   * This node's SELF-INCLUSIVE ancestor chain — `[property, unit]` for a unit,
+   * `[itself]` for everything else.
+   *
+   * 🔴 **ONE author: {@link computeDestinationNode} in `utils/destinations.ts`.**
+   * The same rule `computeItemPaths` carries for `items[].path` and
+   * `computeOrganizationNode` for the org tree, and for the same reason — a
+   * chain the client sends can name a parent that is itself a unit, or a parent
+   * that does not exist. The server derives it from the RESOLVED parent or not
+   * at all.
+   *
+   * ⚠️ **`.optional()` through the EXPAND third of the rollout only.** Storage
+   * carried the key on 0 of 258 prod / 259 dev documents when this shipped
+   * (measured 2026-09-19), so under `z.strictObject` the reader has to deploy
+   * before the backfill can write one. The optionality comes out with the
+   * tighten, together with `query_by_path`'s and `jurisdiction`'s.
+   */
+  path?: DestinationPathNodeType[];
+  /**
+   * Flat mirror of `path.map(n => n.uid)` — **FIRESTORE-ONLY**, for the single
+   * thing Firestore cannot do natively: `array-contains` compares WHOLE
+   * elements, so it cannot match a uid nested inside an array of objects.
+   * `where("query_by_path", "array-contains", uid)` is what answers *"every
+   * unit of this property"* in one query.
+   *
+   * ⚠️ **Typesense needs no such field** — `enable_nested_fields` indexes
+   * `path.uid` natively. This is a limitation of the other store, not a shape
+   * the index wants, which is why the org tree's mirror has the same asymmetry.
+   *
+   * 🔴 It is also what `getOpenBookingsAtDestination` must use rather than an
+   * `in` over a property's units: Firestore caps a disjunction at 30 and a
+   * property has no bound on its unit count.
+   */
+  query_by_path?: string[];
+  /**
+   * The tax jurisdiction this PROPERTY asserts, `null` when the address derives
+   * it correctly — which is both properties in the corpus today.
+   *
+   * 🔴 **An AUTHORING-TIME SEED for the picker, and never a rung in
+   * `resolveJurisdiction`.** api-cloudrun#591 deleted the destination-master
+   * jurisdiction level because *"a destination is keyed by address and reused
+   * across orders and years, so a stamped jurisdiction goes wrong
+   * prospectively"*. That objection is about a value READ AT PRICING TIME for an
+   * existing order; the tax ladder reads `order.destinations[i].jurisdiction` —
+   * a snapshot frozen on the order's own pair — and this field feeds
+   * `deriveJurisdiction` a better default when a pair is first authored.
+   * Verified against `utils/taxes.ts`: `resolveJurisdiction` has exactly three
+   * rungs and no destination-master rung. **Adding a fourth re-opens #591.**
+   *
+   * ⚠️ **Stated on the PROPERTY, absent on the UNIT** — the direct analogue of
+   * organization invariant 12. No property straddles a municipal boundary
+   * (owner, 2026-09-19), so "a stage states its own jurisdiction" is made
+   * unrepresentable rather than policed.
+   */
+  jurisdiction?: JurisdictionType | null;
   contacts?: DestinationContactRefType[];
   version: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
+}
+
+/**
+ * The FIVE tree invariants that read **ONE document and nothing else**.
+ *
+ * 🔴 **Asserted DIRECTLY, not through a fixed-point check.** *"`path` equals
+ * what {@link computeDestinationNode} would produce"* is defined in terms of the
+ * author and can therefore only ever agree with it — the shape that certified
+ * 79 provably-wrong item paths as clean, corpus-wide. The cross-document half
+ * (a unit's `path.slice(0, -1)` equalling its property's `path`) is the audit's,
+ * because it needs a second document; everything below needs none.
+ *
+ * ⚠️ Every arm is guarded on `path` being present, because `path` is
+ * `.optional()` through the expand third of the rollout. **That guard comes out
+ * with the optionality** — leave it in afterwards and the invariants stop
+ * applying to exactly the documents that skipped the backfill.
+ */
+function checkDestinationNode(doc: Destination, ctx: z.RefinementCtx): void {
+  const path = doc.path;
+  if (path === undefined) return;
+
+  const leaf = path[path.length - 1];
+  const isUnit = path.length === DESTINATION_LEVELS.length;
+
+  // 1. self-inclusive: the last node IS this document. `assertValidForWrite`
+  //    compares `doc.uid` to `ref.id` and nothing checks `path.at(-1).uid`, so
+  //    this second copy of the id is defended here or nowhere.
+  if (leaf !== undefined && leaf.uid !== doc.uid) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["path", path.length - 1, "uid"],
+      message: `path is self-inclusive: path.at(-1).uid must equal uid (${doc.uid}), got ${leaf.uid}`,
+    });
+  }
+
+  // 2. the Firestore-only flat mirror is exactly the uids of `path`.
+  if (doc.query_by_path !== undefined) {
+    const expected = path.map((n) => n.uid);
+    const actual = doc.query_by_path;
+    if (actual.length !== expected.length || actual.some((u, i) => u !== expected[i])) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["query_by_path"],
+        message: `query_by_path must equal path.map(n => n.uid) — expected [${expected.join(", ")}], got [${actual.join(", ")}]`,
+      });
+    }
+  }
+
+  // 3. `address.street2` IS the unit node's name, and exists on nothing else.
+  //
+  //    🔴 This is what makes `street2` DERIVED rather than a second field an
+  //    operator can type. It was empty on all 322 documents while ≥14 carried
+  //    unit text inside `street` — the problem was a missing CONCEPT, not a
+  //    missing field, and a hand-written `street2` on a 2-level destination
+  //    would be a second, unauthored answer to "which unit".
+  const street2 = doc.address?.street2;
+  if (doc.address != null) {
+    if (isUnit && street2 !== leaf.name) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["address", "street2"],
+        message: `address.street2 is DERIVED from the unit node — expected "${leaf.name}", got ${street2 === undefined ? "(absent)" : `"${street2}"`}. Author it through computeDestinationNode.`,
+      });
+    }
+    if (!isUnit && street2 !== undefined && street2 !== "") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["address", "street2"],
+        message: `a ${DESTINATION_LEVELS[path.length - 1]} has no line 2 — address.street2 is "${street2}" but this node has no unit above it. Re-parent it under a property instead.`,
+      });
+    }
+  }
+
+  // 4. a UNIT's own name is non-empty, because it IS line 2. A property's may be
+  //    empty: `211 E Chicago Ave` is identified by its street address alone.
+  if (isUnit && leaf !== undefined && leaf.name.trim() === "") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["path", path.length - 1, "name"],
+      message: "a unit's name IS address.street2, so it cannot be empty — an empty line 2 is not a unit",
+    });
+  }
+
+  // 5. the place name is denormalized ONCE per node, at `path[0]`, and mirrors
+  //    `address.name` on root and unit alike. That symmetry is what keeps the
+  //    denorm checkable from one document; a property rename rewrites both
+  //    fields on the whole subtree in one pass.
+  if (doc.address != null && path.length > 0 && path[0].name !== doc.address.name) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["path", 0, "name"],
+      message: `path[0].name denormalizes the PROPERTY's place name and must equal address.name ("${doc.address.name}"), got "${path[0].name}"`,
+    });
+  }
+
+  // 6. the jurisdiction seed is stated on the PROPERTY and absent on the UNIT —
+  //    organization invariant 12, one level shallower. No property straddles a
+  //    municipal boundary, so a unit asserting its own is unrepresentable
+  //    rather than policed.
+  if (isUnit && doc.jurisdiction != null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["jurisdiction"],
+      message: `a unit inherits its property's jurisdiction and states none of its own — got "${doc.jurisdiction}". State it on ${path[0].uid}.`,
+    });
+  }
 }
 
 /** Zod schema for Destination. */
@@ -89,32 +261,45 @@ export const DestinationSchema: z.ZodType<Destination> = z.strictObject({
   // Required (no `.default([])`): the Typesense config declares it so, and a
   // `.default()` never materializes on a write — see the note in `product.ts`.
   mapbox_ids: z.array(z.string()),
-  // ⚠️ **No `query_by_*` twin on ANY of these three, and the absence is the
-  // decision** (api-cloudrun#650). A flat uid mirror exists so Firestore's
-  // `array-contains` can match a uid nested inside an array of objects — which
-  // is why `contacts.query_by_organizations` and `organizations.query_by_path`
-  // both carry one and must keep it. On `destinations` the three mirrors had no
-  // writer and no reader, and were stripped from both corpora on 2026-08-28
-  // (188 documents each for `organizations`/`products`, 166 for `contacts`).
+  // ── The tree ────────────────────────────────────────────────────────────
   //
-  // 🔴 They are not merely unused — wiring them up would have been WRONG. All
-  // three match branches of `findOrCreateDestination` return the found uid and
-  // write nothing back, so `organizations[]` means *"the org that first created
-  // this address"*, not *"every org that uses it"*. A mirror cannot be more
-  // correct than the array it mirrors, and a faithful mirror of an incomplete
-  // array is worse than none because it reads as authoritative. The
-  // ancestor-scoped picker that these were kept for is a read-only search
-  // surface, and Typesense already indexes `organizations.uid` directly.
-  organizations: z.array(DestinationOrganizationRef).optional().meta({ label: "Organizations" }),
-  products: z.array(UidNameRef).optional().meta({ label: "Products" }),
+  // ⚠️ **`.optional()` is the EXPAND third and nothing more.** Under
+  // `z.strictObject` there is no safe direction: the reader deploys, the
+  // backfill writes, then the optionality comes off. See the field docs on
+  // {@link Destination}.
+  //
+  // ⭐ **A `query_by_path` here is sound where the three deleted `query_by_*`
+  // mirrors were not** (api-cloudrun#650). Those mirrored `organizations[]`,
+  // which means *"the org that FIRST CREATED this address"* — all three match
+  // branches of `findOrCreateDestination` return the found uid and write
+  // nothing back — and *a mirror cannot be more correct than the array it
+  // mirrors*. `path` is SERVER-AUTHORED by a single function, so mirroring it
+  // is mirroring a fact rather than an accident. `organizations.query_by_path`
+  // is the working precedent.
+  path: z.array(DestinationPathNode).min(1).max(DESTINATION_LEVELS.length).optional().meta({
+    column: true,
+    label: "Property",
+  }),
+  query_by_path: z.array(z.string()).optional(),
+  jurisdiction: JurisdictionEnum.nullable().optional().meta({ label: "Jurisdiction" }),
   // `contacts`: declared ahead of use. 192 of 458 prod destinations carried the
   // key, none with an element (2026-08-23) — the feature has not shipped.
   // Deliberately carries no issue; this line is the record.
   // CLAUDE.md § "Is a field dead?".
+  //
+  // 🔴 **`organizations` and `products` were DELETED here** — the last two steps
+  // of the four-step removal (api-cloudrun#654, api-cloudrun#782 population A2).
+  // The writers stopped first (`findOrCreateDestination` stopped writing
+  // `organizations` in `v0.285.0`, verified deployed as revision
+  // `api-cloudrun-00424-x4j`), storage then emptied, and on 2026-09-19 the KEY
+  // was absent — not merely empty — on **0 of 258 prod and 0 of 259 dev**
+  // documents, which is what makes a `z.strictObject` drop safe to read.
+  // ⚠️ `contacts` did NOT go with them: 126 documents in each env still carry
+  // the key.
   contacts: z.array(DestinationContactRef).optional(),
   version: z.int().min(0).default(0),
   ...TimestampFields,
-}).meta({
+}).superRefine(checkDestinationNode).meta({
   title: "Destination",
   collection: "destinations",
   displayDefaults: {

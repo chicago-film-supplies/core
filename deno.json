@@ -65,6 +65,7 @@
     "./utils/cards": "./src/utils/cards.ts",
     "./utils/contact-name": "./src/utils/contact-name.ts",
     "./utils/dates": "./src/utils/dates.ts",
+    "./utils/destinations": "./src/utils/destinations.ts",
     "./utils/documentDiff": "./src/utils/documentDiff.ts",
     "./utils/quantityAccounting": "./src/utils/quantityAccounting.ts",
     "./utils/icons": "./src/utils/icons.ts",

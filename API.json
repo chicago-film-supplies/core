@@ -1336,7 +1336,7 @@
           "kind": "variable",
           "name": "DESTINATION_LEVELS",
           "declaration": "const DESTINATION_LEVELS: \"property\" | \"unit\"[];",
-          "doc": "The two levels of the destination tree — `DESTINATION_LEVELS[path.length - 1]`.\n\n⚠️ **A PROPERTY is one STREET ADDRESS, not a brand.** `.max(2)` is what makes\na \"Cinespace\" umbrella over three lots unrepresentable, and that is the\nowner's rule 1 rather than a budget: a second street address held as a unit\nwould overwrite the address a driver is actually sent to. The three lots are\nthree properties. See `.claude/data/destination-tree/properties.yaml`."
+          "doc": "The two levels of the destination tree — `DESTINATION_LEVELS[path.length - 1]`.\n\n⚠️ **A PROPERTY is one STREET ADDRESS, not a brand.** `.max(2)` is what makes\na \"Cinespace\" umbrella over three lots unrepresentable, and that is the\nowner's rule 1 rather than a budget: a second street address held as a unit\nwould overwrite the address a driver is actually sent to. The three lots are\nthree properties. See `api-cloudrun/.claude/data/destination-tree/properties.yaml`."
         },
         {
           "kind": "variable",
@@ -6901,7 +6901,7 @@
           "kind": "variable",
           "name": "DESTINATION_LEVELS",
           "declaration": "const DESTINATION_LEVELS: \"property\" | \"unit\"[];",
-          "doc": "The two levels of the destination tree — `DESTINATION_LEVELS[path.length - 1]`.\n\n⚠️ **A PROPERTY is one STREET ADDRESS, not a brand.** `.max(2)` is what makes\na \"Cinespace\" umbrella over three lots unrepresentable, and that is the\nowner's rule 1 rather than a budget: a second street address held as a unit\nwould overwrite the address a driver is actually sent to. The three lots are\nthree properties. See `.claude/data/destination-tree/properties.yaml`."
+          "doc": "The two levels of the destination tree — `DESTINATION_LEVELS[path.length - 1]`.\n\n⚠️ **A PROPERTY is one STREET ADDRESS, not a brand.** `.max(2)` is what makes\na \"Cinespace\" umbrella over three lots unrepresentable, and that is the\nowner's rule 1 rather than a budget: a second street address held as a unit\nwould overwrite the address a driver is actually sent to. The three lots are\nthree properties. See `api-cloudrun/.claude/data/destination-tree/properties.yaml`."
         },
         {
           "kind": "interface",
