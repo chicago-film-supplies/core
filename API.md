@@ -3012,6 +3012,20 @@ Allowed credit-note statuses.
 type CreditNoteStatusType = indexedAccess;
 ```
 
+### `DESTINATION_LEVELS`
+
+The two levels of the destination tree — `DESTINATION_LEVELS[path.length - 1]`.
+
+⚠️ **A PROPERTY is one STREET ADDRESS, not a brand.** `.max(2)` is what makes
+a "Cinespace" umbrella over three lots unrepresentable, and that is the
+owner's rule 1 rather than a budget: a second street address held as a unit
+would overwrite the address a driver is actually sent to. The three lots are
+three properties. See `.claude/data/destination-tree/properties.yaml`.
+
+```ts
+const DESTINATION_LEVELS: "property" | "unit"[];
+```
+
 ### `DOC_LINE_ITEM_TYPES`
 
 Billable line item types stored in order/invoice documents (excludes destination/group dividers).
@@ -3127,8 +3141,9 @@ interface DestinationDoc {
   uid: string;
   address: AddressType | null;
   mapbox_ids: string[];
-  organizations?: DestinationOrganizationRefType[];
-  products?: UidNameRefType[];
+  path?: DestinationPathNodeType[];
+  query_by_path?: string[];
+  jurisdiction?: JurisdictionType | null;
   contacts?: DestinationContactRefType[];
   version: number;
   created_at: FirestoreTimestampType;
@@ -3157,43 +3172,49 @@ interface DestinationEndpointType {
 }
 ```
 
-### `DestinationOrganizationRef`
+### `DestinationLevelType`
 
-Zod schema for an organization reference embedded in a destination.
+The level a destination node sits at, read off `path.length`.
 
 ```ts
-const DestinationOrganizationRef: z.ZodType<DestinationOrganizationRefType>;
+type DestinationLevelType = indexedAccess;
 ```
 
-### `DestinationOrganizationRefType`
+### `DestinationPathNode`
 
-Organization reference embedded in a destination document — **the uid alone**.
-
-🔴 **Its OWN type rather than the shared `UidNameRef`, and that is not
-cosmetic.** `UidNameRef` also backs `tags`, `products` and `alternates` in
-`product.ts`, `webshop-product.ts` and `tag.ts`, none of which is part of this
-campaign; removing `name` from it would have changed all four at once.
-Population A2 of api-cloudrun#782 — see
-{@link ContactOrganizationType} for why the edge composes rather than stores,
-and for the four-step removal this is the last step of.
-
-⭐ **This edge was the campaign's clearest evidence, because nothing ever
-maintained it.** `contacts.organizations[].name` had a cascade and agreed with
-`composeOrgName(path)` on 214 of 214 prod edges; this one had none, and
-**218 of 470 disagreed** — fossils like
-`"20th Television - Deli Boys - S2: Locations"` against the live
-`"20th Television / Deli Boys S2 / Locations"` (measured 2026-09-02, both
-environments). A denormalization with no cascade is not a cheaper
-denormalization; it is a stale one.
-
-⚠️ **`organizations[]` means *the org that first created this address***, not
-every org that uses it — all three match branches of `findOrCreateDestination`
-return the found uid and write nothing back. That is unchanged here, and it is
-why the array has no `query_by_*` mirror (see the field comment below).
+Zod schema for one node of a destination's ancestor chain.
 
 ```ts
-interface DestinationOrganizationRefType {
+const DestinationPathNode: z.ZodType<DestinationPathNodeType>;
+```
+
+### `DestinationPathNodeType`
+
+One node of a destination's ancestor chain — `{uid, name}`, and deliberately
+NOT {@link OrgPathNodeType}.
+
+Three differences, each load-bearing:
+
+1. **No `derived`.** Nothing mints a destination node as a placeholder; the
+   one document this campaign creates is minted by the operator-authored
+   migration, from a YAML the owner ruled. A flag with one constant value is
+   a field that will be read as meaning something.
+2. **`name` may be EMPTY on a property**, where `OrgPathNode.name` is
+   `.min(1)`. A property is identified by its STREET ADDRESS, and one of the
+   three in the corpus (`211 E Chicago Ave`) has no place name at all — the
+   owner's words were *"the building is 211 E Chicago"*. The non-empty
+   requirement therefore lands on the UNIT leaf alone, where it is real:
+   a unit's name IS `address.street2`, and an empty line 2 is not a unit.
+3. **`path[0].name` mirrors `address.name` on EVERY node of a property**, root
+   and unit alike, so the denorm is checkable from ONE document rather than
+   by a fan-out. That is the whole reason the migration rewrites a unit's
+   `address.name` to the place name: the unit designator moves to `street2`
+   and the place name is what is left.
+
+```ts
+interface DestinationPathNodeType {
   uid: string;
+  name: string;
 }
 ```
 
@@ -15382,6 +15403,20 @@ interface UpdateContactInputType {
 
 ## `@cfs/core/schemas/destination`
 
+### `DESTINATION_LEVELS`
+
+The two levels of the destination tree — `DESTINATION_LEVELS[path.length - 1]`.
+
+⚠️ **A PROPERTY is one STREET ADDRESS, not a brand.** `.max(2)` is what makes
+a "Cinespace" umbrella over three lots unrepresentable, and that is the
+owner's rule 1 rather than a budget: a second street address held as a unit
+would overwrite the address a driver is actually sent to. The three lots are
+three properties. See `.claude/data/destination-tree/properties.yaml`.
+
+```ts
+const DESTINATION_LEVELS: "property" | "unit"[];
+```
+
 ### `Destination`
 
 Full Firestore document for a destination (a physical address used in orders).
@@ -15391,8 +15426,9 @@ interface Destination {
   uid: string;
   address: AddressType | null;
   mapbox_ids: string[];
-  organizations?: DestinationOrganizationRefType[];
-  products?: UidNameRefType[];
+  path?: DestinationPathNodeType[];
+  query_by_path?: string[];
+  jurisdiction?: JurisdictionType | null;
   contacts?: DestinationContactRefType[];
   version: number;
   created_at: FirestoreTimestampType;
@@ -15424,43 +15460,49 @@ interface DestinationContactRefType {
 }
 ```
 
-### `DestinationOrganizationRef`
+### `DestinationLevelType`
 
-Zod schema for an organization reference embedded in a destination.
+The level a destination node sits at, read off `path.length`.
 
 ```ts
-const DestinationOrganizationRef: z.ZodType<DestinationOrganizationRefType>;
+type DestinationLevelType = indexedAccess;
 ```
 
-### `DestinationOrganizationRefType`
+### `DestinationPathNode`
 
-Organization reference embedded in a destination document — **the uid alone**.
-
-🔴 **Its OWN type rather than the shared `UidNameRef`, and that is not
-cosmetic.** `UidNameRef` also backs `tags`, `products` and `alternates` in
-`product.ts`, `webshop-product.ts` and `tag.ts`, none of which is part of this
-campaign; removing `name` from it would have changed all four at once.
-Population A2 of api-cloudrun#782 — see
-{@link ContactOrganizationType} for why the edge composes rather than stores,
-and for the four-step removal this is the last step of.
-
-⭐ **This edge was the campaign's clearest evidence, because nothing ever
-maintained it.** `contacts.organizations[].name` had a cascade and agreed with
-`composeOrgName(path)` on 214 of 214 prod edges; this one had none, and
-**218 of 470 disagreed** — fossils like
-`"20th Television - Deli Boys - S2: Locations"` against the live
-`"20th Television / Deli Boys S2 / Locations"` (measured 2026-09-02, both
-environments). A denormalization with no cascade is not a cheaper
-denormalization; it is a stale one.
-
-⚠️ **`organizations[]` means *the org that first created this address***, not
-every org that uses it — all three match branches of `findOrCreateDestination`
-return the found uid and write nothing back. That is unchanged here, and it is
-why the array has no `query_by_*` mirror (see the field comment below).
+Zod schema for one node of a destination's ancestor chain.
 
 ```ts
-interface DestinationOrganizationRefType {
+const DestinationPathNode: z.ZodType<DestinationPathNodeType>;
+```
+
+### `DestinationPathNodeType`
+
+One node of a destination's ancestor chain — `{uid, name}`, and deliberately
+NOT {@link OrgPathNodeType}.
+
+Three differences, each load-bearing:
+
+1. **No `derived`.** Nothing mints a destination node as a placeholder; the
+   one document this campaign creates is minted by the operator-authored
+   migration, from a YAML the owner ruled. A flag with one constant value is
+   a field that will be read as meaning something.
+2. **`name` may be EMPTY on a property**, where `OrgPathNode.name` is
+   `.min(1)`. A property is identified by its STREET ADDRESS, and one of the
+   three in the corpus (`211 E Chicago Ave`) has no place name at all — the
+   owner's words were *"the building is 211 E Chicago"*. The non-empty
+   requirement therefore lands on the UNIT leaf alone, where it is real:
+   a unit's name IS `address.street2`, and an empty line 2 is not a unit.
+3. **`path[0].name` mirrors `address.name` on EVERY node of a property**, root
+   and unit alike, so the denorm is checkable from ONE document rather than
+   by a fan-out. That is the whole reason the migration rewrites a unit's
+   `address.name` to the place name: the unit designator moves to `street2`
+   and the place name is what is left.
+
+```ts
+interface DestinationPathNodeType {
   uid: string;
+  name: string;
 }
 ```
 
@@ -20510,8 +20552,8 @@ interface DestinationDocument {
   uid: string;
   mapbox_ids: string[];
   address?: TypesenseAddressFields;
-  organizations?: Array<typeLiteral>;
-  products?: Array<typeLiteral>;
+  path?: Array<typeLiteral>;
+  jurisdiction?: string;
   contacts?: Array<typeLiteral>;
   created_at?: number;
   updated_at: number;
@@ -25527,6 +25569,98 @@ toChicagoYmd("2025-02-14T03:00:00.000Z");      // "2025-02-13" (Chicago day)
 toChicagoYmd("2025-07-04T00:00:00.000-05:00"); // "2025-07-04" (CDT)
 ```
 
+## `@cfs/core/utils/destinations`
+
+Destination tree helpers — the property → unit hierarchy.
+
+### `applyDestinationStreet2(address: AddressType, street2: string | undefined): AddressType`
+
+Apply {@link computeDestinationNode}'s `street2` to an address, so a writer
+cannot apply the path and forget line 2.
+
+⚠️ **DELETES the key rather than writing `""`** when the node is a property.
+`street2` is `.optional()`, and invariant 3 reads an empty string as a
+violation rather than as an absence — the two are the same fact and only one
+of them is representable.
+
+### `computeDestinationNode(node: typeLiteral, parent: Pick<Destination, "uid" | "path" | "address"> | null): typeLiteral`
+
+**The ONE author of `path`, `query_by_path` and `address.street2`.** No writer
+builds any of the three by hand — the rule `computeItemPaths` carries for
+`items[].path` and `computeOrganizationNode` for the org tree.
+
+🔴 **`street2` is returned from HERE, and that is what makes it derived.** It
+was empty on all 322 documents while ≥14 carried unit text inside `street`:
+the problem was a missing concept, not a missing field. Authoring it beside
+the node that means it is what stops a hand-typed line 2 from becoming a
+second, unauthored answer to *"which unit"*.
+
+Throws rather than returning a partial result, because every caller is a write
+path and a silently-wrong `path` addresses the wrong subtree.
+
+**Parameters**
+
+- `node` — this document's own uid, and its OWN name — the unit designator
+when it is being hung under a parent, the place name when it is
+a property.
+- `parent` — the RESOLVED parent document, or `null` for a property. Never a
+chain the client sent.
+
+### `destinationLevel(node: Pick<Destination, "path">): DestinationLevelType`
+
+The level a node sits at, read off `path` — never stored, so it cannot drift.
+
+⚠️ **THROWS on an absent or out-of-range path rather than returning `null`.**
+The same ruling {@link orgLevel} carries: a `| null` return keeps callers
+writing dead branches and keeps *"is this a unit?"* spelled four ways. A
+caller holding RAW Firestore data — an audit, a Typesense translate, a
+document written before the backfill — must ask about `path` itself first.
+
+### `destinationOwnName(node: Pick<Destination, "path">): string`
+
+This node's OWN name — the unit designator for a unit, the place name for a
+property. Empty only on a property identified by its street address alone.
+
+### `destinationParentUid(node: Pick<Destination, "path">): string | null`
+
+This node's parent — `path.at(-2).uid`, or `null` when this node IS a property.
+
+`null` has exactly ONE meaning here: a property. A node with no `path` throws
+from {@link destinationLevel} rather than reading as a root.
+
+### `destinationPropertyUid(node: Pick<Destination, "path">): string`
+
+The property this node belongs to — `path[0].uid`, which is the node itself when it is a property.
+
+### `isDestinationProperty(node: Pick<Destination, "path">): boolean`
+
+Is this node a PROPERTY — the top of its tree, depth 1?
+
+⚠️ **True of a flat singleton too, and that is the point.** A path is
+self-inclusive, so a destination with no units has `path = [itself]` and is a
+property of one. The owner's rule 3: a property node is created when a SECOND
+unit needs one, never in anticipation.
+
+### `isDestinationUnit(node: Pick<Destination, "path">): boolean`
+
+Is this node a UNIT — the deepest level, the one whose name IS `address.street2`?
+
+### `resolveDestinationJurisdictionSeed(node: Pick<Destination, "uid" | "path" | "jurisdiction">, property: Pick<Destination, "uid" | "jurisdiction"> | null): JurisdictionType | null`
+
+The jurisdiction SEED for this node — its own when it states one, otherwise
+its property's. `null` when nothing on the chain states one, which is every
+document in the corpus today.
+
+🔴 **A seed for the PICKER, never a rung in `resolveJurisdiction`.** See
+{@link Destination.jurisdiction} and api-cloudrun#591. This function exists so
+the authoring surface has ONE spelling of the walk; it is deliberately not
+called from `utils/taxes.ts`, and a call site there is the defect, not the
+feature.
+
+⚠️ **A missing or tombstoned property states nothing rather than throwing**,
+exactly as `resolveTaxAxes` swallows a dangling ancestor: a deleted property
+must not take down every write in its subtree.
+
 ## `@cfs/core/utils/documentDiff`
 
 ### `DocumentBilledEntry`
@@ -30325,6 +30459,7 @@ interface LedgerFoldResult {
   costAppliedCents: number;
   unitCost: number;
   basisUnderflowCents: number;
+  oosUnattributedDelta: number;
 }
 ```
 
@@ -30432,7 +30567,7 @@ Returning the side rather than letting callers decide is the point: the client
 sends a direction-agnostic `[{uid_location, quantity}]` and never has to know
 which way a type moves.
 
-### `applyMovementToLedger(ledger: InventoryLedger, movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody" | "reverses">, placements: ReadonlyMap<string, LocationPlacement>, now: indexedAccess): LedgerFoldResult`
+### `applyMovementToLedger(ledger: InventoryLedger, movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody" | "reverses">, placements: ReadonlyMap<string, LocationPlacement>, now: indexedAccess, _: unknown): LedgerFoldResult`
 
 Fold one movement onto a ledger, returning a NEW ledger.
 
@@ -30480,7 +30615,7 @@ The previous ledger fold did exactly that: it read the stored
 `average_unit_cost` (already quantized) and multiplied. Here the division
 happens last, on exact integer cents.
 
-### `deriveServiceQuantities(ledger: InventoryLedger, lines: readonly MovementLineType[], custody: MovementCustodyType | null): Pick<InventoryLedger, "quantity_in_service" | "quantity_out_of_service">`
+### `deriveServiceQuantities(ledger: InventoryLedger, lines: readonly MovementLineType[], custody: MovementCustodyType | null, reason: keyof indexedAccess | null): Pick<InventoryLedger, "quantity_in_service" | "quantity_out_of_service" | "out_of_service_breakdown"> & typeLiteral`
 
 `quantity_in_service` and `quantity_out_of_service` from placement kind.
 

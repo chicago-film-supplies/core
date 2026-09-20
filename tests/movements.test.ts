@@ -605,15 +605,25 @@ Deno.test("two lines naming the same location sum rather than collide (#287)", (
 
 Deno.test("units at an OOS record leave service without leaving ownership", () => {
   const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
-  const derived = deriveServiceQuantities(start, [line(3, atBooking, atOos)], null);
+  const derived = deriveServiceQuantities(start, [line(3, atBooking, atOos)], null, "lost");
   assertEquals(derived.quantity_out_of_service, 3);
+  assertEquals(derived.out_of_service_breakdown.lost, 3, "the breakdown IS the source");
   assertEquals(derived.quantity_in_service, 7);
 });
 
 Deno.test("returning to service restores the in-service count", () => {
-  const start = ledger({ quantity_held: 10, quantity_in_service: 7, quantity_out_of_service: 3 });
-  const derived = deriveServiceQuantities(start, [line(3, atOos, at(LOC_A))], null);
+  // ⚠️ The fixture now has to be CONSISTENT: a ledger holding 3 out of
+  // service with an empty breakdown is an impossible state under one source of
+  // truth, and used to be the exact drift this fix removes.
+  const start = ledger({
+    quantity_held: 10,
+    quantity_in_service: 7,
+    quantity_out_of_service: 3,
+    out_of_service_breakdown: { cleaning: 0, damaged: 0, maintenance: 0, lost: 3 },
+  });
+  const derived = deriveServiceQuantities(start, [line(3, atOos, at(LOC_A))], null, "lost");
   assertEquals(derived.quantity_out_of_service, 0);
+  assertEquals(derived.out_of_service_breakdown.lost, 0);
   assertEquals(derived.quantity_in_service, 10);
 });
 
@@ -628,8 +638,10 @@ Deno.test("a damaged unit leaves service WITHOUT leaving its shelf", () => {
     start,
     [line(3, atBooking, at(LOC_A))],
     { from: "out", to: "damaged" },
+    "damaged",
   );
   assertEquals(derived.quantity_out_of_service, 3);
+  assertEquals(derived.out_of_service_breakdown.damaged, 3);
   assertEquals(derived.quantity_in_service, 7);
 });
 
@@ -643,6 +655,7 @@ Deno.test("a clean return moves nothing out of service", () => {
     start,
     [line(3, atBooking, at(LOC_A))],
     { from: "out", to: "returned" },
+    null,
   );
   assertEquals(derived.quantity_out_of_service, 0);
   assertEquals(derived.quantity_in_service, 10);
@@ -658,13 +671,13 @@ Deno.test("the placement and in-place terms cannot double-count", () => {
   const lost = deriveServiceQuantities(start, [line(2, atBooking, atOos)], {
     from: "out",
     to: "lost",
-  });
+  }, "lost");
   assertEquals(lost.quantity_out_of_service, 2, "placement term only");
 
   const damaged = deriveServiceQuantities(start, [line(2, atBooking, at(LOC_A))], {
     from: "out",
     to: "damaged",
-  });
+  }, "damaged");
   assertEquals(damaged.quantity_out_of_service, 2, "state term only");
 });
 
@@ -684,7 +697,7 @@ Deno.test("a LEGACY mark_damaged row is counted once, not twice", () => {
   const legacy = deriveServiceQuantities(start, [line(4, atBooking, atOos)], {
     from: "out",
     to: "damaged",
-  });
+  }, "damaged");
   assertEquals(legacy.quantity_out_of_service, 4, "counted by placement, once");
   assertEquals(legacy.quantity_in_service, 6);
 });
@@ -710,6 +723,10 @@ Deno.test("in_service and out_of_service always partition held", () => {
     },
     placements,
     mockTimestamp,
+    // ⚠️ The reason is REQUIRED for the units to land anywhere. Without it the
+    // breakdown has no bucket, the derived scalar does not move, and the fold
+    // reports `oosUnattributedDelta` — which is what the writer refuses on.
+    "damaged",
   );
   assertEquals(next.quantity_held, 10, "damaged units are still owned");
   assertEquals(next.quantity_out_of_service, 4);
@@ -876,4 +893,61 @@ Deno.test("a non-reversal decrease still relieves the weighted-average share", (
   );
   assertEquals(next.total_cost_basis_cents, 30000, "a quarter of the basis, never the $999 of revenue");
   assertEquals(basisUnderflowCents, 0, "costOfUnits caps at the basis, so it can never underflow");
+});
+
+// ── ONE SOURCE OF TRUTH: the breakdown, and the scalar derived from it ──
+
+Deno.test("🔴 the out-of-service scalar cannot drift from its breakdown", () => {
+  // The defect this replaced: `quantity_out_of_service` was an incremental
+  // counter (`ledger.quantity_out_of_service + oosDelta`) maintained BESIDE a
+  // breakdown the CALLER incremented separately. Nothing reconciled them, and
+  // only the breakdown clamped at 0 — so a stored scalar that drifted stayed
+  // drifted, and every later fold carried it forward.
+  //
+  // ⚠️ Measured on dev 2026-09-19: one ledger read `out_of_service: 25` against
+  // a breakdown summing to 1 and a single out-of-service record of one unit. It
+  // failed two booking tests, was repaired, and the very next suite run put it
+  // back — ratcheting a few units at a time. Two pushes died on it.
+  const drifted = ledger({
+    quantity_held: 26,
+    quantity_in_service: 1,
+    quantity_out_of_service: 25, // ← the lie
+    out_of_service_breakdown: { cleaning: 0, damaged: 1, maintenance: 0, lost: 0 },
+  });
+
+  // A movement that touches service state AT ALL now re-derives the scalar from
+  // the breakdown, so the drift cannot survive one fold.
+  const healed = deriveServiceQuantities(
+    drifted,
+    [line(1, atBooking, at(LOC_A))],
+    { from: "out", to: "damaged" },
+    "damaged",
+  );
+  assertEquals(healed.out_of_service_breakdown.damaged, 2);
+  assertEquals(healed.quantity_out_of_service, 2, "the SUM, never the stored scalar + a delta");
+  assertEquals(healed.quantity_in_service, 24);
+});
+
+Deno.test("a delta with no reason to file it under is REPORTED, not silently dropped", () => {
+  // 🔴 The breakdown cannot represent a move it has no bucket for, so the
+  // derived scalar would silently under-count. Reported rather than thrown:
+  // two of the three callers are corpus-wide replay scans, where a throw
+  // mid-run reports nothing and looks exactly like a clean corpus.
+  const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
+  const orphan = deriveServiceQuantities(start, [line(3, atBooking, atOos)], null, null);
+  assertEquals(orphan.quantity_out_of_service, 0, "the breakdown could not take it");
+  assertEquals(orphan.oosUnattributedDelta, 3, "and it says so");
+});
+
+Deno.test("a movement that moves no service units leaves the breakdown alone", () => {
+  const start = ledger({
+    quantity_held: 10,
+    quantity_in_service: 8,
+    quantity_out_of_service: 2,
+    out_of_service_breakdown: { cleaning: 0, damaged: 2, maintenance: 0, lost: 0 },
+  });
+  const quiet = deriveServiceQuantities(start, [line(1, null, at(LOC_A))], null, null);
+  assertEquals(quiet.quantity_out_of_service, 2);
+  assertEquals(quiet.out_of_service_breakdown.damaged, 2);
+  assertEquals(quiet.oosUnattributedDelta, 0);
 });

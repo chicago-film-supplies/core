@@ -202,6 +202,16 @@ export interface LedgerFoldResult {
    * licenses refusing rather than guessing (api-cloudrun#1069 question 3).
    */
   basisUnderflowCents: number;
+  /**
+   * Units that moved out of service with no reason to file them under — see
+   * {@link deriveServiceQuantities}. `0` on every movement that names one and
+   * on every movement that moves no service units at all.
+   *
+   * ⚠️ Non-zero means `quantity_out_of_service` did NOT move, because the
+   * breakdown it is derived from could not represent the change. The WRITER
+   * must refuse; a replay SCAN counts it.
+   */
+  oosUnattributedDelta: number;
 }
 
 /** A shallow-cloned store entry, so the fold never mutates its input. */
@@ -315,6 +325,16 @@ export function applyMovementToLedger(
   movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody" | "reverses">,
   placements: ReadonlyMap<string, LocationPlacement>,
   now: InventoryLedger["updated_at"],
+  /**
+   * The out-of-service bucket this movement's units belong to, when it moves
+   * any. `null` for every movement that does not touch service state.
+   *
+   * 🔴 The caller supplies the REASON and nothing else — see
+   * {@link deriveServiceQuantities}. It used to supply a quantity as well and
+   * maintain `out_of_service_breakdown` itself, which made the breakdown and
+   * `quantity_out_of_service` two independent accounts of one fact.
+   */
+  oosReason: keyof InventoryLedger["out_of_service_breakdown"] | null = null,
 ): LedgerFoldResult {
   const next: InventoryLedger = {
     ...ledger,
@@ -398,7 +418,10 @@ export function applyMovementToLedger(
   }
 
   // ── The three fields that used to be vestigial ──
-  Object.assign(next, deriveServiceQuantities(next, movement.lines, movement.custody));
+  const service = deriveServiceQuantities(next, movement.lines, movement.custody, oosReason);
+  next.out_of_service_breakdown = service.out_of_service_breakdown;
+  next.quantity_out_of_service = service.quantity_out_of_service;
+  next.quantity_in_service = service.quantity_in_service;
 
   next.query_by_uid_store = next.store_breakdown.map((s) => s.uid_store);
   next.query_by_uid_location = next.store_breakdown.flatMap((s) =>
@@ -406,7 +429,13 @@ export function applyMovementToLedger(
   );
   next.updated_at = now;
 
-  return { ledger: next, costAppliedCents, unitCost, basisUnderflowCents };
+  return {
+    ledger: next,
+    costAppliedCents,
+    unitCost,
+    basisUnderflowCents,
+    oosUnattributedDelta: service.oosUnattributedDelta,
+  };
 }
 
 /**
@@ -460,7 +489,36 @@ export function deriveServiceQuantities(
   ledger: InventoryLedger,
   lines: readonly MovementLineType[],
   custody: MovementCustodyType | null,
-): Pick<InventoryLedger, "quantity_in_service" | "quantity_out_of_service"> {
+  /**
+   * Which bucket this movement's out-of-service units belong to. The reason
+   * lives on the out-of-service DOCUMENT, so only the caller can read it.
+   *
+   * 🔴 **It is the ONLY thing the caller supplies, and that is the fix.** The
+   * caller used to pass a QUANTITY too — `transition.quantity` from
+   * `services/bookings.ts`, `fromRecord` from `services/outOfService.ts` — and
+   * apply it to the breakdown itself, AFTER this function had separately moved
+   * the scalar. Two independent maintainers of one fact, and only the breakdown
+   * self-corrected (`applyOutOfServiceReason` clamps at 0). The scalar ratcheted.
+   *
+   * Every one of those caller quantities was already equal to the `oosDelta`
+   * computed below, so nothing is lost by dropping them.
+   */
+  reason: keyof InventoryLedger["out_of_service_breakdown"] | null,
+): Pick<
+  InventoryLedger,
+  "quantity_in_service" | "quantity_out_of_service" | "out_of_service_breakdown"
+> & {
+  /**
+   * 🔴 Units that moved out of service with NO reason to file them under.
+   *
+   * Non-zero means the breakdown cannot represent the move, so the scalar
+   * derived from it would silently under-count. **Reported, never thrown** —
+   * two of this fold's three callers are corpus-wide replay scans, where a
+   * throw mid-run reports nothing and looks exactly like a clean corpus. The
+   * WRITER refuses; a SCAN counts. Same split as `basisUnderflowCents`.
+   */
+  oosUnattributedDelta: number;
+} {
   let oosDelta = 0;
 
   // Term 1 — placement. A unit that moved to or from an out-of-service record.
@@ -494,10 +552,25 @@ export function deriveServiceQuantities(
     if (custody.from === "damaged") oosDelta -= inPlace;
   }
 
-  const outOfService = Math.max(0, ledger.quantity_out_of_service + oosDelta);
+  // 🔴 **ONE SOURCE OF TRUTH: the breakdown.** The scalar is its SUM, derived
+  // here and nowhere else, so the two cannot disagree by construction.
+  //
+  // It used to be `ledger.quantity_out_of_service + oosDelta` — an incremental
+  // counter maintained beside a breakdown the CALLER incremented separately.
+  // Nothing reconciled them, and only the breakdown clamped, so a stored scalar
+  // that drifted stayed drifted and every later fold carried it forward.
+  // Measured 2026-09-19: 285 of 285 prod ledgers already satisfy
+  // `scalar == sum(breakdown)`, so deriving it is behaviour-preserving there;
+  // the one dev ledger that violated it was ratcheting on every suite run.
+  const breakdown = reason !== null && oosDelta !== 0
+    ? applyOutOfServiceReason(ledger.out_of_service_breakdown, reason, oosDelta)
+    : ledger.out_of_service_breakdown;
+  const outOfService = Object.values(breakdown).reduce((sum, n) => sum + n, 0);
   return {
+    out_of_service_breakdown: breakdown,
     quantity_out_of_service: outOfService,
     quantity_in_service: ledger.quantity_held - outOfService,
+    oosUnattributedDelta: reason === null ? oosDelta : 0,
   };
 }
 
