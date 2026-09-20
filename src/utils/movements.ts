@@ -52,6 +52,60 @@ export function costOfUnits(basisCents: bigint, heldUnits: number, quantity: num
   return drawn > basisCents ? basisCents : drawn;
 }
 
+/**
+ * The EXACT basis a reversal must relieve, or `null` when this is not a
+ * cost-bearing reversal of an increase and the weighted-average share applies.
+ *
+ * ## 🔴 A reversal reverses EXACTLY — owner, 2026-09-19 (api-cloudrun#1069)
+ *
+ * *"a reversal should reverse exactly, yes i misentered the transaction info
+ * twice."* Every other decrease relieves `costOfUnits(basis, held, units)`,
+ * deliberately, because on a `sale` the caller's number is REVENUE. A reversal
+ * is the one decrease whose entire job is to undo a specific prior movement, so
+ * a weighted-average share makes the relief depend on every unrelated purchase
+ * in between: reversing a $149.96 purchase relieved $74.98, and the product's
+ * basis never returned to what it was before the mis-key.
+ *
+ * ## ⭐ The exact number is already on the reversal, and it needs no lookup
+ *
+ * `cost.amount_cents` on a STORED movement is what the applier actually took,
+ * not what the operator typed — `appliedMovementCost`
+ * (`api-cloudrun/src/lib/movementApplier.ts`) restamps it from the fold's own
+ * `costAppliedCents` before the movement is written. And `reverseTransaction`
+ * negates that stored amount onto the reversal. So the reversal already carries
+ * −(what its original applied), and a pure fold can be exact without reading
+ * the original at all.
+ *
+ * ⚠️ **That is a claim about the WRITER, and it is what makes this safe.** If a
+ * future writer ever stores an operator-typed cost on a reversal instead, this
+ * becomes exact about the wrong number, silently. `reverses` is the structured
+ * field — not the `Reversal of #N` prose in `reference`, which 2 of the 6
+ * cost-bearing prod reversals do not use (#1155 and #1157 say *"Reverses the
+ * … verification find"*), and which an enumeration keyed on that prose missed.
+ *
+ * ## ⚠️ The MIRROR case was already correct, and must not be "fixed"
+ *
+ * Reversing a DECREASE is an increase, and the `delta > 0` branch has always
+ * added `cost.amount_cents` directly. So prod movement #1159 (reversal of the
+ * #1158 `adjustment_decrease`) restores exactly the $1.23 that #1158 relieved,
+ * and its POSITIVE amount on a decrease-typed movement is `reverseTransaction`
+ * negating a negative — **not** an operator compensating for this defect, which
+ * is what api-cloudrun#1069 question 4 suspected.
+ *
+ * Returns a MAGNITUDE, matching `costOfUnits`: the caller carries the sign.
+ */
+function reversalReliefCents(
+  movement: Pick<Movement, "cost" | "reverses">,
+): bigint | null {
+  if (movement.reverses === null || movement.cost === null) return null;
+  const stated = BigInt(movement.cost.amount_cents);
+  // 🔴 A reversal of an INCREASE carries a negative amount, so the relief is
+  // its negation. A non-negative amount here means the reversal disagrees with
+  // its own direction — a stored-record defect, not a smaller relief — so fall
+  // back to the weighted-average share rather than ADDING basis on a decrease.
+  return stated < 0n ? -stated : null;
+}
+
 // ── Placement ───────────────────────────────────────────────────────
 
 /**
@@ -130,6 +184,24 @@ export interface LedgerFoldResult {
    * beta.117 regression: a 100-unit $6.39 purchase reporting $0.06/unit.
    */
   unitCost: number;
+  /**
+   * How far an EXACT reversal relief overshot the basis that was there to
+   * relieve, in cents. `0` on every other movement, and on every reversal that
+   * fits.
+   *
+   * 🔴 **It is REPORTED, never thrown and never clamped, and the split is the
+   * point.** A clamp would fabricate a basis and make the reversal inexact,
+   * which is the whole defect this branch removes. A throw would abort the
+   * caller — and two of the three callers are corpus-wide REPLAY SCANS
+   * (`api-cloudrun/scripts/audit-ledger-replay.ts`,
+   * `api-cloudrun/scripts/audit-unjournaled-consumption.ts`), where a throw
+   * mid-scan reports nothing and looks exactly like a clean corpus.
+   *
+   * So the WRITER gates on it and a SCAN counts it. Measured on prod
+   * 2026-09-19: **0 of the 6 cost-bearing reversals underflow**, which is what
+   * licenses refusing rather than guessing (api-cloudrun#1069 question 3).
+   */
+  basisUnderflowCents: number;
 }
 
 /** A shallow-cloned store entry, so the fold never mutates its input. */
@@ -237,7 +309,10 @@ export function applyMovementToLedger(
   // `custody` joined this Pick when `damaged` became a STATE: a damaged unit
   // stays on its shelf, so the fold can no longer read out-of-service off the
   // line endpoints alone. See `deriveServiceQuantities`.
-  movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody">,
+  // `reverses` joined this Pick for api-cloudrun#1069: a reversal relieves the
+  // EXACT amount its original applied, and nothing else on the movement can say
+  // that this IS a reversal. See the cost branch below.
+  movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody" | "reverses">,
   placements: ReadonlyMap<string, LocationPlacement>,
   now: InventoryLedger["updated_at"],
 ): LedgerFoldResult {
@@ -258,6 +333,7 @@ export function applyMovementToLedger(
   // per-unit figure is reported.
   let costAppliedCents = 0;
   let unitCost = 0;
+  let basisUnderflowCents = 0;
   if (carriesCost) {
     const basisCents = BigInt(next.total_cost_basis_cents);
     if (delta > 0) {
@@ -267,7 +343,13 @@ export function applyMovementToLedger(
       next.total_cost_basis_cents = Number(basisCents + addCents);
     } else if (delta < 0) {
       const units = -delta;
-      const outCents = costOfUnits(basisCents, next.quantity_held, units);
+      const outCents = reversalReliefCents(movement) ??
+        costOfUnits(basisCents, next.quantity_held, units);
+      // 🔴 A reversal may relieve more basis than is there, and the shortfall
+      // is REPORTED rather than clamped — see `basisUnderflowCents`. The
+      // weighted-average branch cannot underflow: `costOfUnits` caps at the
+      // basis by construction, so this is only ever a reversal's number.
+      if (outCents > basisCents) basisUnderflowCents = Number(outCents - basisCents);
       costAppliedCents = -Number(outCents);
       unitCost = perUnitCostAt4dp(outCents, BigInt(units));
       next.total_cost_basis_cents = Number(basisCents - outCents);
@@ -324,7 +406,7 @@ export function applyMovementToLedger(
   );
   next.updated_at = now;
 
-  return { ledger: next, costAppliedCents, unitCost };
+  return { ledger: next, costAppliedCents, unitCost, basisUnderflowCents };
 }
 
 /**

@@ -276,6 +276,7 @@ Deno.test("a purchase adds basis and units, and lands them on the shelf", () => 
   const { ledger: next, costAppliedCents } = applyMovementToLedger(
     ledger(),
     {
+      reverses: null,
       type: "purchase",
       custody: null,
       quantity: 10,
@@ -302,6 +303,7 @@ Deno.test("a purchase reports its unit cost as a 4dp RATE, not cent-quantized mo
   const { ledger: next, unitCost, costAppliedCents } = applyMovementToLedger(
     ledger(),
     {
+      reverses: null,
       type: "purchase",
       custody: null,
       quantity: 100,
@@ -327,6 +329,7 @@ Deno.test("a cost-bearing decrease reports its unit cost at 4dp too", () => {
   const { ledger: next, unitCost } = applyMovementToLedger(
     start,
     {
+      reverses: null,
       type: "sale",
       custody: null,
       quantity: 30,
@@ -352,7 +355,7 @@ Deno.test("a placement stamps the store's and the location's identity, on create
   // and the ledger is the only place those flags are denormalized.
   const { ledger: created } = applyMovementToLedger(
     ledger(),
-    { type: "purchase", custody: null, quantity: 4, lines: [line(4, null, at(LOC_A))], cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] } },
+    { reverses: null, type: "purchase", custody: null, quantity: 4, lines: [line(4, null, at(LOC_A))], cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] } },
     placements,
     mockTimestamp,
   );
@@ -377,7 +380,7 @@ Deno.test("a placement stamps the store's and the location's identity, on create
   });
   const { ledger: healed } = applyMovementToLedger(
     stale,
-    { type: "transfer", custody: null, quantity: 1, lines: [line(1, at(LOC_A), at(LOC_B))], cost: null },
+    { reverses: null, type: "transfer", custody: null, quantity: 1, lines: [line(1, at(LOC_A), at(LOC_B))], cost: null },
     placements,
     mockTimestamp,
   );
@@ -394,6 +397,7 @@ Deno.test("a sale removes the weighted-average share, not the caller's number", 
   const { ledger: next, costAppliedCents } = applyMovementToLedger(
     start,
     {
+      reverses: null,
       type: "sale",
       custody: null,
       quantity: 2,
@@ -429,7 +433,7 @@ Deno.test("a cost-only fold is inert: `lines: []` beside a cost moves no basis",
 
   const { ledger: inert, costAppliedCents: none } = applyMovementToLedger(
     start,
-    { type: "purchase", custody: null, quantity: 0, lines: [], cost },
+    { reverses: null, type: "purchase", custody: null, quantity: 0, lines: [], cost },
     placements,
     mockTimestamp,
   );
@@ -443,7 +447,7 @@ Deno.test("a cost-only fold is inert: `lines: []` beside a cost moves no basis",
   // fall-through and not a fixture that could never have moved anything.
   const { ledger: moved, costAppliedCents: applied } = applyMovementToLedger(
     start,
-    { type: "purchase", custody: null, quantity: 10, lines: [line(10, null, at(LOC_A))], cost },
+    { reverses: null, type: "purchase", custody: null, quantity: 10, lines: [line(10, null, at(LOC_A))], cost },
     placements,
     mockTimestamp,
   );
@@ -479,7 +483,7 @@ Deno.test("a transfer leaves the basis exactly where it was (#286 defect 1)", ()
   const start = ledger({ quantity_held: 4, total_cost_basis_cents: 160000, average_unit_cost: 400 });
   const { ledger: next, costAppliedCents } = applyMovementToLedger(
     start,
-    { type: "transfer", custody: null, quantity: 4, lines: [line(4, at(LOC_A), at(LOC_B))], cost: null },
+    { reverses: null, type: "transfer", custody: null, quantity: 4, lines: [line(4, at(LOC_A), at(LOC_B))], cost: null },
     placements,
     mockTimestamp,
   );
@@ -512,7 +516,7 @@ Deno.test("a full-quantity transfer through held=0 preserves the basis (#286 def
   const start = ledgerAtShelfA(4, { total_cost_basis_cents: 160000, average_unit_cost: 400 });
   const { ledger: mid } = applyMovementToLedger(
     start,
-    { type: "transfer", custody: null, quantity: 4, lines: [line(4, at(LOC_A), at(LOC_B))], cost: null },
+    { reverses: null, type: "transfer", custody: null, quantity: 4, lines: [line(4, at(LOC_A), at(LOC_B))], cost: null },
     placements,
     mockTimestamp,
   );
@@ -526,6 +530,7 @@ Deno.test("selling the last unit zeroes both basis and average", () => {
   const { ledger: next } = applyMovementToLedger(
     start,
     {
+      reverses: null,
       type: "sale",
       custody: null,
       quantity: 1,
@@ -546,6 +551,7 @@ Deno.test("the fold never mutates its input ledger", () => {
   applyMovementToLedger(
     start,
     {
+      reverses: null,
       type: "sale",
       custody: null,
       quantity: 2,
@@ -563,6 +569,7 @@ Deno.test("a movement into a never-held store creates the entry (#294)", () => {
   const { ledger: next } = applyMovementToLedger(
     ledger(),
     {
+      reverses: null,
       type: "purchase",
       custody: null,
       quantity: 5,
@@ -580,6 +587,7 @@ Deno.test("two lines naming the same location sum rather than collide (#287)", (
   const { ledger: next } = applyMovementToLedger(
     ledger(),
     {
+      reverses: null,
       type: "purchase",
       custody: null,
       quantity: 5,
@@ -693,6 +701,7 @@ Deno.test("in_service and out_of_service always partition held", () => {
   const { ledger: next } = applyMovementToLedger(
     ledger({ quantity_held: 10, quantity_in_service: 10 }),
     {
+      reverses: null,
       type: "mark_damaged",
       custody: { from: "out", to: "damaged" },
       quantity: 4,
@@ -712,6 +721,7 @@ Deno.test("a write-off removes ownership and clears the out-of-service count", (
   const { ledger: next } = applyMovementToLedger(
     ledger({ quantity_held: 10, quantity_in_service: 6, quantity_out_of_service: 4, total_cost_basis_cents: 400000 }),
     {
+      reverses: null,
       type: "write_off",
       custody: null,
       quantity: 4,
@@ -737,4 +747,133 @@ Deno.test("applyOutOfServiceReason clamps at zero and leaves other reasons alone
     maintenance: 0,
     lost: 1,
   });
+});
+
+// ── A reversal reverses EXACTLY (api-cloudrun#1069) ──────────────────
+
+/**
+ * The prod history of Metro Rack - 3 Tier `mQNwG1fQQsfITtpaefE4`, verbatim.
+ *
+ * ⭐ It is a fixture rather than a scenario because the owner stated the answer
+ * for it: *"a reversal should reverse exactly, yes i misentered the transaction
+ * info twice"* — #2292 and #2294 are one purchase keyed twice, #2293 and #2296
+ * are their corrections, and **the correct basis is $149.96**: the `find` of 2
+ * at $0.00 plus the one real purchase.
+ *
+ * ⚠️ Before this fix the journal replayed to $224.94 and the stored ledger held
+ * $299.92 — two different wrong numbers, differing only in how many reversals
+ * each had folded.
+ */
+Deno.test("a reversal of a purchase relieves EXACTLY what it added (api-cloudrun#1069)", () => {
+  const cost = (cents: number) => ({ amount_cents: cents, unit_cost: 0, unit_costs_cents: [] });
+  const journal = [
+    // #2291 find +2 @ $0.00
+    { reverses: null, type: "find" as const, custody: null, quantity: 2, lines: [line(2, null, at(LOC_A))], cost: cost(0) },
+    // #2297 purchase +1 @ $149.96
+    { reverses: null, type: "purchase" as const, custody: null, quantity: 1, lines: [line(1, null, at(LOC_A))], cost: cost(14996) },
+    // #2292 purchase +2 @ $149.96  — the mis-key
+    { reverses: null, type: "purchase" as const, custody: null, quantity: 2, lines: [line(2, null, at(LOC_A))], cost: cost(14996) },
+    // #2294 purchase +1 @ $149.96  — the mis-key again
+    { reverses: null, type: "purchase" as const, custody: null, quantity: 1, lines: [line(1, null, at(LOC_A))], cost: cost(14996) },
+    // #2293 reverses #2292
+    { reverses: "m2292", type: "purchase" as const, custody: null, quantity: 2, lines: [line(2, at(LOC_A), null)], cost: cost(-14996) },
+    // #2296 reverses #2294
+    { reverses: "m2294", type: "purchase" as const, custody: null, quantity: 1, lines: [line(1, at(LOC_A), null)], cost: cost(-14996) },
+  ];
+
+  let folded = ledger();
+  for (const m of journal) folded = applyMovementToLedger(folded, m, placements, mockTimestamp).ledger;
+
+  assertEquals(folded.quantity_held, 3, "quantities were never the defect");
+  assertEquals(
+    folded.total_cost_basis_cents,
+    14996,
+    "the find at $0.00 plus the one real purchase — NOT the $224.94 a weighted-average relief left",
+  );
+});
+
+Deno.test("reversing an increase is exact even when an unrelated purchase intervenes", () => {
+  // 🔴 This is what a weighted-average relief cannot do, and it is the whole
+  // point: the relief must not depend on a purchase that has nothing to do with
+  // the movement being undone.
+  const cost = (cents: number) => ({ amount_cents: cents, unit_cost: 0, unit_costs_cents: [] });
+  let folded = ledger();
+  for (
+    const m of [
+      { reverses: null, type: "purchase" as const, custody: null, quantity: 1, lines: [line(1, null, at(LOC_A))], cost: cost(10000) },
+      { reverses: null, type: "purchase" as const, custody: null, quantity: 9, lines: [line(9, null, at(LOC_A))], cost: cost(900) },
+      { reverses: "m1", type: "purchase" as const, custody: null, quantity: 1, lines: [line(1, at(LOC_A), null)], cost: cost(-10000) },
+    ]
+  ) folded = applyMovementToLedger(folded, m, placements, mockTimestamp).ledger;
+
+  assertEquals(folded.quantity_held, 9);
+  // A weighted-average share of $109.00 over 10 units is $10.90 — which would
+  // leave $98.10 standing for nine units that cost $9.00.
+  assertEquals(folded.total_cost_basis_cents, 900);
+});
+
+Deno.test("⚠️ reversing a DECREASE was already exact, and is unchanged (#1159)", () => {
+  // The `delta > 0` branch has always added `cost.amount_cents` directly, and
+  // `reverseTransaction` negates the amount the applier STORED. So #1159's
+  // positive $1.23 on an `adjustment_decrease` restores exactly what #1158
+  // relieved — it is not an operator compensating for the defect above.
+  const start = ledger({ quantity_held: 1, total_cost_basis_cents: 0, average_unit_cost: 0 });
+  const { ledger: next, basisUnderflowCents } = applyMovementToLedger(
+    start,
+    {
+      reverses: "m1158",
+      type: "adjustment_decrease",
+      custody: null,
+      quantity: 1,
+      lines: [line(1, null, at(LOC_A))],
+      cost: { amount_cents: 123, unit_cost: 0, unit_costs_cents: [] },
+    },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(next.total_cost_basis_cents, 123);
+  assertEquals(basisUnderflowCents, 0);
+});
+
+Deno.test("🔴 a reversal relieving more basis than exists REPORTS the shortfall", () => {
+  // It is neither thrown nor clamped: a clamp makes the reversal inexact again,
+  // and a throw would abort the corpus-wide replay scans mid-run.
+  const start = ledger({ quantity_held: 2, total_cost_basis_cents: 5000, average_unit_cost: 2500 });
+  const { ledger: next, costAppliedCents, basisUnderflowCents } = applyMovementToLedger(
+    start,
+    {
+      reverses: "mX",
+      type: "purchase",
+      custody: null,
+      quantity: 1,
+      lines: [line(1, at(LOC_A), null)],
+      cost: { amount_cents: -8000, unit_cost: 0, unit_costs_cents: [] },
+    },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(basisUnderflowCents, 3000);
+  assertEquals(costAppliedCents, -8000, "the relief stays EXACT — the shortfall is reported, not absorbed");
+  assertEquals(next.total_cost_basis_cents, -3000);
+});
+
+Deno.test("a non-reversal decrease still relieves the weighted-average share", () => {
+  // The rule this fix must NOT widen: on a `sale` the caller's number is
+  // REVENUE, so relieving it would book revenue as cost.
+  const start = ledger({ quantity_held: 4, total_cost_basis_cents: 40000, average_unit_cost: 100 });
+  const { ledger: next, basisUnderflowCents } = applyMovementToLedger(
+    start,
+    {
+      reverses: null,
+      type: "sale",
+      custody: null,
+      quantity: 1,
+      lines: [line(1, at(LOC_A), null)],
+      cost: { amount_cents: 99900, unit_cost: 0, unit_costs_cents: [] },
+    },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(next.total_cost_basis_cents, 30000, "a quarter of the basis, never the $999 of revenue");
+  assertEquals(basisUnderflowCents, 0, "costOfUnits caps at the basis, so it can never underflow");
 });

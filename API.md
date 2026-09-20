@@ -30324,6 +30324,7 @@ interface LedgerFoldResult {
   ledger: InventoryLedger;
   costAppliedCents: number;
   unitCost: number;
+  basisUnderflowCents: number;
 }
 ```
 
@@ -30431,7 +30432,7 @@ Returning the side rather than letting callers decide is the point: the client
 sends a direction-agnostic `[{uid_location, quantity}]` and never has to know
 which way a type moves.
 
-### `applyMovementToLedger(ledger: InventoryLedger, movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody">, placements: ReadonlyMap<string, LocationPlacement>, now: indexedAccess): LedgerFoldResult`
+### `applyMovementToLedger(ledger: InventoryLedger, movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody" | "reverses">, placements: ReadonlyMap<string, LocationPlacement>, now: indexedAccess): LedgerFoldResult`
 
 Fold one movement onto a ledger, returning a NEW ledger.
 

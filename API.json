@@ -13838,7 +13838,7 @@
         {
           "kind": "interface",
           "name": "LedgerFoldResult",
-          "declaration": "interface LedgerFoldResult {\n  ledger: InventoryLedger;\n  costAppliedCents: number;\n  unitCost: number;\n}",
+          "declaration": "interface LedgerFoldResult {\n  ledger: InventoryLedger;\n  costAppliedCents: number;\n  unitCost: number;\n  basisUnderflowCents: number;\n}",
           "doc": "What a movement did to a ledger, and the cost it actually consumed."
         },
         {
@@ -13900,7 +13900,7 @@
         {
           "kind": "function",
           "name": "applyMovementToLedger",
-          "signature": "applyMovementToLedger(ledger: InventoryLedger, movement: Pick<Movement, \"type\" | \"quantity\" | \"lines\" | \"cost\" | \"custody\">, placements: ReadonlyMap<string, LocationPlacement>, now: indexedAccess): LedgerFoldResult",
+          "signature": "applyMovementToLedger(ledger: InventoryLedger, movement: Pick<Movement, \"type\" | \"quantity\" | \"lines\" | \"cost\" | \"custody\" | \"reverses\">, placements: ReadonlyMap<string, LocationPlacement>, now: indexedAccess): LedgerFoldResult",
           "doc": "Fold one movement onto a ledger, returning a NEW ledger.\n\nPurely a function of `(ledger, movement, placements)`: no Firestore, no clock,\nno mutation of either input. `now` is injected rather than read so the same\nwrite instant can be shared across a multi-document transaction.\n\n`placements` resolves each `locations`-kind line endpoint to the store that\nowns it. The caller must have already asserted that ownership (#307) — this\nfold trusts the map, because the read that proves it is what stops a future\nwriter from skipping the check.\n\n## Cost\n\nIncreases add the caller-supplied acquisition cost. Cost-bearing decreases\nremove the weighted-average share of the basis captured BEFORE the quantity\nchanges — never the caller's number, which is revenue or an estimate and let\nthe basis drift from quantity and even go negative.\n\nThe returned `unitCost` and the ledger's `average_unit_cost` are per-unit\n**rates at 4dp** (`perUnitCostAt4dp`), not money. Both were quantized to the\ncent until 2026-08-03, which reported a 100-unit purchase at $6.39 as\n$0.06/unit — a 6% error on a figure that is only ever displayed. The basis\nitself is money and is unchanged.\n\nA type whose contract forbids cost never touches the basis at all. That is\nwhat makes #286 (a costed transfer corrupting the basis) structurally\nimpossible rather than gated: a transfer has no cost object to mis-gate.",
           "paramTags": [],
           "returnsTag": null
