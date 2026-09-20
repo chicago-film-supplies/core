@@ -44,8 +44,8 @@ Deno.test("DocSource accepts a composite uid, including a movement's", () => {
   // correction path.
   const composites = [
     "0199a1f2-3b4c-7d8e-9f01-234567890abc|sale|testprod100000000000",
-    "0199a1f2-3b4c-7d8e-9f01-234567890abc|check_out|testordr100000000000:testitem10000000000x:testdest100000000000",
-    "testordr100000000000:testitem10000000000x:testdest100000000000",
+    "0199a1f2-3b4c-7d8e-9f01-234567890abc|check_out|testordr100000000000:testitem10000000000x:9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48",
+    "testordr100000000000:testitem10000000000x:9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48",
   ];
   for (const uid of composites) {
     assertEquals(
@@ -74,7 +74,7 @@ Deno.test("DocSource still carries an optional label and rejects extras", () => 
     DocSource.safeParse({
       collection: "bookings",
       // BookingId — `{uid_order}:{uid_product}:{uid_destination}` (see `_uid.ts`).
-      uid: "order100000000000000:product1000000000000:dest1000000000000000",
+      uid: "order100000000000000:product1000000000000:9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48",
       label: "Booking #1042",
     }).success,
     true,

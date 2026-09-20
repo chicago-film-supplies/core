@@ -161,12 +161,9 @@ interface BookingOpts {
   orgUid?: string;
   /**
    * The delivery/collection ADDRESS the booking records — a different fact
-   * from `legUid`, which is segment 3 of its id. Defaults to `legUid` because
-   * under the legacy address-keyed form they were the same value.
-   *
-   * ⚠️ **A fixture passing a pair uid as `legUid` MUST set this**, or the
-   * booking carries a UUID in a `FirestoreId` field and does not parse —
-   * invisible to any arm that does not run it through `BookingSchema`.
+   * from `legUid`, which is segment 3 of its id. Defaults through
+   * {@link ADDRESS_OF_LEG}; set it explicitly for a leg that is not one of the
+   * two standard ones, or for two legs deliberately sharing one address.
    */
   deliveryUid?: string;
 }
@@ -180,10 +177,18 @@ interface BookingOpts {
  * are therefore exercising the LEGACY arm on purpose — see the pair of tests
  * at the end of this file.
  */
+/**
+ * Which ADDRESS each fixture leg delivers to. The two are separate facts — the
+ * leg is segment 3 of the booking id, the address is `uid_destination_delivery`
+ * — and this map is what keeps a fixture from conflating them the way the
+ * pre-2026-09-20 id did.
+ */
+const ADDRESS_OF_LEG: Record<string, string> = { [LEG_1]: STAGE, [LEG_2]: LOT };
+
 function booking(productUid: string, legUid: string, opts: BookingOpts = {}): Booking {
   const orderUid = opts.orderUid ?? ORDER;
   const quantity = opts.quantity ?? 2;
-  const deliveryUid = opts.deliveryUid ?? legUid;
+  const deliveryUid = opts.deliveryUid ?? ADDRESS_OF_LEG[legUid] ?? legUid;
   return {
     uid: `${orderUid}:${productUid}:${legUid}`,
     uid_order: orderUid,
@@ -252,7 +257,7 @@ Deno.test("fold: a destination scope keeps only the legs delivering THERE", () =
   });
   // Both legs' bookings are open; only the membership query narrows, and the
   // fold must narrow again by LEG or the second leg rides in on the first.
-  const bookings = [booking(CAMERA, STAGE), booking(TRIPOD, LOT, { quantity: 1 })];
+  const bookings = [booking(CAMERA, LEG_1), booking(TRIPOD, LEG_2, { quantity: 1 })];
 
   const { orders } = foldPickSheet({ scope: DESTINATION_SCOPE, gate: "all", leg: null, bookings, fulfillments: docs(f) });
   assertEquals(orders.length, 1);
@@ -270,7 +275,7 @@ Deno.test("fold: an ORGANIZATION scope keeps BOTH legs of the same order", () =>
       line(TRIPOD, "Sachtler", 1, [LEG_2, TRIPOD]),
     ],
   });
-  const bookings = [booking(CAMERA, STAGE), booking(TRIPOD, LOT, { quantity: 1 })];
+  const bookings = [booking(CAMERA, LEG_1), booking(TRIPOD, LEG_2, { quantity: 1 })];
 
   const { orders } = foldPickSheet({ scope: ORG_SCOPE, gate: "all", leg: null, bookings, fulfillments: docs(f) });
   assertEquals(orders.length, 1);
@@ -284,7 +289,7 @@ Deno.test("fold: the gate drops a customer-collect leg from a crew sheet", () =>
     destinations: [pair(LEG_1, STORE, { collecting: true })],
     items: [divider(LEG_1, "Will call"), line(CAMERA, "Alexa 35", 2, [LEG_1, CAMERA])],
   });
-  const bookings = [booking(CAMERA, STORE)];
+  const bookings = [booking(CAMERA, LEG_1, { deliveryUid: STORE })];
   const scope: PickSheetScope = { kind: "destination", uid: STORE, name: "CFS", uids: [STORE] };
 
   assertEquals(foldPickSheet({ scope, gate: "crew", leg: null, bookings, fulfillments: docs(f) }).orders.length, 0);
@@ -313,7 +318,7 @@ Deno.test("fold: a line with NO booking is still a row — bookings cannot be th
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE)],
+    bookings: [booking(CAMERA, LEG_1)],
     fulfillments: docs(f),
   });
   const leg = orders[0].destinations[0];
@@ -335,7 +340,7 @@ Deno.test("fold: a group divider is a row, and its children come with it", () =>
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE)],
+    bookings: [booking(CAMERA, LEG_1)],
     fulfillments: docs(f),
   });
   assertEquals(orders[0].destinations[0].items.map((i) => i.item.uid), [GROUP_1, CAMERA]);
@@ -364,7 +369,7 @@ Deno.test("fold: paths are carried VERBATIM — the fold mints none", () => {
     scope: ORG_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE), booking(TRIPOD, LOT, { quantity: 1 })],
+    bookings: [booking(CAMERA, LEG_1), booking(TRIPOD, LEG_2, { quantity: 1 })],
     fulfillments: docs(f),
   });
   const [legOne, legTwo] = orders[0].destinations;
@@ -396,7 +401,7 @@ Deno.test("fold: two lines on one aggregate booking count its units ONCE", () =>
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE)],
+    bookings: [booking(CAMERA, LEG_1)],
     fulfillments: docs(f),
   });
   const leg = orders[0].destinations[0];
@@ -419,7 +424,7 @@ Deno.test("fold: a booking outside the open slice reads as NO booking, not a clo
     scope: ORG_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(TRIPOD, STAGE, { quantity: 1 })],
+    bookings: [booking(TRIPOD, LEG_1, { quantity: 1 })],
     fulfillments: docs(f),
   });
   // The order's only line is the camera, whose booking is absent; the tripod
@@ -455,12 +460,18 @@ Deno.test("fold: a leg whose pair names no delivery endpoint carries no booking"
     "a booking cannot name a leg with no delivery endpoint",
   );
 
+  // ⚠️ **And the fold is asked with an EMPTY slice, deliberately.** This arm
+  // used to hand it a booking and assert 0 orders — which was green for the
+  // wrong reason: that fixture's id was built from the ADDRESS, so it matched
+  // no leg and the fold would have gone equally quiet on a leg that DID have an
+  // endpoint. Pair-keyed, such a booking resolves and the leg is surfaced,
+  // correctly — the corpus is what cannot produce one, per the two arms above.
   const f = fulfillment({ destinations: [pair(LEG_1, null)] });
   const { orders } = foldPickSheet({
     scope: ORG_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE)],
+    bookings: [],
     fulfillments: docs(f),
   });
   assertEquals(orders.length, 0, "nothing is addressable there");
@@ -478,7 +489,7 @@ Deno.test("fold: an order with no fulfillment document is SURFACED, never droppe
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE), booking(CAMERA, STAGE, { orderUid: ORDER_B })],
+    bookings: [booking(CAMERA, LEG_1), booking(CAMERA, LEG_1, { orderUid: ORDER_B })],
     fulfillments: docs(fulfillment()),
   });
   assertEquals(orders.length, 1);
@@ -493,7 +504,7 @@ Deno.test("leg: a `collection` sheet drops a leg still waiting to go out", () =>
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: "collection",
-    bookings: [booking(CAMERA, STAGE, { reserved: 2 })],
+    bookings: [booking(CAMERA, LEG_1, { reserved: 2 })],
     fulfillments: docs(f),
   });
   assertEquals(orders.length, 0, "a leg with outbound work is not on a collection sheet");
@@ -505,7 +516,7 @@ Deno.test("leg: a `delivery` sheet keeps that same leg", () => {
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: "delivery",
-    bookings: [booking(CAMERA, STAGE, { reserved: 2 })],
+    bookings: [booking(CAMERA, LEG_1, { reserved: 2 })],
     fulfillments: docs(f),
   });
   assertEquals(orders[0].destinations.map((d) => d.uid), [LEG_1]);
@@ -525,8 +536,8 @@ Deno.test("leg: the two directions PARTITION one sheet, and `null` keeps both", 
   });
   // LEG_1 is still going out; LEG_2 is in flight and therefore coming back.
   const bookings = [
-    booking(CAMERA, STAGE, { reserved: 2 }),
-    booking(TRIPOD, LOT, { quantity: 1, status: "active", out: 1 }),
+    booking(CAMERA, LEG_1, { reserved: 2 }),
+    booking(TRIPOD, LEG_2, { quantity: 1, status: "active", out: 1 }),
   ];
   const all = foldPickSheet({ scope: ORG_SCOPE, gate: "all", leg: null, bookings, fulfillments: docs(f) });
   assertEquals(all.orders[0].destinations.map((d) => d.uid), [LEG_1, LEG_2]);
@@ -547,7 +558,7 @@ Deno.test("leg: an order left with NO admitted leg drops off the sheet entirely"
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: "collection",
-    bookings: [booking(CAMERA, STAGE, { reserved: 2 })],
+    bookings: [booking(CAMERA, LEG_1, { reserved: 2 })],
     fulfillments: docs(f),
   });
   assertEquals(orders, []);
@@ -565,7 +576,7 @@ Deno.test("due_at: a pending leg waits on its DELIVERY date", () => {
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE, { reserved: 2 })],
+    bookings: [booking(CAMERA, LEG_1, { reserved: 2 })],
     fulfillments: docs(f),
   });
   assertEquals(orders[0].destinations[0].due_at, "2026-09-01T09:00:00.000-05:00");
@@ -582,7 +593,7 @@ Deno.test("due_at: a leg fully in flight waits on its COLLECTION date", () => {
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE, { status: "active", out: 2 })],
+    bookings: [booking(CAMERA, LEG_1, { status: "active", out: 2 })],
     fulfillments: docs(f),
   });
   assertEquals(orders[0].destinations[0].due_at, "2026-09-10T09:00:00.000-05:00");
@@ -605,7 +616,7 @@ Deno.test("due_at: a SALE sitting in `out` is not waiting on a collection", () =
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE, { type: "sale", status: "active", out: 2 })],
+    bookings: [booking(CAMERA, LEG_1, { type: "sale", status: "active", out: 2 })],
     fulfillments: docs(f),
   });
   assertEquals(orders[0].destinations[0].due_at, "2026-09-01T09:00:00.000-05:00");
@@ -622,7 +633,7 @@ Deno.test("due_at: a partially prepped leg is still waiting to go OUT", () => {
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE, { status: "part-prepped", prepped: 1, out: 1, quantity: 2 })],
+    bookings: [booking(CAMERA, LEG_1, { status: "part-prepped", prepped: 1, out: 1, quantity: 2 })],
     fulfillments: docs(f),
   });
   assertEquals(orders[0].destinations[0].due_at, "2026-09-01T09:00:00.000-05:00");
@@ -647,8 +658,8 @@ Deno.test("sort: an undated order sorts LAST, not first", () => {
     gate: "all",
     leg: null,
     bookings: [
-      booking(CAMERA, STAGE, { orderUid: ORDER_B }),
-      booking(CAMERA, STAGE),
+      booking(CAMERA, LEG_1, { orderUid: ORDER_B }),
+      booking(CAMERA, LEG_1),
     ],
     fulfillments: docs(soon, undated),
   });
@@ -677,7 +688,7 @@ Deno.test("sort: an order's own due date is its EARLIEST leg's", () => {
     scope: ORG_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE), booking(TRIPOD, LOT, { quantity: 1 })],
+    bookings: [booking(CAMERA, LEG_1), booking(TRIPOD, LEG_2, { quantity: 1 })],
     fulfillments: docs(f),
   });
   assertEquals(orderDueAt(orders[0]), "2026-09-02T09:00:00.000-05:00");
@@ -699,8 +710,8 @@ Deno.test("organizations: a sheet spanning two customers names both", () => {
     gate: "all",
     leg: null,
     bookings: [
-      booking(CAMERA, STAGE),
-      booking(CAMERA, STAGE, { orderUid: ORDER_B, quantity: 1, orgUid: ORG_B }),
+      booking(CAMERA, LEG_1),
+      booking(CAMERA, LEG_1, { orderUid: ORDER_B, quantity: 1, orgUid: ORG_B }),
     ],
     fulfillments: docs(a, b),
   });
@@ -765,7 +776,7 @@ Deno.test("owner: two lines on one booking — exactly one OWNS, and the others 
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE), booking(TRIPOD, STAGE, { quantity: 1 })],
+    bookings: [booking(CAMERA, LEG_1), booking(TRIPOD, LEG_1, { quantity: 1 })],
     fulfillments: docs(f),
   });
   const items = orders[0].destinations[0].items;
@@ -825,12 +836,12 @@ Deno.test("owner: differently-parented occurrences of one product now resolve to
     gate: "all",
     leg: null,
     bookings: [
-      booking(STEAMER, STAGE, { quantity: 1 }),
-      booking(TENT, STAGE, { quantity: 1 }),
-      booking(CORD, STAGE, { quantity: 1 }),
-      { ...booking(TRIPOD, STAGE, { quantity: 1 }), uid: bookingId(ORDER, TRIPOD, STAGE, steamerHash) },
-      { ...booking(TRIPOD, STAGE, { quantity: 2 }), uid: bookingId(ORDER, TRIPOD, STAGE, tentHash) },
-      { ...booking(TRIPOD, STAGE, { quantity: 1 }), uid: bookingId(ORDER, TRIPOD, STAGE, cordHash) },
+      booking(STEAMER, LEG_1, { quantity: 1 }),
+      booking(TENT, LEG_1, { quantity: 1 }),
+      booking(CORD, LEG_1, { quantity: 1 }),
+      { ...booking(TRIPOD, LEG_1, { quantity: 1 }), uid: bookingId(ORDER, TRIPOD, LEG_1, steamerHash) },
+      { ...booking(TRIPOD, LEG_1, { quantity: 2 }), uid: bookingId(ORDER, TRIPOD, LEG_1, tentHash) },
+      { ...booking(TRIPOD, LEG_1, { quantity: 1 }), uid: bookingId(ORDER, TRIPOD, LEG_1, cordHash) },
     ],
     fulfillments: docs(f),
   });
@@ -888,8 +899,8 @@ Deno.test("owner: among fungible component occurrences, the LARGEST ordered quan
     gate: "all",
     leg: null,
     bookings: [
-      booking(STEAMER, STAGE, { quantity: 2 }),
-      { ...booking(TRIPOD, STAGE, { quantity: 3 }), uid: bookingId(ORDER, TRIPOD, STAGE, crateHash) },
+      booking(STEAMER, LEG_1, { quantity: 2 }),
+      { ...booking(TRIPOD, LEG_1, { quantity: 3 }), uid: bookingId(ORDER, TRIPOD, LEG_1, crateHash) },
     ],
     fulfillments: docs(f),
   });
@@ -930,7 +941,7 @@ Deno.test("owner: a divider, a group and a service line own NOTHING and point at
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE)],
+    bookings: [booking(CAMERA, LEG_1)],
     fulfillments: docs(f),
   });
   const items = orders[0].destinations[0].items;
@@ -1017,18 +1028,19 @@ Deno.test("scope: two pairs sharing one delivery uid are TWO legs, never merged"
 });
 
 /**
- * 🔴 **The legacy arm, and it is TRANSITIONAL.** Between the writer flipping
- * and the corpus migrating, a stored booking still carries the address-keyed
- * segment 3, and this fold joins by CONSTRUCTION with no read — so a form
- * mismatch yields `uid_booking: null`, which renders as a legitimate
- * `stock_method: "none"` component and **undercounts a packing list with no
- * error anywhere**. The two-key read in `bookingUidForItem` is what prevents
- * that, and this arm is the only thing holding it in place.
+ * 🔴 **The legacy arm is GONE, and this is the net that says so.** Between the
+ * writer flipping and the corpus migrating, `bookingUidForItem` read two keys —
+ * the pair uid, then the address — because this fold joins by CONSTRUCTION with
+ * no read, so a form mismatch yields `uid_booking: null`, which renders as a
+ * legitimate `stock_method: "none"` component and **undercounts a packing list
+ * with no error anywhere**. Both corpora now measure 0 old-form ids
+ * (api-cloudrun#933 step 5), the fallback is deleted, and an address-keyed
+ * booking must therefore resolve to NOTHING rather than silently to a row.
  *
- * ⚠️ **Delete this test in step 5 of api-cloudrun#933**, with the fallback it
- * pins — not before, and not by quietly letting it rot green.
+ * ⚠️ **The rejection is the load-bearing half.** "The pair-keyed booking
+ * resolves" passes just as happily with the fallback still in place.
  */
-Deno.test("legacy: an address-keyed booking still resolves during the migration window", () => {
+Deno.test("an address-keyed booking resolves to NOTHING — the fallback is deleted", () => {
   const f = fulfillment({
     destinations: [pair(LEG_1, STAGE)],
     items: [
@@ -1036,27 +1048,44 @@ Deno.test("legacy: an address-keyed booking still resolves during the migration 
       line(CAMERA, "Alexa 35", 2, [LEG_1, CAMERA]),
     ],
   });
+  const legacy = { ...booking(CAMERA, LEG_1, { quantity: 2 }), uid: `${ORDER}:${CAMERA}:${STAGE}` };
+
   const { orders } = foldPickSheet({
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE, { quantity: 2 })],
+    bookings: [legacy],
     fulfillments: docs(f),
   });
 
-  const row = orders[0].destinations[0].items.find(pickSheetItemOwnsBooking);
-  assertEquals(row?.uid_booking, `${ORDER}:${CAMERA}:${STAGE}`, "resolved on the legacy form");
-  assertEquals(sheetQuantity(orders), 2);
+  // Nothing in the slice resolves, so the leg has no open work and the order is
+  // not on the sheet at all — the same quiet a genuinely-finished leg produces.
+  // ⚠️ That is exactly why this can only be read beside the positive arm below:
+  // silence alone does not distinguish "not mine" from "cannot see it".
+  assertEquals(orders.length, 0, "an address-keyed id is not a booking id");
+  assertEquals(sheetQuantity(orders), 0);
+
+  // ...and the pair-keyed booking, on the same fixture, resolves and counts.
+  const { orders: ok } = foldPickSheet({
+    scope: DESTINATION_SCOPE,
+    gate: "all",
+    leg: null,
+    bookings: [booking(CAMERA, LEG_1, { quantity: 2 })],
+    fulfillments: docs(f),
+  });
+  const owner = ok[0].destinations[0].items.find(pickSheetItemOwnsBooking);
+  assertEquals(owner?.uid_booking, `${ORDER}:${CAMERA}:${LEG_1}`);
+  assertEquals(sheetQuantity(ok), 2);
 });
 
 /**
- * The same window, from the receipt's side. `bookingOccurrencesByBooking` has
- * no booking map to choose with, so it registers each occurrence under BOTH
- * forms — a movement holding either one finds its owner row.
- *
- * ⚠️ **Delete this with the dual-key emission in step 5 of api-cloudrun#933.**
+ * The same, from the receipt's side. `bookingOccurrencesByBooking` has no
+ * booking map to choose with, so during the migration window it registered each
+ * occurrence under BOTH forms. It emits ONE key now, and a movement still
+ * holding an address-keyed subject finds nothing — which is correct: the
+ * migration re-keyed the journal along with the bookings.
  */
-Deno.test("legacy: occurrences are reachable by either segment-3 form", () => {
+Deno.test("occurrences are keyed by the LEG alone — the dual emission is deleted", () => {
   const f = fulfillment({
     destinations: [pair(LEG_1, STAGE)],
     items: [
@@ -1065,9 +1094,9 @@ Deno.test("legacy: occurrences are reachable by either segment-3 form", () => {
     ],
   });
   const occurrences = bookingOccurrencesByBooking(f.uid, f.items, f.destinations);
-  const expected = [{ path: [LEG_1, CAMERA], quantity: 2 }];
-  assertEquals(occurrences.get(`${ORDER}:${CAMERA}:${LEG_1}`), expected, "current form");
-  assertEquals(occurrences.get(`${ORDER}:${CAMERA}:${STAGE}`), expected, "legacy form");
+  assertEquals(occurrences.get(`${ORDER}:${CAMERA}:${LEG_1}`), [{ path: [LEG_1, CAMERA], quantity: 2 }]);
+  assertEquals(occurrences.get(`${ORDER}:${CAMERA}:${STAGE}`), undefined, "legacy form");
+  assertEquals(occurrences.size, 1, "one key per occurrence, not two");
 });
 
 // ── The template's door onto a row's numbers ────────────────────────
@@ -1098,7 +1127,7 @@ Deno.test("helper: pickSheetLineBooking answers for the OWNER and null for every
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE), booking(TRIPOD, STAGE, { quantity: 1 })],
+    bookings: [booking(CAMERA, LEG_1), booking(TRIPOD, LEG_1, { quantity: 1 })],
     fulfillments: docs(f),
   });
   const leg = orders[0].destinations[0];
@@ -1141,7 +1170,7 @@ Deno.test("helper: pickSheetLineBooking refuses a row from a DIFFERENT leg", () 
     scope: ORG_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE), booking(TRIPOD, LOT, { quantity: 1 })],
+    bookings: [booking(CAMERA, LEG_1), booking(TRIPOD, LEG_2, { quantity: 1 })],
     fulfillments: docs(f),
   });
   const [legOne, legTwo] = orders[0].destinations;
@@ -1213,7 +1242,7 @@ Deno.test("bookingOccurrencesByBooking agrees with the fold, booking for booking
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE), booking(TRIPOD, STAGE, { quantity: 1 })],
+    bookings: [booking(CAMERA, LEG_1), booking(TRIPOD, LEG_1, { quantity: 1 })],
     fulfillments: docs(f),
   });
 

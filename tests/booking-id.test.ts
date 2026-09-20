@@ -11,10 +11,10 @@ import {
   componentSignatureHash,
   parseBookingId,
 } from "../src/utils/booking-id.ts";
-import { fid } from "./helpers/ids.ts";
+import { fid, legUid } from "./helpers/ids.ts";
 
 const ORDER = fid("order");
-const DEST = fid("dest");
+const DEST = legUid("dest"); // segment 3 is the LEG (pair uid), not an address
 const DIVIDER = "11111111-1111-4111-8111-111111111111";
 const GROUP = "22222222-2222-4222-8222-222222222222";
 const PRODUCT = fid("product");

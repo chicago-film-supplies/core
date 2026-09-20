@@ -28,7 +28,7 @@ const SESSION = "0199a1f2-3b4c-7d8e-9f01-234567890abc";
 /** A reversal is a NEW session against the SAME subject — that is the whole id difference. */
 const REVERSAL_SESSION = "0199a1f2-3b4c-7d8e-9f01-234567890abd";
 const PRODUCT = "testprod100000000000";
-const BOOKING = "testordr100000000000:testitem10000000000x:testdest100000000000";
+const BOOKING = "testordr100000000000:testitem10000000000x:9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48";
 const LOC_A = "testloc1000000000000";
 const LOC_B = "testloc2000000000000";
 const OOS = "testoos10000000000000".slice(0, 20);

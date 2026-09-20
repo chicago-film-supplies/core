@@ -31,7 +31,7 @@ import {
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const NOW: TestDocOptionsWithNow = { now: mockTimestamp };
-const BOOKING_ID = "AAAAAAAAAAAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAA";
+const BOOKING_ID = "AAAAAAAAAAAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAA:9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48";
 
 /**
  * The per-schema escape hatch, and the number that matters.

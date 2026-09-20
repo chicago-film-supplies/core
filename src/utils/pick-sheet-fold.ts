@@ -102,24 +102,6 @@ function bookingUidFor(
 }
 
 /**
- * Segment-3 candidates for one leg, in preference order: the pair's own uid
- * (current), then its `delivery.uid` (legacy, address-keyed).
- *
- * ⚠️ **Transitional, deleted once the corpus is migrated** (api-cloudrun#933
- * step 5). It exists because this fold joins by CONSTRUCTION — it derives a
- * booking id rather than reading one — so a form mismatch yields
- * `uid_booking: null`, which renders as a legitimate `stock_method: "none"`
- * component and undercounts the sheet with no error anywhere. A caller holding
- * a real booking map resolves against it; one that holds no map emits both.
- */
-function legSegmentCandidates(
-  pair: { uid: string; delivery: { uid: string | null } },
-): string[] {
-  const legacy = pair.delivery.uid;
-  return legacy === null || legacy === pair.uid ? [pair.uid] : [pair.uid, legacy];
-}
-
-/**
  * When a leg is next due — the field the sheet is ordered on.
  *
  * ⭐ **The direction is `pickSheetLegDirection`'s, and this function owns only
@@ -497,14 +479,8 @@ function bookingUidForItem(
   // `FirestoreId`, so such a booking is unwritable. Refusing here as well would
   // be a second, weaker copy of that rule — and one that drops real work off a
   // packing list the day the schema changes.
-  // Two-key read, new form first — see {@link legSegmentCandidates}. Having a
-  // real map here is what makes this site safe; the one that has none emits
-  // both keys instead.
-  for (const segment of legSegmentCandidates(pair)) {
-    const uid = bookingUidFor(orderUid, item, segment);
-    if (bookingByUid.has(uid)) return uid;
-  }
-  return null;
+  const uid = bookingUidFor(orderUid, item, pair.uid);
+  return bookingByUid.has(uid) ? uid : null;
 }
 
 /**
@@ -526,13 +502,6 @@ function bookingUidForItem(
  * `bookingByUid` only because it must also decide which lines are on the sheet
  * at all.
  *
- * ⚠️ **Transitionally each occurrence is registered under BOTH segment-3 forms**
- * (api-cloudrun#933 step 1), because having no map is exactly what stops this
- * walk from choosing between them. That is sound only under the property in the
- * paragraph above — every key is LOOKED UP, never iterated — so a caller that
- * starts enumerating entries or trusting `size` must wait for step 5, which
- * deletes the legacy key.
- *
  * Exported for the receipt (`MovementSessionItem.owner_path`), so the pick sheet
  * and the receipt designate the SAME row rather than deriving ownership twice.
  */
@@ -550,7 +519,6 @@ export function bookingOccurrencesByBooking(
     if (divider.type !== "destination") continue;
     const pair = destinations.find((d) => d.uid === divider.uid);
     if (!pair) continue;
-    const segments = legSegmentCandidates(pair);
 
     const { endIndex } = getItemSubtreeRange(items, i);
     for (let j = i + 1; j <= endIndex; j++) {
@@ -560,12 +528,10 @@ export function bookingOccurrencesByBooking(
         path: item.path,
         quantity: item.quantity,
       };
-      for (const segment of segments) {
-        const uidBooking = bookingUidFor(orderUid, item, segment);
-        const list = out.get(uidBooking);
-        if (list) list.push(occurrence);
-        else out.set(uidBooking, [occurrence]);
-      }
+      const uidBooking = bookingUidFor(orderUid, item, pair.uid);
+      const list = out.get(uidBooking);
+      if (list) list.push(occurrence);
+      else out.set(uidBooking, [occurrence]);
     }
   }
   return out;

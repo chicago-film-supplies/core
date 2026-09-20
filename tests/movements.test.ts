@@ -25,7 +25,7 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 const LOC_A = "testloc1000000000000";
 const LOC_B = "testloc2000000000000";
 const OOS = "testoos1000000000000";
-const BOOKING = "testordr100000000000:testitem10000000000x:testdest100000000000";
+const BOOKING = "testordr100000000000:testitem10000000000x:9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48";
 
 const at = (uid: string) => ({ collection: "locations" as const, uid });
 const atOos = { collection: "out-of-service" as const, uid: OOS };

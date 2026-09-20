@@ -76,11 +76,13 @@
  * because the id embedded the destination uid. The pair uid is churned by
  * none of that.
  *
- * ⚠️ **Segment 3's `firestoreId` arm is TRANSITIONAL** — it accepts the legacy
- * address-keyed form only until the corpus is migrated, and is deleted once
- * `bookings` and `transactions` both measure 0 old-form ids. An armed dead
- * branch is what would silently re-admit the shape that cannot tell two legs
- * to one address apart.
+ * 🔴 **There is no legacy arm, deliberately.** Segment 3 accepted the
+ * address-keyed `firestoreId` form for the migration window only; the whole
+ * corpus was re-keyed on 2026-09-20 (`bookings` 7,306 prod / 7,310 dev,
+ * `transactions` 1,213 / 1,682 custody subjects, 0 old-form in either project)
+ * and the arm was deleted rather than kept. An armed dead branch is what would
+ * silently re-admit the shape that cannot tell two legs to one address apart —
+ * so a stored id in the old form is now a WRITE REFUSAL, which is the point.
  *
  * ## `BookingId`'s 4th segment, and why `isProductShapedUid` lives here
  *
@@ -104,16 +106,16 @@
  * predicate is derivable from `ItemUid`'s union alone — no `structuralUids` set
  * has to travel alongside a `path` for `componentAncestry` to read it correctly.
  *
- * ⚠️ **`MovementId`'s subject arm inherits segment 3's transitional union, and
- * narrows with it.** This module previously ruled that union *permanent*, on
+ * ⚠️ **`MovementId`'s subject arm inherits segment 3, and narrowed with it.**
+ * This module previously ruled the legacy-address union *permanent*, on
  * the grounds that `transactions` is append-only, so a historical movement's
  * stored id records what its subject's id *was at the time* and is never
  * rewritten. 🔴 **That reasoning is overturned** (owner, 2026-09-20): a
  * movement **names** the booking it is about, and a re-key corrects that
- * booking's identity rather than restating the event. So the movement ids move
- * with their subjects, no legacy arm survives anywhere, and both unions narrow
- * to the uuid form together. The 3-vs-4-segment union stays permanent — that
- * one really is a difference between occurrences, not between eras.
+ * booking's identity rather than restating the event. So the movement ids moved
+ * with their subjects, no legacy arm survives anywhere, and both unions
+ * narrowed to the uuid form together. The 3-vs-4-segment union stays permanent
+ * — that one really is a difference between occurrences, not between eras.
  *
  * ## Naming: `uid` is a document id, `uuid` is someone else's id
  *
@@ -195,15 +197,11 @@ export function isProductShapedUid(uid: string): boolean {
 }
 
 /**
- * Segment 3 of a `BookingId` — the destination PAIR's uid, a UUID. See the
- * "`BookingId`'s 3rd segment is the LEG" section above.
- *
- * ⚠️ The `firestoreId` arm is **transitional**: it accepts the legacy
- * address-keyed form for the migration window only, and is deleted once both
- * `bookings` and `transactions` measure 0 old-form ids. Do not read it as a
- * permanent polymorphism.
+ * Segment 3 of a `BookingId` — the destination PAIR's uid, a UUID, and ONLY
+ * that. See the "`BookingId`'s 3rd segment is the LEG" section above for why
+ * the legacy address-keyed arm was deleted rather than kept.
  */
-const destinationPairSegment = z.union([z.uuid(), firestoreId]);
+const destinationPairSegment = z.uuid();
 
 /** Internal, un-annotated so `MovementId` can embed its pattern. */
 const bookingIdTopLevel = z.templateLiteral([
@@ -265,10 +263,10 @@ export const BookingId: z.ZodType<string> = z.union([bookingIdTopLevel, bookingI
  * `bookings` id makes a booking upsert idempotent.
  *
  * ⚠️ The subject arm is `firestoreId | bookingIdTopLevel | bookingIdComponent`.
- * The product/booking split is permanent; segment 3's legacy-address arm,
- * inherited from `BookingId`, is **transitional** and narrows with it — a
- * movement's id is re-keyed along with the booking it names. See the
- * "`BookingId`'s 3rd segment" section above.
+ * The product/booking split is permanent. Segment 3 of the booking arms carries
+ * no legacy-address form: a movement's id was re-keyed along with the booking it
+ * names, because a movement NAMES its subject rather than recording what that
+ * subject's id once was. See the "`BookingId`'s 3rd segment" section above.
  */
 export const MovementId: z.ZodType<string> = z.templateLiteral([
   z.uuid(),

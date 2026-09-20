@@ -5802,10 +5802,10 @@ event idempotent under the manager's retry-on-409, exactly as the derived
 `bookings` id makes a booking upsert idempotent.
 
 ⚠️ The subject arm is `firestoreId | bookingIdTopLevel | bookingIdComponent`.
-The product/booking split is permanent; segment 3's legacy-address arm,
-inherited from `BookingId`, is **transitional** and narrows with it — a
-movement's id is re-keyed along with the booking it names. See the
-"`BookingId`'s 3rd segment" section above.
+The product/booking split is permanent. Segment 3 of the booking arms carries
+no legacy-address form: a movement's id was re-keyed along with the booking it
+names, because a movement NAMES its subject rather than recording what that
+subject's id once was. See the "`BookingId`'s 3rd segment" section above.
 
 ```ts
 const MovementId: z.ZodType<string>;
@@ -13357,10 +13357,10 @@ event idempotent under the manager's retry-on-409, exactly as the derived
 `bookings` id makes a booking upsert idempotent.
 
 ⚠️ The subject arm is `firestoreId | bookingIdTopLevel | bookingIdComponent`.
-The product/booking split is permanent; segment 3's legacy-address arm,
-inherited from `BookingId`, is **transitional** and narrows with it — a
-movement's id is re-keyed along with the booking it names. See the
-"`BookingId`'s 3rd segment" section above.
+The product/booking split is permanent. Segment 3 of the booking arms carries
+no legacy-address form: a movement's id was re-keyed along with the booking it
+names, because a movement NAMES its subject rather than recording what that
+subject's id once was. See the "`BookingId`'s 3rd segment" section above.
 
 ```ts
 const MovementId: z.ZodType<string>;
@@ -34232,13 +34232,6 @@ holds a real booking uid — a movement does — looks it up directly and a key
 naming no real booking is simply never asked for. The fold passes a
 `bookingByUid` only because it must also decide which lines are on the sheet
 at all.
-
-⚠️ **Transitionally each occurrence is registered under BOTH segment-3 forms**
-(api-cloudrun#933 step 1), because having no map is exactly what stops this
-walk from choosing between them. That is sound only under the property in the
-paragraph above — every key is LOOKED UP, never iterated — so a caller that
-starts enumerating entries or trusting `size` must wait for step 5, which
-deletes the legacy key.
 
 Exported for the receipt (`MovementSessionItem.owner_path`), so the pick sheet
 and the receipt designate the SAME row rather than deriving ownership twice.

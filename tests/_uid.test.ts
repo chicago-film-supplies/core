@@ -13,7 +13,10 @@ import {
   SEEDED_ROLE_NAMES,
   ThreadId,
 } from "../src/schemas/_uid.ts";
-import { bookingId, fid } from "./helpers/ids.ts";
+import { bookingId, fid, legUid } from "./helpers/ids.ts";
+
+/** A destination PAIR uid — segment 3 of a `BookingId`, the LEG. */
+const LEG = "fe847108-d824-4f3a-aac8-ce60a9743ffc";
 
 const accepts = (s: { safeParse(v: unknown): { success: boolean } }, v: string) =>
   assertEquals(s.safeParse(v).success, true, `expected accept: ${v}`);
@@ -45,67 +48,71 @@ Deno.test("ItemUid rejects malformed ids", () => {
   rejects(ItemUid, "test-item-1");
 });
 
-Deno.test("BookingId accepts {order}:{item}:{dest}, incl. custom middle", () => {
-  accepts(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG");
+Deno.test("BookingId accepts {order}:{item}:{leg}, incl. custom middle", () => {
+  accepts(BookingId, `00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${LEG}`);
   accepts(
     BookingId,
-    "00iNtfho7YCp6FllPi9f:custom-fe847108-d824-4f3a-aac8-ce60a9743ffc:gka5vla5wQO1xlSsR7UG",
+    `00iNtfho7YCp6FllPi9f:custom-fe847108-d824-4f3a-aac8-ce60a9743ffc:${LEG}`,
   );
 });
 
 Deno.test("BookingId rejects wrong arity / bad segments", () => {
   rejects(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk"); // 2 parts
-  rejects(BookingId, "00iNtfho7YCp6FllPi9f:bad:gka5vla5wQO1xlSsR7UG");
+  rejects(BookingId, `00iNtfho7YCp6FllPi9f:bad:${LEG}`);
 });
 
 Deno.test("BookingId accepts the 4-segment kit-component form", () => {
   accepts(
     BookingId,
-    "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG:0123456789ab",
+    `00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${LEG}:0123456789ab`,
   );
   accepts(
     BookingId,
-    bookingId(fid("o"), fid("p"), fid("d"), "0123456789ab"),
+    bookingId(fid("o"), fid("p"), legUid("d"), "0123456789ab"),
   );
 });
 
 Deno.test("BookingId rejects a malformed 4th segment", () => {
   // Wrong length, and uppercase — the hash is lowercase-hex, first 12 chars.
-  rejects(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG:0123456789a");
-  rejects(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG:0123456789ABCD");
-  rejects(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG:0123456789AB");
+  rejects(BookingId, `00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${LEG}:0123456789a`);
+  rejects(BookingId, `00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${LEG}:0123456789ABCD`);
+  rejects(BookingId, `00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${LEG}:0123456789AB`);
 });
 
 Deno.test("MovementId accepts a 4-segment (kit-component) booking subject", () => {
-  const subject = bookingId(fid("o"), fid("p"), fid("d"), "0123456789ab");
+  const subject = bookingId(fid("o"), fid("p"), legUid("d"), "0123456789ab");
   accepts(MovementId, `fe847108-d824-4f3a-aac8-ce60a9743ffc|check_out|${subject}`);
 });
 
 /**
- * 🔴 **Segment 3 is the destination PAIR's uid — the LEG — and the
- * `firestoreId` arm beside it is TRANSITIONAL** (api-cloudrun#933). Both arms
- * are pinned so that narrowing the union in step 5 is a deliberate edit to this
- * file rather than something a refactor can do silently.
+ * 🔴 **Segment 3 is the destination PAIR's uid — the LEG — and ONLY that**
+ * (api-cloudrun#933). The transitional `firestoreId` arm was deleted once both
+ * corpora measured 0 old-form ids; this pair of tests is the net, and the
+ * REJECTION half is the load-bearing one — an accepted legacy id is the shape
+ * that cannot tell two legs to one address apart.
  */
 Deno.test("BookingId accepts a pair-uid (LEG) 3rd segment, 3- and 4-segment", () => {
-  const leg = "fe847108-d824-4f3a-aac8-ce60a9743ffc";
-  accepts(BookingId, `00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${leg}`);
-  accepts(BookingId, `00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${leg}:0123456789ab`);
+  accepts(BookingId, `00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${LEG}`);
+  accepts(BookingId, `00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${LEG}:0123456789ab`);
   accepts(
     BookingId,
-    `00iNtfho7YCp6FllPi9f:custom-fe847108-d824-4f3a-aac8-ce60a9743ffc:${leg}`,
+    `00iNtfho7YCp6FllPi9f:custom-fe847108-d824-4f3a-aac8-ce60a9743ffc:${LEG}`,
   );
 });
 
 /**
- * ⚠️ **Delete this arm in step 5 of api-cloudrun#933**, with the union member
- * it pins. It is green today because the corpus still holds address-keyed ids;
- * once the migration measures 0 old-form ids it is a dead branch, and an armed
- * dead branch is what silently re-admits the shape that cannot tell two legs to
- * one address apart.
+ * 🔴 The pre-2026-09-20 form: segment 3 is a `destinations/{uid}` FirestoreId,
+ * not the destination PAIR's uuid. It parsed while the transitional arm stood;
+ * both corpora read 0 old-form ids, so it must not now. Mirrors the same
+ * assertion on {@link EventCardId}, which narrowed one day earlier.
  */
-Deno.test("BookingId still accepts the LEGACY address-keyed 3rd segment", () => {
-  accepts(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG");
+Deno.test("BookingId REJECTS the legacy address-keyed 3rd segment", () => {
+  rejects(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG");
+  rejects(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG:0123456789ab");
+  rejects(
+    MovementId,
+    "0f2a1c3e-4b5d-4e6f-8a9b-0c1d2e3f4a5b|check_out|00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG",
+  );
 });
 
 Deno.test("BookingId rejects a 3rd segment that is neither form", () => {
@@ -113,13 +120,13 @@ Deno.test("BookingId rejects a 3rd segment that is neither form", () => {
   const item = "0BIQ73UMiHTtd8mo0yNk";
   rejects(BookingId, `${order}:${item}:not-a-uid`);
   rejects(BookingId, `${order}:${item}:fe847108-d824-4f3a-aac8-ce60a9743ff`); // uuid, 1 short
-  rejects(BookingId, `${order}:${item}:gka5vla5wQO1xlSsR7U`); // firestore id, 19
+  rejects(BookingId, `${order}:${item}:gka5vla5wQO1xlSsR7U`); // firestore-shaped, 19
   rejects(BookingId, `${order}:${item}:`);
 });
 
-/** The subject arm inherits segment 3's union, and narrows with it in step 5. */
+/** The subject arm inherits segment 3, which is a pair uid and nothing else. */
 Deno.test("MovementId accepts a pair-uid booking subject, 3- and 4-segment", () => {
-  const leg = "fe847108-d824-4f3a-aac8-ce60a9743ffc";
+  const leg = LEG;
   const session = "0f2a1c3e-4b5d-4e6f-8a9b-0c1d2e3f4a5b";
   accepts(MovementId, `${session}|check_out|00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${leg}`);
   accepts(
@@ -187,7 +194,7 @@ Deno.test("fixture id helpers produce validator-compliant ids", () => {
   assertEquals(prod.length, 20);
   accepts(FirestoreId, prod);
   accepts(ItemUid, prod);
-  accepts(BookingId, bookingId(fid("o"), fid("p"), fid("d")));
+  accepts(BookingId, bookingId(fid("o"), fid("p"), legUid("d")));
 });
 
 // ── RoleId ──────────────────────────────────────────────────────────

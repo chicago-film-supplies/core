@@ -9,7 +9,7 @@ const datesBase = bookingBase.dates as Record<string, unknown>;
 
 const validBooking = {
   ...bookingBase,
-  uid: "testorder10000000000:testprod100000000000:testdest100000000000",
+  uid: "testorder10000000000:testprod100000000000:9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48",
   uid_order: "testorder10000000000",
   uid_product: "testprod100000000000",
   name: "LED Panel",

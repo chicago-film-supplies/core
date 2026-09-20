@@ -69,7 +69,7 @@ Deno.test("OutOfServiceSchema accepts plural sources (booking + order)", () => {
   const doc = {
     ...validOOS,
     sources: [
-      { collection: "bookings", uid: "testorder10000000000:testprod100000000000:testdest100000000000", label: "Booking #5" },
+      { collection: "bookings", uid: "testorder10000000000:testprod100000000000:9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48", label: "Booking #5" },
       { collection: "orders", uid: "testorder10000000000", label: "Order #1001" },
     ],
     query_by_sources: ["bookings:test-booking-1", "orders:test-order-1"],
@@ -100,7 +100,7 @@ Deno.test("OutOfServiceSchema validates with stores and transactions", () => {
       date: "2026-03-01T00:00:00.000-06:00",
       date_fs: fs,
       quantity: 2,
-      source: { collection: "bookings", uid: "testorder10000000000:testprod100000000000:testdest100000000000" },
+      source: { collection: "bookings", uid: "testorder10000000000:testprod100000000000:9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48" },
       type: "open",
     }],
   };
