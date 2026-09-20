@@ -77,6 +77,9 @@ export type TransactionId =
   // suppliers.ts
   | "create-supplier"
   | "update-supplier"
+  // destinations.ts — the ONE route that writes a destination's tree. Every
+  // other destination write is a side effect of an order.
+  | "reparent-destination"
   | "create-organization"
   | "update-organization"
   // 🔴 **A re-parent gets its OWN id, never a borrowed `update-organization`.**
@@ -227,6 +230,8 @@ export type RuleId =
   | "update-org:tax-axes-to-orders"
   | "update-org:contacts-change"
   | "update-org:name-to-descendants"
+  | "reparent-destination:tree-to-node"
+  | "reparent-destination:place-name-to-units"
   | "reparent-org:tree-to-descendants"
   | "reparent-org:activity-to-new-ancestors"
   | "stamp-org-activity:orders-to-organizations"
