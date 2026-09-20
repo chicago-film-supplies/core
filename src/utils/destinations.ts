@@ -26,8 +26,9 @@ export function destinationLevel(node: Pick<Destination, "path">): DestinationLe
   if (depth === undefined || depth < 1 || depth > DESTINATION_LEVELS.length) {
     throw new Error(
       `destination path depth ${depth ?? "(no path)"} is outside the ${DESTINATION_LEVELS.length}-level tree ` +
-        `(${DESTINATION_LEVELS.join(" → ")}) — check \`path\` before asking for a level. Through the expand ` +
-        `third of the rollout \`path\` is optional, so an un-backfilled document reaches here legitimately.`,
+        `(${DESTINATION_LEVELS.join(" → ")}) — check \`path\` before asking for a level. ⚠️ \`path\` is REQUIRED ` +
+        `since 2026-09-20, so this throw now defends only against an UNTYPED source — raw Firestore data, a ` +
+        `hand-built fixture, a document written by an older build — never against a parsed \`Destination\`.`,
     );
   }
   return DESTINATION_LEVELS[depth - 1];

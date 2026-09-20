@@ -1401,7 +1401,7 @@
         {
           "kind": "interface",
           "name": "DestinationDoc",
-          "declaration": "interface DestinationDoc {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  path?: DestinationPathNodeType[];\n  query_by_path?: string[];\n  jurisdiction?: JurisdictionType | null;\n  contacts?: DestinationContactRefType[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface DestinationDoc {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  path: DestinationPathNodeType[];\n  query_by_path: string[];\n  jurisdiction?: JurisdictionType | null;\n  contacts?: DestinationContactRefType[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a destination (a physical address used in orders)."
         },
         {
@@ -6906,7 +6906,7 @@
         {
           "kind": "interface",
           "name": "Destination",
-          "declaration": "interface Destination {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  path?: DestinationPathNodeType[];\n  query_by_path?: string[];\n  jurisdiction?: JurisdictionType | null;\n  contacts?: DestinationContactRefType[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Destination {\n  uid: string;\n  address: AddressType | null;\n  mapbox_ids: string[];\n  path: DestinationPathNodeType[];\n  query_by_path: string[];\n  jurisdiction?: JurisdictionType | null;\n  contacts?: DestinationContactRefType[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a destination (a physical address used in orders)."
         },
         {

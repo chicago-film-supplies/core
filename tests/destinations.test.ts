@@ -8,7 +8,7 @@
  * 2, a unit is the exact opposite. A one-polarity check passes against a
  * constant-false guard.
  */
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import { DestinationSchema } from "../src/schemas/destination.ts";
 import {
   applyDestinationStreet2,
@@ -135,16 +135,20 @@ Deno.test("computeDestinationNode: a CYCLE throws — a node cannot be its own a
 });
 
 Deno.test("computeDestinationNode: a PATHLESS parent throws rather than minting a root", () => {
-  // The expand third leaves `path` optional, so an un-backfilled parent is a
-  // real state — and silently treating it as a root would hang the unit at
-  // depth 1 with its unit text stranded in `street`.
+  // ⚠️ `path` is REQUIRED since 2026-09-20, so this is no longer a state the
+  // TYPE admits — which is exactly why the cast stays: the parent arrives as
+  // raw Firestore data, and silently treating a pathless one as a root would
+  // hang the unit at depth 1 with its unit text stranded in `street`.
   assertThrows(
     () =>
-      computeDestinationNode({ uid: UNIT_UID, name: "Stage 25" }, {
-        uid: PROPERTY_UID,
-        path: undefined,
-        address: address(),
-      }),
+      computeDestinationNode(
+        { uid: UNIT_UID, name: "Stage 25" },
+        {
+          uid: PROPERTY_UID,
+          path: undefined,
+          address: address(),
+        } as unknown as Parameters<typeof computeDestinationNode>[1],
+      ),
     Error,
     "has no path",
   );
@@ -175,7 +179,14 @@ Deno.test("the level readers agree, both ways", () => {
 });
 
 Deno.test("destinationLevel THROWS on a pathless document rather than guessing a level", () => {
-  assertThrows(() => destinationLevel({ path: undefined }), Error, "(no path)");
+  // Cast: `path` is required on the type, and the throw defends the boundary
+  // where a document arrives UNPARSED. Deleting this test with the optionality
+  // would retire the only coverage of that boundary.
+  assertThrows(
+    () => destinationLevel({ path: undefined } as unknown as Parameters<typeof destinationLevel>[0]),
+    Error,
+    "(no path)",
+  );
 });
 
 Deno.test("the jurisdiction SEED walks to the property, and a unit's own value never shadows it", () => {
@@ -253,10 +264,27 @@ Deno.test("invariant 6 — the jurisdiction seed is the PROPERTY's, and a unit s
   assert(DestinationSchema.safeParse(unit({ jurisdiction: null })).success);
 });
 
-Deno.test("a PATHLESS destination still parses — the expand third, and the guards are inert on it", () => {
-  // ⚠️ This is the arm that comes out with the optionality. While it stands,
-  // every invariant above is skipped for a document the backfill has not
-  // reached — which is correct now and a hole the moment `path` is required.
+Deno.test("a PATHLESS destination is REFUSED — the contract third, and no invariant is inert any more", () => {
+  // 🔴 The inverse of what this test asserted through the expand, flipped in the
+  // same commit that made `path` required and deleted `checkDestinationNode`'s
+  // `path === undefined` early return. While that return stood, every invariant
+  // above was skipped for a document the backfill had not reached — the only
+  // population they were ever needed for. The corpus census that licensed the
+  // flip: `path` present on 258/258 prod and 259/259 dev (2026-09-20).
   const flat = { uid: PROPERTY_UID, address: address(), mapbox_ids: [], ...ts };
-  assert(DestinationSchema.safeParse(flat).success);
+  assertEquals(DestinationSchema.safeParse(flat).success, false);
+
+  // And the guards really do reach a document now: a mirror that disagrees with
+  // `path` is caught rather than skipped.
+  const mismatched = {
+    ...flat,
+    path: [{ uid: PROPERTY_UID, name: "Cinespace" }],
+    query_by_path: [UNIT_UID],
+  };
+  const result = DestinationSchema.safeParse(mismatched);
+  assertEquals(result.success, false);
+  assertStringIncludes(
+    result.error?.issues.map((i) => i.message).join(" ") ?? "",
+    "query_by_path must equal path.map",
+  );
 });

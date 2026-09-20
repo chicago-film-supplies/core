@@ -98,13 +98,16 @@ export interface Destination {
    * that does not exist. The server derives it from the RESOLVED parent or not
    * at all.
    *
-   * ⚠️ **`.optional()` through the EXPAND third of the rollout only.** Storage
-   * carried the key on 0 of 258 prod / 259 dev documents when this shipped
-   * (measured 2026-09-19), so under `z.strictObject` the reader has to deploy
-   * before the backfill can write one. The optionality comes out with the
-   * tighten, together with `query_by_path`'s and `jurisdiction`'s.
+   * ✅ **REQUIRED since the contract third of the rollout.** It was
+   * `.optional()` through the expand — storage carried the key on 0 of 258 prod
+   * / 259 dev documents when it shipped (2026-09-19), so under `z.strictObject`
+   * the reader had to deploy before the backfill could write one. The backfill
+   * then ran in both corpora and the census came back **258/258 prod and
+   * 259/259 dev** (2026-09-20), which is what made this tighten safe.
+   * `findOrCreateDestination` authors `path` at create time, so the corpus
+   * cannot re-diverge.
    */
-  path?: DestinationPathNodeType[];
+  path: DestinationPathNodeType[];
   /**
    * Flat mirror of `path.map(n => n.uid)` — **FIRESTORE-ONLY**, for the single
    * thing Firestore cannot do natively: `array-contains` compares WHOLE
@@ -120,7 +123,7 @@ export interface Destination {
    * `in` over a property's units: Firestore caps a disjunction at 30 and a
    * property has no bound on its unit count.
    */
-  query_by_path?: string[];
+  query_by_path: string[];
   /**
    * The tax jurisdiction this PROPERTY asserts, `null` when the address derives
    * it correctly — which is both properties in the corpus today.
@@ -140,6 +143,18 @@ export interface Destination {
    * organization invariant 12. No property straddles a municipal boundary
    * (owner, 2026-09-19), so "a stage states its own jurisdiction" is made
    * unrepresentable rather than policed.
+   *
+   * 🔴 **So this one field stays `.optional()` while `path` and
+   * `query_by_path` tighten, and that is a RULING rather than a leftover**
+   * (owner, 2026-09-20). Census at the tighten: the key was absent on exactly
+   * the 13 units and present on all 245 prod / 246 dev non-units — the split is
+   * clean and it is AUTHORED, `migrate-destination-tree.ts` deleting the key on
+   * a unit rather than writing `null` there. Requiring it would either make
+   * every unit document unparseable under `z.strictObject` or force a
+   * present-and-null on a level that asserts nothing, so the general
+   * prefer-`.nullable()` ruling (`tests/stored-optionality.test.ts`) does not
+   * reach here: **absence is the meaning.** Invariant 6 below still refuses a
+   * unit that states one.
    */
   jurisdiction?: JurisdictionType | null;
   contacts?: DestinationContactRefType[];
@@ -158,14 +173,13 @@ export interface Destination {
  * (a unit's `path.slice(0, -1)` equalling its property's `path`) is the audit's,
  * because it needs a second document; everything below needs none.
  *
- * ⚠️ Every arm is guarded on `path` being present, because `path` is
- * `.optional()` through the expand third of the rollout. **That guard comes out
- * with the optionality** — leave it in afterwards and the invariants stop
- * applying to exactly the documents that skipped the backfill.
+ * ⚠️ **Every arm was once guarded on `path` being present, and that guard came
+ * out WITH the optionality, in the same commit** — left in afterwards it makes
+ * every invariant inert on exactly the documents a backfill missed, which is
+ * the only population they were ever needed for.
  */
 function checkDestinationNode(doc: Destination, ctx: z.RefinementCtx): void {
   const path = doc.path;
-  if (path === undefined) return;
 
   const leaf = path[path.length - 1];
   const isUnit = path.length === DESTINATION_LEVELS.length;
@@ -182,16 +196,14 @@ function checkDestinationNode(doc: Destination, ctx: z.RefinementCtx): void {
   }
 
   // 2. the Firestore-only flat mirror is exactly the uids of `path`.
-  if (doc.query_by_path !== undefined) {
-    const expected = path.map((n) => n.uid);
-    const actual = doc.query_by_path;
-    if (actual.length !== expected.length || actual.some((u, i) => u !== expected[i])) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["query_by_path"],
-        message: `query_by_path must equal path.map(n => n.uid) — expected [${expected.join(", ")}], got [${actual.join(", ")}]`,
-      });
-    }
+  const expected = path.map((n) => n.uid);
+  const actual = doc.query_by_path;
+  if (actual.length !== expected.length || actual.some((u, i) => u !== expected[i])) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["query_by_path"],
+      message: `query_by_path must equal path.map(n => n.uid) — expected [${expected.join(", ")}], got [${actual.join(", ")}]`,
+    });
   }
 
   // 3. `address.street2` IS the unit node's name, and exists on nothing else.
@@ -263,10 +275,12 @@ export const DestinationSchema: z.ZodType<Destination> = z.strictObject({
   mapbox_ids: z.array(z.string()),
   // ── The tree ────────────────────────────────────────────────────────────
   //
-  // ⚠️ **`.optional()` is the EXPAND third and nothing more.** Under
-  // `z.strictObject` there is no safe direction: the reader deploys, the
-  // backfill writes, then the optionality comes off. See the field docs on
-  // {@link Destination}.
+  // ✅ **The expand/migrate/contract is COMPLETE for `path` and
+  // `query_by_path`.** Under `z.strictObject` there was no safe direction: the
+  // reader deployed (`beta.510`), the backfill wrote both corpora, and the
+  // optionality comes off here against a measured 258/258 prod, 259/259 dev.
+  // ⚠️ **`jurisdiction` does NOT come with them** — its absence on a unit is
+  // the meaning, not a gap. See the field docs on {@link Destination}.
   //
   // ⭐ **A `query_by_path` here is sound where the three deleted `query_by_*`
   // mirrors were not** (api-cloudrun#650). Those mirrored `organizations[]`,
@@ -276,11 +290,11 @@ export const DestinationSchema: z.ZodType<Destination> = z.strictObject({
   // mirrors*. `path` is SERVER-AUTHORED by a single function, so mirroring it
   // is mirroring a fact rather than an accident. `organizations.query_by_path`
   // is the working precedent.
-  path: z.array(DestinationPathNode).min(1).max(DESTINATION_LEVELS.length).optional().meta({
+  path: z.array(DestinationPathNode).min(1).max(DESTINATION_LEVELS.length).meta({
     column: true,
     label: "Property",
   }),
-  query_by_path: z.array(z.string()).optional(),
+  query_by_path: z.array(z.string()),
   jurisdiction: JurisdictionEnum.nullable().optional().meta({ label: "Jurisdiction" }),
   // `contacts`: declared ahead of use. 192 of 458 prod destinations carried the
   // key, none with an element (2026-08-23) — the feature has not shipped.

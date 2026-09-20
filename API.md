@@ -3141,8 +3141,8 @@ interface DestinationDoc {
   uid: string;
   address: AddressType | null;
   mapbox_ids: string[];
-  path?: DestinationPathNodeType[];
-  query_by_path?: string[];
+  path: DestinationPathNodeType[];
+  query_by_path: string[];
   jurisdiction?: JurisdictionType | null;
   contacts?: DestinationContactRefType[];
   version: number;
@@ -15426,8 +15426,8 @@ interface Destination {
   uid: string;
   address: AddressType | null;
   mapbox_ids: string[];
-  path?: DestinationPathNodeType[];
-  query_by_path?: string[];
+  path: DestinationPathNodeType[];
+  query_by_path: string[];
   jurisdiction?: JurisdictionType | null;
   contacts?: DestinationContactRefType[];
   version: number;

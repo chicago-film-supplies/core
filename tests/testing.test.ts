@@ -72,6 +72,19 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
     derived_from: null,
     uid_department_type: null,
   },
+  // ⚠️ **Third entry, added when the DESTINATION tree's `path` became required**
+  // (2026-09-20) — the same class as `organization` above and for the same
+  // reason, one level shallower. `query_by_path === path.map(n => n.uid)` and
+  // `path.at(-1).uid === uid` are cross-field equalities. ⚠️ The fixture leaves
+  // `address` at the walker's `null`, which is deliberate: invariants 3 and 5
+  // (`street2` is the unit's name, `path[0].name` mirrors `address.name`) are
+  // both guarded on an address being present, so overriding one here would buy
+  // a second hand-written block and satisfy nothing extra. A property (depth 1)
+  // states no `street2` either way.
+  destination: {
+    path: [{ uid: "AAAAAAAAAAAAAAAAAAAA", name: "Fixture Property" }],
+    query_by_path: ["AAAAAAAAAAAAAAAAAAAA"],
+  },
 };
 
 /** Distinct schemas from the registry, keyed by their first (singular) name. */
@@ -127,7 +140,7 @@ Deno.test("corpus gate — every registry schema has a minimal fixture that pars
   // The escape hatch is the measurement. Structural coverage is 58/60 without
   // it; if this grows for a reason OTHER than a new cross-field refinement, the
   // walker has stopped keeping up with the schemas.
-  assertEquals(Object.keys(OVERRIDES).length, 2, "a schema now needs hand-written fixture knowledge");
+  assertEquals(Object.keys(OVERRIDES).length, 3, "a schema now needs hand-written fixture knowledge");
 });
 
 Deno.test("corpus gate companion — an unsatisfiable invariant still throws, naming its path", () => {

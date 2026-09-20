@@ -73,7 +73,15 @@ type Reason =
   /** Deliberately in transit through an expand/migrate/contract. */
   | "mid-expand"
   /** A written refusal sits beside the declaration, with its corpus count. */
-  | "refused:no-writer-yet";
+  | "refused:no-writer-yet"
+  /**
+   * 🔴 **Do not tighten: ABSENCE is the meaning.** One level of a tree states
+   * the field and a sibling level must not, so present-and-null would assert
+   * something false about the level that carries no opinion. The general
+   * prefer-`.nullable()` ruling above is about a field whose absence is an
+   * accident; this is the case it does not reach.
+   */
+  | "structurally-absent";
 
 const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   // ── pending-census — measurable with `orderBy`, awaiting the both-environment
@@ -199,13 +207,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["products.crms_rate_id", "crms-pending-removal"],
   // ── mid-expand — deliberately in transit. `DocumentOrganizationSnapshot`'s own
   //    docblock names the three-step dance it is in the first step of.
-  // The destination tree's authoring-time jurisdiction SEED. Absent on 0 of 258
-  // prod / 259 dev documents (2026-09-19), so under `z.strictObject` the reader
-  // has to deploy before the backfill can write one. 🔴 **The `.optional()` comes
-  // off in the same step that makes `path` required** — leave it and the
-  // property-states-it / unit-states-none invariant stops applying to exactly
-  // the documents that skipped the backfill.
-  ["destinations.jurisdiction", "mid-expand"],
   ["credit-notes.organization.jurisdiction_claim", "mid-expand"],
   ["invoices.organization.jurisdiction_claim", "mid-expand"],
   ["orders.organization.jurisdiction_claim", "mid-expand"],
@@ -222,6 +223,18 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   // ── refused — a written refusal sits beside the declaration, with its corpus
   //    count. See `src/schemas/supplier.ts`.
   ["transactions.supplier", "refused:no-writer-yet"],
+  // ── structurally-absent — absence carries the meaning.
+  // The destination tree's authoring-time jurisdiction SEED. It rode through the
+  // expand beside `path` and `query_by_path`, and it does NOT come off with them
+  // (owner, 2026-09-20): a PROPERTY states the jurisdiction and a UNIT states
+  // none, and the census at the tighten found that split exactly — the key absent
+  // on all 13 units, present on all 245 prod / 246 dev non-units. It is authored
+  // that way, `migrate-destination-tree.ts` deleting the key on a unit rather
+  // than writing `null`. Requiring it would make every unit unparseable under
+  // `z.strictObject`; writing `null` there would have a stage assert a
+  // jurisdiction it has no opinion about. Invariant 6 in `destination.ts` still
+  // refuses a unit that states one.
+  ["destinations.jurisdiction", "structurally-absent"],
 ]);
 
 // ── The walk ─────────────────────────────────────────────────────────
