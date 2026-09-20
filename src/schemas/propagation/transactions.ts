@@ -118,7 +118,7 @@ const LEDGER_NON_NEGATIVE: EnforcementRef = {
  * deliberately absent: it declares its own two edges in `store-transfers.ts`,
  * because a rule id is owned by the file that declares it.
  */
-type MovementTransactionId = "create-transaction" | "reverse-transaction";
+type MovementTransactionId = "create-transaction" | "reverse-transaction" | "reclass-stock";
 
 /** The ledger edge, shared by the forward and the reversing transaction. */
 function ledgerRule(
@@ -276,15 +276,43 @@ const reverseTransactionTransaction: TransactionDefinition = {
   ],
 };
 
+// ── Reclass between a product and its twin ──────────────────────
+
+const reclassStockRules: CollectionRule[] = [
+  ledgerRule(
+    "reclass-stock",
+    "A reclass moves units between a retail product and its rental twin, so it folds onto TWO ledgers in one Firestore transaction — a `reclass_out` on the source and a `reclass_in` on the target. 🔴 The target's cost is NOT the caller's number: the decrease relieves the weighted-average share of the source's basis captured before its quantity moved, and the increase is stamped with exactly what that relief was. A pair whose two amounts were typed independently would leave both ledgers internally consistent, disagreeing with each other, and undetectable (api-cloudrun#1068).",
+    [MOVEMENT_FOLD, LEDGER_NON_NEGATIVE, LEDGER_REPLAY],
+  ),
+  locationsRule(
+    "reclass-stock",
+    "Both halves stage placements: the units leave a shelf under the source product and land on a shelf under the target product. The two products' `products[]` entries on the same location document are independent rows, so a reclass within one bin is two edits to one document rather than a net-zero no-op.",
+    [MOVEMENT_LOCATION_STAGING],
+  ),
+];
+
+const reclassStockTransaction: TransactionDefinition = {
+  id: "reclass-stock",
+  description:
+    "Moves units between a retail product and its rental twin, as a PAIR of movements written in one Firestore transaction: a `reclass_out` off the source and a `reclass_in` onto the target, each naming the other — and the other's product — in `sources[]`. The caller supplies a quantity and NEVER an amount. 🔴 Neither type is a member of the manual-transaction vocabulary, so one half cannot be keyed alone. Posts NOTHING to Xero: nothing entered or left CFS, so the accounting side is a manual journal between two inventory accounts (`xeroPostingFor` → `manual`/`reclass_between_products`). Rebuilds `stock/{P}` for BOTH products via {@link STOCK_STEPS} — fires on: every reclass, since both halves move quantity_held by construction.",
+  steps: [
+    "reclass-stock:transaction-to-ledger",
+    "reclass-stock:transaction-to-locations",
+    ...STOCK_STEPS,
+  ],
+};
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/transactions.ts` contributes to the propagation catalog. */
 export const transactions: PropagationModule = {
   rules: [
     ...createTransactionRules,
     ...reverseTransactionRules,
+    ...reclassStockRules,
   ],
   transactions: [
     createTransactionTransaction,
     reverseTransactionTransaction,
+    reclassStockTransaction,
   ],
 };

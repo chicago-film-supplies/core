@@ -1,5 +1,8 @@
 import { assertEquals, assertNotEquals } from "@std/assert";
 import {
+  getDisplayTransactionTypes,
+  getTransactionMultiplier,
+  hasCosts,
   MOVEMENT_TYPES,
   type MovementTypeType,
 } from "../src/schemas/mod.ts";
@@ -151,6 +154,57 @@ Deno.test("a CAPITALISED disposal refuses, and routes to the manual seam", () =>
       kind: "manual",
       reason: "capitalised_disposal",
     }, `${type} on the fleet must not post a journal`);
+  }
+});
+
+Deno.test("a twin reclass NEVER posts a bill, in either direction or on any product type", () => {
+  // A reclass moves units between a retail product and its rental twin. Nothing
+  // entered or left CFS, so there is no ACCPAY document of any kind — the Xero
+  // side is a manual journal between two inventory accounts (api-cloudrun#1068).
+  //
+  // 🔴 Asserted over EVERY product type and both signs of the stored cost,
+  // because the arm sits before the `asset_account` switch deliberately: behind
+  // it, a reclass on a non-stock-bearing product would come back TERMINAL, which
+  // is a 500 on a movement that is simply not Xero's business.
+  for (const type of ["reclass_out", "reclass_in"] as const) {
+    for (const productType of PRODUCT_TYPES) {
+      for (const cost of [null, 0, 12_345, -12_345]) {
+        for (const delta of [null, 5, -5, 0]) {
+          assertEquals(
+            xeroPostingFor(type, productType, cost, delta),
+            { kind: "manual", reason: "reclass_between_products" },
+            `${type}/${productType}/${cost}/${delta} must not post`,
+          );
+        }
+      }
+    }
+  }
+});
+
+Deno.test("the reclass pair carries OPPOSITE ownership directions", () => {
+  // ⚠️ This is why it is two types and not one. `getTransactionMultiplier`
+  // reads the direction off the contract's `places`, so a single type carrying
+  // both directions resolves to 0 and `xeroPostingFor` terminals it as
+  // `no_ownership_direction` — a movement that folds nothing.
+  assertEquals(getTransactionMultiplier("reclass_out"), -1);
+  assertEquals(getTransactionMultiplier("reclass_in"), 1);
+  // And both bear a cost: the decrease relieves the weighted-average share, the
+  // increase accepts what that relief actually was.
+  assertEquals(hasCosts("reclass_out"), true);
+  assertEquals(hasCosts("reclass_in"), true);
+});
+
+Deno.test("neither reclass type is operator-keyable", () => {
+  // 🔴 One side alone is the defect, not a smaller version of the event: the
+  // decrease's amount is replaced by what it relieved while the increase accepts
+  // the operator's number, so two hand-keyed halves disagree and nothing
+  // detects it. Only the paired writer may mint these.
+  for (const type of ["reclass_out", "reclass_in"] as const) {
+    assertEquals(
+      getDisplayTransactionTypes().includes(type),
+      false,
+      `${type} must not reach the manual transaction form`,
+    );
   }
 });
 

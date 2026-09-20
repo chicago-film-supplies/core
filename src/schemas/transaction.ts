@@ -196,6 +196,41 @@ export const MOVEMENT_TYPES = [
   "adjustment_decrease",
   "trade_in",
   "write_off",
+  // ── the twin reclass, which is TWO types and one event ──
+  //
+  // A product CFS both sells and rents is two products (`Combo Hanger` beside
+  // `Combo Hanger (Purchase)`), and stock physically moves between them: bought
+  // as retail, boxed, then a portion committed to the rental fleet. Six products
+  // on prod carry Σ 5,683 units that moved with nothing recording it, so the
+  // cost stayed on the twin that was purchased and the other ledger reads zero
+  // (api-cloudrun#1068).
+  //
+  // 🔴 **Two types rather than one, and it is not a stylistic choice.**
+  // {@link getTransactionMultiplier} reads the DIRECTION off the contract's
+  // `places`, so one type carrying both directions resolves to `0` and
+  // `xeroPostingFor` terminals it as `no_ownership_direction`. The pair is what
+  // makes each side's direction derivable, exactly as `sale`/`sale_return` are
+  // two types for one commercial relationship.
+  //
+  // 🔴 **And the ends are `outside`, NOT a `products` place kind, because
+  // conservation here is STRUCTURAL.** A line contributes
+  // `(to ? +q : 0) + (from ? −q : 0)` with no cross-line summation, so a line
+  // reading `{from: shelf, to: <the other product>}` nets to ZERO on the ledger
+  // it is stored against — it would leave the source's `quantity_held`
+  // untouched, which is the one thing a reclass must move. Adding `products` to
+  // {@link PLACE_KINDS} would therefore buy a prettier document and a fold that
+  // does nothing.
+  //
+  // ⚠️ **Neither is a member of `MANUAL_MOVEMENT_TYPES`, deliberately**, so
+  // `CreateTransactionInput` refuses both and one side cannot be keyed alone.
+  // The asymmetry is the whole reason: a cost-bearing DECREASE has the
+  // operator's number replaced by the weighted-average share it actually
+  // relieved, while an INCREASE accepts it, so "enter the same figure on both
+  // sides" yields two ledgers that are each internally consistent, disagree with
+  // each other, and trip no detector. The amount must be read back from what the
+  // decrease relieved, which only a paired writer can do.
+  "reclass_out",
+  "reclass_in",
   // Placement only — nets to zero on ownership and touches no cost.
   "transfer",
   "return_to_service",
@@ -407,6 +442,24 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     custody: "forbidden",
     cost: "required",
     places: { from: ["locations"], to: ["outside"] },
+    booking: "forbidden",
+  },
+  // ── the twin reclass ──
+  // Mirrors of `adjustment_decrease` / `adjustment_increase`: the units leave
+  // ownership OF THIS PRODUCT and enter ownership of the other one. The pair is
+  // recoverable from either end through `sources[]`, which is where the
+  // counterpart movement and the counterpart product are named — a `sources[]`
+  // entry is not a place, so it cannot disturb the fold.
+  reclass_out: {
+    custody: "forbidden",
+    cost: "required",
+    places: { from: ["locations"], to: ["outside"] },
+    booking: "forbidden",
+  },
+  reclass_in: {
+    custody: "forbidden",
+    cost: "required",
+    places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
   },
   // No custody: the booking keeps `damaged: N` forever — a terminal key and part

@@ -683,7 +683,22 @@ export type XeroPostingManualReason =
    * disposal by quantity at all. So CFS refuses rather than posting a journal
    * it cannot complete.
    */
-  | "capitalised_disposal";
+  | "capitalised_disposal"
+  /**
+   * A twin reclass — units moved between a retail product and its rental twin.
+   *
+   * 🔴 **It is not a spend and must never post a bill.** Nothing entered or left
+   * CFS; one inventory account has to be credited and another debited, which is
+   * a Xero MANUAL JOURNAL and not an ACCPAY document. Routing it down the bill
+   * path would post a shrink expense on one side and an adjustment clearing
+   * entry on the other, recording a loss and a gain for an event that is
+   * neither.
+   *
+   * ⚠️ Both sides of the pair report, and that is deliberate: each is a
+   * different account movement, and an operator reading one intervention with
+   * no counterpart would not know which direction was left unposted.
+   */
+  | "reclass_between_products";
 
 /** Why a movement *should* post but cannot — permanent, and detected before any Xero call. */
 export type XeroPostingTerminalReason =
@@ -766,6 +781,14 @@ export function xeroPostingFor(
   if (!hasCosts(type)) return { kind: "skip", reason: "no_cost_contract" };
   if (type === "opening_balance") return { kind: "skip", reason: "opening_balance" };
   if (type === "sale") return { kind: "skip", reason: "sale_posts_on_accrec" };
+  // 🔴 Before any account derivation: a reclass has no ACCPAY document of any
+  // kind, whichever direction it runs and whatever the product type. Placing
+  // this after the `asset_account` switch would make a reclass on a
+  // non-stock-bearing product terminal instead of manual, i.e. a 500 on a
+  // movement that is simply not Xero's business.
+  if (type === "reclass_out" || type === "reclass_in") {
+    return { kind: "manual", reason: "reclass_between_products" };
+  }
 
   // A refunded return is settled against the customer, not a supplier. The zero
   // IS the decision — `MOVEMENT_CONTRACTS` makes `cost` required on

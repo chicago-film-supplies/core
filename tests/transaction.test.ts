@@ -75,6 +75,8 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     adjustment_decrease: null,
     trade_in: null,
     write_off: null,
+    reclass_out: null,
+    reclass_in: null,
     transfer: null,
     return_to_service: null,
   };
