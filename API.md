@@ -737,18 +737,27 @@ const BlobRefSchema: z.ZodType<BlobRef>;
 ### `Booking`
 
 Full Firestore document for a booking — an AGGREGATE per
-`(order, product, destination, component_signature_hash)`, **not a line**.
-The same product may repeat within one destination in ways that ARE
+`(order, product, LEG, component_signature_hash)`, **not a line**.
+
+🔴 **The leg is the destination PAIR (`destinations[i].uid`), not the
+address it ships to.** An order may carry two legs to one address; keyed on
+the address they collapse to one row and every per-leg total then states its
+whole quantity once per leg (api-cloudrun#933). `uid_destination_delivery` /
+`uid_destination_collection` remain the ADDRESSES and are what every
+address-filtered query reads; the LEG is recovered from `uid` via
+`parseBookingId`.
+
+The same product may repeat within one leg in ways that ARE
 fungible (a priced principal plus its own zero-priced accessories, a
 `splitItem` clone of the same subtree) and every such occurrence resolves
 to this ONE row.
 
-⚠️ **It is NOT one row per `(order, product, destination)` alone** — a
+⚠️ **It is NOT one row per `(order, product, leg)` alone** — a
 standalone unit of a product and an occurrence of the same product nested
 inside a kit are genuinely different bookings, disambiguated by
 `component_signature_hash` / `uid`'s 4th segment
 (`@cfs/core/utils/booking-id`). Reading a shared `(order, product,
-destination)` as one booking is the prod-961 defect class this field
+leg)` as one booking is the prod-961 defect class this field
 exists to close; reading a shared `(…, component_signature_hash)` row as a
 line is the OTHER standing defect — it renders one booking's quantities N
 times, every unit total N× wrong. Stated the same way in
@@ -851,10 +860,11 @@ interface BookingDestinationRef {
 ### `BookingId`
 
 `bookings.uid` — deterministic composite, sparse by construction:
-`{uid_order}:{item uid}:{uid_destination}` for a top-level occurrence
-(unchanged, byte-for-byte, from before the 4-segment form existed; the
-middle segment is the order item's uid, which for a custom product is
-`custom-{uuid}`), or `{uid_order}:{item uid}:{uid_destination}:{hash}` for
+`{uid_order}:{item uid}:{destination pair uid}` for a top-level occurrence
+(the middle segment is the order item's uid, which for a custom product is
+`custom-{uuid}`; the third is the LEG, **not** the address — see the
+"`BookingId`'s 3rd segment" section above), or
+`{uid_order}:{item uid}:{destination pair uid}:{hash}` for
 an occurrence that is a component of a kit — see the "`BookingId`'s 4th
 segment" section above. Built only through `booking-id.ts`'s
 `buildBookingId`; never assembled by hand at a second call site.
@@ -5791,9 +5801,11 @@ This is the sanctioned use of a derived id: it is what makes an append-only
 event idempotent under the manager's retry-on-409, exactly as the derived
 `bookings` id makes a booking upsert idempotent.
 
-⚠️ The subject arm is `firestoreId | bookingIdTopLevel | bookingIdComponent`
-— a permanent union, not a transitional one. See the "`BookingId`'s 4th
-segment" section above.
+⚠️ The subject arm is `firestoreId | bookingIdTopLevel | bookingIdComponent`.
+The product/booking split is permanent; segment 3's legacy-address arm,
+inherited from `BookingId`, is **transitional** and narrows with it — a
+movement's id is re-keyed along with the booking it names. See the
+"`BookingId`'s 3rd segment" section above.
 
 ```ts
 const MovementId: z.ZodType<string>;
@@ -12748,10 +12760,11 @@ const AnyUid: z.ZodType<string>;
 ### `BookingId`
 
 `bookings.uid` — deterministic composite, sparse by construction:
-`{uid_order}:{item uid}:{uid_destination}` for a top-level occurrence
-(unchanged, byte-for-byte, from before the 4-segment form existed; the
-middle segment is the order item's uid, which for a custom product is
-`custom-{uuid}`), or `{uid_order}:{item uid}:{uid_destination}:{hash}` for
+`{uid_order}:{item uid}:{destination pair uid}` for a top-level occurrence
+(the middle segment is the order item's uid, which for a custom product is
+`custom-{uuid}`; the third is the LEG, **not** the address — see the
+"`BookingId`'s 3rd segment" section above), or
+`{uid_order}:{item uid}:{destination pair uid}:{hash}` for
 an occurrence that is a component of a kit — see the "`BookingId`'s 4th
 segment" section above. Built only through `booking-id.ts`'s
 `buildBookingId`; never assembled by hand at a second call site.
@@ -13343,9 +13356,11 @@ This is the sanctioned use of a derived id: it is what makes an append-only
 event idempotent under the manager's retry-on-409, exactly as the derived
 `bookings` id makes a booking upsert idempotent.
 
-⚠️ The subject arm is `firestoreId | bookingIdTopLevel | bookingIdComponent`
-— a permanent union, not a transitional one. See the "`BookingId`'s 4th
-segment" section above.
+⚠️ The subject arm is `firestoreId | bookingIdTopLevel | bookingIdComponent`.
+The product/booking split is permanent; segment 3's legacy-address arm,
+inherited from `BookingId`, is **transitional** and narrows with it — a
+movement's id is re-keyed along with the booking it names. See the
+"`BookingId`'s 3rd segment" section above.
 
 ```ts
 const MovementId: z.ZodType<string>;
@@ -14496,18 +14511,27 @@ const BOOKING_STATUSES: "draft" | "quoted" | "reserved" | "part-prepped" | "prep
 ### `Booking`
 
 Full Firestore document for a booking — an AGGREGATE per
-`(order, product, destination, component_signature_hash)`, **not a line**.
-The same product may repeat within one destination in ways that ARE
+`(order, product, LEG, component_signature_hash)`, **not a line**.
+
+🔴 **The leg is the destination PAIR (`destinations[i].uid`), not the
+address it ships to.** An order may carry two legs to one address; keyed on
+the address they collapse to one row and every per-leg total then states its
+whole quantity once per leg (api-cloudrun#933). `uid_destination_delivery` /
+`uid_destination_collection` remain the ADDRESSES and are what every
+address-filtered query reads; the LEG is recovered from `uid` via
+`parseBookingId`.
+
+The same product may repeat within one leg in ways that ARE
 fungible (a priced principal plus its own zero-priced accessories, a
 `splitItem` clone of the same subtree) and every such occurrence resolves
 to this ONE row.
 
-⚠️ **It is NOT one row per `(order, product, destination)` alone** — a
+⚠️ **It is NOT one row per `(order, product, leg)` alone** — a
 standalone unit of a product and an occurrence of the same product nested
 inside a kit are genuinely different bookings, disambiguated by
 `component_signature_hash` / `uid`'s 4th segment
 (`@cfs/core/utils/booking-id`). Reading a shared `(order, product,
-destination)` as one booking is the prod-961 defect class this field
+leg)` as one booking is the prod-961 defect class this field
 exists to close; reading a shared `(…, component_signature_hash)` row as a
 line is the OTHER standing defect — it renders one booking's quantities N
 times, every unit total N× wrong. Stated the same way in
@@ -24563,11 +24587,17 @@ interface ParsedBookingId {
 ### `buildBookingId(orderUid: string, item: typeLiteral, path: readonly string[], destUid: string): string`
 
 The one place a `BookingId` is assembled from parts. Sparse by
-construction: a top-level occurrence (empty ancestry) gets the unchanged
-3-segment id — `{uid_order}:{item uid}:{uid_destination}` — byte-for-byte
-what every booking id has always been; a component occurrence gets a 4th
-segment, the signature hash, appended AFTER the destination. The
-destination segment's position and meaning are otherwise untouched.
+construction: a top-level occurrence (empty ancestry) gets the 3-segment id
+`{uid_order}:{item uid}:{destination pair uid}`; a component occurrence gets
+a 4th segment, the signature hash, appended AFTER the leg segment.
+
+🔴 **Segment 3 is the destination PAIR's own uid — the LEG — not the
+`destinations/{uid}` ADDRESS.** One order may carry two legs to the same
+address; keyed on the address they collapse to one booking and every per-leg
+total then states its whole quantity once per leg (api-cloudrun#933). The
+parameter is still named `destUid` for the callers across three repos that
+pass it; the VALUE it must receive is `destinations[i].uid`, never
+`destinations[i].delivery.uid`.
 
 `item` takes just the uid (not the whole line) because `path` — which
 already carries the item's own uid as its last segment — is a separate,
@@ -24643,11 +24673,16 @@ Returns `null` rather than throwing when the id is not the shape this module
 assembles — callers walk stored corpora, where a refusal to classify is more
 useful than an exception, and every caller already has a "not mine" branch.
 
-⚠️ **Segment COUNT is the only discriminator, deliberately.** A signature
-hash is 12 lowercase hex characters and a destination uid is a Firestore id,
-so a shape test would also pass on some ids and is a second, weaker statement
-of the format. Count is exact: `buildBookingIdFromSignature` emits 3 or 4
-segments and nothing else.
+⚠️ **Segment COUNT is the only discriminator, deliberately.** A shape test
+would be a second, weaker statement of the format — and it would have needed
+rewriting when segment 3 became a UUID. Count is exact:
+`buildBookingIdFromSignature` emits 3 or 4 segments and nothing else, and a
+UUID contains no `:`, so this parser needed no change for the leg re-key
+(api-cloudrun#933).
+
+⚠️ **`destUid` is the LEG — the destination pair's own uid — despite the
+name**, which is kept only because three repos destructure it. It does not
+resolve against `destinations/{uid}`.
 
 ## `@cfs/core/utils/bookings`
 
@@ -29310,19 +29345,20 @@ every bit as much as a rented one, and it is *less* recoverable. `out` is on
 the target side of `prep` for both types, so the branch is a no-op here and
 the function is honest about not needing it.
 
-⚠️ **The grain is the BOOKING, and a booking is keyed on the COMPONENT
-SIGNATURE as well as the destination.** A booking id is
-`{order}:{item}:{dest}` for a top-level occurrence and
-`{order}:{item}:{dest}:{signature}` for a component one ({@link
-buildBookingIdFromSignature}), so what shares a booking — and therefore
-freezes together — is two occurrences of the same product under one
-destination **with the same component ancestry**. The same product standalone
+⚠️ **The grain is the BOOKING, and a booking is keyed on the LEG and on the
+COMPONENT SIGNATURE.** A booking id is `{order}:{item}:{pair uid}` for a
+top-level occurrence and `{order}:{item}:{pair uid}:{signature}` for a
+component one ({@link buildBookingIdFromSignature}), so what shares a
+booking — and therefore freezes together — is two occurrences of the same
+product under one **leg** with the same component ancestry. ⭐ Segment 3 is
+the destination pair's uid, **not** its address: two legs to one address are
+two bookings and freeze independently (api-cloudrun#933). The same product standalone
 and nested inside a kit are different bookings and freeze independently.
 
 🔴 **This paragraph previously said the grain was `(order, product,
 destination)`, full stop, and that reading is what a caller acts on.** It
-predates the signature segment and it is the wrong mental model in the
-expensive direction: a consumer that keys its own freeze set on
+predated the signature segment, and `destination` has since been corrected to
+the LEG; it is the wrong mental model in the expensive direction: a consumer that keys its own freeze set on
 `(product, destination)` cannot match the ids it derives them from, so the
 freeze goes ABSENT rather than merely coarse. That is api-cloudrun#1060.
 **Parse a booking id with {@link parseBookingId}; never hand-split it.**
@@ -34183,17 +34219,26 @@ Every aggregate booking's occurrences in ONE fulfillment, keyed by booking uid.
 
 The whole-document counterpart to the leg-scoped map {@link foldPickSheet}
 builds inline. Equivalent per booking, and the fold's own note says why: a
-booking belongs to exactly one leg by construction, because its uid names the
-leg's endpoint. So an order-scoped walk cannot merge two legs' occurrences of
-one booking — there is no such thing.
+booking belongs to exactly one leg by construction, because its uid NAMES the
+leg. So an order-scoped walk cannot merge two legs' occurrences of one
+booking — there is no such thing. ⭐ That is now structural; keyed on the
+leg's ADDRESS it was a claim about the data, and a false one whenever two
+legs delivered to the same place (api-cloudrun#933).
 
 ⭐ **It needs no `bookings` read.** `bookingUidFor` is a pure composite of
-`(order, product, destination)` — plus the item's own component ancestry,
-for a kit-component occurrence — so the keys are DERIVED; a caller that
-already holds a real booking uid — a movement does — looks it up directly and
-a key naming no real booking is simply never asked for. The fold passes a
+`(order, product, leg)` — plus the item's own component ancestry, for a
+kit-component occurrence — so the keys are DERIVED; a caller that already
+holds a real booking uid — a movement does — looks it up directly and a key
+naming no real booking is simply never asked for. The fold passes a
 `bookingByUid` only because it must also decide which lines are on the sheet
 at all.
+
+⚠️ **Transitionally each occurrence is registered under BOTH segment-3 forms**
+(api-cloudrun#933 step 1), because having no map is exactly what stops this
+walk from choosing between them. That is sound only under the property in the
+paragraph above — every key is LOOKED UP, never iterated — so a caller that
+starts enumerating entries or trusting `size` must wait for step 5, which
+deletes the legacy key.
 
 Exported for the receipt (`MovementSessionItem.owner_path`), so the pick sheet
 and the receipt designate the SAME row rather than deriving ownership twice.

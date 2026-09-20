@@ -149,18 +149,27 @@ export interface BookingStore {
 
 /**
  * Full Firestore document for a booking — an AGGREGATE per
- * `(order, product, destination, component_signature_hash)`, **not a line**.
- * The same product may repeat within one destination in ways that ARE
+ * `(order, product, LEG, component_signature_hash)`, **not a line**.
+ *
+ * 🔴 **The leg is the destination PAIR (`destinations[i].uid`), not the
+ * address it ships to.** An order may carry two legs to one address; keyed on
+ * the address they collapse to one row and every per-leg total then states its
+ * whole quantity once per leg (api-cloudrun#933). `uid_destination_delivery` /
+ * `uid_destination_collection` remain the ADDRESSES and are what every
+ * address-filtered query reads; the LEG is recovered from `uid` via
+ * `parseBookingId`.
+ *
+ * The same product may repeat within one leg in ways that ARE
  * fungible (a priced principal plus its own zero-priced accessories, a
  * `splitItem` clone of the same subtree) and every such occurrence resolves
  * to this ONE row.
  *
- * ⚠️ **It is NOT one row per `(order, product, destination)` alone** — a
+ * ⚠️ **It is NOT one row per `(order, product, leg)` alone** — a
  * standalone unit of a product and an occurrence of the same product nested
  * inside a kit are genuinely different bookings, disambiguated by
  * `component_signature_hash` / `uid`'s 4th segment
  * (`@cfs/core/utils/booking-id`). Reading a shared `(order, product,
- * destination)` as one booking is the prod-961 defect class this field
+ * leg)` as one booking is the prod-961 defect class this field
  * exists to close; reading a shared `(…, component_signature_hash)` row as a
  * line is the OTHER standing defect — it renders one booking's quantities N
  * times, every unit total N× wrong. Stated the same way in

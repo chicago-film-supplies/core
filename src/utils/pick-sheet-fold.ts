@@ -84,17 +84,39 @@ export interface PickSheetFoldResult {
  * call sites reading "the booking id for this occurrence" rather than four
  * positional args apiece.
  *
- * ⚠️ The third parameter is the pair's `delivery.uid` — a `destinations/{uid}`
- * ADDRESS-BOOK id — never the destination divider's uid. The two are different
- * values and only one of them joins across documents; api-cloudrun#663 is that
- * pair confused the other way round.
+ * 🔴 The third parameter is the destination PAIR's own uid — the LEG — never
+ * the pair's `delivery.uid`, which is a `destinations/{uid}` ADDRESS-BOOK id.
+ * Two legs of one order may deliver to the SAME address, so keyed on the
+ * address both resolve to one booking and this fold states that booking's whole
+ * quantity once per leg (api-cloudrun#933 — a booking of 5 folding to 10).
+ * ⚠️ This reverses the parameter's earlier meaning; api-cloudrun#663 is the
+ * same pair of values confused on the invoice seam, and it too resolved in
+ * favour of the pair uid.
  */
 function bookingUidFor(
   orderUid: string,
   item: { uid: string; path: string[] },
-  deliveryUid: string,
+  pairUid: string,
 ): string {
-  return buildBookingId(orderUid, item, item.path, deliveryUid);
+  return buildBookingId(orderUid, item, item.path, pairUid);
+}
+
+/**
+ * Segment-3 candidates for one leg, in preference order: the pair's own uid
+ * (current), then its `delivery.uid` (legacy, address-keyed).
+ *
+ * ⚠️ **Transitional, deleted once the corpus is migrated** (api-cloudrun#933
+ * step 5). It exists because this fold joins by CONSTRUCTION — it derives a
+ * booking id rather than reading one — so a form mismatch yields
+ * `uid_booking: null`, which renders as a legitimate `stock_method: "none"`
+ * component and undercounts the sheet with no error anywhere. A caller holding
+ * a real booking map resolves against it; one that holds no map emits both.
+ */
+function legSegmentCandidates(
+  pair: { uid: string; delivery: { uid: string | null } },
+): string[] {
+  const legacy = pair.delivery.uid;
+  return legacy === null || legacy === pair.uid ? [pair.uid] : [pair.uid, legacy];
 }
 
 /**
@@ -308,12 +330,11 @@ export function foldPickSheet(input: {
       if (!pickSheetGateAdmits(pair, gate)) continue;
       if (scope.kind === "destination" && pair.delivery.uid !== scope.uid) continue;
 
-      const deliveryUid = pair.delivery.uid;
       const { endIndex } = getItemSubtreeRange(fulfillment.items, i);
 
       const items: PickSheetItem[] = [];
       // First-appearance order, deduped: a booking is aggregate per
-      // `(order, product, destination)`, so several lines in one leg legitimately
+      // `(order, product, leg)`, so several lines in one leg legitimately
       // name the same one — a priced principal beside zero-priced accessories, a
       // `splitItem`, or a product appearing both standalone and as a kit
       // component.
@@ -321,14 +342,17 @@ export function foldPickSheet(input: {
       const seen = new Set<string>();
       // Every occurrence of each aggregate booking, in document order, scoped to
       // THIS leg — scoped rather than per order because a booking belongs to
-      // exactly one leg by construction (its uid names the leg's endpoint), so a
+      // exactly one leg by construction (its uid NAMES the leg), so a
       // leg-scoped map cannot leak an owner across a section boundary even if
-      // that ever stops being true.
+      // that ever stops being true. ⭐ Under the old address-keyed id that
+      // belonging was a claim about the DATA — two legs to one address shared a
+      // booking — and this scoping is what contained the damage to a per-leg
+      // overcount rather than a cross-leg one (api-cloudrun#933).
       const occurrences = new Map<string, BookingOccurrence[]>();
 
       for (let j = i + 1; j <= endIndex; j++) {
         const item = fulfillment.items[j];
-        const uidBooking = bookingUidForItem(orderUid, item, deliveryUid, bookingByUid);
+        const uidBooking = bookingUidForItem(orderUid, item, pair, bookingByUid);
         // `owner_path` is filled in after the walk: every occurrence has to be
         // known before any of them can be told which one owns.
         items.push({ item, uid_booking: uidBooking, owner_path: null });
@@ -462,13 +486,25 @@ function samePath(a: readonly string[], b: readonly string[]): boolean {
 function bookingUidForItem(
   orderUid: string,
   item: FulfillmentItemType,
-  deliveryUid: string | null,
+  pair: { uid: string; delivery: { uid: string | null } },
   bookingByUid: ReadonlyMap<string, Booking>,
 ): string | null {
   if (item.type === "destination" || item.type === "group") return null;
-  if (deliveryUid === null) return null;
-  const uid = bookingUidFor(orderUid, item, deliveryUid);
-  return bookingByUid.has(uid) ? uid : null;
+  // ⚠️ **No `delivery.uid === null` guard, deliberately.** This function used to
+  // refuse an endpoint-less leg because the id embedded the delivery uid and so
+  // could not be built. It can be built now, and the refusal has moved upstream
+  // to a stronger place: `Booking.uid_destination_delivery` is a required
+  // `FirestoreId`, so such a booking is unwritable. Refusing here as well would
+  // be a second, weaker copy of that rule — and one that drops real work off a
+  // packing list the day the schema changes.
+  // Two-key read, new form first — see {@link legSegmentCandidates}. Having a
+  // real map here is what makes this site safe; the one that has none emits
+  // both keys instead.
+  for (const segment of legSegmentCandidates(pair)) {
+    const uid = bookingUidFor(orderUid, item, segment);
+    if (bookingByUid.has(uid)) return uid;
+  }
+  return null;
 }
 
 /**
@@ -476,17 +512,26 @@ function bookingUidForItem(
  *
  * The whole-document counterpart to the leg-scoped map {@link foldPickSheet}
  * builds inline. Equivalent per booking, and the fold's own note says why: a
- * booking belongs to exactly one leg by construction, because its uid names the
- * leg's endpoint. So an order-scoped walk cannot merge two legs' occurrences of
- * one booking — there is no such thing.
+ * booking belongs to exactly one leg by construction, because its uid NAMES the
+ * leg. So an order-scoped walk cannot merge two legs' occurrences of one
+ * booking — there is no such thing. ⭐ That is now structural; keyed on the
+ * leg's ADDRESS it was a claim about the data, and a false one whenever two
+ * legs delivered to the same place (api-cloudrun#933).
  *
  * ⭐ **It needs no `bookings` read.** `bookingUidFor` is a pure composite of
- * `(order, product, destination)` — plus the item's own component ancestry,
- * for a kit-component occurrence — so the keys are DERIVED; a caller that
- * already holds a real booking uid — a movement does — looks it up directly and
- * a key naming no real booking is simply never asked for. The fold passes a
+ * `(order, product, leg)` — plus the item's own component ancestry, for a
+ * kit-component occurrence — so the keys are DERIVED; a caller that already
+ * holds a real booking uid — a movement does — looks it up directly and a key
+ * naming no real booking is simply never asked for. The fold passes a
  * `bookingByUid` only because it must also decide which lines are on the sheet
  * at all.
+ *
+ * ⚠️ **Transitionally each occurrence is registered under BOTH segment-3 forms**
+ * (api-cloudrun#933 step 1), because having no map is exactly what stops this
+ * walk from choosing between them. That is sound only under the property in the
+ * paragraph above — every key is LOOKED UP, never iterated — so a caller that
+ * starts enumerating entries or trusting `size` must wait for step 5, which
+ * deletes the legacy key.
  *
  * Exported for the receipt (`MovementSessionItem.owner_path`), so the pick sheet
  * and the receipt designate the SAME row rather than deriving ownership twice.
@@ -504,21 +549,23 @@ export function bookingOccurrencesByBooking(
     const divider = items[i];
     if (divider.type !== "destination") continue;
     const pair = destinations.find((d) => d.uid === divider.uid);
-    const deliveryUid = pair?.delivery.uid ?? null;
-    if (deliveryUid === null) continue;
+    if (!pair) continue;
+    const segments = legSegmentCandidates(pair);
 
     const { endIndex } = getItemSubtreeRange(items, i);
     for (let j = i + 1; j <= endIndex; j++) {
       const item = items[j];
       if (item.type === "destination" || item.type === "group") continue;
-      const uidBooking = bookingUidFor(orderUid, item, deliveryUid);
       const occurrence: BookingOccurrence = {
         path: item.path,
         quantity: item.quantity,
       };
-      const list = out.get(uidBooking);
-      if (list) list.push(occurrence);
-      else out.set(uidBooking, [occurrence]);
+      for (const segment of segments) {
+        const uidBooking = bookingUidFor(orderUid, item, segment);
+        const list = out.get(uidBooking);
+        if (list) list.push(occurrence);
+        else out.set(uidBooking, [occurrence]);
+      }
     }
   }
   return out;

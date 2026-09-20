@@ -32,7 +32,7 @@ import type {
   OrderDocDatesType,
   PickSheetScope,
 } from "../src/schemas/mod.ts";
-import { pickSheetItemOwnsBooking } from "../src/schemas/mod.ts";
+import { BookingSchema, pickSheetItemOwnsBooking } from "../src/schemas/mod.ts";
 import {
   bookingOccurrencesByBooking,
   chooseBookingOwner,
@@ -159,13 +159,33 @@ interface BookingOpts {
   out?: number;
   returned?: number;
   orgUid?: string;
+  /**
+   * The delivery/collection ADDRESS the booking records — a different fact
+   * from `legUid`, which is segment 3 of its id. Defaults to `legUid` because
+   * under the legacy address-keyed form they were the same value.
+   *
+   * ⚠️ **A fixture passing a pair uid as `legUid` MUST set this**, or the
+   * booking carries a UUID in a `FirestoreId` field and does not parse —
+   * invisible to any arm that does not run it through `BookingSchema`.
+   */
+  deliveryUid?: string;
 }
 
-function booking(productUid: string, deliveryUid: string, opts: BookingOpts = {}): Booking {
+/**
+ * ⚠️ **`legUid` is SEGMENT 3 of the booking id, and the fixtures deliberately
+ * pass both forms.** Current bookings key it on the destination PAIR's uid
+ * (`LEG_1`/`LEG_2`); the pre-api-cloudrun#933 corpus keys it on the delivery
+ * ADDRESS (`STAGE`/`LOT`/`STORE`), which the fold still resolves through its
+ * transitional two-key read until the migration lands. Arms passing an address
+ * are therefore exercising the LEGACY arm on purpose — see the pair of tests
+ * at the end of this file.
+ */
+function booking(productUid: string, legUid: string, opts: BookingOpts = {}): Booking {
   const orderUid = opts.orderUid ?? ORDER;
   const quantity = opts.quantity ?? 2;
+  const deliveryUid = opts.deliveryUid ?? legUid;
   return {
-    uid: `${orderUid}:${productUid}:${deliveryUid}`,
+    uid: `${orderUid}:${productUid}:${legUid}`,
     uid_order: orderUid,
     uid_product: productUid,
     component_signature_hash: null,
@@ -407,7 +427,34 @@ Deno.test("fold: a booking outside the open slice reads as NO booking, not a clo
   assertEquals(orders.length, 0);
 });
 
+/**
+ * ⚠️ **This still holds, but no longer for the reason it used to, and the
+ * difference is worth stating.** The fold once refused such a leg by
+ * CONSTRUCTION: the booking id embedded the delivery uid, so a `null` endpoint
+ * made no id at all. Segment 3 is now the pair's own uid (api-cloudrun#933), so
+ * an id *is* buildable here — and the refusal has moved upstream, where it is
+ * stronger: `Booking.uid_destination_delivery` is a required `FirestoreId`, so
+ * a booking naming a leg with no endpoint is **unwritable**, and the arm below
+ * is a statement about the corpus rather than about this walk.
+ */
 Deno.test("fold: a leg whose pair names no delivery endpoint carries no booking", () => {
+  // The guarantee, asserted where it actually lives rather than inferred from
+  // the fold going quiet. ⚠️ Both directions, because a fixture that fails to
+  // parse for some unrelated reason makes the refusal arm vacuous.
+  assertEquals(
+    BookingSchema.safeParse(booking(CAMERA, LEG_1, { deliveryUid: STAGE })).success,
+    true,
+    "the fixture itself is a valid booking — otherwise the arm below proves nothing",
+  );
+  assertEquals(
+    BookingSchema.safeParse({
+      ...booking(CAMERA, LEG_1, { deliveryUid: STAGE }),
+      uid_destination_delivery: null,
+    }).success,
+    false,
+    "a booking cannot name a leg with no delivery endpoint",
+  );
+
   const f = fulfillment({ destinations: [pair(LEG_1, null)] });
   const { orders } = foldPickSheet({
     scope: ORG_SCOPE,
@@ -910,12 +957,12 @@ Deno.test("owner: a divider, a group and a service line own NOTHING and point at
  * endpoint would merge these two into one and silently drop a leg — reporting
  * clean right up to the first instance.
  *
- * ⚠️ **The over-count below is REAL and is not what this arm is asserting.** A
- * booking's document id is `{order}:{product}:{delivery.uid}` and carries no leg
- * segment, so one booking genuinely spans both legs — and `quantity` /
- * `sheetQuantity` therefore state its units once per leg. That is a limit of the
- * booking id rather than of this fold (api-cloudrun#933); it is pinned here so
- * the repair has a place to land and cannot arrive unnoticed.
+ * ⭐ **This arm used to pin an over-count, and it is now the proof it is
+ * gone.** A booking's id was `{order}:{product}:{delivery.uid}` and carried no
+ * leg segment, so ONE booking spanned both legs and `sheetQuantity` stated its
+ * units once per leg — 5 units reported as 10 (api-cloudrun#933). Segment 3 is
+ * now the destination PAIR's uid, so the two legs are two bookings and the
+ * sheet totals what is physically going out.
  */
 Deno.test("scope: two pairs sharing one delivery uid are TWO legs, never merged", () => {
   const f = fulfillment({
@@ -931,7 +978,13 @@ Deno.test("scope: two pairs sharing one delivery uid are TWO legs, never merged"
     scope: DESTINATION_SCOPE,
     gate: "all",
     leg: null,
-    bookings: [booking(CAMERA, STAGE, { quantity: 5 })],
+    // TWO bookings, one per leg — which is what keying segment 3 on the pair
+    // uid makes representable. Under the address-keyed id these two ids were
+    // the same string and only one row could exist.
+    bookings: [
+      booking(CAMERA, LEG_1, { quantity: 2, deliveryUid: STAGE }),
+      booking(CAMERA, LEG_2, { quantity: 3, deliveryUid: STAGE }),
+    ],
     fulfillments: docs(f),
   });
 
@@ -946,8 +999,75 @@ Deno.test("scope: two pairs sharing one delivery uid are TWO legs, never merged"
   for (const leg of orders[0].destinations) {
     assertEquals(leg.items.filter(pickSheetItemOwnsBooking).length, 1);
   }
-  // The known over-count, stated rather than hidden: 5 units, counted twice.
-  assertEquals(sheetQuantity(orders), 10, "api-cloudrun#933 — one booking, two legs");
+
+  // ⭐ **The positive arm.** Not merely "the wrong number is gone": the two legs
+  // resolve to two DISTINCT booking ids, each carrying its own leg's quantity.
+  const uids = orders[0].destinations.map((d) => d.items.find(pickSheetItemOwnsBooking)!.uid_booking);
+  assertEquals(uids, [`${ORDER}:${CAMERA}:${LEG_1}`, `${ORDER}:${CAMERA}:${LEG_2}`]);
+  assertEquals(
+    orders[0].destinations.map((d) => d.bookings.map((b) => b.quantity)),
+    [[2], [3]],
+  );
+  // ...and the address-keyed id names nothing on this sheet.
+  assert(
+    !uids.includes(`${ORDER}:${CAMERA}:${STAGE}`),
+    "the delivery uid is no longer a booking key",
+  );
+  assertEquals(sheetQuantity(orders), 5, "api-cloudrun#933 — two legs, two bookings, 5 units");
+});
+
+/**
+ * 🔴 **The legacy arm, and it is TRANSITIONAL.** Between the writer flipping
+ * and the corpus migrating, a stored booking still carries the address-keyed
+ * segment 3, and this fold joins by CONSTRUCTION with no read — so a form
+ * mismatch yields `uid_booking: null`, which renders as a legitimate
+ * `stock_method: "none"` component and **undercounts a packing list with no
+ * error anywhere**. The two-key read in `bookingUidForItem` is what prevents
+ * that, and this arm is the only thing holding it in place.
+ *
+ * ⚠️ **Delete this test in step 5 of api-cloudrun#933**, with the fallback it
+ * pins — not before, and not by quietly letting it rot green.
+ */
+Deno.test("legacy: an address-keyed booking still resolves during the migration window", () => {
+  const f = fulfillment({
+    destinations: [pair(LEG_1, STAGE)],
+    items: [
+      divider(LEG_1, "Stage 4"),
+      line(CAMERA, "Alexa 35", 2, [LEG_1, CAMERA]),
+    ],
+  });
+  const { orders } = foldPickSheet({
+    scope: DESTINATION_SCOPE,
+    gate: "all",
+    leg: null,
+    bookings: [booking(CAMERA, STAGE, { quantity: 2 })],
+    fulfillments: docs(f),
+  });
+
+  const row = orders[0].destinations[0].items.find(pickSheetItemOwnsBooking);
+  assertEquals(row?.uid_booking, `${ORDER}:${CAMERA}:${STAGE}`, "resolved on the legacy form");
+  assertEquals(sheetQuantity(orders), 2);
+});
+
+/**
+ * The same window, from the receipt's side. `bookingOccurrencesByBooking` has
+ * no booking map to choose with, so it registers each occurrence under BOTH
+ * forms — a movement holding either one finds its owner row.
+ *
+ * ⚠️ **Delete this with the dual-key emission in step 5 of api-cloudrun#933.**
+ */
+Deno.test("legacy: occurrences are reachable by either segment-3 form", () => {
+  const f = fulfillment({
+    destinations: [pair(LEG_1, STAGE)],
+    items: [
+      divider(LEG_1, "Stage 4"),
+      line(CAMERA, "Alexa 35", 2, [LEG_1, CAMERA]),
+    ],
+  });
+  const occurrences = bookingOccurrencesByBooking(f.uid, f.items, f.destinations);
+  const expected = [{ path: [LEG_1, CAMERA], quantity: 2 }];
+  assertEquals(occurrences.get(`${ORDER}:${CAMERA}:${LEG_1}`), expected, "current form");
+  assertEquals(occurrences.get(`${ORDER}:${CAMERA}:${STAGE}`), expected, "legacy form");
 });
 
 // ── The template's door onto a row's numbers ────────────────────────

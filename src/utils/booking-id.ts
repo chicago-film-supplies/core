@@ -65,11 +65,17 @@ export function componentSignatureHash(path: readonly string[]): string | null {
 
 /**
  * The one place a `BookingId` is assembled from parts. Sparse by
- * construction: a top-level occurrence (empty ancestry) gets the unchanged
- * 3-segment id — `{uid_order}:{item uid}:{uid_destination}` — byte-for-byte
- * what every booking id has always been; a component occurrence gets a 4th
- * segment, the signature hash, appended AFTER the destination. The
- * destination segment's position and meaning are otherwise untouched.
+ * construction: a top-level occurrence (empty ancestry) gets the 3-segment id
+ * `{uid_order}:{item uid}:{destination pair uid}`; a component occurrence gets
+ * a 4th segment, the signature hash, appended AFTER the leg segment.
+ *
+ * 🔴 **Segment 3 is the destination PAIR's own uid — the LEG — not the
+ * `destinations/{uid}` ADDRESS.** One order may carry two legs to the same
+ * address; keyed on the address they collapse to one booking and every per-leg
+ * total then states its whole quantity once per leg (api-cloudrun#933). The
+ * parameter is still named `destUid` for the callers across three repos that
+ * pass it; the VALUE it must receive is `destinations[i].uid`, never
+ * `destinations[i].delivery.uid`.
  *
  * `item` takes just the uid (not the whole line) because `path` — which
  * already carries the item's own uid as its last segment — is a separate,
@@ -138,11 +144,16 @@ export interface ParsedBookingId {
  * assembles — callers walk stored corpora, where a refusal to classify is more
  * useful than an exception, and every caller already has a "not mine" branch.
  *
- * ⚠️ **Segment COUNT is the only discriminator, deliberately.** A signature
- * hash is 12 lowercase hex characters and a destination uid is a Firestore id,
- * so a shape test would also pass on some ids and is a second, weaker statement
- * of the format. Count is exact: `buildBookingIdFromSignature` emits 3 or 4
- * segments and nothing else.
+ * ⚠️ **Segment COUNT is the only discriminator, deliberately.** A shape test
+ * would be a second, weaker statement of the format — and it would have needed
+ * rewriting when segment 3 became a UUID. Count is exact:
+ * `buildBookingIdFromSignature` emits 3 or 4 segments and nothing else, and a
+ * UUID contains no `:`, so this parser needed no change for the leg re-key
+ * (api-cloudrun#933).
+ *
+ * ⚠️ **`destUid` is the LEG — the destination pair's own uid — despite the
+ * name**, which is kept only because three repos destructure it. It does not
+ * resolve against `destinations/{uid}`.
  */
 export function parseBookingId(id: string): ParsedBookingId | null {
   const parts = id.split(":");

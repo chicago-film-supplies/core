@@ -523,19 +523,20 @@ export function qtyOnStageSide(
  * the target side of `prep` for both types, so the branch is a no-op here and
  * the function is honest about not needing it.
  *
- * ⚠️ **The grain is the BOOKING, and a booking is keyed on the COMPONENT
- * SIGNATURE as well as the destination.** A booking id is
- * `{order}:{item}:{dest}` for a top-level occurrence and
- * `{order}:{item}:{dest}:{signature}` for a component one ({@link
- * buildBookingIdFromSignature}), so what shares a booking — and therefore
- * freezes together — is two occurrences of the same product under one
- * destination **with the same component ancestry**. The same product standalone
+ * ⚠️ **The grain is the BOOKING, and a booking is keyed on the LEG and on the
+ * COMPONENT SIGNATURE.** A booking id is `{order}:{item}:{pair uid}` for a
+ * top-level occurrence and `{order}:{item}:{pair uid}:{signature}` for a
+ * component one ({@link buildBookingIdFromSignature}), so what shares a
+ * booking — and therefore freezes together — is two occurrences of the same
+ * product under one **leg** with the same component ancestry. ⭐ Segment 3 is
+ * the destination pair's uid, **not** its address: two legs to one address are
+ * two bookings and freeze independently (api-cloudrun#933). The same product standalone
  * and nested inside a kit are different bookings and freeze independently.
  *
  * 🔴 **This paragraph previously said the grain was `(order, product,
  * destination)`, full stop, and that reading is what a caller acts on.** It
- * predates the signature segment and it is the wrong mental model in the
- * expensive direction: a consumer that keys its own freeze set on
+ * predated the signature segment, and `destination` has since been corrected to
+ * the LEG; it is the wrong mental model in the expensive direction: a consumer that keys its own freeze set on
  * `(product, destination)` cannot match the ids it derives them from, so the
  * freeze goes ABSENT rather than merely coarse. That is api-cloudrun#1060.
  * **Parse a booking id with {@link parseBookingId}; never hand-split it.**

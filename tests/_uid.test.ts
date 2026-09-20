@@ -81,6 +81,55 @@ Deno.test("MovementId accepts a 4-segment (kit-component) booking subject", () =
   accepts(MovementId, `fe847108-d824-4f3a-aac8-ce60a9743ffc|check_out|${subject}`);
 });
 
+/**
+ * 🔴 **Segment 3 is the destination PAIR's uid — the LEG — and the
+ * `firestoreId` arm beside it is TRANSITIONAL** (api-cloudrun#933). Both arms
+ * are pinned so that narrowing the union in step 5 is a deliberate edit to this
+ * file rather than something a refactor can do silently.
+ */
+Deno.test("BookingId accepts a pair-uid (LEG) 3rd segment, 3- and 4-segment", () => {
+  const leg = "fe847108-d824-4f3a-aac8-ce60a9743ffc";
+  accepts(BookingId, `00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${leg}`);
+  accepts(BookingId, `00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${leg}:0123456789ab`);
+  accepts(
+    BookingId,
+    `00iNtfho7YCp6FllPi9f:custom-fe847108-d824-4f3a-aac8-ce60a9743ffc:${leg}`,
+  );
+});
+
+/**
+ * ⚠️ **Delete this arm in step 5 of api-cloudrun#933**, with the union member
+ * it pins. It is green today because the corpus still holds address-keyed ids;
+ * once the migration measures 0 old-form ids it is a dead branch, and an armed
+ * dead branch is what silently re-admits the shape that cannot tell two legs to
+ * one address apart.
+ */
+Deno.test("BookingId still accepts the LEGACY address-keyed 3rd segment", () => {
+  accepts(BookingId, "00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:gka5vla5wQO1xlSsR7UG");
+});
+
+Deno.test("BookingId rejects a 3rd segment that is neither form", () => {
+  const order = "00iNtfho7YCp6FllPi9f";
+  const item = "0BIQ73UMiHTtd8mo0yNk";
+  rejects(BookingId, `${order}:${item}:not-a-uid`);
+  rejects(BookingId, `${order}:${item}:fe847108-d824-4f3a-aac8-ce60a9743ff`); // uuid, 1 short
+  rejects(BookingId, `${order}:${item}:gka5vla5wQO1xlSsR7U`); // firestore id, 19
+  rejects(BookingId, `${order}:${item}:`);
+});
+
+/** The subject arm inherits segment 3's union, and narrows with it in step 5. */
+Deno.test("MovementId accepts a pair-uid booking subject, 3- and 4-segment", () => {
+  const leg = "fe847108-d824-4f3a-aac8-ce60a9743ffc";
+  const session = "0f2a1c3e-4b5d-4e6f-8a9b-0c1d2e3f4a5b";
+  accepts(MovementId, `${session}|check_out|00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${leg}`);
+  accepts(
+    MovementId,
+    `${session}|check_out|00iNtfho7YCp6FllPi9f:0BIQ73UMiHTtd8mo0yNk:${leg}:0123456789ab`,
+  );
+  // A product subject is a bare Firestore id and is unaffected by any of this.
+  accepts(MovementId, `${session}|purchase|0BIQ73UMiHTtd8mo0yNk`);
+});
+
 Deno.test("isProductShapedUid: false for a bare divider uuid, true for a product/custom id", () => {
   assertEquals(isProductShapedUid("fe847108-d824-4f3a-aac8-ce60a9743ffc"), false);
   assertEquals(isProductShapedUid(fid("p")), true);

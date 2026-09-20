@@ -10,7 +10,7 @@
  * | Validator        | Shape                                   | Used for |
  * |------------------|-----------------------------------------|----------|
  * | `FirestoreId`    | `[A-Za-z0-9]{20}`                       | own `uid` on normal collections + every `uid_*` doc reference |
- * | `BookingId`      | `{id}:{itemUid}:{id}` or `{id}:{itemUid}:{id}:{hash}` | `bookings.uid` = `{uid_order}:{item uid}:{uid_destination}`, +4th segment for a kit-component occurrence — see below |
+ * | `BookingId`      | `{id}:{itemUid}:{pairUid}` or `{id}:{itemUid}:{pairUid}:{hash}` | `bookings.uid` = `{uid_order}:{item uid}:{destination pair uid}`, +4th segment for a kit-component occurrence — see below |
  * | `ItemUid`        | `FirestoreId | uuid | custom-{uuid}`    | order/invoice/fulfillment `items[].uid` + `path[]` segments |
  * | `QuoteId`        | `{id}:v{N}` / `{id}:draft`              | `quotes.uid` (saved versions + working draft) |
  * | `StatementDocumentId` | `{id}:v{N}`                        | `statement-documents.uid` (saved org statements) |
@@ -52,6 +52,36 @@
  * widening `FirestoreId` would have weakened a guard covering 41 document types
  * for the sake of two.
  *
+ * ## `BookingId`'s 3rd segment is the LEG, not the address
+ *
+ * 🔴 **Segment 3 is the destination PAIR's own uid** (`DocDestinationType.uid`,
+ * a UUID minted once by `buildDestinationPairWithDivider`), **not the
+ * `destinations/{uid}` document id.** The two are easy to confuse and the
+ * difference is the whole point: a booking is one row per *leg* of an order,
+ * and an order may legitimately carry two legs that deliver to the **same
+ * address**. Keyed on the address, both legs resolve to ONE booking and every
+ * per-leg total then states that booking's whole quantity once per leg — a
+ * fixture booking of 5 units folded to a pick-sheet quantity of 10
+ * (api-cloudrun#933). The pair uid is what distinguishes them.
+ *
+ * ⭐ **Two in-store legs are kept apart today only by accident**: the manager
+ * mints a phantom destination uid per endpoint — a client-side auto-id for a
+ * document never written — so the shared-address shape stays rare. Making
+ * those endpoints real destinations removes the accident, which is why the
+ * identity had to be corrected first rather than guarded.
+ *
+ * It is also the **more stable** of the two ids. `destinations/{uid}` is
+ * churned by every address-book merge and by the property/unit tree migration,
+ * each of which had to delete-and-recreate every affected booking precisely
+ * because the id embedded the destination uid. The pair uid is churned by
+ * none of that.
+ *
+ * ⚠️ **Segment 3's `firestoreId` arm is TRANSITIONAL** — it accepts the legacy
+ * address-keyed form only until the corpus is migrated, and is deleted once
+ * `bookings` and `transactions` both measure 0 old-form ids. An armed dead
+ * branch is what would silently re-admit the shape that cannot tell two legs
+ * to one address apart.
+ *
  * ## `BookingId`'s 4th segment, and why `isProductShapedUid` lives here
  *
  * `bookings` aggregates one row per `(order, product, destination)` — but a
@@ -74,12 +104,16 @@
  * predicate is derivable from `ItemUid`'s union alone — no `structuralUids` set
  * has to travel alongside a `path` for `componentAncestry` to read it correctly.
  *
- * ⚠️ **`MovementId`'s subject arm is a permanent union of the 3- and
- * 4-segment forms**, not a transitional one. `transactions` is an
- * append-only journal, so a historical movement's stored id records what its
- * subject's id *was at the time* and is never rewritten — old rows keep the
- * 3-segment shape indefinitely for bookings that existed before the 4-segment
- * form shipped.
+ * ⚠️ **`MovementId`'s subject arm inherits segment 3's transitional union, and
+ * narrows with it.** This module previously ruled that union *permanent*, on
+ * the grounds that `transactions` is append-only, so a historical movement's
+ * stored id records what its subject's id *was at the time* and is never
+ * rewritten. 🔴 **That reasoning is overturned** (owner, 2026-09-20): a
+ * movement **names** the booking it is about, and a re-key corrects that
+ * booking's identity rather than restating the event. So the movement ids move
+ * with their subjects, no legacy arm survives anywhere, and both unions narrow
+ * to the uuid form together. The 3-vs-4-segment union stays permanent — that
+ * one really is a difference between occurrences, not between eras.
  *
  * ## Naming: `uid` is a document id, `uuid` is someone else's id
  *
@@ -160,13 +194,24 @@ export function isProductShapedUid(uid: string): boolean {
   return !BARE_UUID.test(uid);
 }
 
+/**
+ * Segment 3 of a `BookingId` — the destination PAIR's uid, a UUID. See the
+ * "`BookingId`'s 3rd segment is the LEG" section above.
+ *
+ * ⚠️ The `firestoreId` arm is **transitional**: it accepts the legacy
+ * address-keyed form for the migration window only, and is deleted once both
+ * `bookings` and `transactions` measure 0 old-form ids. Do not read it as a
+ * permanent polymorphism.
+ */
+const destinationPairSegment = z.union([z.uuid(), firestoreId]);
+
 /** Internal, un-annotated so `MovementId` can embed its pattern. */
 const bookingIdTopLevel = z.templateLiteral([
   firestoreId,
   ":",
   z.union([firestoreId, customItemUid]),
   ":",
-  firestoreId,
+  destinationPairSegment,
 ]);
 
 /**
@@ -179,17 +224,18 @@ const bookingIdComponent = z.templateLiteral([
   ":",
   z.union([firestoreId, customItemUid]),
   ":",
-  firestoreId,
+  destinationPairSegment,
   ":",
   z.string().regex(/^[0-9a-f]{12}$/, "Must be a 12-hex component signature hash"),
 ]);
 
 /**
  * `bookings.uid` — deterministic composite, sparse by construction:
- * `{uid_order}:{item uid}:{uid_destination}` for a top-level occurrence
- * (unchanged, byte-for-byte, from before the 4-segment form existed; the
- * middle segment is the order item's uid, which for a custom product is
- * `custom-{uuid}`), or `{uid_order}:{item uid}:{uid_destination}:{hash}` for
+ * `{uid_order}:{item uid}:{destination pair uid}` for a top-level occurrence
+ * (the middle segment is the order item's uid, which for a custom product is
+ * `custom-{uuid}`; the third is the LEG, **not** the address — see the
+ * "`BookingId`'s 3rd segment" section above), or
+ * `{uid_order}:{item uid}:{destination pair uid}:{hash}` for
  * an occurrence that is a component of a kit — see the "`BookingId`'s 4th
  * segment" section above. Built only through `booking-id.ts`'s
  * `buildBookingId`; never assembled by hand at a second call site.
@@ -218,9 +264,11 @@ export const BookingId: z.ZodType<string> = z.union([bookingIdTopLevel, bookingI
  * event idempotent under the manager's retry-on-409, exactly as the derived
  * `bookings` id makes a booking upsert idempotent.
  *
- * ⚠️ The subject arm is `firestoreId | bookingIdTopLevel | bookingIdComponent`
- * — a permanent union, not a transitional one. See the "`BookingId`'s 4th
- * segment" section above.
+ * ⚠️ The subject arm is `firestoreId | bookingIdTopLevel | bookingIdComponent`.
+ * The product/booking split is permanent; segment 3's legacy-address arm,
+ * inherited from `BookingId`, is **transitional** and narrows with it — a
+ * movement's id is re-keyed along with the booking it names. See the
+ * "`BookingId`'s 3rd segment" section above.
  */
 export const MovementId: z.ZodType<string> = z.templateLiteral([
   z.uuid(),

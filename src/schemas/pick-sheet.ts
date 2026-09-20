@@ -334,7 +334,12 @@ export const PickSheetScopeSchema: z.ZodType<PickSheetScope> = z.strictObject({
  * instead of by convention.
  */
 export interface PickSheetBooking {
-  /** `{uid_order}:{uid_product}:{delivery.uid}` — deterministic, hence joinable. */
+  /**
+   * `{uid_order}:{uid_product}:{destination pair uid}` — deterministic, hence
+   * joinable. 🔴 Segment 3 is the pair's OWN uid (the leg), not its
+   * `delivery.uid` (the address): two legs to one address are two bookings
+   * (api-cloudrun#933).
+   */
   uid: string;
   uid_product: string;
   name: string;
@@ -386,7 +391,7 @@ export interface PickSheetItem {
    * non-stock line, or a line whose booking has not been written.
    *
    * ⚠️ **Several lines legitimately share one value.** A booking is aggregate
-   * per `(order, product, destination)`, and the same product may repeat inside
+   * per `(order, product, leg)`, and the same product may repeat inside
    * one leg — a priced principal beside zero-priced accessories, a `splitItem`,
    * or a product appearing both standalone and as a kit component. Look the
    * quantities up in {@link PickSheetDestination.bookings}; do NOT sum this
