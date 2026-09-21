@@ -497,12 +497,6 @@ export interface FulfillmentDocument {
     };
     /** Derived at index time — see `DERIVED_FIELDS["fulfillments:destinations.pick_bucket"]`. */
     pick_bucket?: string;
-    /**
-     * The same leg's PROPERTY — derived at index time by a join through
-     * `destinations`, see `DERIVED_FIELDS["fulfillments:destinations.pick_property"]`.
-     * Absent on a customer-collect leg and on a destination with no `path` yet.
-     */
-    pick_property?: string;
   }>;
   items?: Array<{
     uid?: string;

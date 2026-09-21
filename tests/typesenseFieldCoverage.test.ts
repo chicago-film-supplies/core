@@ -170,16 +170,6 @@ const DERIVED_FIELDS: Record<string, string> = {
   // `destinations_v6` declares no `organizations.*` at all (api-cloudrun#654).
   // The stale-entry arm below is what would have caught leaving it.
   "contacts:organizations.name": "composeOrgName joined through the LIVE organization — the stored scalar was removed (api-cloudrun#782)",
-  // ── The by-PROPERTY roll-up key, beside `fulfillments:destinations.pick_bucket`.
-  //
-  // 🔴 **A JOIN, not a read.** A fulfillment's destination block is a snapshot
-  // and carries no `path` — the tree is deliberately not cascaded into
-  // order/invoice/fulfillment snapshots ("snapshot on the DOCUMENT, derive on
-  // the MASTER") — so this is resolved through a destinations map loaded from
-  // Firestore at index time, like the org-sourced edges two entries up. Its
-  // failure mode is ABSENCE, and `loadDestinationProperties` refuses an empty
-  // read for exactly that reason.
-  "fulfillments:destinations.pick_property": "destinationPropertyUid joined through the LIVE destination, in coerceArrayFields beside pick_bucket",
   "orders:dates": "deriveOrderDateEnvelope — synthesized, never stored",
   "orders:dates.delivery_start_fs": "deriveOrderDateEnvelope — envelope min over destinations[]",
   "orders:dates.delivery_end_fs": "deriveOrderDateEnvelope — envelope max over destinations[]",
