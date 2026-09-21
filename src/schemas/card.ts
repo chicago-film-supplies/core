@@ -210,6 +210,53 @@ export const CardOrganization: z.ZodType<CardOrganizationType> = z.strictObject(
   path: OrderDerivedOrgPath,
 });
 
+// ── Source payloads ─────────────────────────────────────────────────
+
+/**
+ * The `orders` SOURCE PAYLOAD — the fields of the order's destination pair that
+ * a card surface reads, copied under the pair's OWN names.
+ *
+ * **This is the pattern for every future source kind (owner, 2026-09-20):**
+ *
+ * - **The key is a `sources[].collection` value, spelled exactly.** Event cards
+ *   are sourced `{ collection: "orders" }`, so the key is `orders` — not
+ *   `fulfillment`, and not a new word.
+ * - **PRESENT iff that source is in `sources`, otherwise ABSENT — never `null`.**
+ *   A stated exception to core#95's "key required, value nullable": with N
+ *   source kinds every card would otherwise carry N nulls, and `cards` must
+ *   stay light.
+ * - **The value holds only fields a card surface READS** (list, facet, button),
+ *   copied from the source doc under their own names. `leg` is the one
+ *   exception: it says WHICH part of the source this card projects, and
+ *   `checkEventCard` pins it to the id's `:start` / `:end`.
+ * - **One writer: the projection that owns the card** (`buildEventCards`). It
+ *   is rebuilt on every build, never carried forward the way `action` is.
+ * - **No `source` discriminator inside it.** The card's kind is already
+ *   `sources`; a second copy could disagree with it.
+ *
+ * `destination` and `organization` are this same pattern from before it had a
+ * name. They are not migrated.
+ *
+ * Why this exists: a card never stored the collect flag, and api-cloudrun#662
+ * repoints every customer-collect leg at the store's own destination — 24 of 43
+ * open prod cards (2026-09-20) sat on that one `destination.uid`. The flag is
+ * what lets the index tell an in-store leg from a delivery there; see
+ * `cardPickBucket` (`@cfs/core/utils/cards`).
+ *
+ * ⚠️ **OPTIONAL on the event card for now, and that is a release step, not a
+ * rule.** Every existing card lacks it until api-cloudrun rebuilds them; the
+ * requirement on the event-card kind lands in `checkEventCard` after that.
+ */
+export type CardOrdersSourceType =
+  | { leg: "start"; customer_collecting: boolean }
+  | { leg: "end"; customer_returning: boolean };
+
+/** Zod schema for CardOrdersSourceType (discriminated on `leg`; JSR no-slow-types-safe). */
+export const CardOrdersSource: z.ZodType<CardOrdersSourceType> = z.discriminatedUnion("leg", [
+  z.strictObject({ leg: z.literal("start"), customer_collecting: z.boolean() }),
+  z.strictObject({ leg: z.literal("end"), customer_returning: z.boolean() }),
+]);
+
 // ── Firestore document ──────────────────────────────────────────────
 
 /**
@@ -241,6 +288,8 @@ export interface Card {
   destination: DocDestinationEndpointType | null;
   organization: CardOrganizationType | null;
   sources: DocSourceType[];
+  /** The `orders` source payload — present iff `sources` names an order. See {@link CardOrdersSource}. */
+  orders?: CardOrdersSourceType;
   attachments: CardAttachmentType[];
   uid_assignees: string[];
   locked: CardLockKey[];
@@ -312,7 +361,32 @@ const isEventCard = (doc: Card): boolean =>
  * is upstream and the tightening lands with it.
  */
 function checkEventCard(doc: Card, ctx: z.RefinementCtx): void {
-  if (!isEventCard(doc)) return;
+  if (!isEventCard(doc)) {
+    // The payload is present IFF its source is — a to-do carrying an `orders`
+    // payload is claiming a projection nothing built.
+    if (doc.orders !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["orders"],
+        message: "orders is present only on a card whose sources name an order",
+      });
+    }
+    return;
+  }
+
+  // `leg` says which half of the pair this card projects, and the id already
+  // says it. Two copies that could disagree are pinned together here.
+  // ⚠️ Not yet REQUIRED on this kind — see `CardOrdersSource`.
+  if (doc.orders !== undefined) {
+    const idLeg = doc.uid.endsWith(":start") ? "start" : doc.uid.endsWith(":end") ? "end" : null;
+    if (idLeg !== doc.orders.leg) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["orders", "leg"],
+        message: `orders.leg "${doc.orders.leg}" does not match the card id's leg (${idLeg ?? "none"})`,
+      });
+    }
+  }
 
   const require = (ok: boolean, path: (string | number)[], field: string) => {
     if (ok) return;
@@ -385,6 +459,8 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   // ⚠️ The witness is gone by design — that repair is why this line can exist.
   organization: CardOrganization.nullable().meta({ label: "Organization" }),
   sources: z.array(DocSource).meta({ label: "Source" }),
+  // ABSENT rather than null off an event card, by rule — see `CardOrdersSource`.
+  orders: CardOrdersSource.optional(),
   // **REQUIRED ×3 — inert `.default([])` removed 2026-09-11 (core#95 batch 8).**
   // 1,159 prod / 1,166 dev cards state all three, and dev is a genuine second
   // sample here: its 7 extra documents are the only hand-authored cards in

@@ -1043,6 +1043,14 @@ export interface CardDocument {
   action?: {
     value?: string;
   };
+  /** The stored `orders` source payload — event cards only. */
+  orders?: {
+    leg?: string;
+    customer_collecting?: boolean;
+    customer_returning?: boolean;
+  };
+  /** Derived at index time — see `DERIVED_FIELDS["cards:pick_bucket"]`. */
+  pick_bucket?: string;
   sources: Array<{
     collection?: string;
     uid?: string;

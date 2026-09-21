@@ -333,3 +333,47 @@ for (const key of ["action", "organization"] as const) {
     }
   });
 }
+
+// ── The `orders` source payload ──────────────────────────────────────
+
+Deno.test("orders payload: a :start card carrying leg=start is ACCEPTED", () => {
+  const doc = { ...validCard, orders: { leg: "start", customer_collecting: true } };
+  assertEquals(CardSchema.safeParse(doc).success, true);
+});
+
+Deno.test("orders payload: ABSENT on an event card is still ACCEPTED (pre-backfill)", () => {
+  // ⚠️ Delete when `checkEventCard` makes it required on the event-card kind.
+  assertEquals("orders" in validCard, false);
+  assertEquals(CardSchema.safeParse(validCard).success, true);
+});
+
+Deno.test("orders payload: leg disagreeing with the id's :start is REFUSED", () => {
+  const doc = { ...validCard, orders: { leg: "end", customer_returning: false } };
+  const r = CardSchema.safeParse(doc);
+  assertEquals(r.success, false);
+  if (!r.success) assertEquals(r.error.issues.map((i) => i.path.join(".")), ["orders.leg"]);
+});
+
+Deno.test("orders payload: leg=end on an :end card is ACCEPTED — the pin is not a constant", () => {
+  // The other polarity: without it a refinement refusing every `end` would pass
+  // the test above.
+  const uid = validCard.uid.replace(/:start$/, ":end");
+  const doc = { ...validCard, uid, uid_thread: uid, orders: { leg: "end", customer_returning: true } };
+  assertEquals(CardSchema.safeParse(doc).success, true);
+});
+
+Deno.test("orders payload: the flag must match the leg's arm — start carries customer_collecting", () => {
+  const doc = { ...validCard, orders: { leg: "start", customer_returning: true } };
+  assertEquals(CardSchema.safeParse(doc).success, false);
+});
+
+Deno.test("orders payload: PRESENT on a to-do is REFUSED — present iff the source is", () => {
+  const doc = { ...validTodoCard, orders: { leg: "start", customer_collecting: false } };
+  const r = CardSchema.safeParse(doc);
+  assertEquals(r.success, false);
+  if (!r.success) assertEquals(r.error.issues.map((i) => i.path.join(".")), ["orders"]);
+});
+
+Deno.test("orders payload: null is REFUSED — absent, never null", () => {
+  assertEquals(CardSchema.safeParse({ ...validCard, orders: null }).success, false);
+});

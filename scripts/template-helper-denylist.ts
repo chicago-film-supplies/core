@@ -99,6 +99,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   //     which a rendered document never prints.
   //   - `resolveDestinationJurisdictionSeed` is an AUTHORING-time seed for the
   //     picker (api-cloudrun#591) — it prices nothing, so it renders nothing.
+  // `cardPickBucket` is the `cards:pick_bucket` INDEX-TIME producer. It returns
+  // a destination uid or a facet sentinel — a roll-up key, never printed text.
+  cards: ["cardPickBucket"],
   destinations: [
     "applyDestinationStreet2",
     "computeDestinationNode",

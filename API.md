@@ -1278,6 +1278,7 @@ interface Card {
   destination: DocDestinationEndpointType | null;
   organization: CardOrganizationType | null;
   sources: DocSourceType[];
+  orders?: CardOrdersSourceType;
   attachments: CardAttachmentType[];
   uid_assignees: string[];
   locked: CardLockKey[];
@@ -1463,6 +1464,54 @@ Zod schema for CardLockKey.
 
 ```ts
 const CardLockKeyEnum: z.ZodType<CardLockKey>;
+```
+
+### `CardOrdersSource`
+
+Zod schema for CardOrdersSourceType (discriminated on `leg`; JSR no-slow-types-safe).
+
+```ts
+const CardOrdersSource: z.ZodType<CardOrdersSourceType>;
+```
+
+### `CardOrdersSourceType`
+
+The `orders` SOURCE PAYLOAD — the fields of the order's destination pair that
+a card surface reads, copied under the pair's OWN names.
+
+**This is the pattern for every future source kind (owner, 2026-09-20):**
+
+- **The key is a `sources[].collection` value, spelled exactly.** Event cards
+  are sourced `{ collection: "orders" }`, so the key is `orders` — not
+  `fulfillment`, and not a new word.
+- **PRESENT iff that source is in `sources`, otherwise ABSENT — never `null`.**
+  A stated exception to core#95's "key required, value nullable": with N
+  source kinds every card would otherwise carry N nulls, and `cards` must
+  stay light.
+- **The value holds only fields a card surface READS** (list, facet, button),
+  copied from the source doc under their own names. `leg` is the one
+  exception: it says WHICH part of the source this card projects, and
+  `checkEventCard` pins it to the id's `:start` / `:end`.
+- **One writer: the projection that owns the card** (`buildEventCards`). It
+  is rebuilt on every build, never carried forward the way `action` is.
+- **No `source` discriminator inside it.** The card's kind is already
+  `sources`; a second copy could disagree with it.
+
+`destination` and `organization` are this same pattern from before it had a
+name. They are not migrated.
+
+Why this exists: a card never stored the collect flag, and api-cloudrun#662
+repoints every customer-collect leg at the store's own destination — 24 of 43
+open prod cards (2026-09-20) sat on that one `destination.uid`. The flag is
+what lets the index tell an in-store leg from a delivery there; see
+`cardPickBucket` (`@cfs/core/utils/cards`).
+
+⚠️ **OPTIONAL on the event card for now, and that is a release step, not a
+rule.** Every existing card lacks it until api-cloudrun rebuilds them; the
+requirement on the event-card kind lands in `checkEventCard` after that.
+
+```ts
+type CardOrdersSourceType = typeLiteral | typeLiteral;
 ```
 
 ### `CardOrganization`
@@ -14895,6 +14944,7 @@ interface Card {
   destination: DocDestinationEndpointType | null;
   organization: CardOrganizationType | null;
   sources: DocSourceType[];
+  orders?: CardOrdersSourceType;
   attachments: CardAttachmentType[];
   uid_assignees: string[];
   locked: CardLockKey[];
@@ -15059,6 +15109,54 @@ Zod schema for CardLockKey.
 
 ```ts
 const CardLockKeyEnum: z.ZodType<CardLockKey>;
+```
+
+### `CardOrdersSource`
+
+Zod schema for CardOrdersSourceType (discriminated on `leg`; JSR no-slow-types-safe).
+
+```ts
+const CardOrdersSource: z.ZodType<CardOrdersSourceType>;
+```
+
+### `CardOrdersSourceType`
+
+The `orders` SOURCE PAYLOAD — the fields of the order's destination pair that
+a card surface reads, copied under the pair's OWN names.
+
+**This is the pattern for every future source kind (owner, 2026-09-20):**
+
+- **The key is a `sources[].collection` value, spelled exactly.** Event cards
+  are sourced `{ collection: "orders" }`, so the key is `orders` — not
+  `fulfillment`, and not a new word.
+- **PRESENT iff that source is in `sources`, otherwise ABSENT — never `null`.**
+  A stated exception to core#95's "key required, value nullable": with N
+  source kinds every card would otherwise carry N nulls, and `cards` must
+  stay light.
+- **The value holds only fields a card surface READS** (list, facet, button),
+  copied from the source doc under their own names. `leg` is the one
+  exception: it says WHICH part of the source this card projects, and
+  `checkEventCard` pins it to the id's `:start` / `:end`.
+- **One writer: the projection that owns the card** (`buildEventCards`). It
+  is rebuilt on every build, never carried forward the way `action` is.
+- **No `source` discriminator inside it.** The card's kind is already
+  `sources`; a second copy could disagree with it.
+
+`destination` and `organization` are this same pattern from before it had a
+name. They are not migrated.
+
+Why this exists: a card never stored the collect flag, and api-cloudrun#662
+repoints every customer-collect leg at the store's own destination — 24 of 43
+open prod cards (2026-09-20) sat on that one `destination.uid`. The flag is
+what lets the index tell an in-store leg from a delivery there; see
+`cardPickBucket` (`@cfs/core/utils/cards`).
+
+⚠️ **OPTIONAL on the event card for now, and that is a release step, not a
+rule.** Every existing card lacks it until api-cloudrun rebuilds them; the
+requirement on the event-card kind lands in `checkEventCard` after that.
+
+```ts
+type CardOrdersSourceType = typeLiteral | typeLiteral;
 ```
 
 ### `CardOrganization`
@@ -24918,6 +25016,39 @@ Which side of the order's lifecycle a card represents:
 ```ts
 type CardSide = "start" | "end";
 ```
+
+### `PICK_BUCKET_CUSTOMER_COLLECT`
+
+The literal `pick_bucket` value for "the customer comes to the store", as
+opposed to a destination uid. The same vocabulary as
+`fulfillments:destinations.pick_bucket`, so a manager roll-up folds either
+facet with one function.
+
+```ts
+const PICK_BUCKET_CUSTOMER_COLLECT: "customer-collect";
+```
+
+### `cardPickBucket(card: Pick<Card, "destination" | "orders">): string | null`
+
+A card's by-destination roll-up key: `"customer-collect"` for an IN-STORE leg,
+otherwise the card's `destination.uid`. `null` when neither can be said — a
+to-do, or an event card built before `orders` existed.
+
+🔴 **Why the store's own uid is not good enough.** api-cloudrun#662 repoints
+every customer-collect leg at the store's destination, so without the split
+one warehouse row swallows the answer — 24 of 43 open prod cards on
+2026-09-20.
+
+⚠️ **Per LEG, and the leg picks the flag** — the same table `cardKind` uses in
+api-cloudrun's `eventCards.ts`: a `:start` card is in-store when the customer
+COLLECTS, an `:end` card when the customer RETURNS. The fulfillments bucket
+reads `customer_collecting` alone because a fulfillment is keyed on its
+delivery leg; a card is one leg, so it can say which.
+
+⚠️ **An event card with no `orders` payload yields `null`, never a guess from
+`destination.uid`.** Guessing would file every unbuilt in-store leg under the
+store's own row, which is the defect this key exists to remove. Absent is
+correct until the card is rebuilt.
 
 ### `computeCardActionFromBookings(side: CardSide, siblings: CardSiblingBooking[], current: CardStatus): CardAction | null`
 

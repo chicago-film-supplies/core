@@ -232,6 +232,8 @@ const DERIVED_FIELDS: Record<string, string> = {
     "coerceArrayFields — any item whose picker quantity diverges from the order's projection",
   "fulfillments:destinations.pick_bucket":
     "coerceArrayFields — per leg, `customer_collecting ? \"customer-collect\" : delivery.uid`",
+  "cards:pick_bucket":
+    "cardPickBucket (@cfs/core/utils/cards) — per card, the LEG's in-store flag ? \"customer-collect\" : destination.uid",
 };
 
 const NUMERIC_TYPES: ReadonlySet<string> = new Set([

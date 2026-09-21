@@ -90,6 +90,26 @@ export const cards: TypesenseCollectionConfig = {
       // The denormalized fulfillment verb the card surface buttons off.
       { name: "action.value", type: "string", facet: true, index: true, optional: true },
 
+      // The `orders` source payload (`CardOrdersSource`) — which leg of the
+      // order's pair this card is, and that leg's in-store flag. Stored, not
+      // derived; present only on an event card.
+      { name: "orders", type: "object", optional: true },
+      { name: "orders.leg", type: "string", facet: true, index: true, optional: true },
+      { name: "orders.customer_collecting", type: "bool", facet: true, index: true, optional: true },
+      { name: "orders.customer_returning", type: "bool", facet: true, index: true, optional: true },
+
+      // The by-destination roll-up key — `cardPickBucket` (`@cfs/core/utils/cards`),
+      // in `fulfillments:destinations.pick_bucket`'s vocabulary (a destination uid
+      // or `customer-collect`), so one manager fold reads either facet.
+      //
+      // 🔴 **Derived at index time, and a SCALAR here where the fulfillments one
+      // is an array.** A card IS one leg, so the element-*i*-of-a-sibling-array
+      // correlation problem that forced the fulfillments key to index time does
+      // not arise — but `destination.uid` alone cannot say "in-store", and the
+      // store's own row would swallow 24 of 43 open prod cards (2026-09-20).
+      // Absent on a to-do and on an event card not yet rebuilt with `orders`.
+      { name: "pick_bucket", type: "string", facet: true, index: true, optional: true },
+
       // Polymorphic sources — object[] with nested facets for
       // "all cards touching order X" and "all cards touching any order".
       // The `sources` array is required (always present) but may be empty:

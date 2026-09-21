@@ -10,7 +10,7 @@
  *
  * @module
  */
-import type { Booking, CardAction, CardStatus } from "../schemas/mod.ts";
+import type { Booking, Card, CardAction, CardStatus } from "../schemas/mod.ts";
 
 /**
  * Which side of the order's lifecycle a card represents:
@@ -179,4 +179,42 @@ export function computeCardActionFromBookings(
   }
   if (out > 0) return { source: "fulfillment", value: "return" };
   return null;
+}
+
+/**
+ * The literal `pick_bucket` value for "the customer comes to the store", as
+ * opposed to a destination uid. The same vocabulary as
+ * `fulfillments:destinations.pick_bucket`, so a manager roll-up folds either
+ * facet with one function.
+ */
+export const PICK_BUCKET_CUSTOMER_COLLECT = "customer-collect";
+
+/**
+ * A card's by-destination roll-up key: `"customer-collect"` for an IN-STORE leg,
+ * otherwise the card's `destination.uid`. `null` when neither can be said — a
+ * to-do, or an event card built before `orders` existed.
+ *
+ * 🔴 **Why the store's own uid is not good enough.** api-cloudrun#662 repoints
+ * every customer-collect leg at the store's destination, so without the split
+ * one warehouse row swallows the answer — 24 of 43 open prod cards on
+ * 2026-09-20.
+ *
+ * ⚠️ **Per LEG, and the leg picks the flag** — the same table `cardKind` uses in
+ * api-cloudrun's `eventCards.ts`: a `:start` card is in-store when the customer
+ * COLLECTS, an `:end` card when the customer RETURNS. The fulfillments bucket
+ * reads `customer_collecting` alone because a fulfillment is keyed on its
+ * delivery leg; a card is one leg, so it can say which.
+ *
+ * ⚠️ **An event card with no `orders` payload yields `null`, never a guess from
+ * `destination.uid`.** Guessing would file every unbuilt in-store leg under the
+ * store's own row, which is the defect this key exists to remove. Absent is
+ * correct until the card is rebuilt.
+ */
+export function cardPickBucket(card: Pick<Card, "destination" | "orders">): string | null {
+  const o = card.orders;
+  if (o === undefined) return null;
+  const inStore = o.leg === "start" ? o.customer_collecting : o.customer_returning;
+  if (inStore) return PICK_BUCKET_CUSTOMER_COLLECT;
+  const uid = card.destination?.uid;
+  return typeof uid === "string" && uid.length > 0 ? uid : null;
 }
