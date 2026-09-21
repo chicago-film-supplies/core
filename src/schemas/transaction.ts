@@ -753,8 +753,22 @@ export interface Movement {
    * retry does not self-heal the way ACCREC does — `POST /Invoices` upserts on
    * `InvoiceNumber` for ACCREC only. The push service must adopt-or-create.
    *
-   * Written only by the bill-push service via `validatedPatchDoc`; it is not
-   * balance-affecting, so it does not join `UpdateTransactionInput`.
+   * ⚠️ **TWO authors, and this line used to say one.** The bill-push service
+   * writes it via `validatedPatchDoc` after POSTing a `CFS-MOV-{number}` bill;
+   * `createTransaction`'s `linkedXeroId` backfill option stamps it at creation
+   * with the GUID of a Xero document that ALREADY EXISTS — a historic supplier
+   * document the journal merely records. Neither is balance-affecting, so it
+   * does not join `UpdateTransactionInput`.
+   *
+   * 🔴 **The GUID can live in any of THREE Xero collections, and nothing stored
+   * says which.** The push service authors ACCPAY bills and ACCPAYCREDIT notes;
+   * the backfill links whatever the purchase actually was — and most CFS
+   * purchases were paid by card, so that is usually a SPEND **bank
+   * transaction**. `z.uuid()` cannot tell them apart: all three are plain
+   * GUIDs. A reader that needs the collection must resolve it against Xero
+   * rather than infer it from the movement's posting direction, which can only
+   * ever name two. See `api-cloudrun/src/lib/xeroDocumentKind.ts` and
+   * chicago-film-supplies/api-cloudrun#1091.
    */
   xero_id?: string | null;
 
