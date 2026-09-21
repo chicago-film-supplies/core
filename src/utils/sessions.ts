@@ -53,7 +53,7 @@ export interface SessionOrderGroup {
  * Split a session's rows into one group per order.
  *
  * ⚠️ **A session can span orders, and that is the point of the surface it comes
- * from.** `POST /returns` accepts whatever a worker was handed back — an item
+ * from.** `PUT /fulfillments/bookings` accepts rows from any orders — an item
  * from order A returned alongside order B is the driving case — so a receipt
  * that printed one flat list would give the customer no way to see which of
  * their jobs each line settled.

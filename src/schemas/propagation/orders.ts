@@ -1270,25 +1270,30 @@ const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
   ],
 };
 
-// ── cross-order-return ─────────────────────────────────────────────
+// ── cross-order-bookings ───────────────────────────────────────────
 //
-// POST /returns — a worker is handed items back and checks them in WITHOUT an
-// order in the path. Same work as `bulk-return-order`, and therefore the same
-// steps; what differs is only the SCOPE, so it declares no rule of its own.
+// PUT /fulfillments/bookings — the cross-order form of
+// `bulk-fulfillment-bookings`. The picker's merged row spans several orders on
+// one product, and the client sends each row's computed NEXT state exactly as
+// the per-order route takes it, so the id is ACTION-AGNOSTIC: prep, check-out,
+// return, lost, damaged and every revert run under it. It declares the same
+// steps and no rule of its own; only the scope differs.
 //
-// ⚠️ It exists as a separate id rather than borrowing `bulk-return-order`
-// because a borrowed transaction id turns the drift check off silently — the
-// logger would resolve the record against a step list describing a different
-// path, and `rules_expected` would stop describing what actually ran.
+// 🔴 **Why one request and not N per-order ones (manager#527).** N parallel
+// per-order requests on one product each take a read lock on
+// `inventory-ledgers/{P}` and then write it — the mutual hot-doc upgrade
+// deadlock, each blocking to the transaction deadline. One request packs every
+// row of a product into ONE chunk, so there is nothing to collide with.
 //
-// The loop over distinct orders is what makes it cross-order: `target_counts`
-// SUMS across them, and `source_doc_id` is the session uuid rather than an
-// order, because there is no single order to name.
+// It replaced `cross-order-return` (`POST /returns`) and `cross-order-checkout`
+// (`POST /checkouts`), which were action-specific and had no callers left.
+// ⚠️ Its own id rather than a borrowed `bulk-fulfillment-bookings`: a borrowed
+// transaction id turns the drift check off silently.
 
-const crossOrderReturnTransaction: TransactionDefinition = {
-  id: "cross-order-return",
+const crossOrderBookingsTransaction: TransactionDefinition = {
+  id: "cross-order-bookings",
   description:
-    "Apply per-booking returned/lost/damaged deltas across bookings belonging to ANY number of orders, in one operator session. Reuses update-booking rules per row, including OOS cowrite for lost/damaged deltas and the per-destination card status recompute; each distinct order touched is finalized and may auto-complete. Identical in kind to bulk-return-order — only the scope differs, so it declares the same steps and no new rule.",
+    "Apply N booking transitions belonging to ANY number of orders in one operator session — the cross-order form of bulk-fulfillment-bookings, and action-agnostic because each row carries its computed next state. Rows are chunked by product, so every row of one product commits in ONE transaction rather than racing on its inventory ledger. Reuses update-booking rules per row, including OOS cowrite for lost/damaged deltas and the per-destination card status recompute; each distinct order touched is finalized and may auto-complete.",
   steps: [
     "update-booking:booking-to-self",
     ...STOCK_STEPS,
@@ -1302,46 +1307,6 @@ const crossOrderReturnTransaction: TransactionDefinition = {
     "create-out-of-service-record:sources-to-record",
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
-  ],
-};
-
-// ── cross-order-checkout ───────────────────────────────────────────
-//
-// POST /checkouts — a worker takes gear out for several jobs in one trip and
-// checks the whole cart out at once, WITHOUT an order in the path. Same work as
-// `bulk-checkout-order`, and therefore the same steps; only the SCOPE differs,
-// so it declares no rule of its own.
-//
-// ⚠️ It exists as a separate id rather than borrowing `bulk-checkout-order`
-// because a borrowed transaction id turns the drift check off silently — the
-// logger would resolve the record against a step list describing a different
-// path, and `rules_expected` would stop describing what actually ran. The same
-// argument `cross-order-return` makes against borrowing `bulk-return-order`.
-//
-// 🔴 **The symmetry with `cross-order-return` is NOT complete, and the gap is
-// the point.** Returning is the direction that cannot be scoped by an order —
-// a worker is handed a crate and refusing half of it is the defect `POST
-// /returns` removes — so `returnOrder` DISCOVERS nothing and the order was only
-// ever an assertion. Checking out is the opposite: `checkoutOrder` calls
-// `readOrderBookings` to discover what to take, so the order is its INPUT. The
-// cross-order form therefore takes EXPLICIT booking rows and never a scope; a
-// scope form would put an irreversible cross-customer sale transfer one call
-// away. `checkoutOrder` filters (it discovered); the cross-order form refuses
-// (it was told).
-
-const crossOrderCheckoutTransaction: TransactionDefinition = {
-  id: "cross-order-checkout",
-  description:
-    "Flip explicitly named reserved/prepped bookings belonging to ANY number of orders to active, moving their quantities into breakdown.out in one operator session. Reuses update-booking rules per row, including the per-destination card status recompute; each distinct order touched is finalized. Identical in kind to bulk-checkout-order — only the scope differs, so it declares the same steps and no new rule. Unlike cross-order-return it takes explicit rows rather than a scope, because check-out is discovered from an order and being handed the wrong row must be a refusal rather than a silent transfer.",
-  steps: [
-    "update-booking:booking-to-self",
-    ...STOCK_STEPS,
-    "update-booking:booking-to-transactions",
-    "update-booking:transactions-to-ledger",
-    "update-booking:transactions-to-locations",
-    "update-booking:booking-to-order",
-    "update-order:order-to-fulfillment",
-    "update-booking:booking-to-cards",
   ],
 };
 
@@ -1446,8 +1411,7 @@ export const orders: PropagationModule = {
     bulkCheckoutOrderTransaction,
     bulkReturnOrderTransaction,
     bulkFulfillmentBookingsTransaction,
-    crossOrderReturnTransaction,
-    crossOrderCheckoutTransaction,
+    crossOrderBookingsTransaction,
     finalizeOrderTransaction,
     processOrderDocsTransaction,
   ],

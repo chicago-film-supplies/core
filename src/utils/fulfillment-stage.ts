@@ -167,10 +167,9 @@ export function returnableQuantity(b: Pick<Booking, "type" | "breakdown">): numb
  *
  * ⚠️ **Not a substitute for {@link checkoutableQuantity}, which is the
  * question a caller asking "may I?" wants.** This is the *arithmetic* half,
- * split out because three api-cloudrun sites need the quantity on a booking
- * they have already decided about: `checkoutRow` builds the patch that applies
- * it, and the cross-order pre-flight sums it per product to size the ledger
- * draw-down. Each of those open-coded `reserved + prepped` before this existed.
+ * split out because api-cloudrun's `checkoutRow` needs the quantity on a
+ * booking it has already decided about, and open-coded `reserved + prepped`
+ * before this existed.
  */
 export function checkoutUnits(b: Pick<Booking, "breakdown">): number {
   return b.breakdown.reserved + b.breakdown.prepped;
@@ -184,13 +183,10 @@ export function checkoutUnits(b: Pick<Booking, "breakdown">): number {
  * 🔴 **ONE author, and the two consumers behave OPPOSITELY on a failure.**
  * api-cloudrun's `checkoutOrder` **filters** on this — it called
  * `readOrderBookings` to DISCOVER its work, so a row that fails the predicate
- * is simply not part of the job. The cross-order form (`POST /checkouts`) was
- * TOLD its rows and must **refuse** instead: silently dropping one would report
- * success for units still sitting on the shelf, and it fails the whole request
- * rather than part of it. A client that offers a row the server would refuse
- * therefore turns one bad tick into a failed cart, with the picker standing at
- * a shelf with no idea which line did it. That is why the picker asks this same
- * function — two behaviours, one predicate, the thing that must not fork.
+ * is simply not part of the job. A client that computes a check-out itself
+ * must ask the same question before offering the row, or it offers a booking
+ * the server's own check-out would skip — two callers, one predicate, the thing
+ * that must not fork.
  *
  * ⚠️ **The STATUS half is the part that is easy to drop, and it is load-bearing
  * on its own.** A per-row partial checkout leaves a booking `active` with

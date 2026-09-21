@@ -10131,7 +10131,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-return" | "cross-order-checkout" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "update-fulfillment-destinations" | "reset-fulfillment" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "update-fulfillment-destinations" | "reset-fulfillment" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `TransactionLogRecord`
@@ -12500,7 +12500,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-return" | "cross-order-checkout" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "update-fulfillment-destinations" | "reset-fulfillment" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "process-order-docs" | "create-out-of-service-record" | "update-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "update-fulfillment-destinations" | "reset-fulfillment" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `aggregates`
@@ -29279,10 +29279,9 @@ ignoring status.
 
 ⚠️ **Not a substitute for {@link checkoutableQuantity}, which is the
 question a caller asking "may I?" wants.** This is the *arithmetic* half,
-split out because three api-cloudrun sites need the quantity on a booking
-they have already decided about: `checkoutRow` builds the patch that applies
-it, and the cross-order pre-flight sums it per product to size the ledger
-draw-down. Each of those open-coded `reserved + prepped` before this existed.
+split out because api-cloudrun's `checkoutRow` needs the quantity on a
+booking it has already decided about, and open-coded `reserved + prepped`
+before this existed.
 
 ### `checkoutableQuantity(b: Pick<Booking, "status" | "breakdown">): number`
 
@@ -29293,13 +29292,10 @@ booking's status says it may not move at all.
 🔴 **ONE author, and the two consumers behave OPPOSITELY on a failure.**
 api-cloudrun's `checkoutOrder` **filters** on this — it called
 `readOrderBookings` to DISCOVER its work, so a row that fails the predicate
-is simply not part of the job. The cross-order form (`POST /checkouts`) was
-TOLD its rows and must **refuse** instead: silently dropping one would report
-success for units still sitting on the shelf, and it fails the whole request
-rather than part of it. A client that offers a row the server would refuse
-therefore turns one bad tick into a failed cart, with the picker standing at
-a shelf with no idea which line did it. That is why the picker asks this same
-function — two behaviours, one predicate, the thing that must not fork.
+is simply not part of the job. A client that computes a check-out itself
+must ask the same question before offering the row, or it offers a booking
+the server's own check-out would skip — two callers, one predicate, the thing
+that must not fork.
 
 ⚠️ **The STATUS half is the part that is easy to drop, and it is load-bearing
 on its own.** A per-row partial checkout leaves a booking `active` with
@@ -33436,7 +33432,7 @@ interface SessionOrderGroup {
 Split a session's rows into one group per order.
 
 ⚠️ **A session can span orders, and that is the point of the surface it comes
-from.** `POST /returns` accepts whatever a worker was handed back — an item
+from.** `PUT /fulfillments/bookings` accepts rows from any orders — an item
 from order A returned alongside order B is the driving case — so a receipt
 that printed one flat list would give the customer no way to see which of
 their jobs each line settled.

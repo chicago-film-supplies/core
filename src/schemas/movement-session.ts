@@ -196,7 +196,7 @@ export interface MovementSession {
    * they do not.
    *
    * ⚠️ **`null` is an ANSWER — "this session spans customers" — and a receipt
-   * must not print a customer name in that case.** `POST /returns` deliberately
+   * must not print a customer name in that case.** `PUT /fulfillments/bookings` deliberately
    * accepts bookings from different orders, so a session spanning two
    * organizations is legitimate rather than a data fault; collapsing to the
    * first would put one customer's name on another's goods.

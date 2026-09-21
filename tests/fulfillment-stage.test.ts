@@ -394,8 +394,8 @@ Deno.test("regressionAlternates lead with the most-terminal non-empty bucket", (
 // ── checkoutUnits / checkoutableQuantity ─────────────────────────────────────
 
 Deno.test("checkoutUnits is the status-blind arithmetic half", () => {
-  // It is what `checkoutRow` applies and what the cross-order pre-flight sums
-  // per product; both have already decided the booking may move.
+  // It is what `checkoutRow` applies, after the caller has already decided the
+  // booking may move.
   assertEquals(checkoutUnits(bk({ reserved: 3, prepped: 2 }, "rental", "active")), 5);
   assertEquals(checkoutUnits(bk({ out: 3 }, "rental", "active")), 0);
 });
@@ -413,9 +413,8 @@ Deno.test("checkoutableQuantity admits reserved, prepped and part-prepped", () =
 Deno.test("🔴 checkoutableQuantity refuses an ACTIVE booking that still holds reserved units", () => {
   // The regression this exists to stop. A per-row partial checkout
   // (`applyBookingActions`) flips the booking to `active` and leaves the
-  // remainder reserved — units present, and `POST /checkouts` will not take
-  // them. A predicate reading the breakdown alone would offer exactly this row,
-  // and the server refuses the WHOLE cart over it, not just the row.
+  // remainder reserved — units present, and `checkoutOrder` will not take
+  // them. A predicate reading the breakdown alone would offer exactly this row.
   assertEquals(checkoutableQuantity(bk({ reserved: 2, out: 3 }, "rental", "active")), 0);
   // …and this is the pair that makes the status half visible: same breakdown,
   // and the arithmetic half still counts it.
