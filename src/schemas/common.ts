@@ -496,6 +496,7 @@ export const CFS_SOURCE_COLLECTIONS = [
   "cards",
   "contacts",
   "credit-notes",
+  "fulfillments",
   "invoices",
   "locations",
   "orders",

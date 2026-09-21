@@ -377,3 +377,53 @@ Deno.test("orders payload: PRESENT on a to-do is REFUSED — present iff the sou
 Deno.test("orders payload: null is REFUSED — absent, never null", () => {
   assertEquals(CardSchema.safeParse({ ...validCard, orders: null }).success, false);
 });
+
+// ── The `fulfillments` source payload (the transition from `orders`) ──
+
+const fulfillmentCard = {
+  ...validCard,
+  sources: [{ collection: "fulfillments", uid: "order100000000000000" }],
+};
+
+Deno.test("fulfillments source: an event card sourced from a fulfillment is an EVENT card", () => {
+  // The per-kind requirements apply to it exactly as to the `orders` label.
+  assertEquals(CardSchema.safeParse(fulfillmentCard).success, true);
+  assertEquals(CardSchema.safeParse({ ...fulfillmentCard, destination: null }).success, false);
+});
+
+Deno.test("fulfillments source: its payload rides under `fulfillments`, pinned to the id's leg", () => {
+  const ok = { ...fulfillmentCard, fulfillments: { leg: "start", customer_collecting: false } };
+  assertEquals(CardSchema.safeParse(ok).success, true);
+  const r = CardSchema.safeParse({ ...fulfillmentCard, fulfillments: { leg: "end", customer_returning: false } });
+  assertEquals(r.success, false);
+  if (!r.success) assertEquals(r.error.issues.map((i) => i.path.join(".")), ["fulfillments.leg"]);
+});
+
+Deno.test("fulfillments source: the payload under the OTHER label's key is REFUSED", () => {
+  // Crossed halves of the transition: a fulfillment-sourced card carrying the
+  // `orders` key, and the reverse.
+  const a = CardSchema.safeParse({ ...fulfillmentCard, orders: { leg: "start", customer_collecting: false } });
+  assertEquals(a.success, false);
+  if (!a.success) assertEquals(a.error.issues.map((i) => i.path.join(".")), ["orders"]);
+  const b = CardSchema.safeParse({ ...validCard, fulfillments: { leg: "start", customer_collecting: false } });
+  assertEquals(b.success, false);
+  if (!b.success) assertEquals(b.error.issues.map((i) => i.path.join(".")), ["fulfillments"]);
+});
+
+Deno.test("fulfillments source: naming BOTH event sources is REFUSED", () => {
+  const r = CardSchema.safeParse({
+    ...validCard,
+    sources: [
+      { collection: "orders", uid: "order100000000000000" },
+      { collection: "fulfillments", uid: "order100000000000000" },
+    ],
+  });
+  assertEquals(r.success, false);
+  if (!r.success) assertEquals(r.error.issues.map((i) => i.path.join(".")), ["sources"]);
+});
+
+Deno.test("fulfillments source: PRESENT on a to-do is REFUSED", () => {
+  const r = CardSchema.safeParse({ ...validTodoCard, fulfillments: { leg: "start", customer_collecting: false } });
+  assertEquals(r.success, false);
+  if (!r.success) assertEquals(r.error.issues.map((i) => i.path.join(".")), ["fulfillments"]);
+});

@@ -1043,6 +1043,12 @@ export interface CardDocument {
     customer_collecting?: boolean;
     customer_returning?: boolean;
   };
+  /** The stored `fulfillments` source payload — `orders`' successor label. */
+  fulfillments?: {
+    leg?: string;
+    customer_collecting?: boolean;
+    customer_returning?: boolean;
+  };
   /** Derived at index time — see `DERIVED_FIELDS["cards:pick_bucket"]`. */
   pick_bucket?: string;
   sources: Array<{

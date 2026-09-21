@@ -56,6 +56,18 @@ Deno.test("start: canceled is preserved", () => {
   assertEquals(computeCardStatusFromBookings("start", siblings, "canceled"), "canceled");
 });
 
+Deno.test("draft is preserved on both sides — a quote's card never enters the work queue", () => {
+  // A quoted order's bookings sit at `quoted`, which the start roll-up would
+  // read as `planned` (pre-delivery, nothing out). The card stays `draft` until
+  // the writer lets go of it when the order leaves `quoted`.
+  const siblings = [rental(5, { quoted: 5 })];
+  assertEquals(computeCardStatusFromBookings("start", siblings, "draft"), "draft");
+  assertEquals(computeCardStatusFromBookings("end", siblings, "draft"), "draft");
+  // …and the SAME siblings from `planned` still roll up, so the keep-list is
+  // what decides it, not the bookings.
+  assertEquals(computeCardStatusFromBookings("start", siblings, "planned"), "planned");
+});
+
 // ── end side ───────────────────────────────────────────────────────
 
 Deno.test("end: nothing returned → planned", () => {
@@ -243,6 +255,17 @@ Deno.test("cardPickBucket: an :end leg reads customer_RETURNING, not collecting"
   );
   assertEquals(
     cardPickBucket({ destination: dest("dest1000000000000000"), orders: { leg: "end", customer_returning: false } }),
+    "dest1000000000000000",
+  );
+});
+
+Deno.test("cardPickBucket: reads the fulfillments payload, the current source label", () => {
+  assertEquals(
+    cardPickBucket({ destination: dest("store0000000000000000"), fulfillments: { leg: "start", customer_collecting: true } }),
+    PICK_BUCKET_CUSTOMER_COLLECT,
+  );
+  assertEquals(
+    cardPickBucket({ destination: dest("dest1000000000000000"), fulfillments: { leg: "end", customer_returning: false } }),
     "dest1000000000000000",
   );
 });

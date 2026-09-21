@@ -15,9 +15,13 @@ import type { Booking, Card, CardAction, CardStatus } from "../schemas/mod.ts";
 /**
  * Which side of the order's lifecycle a card represents:
  * - `"start"` — delivery event (items leave the warehouse for a destination).
- *   Backed by sibling bookings filtered by `uid_destination_delivery`.
  * - `"end"`   — collection event (items return from a destination).
- *   Backed by sibling bookings filtered by `uid_destination_collection`.
+ *
+ * Both sides of a leg are backed by the SAME sibling set: the bookings on that
+ * destination pair (segment 3 of the booking id, segment 2 of the card id).
+ * They used to be filtered by address — `uid_destination_delivery` /
+ * `uid_destination_collection` — which pooled two legs sharing one address
+ * (api-cloudrun#1097).
  */
 export type CardSide = "start" | "end";
 
@@ -28,15 +32,20 @@ export type CardSiblingBooking = Pick<Booking, "type" | "quantity" | "breakdown"
  * Recompute an event card's `status` from its sibling bookings on the
  * destination it belongs to. Pure function — no Firestore reads.
  *
- * Preserves manual overrides:
+ * Preserves manual overrides and the one source-driven status:
  * - `"blocked"` — manually set on the card; sticks until either the parent
  *   order transitions to canceled (handled in update-order) or a future
  *   "Clear block" affordance writes a new auto value through the same path.
  * - `"canceled"` — terminal; sourced from order.status only.
+ * - `"draft"` — a QUOTED order's card (the api-cloudrun
+ *   cards-from-fulfillments plan). A quote's bookings sit at
+ *   `quoted`, so the start roll-up would read them as `planned` and promote a
+ *   quote's card into the work queue. The writer leaves `draft` when the order
+ *   leaves `quoted`, and the roll-up takes over from there.
  *
  * Otherwise, applies per-side roll-up rules:
  *
- * **Start card (delivery)** — siblings filtered to `uid_destination_delivery`:
+ * **Start card (delivery)** — the leg's bookings:
  *   - `pre_delivery = Σ (quoted + reserved + prepped)` — still in the warehouse.
  *   - `out          = Σ breakdown.out` — delivery in flight.
  *   - if `pre_delivery === 0`            → `complete` (everything has at least left)
@@ -48,8 +57,7 @@ export type CardSiblingBooking = Pick<Booking, "type" | "quantity" | "breakdown"
  *   warehouse but some legs are still mid-cycle. No live incidence today;
  *   tracked as a low-priority follow-up, not a code change.
  *
- * **End card (collection)** — siblings filtered to `uid_destination_collection`,
- *   then to **rentals only** (`b.type === "rental"`). Only a rental has a
+ * **End card (collection)** — the leg's bookings, filtered to **rentals only** (`b.type === "rental"`). Only a rental has a
  *   collection event — checked out (`breakdown.out > 0`) and later returned —
  *   so only a rental can drive the card to `complete`. Sale, service, and
  *   surcharge lines are all excluded:
@@ -82,7 +90,7 @@ export function computeCardStatusFromBookings(
   siblings: CardSiblingBooking[],
   current: CardStatus,
 ): CardStatus {
-  if (current === "blocked" || current === "canceled") return current;
+  if (current === "blocked" || current === "canceled" || current === "draft") return current;
 
   if (side === "start") {
     let preDelivery = 0;
@@ -126,7 +134,7 @@ export function computeCardStatusFromBookings(
  *   draft card must never surface a stale action.
  * - the relevant side has nothing pending (see per-side rules).
  *
- * **Start side (delivery)** — siblings filtered to `uid_destination_delivery`.
+ * **Start side (delivery)** — the leg's bookings.
  * No sale filter: sale lines are genuinely prepped + checked out on delivery.
  *   - `reserved > 0` → `prep`     (still has unprepped quantity)
  *   - else `prepped > 0` → `checkout` (prepped, awaiting check-out)
@@ -192,7 +200,7 @@ export const PICK_BUCKET_CUSTOMER_COLLECT = "customer-collect";
 /**
  * A card's by-destination roll-up key: `"customer-collect"` for an IN-STORE leg,
  * otherwise the card's `destination.uid`. `null` when neither can be said — a
- * to-do, or an event card built before `orders` existed.
+ * to-do, or an event card built before its source payload existed.
  *
  * 🔴 **Why the store's own uid is not good enough.** api-cloudrun#662 repoints
  * every customer-collect leg at the store's destination, so without the split
@@ -205,13 +213,18 @@ export const PICK_BUCKET_CUSTOMER_COLLECT = "customer-collect";
  * reads `customer_collecting` alone because a fulfillment is keyed on its
  * delivery leg; a card is one leg, so it can say which.
  *
- * ⚠️ **An event card with no `orders` payload yields `null`, never a guess from
+ * ⚠️ **An event card with no source payload yields `null`, never a guess from
  * `destination.uid`.** Guessing would file every unbuilt in-store leg under the
  * store's own row, which is the defect this key exists to remove. Absent is
  * correct until the card is rebuilt.
+ *
+ * Reads either key — `fulfillments` (the current label) or `orders` (the old
+ * one) — while both are legal; see `CardFulfillmentsSource`.
  */
-export function cardPickBucket(card: Pick<Card, "destination" | "orders">): string | null {
-  const o = card.orders;
+export function cardPickBucket(
+  card: Pick<Card, "destination" | "orders" | "fulfillments">,
+): string | null {
+  const o = card.fulfillments ?? card.orders;
   if (o === undefined) return null;
   const inStore = o.leg === "start" ? o.customer_collecting : o.customer_returning;
   if (inStore) return PICK_BUCKET_CUSTOMER_COLLECT;

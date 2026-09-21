@@ -97,6 +97,13 @@ export const cards: TypesenseCollectionConfig = {
       { name: "orders.leg", type: "string", facet: true, index: true, optional: true },
       { name: "orders.customer_collecting", type: "bool", facet: true, index: true, optional: true },
       { name: "orders.customer_returning", type: "bool", facet: true, index: true, optional: true },
+      // The same payload under the new source label (`CardFulfillmentsSource`).
+      // Both are declared while both are legal; `orders.*` goes with P4 of
+      // the api-cloudrun cards-from-fulfillments plan.
+      { name: "fulfillments", type: "object", optional: true },
+      { name: "fulfillments.leg", type: "string", facet: true, index: true, optional: true },
+      { name: "fulfillments.customer_collecting", type: "bool", facet: true, index: true, optional: true },
+      { name: "fulfillments.customer_returning", type: "bool", facet: true, index: true, optional: true },
 
       // The by-destination roll-up key — `cardPickBucket` (`@cfs/core/utils/cards`),
       // in `fulfillments:destinations.pick_bucket`'s vocabulary (a destination uid

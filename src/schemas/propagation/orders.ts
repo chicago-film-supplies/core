@@ -495,7 +495,7 @@ const createOrderRules: CollectionRule[] = [
         source: ["status"],
         target: ["status"],
         transform:
-          "mapped: reserved/quoted→planned, active→active, complete→complete, canceled→canceled, draft→draft",
+          "mapped: reserved→planned, active→active, complete→complete. A draft, quoted or canceled order has NO event cards — the reconcile builds only for reserved/active/complete and deletes the rest",
       },
       {
         source: ["number"],
