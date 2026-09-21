@@ -254,13 +254,48 @@ export function chooseBookingOwner<T extends BookingOccurrence>(
 }
 
 /**
+ * Does a destination scope admit a leg delivered to `uid`?
+ *
+ * 🔴 **`uids`, not `uid` — and the difference only became visible when
+ * destinations grew a tree.** `scope.uids` is the set the membership query
+ * actually ran on (`query_by_path array-contains`, self-inclusive); `scope.uid`
+ * is the one the caller NAMED. For a bare destination the two say the same
+ * thing, which is why narrowing on `uid` alone was correct for as long as a
+ * destination had no descendants to have.
+ *
+ * ⚠️ **It stopped being correct silently, and in the failing-quiet direction.**
+ * A `destination-subtree` scope resolves a property to its units and reads
+ * every open booking across them — and then a `uid` narrowing discarded every
+ * leg delivered to a UNIT, keeping only the property's own rows. The sheet came
+ * back short rather than empty or erroring, so it read as "nothing is out at
+ * Stage 25" instead of as a bug. `api-cloudrun`'s `resolveDestinationScope`
+ * shipped its subtree arm against this.
+ *
+ * ⚠️ **An empty `uids` falls back to `uid`.** The field carries a `.default([])`
+ * and predates its own population, so a scope built before this mattered — or by
+ * a caller that fills only `uid` — must keep answering for the named node
+ * rather than admitting nothing.
+ *
+ * ⚠️ **A `null` delivery endpoint is admitted by NO destination scope**, which is
+ * what the `!==` comparison this replaced did by accident — `null !== uid` is
+ * always true, so the leg was dropped. Stated rather than inherited: a leg with
+ * no endpoint is not at any place, so no place's sheet can claim it.
+ */
+function destinationScopeAdmits(scope: PickSheetScope, uid: string | null): boolean {
+  if (uid === null) return false;
+  if (scope.uids.length === 0) return uid === scope.uid;
+  return scope.uids.includes(uid);
+}
+
+/**
  * Fold a membership slice plus the fulfillment documents it names into
  * `orders[] → destinations[] → items[]`.
  *
- * ⚠️ `bookings` must already be the scope's slice — the destination's or the
- * organization subtree's open bookings. This narrows by LEG, not by scope
+ * ⚠️ `bookings` must already be the scope's slice — the destination subtree's or
+ * the organization subtree's open bookings. This narrows by LEG, not by scope
  * membership: an order in the slice for one destination may carry a second leg
- * elsewhere, and the destination scope drops that one here.
+ * elsewhere, and the destination scope drops that one here — see
+ * {@link destinationScopeAdmits} for which uids "the destination scope" means.
  *
  * ⚠️ **A section's order attribution comes from the DOCUMENT, not from
  * `items[].uid_order`**, and that is a stated limit rather than an oversight.
@@ -310,7 +345,7 @@ export function foldPickSheet(input: {
       const pair = fulfillment.destinations.find((d) => d.uid === divider.uid);
       if (!pair) continue;
       if (!pickSheetGateAdmits(pair, gate)) continue;
-      if (scope.kind === "destination" && pair.delivery.uid !== scope.uid) continue;
+      if (scope.kind === "destination" && !destinationScopeAdmits(scope, pair.delivery.uid)) continue;
 
       const { endIndex } = getItemSubtreeRange(fulfillment.items, i);
 

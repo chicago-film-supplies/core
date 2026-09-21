@@ -34286,10 +34286,11 @@ The sheet's total order over orders. Exported so a pager sorts identically.
 Fold a membership slice plus the fulfillment documents it names into
 `orders[] → destinations[] → items[]`.
 
-⚠️ `bookings` must already be the scope's slice — the destination's or the
-organization subtree's open bookings. This narrows by LEG, not by scope
+⚠️ `bookings` must already be the scope's slice — the destination subtree's or
+the organization subtree's open bookings. This narrows by LEG, not by scope
 membership: an order in the slice for one destination may carry a second leg
-elsewhere, and the destination scope drops that one here.
+elsewhere, and the destination scope drops that one here — see
+{@link destinationScopeAdmits} for which uids "the destination scope" means.
 
 ⚠️ **A section's order attribution comes from the DOCUMENT, not from
 `items[].uid_order`**, and that is a stated limit rather than an oversight.

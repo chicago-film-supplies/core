@@ -265,6 +265,78 @@ Deno.test("fold: a destination scope keeps only the legs delivering THERE", () =
   assertEquals(sheetQuantity(orders), 2);
 });
 
+Deno.test("fold: a destination SUBTREE scope keeps a leg delivered to a UNIT, not only the property's own rows", () => {
+  // The property → unit tree, as a scope: `uids` is what the membership query
+  // ran on (`query_by_path array-contains`, self-inclusive), `uid` is the node
+  // the operator NAMED. STAGE and LOT are two units of one property here.
+  //
+  // 🔴 **This is the assertion the single-uid narrowing failed.** It admitted
+  // only `scope.uid`, so a subtree sheet read every unit's bookings and then
+  // discarded every leg that was not at the property itself — coming back SHORT
+  // rather than empty, which reads as "nothing is out at Stage 4".
+  const PROPERTY = "r".repeat(20);
+  const f = fulfillment({
+    destinations: [pair(LEG_1, STAGE), pair(LEG_2, LOT)],
+    items: [
+      divider(LEG_1, "Stage 4"),
+      line(CAMERA, "Alexa 35", 2, [LEG_1, CAMERA]),
+      divider(LEG_2, "Back Lot"),
+      line(TRIPOD, "Sachtler", 1, [LEG_2, TRIPOD]),
+    ],
+  });
+  const bookings = [booking(CAMERA, LEG_1), booking(TRIPOD, LEG_2, { quantity: 1 })];
+  const scope: PickSheetScope = { kind: "destination", uid: PROPERTY, name: "The lot", uids: [PROPERTY, STAGE, LOT] };
+
+  const { orders } = foldPickSheet({ scope, gate: "all", leg: null, bookings, fulfillments: docs(f) });
+  assertEquals(orders.length, 1);
+  assertEquals(orders[0].destinations.map((d) => d.uid), [LEG_1, LEG_2]);
+  assertEquals(sheetQuantity(orders), 3);
+});
+
+Deno.test("fold: a destination subtree still drops a leg OUTSIDE the subtree", () => {
+  // The widening must not become "admit everything the membership query
+  // returned". A destination scope narrows by leg for the same reason it always
+  // did: an order in the slice may carry a second leg somewhere else entirely.
+  const PROPERTY = "r".repeat(20);
+  const f = fulfillment({
+    destinations: [pair(LEG_1, STAGE), pair(LEG_2, LOT)],
+    items: [
+      divider(LEG_1, "Stage 4"),
+      line(CAMERA, "Alexa 35", 2, [LEG_1, CAMERA]),
+      divider(LEG_2, "Back Lot"),
+      line(TRIPOD, "Sachtler", 1, [LEG_2, TRIPOD]),
+    ],
+  });
+  const bookings = [booking(CAMERA, LEG_1), booking(TRIPOD, LEG_2, { quantity: 1 })];
+  const scope: PickSheetScope = { kind: "destination", uid: PROPERTY, name: "The lot", uids: [PROPERTY, STAGE] };
+
+  const { orders } = foldPickSheet({ scope, gate: "all", leg: null, bookings, fulfillments: docs(f) });
+  assertEquals(orders[0].destinations.map((d) => d.uid), [LEG_1]);
+  assertEquals(sheetQuantity(orders), 2);
+});
+
+Deno.test("fold: an EMPTY uids falls back to the named uid", () => {
+  // `uids` carries a `.default([])` and predates its own population, so a scope
+  // built by a caller that fills only `uid` must keep answering for that node
+  // rather than admitting nothing. Narrowing on an empty list would make every
+  // such sheet silently empty.
+  const f = fulfillment({
+    destinations: [pair(LEG_1, STAGE), pair(LEG_2, LOT)],
+    items: [
+      divider(LEG_1, "Stage 4"),
+      line(CAMERA, "Alexa 35", 2, [LEG_1, CAMERA]),
+      divider(LEG_2, "Back Lot"),
+      line(TRIPOD, "Sachtler", 1, [LEG_2, TRIPOD]),
+    ],
+  });
+  const bookings = [booking(CAMERA, LEG_1), booking(TRIPOD, LEG_2, { quantity: 1 })];
+  const scope: PickSheetScope = { kind: "destination", uid: STAGE, name: "Stage 4", uids: [] };
+
+  const { orders } = foldPickSheet({ scope, gate: "all", leg: null, bookings, fulfillments: docs(f) });
+  assertEquals(orders[0].destinations.map((d) => d.uid), [LEG_1]);
+  assertEquals(sheetQuantity(orders), 2);
+});
+
 Deno.test("fold: an ORGANIZATION scope keeps BOTH legs of the same order", () => {
   const f = fulfillment({
     destinations: [pair(LEG_1, STAGE), pair(LEG_2, LOT)],
