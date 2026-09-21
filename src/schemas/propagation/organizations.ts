@@ -124,6 +124,20 @@ const ORG_NAME_TO_ORDER_CHILDREN_CORPUS: EnforcementRef = {
   gates: true,
 };
 
+/**
+ * An org rename reaching the event cards of its orders (api-cloudrun#1093).
+ * Cards were rebuilt only when their order was next edited, so a rename left
+ * `card.organization.path` stale until then.
+ */
+const ORG_NAME_TO_CARDS: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/organizations/organizations.test.ts::a rename reaches the event cards of its live orders (api-cloudrun#1093)",
+  clause:
+    "after a rename, every event card of a live order under the node carries the node's new chain in `organization.path`.",
+  gates: true,
+};
+
 const ORG_BILLING_TO_INVOICES_TEST: EnforcementRef = {
   kind: "test",
   ref:
@@ -393,6 +407,21 @@ const updateOrganizationRules: CollectionRule[] = [
     ],
   },
   {
+    id: "update-org:name-to-cards",
+    source: "organizations",
+    target: "cards",
+    mode: "fan-out",
+    invariant:
+      "An event card's organization snapshot follows its own fulfillment's (api-cloudrun#1093) — so a rename or re-parent no longer leaves card.organization.path stale until the order's next edit",
+    enforced_by: [ORG_NAME_TO_CARDS],
+    transaction: "update-organization",
+    trigger: "name or re-parent change — every event card of every rewritten order, resolved outside any transaction",
+    fields: [
+      { source: ["uid"], target: ["organization", "uid"] },
+      { source: ["path"], target: ["organization", "path"] },
+    ],
+  },
+  {
     id: "update-org:billing-to-invoices",
     source: "organizations",
     target: "invoices",
@@ -556,6 +585,7 @@ const reparentOrganizationTransaction: TransactionDefinition = {
     // this is the declaration catching up.
     "update-org:name-to-bookings",
     "update-org:name-to-fulfillments",
+    "update-org:name-to-cards",
     // ⚠️ **Added for the same reason, one tier later** (api-cloudrun#801). A move
     // changes which ancestors a node has, so a node that INHERITS its billing
     // address resolves to a different one afterwards — and its live orders and
@@ -645,6 +675,7 @@ const updateOrganizationTransaction: TransactionDefinition = {
     "update-org:billing-to-invoices",
     "update-org:name-to-bookings",
     "update-org:name-to-fulfillments",
+    "update-org:name-to-cards",
     "update-org:tax-axes-to-orders",
     "update-org:contacts-change",
     "update-org:name-to-descendants",

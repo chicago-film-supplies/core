@@ -71,6 +71,83 @@ const PICKER_WRITE_CASCADES: EnforcementRef = {
   gates: true,
 };
 
+// ── The event-card projection, shared by every fulfillment writer ────
+
+/**
+ * The fields a fulfillment writes onto its event cards — one list, read by all
+ * five `*:fulfillment-to-cards` rules so the five cannot drift.
+ *
+ * **Event cards are sourced from the FULFILLMENT (owner ruling 2026-09-21).**
+ * A card describes what happens on the ground; the order is the quote. So every
+ * writer of a fulfillment stages that fulfillment's cards in the SAME
+ * transaction, from the document as it will be stored — never from the order.
+ * A fulfillment shares its order's id, so the card id
+ * (`{uid}:{pair uid}:{start|end}`) did not move.
+ *
+ * ⚠️ `items` decides which cards EXIST rather than a field on one, so it has no
+ * mapping here: a section with no deliverable line emits no `:start` card and
+ * one with no returnable line no `:end` card, so a leg the picker emptied loses
+ * its card. And the booking gate reads the leg's bookings, not a field.
+ */
+export const FULFILLMENT_TO_CARDS_FIELDS: CollectionRule["fields"] = [
+  {
+    source: ["uid"],
+    target: ["sources"],
+    transform: "[{collection:'fulfillments', uid}] — the fulfillment shares its order's id",
+  },
+  {
+    source: ["status"],
+    target: ["status"],
+    transform:
+      "quoted→draft with `status` added to `locked` (a quote's card is expected work, not queued work); draft/canceled delete every card; reserved/active/complete build cards whose status then rolls up from each LEG's bookings, preserving a manual blocked/canceled",
+  },
+  {
+    source: ["number"],
+    target: ["subject"],
+    transform: "eventCardSubject(number, subject, action) → '#NUM - <Action> [Subject]'",
+  },
+  { source: ["subject"], target: ["subject"] },
+  { source: ["organization", "uid"], target: ["organization", "uid"] },
+  { source: ["organization", "path"], target: ["organization", "path"] },
+  {
+    source: ["destinations", "delivery"],
+    target: ["destination"],
+    transform: "the pair's delivery endpoint, for a :start card",
+  },
+  {
+    source: ["destinations", "collection"],
+    target: ["destination"],
+    transform: "the pair's collection endpoint, for an :end card",
+  },
+  { source: ["destinations", "dates", "delivery_start"], target: ["dates", "start"] },
+  { source: ["destinations", "dates", "delivery_end"], target: ["dates", "end"] },
+  { source: ["destinations", "dates", "collection_start"], target: ["dates", "start"] },
+  { source: ["destinations", "dates", "collection_end"], target: ["dates", "end"] },
+  {
+    source: ["destinations", "customer_collecting"],
+    target: ["fulfillments"],
+    transform: "{leg:'start', customer_collecting} on a :start card; also picks its list (in-store vs field-service)",
+  },
+  {
+    source: ["destinations", "customer_returning"],
+    target: ["fulfillments"],
+    transform: "{leg:'end', customer_returning} on an :end card; also picks its list",
+  },
+];
+
+/**
+ * The fulfillment writers' card half — the positive arm: an edit on the
+ * fulfillment reaches the pair's cards.
+ */
+const FULFILLMENT_EDIT_REACHES_CARDS: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/fulfillment/fulfillmentDestinations.test.ts::the edit reaches the pair's event cards (api-cloudrun#1097)",
+  clause:
+    "a picked collection window lands on the `:end` card and the untouched delivery window stays on the `:start` card; sibling steps assert an endpoint override, a repointed delivery and a collect-flag edit reach the cards too.",
+  gates: true,
+};
+
 // ── update-fulfillment-items ─────────────────────────────────────────
 
 const updateFulfillmentItemsRules: CollectionRule[] = [
@@ -113,8 +190,27 @@ const updateFulfillmentItemsTransaction: TransactionDefinition = {
     "writes only the fulfillment doc itself — no cascade.",
   steps: [
     "update-fulfillment-items:items-self",
+    "update-fulfillment-items:fulfillment-to-cards",
+    // A card the edit makes newly derivable mints its thread in the same
+    // transaction, exactly as the order writers do.
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
   ],
 };
+
+const updateFulfillmentItemsCardRules: CollectionRule[] = [
+  {
+    id: "update-fulfillment-items:fulfillment-to-cards",
+    source: "fulfillments",
+    target: "cards",
+    mode: "co-write",
+    invariant:
+      "A picker's item edit re-derives the fulfillment's event cards in the same transaction — a leg emptied of deliverable lines loses its card",
+    enforced_by: [FULFILLMENT_EDIT_REACHES_CARDS],
+    transaction: "update-fulfillment-items",
+    fields: FULFILLMENT_TO_CARDS_FIELDS,
+  },
+];
 
 // ── reset-fulfillment ────────────────────────────────────────────────
 
@@ -215,6 +311,11 @@ const resetFulfillmentTransaction: TransactionDefinition = {
     "doc itself — no cascade.",
   steps: [
     "reset-fulfillment:rebuild-from-order",
+    "reset-fulfillment:fulfillment-to-cards",
+    // A card the edit makes newly derivable mints its thread in the same
+    // transaction, exactly as the order writers do.
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
   ],
 };
 
@@ -265,6 +366,34 @@ const updateFulfillmentDestinationsRules: CollectionRule[] = [
   },
 ];
 
+const resetFulfillmentCardRules: CollectionRule[] = [
+  {
+    id: "reset-fulfillment:fulfillment-to-cards",
+    source: "fulfillments",
+    target: "cards",
+    mode: "co-write",
+    invariant:
+      "A reset re-projects the fulfillment from its order, and its event cards follow the re-projection in the same transaction",
+    enforced_by: [FULFILLMENT_EDIT_REACHES_CARDS],
+    transaction: "reset-fulfillment",
+    fields: FULFILLMENT_TO_CARDS_FIELDS,
+  },
+];
+
+const updateFulfillmentDestinationsCardRules: CollectionRule[] = [
+  {
+    id: "update-fulfillment-destinations:fulfillment-to-cards",
+    source: "fulfillments",
+    target: "cards",
+    mode: "co-write",
+    invariant:
+      "An operator's pair edit — a window, an endpoint, a collect flag — reaches that pair's event cards in the same transaction, not through the order echo (api-cloudrun#1097)",
+    enforced_by: [FULFILLMENT_EDIT_REACHES_CARDS],
+    transaction: "update-fulfillment-destinations",
+    fields: FULFILLMENT_TO_CARDS_FIELDS,
+  },
+];
+
 const updateFulfillmentDestinationsTransaction: TransactionDefinition = {
   id: "update-fulfillment-destinations",
   description:
@@ -291,6 +420,11 @@ const updateFulfillmentDestinationsTransaction: TransactionDefinition = {
     "a picker must be able to record where the gear physically is.",
   steps: [
     "update-fulfillment-destinations:pairs-self",
+    "update-fulfillment-destinations:fulfillment-to-cards",
+    // A card the edit makes newly derivable mints its thread in the same
+    // transaction, exactly as the order writers do.
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
   ],
 };
 
@@ -299,8 +433,11 @@ const updateFulfillmentDestinationsTransaction: TransactionDefinition = {
 export const fulfillments: PropagationModule = {
   rules: [
     ...updateFulfillmentItemsRules,
+    ...updateFulfillmentItemsCardRules,
     ...updateFulfillmentDestinationsRules,
+    ...updateFulfillmentDestinationsCardRules,
     ...resetFulfillmentRules,
+    ...resetFulfillmentCardRules,
   ],
   transactions: [
     updateFulfillmentItemsTransaction,

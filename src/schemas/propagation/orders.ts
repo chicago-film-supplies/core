@@ -10,6 +10,7 @@ import type {
   TransactionDefinition,
 } from "./types.ts";
 import { STOCK_STEPS } from "./stock.ts";
+import { FULFILLMENT_TO_CARDS_FIELDS } from "./fulfillments.ts";
 
 // ── What checks these rules ─────────────────────────────────────────
 //
@@ -476,91 +477,15 @@ const createOrderRules: CollectionRule[] = [
     ],
   },
   {
-    id: "create-order:order-to-cards",
-    source: "orders",
+    id: "create-order:fulfillment-to-cards",
+    source: "fulfillments",
     target: "cards",
     mode: "co-write",
     invariant:
-      "Schedule projection — one event card per destination per position (start/end) drives the Dashboard's list/kanban/calendar/map views",
+      "Schedule projection — one event card per destination pair per position (start/end), built from the fulfillment this transaction co-writes (a card describes what happens on the ground; the order is the quote). Drives the Dashboard's list/kanban/calendar/map views",
     enforced_by: [EVENT_CARD_RECONCILE],
     transaction: "create-order",
-    fields: [
-      {
-        source: ["uid"],
-        target: ["sources"],
-        transform:
-          "[{collection:'orders', uid}] — event card links back to its parent order",
-      },
-      {
-        source: ["status"],
-        target: ["status"],
-        transform:
-          "mapped: reserved→planned, active→active, complete→complete. A draft, quoted or canceled order has NO event cards — the reconcile builds only for reserved/active/complete and deletes the rest",
-      },
-      {
-        source: ["number"],
-        target: ["subject"],
-        transform:
-          "eventCardSubject(number, subject, action) → '#NUM - <Action> [Subject]'; action in {Deliver, Pickup, Return, Canceled} per (position, customer_collecting/returning, status)",
-      },
-      { source: ["subject"], target: ["subject"] },
-      { source: ["organization", "uid"], target: ["organization", "uid"] },
-      { source: ["organization", "path"], target: ["organization", "path"] },
-      {
-        source: ["destinations", "delivery"],
-        target: ["destination"],
-        transform: "full DocDestinationEndpointType for start events",
-      },
-      {
-        source: ["destinations", "collection"],
-        target: ["destination"],
-        transform: "full DocDestinationEndpointType for end events",
-      },
-      {
-        source: ["destinations", "dates", "delivery_start"],
-        target: ["dates", "start"],
-        transform:
-          "start event start instant (from the card's own destination)",
-      },
-      {
-        source: ["destinations", "dates", "delivery_end"],
-        target: ["dates", "end"],
-        transform: "start event end instant (from the card's own destination)",
-      },
-      {
-        source: ["destinations", "dates", "collection_start"],
-        target: ["dates", "start"],
-        transform:
-          "end event start instant (rental items only, from the card's own destination)",
-      },
-      {
-        source: ["destinations", "dates", "collection_end"],
-        target: ["dates", "end"],
-        transform:
-          "end event end instant (rental items only, from the card's own destination)",
-      },
-      // ⚠️ One mapping listing a parent and two of its children as if they were
-      // a path. They are siblings UNDER a destination, so each is its own
-      // mapping (#568).
-      {
-        source: ["destinations", "customer_collecting"],
-        target: ["uid_list"],
-        transform:
-          "per-pair flag drives card list — field-service for deliver, in-store for in_store_pickup",
-      },
-      {
-        source: ["destinations", "customer_returning"],
-        target: ["uid_list"],
-        transform:
-          "per-pair flag drives card list — field-service for pick_up, in-store for in_store_return",
-      },
-      {
-        source: [],
-        target: ["locked"],
-        transform:
-          "['card','subject','sources','destination','organization','attachments','status_auto'] — order-derived cards cannot be deleted, status follows pick progress, label/sources/destination/org/attachments cannot be edited via PATCH",
-      },
-    ],
+    fields: FULFILLMENT_TO_CARDS_FIELDS,
   },
   {
     id: "create-order:order-to-fulfillment",
@@ -623,7 +548,7 @@ const createOrderTransaction: TransactionDefinition = {
     "create-order:order-to-bookings",
     "create-order:ledger-to-bookings",
     ...STOCK_STEPS,
-    "create-order:order-to-cards",
+    "create-order:fulfillment-to-cards",
     "create-order:order-to-fulfillment",
     "cowrite-thread:orders-to-thread",
     "cowrite-thread:thread-to-orders",
@@ -772,63 +697,15 @@ const updateOrderRules: CollectionRule[] = [
     ],
   },
   {
-    id: "update-order:order-to-cards",
-    source: "orders",
+    id: "update-order:fulfillment-to-cards",
+    source: "fulfillments",
     target: "cards",
     mode: "co-write",
     invariant:
-      "Event cards are rebuilt on every update — cards for removed destinations are deleted (and their threads cascade), cards for existing destinations are upserted in place. Preserves each card's user-editable fields (body, attachments, assignees) AND any progress-derived status (planned/active/complete/blocked) — order.status is only forced onto the card when the order transitions to draft or canceled (terminal). Active/reserved/quoted/complete order statuses don't clobber the card's per-pick auto-computed status (see update-booking:booking-to-cards).",
+      "Event cards are rebuilt on every update from the fulfillment AS IT WILL BE STORED — the order → fulfillment merge runs first, so a picker's override is what the card shows. Cards for removed pairs are deleted (a comment-bearing thread survives, re-sourced to the order); cards for existing pairs are upserted in place, preserving each card's user-editable fields (body, attachments, assignees) and its progress-derived status (see update-booking:booking-to-cards).",
     enforced_by: [EVENT_CARD_RECONCILE, EVENT_CARD_PRESERVED_ON_UPDATE],
     transaction: "update-order",
-    fields: [
-      {
-        source: ["uid"],
-        target: ["sources"],
-        transform:
-          "[{collection:'orders', uid}] — regenerated event cards link back to the parent order",
-      },
-      {
-        source: ["status"],
-        target: ["status"],
-        transform:
-          "draft→draft, canceled→canceled (force-override); other statuses preserve the card's existing progress-derived status",
-      },
-      {
-        source: ["number"],
-        target: ["subject"],
-        transform:
-          "eventCardSubject(number, subject, action) → '#NUM - <Action> [Subject]'",
-      },
-      { source: ["subject"], target: ["subject"] },
-      { source: ["organization", "uid"], target: ["organization", "uid"] },
-      { source: ["organization", "path"], target: ["organization", "path"] },
-      {
-        source: ["destinations", "delivery"],
-        target: ["destination"],
-        transform: "full DocDestinationEndpointType for start events",
-      },
-      {
-        source: ["destinations", "collection"],
-        target: ["destination"],
-        transform: "full DocDestinationEndpointType for end events",
-      },
-      {
-        source: ["destinations", "dates", "delivery_start"],
-        target: ["dates", "start"],
-      },
-      {
-        source: ["destinations", "dates", "delivery_end"],
-        target: ["dates", "end"],
-      },
-      {
-        source: ["destinations", "dates", "collection_start"],
-        target: ["dates", "start"],
-      },
-      {
-        source: ["destinations", "dates", "collection_end"],
-        target: ["dates", "end"],
-      },
-    ],
+    fields: FULFILLMENT_TO_CARDS_FIELDS,
   },
   {
     id: "update-order:order-to-fulfillment",
@@ -893,7 +770,7 @@ const updateOrderTransaction: TransactionDefinition = {
     "update-order:order-to-bookings",
     "update-order:ledger-to-bookings",
     ...STOCK_STEPS,
-    "update-order:order-to-cards",
+    "update-order:fulfillment-to-cards",
     // Shared steps, declared in `propagation/cards.ts` and fired here: a minted event card
     // gets its thread cowritten by the same helper `create-card` uses. Measured
     // undeclared in prod 2026-08-17 (`update-order` wrote `threads`), and
