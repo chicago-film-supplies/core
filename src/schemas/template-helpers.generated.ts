@@ -40,6 +40,8 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "cards": [
     { name: "computeCardActionFromBookings", expr: "it.cards.computeCardActionFromBookings(side, siblings, current)", desc: "Recompute a card's denormalized **next fulfillment action** from its sibling bookings — the value the `CardTile` button shows on surfaces (Dashboard kanban, Calendar agenda) where no bookings are loaded. Pure function — no Firestore reads. Computed in lockstep with `computeCardStatusFromBookings` on every booking write.", returns: "CardAction | null" },
     { name: "computeCardStatusFromBookings", expr: "it.cards.computeCardStatusFromBookings(side, siblings, current)", desc: "Recompute an event card's `status` from its sibling bookings on the destination it belongs to. Pure function — no Firestore reads.", returns: "CardStatus" },
+    { name: "eventCardUid", expr: "it.cards.eventCardUid(fulfillmentUid, pairUid, side)", desc: "An event card's document id: `{uid_fulfillment}:{uid_pair}:{side}`.", returns: "string" },
+    { name: "parseEventCardUid", expr: "it.cards.parseEventCardUid(cardUid)", desc: "Split an event card id into its fulfillment, pair and side, or `null` when it is not one — a to-do or list card, or an id from before the pair re-key.", returns: "ParsedEventCardUid | null" },
   ],
   "citations": [
 

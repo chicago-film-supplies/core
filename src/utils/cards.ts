@@ -25,6 +25,50 @@ import type { Booking, Card, CardAction, CardStatus } from "../schemas/mod.ts";
  */
 export type CardSide = "start" | "end";
 
+/**
+ * A destination PAIR's uid — `crypto.randomUUID()`, matching `DocDestination.uid`.
+ * Segment 2 of every event card id, and segment 3 of every booking id.
+ */
+const PAIR_UID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * An event card's document id: `{uid_fulfillment}:{uid_pair}:{side}`.
+ *
+ * 🔴 **The ONE constructor, and {@link parseEventCardUid} the one parser.**
+ * Both lived only in api-cloudrun while manager built the same string by hand
+ * for its optimistic card fan — and when the middle segment changed from an
+ * address to the destination pair, the hand-built copy kept naming the
+ * address, matched no card, and every optimistic update was a silent no-op for
+ * months (manager#531). A fulfillment's uid IS its order's uid.
+ */
+export function eventCardUid(fulfillmentUid: string, pairUid: string, side: CardSide): string {
+  return `${fulfillmentUid}:${pairUid}:${side}`;
+}
+
+/** The three parts of an event card id. */
+export interface ParsedEventCardUid {
+  fulfillmentUid: string;
+  pairUid: string;
+  side: CardSide;
+}
+
+/**
+ * Split an event card id into its fulfillment, pair and side, or `null` when it
+ * is not one — a to-do or list card, or an id from before the pair re-key.
+ *
+ * ⚠️ **Strict on the pair segment.** An address-keyed id (the pre-2026-09 form)
+ * returns `null` rather than a pair that names no leg: both corpora hold 0 of
+ * them, so one reaching here is a card nothing should treat as a leg.
+ */
+export function parseEventCardUid(cardUid: string): ParsedEventCardUid | null {
+  const parts = cardUid.split(":");
+  if (parts.length !== 3) return null;
+  const [fulfillmentUid, pairUid, side] = parts;
+  if (!fulfillmentUid || !PAIR_UID.test(pairUid)) return null;
+  if (side !== "start" && side !== "end") return null;
+  return { fulfillmentUid, pairUid, side };
+}
+
 /** Subset of `Booking` the formula reads. Keeps the helper dependency-light. */
 export type CardSiblingBooking = Pick<Booking, "type" | "quantity" | "breakdown">;
 

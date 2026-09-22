@@ -3,6 +3,8 @@ import {
   computeCardActionFromBookings,
   cardPickBucket,
   computeCardStatusFromBookings,
+  eventCardUid,
+  parseEventCardUid,
   PICK_BUCKET_CUSTOMER_COLLECT,
   type CardSiblingBooking,
 } from "../src/utils/cards.ts";
@@ -266,4 +268,28 @@ Deno.test("cardPickBucket: no fulfillments payload is null, never a guess from d
 Deno.test("cardPickBucket: a delivered leg with no destination uid is null", () => {
   assertEquals(cardPickBucket({ destination: dest(null), fulfillments: { leg: "start", customer_collecting: false } }), null);
   assertEquals(cardPickBucket({ destination: null, fulfillments: { leg: "start", customer_collecting: false } }), null);
+});
+
+// ── eventCardUid / parseEventCardUid ────────────────────────────────
+
+const PAIR = "e005eda3-42f3-4dde-add2-7fb96f632984";
+
+Deno.test("eventCardUid — fulfillment, pair, side", () => {
+  assertEquals(eventCardUid("xbuHnaf17Ixrnv2YIC9E", PAIR, "end"), `xbuHnaf17Ixrnv2YIC9E:${PAIR}:end`);
+});
+
+Deno.test("parseEventCardUid — reads back what eventCardUid wrote, both sides", () => {
+  for (const side of ["start", "end"] as const) {
+    assertEquals(parseEventCardUid(eventCardUid("ord1", PAIR, side)), { fulfillmentUid: "ord1", pairUid: PAIR, side });
+  }
+});
+
+Deno.test("parseEventCardUid — null for anything that is not an event card id", () => {
+  // An address-keyed id from before the pair re-key names no leg.
+  assertEquals(parseEventCardUid("ord1:vTn8CTAwwJHEJZLBzsOw:end"), null);
+  assertEquals(parseEventCardUid(`ord1:${PAIR}:middle`), null);
+  assertEquals(parseEventCardUid(`:${PAIR}:start`), null);
+  assertEquals(parseEventCardUid(`ord1:${PAIR}:start:extra`), null);
+  // A to-do card's auto-id.
+  assertEquals(parseEventCardUid("Zq3kP0aLmN8rT2vW4xYz"), null);
 });

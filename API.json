@@ -11093,6 +11093,12 @@
           "doc": "The literal `pick_bucket` value for \"the customer comes to the store\", as\nopposed to a destination uid. The same vocabulary as\n`fulfillments:destinations.pick_bucket`, so a manager roll-up folds either\nfacet with one function."
         },
         {
+          "kind": "interface",
+          "name": "ParsedEventCardUid",
+          "declaration": "interface ParsedEventCardUid {\n  fulfillmentUid: string;\n  pairUid: string;\n  side: CardSide;\n}",
+          "doc": "The three parts of an event card id."
+        },
+        {
           "kind": "function",
           "name": "cardPickBucket",
           "signature": "cardPickBucket(card: Pick<Card, \"destination\" | \"fulfillments\">): string | null",
@@ -11140,6 +11146,22 @@
               "doc": "The card's current status — preserved if `blocked` or\n`canceled` so manual overrides aren't clobbered."
             }
           ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "eventCardUid",
+          "signature": "eventCardUid(fulfillmentUid: string, pairUid: string, side: CardSide): string",
+          "doc": "An event card's document id: `{uid_fulfillment}:{uid_pair}:{side}`.\n\n🔴 **The ONE constructor, and {@link parseEventCardUid} the one parser.**\nBoth lived only in api-cloudrun while manager built the same string by hand\nfor its optimistic card fan — and when the middle segment changed from an\naddress to the destination pair, the hand-built copy kept naming the\naddress, matched no card, and every optimistic update was a silent no-op for\nmonths (manager#531). A fulfillment's uid IS its order's uid.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "parseEventCardUid",
+          "signature": "parseEventCardUid(cardUid: string): ParsedEventCardUid | null",
+          "doc": "Split an event card id into its fulfillment, pair and side, or `null` when it\nis not one — a to-do or list card, or an id from before the pair re-key.\n\n⚠️ **Strict on the pair segment.** An address-keyed id (the pre-2026-09 form)\nreturns `null` rather than a pair that names no leg: both corpora hold 0 of\nthem, so one reaching here is a card nothing should treat as a leg.",
+          "paramTags": [],
           "returnsTag": null
         }
       ]

@@ -25048,6 +25048,18 @@ facet with one function.
 const PICK_BUCKET_CUSTOMER_COLLECT: "customer-collect";
 ```
 
+### `ParsedEventCardUid`
+
+The three parts of an event card id.
+
+```ts
+interface ParsedEventCardUid {
+  fulfillmentUid: string;
+  pairUid: string;
+  side: CardSide;
+}
+```
+
 ### `cardPickBucket(card: Pick<Card, "destination" | "fulfillments">): string | null`
 
 A card's by-destination roll-up key: `"customer-collect"` for an IN-STORE leg,
@@ -25166,6 +25178,26 @@ which sibling set the caller is expected to have prepared.
 - `siblings` — Bookings filtered to the relevant destination side.
 - `current` — The card's current status — preserved if `blocked` or
 `canceled` so manual overrides aren't clobbered.
+
+### `eventCardUid(fulfillmentUid: string, pairUid: string, side: CardSide): string`
+
+An event card's document id: `{uid_fulfillment}:{uid_pair}:{side}`.
+
+🔴 **The ONE constructor, and {@link parseEventCardUid} the one parser.**
+Both lived only in api-cloudrun while manager built the same string by hand
+for its optimistic card fan — and when the middle segment changed from an
+address to the destination pair, the hand-built copy kept naming the
+address, matched no card, and every optimistic update was a silent no-op for
+months (manager#531). A fulfillment's uid IS its order's uid.
+
+### `parseEventCardUid(cardUid: string): ParsedEventCardUid | null`
+
+Split an event card id into its fulfillment, pair and side, or `null` when it
+is not one — a to-do or list card, or an id from before the pair re-key.
+
+⚠️ **Strict on the pair segment.** An address-keyed id (the pre-2026-09 form)
+returns `null` rather than a pair that names no leg: both corpora hold 0 of
+them, so one reaching here is a card nothing should treat as a leg.
 
 ## `@cfs/core/utils/contact-name`
 
