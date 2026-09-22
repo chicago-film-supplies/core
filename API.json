@@ -13084,7 +13084,7 @@
         {
           "kind": "interface",
           "name": "DestinationGroup",
-          "declaration": "interface DestinationGroup {\n  uid: string | null;\n  uid_delivery: string;\n  uid_collection: string;\n  items: LineItem[];\n  packing_list_delivery: LineItem[];\n  packing_list_collection: LineItem[];\n}",
+          "declaration": "interface DestinationGroup {\n  uid: string | null;\n  uid_delivery: string | null;\n  uid_collection: string | null;\n  items: LineItem[];\n  packing_list_delivery: LineItem[];\n  packing_list_collection: LineItem[];\n}",
           "doc": "A destination section with its delivery/collection UIDs and child items."
         },
         {
@@ -13190,8 +13190,8 @@
         {
           "kind": "function",
           "name": "groupByDestination",
-          "signature": "groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[], fallbackDeliveryUid: string, fallbackCollectionUid?: string): DestinationGroup[]",
-          "doc": "Slice the flat items array into destination sections, each carrying the\nendpoints its PAIR names.\n\n⚠️ **`destinations` is a required parameter and used to be absent, because\nthe endpoints used to be read off the divider itself** — the second copy that\napi-cloudrun#662/#663/#664 are all instances of. The divider now carries only\nits `uid`; the endpoints live on the pair that uid addresses, and the contract\nstep deleted `uid_delivery`/`uid_collection` from the divider outright\n(api-cloudrun#662/#663/#664). Reading them here\nagain would re-open the class.\n\n✅ **`uid_delivery` in the RESULT is unchanged and must stay that way.** It is\na `destinations/{uid}` document id and it is the third segment of every\nbooking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it\nmoves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,\nthe same string. There is no `bookings` migration in this change, and there\nmust not be: the deleted `webhooks/opportunity.ts` recorded 552 duplicate prod bookings\nfrom a destination uid moving under that id.\n\nThe fallbacks answer for a section whose pair is missing or names no\nendpoint — a divider-less items array, and a genuinely destinationless CRMS\norder (where the caller passes `\"\"` and skips the group downstream).",
+          "signature": "groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[]): DestinationGroup[]",
+          "doc": "Slice the flat items array into destination sections, each carrying the\nendpoints its PAIR names.\n\n⚠️ **`destinations` is a required parameter and used to be absent, because\nthe endpoints used to be read off the divider itself** — the second copy that\napi-cloudrun#662/#663/#664 are all instances of. The divider now carries only\nits `uid`; the endpoints live on the pair that uid addresses, and the contract\nstep deleted `uid_delivery`/`uid_collection` from the divider outright\n(api-cloudrun#662/#663/#664). Reading them here\nagain would re-open the class.\n\nA section with no pair of its own — a divider-less items array, or a divider\nwhose uid names no pair — takes `destinations[0]`'s endpoints. That is the\npositional rule every caller used to restate as a pair of fallback arguments\n(`destinations[0]?.delivery?.uid || \"unknown\"`), six copies of it in\napi-cloudrun; it has one home here now (api-cloudrun#1110).\n\n⚠️ **There is no placeholder uid.** The old callers passed `\"unknown\"`, which\ncould only ever surface as an id naming no document. An endpoint with no uid\n— legal on a draft alone — comes back as `null`, and the caller decides.\n\n`uid_delivery` is the ADDRESS, not the booking key: a booking id's third\nsegment has been the LEG — the pair's own `uid` — since api-cloudrun#933.",
           "paramTags": [
             {
               "name": "items",
@@ -13200,14 +13200,6 @@
             {
               "name": "destinations",
               "doc": "The document's destination pairs, joined by `uid`"
-            },
-            {
-              "name": "fallbackDeliveryUid",
-              "doc": "Endpoint for a section whose pair supplies none"
-            },
-            {
-              "name": "fallbackCollectionUid",
-              "doc": "Defaults to `fallbackDeliveryUid`"
             }
           ],
           "returnsTag": null
@@ -14331,7 +14323,7 @@
         {
           "kind": "interface",
           "name": "DestinationGroup",
-          "declaration": "interface DestinationGroup {\n  uid: string | null;\n  uid_delivery: string;\n  uid_collection: string;\n  items: LineItem[];\n  packing_list_delivery: LineItem[];\n  packing_list_collection: LineItem[];\n}",
+          "declaration": "interface DestinationGroup {\n  uid: string | null;\n  uid_delivery: string | null;\n  uid_collection: string | null;\n  items: LineItem[];\n  packing_list_delivery: LineItem[];\n  packing_list_collection: LineItem[];\n}",
           "doc": "A destination section with its delivery/collection UIDs and child items."
         },
         {
@@ -14830,8 +14822,8 @@
         {
           "kind": "function",
           "name": "groupByDestination",
-          "signature": "groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[], fallbackDeliveryUid: string, fallbackCollectionUid?: string): DestinationGroup[]",
-          "doc": "Slice the flat items array into destination sections, each carrying the\nendpoints its PAIR names.\n\n⚠️ **`destinations` is a required parameter and used to be absent, because\nthe endpoints used to be read off the divider itself** — the second copy that\napi-cloudrun#662/#663/#664 are all instances of. The divider now carries only\nits `uid`; the endpoints live on the pair that uid addresses, and the contract\nstep deleted `uid_delivery`/`uid_collection` from the divider outright\n(api-cloudrun#662/#663/#664). Reading them here\nagain would re-open the class.\n\n✅ **`uid_delivery` in the RESULT is unchanged and must stay that way.** It is\na `destinations/{uid}` document id and it is the third segment of every\nbooking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it\nmoves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,\nthe same string. There is no `bookings` migration in this change, and there\nmust not be: the deleted `webhooks/opportunity.ts` recorded 552 duplicate prod bookings\nfrom a destination uid moving under that id.\n\nThe fallbacks answer for a section whose pair is missing or names no\nendpoint — a divider-less items array, and a genuinely destinationless CRMS\norder (where the caller passes `\"\"` and skips the group downstream).",
+          "signature": "groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[]): DestinationGroup[]",
+          "doc": "Slice the flat items array into destination sections, each carrying the\nendpoints its PAIR names.\n\n⚠️ **`destinations` is a required parameter and used to be absent, because\nthe endpoints used to be read off the divider itself** — the second copy that\napi-cloudrun#662/#663/#664 are all instances of. The divider now carries only\nits `uid`; the endpoints live on the pair that uid addresses, and the contract\nstep deleted `uid_delivery`/`uid_collection` from the divider outright\n(api-cloudrun#662/#663/#664). Reading them here\nagain would re-open the class.\n\nA section with no pair of its own — a divider-less items array, or a divider\nwhose uid names no pair — takes `destinations[0]`'s endpoints. That is the\npositional rule every caller used to restate as a pair of fallback arguments\n(`destinations[0]?.delivery?.uid || \"unknown\"`), six copies of it in\napi-cloudrun; it has one home here now (api-cloudrun#1110).\n\n⚠️ **There is no placeholder uid.** The old callers passed `\"unknown\"`, which\ncould only ever surface as an id naming no document. An endpoint with no uid\n— legal on a draft alone — comes back as `null`, and the caller decides.\n\n`uid_delivery` is the ADDRESS, not the booking key: a booking id's third\nsegment has been the LEG — the pair's own `uid` — since api-cloudrun#933.",
           "paramTags": [
             {
               "name": "items",
@@ -14840,14 +14832,6 @@
             {
               "name": "destinations",
               "doc": "The document's destination pairs, joined by `uid`"
-            },
-            {
-              "name": "fallbackDeliveryUid",
-              "doc": "Endpoint for a section whose pair supplies none"
-            },
-            {
-              "name": "fallbackCollectionUid",
-              "doc": "Defaults to `fallbackDeliveryUid`"
             }
           ],
           "returnsTag": null
@@ -15771,7 +15755,7 @@
         {
           "kind": "interface",
           "name": "DestinationGroup",
-          "declaration": "interface DestinationGroup {\n  uid: string | null;\n  uid_delivery: string;\n  uid_collection: string;\n  items: LineItem[];\n  packing_list_delivery: LineItem[];\n  packing_list_collection: LineItem[];\n}",
+          "declaration": "interface DestinationGroup {\n  uid: string | null;\n  uid_delivery: string | null;\n  uid_collection: string | null;\n  items: LineItem[];\n  packing_list_delivery: LineItem[];\n  packing_list_collection: LineItem[];\n}",
           "doc": "A destination section with its delivery/collection UIDs and child items."
         },
         {
@@ -15825,8 +15809,8 @@
         {
           "kind": "function",
           "name": "groupByDestination",
-          "signature": "groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[], fallbackDeliveryUid: string, fallbackCollectionUid?: string): DestinationGroup[]",
-          "doc": "Slice the flat items array into destination sections, each carrying the\nendpoints its PAIR names.\n\n⚠️ **`destinations` is a required parameter and used to be absent, because\nthe endpoints used to be read off the divider itself** — the second copy that\napi-cloudrun#662/#663/#664 are all instances of. The divider now carries only\nits `uid`; the endpoints live on the pair that uid addresses, and the contract\nstep deleted `uid_delivery`/`uid_collection` from the divider outright\n(api-cloudrun#662/#663/#664). Reading them here\nagain would re-open the class.\n\n✅ **`uid_delivery` in the RESULT is unchanged and must stay that way.** It is\na `destinations/{uid}` document id and it is the third segment of every\nbooking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it\nmoves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,\nthe same string. There is no `bookings` migration in this change, and there\nmust not be: the deleted `webhooks/opportunity.ts` recorded 552 duplicate prod bookings\nfrom a destination uid moving under that id.\n\nThe fallbacks answer for a section whose pair is missing or names no\nendpoint — a divider-less items array, and a genuinely destinationless CRMS\norder (where the caller passes `\"\"` and skips the group downstream).",
+          "signature": "groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[]): DestinationGroup[]",
+          "doc": "Slice the flat items array into destination sections, each carrying the\nendpoints its PAIR names.\n\n⚠️ **`destinations` is a required parameter and used to be absent, because\nthe endpoints used to be read off the divider itself** — the second copy that\napi-cloudrun#662/#663/#664 are all instances of. The divider now carries only\nits `uid`; the endpoints live on the pair that uid addresses, and the contract\nstep deleted `uid_delivery`/`uid_collection` from the divider outright\n(api-cloudrun#662/#663/#664). Reading them here\nagain would re-open the class.\n\nA section with no pair of its own — a divider-less items array, or a divider\nwhose uid names no pair — takes `destinations[0]`'s endpoints. That is the\npositional rule every caller used to restate as a pair of fallback arguments\n(`destinations[0]?.delivery?.uid || \"unknown\"`), six copies of it in\napi-cloudrun; it has one home here now (api-cloudrun#1110).\n\n⚠️ **There is no placeholder uid.** The old callers passed `\"unknown\"`, which\ncould only ever surface as an id naming no document. An endpoint with no uid\n— legal on a draft alone — comes back as `null`, and the caller decides.\n\n`uid_delivery` is the ADDRESS, not the booking key: a booking id's third\nsegment has been the LEG — the pair's own `uid` — since api-cloudrun#933.",
           "paramTags": [
             {
               "name": "items",
@@ -15835,14 +15819,6 @@
             {
               "name": "destinations",
               "doc": "The document's destination pairs, joined by `uid`"
-            },
-            {
-              "name": "fallbackDeliveryUid",
-              "doc": "Endpoint for a section whose pair supplies none"
-            },
-            {
-              "name": "fallbackCollectionUid",
-              "doc": "Defaults to `fallbackDeliveryUid`"
             }
           ],
           "returnsTag": null

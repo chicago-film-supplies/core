@@ -2965,8 +2965,18 @@ export interface DestinationGroup {
    * items array produces, which answers for no pair.
    */
   uid: string | null;
-  uid_delivery: string;
-  uid_collection: string;
+  /**
+   * The section's delivery ADDRESS — a `destinations/{uid}` document id, read
+   * off its pair (or off `destinations[0]` for a section with no pair).
+   *
+   * ⚠️ **`null` only on a DRAFT.** Past draft every stored endpoint names a
+   * place (`checkStoredEndpoints`), so a writer that runs only past draft may
+   * treat `null` as a violated invariant and refuse — never substitute a
+   * placeholder, which mints an id naming no document.
+   */
+  uid_delivery: string | null;
+  /** The section's collection address. Same nullability as {@link DestinationGroup.uid_delivery}. */
+  uid_collection: string | null;
   /** Every non-destination row of this section, **dividers included**. */
   items: LineItem[];
   /**
@@ -3009,34 +3019,33 @@ export interface DestinationGroup {
  * (api-cloudrun#662/#663/#664). Reading them here
  * again would re-open the class.
  *
- * ✅ **`uid_delivery` in the RESULT is unchanged and must stay that way.** It is
- * a `destinations/{uid}` document id and it is the third segment of every
- * booking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it
- * moves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,
- * the same string. There is no `bookings` migration in this change, and there
- * must not be: the deleted `webhooks/opportunity.ts` recorded 552 duplicate prod bookings
- * from a destination uid moving under that id.
+ * A section with no pair of its own — a divider-less items array, or a divider
+ * whose uid names no pair — takes `destinations[0]`'s endpoints. That is the
+ * positional rule every caller used to restate as a pair of fallback arguments
+ * (`destinations[0]?.delivery?.uid || "unknown"`), six copies of it in
+ * api-cloudrun; it has one home here now (api-cloudrun#1110).
  *
- * The fallbacks answer for a section whose pair is missing or names no
- * endpoint — a divider-less items array, and a genuinely destinationless CRMS
- * order (where the caller passes `""` and skips the group downstream).
+ * ⚠️ **There is no placeholder uid.** The old callers passed `"unknown"`, which
+ * could only ever surface as an id naming no document. An endpoint with no uid
+ * — legal on a draft alone — comes back as `null`, and the caller decides.
+ *
+ * `uid_delivery` is the ADDRESS, not the booking key: a booking id's third
+ * segment has been the LEG — the pair's own `uid` — since api-cloudrun#933.
  *
  * @param items - The document's flat items array
  * @param destinations - The document's destination pairs, joined by `uid`
- * @param fallbackDeliveryUid - Endpoint for a section whose pair supplies none
- * @param fallbackCollectionUid - Defaults to `fallbackDeliveryUid`
  */
 export function groupByDestination(
   items: LineItem[],
   destinations: readonly DestinationPairLike[],
-  fallbackDeliveryUid: string,
-  fallbackCollectionUid?: string,
 ): DestinationGroup[] {
   if (!Array.isArray(items)) {
     throw new Error("items must be an array");
   }
 
-  const collectionFallback = fallbackCollectionUid || fallbackDeliveryUid;
+  const first = destinations?.[0];
+  const fallbackDelivery = first?.delivery?.uid ?? null;
+  const fallbackCollection = first?.collection?.uid ?? null;
   const pairByUid = new Map<string, DestinationPairLike>();
   for (const pair of destinations ?? []) {
     if (pair?.uid) pairByUid.set(pair.uid, pair);
@@ -3051,8 +3060,8 @@ export function groupByDestination(
       const pair = item.uid ? pairByUid.get(item.uid) : undefined;
       current = {
         uid: item.uid ?? null,
-        uid_delivery: pair?.delivery?.uid || fallbackDeliveryUid,
-        uid_collection: pair?.collection?.uid || collectionFallback,
+        uid_delivery: pair ? pair.delivery?.uid ?? null : fallbackDelivery,
+        uid_collection: pair ? pair.collection?.uid ?? null : fallbackCollection,
         items: [],
         packing_list_delivery: [],
         packing_list_collection: [],
@@ -3063,8 +3072,8 @@ export function groupByDestination(
     if (!current) {
       current = {
         uid: null,
-        uid_delivery: fallbackDeliveryUid,
-        uid_collection: collectionFallback,
+        uid_delivery: fallbackDelivery,
+        uid_collection: fallbackCollection,
         items: [],
         packing_list_delivery: [],
         packing_list_collection: [],
@@ -3086,8 +3095,8 @@ export function groupByDestination(
   if (groups.length === 0) {
     return [{
       uid: null,
-      uid_delivery: fallbackDeliveryUid,
-      uid_collection: collectionFallback,
+      uid_delivery: fallbackDelivery,
+      uid_collection: fallbackCollection,
       items: [],
       packing_list_delivery: [],
       packing_list_collection: [],

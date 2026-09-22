@@ -1279,7 +1279,7 @@ Deno.test("groupByDestination splits by destination dividers, taking endpoints f
     { uid: "d1", delivery: { uid: "dest-A" }, collection: { uid: "dest-A-back" } },
     { uid: "d2", delivery: { uid: "dest-B" }, collection: { uid: "dest-B-back" } },
   ];
-  const result = groupByDestination(items, destinations, "fallback");
+  const result = groupByDestination(items, destinations);
   assertEquals(result.length, 2);
   assertEquals(result[0].uid, "d1");
   assertEquals(result[0].uid_delivery, "dest-A");
@@ -1306,7 +1306,7 @@ Deno.test("groupByDestination pairs by uid, not by position", () => {
     { uid: "d2", delivery: { uid: "dest-B" }, collection: { uid: "dest-B" } },
     { uid: "d1", delivery: { uid: "dest-A" }, collection: { uid: "dest-A" } },
   ];
-  const result = groupByDestination(items, destinations, "fallback");
+  const result = groupByDestination(items, destinations);
   assertEquals(result[0].uid_delivery, "dest-A");
   assertEquals(result[1].uid_delivery, "dest-B");
 });
@@ -1325,7 +1325,7 @@ Deno.test("groupByDestination keeps two sections apart when they share ONE addre
     { uid: "d1", delivery: { uid: "shared" }, collection: { uid: "shared" } },
     { uid: "d2", delivery: { uid: "shared" }, collection: { uid: "shared" } },
   ];
-  const result = groupByDestination(items, destinations, "fallback");
+  const result = groupByDestination(items, destinations);
   assertEquals(result.length, 2);
   assertEquals(result[0].uid, "d1");
   assertEquals(result[1].uid, "d2");
@@ -1333,29 +1333,68 @@ Deno.test("groupByDestination keeps two sections apart when they share ONE addre
   assertEquals(result[1].items.length, 1);
 });
 
-Deno.test("groupByDestination falls back when a divider names no pair", () => {
+// A section with no pair of its own reads `destinations[0]` — the positional
+// rule callers used to pass in as two fallback arguments (api-cloudrun#1110).
+const FIRST_PAIR = { uid: "d1", delivery: { uid: "first-out" }, collection: { uid: "first-back" } };
+
+Deno.test("groupByDestination gives a divider that names no pair the FIRST pair's endpoints", () => {
   const items: LineItem[] = [
     { type: "destination", uid: "orphan", name: "", path: ["orphan"] },
     makeItem({ uid: "p1", type: "rental", path: ["orphan", "p1"] }),
   ];
-  const result = groupByDestination(items, [], "fb-delivery", "fb-collection");
+  const result = groupByDestination(items, [FIRST_PAIR]);
   assertEquals(result.length, 1);
   assertEquals(result[0].uid, "orphan");
-  assertEquals(result[0].uid_delivery, "fb-delivery");
-  assertEquals(result[0].uid_collection, "fb-collection");
+  assertEquals(result[0].uid_delivery, "first-out");
+  assertEquals(result[0].uid_collection, "first-back");
 });
 
-Deno.test("groupByDestination uses fallback when no dividers", () => {
+Deno.test("groupByDestination gives a divider-less array the FIRST pair's endpoints", () => {
   const items = [makeItem({ uid: "p1", type: "rental" })];
-  const result = groupByDestination(items, [], "fb-delivery", "fb-collection");
+  const result = groupByDestination(items, [FIRST_PAIR]);
   assertEquals(result.length, 1);
   assertEquals(result[0].uid, null);
-  assertEquals(result[0].uid_delivery, "fb-delivery");
-  assertEquals(result[0].uid_collection, "fb-collection");
+  assertEquals(result[0].uid_delivery, "first-out");
+  assertEquals(result[0].uid_collection, "first-back");
+});
+
+Deno.test("groupByDestination returns NULL, never a placeholder, for an endpoint with no uid", () => {
+  // Legal on a draft alone (`checkStoredEndpoints`). The callers used to turn
+  // this into `"unknown"` — an id naming no document.
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
+    makeItem({ uid: "p1", type: "rental", path: ["d1", "p1"] }),
+  ];
+  const [group] = groupByDestination(items, [
+    { uid: "d1", delivery: { uid: null }, collection: { uid: "back" } },
+  ]);
+  assertEquals(group.uid_delivery, null);
+  assertEquals(group.uid_collection, "back");
+
+  const [orphan] = groupByDestination([makeItem({ uid: "p1", type: "rental" })], []);
+  assertEquals(orphan.uid_delivery, null, "no pairs at all");
+  assertEquals(orphan.uid_collection, null);
+});
+
+Deno.test("groupByDestination does NOT borrow the first pair's endpoint for a matched pair missing one", () => {
+  // The old `pair?.delivery?.uid || fallback` did — a second leg's unplaced
+  // delivery silently became the FIRST leg's address.
+  const items: LineItem[] = [
+    { type: "destination", uid: "d1", name: "", path: ["d1"] },
+    makeItem({ uid: "p1", type: "rental", path: ["d1", "p1"] }),
+    { type: "destination", uid: "d2", name: "", path: ["d2"] },
+    makeItem({ uid: "p2", type: "rental", path: ["d2", "p2"] }),
+  ];
+  const result = groupByDestination(items, [
+    FIRST_PAIR,
+    { uid: "d2", delivery: { uid: null }, collection: { uid: null } },
+  ]);
+  assertEquals(result[1].uid_delivery, null);
+  assertEquals(result[1].uid_collection, null);
 });
 
 Deno.test("groupByDestination returns empty section for empty items", () => {
-  const result = groupByDestination([], [], "fb");
+  const result = groupByDestination([], []);
   assertEquals(result.length, 1);
   assertEquals(result[0].uid, null);
   assertEquals(result[0].items.length, 0);
@@ -1456,7 +1495,7 @@ Deno.test("🔴 the non-composition core#80 names: dividers are STRIPPED, so gro
     { type: "group", uid: "g1", name: "Tables", path: ["d1", "g1"] },
     makeItem({ uid: "p1", type: "rental", name: "Round Table", path: ["d1", "g1", "p1"] }),
   ];
-  const [group] = groupByDestination(items, [], "fallback");
+  const [group] = groupByDestination(items, []);
   assertEquals(group.packing_list_delivery.length, 1, "the divider is stripped");
 
   const composed = buildPackingList(group.packing_list_delivery) as PackingListItem[];
@@ -1472,7 +1511,7 @@ Deno.test("buildPackingListForLeg preserves group_name where the composed call l
     { type: "group", uid: "g1", name: "Tables", path: ["d1", "g1"] },
     makeItem({ uid: "p1", type: "rental", name: "Round Table", path: ["d1", "g1", "p1"] }),
   ];
-  const [group] = groupByDestination(items, [], "fallback");
+  const [group] = groupByDestination(items, []);
   const result = buildPackingListForLeg(group.items, "delivery") as PackingListItem[];
   assertEquals(result.length, 1);
   assertEquals(result[0].group_name, "Tables");

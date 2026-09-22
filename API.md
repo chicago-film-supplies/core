@@ -28911,8 +28911,8 @@ A destination section with its delivery/collection UIDs and child items.
 ```ts
 interface DestinationGroup {
   uid: string | null;
-  uid_delivery: string;
-  uid_collection: string;
+  uid_delivery: string | null;
+  uid_collection: string | null;
   items: LineItem[];
   packing_list_delivery: LineItem[];
   packing_list_collection: LineItem[];
@@ -29158,7 +29158,7 @@ own two-type test rather than reading `ITEM_CONTRACTS[type].kind`: switching
 to the contract would silently make `order` dividers structural here, for
 every invoice caller.
 
-### `groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[], fallbackDeliveryUid: string, fallbackCollectionUid?: string): DestinationGroup[]`
+### `groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[]): DestinationGroup[]`
 
 Slice the flat items array into destination sections, each carrying the
 endpoints its PAIR names.
@@ -29171,24 +29171,23 @@ step deleted `uid_delivery`/`uid_collection` from the divider outright
 (api-cloudrun#662/#663/#664). Reading them here
 again would re-open the class.
 
-✅ **`uid_delivery` in the RESULT is unchanged and must stay that way.** It is
-a `destinations/{uid}` document id and it is the third segment of every
-booking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it
-moves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,
-the same string. There is no `bookings` migration in this change, and there
-must not be: the deleted `webhooks/opportunity.ts` recorded 552 duplicate prod bookings
-from a destination uid moving under that id.
+A section with no pair of its own — a divider-less items array, or a divider
+whose uid names no pair — takes `destinations[0]`'s endpoints. That is the
+positional rule every caller used to restate as a pair of fallback arguments
+(`destinations[0]?.delivery?.uid || "unknown"`), six copies of it in
+api-cloudrun; it has one home here now (api-cloudrun#1110).
 
-The fallbacks answer for a section whose pair is missing or names no
-endpoint — a divider-less items array, and a genuinely destinationless CRMS
-order (where the caller passes `""` and skips the group downstream).
+⚠️ **There is no placeholder uid.** The old callers passed `"unknown"`, which
+could only ever surface as an id naming no document. An endpoint with no uid
+— legal on a draft alone — comes back as `null`, and the caller decides.
+
+`uid_delivery` is the ADDRESS, not the booking key: a booking id's third
+segment has been the LEG — the pair's own `uid` — since api-cloudrun#933.
 
 **Parameters**
 
 - `items` — The document's flat items array
 - `destinations` — The document's destination pairs, joined by `uid`
-- `fallbackDeliveryUid` — Endpoint for a section whose pair supplies none
-- `fallbackCollectionUid` — Defaults to `fallbackDeliveryUid`
 
 ### `isSameAsDeliveryDates(dates: ChargeDates): boolean`
 
@@ -31382,8 +31381,8 @@ A destination section with its delivery/collection UIDs and child items.
 ```ts
 interface DestinationGroup {
   uid: string | null;
-  uid_delivery: string;
-  uid_collection: string;
+  uid_delivery: string | null;
+  uid_collection: string | null;
   items: LineItem[];
   packing_list_delivery: LineItem[];
   packing_list_collection: LineItem[];
@@ -32577,7 +32576,7 @@ itself now that the price no longer carries a nested `{uid, name}`: a line
 item's `uid` IS its product uid, which is exactly what the old
 `price.uid` held.
 
-### `groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[], fallbackDeliveryUid: string, fallbackCollectionUid?: string): DestinationGroup[]`
+### `groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[]): DestinationGroup[]`
 
 Slice the flat items array into destination sections, each carrying the
 endpoints its PAIR names.
@@ -32590,24 +32589,23 @@ step deleted `uid_delivery`/`uid_collection` from the divider outright
 (api-cloudrun#662/#663/#664). Reading them here
 again would re-open the class.
 
-✅ **`uid_delivery` in the RESULT is unchanged and must stay that way.** It is
-a `destinations/{uid}` document id and it is the third segment of every
-booking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it
-moves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,
-the same string. There is no `bookings` migration in this change, and there
-must not be: the deleted `webhooks/opportunity.ts` recorded 552 duplicate prod bookings
-from a destination uid moving under that id.
+A section with no pair of its own — a divider-less items array, or a divider
+whose uid names no pair — takes `destinations[0]`'s endpoints. That is the
+positional rule every caller used to restate as a pair of fallback arguments
+(`destinations[0]?.delivery?.uid || "unknown"`), six copies of it in
+api-cloudrun; it has one home here now (api-cloudrun#1110).
 
-The fallbacks answer for a section whose pair is missing or names no
-endpoint — a divider-less items array, and a genuinely destinationless CRMS
-order (where the caller passes `""` and skips the group downstream).
+⚠️ **There is no placeholder uid.** The old callers passed `"unknown"`, which
+could only ever surface as an id naming no document. An endpoint with no uid
+— legal on a draft alone — comes back as `null`, and the caller decides.
+
+`uid_delivery` is the ADDRESS, not the booking key: a booking id's third
+segment has been the LEG — the pair's own `uid` — since api-cloudrun#933.
 
 **Parameters**
 
 - `items` — The document's flat items array
 - `destinations` — The document's destination pairs, joined by `uid`
-- `fallbackDeliveryUid` — Endpoint for a section whose pair supplies none
-- `fallbackCollectionUid` — Defaults to `fallbackDeliveryUid`
 
 ### `isFromTotalItemType(type: string): boolean`
 
@@ -34429,8 +34427,8 @@ A destination section with its delivery/collection UIDs and child items.
 ```ts
 interface DestinationGroup {
   uid: string | null;
-  uid_delivery: string;
-  uid_collection: string;
+  uid_delivery: string | null;
+  uid_collection: string | null;
   items: LineItem[];
   packing_list_delivery: LineItem[];
   packing_list_collection: LineItem[];
@@ -34599,7 +34597,7 @@ Mapping:
 
 Empty input returns empty strings.
 
-### `groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[], fallbackDeliveryUid: string, fallbackCollectionUid?: string): DestinationGroup[]`
+### `groupByDestination(items: LineItem[], destinations: readonly DestinationPairLike[]): DestinationGroup[]`
 
 Slice the flat items array into destination sections, each carrying the
 endpoints its PAIR names.
@@ -34612,24 +34610,23 @@ step deleted `uid_delivery`/`uid_collection` from the divider outright
 (api-cloudrun#662/#663/#664). Reading them here
 again would re-open the class.
 
-✅ **`uid_delivery` in the RESULT is unchanged and must stay that way.** It is
-a `destinations/{uid}` document id and it is the third segment of every
-booking's doc id (`orderUid:productUid:destUid`), so only the ROUTE to it
-moves here — `divider.uid_delivery` becomes `pairFor(divider).delivery.uid`,
-the same string. There is no `bookings` migration in this change, and there
-must not be: the deleted `webhooks/opportunity.ts` recorded 552 duplicate prod bookings
-from a destination uid moving under that id.
+A section with no pair of its own — a divider-less items array, or a divider
+whose uid names no pair — takes `destinations[0]`'s endpoints. That is the
+positional rule every caller used to restate as a pair of fallback arguments
+(`destinations[0]?.delivery?.uid || "unknown"`), six copies of it in
+api-cloudrun; it has one home here now (api-cloudrun#1110).
 
-The fallbacks answer for a section whose pair is missing or names no
-endpoint — a divider-less items array, and a genuinely destinationless CRMS
-order (where the caller passes `""` and skips the group downstream).
+⚠️ **There is no placeholder uid.** The old callers passed `"unknown"`, which
+could only ever surface as an id naming no document. An endpoint with no uid
+— legal on a draft alone — comes back as `null`, and the caller decides.
+
+`uid_delivery` is the ADDRESS, not the booking key: a booking id's third
+segment has been the LEG — the pair's own `uid` — since api-cloudrun#933.
 
 **Parameters**
 
 - `items` — The document's flat items array
 - `destinations` — The document's destination pairs, joined by `uid`
-- `fallbackDeliveryUid` — Endpoint for a section whose pair supplies none
-- `fallbackCollectionUid` — Defaults to `fallbackDeliveryUid`
 
 ### `isSameAsDeliveryDates(dates: ChargeDates): boolean`
 
