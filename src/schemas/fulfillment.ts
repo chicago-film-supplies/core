@@ -41,6 +41,7 @@ import {
 } from "./common.ts";
 import {
   checkExchangePairs,
+  checkStoredEndpoints,
   DocDestination,
   type DocDestinationType,
   ORDER_STATUSES,
@@ -495,7 +496,7 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   query_by_dates: z.array(z.string()),
   version: z.int().min(0).default(0),
   ...TimestampFields,
-}).meta({
+}).superRefine(checkStoredEndpoints).meta({
   title: "Fulfillment",
   collection: "fulfillments",
   displayDefaults: {

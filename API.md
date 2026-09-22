@@ -17892,6 +17892,31 @@ what a swap is.
 ⚠️ **It reads the array, so it is attached at `z.array(...)` rather than to a
 pair** — a pair alone cannot see its siblings.
 
+### `checkStoredEndpoints(doc: typeLiteral, ctx: z.RefinementCtx): void`
+
+A STORED order, fulfillment or invoice that has left `draft` names a real place
+on every leg: each endpoint carries a `uid` and an `address`.
+
+🔴 **Stored, not input, and not on a draft** (owner, 2026-09-22 —
+fulfillment-surface Phase 4 item 2). `DocDestinationEndpoint.address` stays
+nullable because the manager saves on every change, and a "Deliver To" leg
+legitimately has no address until the operator picks one; refusing that would
+400 every keystroke on a half-built draft. What the refinement refuses is a
+document that has moved PAST draft still missing one — the state that put
+15 endpoints in each corpus, all of them in-store legs whose endpoint had never
+been pointed at the store (api-cloudrun `substituteStoreEndpoints` now does
+that on every order write).
+
+The corpus was backfilled to 0 before this shipped (api-cloudrun's
+repair-null-endpoint-addresses script, verified by its
+scan-null-endpoint-addresses census), because under
+`z.strictObject` every write re-parses the whole stored document: a stored
+violator would have been unwritable the moment the API pinned this.
+
+⚠️ **A document-level refinement, so a single-field PATCH does not see it.**
+`assertValidPatch` validates each key alone; a writer patching `destinations`
+on a non-draft document is checked only when it supplies the merged document.
+
 ### `getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]`
 
 The statuses an operator can move to from the given current status.

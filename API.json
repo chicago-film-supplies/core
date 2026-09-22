@@ -7997,6 +7997,14 @@
         },
         {
           "kind": "function",
+          "name": "checkStoredEndpoints",
+          "signature": "checkStoredEndpoints(doc: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "A STORED order, fulfillment or invoice that has left `draft` names a real place\non every leg: each endpoint carries a `uid` and an `address`.\n\n🔴 **Stored, not input, and not on a draft** (owner, 2026-09-22 —\nfulfillment-surface Phase 4 item 2). `DocDestinationEndpoint.address` stays\nnullable because the manager saves on every change, and a \"Deliver To\" leg\nlegitimately has no address until the operator picks one; refusing that would\n400 every keystroke on a half-built draft. What the refinement refuses is a\ndocument that has moved PAST draft still missing one — the state that put\n15 endpoints in each corpus, all of them in-store legs whose endpoint had never\nbeen pointed at the store (api-cloudrun `substituteStoreEndpoints` now does\nthat on every order write).\n\nThe corpus was backfilled to 0 before this shipped (api-cloudrun's\nrepair-null-endpoint-addresses script, verified by its\nscan-null-endpoint-addresses census), because under\n`z.strictObject` every write re-parses the whole stored document: a stored\nviolator would have been unwritable the moment the API pinned this.\n\n⚠️ **A document-level refinement, so a single-field PATCH does not see it.**\n`assertValidPatch` validates each key alone; a writer patching `destinations`\non a non-draft document is checked only when it supplies the merged document.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "getOrderStatusTransitions",
           "signature": "getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]",
           "doc": "The statuses an operator can move to from the given current status.\nReturns an empty list for computed statuses (`active`, `complete`) and\nfilters the current status out of the user-settable set.",

@@ -24,14 +24,36 @@ const validDocDates = {
   charge_windows: [{ start: "2026-03-01T00:00:00.000-06:00", end: "2026-03-10T00:00:00.000-06:00", days: 7 }],
 };
 
+/**
+ * A placed endpoint. Every non-draft stored document needs one on each leg
+ * (`checkStoredEndpoints`), and three of the tests below flip `validInvoice` out
+ * of draft — so the fixture is placed, and the unplaced case is its own test.
+ */
+const placedEndpoint = {
+  uid: "testdest100000000000",
+  address: {
+    city: "Chicago",
+    country_name: "United States",
+    full: "3100 W Fillmore St, Chicago, IL, 60612, United States",
+    name: "",
+    postcode: "60612",
+    region: "IL",
+    street: "3100 W Fillmore St",
+    street2: "",
+    address_coordinates: { latitude: 41.8708, longitude: -87.7036 },
+  },
+  instructions: null,
+  contact: null,
+};
+
 const validDestination = {
   uid_order: "testorder10000000000",
   // The pair's identity — its destination divider's uid. See the twin in
   // `tests/order.test.ts`.
   uid: "11111111-1111-4111-8111-111111111111",
   dates: validDocDates,
-  delivery: { uid: null, address: null, instructions: null, contact: null },
-  collection: { uid: null, address: null, instructions: null, contact: null },
+  delivery: placedEndpoint,
+  collection: placedEndpoint,
   // ⚠️ **Spelled out because the invoice grain no longer defaults them, and this
   // fixture is the reason that mattered.** `InvoiceDocDestination` carried
   // `z.boolean().default(false)` on both flags until 2026-09-09, so this literal
@@ -159,6 +181,27 @@ Deno.test("InvoiceSchema rejects a null or absent subject", () => {
 Deno.test("InvoiceSchema rejects invalid status", () => {
   const doc = { ...validInvoice, status: "pending" };
   assertEquals(InvoiceSchema.safeParse(doc).success, false);
+});
+
+Deno.test("checkStoredEndpoints — a draft may leave a leg unplaced; nothing past draft may", () => {
+  const unplaced = { uid: null, address: null, instructions: null, contact: null };
+  const withLeg = (status: InvoiceStatusType, collection: typeof unplaced | typeof placedEndpoint) => ({
+    ...validInvoice,
+    status,
+    destinations: [{ ...validDestination, collection }],
+  });
+  assertEquals(InvoiceSchema.safeParse(withLeg("draft", unplaced)).success, true, "a draft is still being built");
+  for (const status of ["issued", "part_paid", "paid", "void"] as const) {
+    const result = InvoiceSchema.safeParse(withLeg(status, unplaced));
+    assertEquals(result.success, false, `${status} with an unplaced leg`);
+    if (!result.success) {
+      const paths = result.error.issues.map((i) => i.path.join("."));
+      assert(paths.includes("destinations.0.collection.uid"), paths.join(", "));
+      assert(paths.includes("destinations.0.collection.address"), paths.join(", "));
+      assert(!paths.some((p) => p.startsWith("destinations.0.delivery")), "the placed leg is not reported");
+    }
+    assertEquals(InvoiceSchema.safeParse(withLeg(status, placedEndpoint)).success, true, `${status} placed`);
+  }
 });
 
 Deno.test("InvoiceSchema accepts part_paid and void statuses", () => {
