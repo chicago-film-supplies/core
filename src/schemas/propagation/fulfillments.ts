@@ -438,6 +438,104 @@ const updateFulfillmentDestinationsTransaction: TransactionDefinition = {
   ],
 };
 
+// ── create-fulfillment-exchange ──────────────────────────────────────
+
+/**
+ * The positive half — one call stages the leg, its divider and its rows, and a
+ * second call against the same version is refused.
+ *
+ * 🔴 **Half a swap is worse than no swap**, which is why this is one route
+ * rather than a `PUT /destinations` for the pair and a `PUT /items` for the
+ * row: a pair with no row under it derives a trip card with nothing on it, and
+ * a row under a pair that does not exist addresses nothing.
+ */
+const EXCHANGE_LEG_IS_ATOMIC: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/fulfillment/fulfillmentExchanges.test.ts::POST /exchanges stages the leg, its divider and its replacement row",
+  clause:
+    "the `destinations + items + version` half — the anchored step posts one exchange leg and asserts the stored fulfillment carries the pair (with its `exchange` block and the parent's endpoints), the destination divider keyed on the pair uid, and the replacement row under it carrying `replaces`. The sibling step asserts a stale `version` is a 409.",
+  gates: true,
+};
+
+const createFulfillmentExchangeRules: CollectionRule[] = [
+  {
+    id: "create-fulfillment-exchange:leg-self",
+    source: "fulfillments",
+    target: "fulfillments",
+    mode: "co-write",
+    invariant:
+      "A warehouse-staged mid-rental swap is ONE write: the exchange pair, its " +
+      "destination divider and its replacement rows land together, with `version` " +
+      "bumped and both `query_by_*` arrays re-derived from what is about to be " +
+      "stored. 🔴 This is the ONE writer that adds a destination pair a fulfillment's " +
+      "order does not have — `update-fulfillment-destinations` explicitly refuses " +
+      "membership changes — and it is admissible only because an exchange leg is a " +
+      "fact about what the warehouse DID, which the order never asked for.",
+    enforced_by: [EXCHANGE_LEG_IS_ATOMIC],
+    transaction: "create-fulfillment-exchange",
+    fields: [
+      { source: ["destinations"], target: ["destinations"], transform: "the exchange pair appended" },
+      { source: ["items"], target: ["items"], transform: "the leg's divider and replacement rows appended" },
+      { source: ["version"], target: ["version"], transform: "incremented" },
+      {
+        source: [],
+        target: ["query_by_dates"],
+        transform: "recomputed from the merged destinations",
+      },
+      {
+        source: [],
+        target: ["query_by_contacts"],
+        transform: "recomputed from the merged destinations",
+      },
+    ],
+  },
+];
+
+const createFulfillmentExchangeCardRules: CollectionRule[] = [
+  {
+    id: "create-fulfillment-exchange:fulfillment-to-cards",
+    source: "fulfillments",
+    target: "cards",
+    mode: "co-write",
+    invariant:
+      "The swap's trip card is derived in the same transaction that stages the leg. " +
+      "⚠️ A `:start` card ONLY — an exchange leg's units come back on the parent's " +
+      "return trip, so `eventCardSlots` mints no `:end` for it and the parent's " +
+      "`:end` rolls the leg's bookings in.",
+    enforced_by: [EXCHANGE_LEG_IS_ATOMIC],
+    transaction: "create-fulfillment-exchange",
+    fields: FULFILLMENT_TO_CARDS_FIELDS,
+  },
+];
+
+const createFulfillmentExchangeTransaction: TransactionDefinition = {
+  id: "create-fulfillment-exchange",
+  description:
+    "Stage a mid-rental SWAP on a fulfillment: a destination pair carrying " +
+    "`exchange: { uid_pair, disposition }`, its divider, and the replacement row(s) " +
+    "under it naming — through `replaces` — the damaged rows they go out against. " +
+    "Optimistic concurrency via `version`; writes the fulfillment doc and its cards.\n\n" +
+    "🔴 The BOOKINGS that follow are not a step of this transaction, for exactly the " +
+    "reason `update-fulfillment-destinations` records: `buildBookingDates` has one " +
+    "author and it is in `updateOrder`. The leg reaches the booking projection as an " +
+    "INPUT (`api-cloudrun/src/lib/exchangeLegs.ts`, the api-cloudrun#882 pattern), so " +
+    "the next order write creates the replacement's booking whether or not the " +
+    "best-effort organization echo this route fires wins its version race.\n\n" +
+    "⚠️ The damaged unit X is NOT touched here. For `disposition: \"exchange\"` it moves " +
+    "`out → damaged` when the swap's own trip is checked out (the rider in " +
+    "`api-cloudrun/src/lib/swapCustody.ts`); for `send_now` the operator marks it at " +
+    "check-in, because `mark_damaged` means \"back on a shelf\" and the unit is still " +
+    "on set.",
+  steps: [
+    "create-fulfillment-exchange:leg-self",
+    "create-fulfillment-exchange:fulfillment-to-cards",
+    // A newly derivable trip card mints its thread in the same transaction.
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
+  ],
+};
+
 // ── reconcile-fulfillment-cards ──────────────────────────────────────
 
 /**
@@ -490,6 +588,8 @@ export const fulfillments: PropagationModule = {
     ...updateFulfillmentItemsCardRules,
     ...updateFulfillmentDestinationsRules,
     ...updateFulfillmentDestinationsCardRules,
+    ...createFulfillmentExchangeRules,
+    ...createFulfillmentExchangeCardRules,
     ...resetFulfillmentRules,
     ...resetFulfillmentCardRules,
     ...reconcileFulfillmentCardsRules,
@@ -497,6 +597,7 @@ export const fulfillments: PropagationModule = {
   transactions: [
     updateFulfillmentItemsTransaction,
     updateFulfillmentDestinationsTransaction,
+    createFulfillmentExchangeTransaction,
     resetFulfillmentTransaction,
     reconcileFulfillmentCardsTransaction,
   ],

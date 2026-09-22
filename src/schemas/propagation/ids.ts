@@ -114,6 +114,7 @@ export type TransactionId =
   // fulfillments.ts
   | "update-fulfillment-items"
   | "update-fulfillment-destinations"
+  | "create-fulfillment-exchange"
   | "reset-fulfillment"
   | "reconcile-fulfillment-cards"
   // taxes.ts
@@ -280,6 +281,8 @@ export type RuleId =
   | "update-fulfillment-items:fulfillment-to-cards"
   | "update-fulfillment-destinations:pairs-self"
   | "update-fulfillment-destinations:fulfillment-to-cards"
+  | "create-fulfillment-exchange:leg-self"
+  | "create-fulfillment-exchange:fulfillment-to-cards"
   | "reset-fulfillment:rebuild-from-order"
   | "reset-fulfillment:fulfillment-to-cards"
   | "reconcile-fulfillment-cards:fulfillment-to-cards"
