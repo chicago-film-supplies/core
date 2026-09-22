@@ -213,14 +213,21 @@ export const CardOrganization: z.ZodType<CardOrganizationType> = z.strictObject(
 // ── Source payloads ─────────────────────────────────────────────────
 
 /**
- * The `orders` SOURCE PAYLOAD — the fields of the order's destination pair that
- * a card surface reads, copied under the pair's OWN names.
+ * The `fulfillments` SOURCE PAYLOAD — the fields of the fulfillment's destination
+ * pair that a card surface reads, copied under the pair's OWN names.
+ *
+ * **Event cards are sourced from the FULFILLMENT (owner, 2026-09-21).** A card
+ * describes what happens on the ground; the order is the quote. So an event
+ * card's source is `{ collection: "fulfillments", uid }` — the same uid as its
+ * order, since a fulfillment shares its order's id. The label was `orders` until
+ * the api-cloudrun cards-from-fulfillments campaign relabelled both corpora
+ * (2026-09-21) and this contract removed it.
  *
  * **This is the pattern for every future source kind (owner, 2026-09-20):**
  *
  * - **The key is a `sources[].collection` value, spelled exactly.** Event cards
- *   are sourced `{ collection: "orders" }`, so the key is `orders` — not
- *   `fulfillment`, and not a new word.
+ *   are sourced `{ collection: "fulfillments" }`, so the key is `fulfillments` —
+ *   not `fulfillment`, and not a new word.
  * - **PRESENT iff that source is in `sources`, otherwise ABSENT — never `null`.**
  *   A stated exception to core#95's "key required, value nullable": with N
  *   source kinds every card would otherwise carry N nulls, and `cards` must
@@ -243,39 +250,20 @@ export const CardOrganization: z.ZodType<CardOrganizationType> = z.strictObject(
  * what lets the index tell an in-store leg from a delivery there; see
  * `cardPickBucket` (`@cfs/core/utils/cards`).
  *
- * ⚠️ **OPTIONAL on the event card for now, and that is a release step, not a
- * rule.** Every existing card lacks it until api-cloudrun rebuilds them; the
- * requirement on the event-card kind lands in `checkEventCard` after that.
+ * **REQUIRED on an event card** (`checkEventCard`). It was optional while the
+ * corpus was rebuilt; the relabel wrote it onto every event card — 1,191 of
+ * 1,191 in each environment, 0 unresolved — and `buildEventCards` writes it on
+ * every build.
  */
-export type CardOrdersSourceType =
+export type CardFulfillmentsSourceType =
   | { leg: "start"; customer_collecting: boolean }
   | { leg: "end"; customer_returning: boolean };
 
-/** Zod schema for CardOrdersSourceType (discriminated on `leg`; JSR no-slow-types-safe). */
-export const CardOrdersSource: z.ZodType<CardOrdersSourceType> = z.discriminatedUnion("leg", [
+/** Zod schema for CardFulfillmentsSourceType (discriminated on `leg`; JSR no-slow-types-safe). */
+export const CardFulfillmentsSource: z.ZodType<CardFulfillmentsSourceType> = z.discriminatedUnion("leg", [
   z.strictObject({ leg: z.literal("start"), customer_collecting: z.boolean() }),
   z.strictObject({ leg: z.literal("end"), customer_returning: z.boolean() }),
 ]);
-
-/**
- * The `fulfillments` SOURCE PAYLOAD — {@link CardOrdersSource}'s successor, with
- * the same arms under the key the pattern above dictates.
- *
- * **Event cards are sourced from the FULFILLMENT (owner, 2026-09-21).** A card
- * describes what happens on the ground; the order is the quote. So the card's
- * source becomes `{ collection: "fulfillments", uid }` — the same uid, since a
- * fulfillment shares its order's id — and the payload key follows the source.
- *
- * ⚠️ **Both keys are legal during the transition, and that is a release step,
- * not a rule.** The API writes the new label and a migration relabels the old
- * corpus; once both corpora read 0 `orders`-sourced event cards, `orders`,
- * {@link CardOrdersSource} and the `orders.*` Typesense fields are removed
- * (the api-cloudrun cards-from-fulfillments plan, P4).
- */
-export type CardFulfillmentsSourceType = CardOrdersSourceType;
-
-/** Zod schema for CardFulfillmentsSourceType — the same arms as {@link CardOrdersSource}. */
-export const CardFulfillmentsSource: z.ZodType<CardFulfillmentsSourceType> = CardOrdersSource;
 
 // ── Firestore document ──────────────────────────────────────────────
 
@@ -308,8 +296,6 @@ export interface Card {
   destination: DocDestinationEndpointType | null;
   organization: CardOrganizationType | null;
   sources: DocSourceType[];
-  /** The `orders` source payload — present iff `sources` names an order. See {@link CardOrdersSource}. */
-  orders?: CardOrdersSourceType;
   /** The `fulfillments` source payload — present iff `sources` names a fulfillment. See {@link CardFulfillmentsSource}. */
   fulfillments?: CardFulfillmentsSourceType;
   attachments: CardAttachmentType[];
@@ -341,22 +327,13 @@ export const CardDates: z.ZodType<CardDatesType> = z.strictObject({
 
 /** Zod schema for a card Firestore document. */
 /**
- * The two collections an event card may be sourced from — `orders` (the old
- * label) and `fulfillments` (the new one). Each names the key its payload
- * rides under. See {@link CardFulfillmentsSource} for the transition.
- */
-const EVENT_SOURCE_COLLECTIONS = ["orders", "fulfillments"] as const;
-type EventSourceCollection = typeof EVENT_SOURCE_COLLECTIONS[number];
-
-const eventSources = (doc: Card): EventSourceCollection[] =>
-  EVENT_SOURCE_COLLECTIONS.filter((c) => doc.sources.some((s) => s.collection === c));
-
-/**
  * An event card is one the fulfillment projection OWNS — `buildEventCards` built
  * it, `reconcileEventCards` recomputes it, and a uid that does not parse as an
  * {@link EventCardId} gets it hard-deleted. The discriminator is DERIVED rather
  * than stored, and `sources` is the only place it can be read from: a card
- * carrying an `orders` or a `fulfillments` source is this projection's.
+ * carrying a `fulfillments` source is this projection's. (The label was `orders`
+ * until both corpora were relabelled on 2026-09-21; an `orders` source now marks
+ * nothing.)
  *
  * ⚠️ **Do not switch this to an id-shape test.** The id is what the projection
  * MINTS; the source is what makes the card the projection's to mint. Keying the
@@ -367,7 +344,8 @@ const eventSources = (doc: Card): EventSourceCollection[] =>
  * which is what makes this predicate an authorization fact rather than a
  * heuristic. `manager/src/utils/cardKind.ts` spells it the same way.
  */
-const isEventCard = (doc: Card): boolean => eventSources(doc).length > 0;
+const isEventCard = (doc: Card): boolean =>
+  doc.sources.some((s) => s.collection === "fulfillments");
 
 /**
  * Per-KIND requiredness: the five fields an event card always has, and a
@@ -392,45 +370,34 @@ const isEventCard = (doc: Card): boolean => eventSources(doc).length > 0;
  * is upstream and the tightening lands with it.
  */
 function checkEventCard(doc: Card, ctx: z.RefinementCtx): void {
-  const named = eventSources(doc);
-
-  // The payload is present IFF its source is, under that source's own key — a
-  // card carrying a payload its sources do not name is claiming a projection
-  // nothing built, and one carrying the OTHER label's key has the two halves
-  // of the transition crossed.
-  for (const key of EVENT_SOURCE_COLLECTIONS) {
-    if (doc[key] !== undefined && !named.includes(key)) {
+  if (!isEventCard(doc)) {
+    // The payload is present IFF its source is — a to-do carrying a
+    // `fulfillments` payload is claiming a projection nothing built.
+    if (doc.fulfillments !== undefined) {
       ctx.addIssue({
         code: "custom",
-        path: [key],
-        message: `${key} is present only on a card whose sources name the ${key} collection`,
+        path: ["fulfillments"],
+        message: "fulfillments is present only on a card whose sources name a fulfillment",
       });
     }
-  }
-  if (!isEventCard(doc)) return;
-
-  // One projection owns an event card, so it names exactly one event source.
-  if (named.length > 1) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["sources"],
-      message: `an event card names exactly one of ${EVENT_SOURCE_COLLECTIONS.join(", ")}, not ${named.join(" and ")}`,
-    });
     return;
   }
 
   // `leg` says which half of the pair this card projects, and the id already
   // says it. Two copies that could disagree are pinned together here.
-  // ⚠️ Not yet REQUIRED on this kind — see `CardOrdersSource`.
-  const key = named[0];
-  const payload = doc[key];
-  if (payload !== undefined) {
+  if (doc.fulfillments === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["fulfillments"],
+      message: "fulfillments is required on an event card",
+    });
+  } else {
     const idLeg = doc.uid.endsWith(":start") ? "start" : doc.uid.endsWith(":end") ? "end" : null;
-    if (idLeg !== payload.leg) {
+    if (idLeg !== doc.fulfillments.leg) {
       ctx.addIssue({
         code: "custom",
-        path: [key, "leg"],
-        message: `${key}.leg "${payload.leg}" does not match the card id's leg (${idLeg ?? "none"})`,
+        path: ["fulfillments", "leg"],
+        message: `fulfillments.leg "${doc.fulfillments.leg}" does not match the card id's leg (${idLeg ?? "none"})`,
       });
     }
   }
@@ -506,9 +473,8 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   // ⚠️ The witness is gone by design — that repair is why this line can exist.
   organization: CardOrganization.nullable().meta({ label: "Organization" }),
   sources: z.array(DocSource).meta({ label: "Source" }),
-  // ABSENT rather than null off an event card, by rule — see `CardOrdersSource`.
-  orders: CardOrdersSource.optional(),
-  // The same payload under the new source label — see `CardFulfillmentsSource`.
+  // ABSENT rather than null off an event card, by rule — see
+  // `CardFulfillmentsSource`. Required ON an event card by `checkEventCard`.
   fulfillments: CardFulfillmentsSource.optional(),
   // **REQUIRED ×3 — inert `.default([])` removed 2026-09-11 (core#95 batch 8).**
   // 1,159 prod / 1,166 dev cards state all three, and dev is a genuine second

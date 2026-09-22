@@ -90,16 +90,10 @@ export const cards: TypesenseCollectionConfig = {
       // The denormalized fulfillment verb the card surface buttons off.
       { name: "action.value", type: "string", facet: true, index: true, optional: true },
 
-      // The `orders` source payload (`CardOrdersSource`) — which leg of the
-      // order's pair this card is, and that leg's in-store flag. Stored, not
-      // derived; present only on an event card.
-      { name: "orders", type: "object", optional: true },
-      { name: "orders.leg", type: "string", facet: true, index: true, optional: true },
-      { name: "orders.customer_collecting", type: "bool", facet: true, index: true, optional: true },
-      { name: "orders.customer_returning", type: "bool", facet: true, index: true, optional: true },
-      // The same payload under the new source label (`CardFulfillmentsSource`).
-      // Both are declared while both are legal; `orders.*` goes with P4 of
-      // the api-cloudrun cards-from-fulfillments plan.
+      // The `fulfillments` source payload (`CardFulfillmentsSource`) — which leg
+      // of the fulfillment's pair this card is, and that leg's in-store flag.
+      // Stored, not derived; present only on an event card. (`orders.*` held
+      // the same payload until the 2026-09-21 relabel and is gone.)
       { name: "fulfillments", type: "object", optional: true },
       { name: "fulfillments.leg", type: "string", facet: true, index: true, optional: true },
       { name: "fulfillments.customer_collecting", type: "bool", facet: true, index: true, optional: true },

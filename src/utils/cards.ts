@@ -217,14 +217,11 @@ export const PICK_BUCKET_CUSTOMER_COLLECT = "customer-collect";
  * `destination.uid`.** Guessing would file every unbuilt in-store leg under the
  * store's own row, which is the defect this key exists to remove. Absent is
  * correct until the card is rebuilt.
- *
- * Reads either key — `fulfillments` (the current label) or `orders` (the old
- * one) — while both are legal; see `CardFulfillmentsSource`.
  */
 export function cardPickBucket(
-  card: Pick<Card, "destination" | "orders" | "fulfillments">,
+  card: Pick<Card, "destination" | "fulfillments">,
 ): string | null {
-  const o = card.fulfillments ?? card.orders;
+  const o = card.fulfillments;
   if (o === undefined) return null;
   const inStore = o.leg === "start" ? o.customer_collecting : o.customer_returning;
   if (inStore) return PICK_BUCKET_CUSTOMER_COLLECT;

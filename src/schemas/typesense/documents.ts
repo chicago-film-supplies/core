@@ -1037,13 +1037,7 @@ export interface CardDocument {
   action?: {
     value?: string;
   };
-  /** The stored `orders` source payload — event cards only. */
-  orders?: {
-    leg?: string;
-    customer_collecting?: boolean;
-    customer_returning?: boolean;
-  };
-  /** The stored `fulfillments` source payload — `orders`' successor label. */
+  /** The stored `fulfillments` source payload — event cards only. */
   fulfillments?: {
     leg?: string;
     customer_collecting?: boolean;

@@ -234,14 +234,14 @@ const dest = (uid: string | null) => ({ uid, address: null, instructions: null, 
 
 Deno.test("cardPickBucket: a :start leg the customer COLLECTS is customer-collect", () => {
   assertEquals(
-    cardPickBucket({ destination: dest("store0000000000000000"), orders: { leg: "start", customer_collecting: true } }),
+    cardPickBucket({ destination: dest("store0000000000000000"), fulfillments: { leg: "start", customer_collecting: true } }),
     PICK_BUCKET_CUSTOMER_COLLECT,
   );
 });
 
 Deno.test("cardPickBucket: a :start leg we DELIVER is its destination uid", () => {
   assertEquals(
-    cardPickBucket({ destination: dest("dest1000000000000000"), orders: { leg: "start", customer_collecting: false } }),
+    cardPickBucket({ destination: dest("dest1000000000000000"), fulfillments: { leg: "start", customer_collecting: false } }),
     "dest1000000000000000",
   );
 });
@@ -250,18 +250,7 @@ Deno.test("cardPickBucket: an :end leg reads customer_RETURNING, not collecting"
   // Both polarities of the end arm, so a helper that read the start flag for
   // every leg (it has none here) cannot pass.
   assertEquals(
-    cardPickBucket({ destination: dest("store0000000000000000"), orders: { leg: "end", customer_returning: true } }),
-    PICK_BUCKET_CUSTOMER_COLLECT,
-  );
-  assertEquals(
-    cardPickBucket({ destination: dest("dest1000000000000000"), orders: { leg: "end", customer_returning: false } }),
-    "dest1000000000000000",
-  );
-});
-
-Deno.test("cardPickBucket: reads the fulfillments payload, the current source label", () => {
-  assertEquals(
-    cardPickBucket({ destination: dest("store0000000000000000"), fulfillments: { leg: "start", customer_collecting: true } }),
+    cardPickBucket({ destination: dest("store0000000000000000"), fulfillments: { leg: "end", customer_returning: true } }),
     PICK_BUCKET_CUSTOMER_COLLECT,
   );
   assertEquals(
@@ -270,11 +259,11 @@ Deno.test("cardPickBucket: reads the fulfillments payload, the current source la
   );
 });
 
-Deno.test("cardPickBucket: no orders payload is null, never a guess from destination.uid", () => {
+Deno.test("cardPickBucket: no fulfillments payload is null, never a guess from destination.uid", () => {
   assertEquals(cardPickBucket({ destination: dest("store0000000000000000") }), null);
 });
 
 Deno.test("cardPickBucket: a delivered leg with no destination uid is null", () => {
-  assertEquals(cardPickBucket({ destination: dest(null), orders: { leg: "start", customer_collecting: false } }), null);
-  assertEquals(cardPickBucket({ destination: null, orders: { leg: "start", customer_collecting: false } }), null);
+  assertEquals(cardPickBucket({ destination: dest(null), fulfillments: { leg: "start", customer_collecting: false } }), null);
+  assertEquals(cardPickBucket({ destination: null, fulfillments: { leg: "start", customer_collecting: false } }), null);
 });

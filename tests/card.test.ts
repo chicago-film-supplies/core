@@ -48,7 +48,8 @@ const validCard = {
     uid: "org10000000000000000",
     path: [{ uid: "org10000000000000000", name: "Acme Productions", derived: false }],
   },
-  sources: [{ collection: "orders", uid: "order100000000000000" }],
+  sources: [{ collection: "fulfillments", uid: "order100000000000000" }],
+  fulfillments: { leg: "start", customer_collecting: false },
   attachments: [],
   uid_assignees: [],
   locked: ["card", "subject", "sources"],
@@ -62,13 +63,14 @@ const validCard = {
 };
 
 /**
- * The HAND-AUTHORED to-do: no order source, so no destination, no organization
+ * The HAND-AUTHORED to-do: no event source, so no source payload, no destination, no organization
  * and no date. 7 of these exist in dev and none in prod, and they are why
  * `destination` / `organization` / `date_fs` stay nullable on the schema
  * instead of being required outright.
  */
+const { fulfillments: _eventPayload, ...validCardWithoutPayload } = validCard;
 const validTodoCard = {
-  ...validCard,
+  ...validCardWithoutPayload,
   uid: "card1000000000000000",
   uid_thread: "thread10000000000000",
   sources: [],
@@ -153,7 +155,7 @@ Deno.test("checkEventCard: the SAME nulls on a to-do are accepted — the refine
   assertEquals(CardSchema.safeParse(validTodoCard).success, true);
 });
 
-Deno.test("checkEventCard: a NON-orders source does not make a card an event card", () => {
+Deno.test("checkEventCard: a non-fulfillments source does not make a card an event card", () => {
   const doc = {
     ...validTodoCard,
     sources: [{ collection: "organizations", uid: "org10000000000000000" }],
@@ -165,7 +167,7 @@ Deno.test("CardSchema accepts multiple polymorphic sources", () => {
   const doc = {
     ...validCard,
     sources: [
-      { collection: "orders", uid: "order100000000000000" },
+      { collection: "fulfillments", uid: "order100000000000000" },
       { collection: "organizations", uid: "org10000000000000000" },
     ],
   };
@@ -334,96 +336,56 @@ for (const key of ["action", "organization"] as const) {
   });
 }
 
-// ── The `orders` source payload ──────────────────────────────────────
+// ── The `fulfillments` source payload ─────────────────────────────────
 
-Deno.test("orders payload: a :start card carrying leg=start is ACCEPTED", () => {
-  const doc = { ...validCard, orders: { leg: "start", customer_collecting: true } };
-  assertEquals(CardSchema.safeParse(doc).success, true);
-});
-
-Deno.test("orders payload: ABSENT on an event card is still ACCEPTED (pre-backfill)", () => {
-  // ⚠️ Delete when `checkEventCard` makes it required on the event-card kind.
-  assertEquals("orders" in validCard, false);
+Deno.test("fulfillments payload: a :start card carrying leg=start is ACCEPTED", () => {
   assertEquals(CardSchema.safeParse(validCard).success, true);
 });
 
-Deno.test("orders payload: leg disagreeing with the id's :start is REFUSED", () => {
-  const doc = { ...validCard, orders: { leg: "end", customer_returning: false } };
+Deno.test("fulfillments payload: ABSENT on an event card is REFUSED — required since the relabel", () => {
+  const { fulfillments: _payload, ...doc } = validCard;
   const r = CardSchema.safeParse(doc);
   assertEquals(r.success, false);
-  if (!r.success) assertEquals(r.error.issues.map((i) => i.path.join(".")), ["orders.leg"]);
+  if (!r.success) assertEquals(r.error.issues.map((i) => i.path.join(".")), ["fulfillments"]);
 });
 
-Deno.test("orders payload: leg=end on an :end card is ACCEPTED — the pin is not a constant", () => {
-  // The other polarity: without it a refinement refusing every `end` would pass
-  // the test above.
-  const uid = validCard.uid.replace(/:start$/, ":end");
-  const doc = { ...validCard, uid, uid_thread: uid, orders: { leg: "end", customer_returning: true } };
-  assertEquals(CardSchema.safeParse(doc).success, true);
-});
-
-Deno.test("orders payload: the flag must match the leg's arm — start carries customer_collecting", () => {
-  const doc = { ...validCard, orders: { leg: "start", customer_returning: true } };
-  assertEquals(CardSchema.safeParse(doc).success, false);
-});
-
-Deno.test("orders payload: PRESENT on a to-do is REFUSED — present iff the source is", () => {
-  const doc = { ...validTodoCard, orders: { leg: "start", customer_collecting: false } };
+Deno.test("fulfillments payload: leg disagreeing with the id's :start is REFUSED", () => {
+  const doc = { ...validCard, fulfillments: { leg: "end", customer_returning: false } };
   const r = CardSchema.safeParse(doc);
-  assertEquals(r.success, false);
-  if (!r.success) assertEquals(r.error.issues.map((i) => i.path.join(".")), ["orders"]);
-});
-
-Deno.test("orders payload: null is REFUSED — absent, never null", () => {
-  assertEquals(CardSchema.safeParse({ ...validCard, orders: null }).success, false);
-});
-
-// ── The `fulfillments` source payload (the transition from `orders`) ──
-
-const fulfillmentCard = {
-  ...validCard,
-  sources: [{ collection: "fulfillments", uid: "order100000000000000" }],
-};
-
-Deno.test("fulfillments source: an event card sourced from a fulfillment is an EVENT card", () => {
-  // The per-kind requirements apply to it exactly as to the `orders` label.
-  assertEquals(CardSchema.safeParse(fulfillmentCard).success, true);
-  assertEquals(CardSchema.safeParse({ ...fulfillmentCard, destination: null }).success, false);
-});
-
-Deno.test("fulfillments source: its payload rides under `fulfillments`, pinned to the id's leg", () => {
-  const ok = { ...fulfillmentCard, fulfillments: { leg: "start", customer_collecting: false } };
-  assertEquals(CardSchema.safeParse(ok).success, true);
-  const r = CardSchema.safeParse({ ...fulfillmentCard, fulfillments: { leg: "end", customer_returning: false } });
   assertEquals(r.success, false);
   if (!r.success) assertEquals(r.error.issues.map((i) => i.path.join(".")), ["fulfillments.leg"]);
 });
 
-Deno.test("fulfillments source: the payload under the OTHER label's key is REFUSED", () => {
-  // Crossed halves of the transition: a fulfillment-sourced card carrying the
-  // `orders` key, and the reverse.
-  const a = CardSchema.safeParse({ ...fulfillmentCard, orders: { leg: "start", customer_collecting: false } });
-  assertEquals(a.success, false);
-  if (!a.success) assertEquals(a.error.issues.map((i) => i.path.join(".")), ["orders"]);
-  const b = CardSchema.safeParse({ ...validCard, fulfillments: { leg: "start", customer_collecting: false } });
-  assertEquals(b.success, false);
-  if (!b.success) assertEquals(b.error.issues.map((i) => i.path.join(".")), ["fulfillments"]);
+Deno.test("fulfillments payload: leg=end on an :end card is ACCEPTED — the pin is not a constant", () => {
+  // The other polarity: without it a refinement refusing every `end` would pass
+  // the test above.
+  const uid = validCard.uid.replace(/:start$/, ":end");
+  const doc = { ...validCard, uid, uid_thread: uid, fulfillments: { leg: "end", customer_returning: true } };
+  assertEquals(CardSchema.safeParse(doc).success, true);
 });
 
-Deno.test("fulfillments source: naming BOTH event sources is REFUSED", () => {
-  const r = CardSchema.safeParse({
-    ...validCard,
-    sources: [
-      { collection: "orders", uid: "order100000000000000" },
-      { collection: "fulfillments", uid: "order100000000000000" },
-    ],
-  });
-  assertEquals(r.success, false);
-  if (!r.success) assertEquals(r.error.issues.map((i) => i.path.join(".")), ["sources"]);
+Deno.test("fulfillments payload: the flag must match the leg's arm — start carries customer_collecting", () => {
+  const doc = { ...validCard, fulfillments: { leg: "start", customer_returning: true } };
+  assertEquals(CardSchema.safeParse(doc).success, false);
 });
 
-Deno.test("fulfillments source: PRESENT on a to-do is REFUSED", () => {
-  const r = CardSchema.safeParse({ ...validTodoCard, fulfillments: { leg: "start", customer_collecting: false } });
+Deno.test("fulfillments payload: PRESENT on a to-do is REFUSED — present iff the source is", () => {
+  const doc = { ...validTodoCard, fulfillments: { leg: "start", customer_collecting: false } };
+  const r = CardSchema.safeParse(doc);
   assertEquals(r.success, false);
   if (!r.success) assertEquals(r.error.issues.map((i) => i.path.join(".")), ["fulfillments"]);
+});
+
+Deno.test("fulfillments payload: null is REFUSED — absent, never null", () => {
+  assertEquals(CardSchema.safeParse({ ...validCard, fulfillments: null }).success, false);
+});
+
+Deno.test("the retired `orders` label: its payload key is REFUSED, and its source marks no event card", () => {
+  // The contract step (P4 of the api-cloudrun cards-from-fulfillments plan):
+  // both corpora read 0 `orders`-labelled event cards before it was taken.
+  assertEquals(CardSchema.safeParse({ ...validCard, orders: { leg: "start", customer_collecting: false } }).success, false);
+  // An `orders` source alone is not an event card, so a to-do shaped like one
+  // passes the per-kind nulls.
+  const todo = { ...validTodoCard, sources: [{ collection: "orders", uid: "order100000000000000" }] };
+  assertEquals(CardSchema.safeParse(todo).success, true);
 });
