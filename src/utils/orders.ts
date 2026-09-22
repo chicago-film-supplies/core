@@ -2794,6 +2794,10 @@ export function buildDestinationPairWithDivider(
     collection: input.collection,
     customer_collecting: input.customer_collecting ?? false,
     customer_returning: input.customer_returning ?? false,
+    // 🔴 Required-nullable on the stored pair, so it is always written. This
+    // mints an ORDINARY leg — a swap is never minted here, because an exchange
+    // pair names a parent that must already exist on the document.
+    exchange: null,
   };
   // ⚠️ ONE representation for "asserts nothing", and it is an ABSENT key —
   // `buildDestinationPair` (api-cloudrun) and `resolveJurisdiction` both read

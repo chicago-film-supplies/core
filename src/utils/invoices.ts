@@ -2743,6 +2743,13 @@ export function toInvoiceDestinationPair(
 ): InvoiceDestinationPair {
   const out: Record<string, unknown> = { uid_order: uidOrder };
   for (const [key, value] of Object.entries(pair)) out[key] = value ?? null;
+  // 🔴 **`exchange` is required-nullable on the stored pair, and this loop
+  // copies KEYS — so an order pair that predates the field would project an
+  // invoice pair missing it, which the stored schema then refuses.** Every order
+  // now carries the key (backfilled), so this is belt-and-braces; it is stated
+  // anyway because the alternative is an invoice write whose validity depends on
+  // the vintage of a document it is projecting FROM.
+  out.exchange = pair.exchange ?? null;
   return out as unknown as InvoiceDestinationPair;
 }
 

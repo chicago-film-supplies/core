@@ -43,6 +43,7 @@ import type {
   InvoiceDocItemType,
   FirestoreTimestampType,
   InvoiceStatusType,
+  DestinationExchangeType,
   JurisdictionType,
   OrderDocDatesType,
   SettlementReasonType,
@@ -1508,6 +1509,7 @@ function makePair(
     customer_collecting?: boolean;
     customer_returning?: boolean;
     jurisdiction?: JurisdictionType | null;
+    exchange?: DestinationExchangeType | null;
   } = {},
 ) {
   return {
@@ -1518,6 +1520,8 @@ function makePair(
     customer_collecting: overrides.customer_collecting ?? false,
     customer_returning: overrides.customer_returning ?? false,
     jurisdiction: overrides.jurisdiction ?? null,
+    // Required-nullable on the stored pair: `null` is an ordinary leg.
+    exchange: overrides.exchange ?? null,
   };
 }
 

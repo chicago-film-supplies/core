@@ -106,6 +106,8 @@ function pair(uid: string, deliveryUid: string | null, opts: PairOpts = {}): Doc
     collection: { uid: deliveryUid, address: null, instructions: null, contact: null },
     customer_collecting: opts.collecting ?? false,
     customer_returning: opts.returning ?? false,
+    // Required-nullable on the stored pair: `null` is an ordinary leg.
+    exchange: null,
   };
 }
 

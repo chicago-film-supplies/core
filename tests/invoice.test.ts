@@ -63,6 +63,8 @@ const validDestination = {
   // where the flags are required.
   customer_collecting: false,
   customer_returning: false,
+  // Required-nullable on the stored pair: `null` is an ordinary leg.
+  exchange: null,
 };
 
 const validInvoice = {

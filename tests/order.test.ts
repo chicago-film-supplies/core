@@ -308,6 +308,10 @@ Deno.test("DocDestination REFUSES a pair that omits customer_collecting/returnin
     dates: validDocDates,
     delivery: { uid: null, address: null, instructions: null, contact: null },
     collection: { uid: null, address: null, instructions: null, contact: null },
+    // Stated for the same reason the dates above are: `exchange` is
+    // required-nullable, so omitting it would add a THIRD issue and the
+    // assertion below would pass for the wrong reason. The subject is the flags.
+    exchange: null,
   };
   const refused = DocDestination.safeParse(withoutFlags);
   assertEquals(refused.success, false, "an omitted flag must not parse to `false`");
@@ -847,6 +851,7 @@ Deno.test("OrderSchema validates destination with contact", () => {
       },
       customer_collecting: false,
       customer_returning: false,
+      exchange: null,
     }],
   };
   assertEquals(OrderSchema.safeParse(doc).success, true);

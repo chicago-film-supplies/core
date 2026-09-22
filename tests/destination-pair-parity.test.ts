@@ -166,6 +166,10 @@ Deno.test("InvoiceDocDestination REFUSES a pair that omits customer_collecting/r
     },
     delivery: { uid: null, address: null, instructions: null, contact: null },
     collection: { uid: null, address: null, instructions: null, contact: null },
+    // Stated for the same reason the dates above are: `exchange` is
+    // required-nullable, so omitting it would add a THIRD issue and the
+    // assertion below would pass for the wrong reason. The subject is the flags.
+    exchange: null,
   };
 
   const refused = InvoiceDocDestination.safeParse(base);

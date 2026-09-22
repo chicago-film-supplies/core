@@ -689,10 +689,20 @@ export interface DocDestinationType {
    * document — see {@link DestinationExchangeType}. `null`/absent is an
    * ordinary leg, which is nearly every pair.
    *
-   * Optional while the readers ship ahead of the writers (the add-a-field
-   * order); it becomes required-nullable once every stored pair carries the key.
+   * 🔴 **REQUIRED-NULLABLE** since the api-cloudrun#1107 backfill: `null` is an
+   * ordinary leg and the key is always present, so a reader never has to tell
+   * "no swap" from "this document predates swaps". It shipped
+   * `.nullable().optional()` so the readers could deploy ahead of the writers,
+   * and tightened once every stored pair carried the key
+   * (`api-cloudrun/scripts/audit-destination-exchange.ts` is the census that
+   * licensed it).
+   *
+   * ⚠️ **The INPUT twin (`DestinationType.exchange`) stays optional**, and that
+   * asymmetry is the house rule rather than an oversight: tighten the STORED
+   * schema and default it at the writer, never the input, or every client has to
+   * ship before the API can.
    */
-  exchange?: DestinationExchangeType | null;
+  exchange: DestinationExchangeType | null;
 }
 
 /**
@@ -746,7 +756,7 @@ export const DestinationPairCore: {
   customer_collecting: z.ZodType<boolean>;
   customer_returning: z.ZodType<boolean>;
   jurisdiction: z.ZodOptional<z.ZodNullable<z.ZodType<JurisdictionType>>>;
-  exchange: z.ZodOptional<z.ZodNullable<z.ZodType<DestinationExchangeType>>>;
+  exchange: z.ZodNullable<z.ZodType<DestinationExchangeType>>;
 } = {
   // The destination divider's uid — see {@link DocDestinationType.uid}. Typed
   // `z.uuid()` to match `DestinationDividerArm.uid` exactly, because it IS that
@@ -813,7 +823,14 @@ export const DestinationPairCore: {
   // what makes a swap a per-field three-way merge like every other pair value —
   // see {@link DestinationExchangeType}. No `column: true`: a swap is read off
   // the pair's own row in the editor, not tabulated.
-  exchange: DestinationExchange.nullable().optional(),
+  //
+  // ⚠️ **Unlabelled on purpose, and that has a second consequence worth knowing**:
+  // `meaningfulChangedPaths` filters the activity feed on LABELLED paths, so a
+  // swap writes no activity row. That is not a swap-shaped gap — `fulfillments`
+  // is in no activity feed at all (chicago-film-supplies/api-cloudrun#1112) —
+  // and labelling this field would only cover order-authored swaps while making
+  // any future corpus write emit a row per document.
+  exchange: DestinationExchange.nullable(),
 };
 
 /**
