@@ -22692,7 +22692,7 @@ interface BaseLogFields {
 Msg literals this archetype absorbs.
 
 ```ts
-const CALENDAR_EVENT_MSGS: "calendar_event_adopted" | "calendar_event_not_found" | "calendar_event_stale" | "calendar_missing_date" | "calendar_not_configured" | "calendar_not_found" | "calendar_search_failed" | "calendar_update_superseded"[];
+const CALENDAR_EVENT_MSGS: "calendar_event_not_found" | "calendar_missing_date" | "calendar_not_configured" | "calendar_not_found" | "calendar_update_superseded"[];
 ```
 
 ### `CLOUD_TASK_EVENT_MSGS`
@@ -22712,8 +22712,8 @@ interface CalendarEventLogRecord {
   level: LogLevelType;
   msg: CalendarEventMsg;
   ts: string;
-  booking_uid?: string;
-  calendar_event_id?: string;
+  card_uid?: string;
+  calendar_id?: string;
   request_id?: string;
   method?: string;
   path?: string;

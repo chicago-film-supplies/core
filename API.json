@@ -10003,7 +10003,7 @@
         {
           "kind": "variable",
           "name": "CALENDAR_EVENT_MSGS",
-          "declaration": "const CALENDAR_EVENT_MSGS: \"calendar_event_adopted\" | \"calendar_event_not_found\" | \"calendar_event_stale\" | \"calendar_missing_date\" | \"calendar_not_configured\" | \"calendar_not_found\" | \"calendar_search_failed\" | \"calendar_update_superseded\"[];",
+          "declaration": "const CALENDAR_EVENT_MSGS: \"calendar_event_not_found\" | \"calendar_missing_date\" | \"calendar_not_configured\" | \"calendar_not_found\" | \"calendar_update_superseded\"[];",
           "doc": "Msg literals this archetype absorbs."
         },
         {
@@ -10015,7 +10015,7 @@
         {
           "kind": "interface",
           "name": "CalendarEventLogRecord",
-          "declaration": "interface CalendarEventLogRecord {\n  level: LogLevelType;\n  msg: CalendarEventMsg;\n  ts: string;\n  booking_uid?: string;\n  calendar_event_id?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
+          "declaration": "interface CalendarEventLogRecord {\n  level: LogLevelType;\n  msg: CalendarEventMsg;\n  ts: string;\n  card_uid?: string;\n  calendar_id?: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
           "doc": "Structured log entry for any Google Calendar sync event."
         },
         {

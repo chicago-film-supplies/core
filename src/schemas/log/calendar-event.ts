@@ -1,9 +1,10 @@
 /**
  * Google Calendar sync archetype — emitted by `api-cloudrun/src/lib/calendar.ts` and
- * `api-cloudrun/src/services/calendarUpdate.ts`. Bookings flow to a shared CFS
- * calendar; these msgs cover the sync lifecycle and drift detection.
+ * `api-cloudrun/src/services/calendarUpdate.ts`. Each event card maps to one event on
+ * a shared CFS calendar, at an id derived from the card uid; these msgs cover the
+ * sync lifecycle.
  *
- * **PII posture**: none. Calendar event ids are Google-issued opaque ids.
+ * **PII posture**: none. Card uids and calendar ids are opaque ids.
  */
 
 import { z } from "zod";
@@ -11,13 +12,10 @@ import { baseLogFields, type LogLevelType } from "./base.ts";
 
 /** Msg literals this archetype absorbs. */
 export const CALENDAR_EVENT_MSGS = [
-  "calendar_event_adopted",
   "calendar_event_not_found",
-  "calendar_event_stale",
   "calendar_missing_date",
   "calendar_not_configured",
   "calendar_not_found",
-  "calendar_search_failed",
   "calendar_update_superseded",
 ] as const;
 
@@ -29,8 +27,8 @@ export interface CalendarEventLogRecord {
   level: LogLevelType;
   msg: CalendarEventMsg;
   ts: string;
-  booking_uid?: string;
-  calendar_event_id?: string;
+  card_uid?: string;
+  calendar_id?: string;
   request_id?: string;
   method?: string;
   path?: string;
@@ -45,6 +43,6 @@ export interface CalendarEventLogRecord {
 export const CalendarEventLogRecordSchema: z.ZodType<CalendarEventLogRecord> = z.object({
   ...baseLogFields,
   msg: z.enum(CALENDAR_EVENT_MSGS),
-  booking_uid: z.string().optional(),
-  calendar_event_id: z.string().optional(),
+  card_uid: z.string().optional(),
+  calendar_id: z.string().optional(),
 }).passthrough().meta({ title: "CalendarEventLogRecord" });
