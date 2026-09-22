@@ -36,6 +36,7 @@ import {
   StockMethodEnum,
   type StockMethodType,
   SubstitutedForList,
+  SwapReplacementList,
   type SubstitutedForEntryType,
   TimestampFields,
 } from "./common.ts";
@@ -149,6 +150,19 @@ export interface FulfillmentLineItemType {
    * for, with how many units each — see `SubstitutedForList` (manager#414).
    */
   substituted_for?: SubstitutedForEntryType[];
+  /**
+   * Set on a mid-rental SWAP's replacement line: the DAMAGED rows this one is
+   * going out against, with how many units each — see `SwapReplacementList`.
+   *
+   * ⚠️ **Not `substituted_for`, and the difference is physical**: a substitution
+   * means X never left the warehouse, so the netting cancels its booking; a swap
+   * means X is on set and damaged, so its booking is KEPT and its units are what
+   * the operator marks damaged when the swap's trip completes.
+   *
+   * Only valid on a row under a pair carrying `exchange` — asserted at the
+   * document level, because a row cannot see its own pair.
+   */
+  replaces?: SubstitutedForEntryType[];
 }
 
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
@@ -175,6 +189,7 @@ const FulfillmentLineItemInner = z.strictObject({
   uid_order: FirestoreId.optional(),
   quantity_order: z.number().int().min(0).optional(),
   substituted_for: SubstitutedForList.optional(),
+  replaces: SwapReplacementList.optional(),
   // 🔴 Attached to the **Inner** const so `FulfillmentItem`'s discriminated union
   // below enforces it, matching `order.ts` and (since 2026-09-09) `invoice.ts`.
   // ⚠️ It is VACUOUS at this grain and that is deliberate rather than an
@@ -305,6 +320,13 @@ export interface FulfillmentItemInputLineType {
    * as on the stored line.
    */
   substituted_for?: SubstitutedForEntryType[];
+  /**
+   * The damaged rows a swap's replacement line goes out against — see the
+   * stored line's `replaces`. It needs an input channel for the reason this file
+   * records above: a plain `z.object` STRIPS an undeclared key, so without it a
+   * picker write would silently drop the swap's link to what it replaces.
+   */
+  replaces?: SubstitutedForEntryType[];
   /** Declared so the service can REFUSE it — see the note above. */
   quantity_order?: number;
 }
@@ -314,6 +336,7 @@ const FulfillmentItemInputLineInner = z.object({
   path: z.array(ItemUid),
   quantity: z.number().int().min(0),
   substituted_for: SubstitutedForList.optional(),
+  replaces: SwapReplacementList.optional(),
   // Same declaration as the stored line's, so a body carrying it survives the
   // parse and reaches `updateFulfillmentItems`' explicit refusal.
   quantity_order: z.number().int().min(0).optional(),
@@ -449,6 +472,61 @@ export interface Fulfillment {
   updated_at: FirestoreTimestampType;
 }
 
+/**
+ * A `replaces` entry is a claim about two rows of THIS document, so only the
+ * document can check it:
+ *
+ * 1. the row carrying it sits under a pair marked `exchange` — a swap's
+ *    replacement line, not an ordinary one;
+ * 2. every path it names is a row under that pair's PARENT leg — the damaged
+ *    units are on the leg being swapped against, by definition.
+ *
+ * ⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without
+ * it a swap could name a row on an unrelated leg, and the checkout rider would
+ * mark units damaged on a trip that never carried them.
+ */
+function checkSwapReplacements(
+  doc: { destinations: DocDestinationType[]; items: FulfillmentItemType[] },
+  ctx: z.RefinementCtx,
+): void {
+  const exchangeByPair = new Map(
+    doc.destinations.filter((p) => p.exchange != null).map((p) => [p.uid, p.exchange!.uid_pair]),
+  );
+  const pathsUnderPair = new Map<string, Set<string>>();
+  for (const item of doc.items) {
+    const leg = item.path[0];
+    if (leg === undefined) continue;
+    const set = pathsUnderPair.get(leg) ?? new Set<string>();
+    set.add(item.path.join("/"));
+    pathsUnderPair.set(leg, set);
+  }
+
+  doc.items.forEach((item, i) => {
+    const entries = (item as { replaces?: SubstitutedForEntryType[] }).replaces;
+    if (entries === undefined) return;
+    const leg = item.path[0];
+    const parentLeg = leg === undefined ? undefined : exchangeByPair.get(leg);
+    if (parentLeg === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["items", i, "replaces"],
+        message: "replaces is valid only on a row under a destination pair marked as an exchange",
+      });
+      return;
+    }
+    const underParent = pathsUnderPair.get(parentLeg) ?? new Set<string>();
+    entries.forEach((entry, j) => {
+      if (!underParent.has(entry.path.join("/"))) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["items", i, "replaces", j, "path"],
+          message: `replaces names ${entry.path.join("/")}, which is not a row on the leg this swap exchanges against`,
+        });
+      }
+    });
+  });
+}
+
 export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   uid: FirestoreId,
   number: z.int().meta({
@@ -496,7 +574,7 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   query_by_dates: z.array(z.string()),
   version: z.int().min(0).default(0),
   ...TimestampFields,
-}).superRefine(checkStoredEndpoints).meta({
+}).superRefine(checkStoredEndpoints).superRefine(checkSwapReplacements).meta({
   title: "Fulfillment",
   collection: "fulfillments",
   displayDefaults: {

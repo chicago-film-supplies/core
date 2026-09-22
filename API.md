@@ -4151,6 +4151,7 @@ interface FulfillmentItemInputLineType {
   path: string[];
   quantity: number;
   substituted_for?: SubstitutedForEntryType[];
+  replaces?: SubstitutedForEntryType[];
   quantity_order?: number;
 }
 ```
@@ -4187,6 +4188,7 @@ interface FulfillmentLineItemType {
   uid_order?: string;
   quantity_order?: number;
   substituted_for?: SubstitutedForEntryType[];
+  replaces?: SubstitutedForEntryType[];
 }
 ```
 
@@ -14158,6 +14160,41 @@ could not be reversed.
 const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]>;
 ```
 
+### `SwapReplacementList`
+
+`replaces` on a swap's replacement line: the DAMAGED rows this row is going
+out against, with how many units each.
+
+⭐ **Same shape as {@link SubstitutedForList}, deliberately, and a different
+meaning.** Both say "this row stands in relation to those rows, by this many
+units", so they share an entry schema and every rule that reads a
+`{path, quantity}[]` — the carry-forward across a rebuild, the row-identity
+rules, the document diff. What differs is the physical story, and it is the
+whole distinction:
+
+| | `substituted_for` | `replaces` |
+|---|---|---|
+| X went out | no — Y went instead | yes, and it is out NOW |
+| X's booking | cancelled by the netting | kept, and marked damaged |
+| why | the picker had no X on the shelf | the customer damaged X mid-rental |
+
+🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a
+substitution away — X's booking is cancelled and Y's inherits its custody —
+which is exactly the wrong answer for a swap, where X is on set and its units
+are what the operator is about to mark damaged.
+
+⚠️ **It lives on the ROW rather than on the exchange PAIR**, because a swap
+TRIP legitimately carries replacements for several damaged lines at once: one
+leg, one card, one drive. A pair-level field would force one leg per damaged
+line and put three trip cards on the dispatch board for one physical trip —
+and it would state "what" a level above the `quantity` that says "how many".
+Trip facts (which leg it returns on, whether X comes back on it) stay on the
+pair; line facts live here.
+
+```ts
+const SwapReplacementList: z.ZodType<SubstitutedForEntryType[]>;
+```
+
 ### `TAX_JURISDICTIONS`
 
 **Who can LEVY a tax** — every {@link JurisdictionType} except `no_nexus`.
@@ -18137,6 +18174,7 @@ interface FulfillmentItemInputLineType {
   path: string[];
   quantity: number;
   substituted_for?: SubstitutedForEntryType[];
+  replaces?: SubstitutedForEntryType[];
   quantity_order?: number;
 }
 ```
@@ -18173,6 +18211,7 @@ interface FulfillmentLineItemType {
   uid_order?: string;
   quantity_order?: number;
   substituted_for?: SubstitutedForEntryType[];
+  replaces?: SubstitutedForEntryType[];
 }
 ```
 

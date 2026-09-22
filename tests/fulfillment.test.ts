@@ -9,8 +9,11 @@
 import { assertEquals } from "@std/assert";
 import {
   FulfillmentItemInputLine,
+  FulfillmentSchema,
   UpdateFulfillmentItemsInput,
 } from "../src/schemas/fulfillment.ts";
+import { getTestDoc } from "../src/schemas/testing.ts";
+import { mockTimestamp } from "./helpers/timestamp.ts";
 
 // ── The input schema, and the field list it must not narrow ──────────
 
@@ -107,4 +110,77 @@ Deno.test("UpdateFulfillmentItemsInput requires a version and defaults lineItems
   assertEquals(UpdateFulfillmentItemsInput.safeParse({ version: 0 }).success, true);
   assertEquals(UpdateFulfillmentItemsInput.safeParse({}).success, false, "version gates optimistic concurrency and cannot be omitted");
   assertEquals(UpdateFulfillmentItemsInput.safeParse({ version: 1.5 }).success, false);
+});
+
+// ── A swap's replacement line, and what it may replace ───────────────
+
+Deno.test("FulfillmentItemInputLine carries `replaces` through a parse", () => {
+  // Same claim as the `substituted_for` arm above, for the swap's own field: a
+  // plain `z.object` strips an undeclared key, so without this declaration the
+  // request would succeed and the link to the damaged row would be gone.
+  const parsed = FulfillmentItemInputLine.safeParse({
+    uid: "Item0000000000000009",
+    path: ["Destination000000002", "Item0000000000000009"],
+    quantity: 1,
+    replaces: [{ path: ["Destination000000001", "Item0000000000000001"], quantity: 1 }],
+  });
+  assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
+  assertEquals(parsed.success && parsed.data.replaces?.[0].quantity, 1);
+});
+
+const PARENT_LEG = "11111111-1111-4111-8111-111111111111";
+const SWAP_LEG = "22222222-2222-4222-8222-222222222222";
+const X_ROW = "Item0000000000000001";
+const Y_ROW = "Item0000000000000009";
+
+/** A fulfillment with a parent leg, a swap leg against it, and a row on each. */
+function swapDoc(replaces: unknown, opts: { markExchange?: boolean } = {}) {
+  const base = getTestDoc(FulfillmentSchema, {
+    uid: "testfulfillment00001",
+    created_at: mockTimestamp,
+    updated_at: mockTimestamp,
+  }, { now: mockTimestamp });
+  const pair = base.destinations[0] as unknown as Record<string, unknown>;
+  // `getTestDoc` builds an EMPTY items array (measured), so the rows are stated
+  // here — the minimum a `FulfillmentLineItem` needs to parse.
+  const line = { type: "rental", name: "Light", description: "", quantity: 2, zero_priced: null };
+  return {
+    ...base,
+    destinations: [
+      { ...pair, uid: PARENT_LEG },
+      {
+        ...pair,
+        uid: SWAP_LEG,
+        ...(opts.markExchange === false ? {} : { exchange: { uid_pair: PARENT_LEG, disposition: "exchange" } }),
+      },
+    ],
+    items: [
+      { uid: PARENT_LEG, type: "destination", name: "Set", description: "", path: [PARENT_LEG] },
+      { ...line, uid: X_ROW, path: [PARENT_LEG, X_ROW] },
+      { uid: SWAP_LEG, type: "destination", name: "Exchange", description: "", path: [SWAP_LEG] },
+      { ...line, uid: Y_ROW, quantity: 1, path: [SWAP_LEG, Y_ROW], replaces },
+    ],
+  };
+}
+
+Deno.test("FulfillmentSchema accepts `replaces` naming a row on the leg the swap exchanges against", () => {
+  const parsed = FulfillmentSchema.safeParse(swapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1 }]));
+  assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
+});
+
+Deno.test("FulfillmentSchema refuses `replaces` on a row that is not under an exchange pair", () => {
+  // 🔴 The field says "this row goes out against a damaged one", which is only
+  // meaningful on a swap's trip. Off a swap it would be a free-form pointer.
+  const parsed = FulfillmentSchema.safeParse(
+    swapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1 }], { markExchange: false }),
+  );
+  assertEquals(parsed.success, false);
+});
+
+Deno.test("FulfillmentSchema refuses `replaces` naming a row on some OTHER leg", () => {
+  // The damaged units are on the leg being swapped against, by definition —
+  // otherwise the checkout rider marks units damaged on a trip that never
+  // carried them.
+  const parsed = FulfillmentSchema.safeParse(swapDoc([{ path: [SWAP_LEG, Y_ROW], quantity: 1 }]));
+  assertEquals(parsed.success, false);
 });
