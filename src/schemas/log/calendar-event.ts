@@ -16,7 +16,6 @@ export const CALENDAR_EVENT_MSGS = [
   "calendar_missing_date",
   "calendar_not_configured",
   "calendar_not_found",
-  "calendar_update_superseded",
 ] as const;
 
 /** Discriminated msg union for Calendar-archetype log records. */

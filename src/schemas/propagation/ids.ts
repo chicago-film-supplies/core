@@ -115,6 +115,7 @@ export type TransactionId =
   | "update-fulfillment-items"
   | "update-fulfillment-destinations"
   | "reset-fulfillment"
+  | "reconcile-fulfillment-cards"
   // taxes.ts
   | "create-tax-code"
   | "update-tax-code"
@@ -281,6 +282,7 @@ export type RuleId =
   | "update-fulfillment-destinations:fulfillment-to-cards"
   | "reset-fulfillment:rebuild-from-order"
   | "reset-fulfillment:fulfillment-to-cards"
+  | "reconcile-fulfillment-cards:fulfillment-to-cards"
   // taxes.ts
   | "create-tax-rate:recompute-live-orders"
   | "create-tax-rate:recompute-live-invoices"

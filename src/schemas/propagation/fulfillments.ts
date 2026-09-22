@@ -75,7 +75,7 @@ const PICKER_WRITE_CASCADES: EnforcementRef = {
 
 /**
  * The fields a fulfillment writes onto its event cards — one list, read by all
- * five `*:fulfillment-to-cards` rules so the five cannot drift.
+ * six `*:fulfillment-to-cards` rules so the six cannot drift.
  *
  * **Event cards are sourced from the FULFILLMENT (owner ruling 2026-09-21).**
  * A card describes what happens on the ground; the order is the quote. So every
@@ -123,6 +123,16 @@ export const FULFILLMENT_TO_CARDS_FIELDS: CollectionRule["fields"] = [
   { source: ["destinations", "dates", "delivery_end"], target: ["dates", "end"] },
   { source: ["destinations", "dates", "collection_start"], target: ["dates", "start"] },
   { source: ["destinations", "dates", "collection_end"], target: ["dates", "end"] },
+  {
+    source: ["destinations", "dates", "delivery_start_fs"],
+    target: ["date_fs"],
+    transform: "the :start card's sortable Timestamp twin of dates.start",
+  },
+  {
+    source: ["destinations", "dates", "collection_start_fs"],
+    target: ["date_fs"],
+    transform: "the :end card's sortable Timestamp twin of dates.start",
+  },
   {
     source: ["destinations", "customer_collecting"],
     target: ["fulfillments"],
@@ -428,6 +438,50 @@ const updateFulfillmentDestinationsTransaction: TransactionDefinition = {
   ],
 };
 
+// ── reconcile-fulfillment-cards ──────────────────────────────────────
+
+/**
+ * The standalone form of the card half every fulfillment writer runs — for a
+ * fulfillment whose cards were stranded by a write that did not reach them.
+ */
+const RECONCILE_REACHES_CARDS: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/fulfillment/reconcileFulfillmentCards.test.ts::a fulfillment with no cards gets them, and a second run writes nothing",
+  clause:
+    "a fulfillment whose cards were deleted out of band gets its `:start`/`:end` cards back from one call, and an immediate second call stages no card write.",
+  gates: true,
+};
+
+const reconcileFulfillmentCardsRules: CollectionRule[] = [
+  {
+    id: "reconcile-fulfillment-cards:fulfillment-to-cards",
+    source: "fulfillments",
+    target: "cards",
+    mode: "co-write",
+    invariant:
+      "A fulfillment's event cards can be re-derived from the fulfillment as stored, on demand, with no write to the fulfillment itself (api-cloudrun#1105 #2, #4)",
+    enforced_by: [RECONCILE_REACHES_CARDS],
+    transaction: "reconcile-fulfillment-cards",
+    fields: FULFILLMENT_TO_CARDS_FIELDS,
+  },
+];
+
+const reconcileFulfillmentCardsTransaction: TransactionDefinition = {
+  id: "reconcile-fulfillment-cards",
+  description:
+    "Re-derive one fulfillment's event cards from the fulfillment as stored, and " +
+    "write only the cards (and any thread a newly derivable card mints). The " +
+    "fulfillment is read, never written. Called by the repair scripts that write " +
+    "fulfillments outside the five card-staging writers, and by api-cloudrun's " +
+    "card repair script for a fulfillment whose cards were stranded.",
+  steps: [
+    "reconcile-fulfillment-cards:fulfillment-to-cards",
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
+  ],
+};
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/fulfillments.ts` contributes to the propagation catalog. */
 export const fulfillments: PropagationModule = {
@@ -438,10 +492,12 @@ export const fulfillments: PropagationModule = {
     ...updateFulfillmentDestinationsCardRules,
     ...resetFulfillmentRules,
     ...resetFulfillmentCardRules,
+    ...reconcileFulfillmentCardsRules,
   ],
   transactions: [
     updateFulfillmentItemsTransaction,
     updateFulfillmentDestinationsTransaction,
     resetFulfillmentTransaction,
+    reconcileFulfillmentCardsTransaction,
   ],
 };
