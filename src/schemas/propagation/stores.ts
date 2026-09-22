@@ -1,5 +1,6 @@
 /**
- * Store propagation rules — the single-default-store cascade.
+ * Store propagation rules — the single-default-store cascade, and closing a
+ * store closes its locations (`update-store:deactivate-locations`).
  *
  * Setting a store as the default unsets `default` on every OTHER active store,
  * enforcing the "only one default store" invariant. Unlike the reference-data
@@ -52,6 +53,28 @@ const STORE_DEFAULT_CORPUS: EnforcementRef = {
   gates: true,
 };
 
+/**
+ * The cascade and its refusal are both writer behaviour, so the tests are
+ * what gate them. The detector covers what they cannot see: a store closed
+ * around the writer, or a movement into a closed location afterwards.
+ */
+const CLOSE_STORE_TESTED: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/stores/stores.test.ts::PUT - deactivating a store closes every location and clears default_location",
+  clause:
+    "every active location of the store goes `active: false, default: false` in the transaction that closes the store, and `default_location` is null. Its sibling step `PUT - refuses to deactivate a store whose locations hold stock` pins the refusal. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+  gates: true,
+};
+
+const CLOSED_STORE_CORPUS: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-location-defaults.ts",
+  clause:
+    "check 7 (`inactive_store_live`): an inactive store has no active location and no location holding stock. Checks 1 and 2 skip an inactive store, since their state is the OPEN store's. It shares `api-cloudrun/src/lib/locationIntegrity.ts` with the nightly `/tasks/sweep-location-integrity`.",
+  gates: true,
+};
+
 const createStoreRules: CollectionRule[] = [
   {
     id: "create-store:unset-sibling-defaults",
@@ -89,6 +112,29 @@ const updateStoreRules: CollectionRule[] = [
         source: [],
         target: ["default"],
         transform: "set false on every other active store where default:true",
+      },
+    ],
+  },
+  {
+    id: "update-store:deactivate-locations",
+    source: "stores",
+    target: "locations",
+    mode: "fan-out",
+    invariant:
+      "A closed store has nothing open and nothing held — deactivating a store deactivates every location it owns and clears `default_location` in the same transaction, and is REFUSED while any of its locations, active or not, holds a non-zero quantity (api-cloudrun#1075, owner 2026-09-22). The cascade replaced a refusal that, composed with the two default-location guards, made a store that owned any location impossible to close",
+    enforced_by: [CLOSE_STORE_TESTED, CLOSED_STORE_CORPUS],
+    trigger:
+      "active flips true→false — in-transaction fan-out over every location where uid_store == this store",
+    fields: [
+      {
+        source: [],
+        target: ["active"],
+        transform: "set false on every location of this store that is active or flagged default",
+      },
+      {
+        source: [],
+        target: ["default"],
+        transform: "set false on the same locations, so no closed location still claims the store's default",
       },
     ],
   },

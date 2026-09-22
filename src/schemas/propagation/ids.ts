@@ -312,6 +312,7 @@ export type RuleId =
   // stores.ts
   | "create-store:unset-sibling-defaults"
   | "update-store:unset-sibling-defaults"
+  | "update-store:deactivate-locations"
   // locations.ts
   | "create-location:default-location-to-store"
   | "update-location:set-default-to-store"
