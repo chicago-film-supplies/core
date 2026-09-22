@@ -3311,6 +3311,7 @@ interface DestinationType {
   customer_collecting?: boolean;
   customer_returning?: boolean;
   jurisdiction?: JurisdictionType | null;
+  exchange?: DestinationExchangeType | null;
 }
 ```
 
@@ -3527,6 +3528,7 @@ interface DocDestinationType {
   customer_collecting: boolean;
   customer_returning: boolean;
   jurisdiction?: JurisdictionType | null;
+  exchange?: DestinationExchangeType | null;
 }
 ```
 
@@ -4591,6 +4593,7 @@ interface Invoice {
   status: InvoiceStatusType;
   query_by_orders: string[];
   number_orders: number[];
+  query_by_out_of_service?: string[];
   tax_exempt?: boolean | null;
   uid_store?: string | null;
   date: string;
@@ -4805,6 +4808,7 @@ interface InvoiceDocLineItemType {
   crms_opportunity_id?: number | null;
   crms_id?: number | string | null;
   substituted_for?: SubstitutedForEntryType[];
+  uid_out_of_service?: string | null;
 }
 ```
 
@@ -4946,6 +4950,7 @@ interface InvoiceItemInputLineType {
   tracking_category?: string | null;
   substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
+  uid_out_of_service?: string | null;
 }
 ```
 
@@ -16060,6 +16065,7 @@ interface Invoice {
   status: InvoiceStatusType;
   query_by_orders: string[];
   number_orders: number[];
+  query_by_out_of_service?: string[];
   tax_exempt?: boolean | null;
   uid_store?: string | null;
   date: string;
@@ -16246,6 +16252,7 @@ interface InvoiceDocLineItemType {
   crms_opportunity_id?: number | null;
   crms_id?: number | string | null;
   substituted_for?: SubstitutedForEntryType[];
+  uid_out_of_service?: string | null;
 }
 ```
 
@@ -16381,6 +16388,7 @@ interface InvoiceItemInputLineType {
   tracking_category?: string | null;
   substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
+  uid_out_of_service?: string | null;
 }
 ```
 
@@ -17001,6 +17009,39 @@ interface DestinationEndpointType {
 }
 ```
 
+### `DestinationExchange`
+
+Zod schema for {@link DestinationExchangeType}.
+
+```ts
+const DestinationExchange: z.ZodType<DestinationExchangeType>;
+```
+
+### `DestinationExchangeType`
+
+A mid-rental swap, stated ON the destination pair that carries it.
+
+🔴 **A swap IS a destination pair — an exchange LEG — not a structure of its
+own.** The replacement unit goes out on its own trip, so it needs its own
+dates, its own booking, its own card and its own section of items; a
+destination pair is all four already. Making it a pair is what puts a swap
+through the three-way merge (`utils/shared-fields.ts`) and the diff
+(`utils/documentDiff.ts`) unchanged: a swap made on the order propagates to
+the fulfillment and the invoice unless overridden, and a swap made on the
+fulfillment shows as a diff against both.
+
+⚠️ **The parent's collection endpoint and dates are COPIED, not referenced.**
+The units go back on the parent leg's return trip, which is why an exchange
+pair gets no `:end` card (`utils/cards.ts`) and why its collection half must
+agree with its parent's.
+
+```ts
+interface DestinationExchangeType {
+  uid_pair: string;
+  disposition: ExchangeDispositionType;
+}
+```
+
 ### `DestinationPairCore`
 
 The destination-pair fields the ORDER/FULFILLMENT grain and the INVOICE grain
@@ -17067,6 +17108,7 @@ interface DestinationType {
   customer_collecting?: boolean;
   customer_returning?: boolean;
   jurisdiction?: JurisdictionType | null;
+  exchange?: DestinationExchangeType | null;
 }
 ```
 
@@ -17193,7 +17235,33 @@ interface DocDestinationType {
   customer_collecting: boolean;
   customer_returning: boolean;
   jurisdiction?: JurisdictionType | null;
+  exchange?: DestinationExchangeType | null;
 }
+```
+
+### `EXCHANGE_DISPOSITIONS`
+
+What happens to the damaged unit the replacement is going out against.
+
+```ts
+const EXCHANGE_DISPOSITIONS: "exchange" | "send_now"[];
+```
+
+### `ExchangeDispositionEnum`
+
+Zod schema for {@link ExchangeDispositionType}.
+
+```ts
+const ExchangeDispositionEnum: z.ZodType<ExchangeDispositionType>;
+```
+
+### `ExchangeDispositionType`
+
+`exchange` — the damaged unit comes back on the same trip. `send_now` — the
+replacement goes out now and the damaged unit comes back at the normal return.
+
+```ts
+type ExchangeDispositionType = indexedAccess;
 ```
 
 ### `GroupPathType`
@@ -17813,6 +17881,16 @@ interface UpdateOrderInputType {
   version: number;
 }
 ```
+
+### `checkExchangePairs(pairs: ReadonlyArray<typeLiteral>, ctx: z.RefinementCtx): void`
+
+Every exchange pair names a parent pair of the same document, and that parent
+is not itself an exchange. Shared by the order, fulfillment and invoice
+destination arrays — one statement, so the three grains cannot disagree about
+what a swap is.
+
+⚠️ **It reads the array, so it is attached at `z.array(...)` rather than to a
+pair** — a pair alone cannot see its siblings.
 
 ### `getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]`
 
@@ -26902,6 +26980,7 @@ interface InvoiceItem {
   crms_id?: number | string | null;
   crms_opportunity_id?: number | null;
   substituted_for?: SubstitutedForEntryType[];
+  uid_out_of_service?: string | null;
   path_extension_for?: string[];
 }
 ```
@@ -28375,6 +28454,12 @@ remaining" invoice re-billed lines another invoice had already billed. A line
 counts as new only when the previous order had no line at its path and no line
 that moved there. Dividers are still projected when missing: they are the
 skeleton alignment reads, not something an operator bills.
+
+## A lost/damaged line is the invoice's own row
+
+A `replacement` line carrying `uid_out_of_service` bills a unit the customer
+lost or damaged. No order ever had it, so "synced and removed from the order"
+can never be true of it, and the removed-items pass keeps it unconditionally.
 
 ## Extension sections are billing, not order structure
 
@@ -33460,6 +33545,153 @@ this covers the component itself and every entry nested beneath it.
 - `path` — Full path of the component to remove (e.g. `["A", "B"]`)
 
 **Returns** — New array with the component and its descendants removed
+
+## `@cfs/core/utils/replacements`
+
+Billing lost and damaged units — what a lost/damaged `out-of-service` record
+has been billed, what is left to bill, and the lines a replacement invoice is
+seeded with.
+
+## Billed is DERIVED, never stored on the record
+
+An invoice line bills a record by carrying its uid
+(`InvoiceDocLineItemType.uid_out_of_service`, valid on `type: "replacement"`
+only). What a record has been billed is the sum of those lines' quantities
+across every invoice that is not `void`:
+
+```
+billed(record)   = Σ line.quantity  where line.uid_out_of_service === record.uid
+                                    and invoice.status !== "void"
+unbilled(record) = record.quantity − billed(record)
+```
+
+So there is no marker to release when an invoice is voided or a line is
+deleted — the sum simply stops counting it.
+
+## One module, two askers
+
+The manager calls {@link seedReplacementLines} to OFFER the lines; the API
+calls {@link billedOutOfService} to REFUSE an over-bill. Both read the same
+sum, so the offer and the refusal cannot disagree.
+
+⚠️ **The sum is only as complete as the invoices passed in.** A caller must
+pass EVERY invoice whose `query_by_out_of_service` names the records in
+question (one `array-contains-any` query per ≤30 uids). On the API side that
+read has to be a completeness read inside the transaction that writes the
+invoice — a partial list under-counts and admits a double bill.
+
+### `BILLABLE_OOS_REASONS`
+
+The `out-of-service` reasons a customer is billed for.
+
+```ts
+const BILLABLE_OOS_REASONS: readonly ["lost", "damaged"];
+```
+
+### `ReplacementBillingInvoice`
+
+The fields of an invoice the billed sum reads.
+
+```ts
+interface ReplacementBillingInvoice {
+  uid: string;
+  status: string;
+  items: ReadonlyArray<typeLiteral>;
+}
+```
+
+### `ReplacementLineSeed`
+
+One replacement line to offer, before it is placed on an invoice.
+
+```ts
+interface ReplacementLineSeed {
+  uid_out_of_service: string;
+  uid_rental_product: string;
+  uid_product: string | null;
+  name: string;
+  quantity: number;
+  base_cents: number;
+  uid_pair: string | null;
+  reason: string;
+  warning: string | null;
+}
+```
+
+### `ReplacementSourceOrder`
+
+The fields of an order the seed reads.
+
+```ts
+interface ReplacementSourceOrder {
+  uid: string;
+  items: ReadonlyArray<typeLiteral>;
+}
+```
+
+### `ReplacementSourceProduct`
+
+The fields of a product the seed reads — the rental and its replacement twin.
+
+```ts
+interface ReplacementSourceProduct {
+  uid: string;
+  name: string;
+  uid_linked_replacement?: string | null;
+  price?: typeLiteral | null;
+}
+```
+
+### `ReplacementSourceRecord`
+
+The fields of an `out-of-service` record the billing arithmetic reads.
+
+```ts
+interface ReplacementSourceRecord {
+  uid: string;
+  uid_product: string;
+  reason: string;
+  status: string;
+  quantity: number;
+  query_by_sources: readonly string[];
+}
+```
+
+### `billedOutOfService(invoices: readonly ReplacementBillingInvoice[], excludeInvoiceUid?: string): Map<string, number>`
+
+Units billed per record, over every non-void invoice passed in.
+
+**Parameters**
+
+- `invoices` — Every invoice that could bill the records in question — see
+the module docs for why the list must be complete.
+- `excludeInvoiceUid` — An invoice to leave out of the sum: the one being
+rewritten, whose NEW lines the caller adds itself.
+
+### `isBillableOutOfService(record: Pick<ReplacementSourceRecord, "reason" | "status">): boolean`
+
+Is this record a lost/damaged unit a customer can be billed for?
+
+### `overbilledOutOfService(lines: ReadonlyArray<typeLiteral>, records: readonly Pick<ReplacementSourceRecord, "uid" | "quantity">[], otherInvoices: readonly ReplacementBillingInvoice[], invoiceUid?: string): Array<typeLiteral>`
+
+Every record whose lines would bill more than it holds, given the lines an
+invoice is about to carry. The API's refusal: an empty result is the pass.
+
+**Parameters**
+
+- `lines` — The invoice's lines as they will be written.
+- `records` — Every record those lines name.
+- `otherInvoices` — Every OTHER invoice naming those records (complete).
+
+### `seedReplacementLines(order: ReplacementSourceOrder, records: readonly ReplacementSourceRecord[], invoices: readonly ReplacementBillingInvoice[], products: ReadonlyMap<string, ReplacementSourceProduct>): ReplacementLineSeed[]`
+
+The replacement lines to offer for one order: one per billable record sourced
+from it with units left to bill.
+
+Pure — the caller supplies the records (`query_by_sources` contains
+`orders:<uid>`), every invoice naming them, and the products (each record's
+rental plus its linked twin). A product missing from `products` is treated
+as having no twin.
 
 ## `@cfs/core/utils/reporting`
 

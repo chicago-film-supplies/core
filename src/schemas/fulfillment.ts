@@ -40,6 +40,7 @@ import {
   TimestampFields,
 } from "./common.ts";
 import {
+  checkExchangePairs,
   DocDestination,
   type DocDestinationType,
   ORDER_STATUSES,
@@ -456,7 +457,12 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   }),
   status: FulfillmentOrderStatus.meta({ column: true, label: "Status" }),
   organization: FulfillmentOrganization.meta({ label: "Organization" }),
-  destinations: z.array(DocDestination).min(1),
+  // Same swap invariant as the order's array — one statement, in `order.ts`.
+  // ⚠️ **The INVOICE array deliberately does not carry it**: an invoice is
+  // scoped to what it bills, so it can legitimately hold an exchange pair whose
+  // parent leg another invoice carries, and the refusal would be a write
+  // failure on a correct document.
+  destinations: z.array(DocDestination).min(1).superRefine(checkExchangePairs),
   items: z.array(FulfillmentItem).meta({ label: "Item" })
     .superRefine(checkZeroPricedComponents),
   // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.

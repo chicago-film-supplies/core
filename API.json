@@ -1455,7 +1455,7 @@
         {
           "kind": "interface",
           "name": "DestinationType",
-          "declaration": "interface DestinationType {\n  uid?: string;\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
+          "declaration": "interface DestinationType {\n  uid?: string;\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n  jurisdiction?: JurisdictionType | null;\n  exchange?: DestinationExchangeType | null;\n}",
           "doc": "A destination pair — delivery and collection endpoints.\n\n`customer_collecting` is true when the customer picks up the items at our\nwarehouse for the delivery side of this pair. `customer_returning` is true\nwhen the customer drops the items off at our warehouse for the collection\nside. Both default to false (we deliver / we collect)."
         },
         {
@@ -1551,7 +1551,7 @@
         {
           "kind": "interface",
           "name": "DocDestinationType",
-          "declaration": "interface DocDestinationType {\n  uid: string;\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
+          "declaration": "interface DocDestinationType {\n  uid: string;\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n  jurisdiction?: JurisdictionType | null;\n  exchange?: DestinationExchangeType | null;\n}",
           "doc": "Document-level destination pair. See `DestinationType` for flag semantics."
         },
         {
@@ -2025,7 +2025,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_params_context: RenderParamsContext | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  query_by_out_of_service?: string[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_params_context: RenderParamsContext | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -2091,7 +2091,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -2151,7 +2151,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n  uid_out_of_service?: string | null;\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -7200,7 +7200,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_params_context: RenderParamsContext | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  query_by_out_of_service?: string[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  uploadcare_uuid: string | null;\n  pdf_generated_at: FirestoreTimestampType | null;\n  pdf_params: Record<string, boolean>;\n  pdf_params_context: RenderParamsContext | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -7254,7 +7254,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -7308,7 +7308,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n  uid_out_of_service?: string | null;\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -7641,6 +7641,18 @@
         },
         {
           "kind": "variable",
+          "name": "DestinationExchange",
+          "declaration": "const DestinationExchange: z.ZodType<DestinationExchangeType>;",
+          "doc": "Zod schema for {@link DestinationExchangeType}."
+        },
+        {
+          "kind": "interface",
+          "name": "DestinationExchangeType",
+          "declaration": "interface DestinationExchangeType {\n  uid_pair: string;\n  disposition: ExchangeDispositionType;\n}",
+          "doc": "A mid-rental swap, stated ON the destination pair that carries it.\n\n🔴 **A swap IS a destination pair — an exchange LEG — not a structure of its\nown.** The replacement unit goes out on its own trip, so it needs its own\ndates, its own booking, its own card and its own section of items; a\ndestination pair is all four already. Making it a pair is what puts a swap\nthrough the three-way merge (`utils/shared-fields.ts`) and the diff\n(`utils/documentDiff.ts`) unchanged: a swap made on the order propagates to\nthe fulfillment and the invoice unless overridden, and a swap made on the\nfulfillment shows as a diff against both.\n\n⚠️ **The parent's collection endpoint and dates are COPIED, not referenced.**\nThe units go back on the parent leg's return trip, which is why an exchange\npair gets no `:end` card (`utils/cards.ts`) and why its collection half must\nagree with its parent's."
+        },
+        {
+          "kind": "variable",
           "name": "DestinationPairCore",
           "declaration": "const DestinationPairCore: typeLiteral;",
           "doc": "The destination-pair fields the ORDER/FULFILLMENT grain and the INVOICE grain\nboth carry, as ONE instance per field.\n\n🔴 **This exists because the invoice's hand-copy of these six keys had already\ndrifted, in the one direction a destination pair can least afford.** `9435a15`\n(2026-09-08) made `customer_collecting` / `customer_returning` REQUIRED on the\norder grain, because the `.default(false)` they carried never materialized in\nFirestore (`validateBeforeWrite` discards `result.data`) and its one effect was\nto let a writer omit a flag that reads downstream as *\"we deliver\"* — the answer\nthat sends a crew to an address. `InvoiceDocDestination` was a separate\n`z.strictObject` restating the same keys, so it kept both defaults and the\ncompiler could not see the gap: `InvoiceDocDestinationType extends\nDocDestinationType` hands over the TYPE and the schema inherited nothing.\n16 flags were absent across 8 prod invoices (core#101, repaired 2026-09-09).\n\n⭐ **SPREAD here, where the line item is referenced per key — and the difference\nis key ORDER, not a change of mind.** `getFirestoreColumns` walks the shape, so\na spread sets the operator's column order. `schemas/_items.ts` cannot spread\nbecause its six shared fields sit at three different arrangements across the\ngrains and no key order leaves all three unchanged. Here the shared fields are\nthe WHOLE of `DocDestination` in its existing order, and the invoice's only\nextra key (`uid_order`) already sits first — so `{ uid_order, ...this }`\nreproduces both current shapes exactly. Verified by dumping\n`getFirestoreColumns` / `getTypesenseColumns` / `getInitialValues` for `orders`,\n`invoices` and `fulfillments` before and after: byte-identical, order included.\n\n⚠️ **A grain that SHADOWS a key after the spread is the one thing the spread\ncannot see** — `{ ...DestinationPairCore, customer_collecting: z.boolean() }`\ncompiles and the later key silently wins, which is exactly how the invoice\ndrifted the first time. `tests/destination-pair-parity.test.ts` asserts instance\nidentity on both grains for that reason; do not delete it as redundant.\n\n🔴 **Sharing the instance is what makes `.meta()` safe.** `z.globalRegistry` is\na WeakMap keyed on the schema instance, so a re-declaration carries none of the\nbase's annotations. A grain needing a different heading writes\n`DestinationPairCore.delivery.meta({ … })`, which clones visibly at the call site.\n\n⚠️ **Not on the `@cfs/core/schemas` barrel, deliberately** — no consumer assembles\na pair from parts, and publishing the parts would publish a second way to spell\none. It is reachable at `@cfs/core/schemas/order` only because `order.ts` is an\nentrypoint; `DocDestination` is the shape to import."
@@ -7648,7 +7660,7 @@
         {
           "kind": "interface",
           "name": "DestinationType",
-          "declaration": "interface DestinationType {\n  uid?: string;\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
+          "declaration": "interface DestinationType {\n  uid?: string;\n  dates: OrderDatesType;\n  delivery: DestinationEndpointType;\n  collection: DestinationEndpointType;\n  customer_collecting?: boolean;\n  customer_returning?: boolean;\n  jurisdiction?: JurisdictionType | null;\n  exchange?: DestinationExchangeType | null;\n}",
           "doc": "A destination pair — delivery and collection endpoints.\n\n`customer_collecting` is true when the customer picks up the items at our\nwarehouse for the delivery side of this pair. `customer_returning` is true\nwhen the customer drops the items off at our warehouse for the collection\nside. Both default to false (we deliver / we collect)."
         },
         {
@@ -7708,8 +7720,26 @@
         {
           "kind": "interface",
           "name": "DocDestinationType",
-          "declaration": "interface DocDestinationType {\n  uid: string;\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n  jurisdiction?: JurisdictionType | null;\n}",
+          "declaration": "interface DocDestinationType {\n  uid: string;\n  dates: OrderDocDatesType;\n  delivery: DocDestinationEndpointType;\n  collection: DocDestinationEndpointType;\n  customer_collecting: boolean;\n  customer_returning: boolean;\n  jurisdiction?: JurisdictionType | null;\n  exchange?: DestinationExchangeType | null;\n}",
           "doc": "Document-level destination pair. See `DestinationType` for flag semantics."
+        },
+        {
+          "kind": "variable",
+          "name": "EXCHANGE_DISPOSITIONS",
+          "declaration": "const EXCHANGE_DISPOSITIONS: \"exchange\" | \"send_now\"[];",
+          "doc": "What happens to the damaged unit the replacement is going out against."
+        },
+        {
+          "kind": "variable",
+          "name": "ExchangeDispositionEnum",
+          "declaration": "const ExchangeDispositionEnum: z.ZodType<ExchangeDispositionType>;",
+          "doc": "Zod schema for {@link ExchangeDispositionType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ExchangeDispositionType",
+          "declaration": "type ExchangeDispositionType = indexedAccess;",
+          "doc": "`exchange` — the damaged unit comes back on the same trip. `send_now` — the\nreplacement goes out now and the damaged unit comes back at the normal return."
         },
         {
           "kind": "interface",
@@ -7956,6 +7986,14 @@
           "name": "UpdateOrderInputType",
           "declaration": "interface UpdateOrderInputType {\n  uid?: string;\n  organization?: typeLiteral;\n  status?: OrderStatusType;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  destinations?: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n  version: number;\n}",
           "doc": "Input schema for PUT /orders/:uid — partial update."
+        },
+        {
+          "kind": "function",
+          "name": "checkExchangePairs",
+          "signature": "checkExchangePairs(pairs: ReadonlyArray<typeLiteral>, ctx: z.RefinementCtx): void",
+          "doc": "Every exchange pair names a parent pair of the same document, and that parent\nis not itself an exchange. Shared by the order, fulfillment and invoice\ndestination arrays — one statement, so the three grains cannot disagree about\nwhat a swap is.\n\n⚠️ **It reads the array, so it is attached at `z.array(...)` rather than to a\npair** — a pair alone cannot see its siblings.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",
@@ -12072,7 +12110,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItem",
-          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  path_extension_for?: string[];\n}",
+          "declaration": "interface InvoiceItem {\n  uid_order?: string | null;\n  description?: string;\n  price?: PriceObject | InvoiceDocItemPriceType;\n  coa_revenue?: COARevenueType | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_id?: number | string | null;\n  crms_opportunity_id?: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n  path_extension_for?: string[];\n}",
           "doc": "An invoice item with optional order-scoping and invoice-specific fields.\nExtends LineItem with properties that should be carried forward during sync\nand fields needed for Xero mapping.\n\n`price` accepts both the utility's intermediate PriceObject and the full\nInvoiceDocItemPriceType from schemas to avoid type drift."
         },
         {
@@ -12848,7 +12886,7 @@
           "kind": "function",
           "name": "syncOrderToInvoiceSelective",
           "signature": "syncOrderToInvoiceSelective(prevOrderItems: LineItem[], newOrderItems: LineItem[], currentInvoiceItems: InvoiceDocItemType[], orderDividerUid: string): InvoiceDocItemType[]",
-          "doc": "Selectively sync order items into an invoice, respecting invoice-side overrides.\n\nItems are matched by **path** (not uid), since the same product can appear at\nmultiple positions in the items array. For each item:\n\n- **Synced** (prev order matches current invoice, minus invoice-only fields):\n  replaced with the new order item, carrying forward invoice-only overrides\n- **Overridden** (invoice item differs from prev order): left unchanged\n- **New** (in new order, not in prev): added under the order divider\n- **Left out** (a LINE in prev and new, never on the invoice): stays out\n- **Removed** (in prev order, not in new): removed only if synced, kept if overridden\n- **Extension sections** ({@link extensionSectionTargets}): passed through\n  verbatim, at the tail of the scope\n- **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed\n  and Y's is emitted in its place — see below\n- **`substituted_for` entries** (manager#414): every row is merged at its\n  ORDER-EQUIVALENT quantity (D2) and re-offset against the new order, so a\n  merged Y and a partially swapped X follow order quantity edits. A substitute\n  row the order does not carry is placed after X's subtree. Entries are\n  re-pointed when X moves; once the order drops X, the entry and its units go\n  with it (owner, 2026-09-16)\n\n## 🔴 Why the substitution arm exists: without it a substitution lasts until\nthe next order save\n\nMeasured against this function before the arm was added, with the order\nUNCHANGED (`prev === new`) and the invoice holding Y in X's place:\n\n```\nBEFORE  invoice lines: [ \"Light Y\" ]\nAFTER   invoice lines: [ \"Light X\" ]\n```\n\nBoth halves of the path match fail, and each fails toward undoing the\noperator's edit: X's order path has no invoice line, so the `!invoiceItem`\nbranch re-projects X; Y's path has no PREV ORDER line, so the removed-items\npass drops it as a synced line the order no longer carries. **Neither branch\nis wrong on its own** — the pair is only wrong because nothing told this\nfunction the two rows are the same row, and `substituted_for` is what\nsays so.\n\n⭐ That is Increment 2's lesson on a third surface. A projection undoes any\ndownstream override not stored in a form the projection HONOURS, and being\n*stored* is not enough — the substitution record was already a stored field on\nfulfillments and this function had never heard of it.\n\n## 🔴 A line the invoice LEFT OUT stays out (api-cloudrun#680 R1, owner 2026-09-15)\n\nThe documented rule above was always \"new = in new order, not in prev\", and the\ncode projected EVERY order line the invoice lacked. So an unsettled partial\ninvoice was refilled with the whole order on its next save, and an \"invoice\nremaining\" invoice re-billed lines another invoice had already billed. A line\ncounts as new only when the previous order had no line at its path and no line\nthat moved there. Dividers are still projected when missing: they are the\nskeleton alignment reads, not something an operator bills.\n\n## Extension sections are billing, not order structure\n\nAn extension section's divider names no order path of its own, so without its\nown arm the removed-items pass would drop the divider and every line under it\nas \"synced and removed from the order\". They are emitted untouched after\neverything else.\n\n⚠️ **The whole-scope {@link syncOrderItems} deliberately does NOT get this\narm.** It is the operator's hard snap-to-order, documented to discard\noverrides and drop lines the order no longer has; a substitution is an\noverride, so discarding it is what the operator asked for. Only the automatic\nper-save sync has to be non-destructive.",
+          "doc": "Selectively sync order items into an invoice, respecting invoice-side overrides.\n\nItems are matched by **path** (not uid), since the same product can appear at\nmultiple positions in the items array. For each item:\n\n- **Synced** (prev order matches current invoice, minus invoice-only fields):\n  replaced with the new order item, carrying forward invoice-only overrides\n- **Overridden** (invoice item differs from prev order): left unchanged\n- **New** (in new order, not in prev): added under the order divider\n- **Left out** (a LINE in prev and new, never on the invoice): stays out\n- **Removed** (in prev order, not in new): removed only if synced, kept if overridden\n- **Extension sections** ({@link extensionSectionTargets}): passed through\n  verbatim, at the tail of the scope\n- **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed\n  and Y's is emitted in its place — see below\n- **`substituted_for` entries** (manager#414): every row is merged at its\n  ORDER-EQUIVALENT quantity (D2) and re-offset against the new order, so a\n  merged Y and a partially swapped X follow order quantity edits. A substitute\n  row the order does not carry is placed after X's subtree. Entries are\n  re-pointed when X moves; once the order drops X, the entry and its units go\n  with it (owner, 2026-09-16)\n\n## 🔴 Why the substitution arm exists: without it a substitution lasts until\nthe next order save\n\nMeasured against this function before the arm was added, with the order\nUNCHANGED (`prev === new`) and the invoice holding Y in X's place:\n\n```\nBEFORE  invoice lines: [ \"Light Y\" ]\nAFTER   invoice lines: [ \"Light X\" ]\n```\n\nBoth halves of the path match fail, and each fails toward undoing the\noperator's edit: X's order path has no invoice line, so the `!invoiceItem`\nbranch re-projects X; Y's path has no PREV ORDER line, so the removed-items\npass drops it as a synced line the order no longer carries. **Neither branch\nis wrong on its own** — the pair is only wrong because nothing told this\nfunction the two rows are the same row, and `substituted_for` is what\nsays so.\n\n⭐ That is Increment 2's lesson on a third surface. A projection undoes any\ndownstream override not stored in a form the projection HONOURS, and being\n*stored* is not enough — the substitution record was already a stored field on\nfulfillments and this function had never heard of it.\n\n## 🔴 A line the invoice LEFT OUT stays out (api-cloudrun#680 R1, owner 2026-09-15)\n\nThe documented rule above was always \"new = in new order, not in prev\", and the\ncode projected EVERY order line the invoice lacked. So an unsettled partial\ninvoice was refilled with the whole order on its next save, and an \"invoice\nremaining\" invoice re-billed lines another invoice had already billed. A line\ncounts as new only when the previous order had no line at its path and no line\nthat moved there. Dividers are still projected when missing: they are the\nskeleton alignment reads, not something an operator bills.\n\n## A lost/damaged line is the invoice's own row\n\nA `replacement` line carrying `uid_out_of_service` bills a unit the customer\nlost or damaged. No order ever had it, so \"synced and removed from the order\"\ncan never be true of it, and the removed-items pass keeps it unconditionally.\n\n## Extension sections are billing, not order structure\n\nAn extension section's divider names no order path of its own, so without its\nown arm the removed-items pass would drop the divider and every line under it\nas \"synced and removed from the order\". They are emitted untouched after\neverything else.\n\n⚠️ **The whole-scope {@link syncOrderItems} deliberately does NOT get this\narm.** It is the operator's hard snap-to-order, documented to discard\noverrides and drop lines the order no longer has; a substitution is an\noverride, so discarding it is what the operator asked for. Only the automatic\nper-save sync has to be non-destructive.",
           "paramTags": [
             {
               "name": "prevOrderItems",
@@ -15330,6 +15368,102 @@
             }
           ],
           "returnsTag": "New array with the component and its descendants removed"
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/replacements",
+      "moduleDoc": "Billing lost and damaged units — what a lost/damaged `out-of-service` record\nhas been billed, what is left to bill, and the lines a replacement invoice is\nseeded with.\n\n## Billed is DERIVED, never stored on the record\n\nAn invoice line bills a record by carrying its uid\n(`InvoiceDocLineItemType.uid_out_of_service`, valid on `type: \"replacement\"`\nonly). What a record has been billed is the sum of those lines' quantities\nacross every invoice that is not `void`:\n\n```\nbilled(record)   = Σ line.quantity  where line.uid_out_of_service === record.uid\n                                    and invoice.status !== \"void\"\nunbilled(record) = record.quantity − billed(record)\n```\n\nSo there is no marker to release when an invoice is voided or a line is\ndeleted — the sum simply stops counting it.\n\n## One module, two askers\n\nThe manager calls {@link seedReplacementLines} to OFFER the lines; the API\ncalls {@link billedOutOfService} to REFUSE an over-bill. Both read the same\nsum, so the offer and the refusal cannot disagree.\n\n⚠️ **The sum is only as complete as the invoices passed in.** A caller must\npass EVERY invoice whose `query_by_out_of_service` names the records in\nquestion (one `array-contains-any` query per ≤30 uids). On the API side that\nread has to be a completeness read inside the transaction that writes the\ninvoice — a partial list under-counts and admits a double bill.",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "BILLABLE_OOS_REASONS",
+          "declaration": "const BILLABLE_OOS_REASONS: readonly [\"lost\", \"damaged\"];",
+          "doc": "The `out-of-service` reasons a customer is billed for."
+        },
+        {
+          "kind": "interface",
+          "name": "ReplacementBillingInvoice",
+          "declaration": "interface ReplacementBillingInvoice {\n  uid: string;\n  status: string;\n  items: ReadonlyArray<typeLiteral>;\n}",
+          "doc": "The fields of an invoice the billed sum reads."
+        },
+        {
+          "kind": "interface",
+          "name": "ReplacementLineSeed",
+          "declaration": "interface ReplacementLineSeed {\n  uid_out_of_service: string;\n  uid_rental_product: string;\n  uid_product: string | null;\n  name: string;\n  quantity: number;\n  base_cents: number;\n  uid_pair: string | null;\n  reason: string;\n  warning: string | null;\n}",
+          "doc": "One replacement line to offer, before it is placed on an invoice."
+        },
+        {
+          "kind": "interface",
+          "name": "ReplacementSourceOrder",
+          "declaration": "interface ReplacementSourceOrder {\n  uid: string;\n  items: ReadonlyArray<typeLiteral>;\n}",
+          "doc": "The fields of an order the seed reads."
+        },
+        {
+          "kind": "interface",
+          "name": "ReplacementSourceProduct",
+          "declaration": "interface ReplacementSourceProduct {\n  uid: string;\n  name: string;\n  uid_linked_replacement?: string | null;\n  price?: typeLiteral | null;\n}",
+          "doc": "The fields of a product the seed reads — the rental and its replacement twin."
+        },
+        {
+          "kind": "interface",
+          "name": "ReplacementSourceRecord",
+          "declaration": "interface ReplacementSourceRecord {\n  uid: string;\n  uid_product: string;\n  reason: string;\n  status: string;\n  quantity: number;\n  query_by_sources: readonly string[];\n}",
+          "doc": "The fields of an `out-of-service` record the billing arithmetic reads."
+        },
+        {
+          "kind": "function",
+          "name": "billedOutOfService",
+          "signature": "billedOutOfService(invoices: readonly ReplacementBillingInvoice[], excludeInvoiceUid?: string): Map<string, number>",
+          "doc": "Units billed per record, over every non-void invoice passed in.",
+          "paramTags": [
+            {
+              "name": "invoices",
+              "doc": "Every invoice that could bill the records in question — see\nthe module docs for why the list must be complete."
+            },
+            {
+              "name": "excludeInvoiceUid",
+              "doc": "An invoice to leave out of the sum: the one being\nrewritten, whose NEW lines the caller adds itself."
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isBillableOutOfService",
+          "signature": "isBillableOutOfService(record: Pick<ReplacementSourceRecord, \"reason\" | \"status\">): boolean",
+          "doc": "Is this record a lost/damaged unit a customer can be billed for?",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "overbilledOutOfService",
+          "signature": "overbilledOutOfService(lines: ReadonlyArray<typeLiteral>, records: readonly Pick<ReplacementSourceRecord, \"uid\" | \"quantity\">[], otherInvoices: readonly ReplacementBillingInvoice[], invoiceUid?: string): Array<typeLiteral>",
+          "doc": "Every record whose lines would bill more than it holds, given the lines an\ninvoice is about to carry. The API's refusal: an empty result is the pass.",
+          "paramTags": [
+            {
+              "name": "lines",
+              "doc": "The invoice's lines as they will be written."
+            },
+            {
+              "name": "records",
+              "doc": "Every record those lines name."
+            },
+            {
+              "name": "otherInvoices",
+              "doc": "Every OTHER invoice naming those records (complete)."
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "seedReplacementLines",
+          "signature": "seedReplacementLines(order: ReplacementSourceOrder, records: readonly ReplacementSourceRecord[], invoices: readonly ReplacementBillingInvoice[], products: ReadonlyMap<string, ReplacementSourceProduct>): ReplacementLineSeed[]",
+          "doc": "The replacement lines to offer for one order: one per billable record sourced\nfrom it with units left to bill.\n\nPure — the caller supplies the records (`query_by_sources` contains\n`orders:<uid>`), every invoice naming them, and the products (each record's\nrental plus its linked twin). A product missing from `products` is treated\nas having no twin.",
+          "paramTags": [],
+          "returnsTag": null
         }
       ]
     },

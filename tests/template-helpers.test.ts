@@ -62,6 +62,7 @@ import * as substitutionUtils from "../src/utils/substitutions.ts";
 import * as itemPairingUtils from "../src/utils/item-pairing.ts";
 import * as taxClassUtils from "../src/utils/tax-classes.ts";
 import * as priceDocumentUtils from "../src/utils/price-document.ts";
+import * as replacementUtils from "../src/utils/replacements.ts";
 
 import { templateHelpers } from "../src/schemas/template-helpers.generated.ts";
 import {
@@ -101,6 +102,10 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // Same exception as `documentDiff`: `utils/quantityAccounting.ts` sums an
   // order's sibling invoices, and a template renders one document.
   quantityAccounting: quantityAccountingUtils,
+  // Same exception again: `utils/replacements.ts` asks what a lost/damaged
+  // record has been BILLED — a sum over an order's sibling invoices and its
+  // out-of-service records, neither of which a render context holds.
+  replacements: replacementUtils,
   icons: iconUtils,
   fulfillments: fulfillmentUtils,
   // Same exception as `citations` and `template-lint`: `utils/fulfillment-items.ts`

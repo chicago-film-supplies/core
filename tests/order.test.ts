@@ -1310,3 +1310,64 @@ Deno.test("OrderDocItem: a stored line that omits zero_priced is refused — the
     "the refusal must name zero_priced, not something else on the line",
   );
 });
+
+// ── Exchange pairs — a swap is a destination pair ────────────────
+
+const PARENT_PAIR = "11111111-1111-4111-8111-111111111111";
+const SWAP_PAIR = "22222222-2222-4222-8222-222222222222";
+
+/** The minimal document with a parent leg and a swap leg against it. */
+function docWithSwap(exchange: unknown, swapUid = SWAP_PAIR) {
+  return {
+    ...minimalDoc,
+    destinations: [
+      validDocDestination,
+      { ...validDocDestination, uid: swapUid, exchange },
+    ],
+  };
+}
+
+Deno.test("OrderSchema accepts a swap leg naming an ordinary leg of the same document", () => {
+  const parsed = OrderSchema.safeParse(docWithSwap({ uid_pair: PARENT_PAIR, disposition: "exchange" }));
+  assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
+  assertEquals(OrderSchema.safeParse(docWithSwap({ uid_pair: PARENT_PAIR, disposition: "send_now" })).success, true);
+});
+
+Deno.test("OrderSchema accepts a pair with no exchange — null and absent alike", () => {
+  assertEquals(OrderSchema.safeParse(docWithSwap(null)).success, true);
+  assertEquals(OrderSchema.safeParse(minimalDoc).success, true);
+});
+
+Deno.test("OrderSchema refuses a swap naming no pair, itself, or another swap", () => {
+  const orphan = OrderSchema.safeParse(
+    docWithSwap({ uid_pair: "33333333-3333-4333-8333-333333333333", disposition: "exchange" }),
+  );
+  assertEquals(orphan.success, false, "a parent pair that is not on the document");
+
+  const itself = OrderSchema.safeParse(docWithSwap({ uid_pair: SWAP_PAIR, disposition: "exchange" }));
+  assertEquals(itself.success, false, "a pair naming itself");
+
+  // A chain: swap B against swap A. Two swaps on one leg are two pairs naming
+  // the SAME parent, never a chain.
+  const chained = OrderSchema.safeParse({
+    ...minimalDoc,
+    destinations: [
+      validDocDestination,
+      { ...validDocDestination, uid: SWAP_PAIR, exchange: { uid_pair: PARENT_PAIR, disposition: "exchange" } },
+      {
+        ...validDocDestination,
+        uid: "44444444-4444-4444-8444-444444444444",
+        exchange: { uid_pair: SWAP_PAIR, disposition: "exchange" },
+      },
+    ],
+  });
+  assertEquals(chained.success, false, "a swap against a swap");
+});
+
+Deno.test("OrderSchema refuses an unknown disposition and an extra exchange key", () => {
+  assertEquals(OrderSchema.safeParse(docWithSwap({ uid_pair: PARENT_PAIR, disposition: "later" })).success, false);
+  assertEquals(
+    OrderSchema.safeParse(docWithSwap({ uid_pair: PARENT_PAIR, disposition: "exchange", note: "x" })).success,
+    false,
+  );
+});

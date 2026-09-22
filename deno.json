@@ -86,6 +86,7 @@
     "./utils/price-document": "./src/utils/price-document.ts",
     "./utils/organizations": "./src/utils/organizations.ts",
     "./utils/products": "./src/utils/products.ts",
+    "./utils/replacements": "./src/utils/replacements.ts",
     "./utils/reporting": "./src/utils/reporting.ts",
     "./utils/sessions": "./src/utils/sessions.ts",
     "./utils/shared-fields": "./src/utils/shared-fields.ts",

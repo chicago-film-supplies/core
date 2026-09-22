@@ -412,6 +412,52 @@ export interface InvoiceDocLineItemType {
    *    hands a literal `undefined` to a write boundary.
    */
   substituted_for?: SubstitutedForEntryType[];
+  /**
+   * The `out-of-service` record this line BILLS — a lost or damaged unit charged
+   * at its replacement value. Valid on `type: "replacement"` only.
+   *
+   * It is both the provenance and the double-bill key: what a record has been
+   * billed is DERIVED — Σ `quantity` of the lines naming it across non-void
+   * invoices (`billedOutOfService`, `@cfs/core/utils/replacements`) — so nothing
+   * has to be released when an invoice is voided or a line deleted. The invoice
+   * mirrors every value here into `Invoice.query_by_out_of_service` so that sum
+   * is one `array-contains-any` query.
+   *
+   * ⚠️ **It is also what keeps the line on the invoice.** An invoice-only line
+   * inside an order's section is removed by the next order save
+   * (`syncOrderToInvoiceSelective`'s removal pass); a line carrying this key is
+   * kept, the same way a `substituted_for` row is.
+   *
+   * `.nullable().optional()` rather than `substituted_for`'s bare `.optional()`,
+   * and the difference is `getInitialValues`: an optional STRING seeds `""`,
+   * which is not a Firestore id, so a form-seeded line would be refused at
+   * write. A nullable one seeds `null`. Catalogued in
+   * `tests/stored-optionality.test.ts` as array-member-uncensusable — it sits in
+   * an array of maps, which `orderBy` key-presence cannot reach.
+   */
+  uid_out_of_service?: string | null;
+}
+
+/**
+ * `uid_out_of_service` bills a lost or damaged unit, so it is valid on a
+ * `replacement` line and nowhere else — the tax resolver keys CFS's
+ * replacement treatment (origin jurisdiction, never exempt) on the line TYPE,
+ * so an L&D charge on any other type would be taxed as the wrong thing.
+ * Shared by the stored line and the input line.
+ */
+function checkOutOfServiceLineType(
+  line: { type: string; uid_out_of_service?: string | null },
+  ctx: z.RefinementCtx,
+): void {
+  // `null` is "this line bills no record" — the form seed and the ordinary
+  // state — so only a stated uid is constrained.
+  if (line.uid_out_of_service != null && line.type !== "replacement") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_out_of_service"],
+      message: `uid_out_of_service is valid only on a replacement line, not "${line.type}"`,
+    });
+  }
 }
 
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
@@ -444,7 +490,9 @@ const InvoiceDocLineItemInner = z.strictObject({
   // Plain `.optional()`, matching `FulfillmentLineItem.substituted_for`
   // exactly — see the interface docblock for why this one is not `.nullable()`.
   substituted_for: SubstitutedForList.optional(),
-}).superRefine(checkItemPriceFormula).superRefine(checkZeroPricedAmount);
+  uid_out_of_service: FirestoreId.nullable().optional(),
+}).superRefine(checkItemPriceFormula).superRefine(checkZeroPricedAmount)
+  .superRefine(checkOutOfServiceLineType);
 
 // 🔴 `checkZeroPricedAmount` moved onto the **Inner** const on 2026-09-09, and
 // until then it never ran when an invoice document parsed. It was attached here,
@@ -747,6 +795,16 @@ export interface Invoice {
   query_by_orders: string[];
   number_orders: number[];
   /**
+   * Flat mirror of every line's `uid_out_of_service`, deduplicated — written by
+   * the invoice writer, never sent by a client. It exists so "which invoices
+   * bill this lost/damaged record" is one `array-contains-any` query rather
+   * than a scan of every line of every invoice.
+   *
+   * Optional while the reader ships ahead of the writer (the add-a-field
+   * order); absent reads as `[]`.
+   */
+  query_by_out_of_service?: string[];
+  /**
    * This invoice's exemption, or `null` to inherit the organization's.
    *
    * ⚠️ **Sticky**: `org.tax_exempt || doc.tax_exempt === true`, never
@@ -977,6 +1035,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     column: true,
     label: "Order #",
   }),
+  query_by_out_of_service: z.array(FirestoreId).optional(),
   // `tax_profile` was DELETED here — api-cloudrun#596 item 3's contract third,
   // applied to prod (2,317 documents) and dev on 2026-08-22. The three steps
   // were forced, not ceremonial: every write validates the FULL document and
@@ -1077,6 +1136,24 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).refine(
+  // The mirror must be EXACTLY the set its lines carry — a mirror is a claim
+  // about the lines, and one a writer forgot to refresh would hide a billed
+  // record from the double-bill check. Absent reads as `[]`, so an invoice with
+  // no L&D line needs no key at all.
+  (inv) => {
+    const fromLines = new Set<string>();
+    for (const item of inv.items) {
+      const uid = (item as { uid_out_of_service?: string | null }).uid_out_of_service;
+      if (uid != null) fromLines.add(uid);
+    }
+    const mirror = inv.query_by_out_of_service ?? [];
+    return mirror.length === fromLines.size && mirror.every((u) => fromLines.has(u));
+  },
+  {
+    message: "query_by_out_of_service must list exactly the distinct uid_out_of_service values on items",
+    path: ["query_by_out_of_service"],
+  },
+).refine(
   (inv) => inv.query_by_orders.length === 0 || inv.destinations.length >= 1,
   {
     message:
@@ -1182,6 +1259,12 @@ export interface InvoiceItemInputLineType {
    * charges for.
    */
   zero_priced?: boolean | null;
+  /**
+   * @see `InvoiceDocLineItemType.uid_out_of_service`. Needs an input channel for
+   * the `substituted_for` reason: `buildInvoiceItems` rebuilds every stored line
+   * from typed fields, so a key absent here is dropped on every PUT.
+   */
+  uid_out_of_service?: string | null;
 }
 
 // Un-annotated for `_zod.propValues`, `z.object` so unknown keys are stripped
@@ -1226,7 +1309,8 @@ const InvoiceItemInputLineInner = z.object({
   tracking_category: z.string().nullable().optional(),
   substituted_for: SubstitutedForList.optional(),
   zero_priced: z.boolean().nullable().optional(),
-}).superRefine(checkItemPriceFormula);
+  uid_out_of_service: FirestoreId.nullable().optional(),
+}).superRefine(checkItemPriceFormula).superRefine(checkOutOfServiceLineType);
 
 /** Zod schema for a billable invoice line (input). */
 export const InvoiceItemInputLine: z.ZodType<InvoiceItemInputLineType> =

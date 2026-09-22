@@ -75,6 +75,9 @@ const DATES = [
   "propagated destinations[].customer_collecting",
   "propagated destinations[].customer_returning",
   "propagated destinations[].jurisdiction",
+  // A swap is a pair like any other, so its two leaves merge per field.
+  "propagated destinations[].exchange.uid_pair",
+  "propagated destinations[].exchange.disposition",
 ];
 
 Deno.test("classifySharedFields: order → invoice, every shared key and its kind", () => {

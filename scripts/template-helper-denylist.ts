@@ -507,6 +507,18 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "remainingForOrder",
     "substitutionCredit",
   ],
+  // `utils/replacements.ts` is the lost/damaged BILLING arithmetic: what an
+  // out-of-service record has been billed across an order's sibling invoices,
+  // and the lines a replacement invoice is seeded with. Every export needs the
+  // OOS records and the sibling invoices at once; a template renders one
+  // document and holds neither. Listed in UTIL_MODULES only so the drift guard
+  // sees its exports.
+  replacements: [
+    "billedOutOfService",
+    "isBillableOutOfService",
+    "overbilledOutOfService",
+    "seedReplacementLines",
+  ],
   // `utils/fulfillment-items.ts` is a WRITE-PATH function shared by the API and
   // the manager — it rebuilds a fulfillment's items array from a picker
   // submission. A template renders a document that has already been written, so

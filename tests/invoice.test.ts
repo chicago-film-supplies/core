@@ -1276,3 +1276,27 @@ Deno.test("path: required on every invoice input arm, matching the order grain (
     });
   }
 });
+
+// ── The lost/damaged mirror is a claim about the lines ───────────
+
+Deno.test("InvoiceSchema requires query_by_out_of_service to be exactly the set its lines carry", () => {
+  const line = (validInvoice.items as Record<string, unknown>[])[0];
+  const lost = { ...line, uid: "item2000000000000000", type: "replacement", uid_out_of_service: "Oos00000000000000001" };
+
+  // Stated on a line, absent from the mirror → refused.
+  assertEquals(InvoiceSchema.safeParse({ ...validInvoice, items: [line, lost] }).success, false);
+  // Mirrored → accepted.
+  const mirrored = InvoiceSchema.safeParse({
+    ...validInvoice,
+    items: [line, lost],
+    query_by_out_of_service: ["Oos00000000000000001"],
+  });
+  assertEquals(mirrored.success, true, JSON.stringify(mirrored.success ? {} : mirrored.error.issues));
+  // A mirror naming a record no line bills → refused.
+  assertEquals(
+    InvoiceSchema.safeParse({ ...validInvoice, query_by_out_of_service: ["Oos00000000000000001"] }).success,
+    false,
+  );
+  // No L&D line, no key — the ordinary invoice.
+  assertEquals(InvoiceSchema.safeParse(validInvoice).success, true);
+});

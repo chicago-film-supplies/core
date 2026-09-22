@@ -3725,3 +3725,48 @@ Deno.test("invoiceHasSettlement: absent credited/void keys read as zero, not as 
   assertEquals(invoiceHasSettlement(bare), false);
   assertEquals(invoiceHasSettlement({ totals: { amount_paid_cents: 1 } }), true);
 });
+
+// ── Lost/damaged lines survive the order → invoice sync ─────────
+//
+// An invoice-only line inside an order's section is dropped by the removal pass
+// as "synced and removed from the order" — true of an order line, never of a
+// line billing a lost/damaged record, which no order ever had.
+
+Deno.test("syncOrderToInvoiceSelective keeps a line carrying uid_out_of_service, and drops a plain invoice-only line", () => {
+  const prevItem = orderShapedLine();
+  const projected = buildOrderScopedItems([prevItem], ORDER_DIV_1)[0];
+  const lostLine = {
+    ...projected,
+    uid: ITEM_2,
+    type: "replacement",
+    name: "Replacement: Light",
+    path: [ORDER_DIV_1, DEST_1, ITEM_2],
+    uid_out_of_service: "Oos00000000000000001",
+  } as InvoiceDocItemType;
+  const strayLine = { ...lostLine, uid: ITEM_3, path: [ORDER_DIV_1, DEST_1, ITEM_3] } as InvoiceDocItemType;
+  delete (strayLine as { uid_out_of_service?: string }).uid_out_of_service;
+
+  const result = syncOrderToInvoiceSelective(
+    [prevItem],
+    [orderShapedLine({ name: "Light v2" })],
+    [projected, lostLine, strayLine],
+    ORDER_DIV_1,
+  );
+  const uids = result.map((r) => r.uid);
+  assertEquals(uids.includes(ITEM_2), true, "the L&D line is kept");
+  assertEquals(uids.includes(ITEM_3), false, "a plain invoice-only line is still dropped — the net discriminates");
+  const kept = result.find((r) => r.uid === ITEM_2) as InvoiceItem;
+  assertEquals(kept.uid_out_of_service, "Oos00000000000000001");
+});
+
+Deno.test("InvoiceDocLineItem refuses uid_out_of_service on a non-replacement line", () => {
+  const projected = buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0];
+  const onRental = InvoiceDocLineItem.safeParse({ ...projected, uid_out_of_service: "Oos00000000000000001" });
+  assertEquals(onRental.success, false);
+  const onReplacement = InvoiceDocLineItem.safeParse({
+    ...projected,
+    type: "replacement",
+    uid_out_of_service: "Oos00000000000000001",
+  });
+  assertEquals(onReplacement.success, true, JSON.stringify(onReplacement.success ? {} : onReplacement.error.issues));
+});

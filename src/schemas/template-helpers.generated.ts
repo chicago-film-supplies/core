@@ -226,6 +226,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "pairWindow", expr: "it.quantityAccounting.pairWindow(pair)", desc: "A pair's {@link BilledWindow}, or `null` when it has no windows.", returns: "BilledWindow | null" },
     { name: "sameWindowDates", expr: "it.quantityAccounting.sameWindowDates(a, b)", desc: "Whether two window lists cover the same Chicago calendar dates, window for window, in order.", returns: "boolean" },
   ],
+  "replacements": [
+
+  ],
   "reporting": [
     { name: "agingAccountRows", expr: "it.reporting.agingAccountRows(report)", desc: "The account × bucket matrix: one row per account, plus a residual row when the accounts do not add up to the report's own totals.", returns: "AgingAccountRow[]" },
     { name: "bucketAmountCents", expr: "it.reporting.bucketAmountCents(totals, bucket)", desc: "One bucket's amount out of an {@link AgingTotals}.", returns: "number" },

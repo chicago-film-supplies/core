@@ -376,6 +376,95 @@ export const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType> = z.s
   contact: DocDestinationContact.nullable().meta({ column: true, label: "Contact" }),
 });
 
+/** What happens to the damaged unit the replacement is going out against. */
+export const EXCHANGE_DISPOSITIONS = ["exchange", "send_now"] as const;
+/**
+ * `exchange` — the damaged unit comes back on the same trip. `send_now` — the
+ * replacement goes out now and the damaged unit comes back at the normal return.
+ */
+export type ExchangeDispositionType = typeof EXCHANGE_DISPOSITIONS[number];
+/** Zod schema for {@link ExchangeDispositionType}. */
+export const ExchangeDispositionEnum: z.ZodType<ExchangeDispositionType> = z.enum(EXCHANGE_DISPOSITIONS);
+
+/**
+ * A mid-rental swap, stated ON the destination pair that carries it.
+ *
+ * 🔴 **A swap IS a destination pair — an exchange LEG — not a structure of its
+ * own.** The replacement unit goes out on its own trip, so it needs its own
+ * dates, its own booking, its own card and its own section of items; a
+ * destination pair is all four already. Making it a pair is what puts a swap
+ * through the three-way merge (`utils/shared-fields.ts`) and the diff
+ * (`utils/documentDiff.ts`) unchanged: a swap made on the order propagates to
+ * the fulfillment and the invoice unless overridden, and a swap made on the
+ * fulfillment shows as a diff against both.
+ *
+ * ⚠️ **The parent's collection endpoint and dates are COPIED, not referenced.**
+ * The units go back on the parent leg's return trip, which is why an exchange
+ * pair gets no `:end` card (`utils/cards.ts`) and why its collection half must
+ * agree with its parent's.
+ */
+export interface DestinationExchangeType {
+  /**
+   * The pair this one swaps units on — another pair of the SAME document, and
+   * never itself an exchange pair. Chaining is unrepresentable on purpose: two
+   * swaps against one leg are two exchange pairs naming the same parent.
+   */
+  uid_pair: string;
+  disposition: ExchangeDispositionType;
+}
+
+/** Zod schema for {@link DestinationExchangeType}. */
+export const DestinationExchange: z.ZodType<DestinationExchangeType> = z.strictObject({
+  // The parent pair's uid — a destination divider uid, `z.uuid()` exactly as
+  // `DestinationPairCore.uid` is.
+  uid_pair: z.uuid().meta({ propagate: true }),
+  disposition: ExchangeDispositionEnum.meta({ propagate: true }),
+});
+
+/**
+ * Every exchange pair names a parent pair of the same document, and that parent
+ * is not itself an exchange. Shared by the order, fulfillment and invoice
+ * destination arrays — one statement, so the three grains cannot disagree about
+ * what a swap is.
+ *
+ * ⚠️ **It reads the array, so it is attached at `z.array(...)` rather than to a
+ * pair** — a pair alone cannot see its siblings.
+ */
+export function checkExchangePairs(
+  pairs: ReadonlyArray<{ uid: string; exchange?: DestinationExchangeType | null }>,
+  ctx: z.RefinementCtx,
+): void {
+  const byUid = new Map(pairs.map((p) => [p.uid, p]));
+  pairs.forEach((pair, i) => {
+    const exchange = pair.exchange;
+    if (!exchange) return;
+    const parent = byUid.get(exchange.uid_pair);
+    if (!parent) {
+      ctx.addIssue({
+        code: "custom",
+        path: [i, "exchange", "uid_pair"],
+        message: `exchange.uid_pair ${exchange.uid_pair} names no destination pair on this document`,
+      });
+      return;
+    }
+    if (parent.uid === pair.uid) {
+      ctx.addIssue({
+        code: "custom",
+        path: [i, "exchange", "uid_pair"],
+        message: "an exchange pair cannot name itself as its parent",
+      });
+      return;
+    }
+    if (parent.exchange) {
+      ctx.addIssue({
+        code: "custom",
+        path: [i, "exchange", "uid_pair"],
+        message: `exchange.uid_pair ${exchange.uid_pair} names another exchange pair — a swap is against an ordinary leg`,
+      });
+    }
+  });
+}
+
 /**
  * A destination pair — delivery and collection endpoints.
  *
@@ -422,6 +511,8 @@ export interface DestinationType {
   customer_returning?: boolean;
   /** Level 1 of the jurisdiction precedence — see {@link DocDestinationType}. */
   jurisdiction?: JurisdictionType | null;
+  /** @see {@link DocDestinationType.exchange} — operator-authored, so it has an input channel. */
+  exchange?: DestinationExchangeType | null;
 }
 
 /** Zod schema for a destination pair. */
@@ -439,6 +530,7 @@ export const Destination: z.ZodType<DestinationType> = z.object({
   customer_collecting: z.boolean().optional(),
   customer_returning: z.boolean().optional(),
   jurisdiction: JurisdictionEnum.nullable().optional(),
+  exchange: DestinationExchange.nullable().optional(),
 });
 
 /**
@@ -515,6 +607,15 @@ export interface DocDestinationType {
    * Optional through api-cloudrun#409 Phase 1: every new tax field is additive.
    */
   jurisdiction?: JurisdictionType | null;
+  /**
+   * Set when this pair is a mid-rental SWAP against another leg of the same
+   * document — see {@link DestinationExchangeType}. `null`/absent is an
+   * ordinary leg, which is nearly every pair.
+   *
+   * Optional while the readers ship ahead of the writers (the add-a-field
+   * order); it becomes required-nullable once every stored pair carries the key.
+   */
+  exchange?: DestinationExchangeType | null;
 }
 
 /**
@@ -568,6 +669,7 @@ export const DestinationPairCore: {
   customer_collecting: z.ZodType<boolean>;
   customer_returning: z.ZodType<boolean>;
   jurisdiction: z.ZodOptional<z.ZodNullable<z.ZodType<JurisdictionType>>>;
+  exchange: z.ZodOptional<z.ZodNullable<z.ZodType<DestinationExchangeType>>>;
 } = {
   // The destination divider's uid — see {@link DocDestinationType.uid}. Typed
   // `z.uuid()` to match `DestinationDividerArm.uid` exactly, because it IS that
@@ -630,6 +732,11 @@ export const DestinationPairCore: {
     label: "Jurisdiction",
     propagate: true,
   }),
+  // Each LEAF of the exchange object carries its own `propagate: true`, which is
+  // what makes a swap a per-field three-way merge like every other pair value —
+  // see {@link DestinationExchangeType}. No `column: true`: a swap is read off
+  // the pair's own row in the editor, not tabulated.
+  exchange: DestinationExchange.nullable().optional(),
 };
 
 /**
@@ -1626,7 +1733,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   number: z.int().meta({ column: true, label: "#", linkTo: "orderDetail", propagate: false }),
   status: OrderStatus.meta({ column: true, label: "Status", propagate: false }),
   organization: OrderDocOrganization.meta({ label: "Organization", propagate: true }),
-  destinations: z.array(DocDestination).min(1),
+  destinations: z.array(DocDestination).min(1).superRefine(checkExchangePairs),
   // "Item" prefixes every column under here, which is what keeps
   // `items.price.taxes.rate` ("Item Tax Rate") distinct from the order-level
   // `totals.taxes.rate` ("Tax Rate") — the same field shape at two depths.

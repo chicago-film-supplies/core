@@ -162,6 +162,8 @@ export interface InvoiceItem extends LineItem {
    * `crms_opportunity_id` line above records the absence of.
    */
   substituted_for?: SubstitutedForEntryType[];
+  /** @see `InvoiceDocLineItemType.uid_out_of_service` — a `replacement` line's only. */
+  uid_out_of_service?: string | null;
   /** @see `InvoiceDocDestinationItemType.path_extension_for` — a destination divider's only. */
   path_extension_for?: string[];
 }
@@ -501,7 +503,7 @@ export function getXeroUnitAmountFromCents(subtotalCents: number, quantity: numb
  * before values and reported the ENTIRE CRMS-authored corpus `out_of_sync`,
  * with nothing thrown.
  *
- * ⚠️ Seven literals, no spread. core#43 is the standing case where JSR's npm
+ * ⚠️ Eight literals, no spread. core#43 is the standing case where JSR's npm
  * `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate could
  * see it.
  *
@@ -523,6 +525,10 @@ const INVOICE_ONLY_ITEM_FIELDS = [
   "crms_id",
   "crms_opportunity_id",
   "substituted_for",
+  // The lost/damaged record a `replacement` line bills. Invoice-authored and
+  // never on the order, so it must be carried across a rebuild, and it is not
+  // drift.
+  "uid_out_of_service",
   // 🔴 Type-checked against the STORED shape, not derived from it. Derivation is
   // wrong here and the distinction is the whole point: this is an OVERRIDE
   // POLICY, not a structural difference — `coa_revenue` is on the order line too
@@ -1582,6 +1588,12 @@ function mergePair(
  * that moved there. Dividers are still projected when missing: they are the
  * skeleton alignment reads, not something an operator bills.
  *
+ * ## A lost/damaged line is the invoice's own row
+ *
+ * A `replacement` line carrying `uid_out_of_service` bills a unit the customer
+ * lost or damaged. No order ever had it, so "synced and removed from the order"
+ * can never be true of it, and the removed-items pass keeps it unconditionally.
+ *
  * ## Extension sections are billing, not order structure
  *
  * An extension section's divider names no order path of its own, so without its
@@ -1786,6 +1798,13 @@ function syncScopedItems(
   for (const [pathKey, invoiceItem] of invoiceByPath) {
     if (processedInvoicePaths.has(pathKey) || emittedSubstituted.has(pathKey)) continue;
 
+    // A line billing a lost/damaged record was never on the order, so the
+    // order can never have removed it: it is the invoice's own row, kept the
+    // way a substitution row is.
+    if ((invoiceItem as { uid_out_of_service?: string | null }).uid_out_of_service != null) {
+      emit(invoiceItem);
+      continue;
+    }
     const prevItem = prevByPath.get(pathKey);
     const overridden = prevItem !== undefined && lineOverridden(prevItem, invoiceItem, orderDividerUid);
     if (overridden) {
