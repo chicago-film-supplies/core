@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { getInitialValues, InvoiceDocLineItem, SETTLED_STATUSES, InvoiceDocOrderItem, isInvoiceLineItem, OrderDocDestinationItem, OrderDocGroupItem } from "../src/schemas/mod.ts";
 import { computeItemPaths, rederiveDocumentTotalsForAudit, validateItemPaths } from "../src/utils/orders.ts";
 import type { OrderInvoiceFieldSync } from "../src/utils/invoices.ts";
@@ -3769,4 +3769,27 @@ Deno.test("InvoiceDocLineItem refuses uid_out_of_service on a non-replacement li
     uid_out_of_service: "Oos00000000000000001",
   });
   assertEquals(onReplacement.success, true, JSON.stringify(onReplacement.success ? {} : onReplacement.error.issues));
+});
+
+Deno.test("syncOrderItems — the hard snap discards an override but KEEPS a lost/damaged line", () => {
+  const orderItem = orderShapedLine();
+  const stored: InvoiceDocItemType[] = [
+    { uid: ORDER_DIV_1, type: "order", name: "Order #1001", description: "", path: [] } as InvoiceDocItemType,
+    { ...buildOrderScopedItems([orderItem], ORDER_DIV_1)[0], name: "OPERATOR RENAMED" } as InvoiceDocItemType,
+    {
+      ...buildOrderScopedItems([orderItem], ORDER_DIV_1)[0],
+      uid: ITEM_2,
+      type: "replacement",
+      name: "Replacement: Light",
+      path: [ORDER_DIV_1, DEST_1, ITEM_2],
+      uid_out_of_service: "Oos00000000000000001",
+    } as InvoiceDocItemType,
+  ];
+
+  const result = syncOrderItems(stored, [orderItem], ORDER_DIV_1);
+  const renamed = result.find((r) => r.uid === ITEM_1);
+  assertEquals(renamed?.name, "Light", "the snap discards the invoice's override — that is its job");
+  const lost = result.find((r) => r.uid === ITEM_2) as InvoiceItem | undefined;
+  assert(lost, "a line billing a lost/damaged record has no order counterpart, so the rebuild keeps it");
+  assertEquals(lost.uid_out_of_service, "Oos00000000000000001");
 });

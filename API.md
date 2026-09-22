@@ -28389,6 +28389,14 @@ Sync a single order's items into an invoice's items array.
 Replaces all items scoped to the order divider with rebuilt items from the order,
 carrying forward invoice-specific overrides on matched uids.
 
+🔴 **A line billing a lost/damaged record is KEPT, and it is the one exception
+to "this path discards overrides".** That rule is about the invoice holding a
+different value for an ORDER's line; a line carrying `uid_out_of_service` has
+no order counterpart at all, so a rebuild-from-order has nothing to say about
+it. Dropping it would silently un-bill a unit the customer lost — and it would
+also strand `Invoice.query_by_out_of_service`, whose refine pins the mirror to
+exactly the set the lines carry, so the resync would then fail at the write.
+
 **Parameters**
 
 - `invoiceItems` — Current full invoice items array
