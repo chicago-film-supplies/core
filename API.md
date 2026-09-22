@@ -7550,6 +7550,14 @@ One kind of place a unit can occupy.
 type PlaceKindType = indexedAccess;
 ```
 
+### `PlaceablePair`
+
+A destination pair as far as {@link unplacedEndpoints} reads it.
+
+```ts
+type PlaceablePair = typeLiteral;
+```
+
 ### `PreTaxItemType`
 
 The `pricing: "pre_tax"` members — every type that counts INTO the document
@@ -10361,6 +10369,18 @@ interface UidNameRefType {
 }
 ```
 
+### `UnplacedEndpoint`
+
+One missing half of one endpoint, as {@link unplacedEndpoints} reports it.
+
+```ts
+interface UnplacedEndpoint {
+  index: number;
+  side: "delivery" | "collection";
+  field: "uid" | "address";
+}
+```
+
 ### `UpdateBookingInput`
 
 Zod schema for UpdateBookingInput.
@@ -12370,6 +12390,14 @@ Display defaults for every Typesense collection, derived from collection config.
 ```ts
 const typesenseDisplayDefaults: Record<string, TypesenseDisplayDefaults>;
 ```
+
+### `unplacedEndpoints(status: string, destinations: ReadonlyArray<PlaceablePair>): UnplacedEndpoint[]`
+
+Every endpoint half a document at `status` is missing — the rule
+{@link checkStoredEndpoints} enforces on the stored schemas, as data, so a
+WRITER can refuse the same input with a 400 before it builds a document the
+schema would reject with a 500. One author: the refinement is this function
+plus an `addIssue` per entry. Empty for a draft.
 
 ### `unwrapNonArray(node: z.ZodType): z.ZodType`
 
@@ -17770,6 +17798,14 @@ type OrderStatusType = indexedAccess;
 type OrderUserStatusType = indexedAccess;
 ```
 
+### `PlaceablePair`
+
+A destination pair as far as {@link unplacedEndpoints} reads it.
+
+```ts
+type PlaceablePair = typeLiteral;
+```
+
 ### `PriceModifier`
 
 Zod schema for a rate-based price modifier (tax or transaction fee).
@@ -17853,6 +17889,18 @@ publishing the parts publishes a second way to spell one.
 
 ```ts
 const TotalsCore: typeLiteral;
+```
+
+### `UnplacedEndpoint`
+
+One missing half of one endpoint, as {@link unplacedEndpoints} reports it.
+
+```ts
+interface UnplacedEndpoint {
+  index: number;
+  side: "delivery" | "collection";
+  field: "uid" | "address";
+}
 ```
 
 ### `UpdateOrderInput`
@@ -17953,6 +18001,14 @@ Server-side gate for an order status write. `source: "manual"` rejects
 writes that move into a computed status or out of a computed status into
 anything other than the same value (no-op). `source: "propagation"`
 trusts the booking write path that sets `active` or `complete`.
+
+### `unplacedEndpoints(status: string, destinations: ReadonlyArray<PlaceablePair>): UnplacedEndpoint[]`
+
+Every endpoint half a document at `status` is missing — the rule
+{@link checkStoredEndpoints} enforces on the stored schemas, as data, so a
+WRITER can refuse the same input with a 400 before it builds a document the
+schema would reject with a 500. One author: the refinement is this function
+plus an `addIssue` per entry. Empty for a draft.
 
 ## `@cfs/core/schemas/fulfillment`
 

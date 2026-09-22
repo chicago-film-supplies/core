@@ -492,27 +492,54 @@ export function checkExchangePairs(
 export function checkStoredEndpoints(
   doc: {
     status: string;
-    destinations: ReadonlyArray<{
-      delivery?: { uid?: string | null; address?: unknown } | null;
-      collection?: { uid?: string | null; address?: unknown } | null;
-    }>;
+    destinations: ReadonlyArray<PlaceablePair>;
   },
   ctx: z.RefinementCtx,
 ): void {
-  if (doc.status === "draft") return;
-  doc.destinations.forEach((pair, i) => {
+  for (const gap of unplacedEndpoints(doc.status, doc.destinations)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["destinations", gap.index, gap.side, gap.field],
+      message: `a ${doc.status} document's ${gap.side} endpoint needs a ${gap.field} — only a draft may leave a leg unplaced`,
+    });
+  }
+}
+
+/** A destination pair as far as {@link unplacedEndpoints} reads it. */
+export type PlaceablePair = {
+  delivery?: { uid?: string | null; address?: unknown } | null;
+  collection?: { uid?: string | null; address?: unknown } | null;
+};
+
+/** One missing half of one endpoint, as {@link unplacedEndpoints} reports it. */
+export interface UnplacedEndpoint {
+  /** The pair's position in `destinations`. */
+  index: number;
+  side: "delivery" | "collection";
+  field: "uid" | "address";
+}
+
+/**
+ * Every endpoint half a document at `status` is missing — the rule
+ * {@link checkStoredEndpoints} enforces on the stored schemas, as data, so a
+ * WRITER can refuse the same input with a 400 before it builds a document the
+ * schema would reject with a 500. One author: the refinement is this function
+ * plus an `addIssue` per entry. Empty for a draft.
+ */
+export function unplacedEndpoints(
+  status: string,
+  destinations: ReadonlyArray<PlaceablePair>,
+): UnplacedEndpoint[] {
+  if (status === "draft") return [];
+  const gaps: UnplacedEndpoint[] = [];
+  destinations.forEach((pair, index) => {
     for (const side of ["delivery", "collection"] as const) {
-      const endpoint = pair[side];
       for (const field of ["uid", "address"] as const) {
-        if (endpoint?.[field] != null) continue;
-        ctx.addIssue({
-          code: "custom",
-          path: ["destinations", i, side, field],
-          message: `a ${doc.status} document's ${side} endpoint needs a ${field} — only a draft may leave a leg unplaced`,
-        });
+        if (pair[side]?.[field] == null) gaps.push({ index, side, field });
       }
     }
   });
+  return gaps;
 }
 
 /**

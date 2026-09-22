@@ -3272,6 +3272,12 @@
         },
         {
           "kind": "typeAlias",
+          "name": "PlaceablePair",
+          "declaration": "type PlaceablePair = typeLiteral;",
+          "doc": "A destination pair as far as {@link unplacedEndpoints} reads it."
+        },
+        {
+          "kind": "typeAlias",
           "name": "PreTaxItemType",
           "declaration": "type PreTaxItemType = indexedAccess;",
           "doc": "The `pricing: \"pre_tax\"` members — every type that counts INTO the document\nsubtotal.\n\nDerived from {@link ITEM_CONTRACTS} rather than listed. A hand-written copy of\nthis union is exactly the drift the parity assertions above exist to prevent,\nand `@cfs/core/utils/orders` carried one — `PreTaxLineItem[\"type\"]` was the\nliteral list `\"rental\" | \"sale\" | \"service\" | \"surcharge\" | \"replacement\"`,\na sixth place to remember when a type is added."
@@ -4513,6 +4519,12 @@
           "doc": "Generic uid + name reference used across many collections."
         },
         {
+          "kind": "interface",
+          "name": "UnplacedEndpoint",
+          "declaration": "interface UnplacedEndpoint {\n  index: number;\n  side: \"delivery\" | \"collection\";\n  field: \"uid\" | \"address\";\n}",
+          "doc": "One missing half of one endpoint, as {@link unplacedEndpoints} reports it."
+        },
+        {
           "kind": "variable",
           "name": "UpdateBookingInput",
           "declaration": "const UpdateBookingInput: z.ZodType<UpdateBookingInputType>;",
@@ -5486,6 +5498,14 @@
           "name": "typesenseDisplayDefaults",
           "declaration": "const typesenseDisplayDefaults: Record<string, TypesenseDisplayDefaults>;",
           "doc": "Display defaults for every Typesense collection, derived from collection config."
+        },
+        {
+          "kind": "function",
+          "name": "unplacedEndpoints",
+          "signature": "unplacedEndpoints(status: string, destinations: ReadonlyArray<PlaceablePair>): UnplacedEndpoint[]",
+          "doc": "Every endpoint half a document at `status` is missing — the rule\n{@link checkStoredEndpoints} enforces on the stored schemas, as data, so a\nWRITER can refuse the same input with a 400 before it builds a document the\nschema would reject with a 500. One author: the refinement is this function\nplus an `addIssue` per entry. Empty for a draft.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",
@@ -7946,6 +7966,12 @@
           "doc": ""
         },
         {
+          "kind": "typeAlias",
+          "name": "PlaceablePair",
+          "declaration": "type PlaceablePair = typeLiteral;",
+          "doc": "A destination pair as far as {@link unplacedEndpoints} reads it."
+        },
+        {
           "kind": "variable",
           "name": "PriceModifier",
           "declaration": "const PriceModifier: z.ZodType<PriceModifierType>;",
@@ -7974,6 +8000,12 @@
           "name": "TotalsCore",
           "declaration": "const TotalsCore: typeLiteral;",
           "doc": "The six totals fields an order and an invoice declare identically.\n\n⭐ **Referenced PER KEY, not spread — and unlike `DestinationPairCore` above,\nthat was forced.** The shared fields are contiguous in both grains, but their\ninternal order differs: `discount_amount_cents` is FIRST on the order and\nTHIRD on the invoice. A schema's key order is its Firestore-surface column\norder (`getFirestoreColumns` walks the shape), so `{ ...TotalsCore, … }` would\nmove that column on whichever grain did not supply the ordering — an\noperator-visible change wearing a refactor's clothes. Same answer as the line\nitem in `_items.ts`, same reason, and the opposite answer to the destination\npair. **Contiguity is not the test; agreement on ORDER is.**\n\n🔴 **So the anti-drift guarantee lives in `tests/totals-parity.test.ts`, not in\nthe syntax.** A per-key reference cannot stop a grain re-declaring a field\ninline any more than a spread can stop one shadowing it; only instance\nidentity (`shape[k] === TotalsCore[k]`) sees either. Structural equality would\nNOT do — `z.globalRegistry` is keyed on the instance, so a separately-declared\ntwin carries none of these `.meta()` annotations and every heading below would\nsilently vanish from the tables.\n\n⚠️ **`replacement_total_cents` being order-only is correct, not a gap.** An\ninvoice price has no `replacement_cents`, so an invoice structurally cannot\ncompute one. Written down because it reads like an omission.\n\n⚠️ **Not on the `@cfs/core/schemas` barrel**, for the same reason as\n`DestinationPairCore`: no consumer assembles a totals object from parts, and\npublishing the parts publishes a second way to spell one."
+        },
+        {
+          "kind": "interface",
+          "name": "UnplacedEndpoint",
+          "declaration": "interface UnplacedEndpoint {\n  index: number;\n  side: \"delivery\" | \"collection\";\n  field: \"uid\" | \"address\";\n}",
+          "doc": "One missing half of one endpoint, as {@link unplacedEndpoints} reports it."
         },
         {
           "kind": "variable",
@@ -8032,6 +8064,14 @@
           "name": "isValidOrderStatusTransition",
           "signature": "isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: \"manual\" | \"propagation\"): boolean",
           "doc": "Server-side gate for an order status write. `source: \"manual\"` rejects\nwrites that move into a computed status or out of a computed status into\nanything other than the same value (no-op). `source: \"propagation\"`\ntrusts the booking write path that sets `active` or `complete`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "unplacedEndpoints",
+          "signature": "unplacedEndpoints(status: string, destinations: ReadonlyArray<PlaceablePair>): UnplacedEndpoint[]",
+          "doc": "Every endpoint half a document at `status` is missing — the rule\n{@link checkStoredEndpoints} enforces on the stored schemas, as data, so a\nWRITER can refuse the same input with a 400 before it builds a document the\nschema would reject with a 500. One author: the refinement is this function\nplus an `addIssue` per entry. Empty for a draft.",
           "paramTags": [],
           "returnsTag": null
         }

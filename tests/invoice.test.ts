@@ -2,6 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
 import { ACCEPTS_PAYMENT_STATUSES, canOperatorTransition, CreateInvoiceInput, INVOICE_STATUS_CONTRACTS, InvoiceDocLineItem, InvoiceDocOrderItem, InvoiceItemInputLine, InvoiceSchema, type InvoiceStatusType, LIVE_IN_XERO_STATUSES, REACHED_XERO_STATUSES, SETTLED_STATUSES, UpdateInvoiceInput } from "../src/schemas/invoice.ts";
 import { derivePaymentStatus } from "../src/utils/invoices.ts";
+import { unplacedEndpoints } from "../src/schemas/mod.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 // `uid_thread` is a branded `ThreadId`; the schema walk seeds string leaves as
@@ -202,6 +203,15 @@ Deno.test("checkStoredEndpoints — a draft may leave a leg unplaced; nothing pa
     }
     assertEquals(InvoiceSchema.safeParse(withLeg(status, placedEndpoint)).success, true, `${status} placed`);
   }
+});
+
+Deno.test("unplacedEndpoints — the refinement as data, so a writer can 400 on it", () => {
+  const unplaced = { uid: null, address: null };
+  assertEquals(unplacedEndpoints("draft", [{ delivery: unplaced, collection: unplaced }]), []);
+  assertEquals(unplacedEndpoints("reserved", [{ delivery: placedEndpoint, collection: placedEndpoint }]), []);
+  assertEquals(unplacedEndpoints("reserved", [{ delivery: placedEndpoint, collection: { uid: "x", address: null } }]), [
+    { index: 0, side: "collection", field: "address" },
+  ]);
 });
 
 Deno.test("InvoiceSchema accepts part_paid and void statuses", () => {

@@ -213,6 +213,9 @@ export {
   type OrderComputedStatusType,
   getOrderStatusTransitions,
   isValidOrderStatusTransition,
+  type PlaceablePair,
+  unplacedEndpoints,
+  type UnplacedEndpoint,
 } from "./order.ts";
 
 export {
