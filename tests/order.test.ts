@@ -1376,3 +1376,80 @@ Deno.test("OrderSchema refuses an unknown disposition and an extra exchange key"
     false,
   );
 });
+
+// ── A swap's replacement line may say what it replaces (api-cloudrun#1114) ──
+
+const X_LINE = "testprod100000000000";
+const Y_LINE = "testprod200000000000";
+
+/** A priced order line — the minimum `OrderDocLineItem` parses. */
+function orderLine(uid: string, path: string[], extra: Record<string, unknown> = {}) {
+  return {
+    uid,
+    type: "rental",
+    name: "Light",
+    description: "",
+    path,
+    quantity: 1,
+    uid_tax_class: "TaxC1assDefau1tAAAAA",
+    price: {
+      ...priceBase,
+      base_cents: 10000,
+      replacement_cents: 500000,
+      chargeable_days: 1,
+      subtotal_cents: 10000,
+      subtotal_discounted_cents: 10000,
+      taxes: [],
+      total_cents: 10000,
+    },
+    stock_method: "bulk",
+    zero_priced: null,
+    ...extra,
+  };
+}
+
+/** A swap leg against the parent, X on the parent, and Y on the swap naming `replaces`. */
+function docWithSwapLine(replaces: unknown, exchange: unknown = { uid_pair: PARENT_PAIR, disposition: "exchange" }) {
+  return {
+    ...docWithSwap(exchange),
+    items: [
+      { uid: PARENT_PAIR, type: "destination", name: "Set", description: "", path: [PARENT_PAIR] },
+      orderLine(X_LINE, [PARENT_PAIR, X_LINE]),
+      { uid: SWAP_PAIR, type: "destination", name: "Exchange", description: "", path: [SWAP_PAIR] },
+      orderLine(Y_LINE, [SWAP_PAIR, Y_LINE], { replaces }),
+    ],
+  };
+}
+
+Deno.test("OrderSchema accepts `replaces` naming a row on the leg the swap exchanges against", () => {
+  const parsed = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, X_LINE], quantity: 1 }]));
+  assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
+});
+
+Deno.test("OrderSchema refuses `replaces` on a row that is not under an exchange pair", () => {
+  const parsed = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, X_LINE], quantity: 1 }], null));
+  assertEquals(parsed.success, false);
+  assertEquals(parsed.error?.issues.some((i) => i.path.join(".") === "items.3.replaces"), true);
+});
+
+Deno.test("OrderSchema refuses `replaces` naming a row on some OTHER leg, or no row at all", () => {
+  // The same shared refine the fulfillment runs — one author, so the order
+  // cannot accept a pointer its own projection would then fail to store.
+  const otherLeg = OrderSchema.safeParse(docWithSwapLine([{ path: [SWAP_PAIR, Y_LINE], quantity: 1 }]));
+  assertEquals(otherLeg.success, false);
+  const gone = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, "testprodgone00000000"], quantity: 1 }]));
+  assertEquals(gone.success, false, "a damaged row the order no longer carries");
+});
+
+Deno.test("OrderItem (input) carries `replaces` through a parse", () => {
+  // 🔴 The input is a `z.object`, so an undeclared key is STRIPPED: without the
+  // declaration every order PUT would succeed and drop the swap's link.
+  const parsed = OrderItem.safeParse({
+    uid: Y_LINE,
+    type: "rental",
+    path: [SWAP_PAIR, Y_LINE],
+    replaces: [{ path: [PARENT_PAIR, X_LINE], quantity: 1 }],
+  });
+  assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
+  assertEquals((parsed.success ? parsed.data as { replaces?: unknown[] } : {}).replaces?.length, 1);
+});

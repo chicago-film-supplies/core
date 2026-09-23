@@ -7,10 +7,12 @@ import {
   isInSubstitutedSubtree,
   isRemovedBySubstitution,
   isStrictlyBelow,
+  repointReplaces,
   standInUnits,
   substitutionResync,
 } from "../src/utils/substitutions.ts";
 import { SubstitutedForList } from "../src/schemas/common.ts";
+import { mapPathsAcrossRebuild } from "../src/utils/item-pairing.ts";
 
 /**
  * The path algebra behind every substitution guard, on both surfaces.
@@ -289,4 +291,53 @@ Deno.test("substitutionResync: X reparented re-points the entry", () => {
     (p) => (p.join("/") === X.join("/") ? X2 : undefined),
   );
   assertEquals(r.reoffset(Y, entries, 0).substituted_for, [{ path: X2, quantity: 2 }]);
+});
+
+// ── repointReplaces — a swap's pointer follows X (api-cloudrun#1114) ─────
+
+Deno.test("repointReplaces: an entry naming a row that is there is kept as it is", () => {
+  const r = repointReplaces([{ path: ["L", "X"], quantity: 2 }], [{ path: ["L", "X"] }]);
+  assertEquals(r, { entries: [{ path: ["L", "X"], quantity: 2 }], unresolved: [] });
+});
+
+Deno.test("repointReplaces: X regrouped — the map carries the entry to X's new path", () => {
+  const prev = [{ uid: "X", path: ["L", "X"] }];
+  const next = [{ uid: "G", path: ["L", "G"] }, { uid: "X", path: ["L", "G", "X"] }];
+  const r = repointReplaces([{ path: ["L", "X"], quantity: 1 }], next, [mapPathsAcrossRebuild(prev, next)]);
+  assertEquals(r.entries, [{ path: ["L", "G", "X"], quantity: 1 }]);
+  assertEquals(r.unresolved, []);
+});
+
+Deno.test("repointReplaces: X substituted away — the ONE stand-in is the unit on set", () => {
+  const rows = [{ path: ["L", "Z"], substituted_for: [{ path: ["L", "X"], quantity: 1 }] }];
+  const r = repointReplaces([{ path: ["L", "X"], quantity: 1 }], rows);
+  assertEquals(r.entries, [{ path: ["L", "Z"], quantity: 1 }]);
+});
+
+Deno.test("repointReplaces: a split substitution is NOT guessed at — unresolved", () => {
+  const rows = [
+    { path: ["L", "Z1"], substituted_for: [{ path: ["L", "X"], quantity: 1 }] },
+    { path: ["L", "Z2"], substituted_for: [{ path: ["L", "X"], quantity: 1 }] },
+  ];
+  const r = repointReplaces([{ path: ["L", "X"], quantity: 1 }], rows);
+  assertEquals(r.entries, []);
+  assertEquals(r.unresolved, [{ path: ["L", "X"], quantity: 1 }]);
+});
+
+Deno.test("repointReplaces: X gone with nothing standing in — unresolved, never dropped silently", () => {
+  const r = repointReplaces([{ path: ["L", "X"], quantity: 3 }], [{ path: ["L", "Y"] }]);
+  assertEquals(r, { entries: [], unresolved: [{ path: ["L", "X"], quantity: 3 }] });
+});
+
+Deno.test("repointReplaces: two entries landing on one row MERGE, so the list stays unique by path", () => {
+  // X moved onto the path another entry already names — `SwapReplacementList`
+  // refuses a duplicate path, so the result must sum rather than repeat.
+  const moved = { toPath: (p: readonly string[] | undefined) => (p?.join("/") === "L/Xold" ? ["L", "X"] : undefined) };
+  const r = repointReplaces(
+    [{ path: ["L", "X"], quantity: 1 }, { path: ["L", "Xold"], quantity: 2 }],
+    [{ path: ["L", "X"] }],
+    [moved],
+  );
+  assertEquals(r.entries, [{ path: ["L", "X"], quantity: 3 }]);
+  assertEquals(new Set(r.entries.map((e) => e.path.join("/"))).size, r.entries.length);
 });

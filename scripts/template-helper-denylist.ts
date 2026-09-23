@@ -621,6 +621,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "isRemovedBySubstitution",
     "isStrictlyBelow",
     "isSubstitutionRow",
+    // A write-path re-pointer (api-cloudrun#1114) — a template renders the
+    // stored `replaces`, never re-derives it.
+    "repointReplaces",
     "standInUnits",
     "substitutionCredit",
     "substitutionResync",

@@ -151,6 +151,21 @@ export const DOMAIN_EVENT_MSGS = [
   // on any order a warehouse has started, not a degradation. Emitted from
   // `api-cloudrun/src/services/orders.ts` in api-cloudrun.
   "fulfillment_sync_frozen_rows",
+  // A swap's `replaces` entry named a damaged row the fulfillment no longer
+  // carries, even after re-pointing it across the order rebuild and onto any
+  // stand-in whose `substituted_for` names that row — so the projection DROPPED
+  // it rather than fail the whole order save on `checkSwapReplacements`
+  // (api-cloudrun#1114). The swap's trip still goes out; the checkout rider
+  // simply marks nothing for that entry, and the operator marks the unit at
+  // check-in by hand.
+  //
+  // ⭐ **It is the trail for "why didn't the swap mark my unit damaged".** A drop
+  // is correct and invisible by construction — the entry is simply absent from
+  // the stored row afterwards.
+  //
+  // `{ order_uid, row_path, dropped_paths }`, at `warn`. Emitted from
+  // `api-cloudrun/src/lib/orderFulfillmentSync.ts` in api-cloudrun.
+  "swap_replaces_unresolved",
   // One recurrence threw while the nightly sweep advanced its horizon
   // (api-cloudrun#549 D6-B). `materializeHorizonAll` absorbs the throw and
   // carries on — correct, because `recurrence-horizon-nightly` retries the

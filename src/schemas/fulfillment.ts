@@ -43,6 +43,7 @@ import {
 import {
   checkExchangePairs,
   checkStoredEndpoints,
+  checkSwapReplacements,
   DocDestination,
   type DocDestinationType,
   ORDER_STATUSES,
@@ -470,61 +471,6 @@ export interface Fulfillment {
   version: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
-}
-
-/**
- * A `replaces` entry is a claim about two rows of THIS document, so only the
- * document can check it:
- *
- * 1. the row carrying it sits under a pair marked `exchange` — a swap's
- *    replacement line, not an ordinary one;
- * 2. every path it names is a row under that pair's PARENT leg — the damaged
- *    units are on the leg being swapped against, by definition.
- *
- * ⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without
- * it a swap could name a row on an unrelated leg, and the checkout rider would
- * mark units damaged on a trip that never carried them.
- */
-function checkSwapReplacements(
-  doc: { destinations: DocDestinationType[]; items: FulfillmentItemType[] },
-  ctx: z.RefinementCtx,
-): void {
-  const exchangeByPair = new Map(
-    doc.destinations.filter((p) => p.exchange != null).map((p) => [p.uid, p.exchange!.uid_pair]),
-  );
-  const pathsUnderPair = new Map<string, Set<string>>();
-  for (const item of doc.items) {
-    const leg = item.path[0];
-    if (leg === undefined) continue;
-    const set = pathsUnderPair.get(leg) ?? new Set<string>();
-    set.add(item.path.join("/"));
-    pathsUnderPair.set(leg, set);
-  }
-
-  doc.items.forEach((item, i) => {
-    const entries = (item as { replaces?: SubstitutedForEntryType[] }).replaces;
-    if (entries === undefined) return;
-    const leg = item.path[0];
-    const parentLeg = leg === undefined ? undefined : exchangeByPair.get(leg);
-    if (parentLeg === undefined) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["items", i, "replaces"],
-        message: "replaces is valid only on a row under a destination pair marked as an exchange",
-      });
-      return;
-    }
-    const underParent = pathsUnderPair.get(parentLeg) ?? new Set<string>();
-    entries.forEach((entry, j) => {
-      if (!underParent.has(entry.path.join("/"))) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["items", i, "replaces", j, "path"],
-          message: `replaces names ${entry.path.join("/")}, which is not a row on the leg this swap exchanges against`,
-        });
-      }
-    });
-  });
 }
 
 export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({

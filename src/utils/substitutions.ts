@@ -474,3 +474,105 @@ export function substitutionResync(
     },
   };
 }
+
+/** One `replaces` entry, as a swap's replacement row carries it. */
+export interface ReplacesEntry {
+  readonly path: readonly string[];
+  readonly quantity: number;
+}
+
+/**
+ * A path correspondence across one rebuild — the `toPath` half of
+ * `RebuildPathMap` (`@cfs/core/utils/item-pairing`), which is all this needs.
+ */
+export interface PathForwardMap {
+  toPath(fromPath: readonly string[] | undefined): readonly string[] | undefined;
+}
+
+/** @see {@link repointReplaces} */
+export interface RepointedReplaces {
+  /** The entries, each naming a row of `rows`, merged by path. */
+  entries: Array<{ path: string[]; quantity: number }>;
+  /** Entries no map and no stand-in could resolve — the caller decides. */
+  unresolved: Array<{ path: string[]; quantity: number }>;
+}
+
+/**
+ * Re-point a swap row's `replaces` entries at the rows a document carries NOW
+ * (api-cloudrun#1114).
+ *
+ * `replaces` names the damaged row X by PATH, and a path is only as stable as
+ * the dividers above it — exactly the defect `substituted_for` had until
+ * api-cloudrun#897 (see the module docstring). So every rebuild that can move X
+ * re-points the entries it carries, in this order, first hit wins:
+ *
+ * 1. the entry already names a row of `rows` — kept as it is;
+ * 2. a `maps` entry carries it to a path `rows` has — X MOVED (a regroup, or
+ *    the server re-deriving a path the client chained differently);
+ * 3. exactly ONE row of `rows` carries a `substituted_for` entry naming X (at
+ *    its original or its mapped path) — the picker substituted X away, so the
+ *    unit on set, the one the customer damaged, is that stand-in. Two or more
+ *    stand-ins for one X is a split this cannot choose between, so it stays
+ *    unresolved rather than guessing which unit broke.
+ *
+ * ⚠️ **Resolution against ANY row, not against the parent leg.** Whether the
+ * resolved row sits on the leg the swap exchanges against is
+ * `checkSwapReplacements`' question, asked of the whole document — answering it
+ * here too would give the rule two authors.
+ *
+ * Two entries resolving to one row are MERGED by summing their quantities,
+ * because `SwapReplacementList` is unique by path.
+ *
+ * Pure: it re-points and reports, and never decides what an unresolved entry
+ * means — on an ORDER that is the operator's mistake and a 400, on a
+ * FULFILLMENT it is a dropped pointer and a warn.
+ *
+ * @param entries - The row's `replaces`, as stored or as sent
+ * @param rows - The document's rows as they stand after the rebuild
+ * @param maps - Path correspondences to try, in order
+ * @returns The re-pointed entries and the ones nothing resolved
+ */
+export function repointReplaces(
+  entries: readonly ReplacesEntry[],
+  rows: ReadonlyArray<MaybeSubstitution>,
+  maps: readonly PathForwardMap[] = [],
+): RepointedReplaces {
+  const key = (p: readonly string[]) => p.join("\u0000");
+  const present = new Map<string, readonly string[]>();
+  for (const r of rows) if (r.path.length > 0) present.set(key(r.path), r.path);
+
+  const candidates = (p: readonly string[]): Array<readonly string[]> => {
+    const out: Array<readonly string[]> = [p];
+    for (const m of maps) {
+      const to = m.toPath(p);
+      if (to !== undefined) out.push(to);
+    }
+    return out;
+  };
+
+  const merged = new Map<string, { path: string[]; quantity: number }>();
+  const unresolved: Array<{ path: string[]; quantity: number }> = [];
+  const add = (path: readonly string[], quantity: number) => {
+    const k = key(path);
+    const hit = merged.get(k);
+    if (hit) hit.quantity += quantity;
+    else merged.set(k, { path: [...path], quantity });
+  };
+
+  for (const entry of entries) {
+    const tries = candidates(entry.path);
+    const direct = tries.find((p) => present.has(key(p)));
+    if (direct !== undefined) {
+      add(present.get(key(direct))!, entry.quantity);
+      continue;
+    }
+    const tryKeys = new Set(tries.map(key));
+    const standIns = rows.filter((r) => (r.substituted_for ?? []).some((e) => tryKeys.has(key(e.path))));
+    if (standIns.length === 1) {
+      add(standIns[0].path, entry.quantity);
+      continue;
+    }
+    unresolved.push({ path: [...entry.path], quantity: entry.quantity });
+  }
+  return { entries: [...merged.values()], unresolved };
+}

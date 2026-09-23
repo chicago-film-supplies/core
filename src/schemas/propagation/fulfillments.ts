@@ -471,7 +471,10 @@ const createFulfillmentExchangeRules: CollectionRule[] = [
       "stored. 🔴 This is the ONE writer that adds a destination pair a fulfillment's " +
       "order does not have — `update-fulfillment-destinations` explicitly refuses " +
       "membership changes — and it is admissible only because an exchange leg is a " +
-      "fact about what the warehouse DID, which the order never asked for.",
+      "fact about what the warehouse DID, which the order never asked for. ⚠️ A swap " +
+      "may ALSO be authored on the order (sales staging it, api-cloudrun#1114); that one " +
+      "reaches the fulfillment through `update-order`'s projection like any other leg, " +
+      "and never through this route.",
     enforced_by: [EXCHANGE_LEG_IS_ATOMIC],
     transaction: "create-fulfillment-exchange",
     fields: [

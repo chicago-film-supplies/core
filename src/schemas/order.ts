@@ -38,6 +38,8 @@ import {
   type RateType,
   StockMethodEnum,
   type StockMethodType,
+  type SubstitutedForEntryType,
+  SwapReplacementList,
   type InvoiceStatusType,
   InvoiceStatusEnum,
   NameField,
@@ -423,9 +425,11 @@ export const DestinationExchange: z.ZodType<DestinationExchangeType> = z.strictO
 
 /**
  * Every exchange pair names a parent pair of the same document, and that parent
- * is not itself an exchange. Shared by the order, fulfillment and invoice
- * destination arrays — one statement, so the three grains cannot disagree about
- * what a swap is.
+ * is not itself an exchange. Shared by the order and fulfillment destination
+ * arrays — one statement, so the two grains cannot disagree about what a swap
+ * is. ⚠️ **The INVOICE array deliberately does not carry it** (see the note at
+ * `FulfillmentSchema.destinations`): an invoice is scoped to what it bills, so it
+ * can hold an exchange pair whose parent leg another invoice carries.
  *
  * ⚠️ **It reads the array, so it is attached at `z.array(...)` rather than to a
  * pair** — a pair alone cannot see its siblings.
@@ -503,6 +507,70 @@ export function checkStoredEndpoints(
       message: `a ${doc.status} document's ${gap.side} endpoint needs a ${gap.field} — only a draft may leave a leg unplaced`,
     });
   }
+}
+
+/**
+ * A `replaces` entry is a claim about two rows of THIS document, so only the
+ * document can check it:
+ *
+ * 1. the row carrying it sits under a pair marked `exchange` — a swap's
+ *    replacement line, not an ordinary one;
+ * 2. every path it names is a row under that pair's PARENT leg — the damaged
+ *    units are on the leg being swapped against, by definition.
+ *
+ * ⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without
+ * it a swap could name a row on an unrelated leg, and the checkout rider would
+ * mark units damaged on a trip that never carried them.
+ *
+ * Shared by the order and fulfillment documents, attached exactly as
+ * {@link checkStoredEndpoints} is — it reads two arrays, so it cannot live on
+ * either. Lives HERE rather than in `fulfillment.ts` because `fulfillment.ts`
+ * already imports this module; the reverse import would be a cycle.
+ * (api-cloudrun#1114 moved it when the order line gained `replaces`.)
+ */
+export function checkSwapReplacements(
+  doc: {
+    destinations: ReadonlyArray<{ uid: string; exchange?: DestinationExchangeType | null }>;
+    items: ReadonlyArray<{ path: readonly string[] }>;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const exchangeByPair = new Map(
+    doc.destinations.filter((p) => p.exchange != null).map((p) => [p.uid, p.exchange!.uid_pair]),
+  );
+  const pathsUnderPair = new Map<string, Set<string>>();
+  for (const item of doc.items) {
+    const leg = item.path[0];
+    if (leg === undefined) continue;
+    const set = pathsUnderPair.get(leg) ?? new Set<string>();
+    set.add(item.path.join("/"));
+    pathsUnderPair.set(leg, set);
+  }
+
+  doc.items.forEach((item, i) => {
+    const entries = (item as { replaces?: SubstitutedForEntryType[] }).replaces;
+    if (entries === undefined) return;
+    const leg = item.path[0];
+    const parentLeg = leg === undefined ? undefined : exchangeByPair.get(leg);
+    if (parentLeg === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["items", i, "replaces"],
+        message: "replaces is valid only on a row under a destination pair marked as an exchange",
+      });
+      return;
+    }
+    const underParent = pathsUnderPair.get(parentLeg) ?? new Set<string>();
+    entries.forEach((entry, j) => {
+      if (!underParent.has(entry.path.join("/"))) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["items", i, "replaces", j, "path"],
+          message: `replaces names ${entry.path.join("/")}, which is not a row on the leg this swap exchanges against`,
+        });
+      }
+    });
+  });
 }
 
 /** A destination pair as far as {@link unplacedEndpoints} reads it. */
@@ -1031,6 +1099,12 @@ export interface OrderItemLineType {
   uid_order?: string;
   /** @see `OrderDocLineItemType.uid_tax_class_override` — operator-authored, so it is accepted here. */
   uid_tax_class_override?: string | null;
+  /**
+   * @see `OrderDocLineItemType.replaces`. Declared on the INPUT because this is a
+   * `z.object`: an undeclared key is STRIPPED, so without it every order PUT
+   * would silently drop a swap's link to the damaged row it goes out against.
+   */
+  replaces?: SubstitutedForEntryType[];
 }
 
 // Un-annotated for `_zod.propValues` — see `_dividers.ts`. `z.object`, not
@@ -1056,6 +1130,7 @@ const OrderItemLineInner = z.object({
   order_number: z.int().optional(),
   uid_order: FirestoreId.optional(),
   uid_tax_class_override: FirestoreId.nullable().optional(),
+  replaces: SwapReplacementList.optional(),
 }).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a billable order line (input). */
@@ -1414,6 +1489,29 @@ export interface OrderDocLineItemType {
    * translated `taxed_as: "none"` into the Non-Taxable class here.
    */
   uid_tax_class_override?: string | null;
+  /**
+   * Set on a mid-rental SWAP's replacement line: the DAMAGED rows this one goes
+   * out against, with how many units each — see `SwapReplacementList`. Only valid
+   * on a row under a pair carrying `exchange`, naming rows on that pair's parent
+   * leg ({@link checkSwapReplacements}).
+   *
+   * ⭐ **Authored on the order so sales can stage a swap** (api-cloudrun#1114): the
+   * customer reports the damage, the swap is added here, and it reaches the
+   * fulfillment like any other line. Before this the field lived on the
+   * fulfillment alone, so an order-authored swap sent its trip but could not say
+   * which unit it replaced — the checkout rider marked nothing damaged.
+   *
+   * ⚠️ **`shared: "value"`, not `propagate: true`** — the entries carry no `uid`,
+   * so the classifier cannot walk them as rows; the list is taken or kept whole,
+   * exactly as `charge_windows` is. Merged by hand in api-cloudrun's
+   * `mergeLineItem` (three-way, and a custody-frozen row keeps its stored value,
+   * because the list decides which UNITS the rider moves). The paths are ORDER
+   * paths, re-pointed across every rebuild by `repointReplaces`
+   * (`@cfs/core/utils/substitutions`).
+   *
+   * The invoice does not carry it: `projectOrderItemToInvoiceItem` picks its keys.
+   */
+  replaces?: SubstitutedForEntryType[];
 }
 
 // Un-annotated so `_zod.propValues` survives for `z.discriminatedUnion` below;
@@ -1451,6 +1549,9 @@ const OrderDocLineItemInner = z.strictObject({
   // The class snapshot + the operator's class override — one declaration
   // shared with the invoice line (`_items.ts`).
   ...LineTaxCore,
+  // Plain `.optional()`, matching `substituted_for` and `path_extension_for`:
+  // only a swap's replacement line carries it. See the interface docblock.
+  replaces: SwapReplacementList.optional().meta({ shared: "value" }),
 }).superRefine(checkItemContract).superRefine(checkZeroPricedAmount);
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;
@@ -1925,7 +2026,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   updated_by: ActorRef.nullable().optional().meta({ column: true, label: "Updated By", propagate: false }),
   created_at: TimestampFields.created_at.meta({ propagate: false }),
   updated_at: TimestampFields.updated_at.meta({ propagate: false }),
-}).superRefine(checkStoredEndpoints).meta({
+}).superRefine(checkStoredEndpoints).superRefine(checkSwapReplacements).meta({
   title: "Order",
   collection: "orders",
   displayDefaults: {
