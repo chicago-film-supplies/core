@@ -133,7 +133,7 @@ export const MOVEMENT_TYPES = [
   "check_in",
   "mark_damaged",
   "mark_lost",
-  // The three reachable rewinds. A picker can move custody DOWN the ladder —
+  // The reachable rewinds. A picker can move custody DOWN the ladder —
   // un-prepping a pick, pulling back a check-out, undoing a return — and until
   // these types existed those transitions emitted
   // NOTHING, because `deriveCustodyTransitions` mapped only the forward
@@ -148,31 +148,37 @@ export const MOVEMENT_TYPES = [
   // operator putting units back on the shelf is a new physical fact that undoes
   // no single row — one un-prep can walk back part of each of several earlier
   // preps. Spelling them as their own types is what keeps `reverses` meaning
-  // only what it says, and it costs nothing else: all five are ownership-neutral
+  // only what it says, and it costs nothing else: every rewind is ownership-neutral
   // and `cost: "forbidden"`, so `getTransactionMultiplier` returns 0 and
   // `xeroPostingFor` skips them on `no_cost_contract` — both DERIVED from the
   // contract, so neither needed an arm.
   //
-  // ⚠️ **There are THREE, not five — `lost` and `damaged` have no rewind member
-  // because the ladder cannot produce one.** `applyBookingUpdate` refuses a
-  // decrease of either outright (*"Cannot decrease breakdown.lost or
-  // breakdown.damaged via PUT /bookings — adjust the OOS record itself"*), so
-  // `damaged → out` is a 400 rather than a silent unmapped transition. The
-  // out-of-service record is the lever there, and it already has
-  // `returned_to_service`. Minting a *rewind* for a transition no writer can
-  // emit would be a declared-and-unpopulated vocabulary member — the thing this
-  // comment block exists to avoid, not an extension of it.
+  // ⭐ **There are FIVE — `mark_lost_undo` and `mark_damaged_undo` joined the
+  // three in api-cloudrun#1094 step 5**, and the discriminator for whether one
+  // belongs here is whether a writer can emit it, never whether the vocabulary
+  // looks symmetric. This comment said "THREE, not five" while
+  // `applyBookingUpdate` refused any decrease of `lost`/`damaged` outright, and
+  // that refusal was itself the live defect: the manager's `‹ Out` button fires
+  // `lost → out` / `damaged → out` in one pick and 400'd on any booking holding
+  // them. A mistaken mark ("it was never lost") is a rewind like the others — the
+  // breakdown moves back and the journal has to say so.
   //
-  // ⚠️ **`return_to_service` is NOT a counter-example to that, and the
-  // discriminator is whether a writer exists — not whether the vocabulary looks
-  // symmetric.** It undoes no breakdown key: the booking keeps its `lost: N`
-  // forever, exactly as it keeps `damaged: N` past a write-off, because a
-  // resolution removes ownership or restores placement without editing history.
-  // And its writer was specified before the type was: the out-of-service
-  // propagation rule already says to cowrite "a 'return-to-service' for
-  // breakdown.returned_to_service > 0" once a record completes
-  // (`schemas/propagation/out-of-service.ts`). The type was the half that was
-  // missing, which is the opposite of declared-and-unpopulated.
+  // 🔴 **A mark undo is NOT a way to get a unit back that WAS lost.** That is
+  // `return_to_service` below, and the two claim different things: the undo
+  // says the loss never happened, so the booking's `lost` falls and the event's
+  // out-of-service record is cancelled; a return says it happened and resolved,
+  // so the booking keeps `lost: N` forever, exactly as it keeps `damaged: N` past
+  // a write-off, because a resolution restores placement without editing
+  // history. So the writer must refuse an undo once the record has any
+  // `returned_to_service` / `written_off` progress or has been billed, and
+  // point at the record instead.
+  //
+  // ⚠️ `return_to_service` is keyed on the out-of-service RECORD, not on a
+  // booking. Its writer is `updateOutOfService`
+  // (`api-cloudrun/src/services/outOfService.ts`), since api-cloudrun#1094 step
+  // 4 — the out-of-service propagation rule had specified that cowrite before
+  // either the type or the writer existed
+  // (`schemas/propagation/out-of-service.ts`).
   //
   // ⚠️ **And no `sale` rewind.** `sale`/`sale_return` move ownership and carry a
   // required cost, so undoing one owes a basis and a posting decision the
@@ -184,6 +190,8 @@ export const MOVEMENT_TYPES = [
   "unprep",
   "check_out_undo",
   "check_in_undo",
+  "mark_lost_undo",
+  "mark_damaged_undo",
   // Custody + ownership + cost.
   "sale",
   "sale_return",
@@ -361,7 +369,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["bookings", "locations"], to: ["out-of-service"] },
     booking: "required",
   },
-  // ── the three reachable rewinds, mirrored ──
+  // ── the reachable rewinds, mirrored ──
   // Each is its forward twin's `places` swapped end for end. Mirroring here
   // rather than exempting them keeps the check real: a rewind must still name
   // places of the RIGHT KIND, just in the opposite order — the same reasoning
@@ -375,6 +383,26 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
   },
   check_in_undo: {
+    custody: "required",
+    cost: "forbidden",
+    places: { from: ["locations"], to: ["bookings"] },
+    booking: "required",
+  },
+  // 🔴 **Mirrored EXACTLY, including the widening on `mark_lost`'s origin.** A
+  // loss may come off the booking (`out → lost`) or off a shelf
+  // (`returned → lost`, api-cloudrun#1118), so its undo must be able to put the
+  // unit back at either. Typing it `→ bookings` alone because that is the only
+  // loss the ladder emits today would cost a second publish and a second
+  // manager-first ordering the day the shelf rung lands. The writer is to take
+  // the destination from the consumed record's own mark lines — never re-derive
+  // it from the breakdown — so the kind always matches the one the loss left.
+  mark_lost_undo: {
+    custody: "required",
+    cost: "forbidden",
+    places: { from: ["out-of-service"], to: ["bookings", "locations"] },
+    booking: "required",
+  },
+  mark_damaged_undo: {
     custody: "required",
     cost: "forbidden",
     places: { from: ["locations"], to: ["bookings"] },

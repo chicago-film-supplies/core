@@ -5634,7 +5634,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service"[];
 ```
 
 ### `MSG_SCHEMA_REGISTRY`
@@ -20395,7 +20395,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service"[];
 ```
 
 ### `Movement`

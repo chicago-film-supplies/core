@@ -65,6 +65,8 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     unprep: { from: "prepped", to: "reserved" },
     check_out_undo: { from: "out", to: "prepped" },
     check_in_undo: { from: "returned", to: "out" },
+    mark_lost_undo: { from: "lost", to: "out" },
+    mark_damaged_undo: { from: "damaged", to: "out" },
     sale: { from: "prepped", to: "out" },
     sale_return: { from: "out", to: "returned" },
     opening_balance: null,
@@ -219,6 +221,46 @@ Deno.test("a reversal still may not name the WRONG KIND of place", () => {
     lines: [{ quantity: 2, location: { from: atBooking, to: null } }],
   });
   assertEquals(MovementSchema.safeParse(bogus).success, false);
+});
+
+Deno.test("a mark undo's contract is its forward twin's, swapped end for end (api-cloudrun#1094)", () => {
+  // Mirrored EXACTLY, including `mark_lost`'s widened origin: a loss may come
+  // off the booking OR a shelf (api-cloudrun#1118), so its undo must be able to
+  // put the unit back at either. A narrower undo would cost a second publish.
+  for (const [undo, forward] of [["mark_lost_undo", "mark_lost"], ["mark_damaged_undo", "mark_damaged"]] as const) {
+    const f = MOVEMENT_CONTRACTS[forward];
+    const u = MOVEMENT_CONTRACTS[undo];
+    assertEquals(u.places, { from: f.places!.to, to: f.places!.from }, `${undo} places`);
+    assertEquals(
+      { custody: u.custody, cost: u.cost, booking: u.booking },
+      { custody: f.custody, cost: f.cost, booking: f.booking },
+      `${undo} axes`,
+    );
+  }
+});
+
+Deno.test("mark_lost_undo may return a shelf-sourced loss to its shelf (`lost → returned`)", () => {
+  const doc = movement("mark_lost_undo", {
+    custody: { from: "lost", to: "returned" },
+    lines: [{ quantity: 2, location: { from: atOos, to: at(LOC_A) } }],
+  });
+  const result = MovementSchema.safeParse(doc);
+  assertEquals(result.success, true, result.success ? "" : JSON.stringify(result.error.issues));
+});
+
+Deno.test("a mark undo may not name the wrong kind of place", () => {
+  // `damaged` is a STATE on a shelf, so its undo draws from `locations` — a line
+  // drawing it from the record is the `lost` shape, and is refused.
+  const bogusDamaged = movement("mark_damaged_undo", {
+    lines: [{ quantity: 2, location: { from: atOos, to: atBooking } }],
+  });
+  assertEquals(MovementSchema.safeParse(bogusDamaged).success, false);
+  // And a lost unit found again never left ownership, so it cannot re-enter it.
+  const bogusLost = movement("mark_lost_undo", {
+    custody: { from: "lost", to: null },
+    lines: [{ quantity: 2, location: { from: null, to: at(LOC_A) } }],
+  });
+  assertEquals(MovementSchema.safeParse(bogusLost).success, false);
 });
 
 Deno.test("MovementSchema rejects an unknown type", () => {
@@ -533,14 +575,37 @@ Deno.test("getTransactionMultiplier returns -1 for types that remove owned stock
 });
 
 Deno.test("getTransactionMultiplier returns 0 for movements that do not change ownership", () => {
-  for (const type of ["prep", "check_out", "check_in", "mark_damaged", "mark_lost", "transfer"] as const) {
+  for (
+    const type of [
+      "prep",
+      "check_out",
+      "check_in",
+      "mark_damaged",
+      "mark_lost",
+      "mark_lost_undo",
+      "mark_damaged_undo",
+      "transfer",
+    ] as const
+  ) {
     assertEquals(getTransactionMultiplier(type), 0, `${type} should return 0`);
   }
 });
 
 Deno.test("getDisplayTransactionTypes hides booking-scoped and transfer types", () => {
   const shown = getDisplayTransactionTypes();
-  for (const hidden of ["prep", "check_out", "check_in", "mark_damaged", "mark_lost", "transfer", "opening_balance"]) {
+  for (
+    const hidden of [
+      "prep",
+      "check_out",
+      "check_in",
+      "mark_damaged",
+      "mark_lost",
+      "mark_lost_undo",
+      "mark_damaged_undo",
+      "transfer",
+      "opening_balance",
+    ]
+  ) {
     assertEquals(shown.includes(hidden as MovementTypeType), false, `${hidden} should be hidden`);
   }
   assertEquals(shown.includes("purchase"), true);
