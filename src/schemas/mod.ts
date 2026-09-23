@@ -396,6 +396,7 @@ export {
   // guard in `tests/_uid.test.ts` be a plain "every one" rather than a list with
   // an allowlist beside it. An allowlist is the thing that rots.
   MovementId,
+  OutOfServiceId,
   QuoteId,
   RoleId,
   StatementDocumentId,

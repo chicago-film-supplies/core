@@ -16,7 +16,7 @@
  * booking-detail lookups without sub-object equality issues.
  */
 import { z } from "zod";
-import { FirestoreId, ThreadId } from "./_uid.ts";
+import { FirestoreId, OutOfServiceId, ThreadId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
@@ -213,7 +213,7 @@ const OOSDatesSchema: z.ZodType<OOSDates> = z.strictObject({
 
 /** Zod schema for OutOfService. */
 export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
-  uid: FirestoreId,
+  uid: OutOfServiceId,
   uid_product: FirestoreId,
   number: z.int().meta({ column: true, label: "#", linkTo: "outOfServiceDetail", serverSortVia: "number" }),
   reason: OOSReasonEnum.meta({ column: true, label: "Reason" }),

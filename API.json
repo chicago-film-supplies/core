@@ -3104,6 +3104,12 @@
         },
         {
           "kind": "variable",
+          "name": "OutOfServiceId",
+          "declaration": "const OutOfServiceId: z.ZodType<string>;",
+          "doc": "`out-of-service.uid` — **two populations, and the union is the point.**\n\n| population | shape | minted by |\n|---|---|---|\n| a LOSS event | {@link MovementId} | `api-cloudrun/src/services/bookings.ts` — the record IS its `mark_lost` / `mark_damaged` movement, seen from the inventory side, so it takes that movement's id AND its number |\n| anything else | {@link FirestoreId} | `POST /out-of-service` (an operator taking units out of service for cleaning or maintenance — no movement, so nothing to derive from), plus every record written before api-cloudrun#1094 |\n\n⭐ **Why this is a new id ROLE and not a bent derivation.** The module note\nabove says to bend the derivation rather than the schema, and its reasoning is\nthat widening {@link FirestoreId} would weaken a guard covering 41 document\ntypes for the sake of two. Nothing is widened here: `FirestoreId` is\nuntouched, and ONE field gains a second named shape, exactly as `bookings`,\n`quotes` and `transactions` each carry their own. The alternative — 20 hex\nchars of SHA-256 over the movement id, the `templates` family trick — would\nsatisfy the existing validator and make the pairing **unreadable**, which is\nthe property this module already regrets for template families. Owner ruling,\n2026-09-22.\n\n⚠️ **A shared id across two collections is NOT a shared document.** The record\nand the movement are separate documents with separate schemas and separate\nwriters; the id says they describe one event. Do not infer that reading one\ngives you the other, and do not \"resolve\" a record by fetching\n`transactions/{uid}` — the record's own fields are authoritative for the\nrecord.\n\n🔴 **A loss record is therefore addressable by derivation and a manual one is\nnot**, so `out-of-service` has no single \"find the record for X\" rule. Query\n`query_by_sources` for that, exactly as before."
+        },
+        {
+          "kind": "variable",
           "name": "OutOfServiceSchema",
           "declaration": "const OutOfServiceSchema: z.ZodType<OutOfService>;",
           "doc": "Zod schema for OutOfService."
@@ -6110,6 +6116,12 @@
           "name": "OrgPathNodeType",
           "declaration": "interface OrgPathNodeType {\n  uid: string;\n  name: string;\n  derived: boolean;\n}",
           "doc": "One node of an organization's ancestor chain."
+        },
+        {
+          "kind": "variable",
+          "name": "OutOfServiceId",
+          "declaration": "const OutOfServiceId: z.ZodType<string>;",
+          "doc": "`out-of-service.uid` — **two populations, and the union is the point.**\n\n| population | shape | minted by |\n|---|---|---|\n| a LOSS event | {@link MovementId} | `api-cloudrun/src/services/bookings.ts` — the record IS its `mark_lost` / `mark_damaged` movement, seen from the inventory side, so it takes that movement's id AND its number |\n| anything else | {@link FirestoreId} | `POST /out-of-service` (an operator taking units out of service for cleaning or maintenance — no movement, so nothing to derive from), plus every record written before api-cloudrun#1094 |\n\n⭐ **Why this is a new id ROLE and not a bent derivation.** The module note\nabove says to bend the derivation rather than the schema, and its reasoning is\nthat widening {@link FirestoreId} would weaken a guard covering 41 document\ntypes for the sake of two. Nothing is widened here: `FirestoreId` is\nuntouched, and ONE field gains a second named shape, exactly as `bookings`,\n`quotes` and `transactions` each carry their own. The alternative — 20 hex\nchars of SHA-256 over the movement id, the `templates` family trick — would\nsatisfy the existing validator and make the pairing **unreadable**, which is\nthe property this module already regrets for template families. Owner ruling,\n2026-09-22.\n\n⚠️ **A shared id across two collections is NOT a shared document.** The record\nand the movement are separate documents with separate schemas and separate\nwriters; the id says they describe one event. Do not infer that reading one\ngives you the other, and do not \"resolve\" a record by fetching\n`transactions/{uid}` — the record's own fields are authoritative for the\nrecord.\n\n🔴 **A loss record is therefore addressable by derivation and a manual one is\nnot**, so `out-of-service` has no single \"find the record for X\" rule. Query\n`query_by_sources` for that, exactly as before."
         },
         {
           "kind": "variable",

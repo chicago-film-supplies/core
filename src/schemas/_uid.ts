@@ -15,6 +15,7 @@
  * | `QuoteId`        | `{id}:v{N}` / `{id}:draft`              | `quotes.uid` (saved versions + working draft) |
  * | `StatementDocumentId` | `{id}:v{N}`                        | `statement-documents.uid` (saved org statements) |
  * | `MovementId`     | `{uuid}|{type}|{FirestoreId\|BookingId}` | `transactions.uid` for journal events (see below) |
+ * | `OutOfServiceId` | `FirestoreId \| MovementId`              | `out-of-service.uid` — TWO populations, see below |
  * | *(none)*         | third-party uuid                        | `uploadcare-worklist.uuid` — an Uploadcare id, so `uuid` not `uid`; see the carve-outs below |
  *
  * Carve-outs that intentionally stay looser: `ActorRef.uid` (free-form
@@ -275,6 +276,38 @@ export const MovementId: z.ZodType<string> = z.templateLiteral([
   "|",
   z.union([firestoreId, bookingIdTopLevel, bookingIdComponent]),
 ]);
+
+/**
+ * `out-of-service.uid` — **two populations, and the union is the point.**
+ *
+ * | population | shape | minted by |
+ * |---|---|---|
+ * | a LOSS event | {@link MovementId} | `api-cloudrun/src/services/bookings.ts` — the record IS its `mark_lost` / `mark_damaged` movement, seen from the inventory side, so it takes that movement's id AND its number |
+ * | anything else | {@link FirestoreId} | `POST /out-of-service` (an operator taking units out of service for cleaning or maintenance — no movement, so nothing to derive from), plus every record written before api-cloudrun#1094 |
+ *
+ * ⭐ **Why this is a new id ROLE and not a bent derivation.** The module note
+ * above says to bend the derivation rather than the schema, and its reasoning is
+ * that widening {@link FirestoreId} would weaken a guard covering 41 document
+ * types for the sake of two. Nothing is widened here: `FirestoreId` is
+ * untouched, and ONE field gains a second named shape, exactly as `bookings`,
+ * `quotes` and `transactions` each carry their own. The alternative — 20 hex
+ * chars of SHA-256 over the movement id, the `templates` family trick — would
+ * satisfy the existing validator and make the pairing **unreadable**, which is
+ * the property this module already regrets for template families. Owner ruling,
+ * 2026-09-22.
+ *
+ * ⚠️ **A shared id across two collections is NOT a shared document.** The record
+ * and the movement are separate documents with separate schemas and separate
+ * writers; the id says they describe one event. Do not infer that reading one
+ * gives you the other, and do not "resolve" a record by fetching
+ * `transactions/{uid}` — the record's own fields are authoritative for the
+ * record.
+ *
+ * 🔴 **A loss record is therefore addressable by derivation and a manual one is
+ * not**, so `out-of-service` has no single "find the record for X" rule. Query
+ * `query_by_sources` for that, exactly as before.
+ */
+export const OutOfServiceId: z.ZodType<string> = z.union([FirestoreId, MovementId]);
 
 /**
  * `quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or
