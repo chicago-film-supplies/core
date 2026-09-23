@@ -516,8 +516,7 @@ const createOrderRules: CollectionRule[] = [
         target: ["items"],
         transform:
           "strips price, inclusion_type, zero_priced, crms_id; drops transaction_fee items entirely; " +
-          "a swap row's `replaces` is carried, re-pointed at the fulfillment's own rows by `repointReplaces` " +
-          "(an entry nothing resolves is dropped and logged `swap_replaces_unresolved`, api-cloudrun#1114)",
+          "a swap row's `replaces` is carried verbatim (api-cloudrun#1114)",
       },
       { source: ["subject"], target: ["subject"] },
       { source: ["reference"], target: ["reference"] },
@@ -742,8 +741,8 @@ const updateOrderRules: CollectionRule[] = [
         transform:
           "strips price, inclusion_type, zero_priced, crms_id; drops transaction_fee items entirely; " +
           "a swap row's `replaces` merges three-way and WHOLE (a custody-frozen row keeps its stored value), " +
-          "then is re-pointed at the fulfillment's own rows by `repointReplaces` — an entry nothing resolves " +
-          "is dropped and logged `swap_replaces_unresolved` (api-cloudrun#1114)",
+          "then follows a MOVED damaged row via `repointReplaces`; an entry naming a row the fulfillment no " +
+          "longer carries is kept as a difference to surface, never dropped (api-cloudrun#1114)",
       },
       { source: ["subject"], target: ["subject"] },
       { source: ["reference"], target: ["reference"] },

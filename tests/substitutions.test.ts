@@ -297,36 +297,24 @@ Deno.test("substitutionResync: X reparented re-points the entry", () => {
 
 Deno.test("repointReplaces: an entry naming a row that is there is kept as it is", () => {
   const r = repointReplaces([{ path: ["L", "X"], quantity: 2 }], [{ path: ["L", "X"] }]);
-  assertEquals(r, { entries: [{ path: ["L", "X"], quantity: 2 }], unresolved: [] });
+  assertEquals(r, [{ path: ["L", "X"], quantity: 2 }]);
 });
 
 Deno.test("repointReplaces: X regrouped — the map carries the entry to X's new path", () => {
   const prev = [{ uid: "X", path: ["L", "X"] }];
   const next = [{ uid: "G", path: ["L", "G"] }, { uid: "X", path: ["L", "G", "X"] }];
   const r = repointReplaces([{ path: ["L", "X"], quantity: 1 }], next, [mapPathsAcrossRebuild(prev, next)]);
-  assertEquals(r.entries, [{ path: ["L", "G", "X"], quantity: 1 }]);
-  assertEquals(r.unresolved, []);
+  assertEquals(r, [{ path: ["L", "G", "X"], quantity: 1 }]);
 });
 
-Deno.test("repointReplaces: X substituted away — the ONE stand-in is the unit on set", () => {
+Deno.test("🔴 repointReplaces: X substituted away — NOT moved onto the stand-in; which unit broke is the operator's fact", () => {
   const rows = [{ path: ["L", "Z"], substituted_for: [{ path: ["L", "X"], quantity: 1 }] }];
-  const r = repointReplaces([{ path: ["L", "X"], quantity: 1 }], rows);
-  assertEquals(r.entries, [{ path: ["L", "Z"], quantity: 1 }]);
+  assertEquals(repointReplaces([{ path: ["L", "X"], quantity: 1 }], rows), [{ path: ["L", "X"], quantity: 1 }]);
 });
 
-Deno.test("repointReplaces: a split substitution is NOT guessed at — unresolved", () => {
-  const rows = [
-    { path: ["L", "Z1"], substituted_for: [{ path: ["L", "X"], quantity: 1 }] },
-    { path: ["L", "Z2"], substituted_for: [{ path: ["L", "X"], quantity: 1 }] },
-  ];
-  const r = repointReplaces([{ path: ["L", "X"], quantity: 1 }], rows);
-  assertEquals(r.entries, []);
-  assertEquals(r.unresolved, [{ path: ["L", "X"], quantity: 1 }]);
-});
-
-Deno.test("repointReplaces: X gone with nothing standing in — unresolved, never dropped silently", () => {
+Deno.test("🔴 repointReplaces: X gone — the entry is KEPT verbatim, a difference to surface, never dropped", () => {
   const r = repointReplaces([{ path: ["L", "X"], quantity: 3 }], [{ path: ["L", "Y"] }]);
-  assertEquals(r, { entries: [], unresolved: [{ path: ["L", "X"], quantity: 3 }] });
+  assertEquals(r, [{ path: ["L", "X"], quantity: 3 }]);
 });
 
 Deno.test("repointReplaces: two entries landing on one row MERGE, so the list stays unique by path", () => {
@@ -338,6 +326,5 @@ Deno.test("repointReplaces: two entries landing on one row MERGE, so the list st
     [{ path: ["L", "X"] }],
     [moved],
   );
-  assertEquals(r.entries, [{ path: ["L", "X"], quantity: 3 }]);
-  assertEquals(new Set(r.entries.map((e) => e.path.join("/"))).size, r.entries.length);
+  assertEquals(r, [{ path: ["L", "X"], quantity: 3 }]);
 });

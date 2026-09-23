@@ -8075,7 +8075,7 @@
           "kind": "function",
           "name": "checkSwapReplacements",
           "signature": "checkSwapReplacements(doc: typeLiteral, ctx: z.RefinementCtx): void",
-          "doc": "A `replaces` entry is a claim about two rows of THIS document, so only the\ndocument can check it:\n\n1. the row carrying it sits under a pair marked `exchange` — a swap's\n   replacement line, not an ordinary one;\n2. every path it names is a row under that pair's PARENT leg — the damaged\n   units are on the leg being swapped against, by definition.\n\n⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without\nit a swap could name a row on an unrelated leg, and the checkout rider would\nmark units damaged on a trip that never carried them.\n\nShared by the order and fulfillment documents, attached exactly as\n{@link checkStoredEndpoints} is — it reads two arrays, so it cannot live on\neither. Lives HERE rather than in `fulfillment.ts` because `fulfillment.ts`\nalready imports this module; the reverse import would be a cycle.\n(api-cloudrun#1114 moved it when the order line gained `replaces`.)",
+          "doc": "A `replaces` entry is a claim about two rows of THIS document, so only the\ndocument can check it:\n\n1. the row carrying it sits under a pair marked `exchange` — a swap's\n   replacement line, not an ordinary one;\n2. every path it names is on that pair's PARENT leg (`path[0]`) — the damaged\n   units are on the leg being swapped against, by definition.\n\n⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without\nit a swap could name a row on an unrelated leg, and the checkout rider would\nmark units damaged on a trip that never carried them.\n\n🔴 **It deliberately does NOT require the named row to EXIST** (api-cloudrun#1114,\nowner 2026-09-22). The order, the fulfillment and the invoice legitimately\ndiffer, and a difference is surfaced for an operator to realign — never\nresolved by a write. A pointer at a row this document no longer carries is\nsuch a difference: sales removes the damaged line from the order while the\nunit is still out on set; the warehouse substitutes it away on the\nfulfillment. Requiring existence forced every writer to choose between\nREFUSING the edit and DROPPING the pointer, and both decide the operator's\nquestion for them. A dangling entry marks nothing — the rider finds no booking\n— and the manager surfaces it.\n\nShared by the order and fulfillment documents, attached exactly as\n{@link checkStoredEndpoints} is. Lives HERE rather than in `fulfillment.ts`\nbecause `fulfillment.ts` already imports this module; the reverse import would\nbe a cycle.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10223,7 +10223,7 @@
         {
           "kind": "variable",
           "name": "DOMAIN_EVENT_MSGS",
-          "declaration": "const DOMAIN_EVENT_MSGS: \"afterOrderWrite_order_not_found\" | \"store_destination_no_default\" | \"after_order_write_no_changes\" | \"after_product_write_no_changes\" | \"after_product_write_not_found\" | \"after_product_write_skip_create\" | \"update_order_no_changes\" | \"order_docs_skipped\" | \"order_invoice_count_high\" | \"invoice_created\" | \"invoice_pdf_not_found\" | \"invoice_pdf_skip\" | \"invoice_updated\" | \"organization_check_failed\" | \"organization_no_xero_id\" | \"organization_xero_id_shared\" | \"item_path_invariant_failed\" | \"order_invoice_mirror_repaired\" | \"cascade_converged\" | \"location_cascade_skip\" | \"location_reversal_skip\" | \"location_quantity_negative\" | \"stock_recalc_item_added\" | \"stock_recalc_item_modified\" | \"stock_recalc_item_removed\" | \"stock_recalc_items\" | \"stock_recalc_status_changed\" | \"stock_oversold\" | \"fulfillment_custom_item_qty_override\" | \"fulfillment_sync_items_skipped_no_bookings\" | \"fulfillment_sync_frozen_rows\" | \"swap_replaces_unresolved\" | \"recurrence_horizon_failed\" | \"tax_priced_on_unreviewed_rate\" | \"invoice_destination_override_dropped\" | \"invoice_sync_organization_kept\" | \"destination_pair_unjoined\"[];",
+          "declaration": "const DOMAIN_EVENT_MSGS: \"afterOrderWrite_order_not_found\" | \"store_destination_no_default\" | \"after_order_write_no_changes\" | \"after_product_write_no_changes\" | \"after_product_write_not_found\" | \"after_product_write_skip_create\" | \"update_order_no_changes\" | \"order_docs_skipped\" | \"order_invoice_count_high\" | \"invoice_created\" | \"invoice_pdf_not_found\" | \"invoice_pdf_skip\" | \"invoice_updated\" | \"organization_check_failed\" | \"organization_no_xero_id\" | \"organization_xero_id_shared\" | \"item_path_invariant_failed\" | \"order_invoice_mirror_repaired\" | \"cascade_converged\" | \"location_cascade_skip\" | \"location_reversal_skip\" | \"location_quantity_negative\" | \"stock_recalc_item_added\" | \"stock_recalc_item_modified\" | \"stock_recalc_item_removed\" | \"stock_recalc_items\" | \"stock_recalc_status_changed\" | \"stock_oversold\" | \"fulfillment_custom_item_qty_override\" | \"fulfillment_sync_items_skipped_no_bookings\" | \"fulfillment_sync_frozen_rows\" | \"recurrence_horizon_failed\" | \"tax_priced_on_unreviewed_rate\" | \"invoice_destination_override_dropped\" | \"invoice_sync_organization_kept\" | \"destination_pair_unjoined\"[];",
           "doc": "Msg literals this archetype absorbs."
         },
         {
@@ -13807,12 +13807,6 @@
         },
         {
           "kind": "interface",
-          "name": "RepointedReplaces",
-          "declaration": "interface RepointedReplaces {\n  entries: Array<typeLiteral>;\n  unresolved: Array<typeLiteral>;\n}",
-          "doc": ""
-        },
-        {
-          "kind": "interface",
           "name": "SubstitutionAnchor",
           "declaration": "interface SubstitutionAnchor {\n  readonly path: readonly string[];\n  readonly substitutedFor: readonly string[];\n  readonly quantity: number;\n}",
           "doc": "A substitution row, reduced to what the predicates need.\n\nOne anchor per (substitute row, replaced X). A row merged from two different\nX's is two anchors sharing one `path`."
@@ -13941,8 +13935,8 @@
         {
           "kind": "function",
           "name": "repointReplaces",
-          "signature": "repointReplaces(entries: readonly ReplacesEntry[], rows: ReadonlyArray<MaybeSubstitution>, _: unknown): RepointedReplaces",
-          "doc": "Re-point a swap row's `replaces` entries at the rows a document carries NOW\n(api-cloudrun#1114).\n\n`replaces` names the damaged row X by PATH, and a path is only as stable as\nthe dividers above it — exactly the defect `substituted_for` had until\napi-cloudrun#897 (see the module docstring). So every rebuild that can move X\nre-points the entries it carries, in this order, first hit wins:\n\n1. the entry already names a row of `rows` — kept as it is;\n2. a `maps` entry carries it to a path `rows` has — X MOVED (a regroup, or\n   the server re-deriving a path the client chained differently);\n3. exactly ONE row of `rows` carries a `substituted_for` entry naming X (at\n   its original or its mapped path) — the picker substituted X away, so the\n   unit on set, the one the customer damaged, is that stand-in. Two or more\n   stand-ins for one X is a split this cannot choose between, so it stays\n   unresolved rather than guessing which unit broke.\n\n⚠️ **Resolution against ANY row, not against the parent leg.** Whether the\nresolved row sits on the leg the swap exchanges against is\n`checkSwapReplacements`' question, asked of the whole document — answering it\nhere too would give the rule two authors.\n\nTwo entries resolving to one row are MERGED by summing their quantities,\nbecause `SwapReplacementList` is unique by path.\n\nPure: it re-points and reports, and never decides what an unresolved entry\nmeans — on an ORDER that is the operator's mistake and a 400, on a\nFULFILLMENT it is a dropped pointer and a warn.",
+          "signature": "repointReplaces(entries: readonly ReplacesEntry[], rows: ReadonlyArray<typeLiteral>, _: unknown): Array<typeLiteral>",
+          "doc": "Re-point a swap row's `replaces` entries at the rows a document carries NOW\n(api-cloudrun#1114).\n\n`replaces` names the damaged row X by PATH, and a path is only as stable as\nthe dividers above it — exactly the defect `substituted_for` had until\napi-cloudrun#897 (see the module docstring). So a rebuild that can move X\ncarries each entry forward: if the entry does not name a row of `rows` and a\n`maps` entry takes it to a path that does, it is re-pointed there. That is\nIDENTITY, not a decision — the same row, at its new position.\n\n🔴 **Everything else is kept VERBATIM, and that is the rule, not a gap.** An\nentry naming a row the document no longer carries is a DIFFERENCE between the\norder and its projections — sales removed the damaged line, the picker\nsubstituted it away — and a difference is surfaced for an operator to\nrealign, never resolved by a write. This deliberately does NOT follow X onto a\nsubstitution stand-in: which physical unit broke is the operator's fact, not\nsomething to infer from which row replaced which.\n\nTwo entries landing on one row are MERGED by summing their quantities, because\n`SwapReplacementList` is unique by path.",
           "paramTags": [
             {
               "name": "entries",
@@ -13957,7 +13951,7 @@
               "doc": "Path correspondences to try, in order"
             }
           ],
-          "returnsTag": "The re-pointed entries and the ones nothing resolved"
+          "returnsTag": "The entries, re-pointed where a map carries them onto a row"
         },
         {
           "kind": "function",

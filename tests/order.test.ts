@@ -1432,13 +1432,19 @@ Deno.test("OrderSchema refuses `replaces` on a row that is not under an exchange
   assertEquals(parsed.error?.issues.some((i) => i.path.join(".") === "items.3.replaces"), true);
 });
 
-Deno.test("OrderSchema refuses `replaces` naming a row on some OTHER leg, or no row at all", () => {
+Deno.test("OrderSchema refuses `replaces` naming a row on some OTHER leg", () => {
   // The same shared refine the fulfillment runs — one author, so the order
   // cannot accept a pointer its own projection would then fail to store.
   const otherLeg = OrderSchema.safeParse(docWithSwapLine([{ path: [SWAP_PAIR, Y_LINE], quantity: 1 }]));
   assertEquals(otherLeg.success, false);
+});
+
+Deno.test("🔴 OrderSchema ACCEPTS `replaces` naming a parent-leg row the order no longer carries", () => {
+  // Sales removed the damaged line (the unit is still out on set). That is a
+  // difference to surface for an operator, not a document to refuse — requiring
+  // the row to exist forced writers to refuse the edit or drop the pointer.
   const gone = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, "testprodgone00000000"], quantity: 1 }]));
-  assertEquals(gone.success, false, "a damaged row the order no longer carries");
+  assertEquals(gone.success, true, JSON.stringify(gone.success ? {} : gone.error.issues));
 });
 
 Deno.test("OrderItem (input) carries `replaces` through a parse", () => {

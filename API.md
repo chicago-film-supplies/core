@@ -18073,18 +18073,28 @@ document can check it:
 
 1. the row carrying it sits under a pair marked `exchange` — a swap's
    replacement line, not an ordinary one;
-2. every path it names is a row under that pair's PARENT leg — the damaged
+2. every path it names is on that pair's PARENT leg (`path[0]`) — the damaged
    units are on the leg being swapped against, by definition.
 
 ⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without
 it a swap could name a row on an unrelated leg, and the checkout rider would
 mark units damaged on a trip that never carried them.
 
+🔴 **It deliberately does NOT require the named row to EXIST** (api-cloudrun#1114,
+owner 2026-09-22). The order, the fulfillment and the invoice legitimately
+differ, and a difference is surfaced for an operator to realign — never
+resolved by a write. A pointer at a row this document no longer carries is
+such a difference: sales removes the damaged line from the order while the
+unit is still out on set; the warehouse substitutes it away on the
+fulfillment. Requiring existence forced every writer to choose between
+REFUSING the edit and DROPPING the pointer, and both decide the operator's
+question for them. A dangling entry marks nothing — the rider finds no booking
+— and the manager surfaces it.
+
 Shared by the order and fulfillment documents, attached exactly as
-{@link checkStoredEndpoints} is — it reads two arrays, so it cannot live on
-either. Lives HERE rather than in `fulfillment.ts` because `fulfillment.ts`
-already imports this module; the reverse import would be a cycle.
-(api-cloudrun#1114 moved it when the order line gained `replaces`.)
+{@link checkStoredEndpoints} is. Lives HERE rather than in `fulfillment.ts`
+because `fulfillment.ts` already imports this module; the reverse import would
+be a cycle.
 
 ### `getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]`
 
@@ -23164,7 +23174,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "swap_replaces_unresolved" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_destination_override_dropped" | "invoice_sync_organization_kept" | "destination_pair_unjoined"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_docs_skipped" | "order_invoice_count_high" | "invoice_created" | "invoice_pdf_not_found" | "invoice_pdf_skip" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_destination_override_dropped" | "invoice_sync_organization_kept" | "destination_pair_unjoined"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -30466,15 +30476,6 @@ interface ReplacesEntry {
 }
 ```
 
-### `RepointedReplaces`
-
-```ts
-interface RepointedReplaces {
-  entries: Array<typeLiteral>;
-  unresolved: Array<typeLiteral>;
-}
-```
-
 ### `SubstitutionAnchor`
 
 A substitution row, reduced to what the predicates need.
@@ -30632,36 +30633,28 @@ wire boundary, use {@link isInSubstitutedSubtree} and check Y separately.
 
 **Returns** — Whether the row is a substitution's own row or one of its components
 
-### `repointReplaces(entries: readonly ReplacesEntry[], rows: ReadonlyArray<MaybeSubstitution>, _: unknown): RepointedReplaces`
+### `repointReplaces(entries: readonly ReplacesEntry[], rows: ReadonlyArray<typeLiteral>, _: unknown): Array<typeLiteral>`
 
 Re-point a swap row's `replaces` entries at the rows a document carries NOW
 (api-cloudrun#1114).
 
 `replaces` names the damaged row X by PATH, and a path is only as stable as
 the dividers above it — exactly the defect `substituted_for` had until
-api-cloudrun#897 (see the module docstring). So every rebuild that can move X
-re-points the entries it carries, in this order, first hit wins:
+api-cloudrun#897 (see the module docstring). So a rebuild that can move X
+carries each entry forward: if the entry does not name a row of `rows` and a
+`maps` entry takes it to a path that does, it is re-pointed there. That is
+IDENTITY, not a decision — the same row, at its new position.
 
-1. the entry already names a row of `rows` — kept as it is;
-2. a `maps` entry carries it to a path `rows` has — X MOVED (a regroup, or
-   the server re-deriving a path the client chained differently);
-3. exactly ONE row of `rows` carries a `substituted_for` entry naming X (at
-   its original or its mapped path) — the picker substituted X away, so the
-   unit on set, the one the customer damaged, is that stand-in. Two or more
-   stand-ins for one X is a split this cannot choose between, so it stays
-   unresolved rather than guessing which unit broke.
+🔴 **Everything else is kept VERBATIM, and that is the rule, not a gap.** An
+entry naming a row the document no longer carries is a DIFFERENCE between the
+order and its projections — sales removed the damaged line, the picker
+substituted it away — and a difference is surfaced for an operator to
+realign, never resolved by a write. This deliberately does NOT follow X onto a
+substitution stand-in: which physical unit broke is the operator's fact, not
+something to infer from which row replaced which.
 
-⚠️ **Resolution against ANY row, not against the parent leg.** Whether the
-resolved row sits on the leg the swap exchanges against is
-`checkSwapReplacements`' question, asked of the whole document — answering it
-here too would give the rule two authors.
-
-Two entries resolving to one row are MERGED by summing their quantities,
-because `SwapReplacementList` is unique by path.
-
-Pure: it re-points and reports, and never decides what an unresolved entry
-means — on an ORDER that is the operator's mistake and a 400, on a
-FULFILLMENT it is a dropped pointer and a warn.
+Two entries landing on one row are MERGED by summing their quantities, because
+`SwapReplacementList` is unique by path.
 
 **Parameters**
 
@@ -30669,7 +30662,7 @@ FULFILLMENT it is a dropped pointer and a warn.
 - `rows` — The document's rows as they stand after the rebuild
 - `maps` — Path correspondences to try, in order
 
-**Returns** — The re-pointed entries and the ones nothing resolved
+**Returns** — The entries, re-pointed where a map carries them onto a row
 
 ### `standInUnits(row: MaybeSubstitution, liveX: ReadonlySet<string>): number`
 

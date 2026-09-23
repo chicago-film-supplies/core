@@ -515,18 +515,28 @@ export function checkStoredEndpoints(
  *
  * 1. the row carrying it sits under a pair marked `exchange` — a swap's
  *    replacement line, not an ordinary one;
- * 2. every path it names is a row under that pair's PARENT leg — the damaged
+ * 2. every path it names is on that pair's PARENT leg (`path[0]`) — the damaged
  *    units are on the leg being swapped against, by definition.
  *
  * ⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without
  * it a swap could name a row on an unrelated leg, and the checkout rider would
  * mark units damaged on a trip that never carried them.
  *
+ * 🔴 **It deliberately does NOT require the named row to EXIST** (api-cloudrun#1114,
+ * owner 2026-09-22). The order, the fulfillment and the invoice legitimately
+ * differ, and a difference is surfaced for an operator to realign — never
+ * resolved by a write. A pointer at a row this document no longer carries is
+ * such a difference: sales removes the damaged line from the order while the
+ * unit is still out on set; the warehouse substitutes it away on the
+ * fulfillment. Requiring existence forced every writer to choose between
+ * REFUSING the edit and DROPPING the pointer, and both decide the operator's
+ * question for them. A dangling entry marks nothing — the rider finds no booking
+ * — and the manager surfaces it.
+ *
  * Shared by the order and fulfillment documents, attached exactly as
- * {@link checkStoredEndpoints} is — it reads two arrays, so it cannot live on
- * either. Lives HERE rather than in `fulfillment.ts` because `fulfillment.ts`
- * already imports this module; the reverse import would be a cycle.
- * (api-cloudrun#1114 moved it when the order line gained `replaces`.)
+ * {@link checkStoredEndpoints} is. Lives HERE rather than in `fulfillment.ts`
+ * because `fulfillment.ts` already imports this module; the reverse import would
+ * be a cycle.
  */
 export function checkSwapReplacements(
   doc: {
@@ -538,14 +548,6 @@ export function checkSwapReplacements(
   const exchangeByPair = new Map(
     doc.destinations.filter((p) => p.exchange != null).map((p) => [p.uid, p.exchange!.uid_pair]),
   );
-  const pathsUnderPair = new Map<string, Set<string>>();
-  for (const item of doc.items) {
-    const leg = item.path[0];
-    if (leg === undefined) continue;
-    const set = pathsUnderPair.get(leg) ?? new Set<string>();
-    set.add(item.path.join("/"));
-    pathsUnderPair.set(leg, set);
-  }
 
   doc.items.forEach((item, i) => {
     const entries = (item as { replaces?: SubstitutedForEntryType[] }).replaces;
@@ -560,13 +562,12 @@ export function checkSwapReplacements(
       });
       return;
     }
-    const underParent = pathsUnderPair.get(parentLeg) ?? new Set<string>();
     entries.forEach((entry, j) => {
-      if (!underParent.has(entry.path.join("/"))) {
+      if (entry.path[0] !== parentLeg) {
         ctx.addIssue({
           code: "custom",
           path: ["items", i, "replaces", j, "path"],
-          message: `replaces names ${entry.path.join("/")}, which is not a row on the leg this swap exchanges against`,
+          message: `replaces names ${entry.path.join("/")}, which is not on the leg this swap exchanges against`,
         });
       }
     });
@@ -1507,7 +1508,8 @@ export interface OrderDocLineItemType {
    * `mergeLineItem` (three-way, and a custody-frozen row keeps its stored value,
    * because the list decides which UNITS the rider moves). The paths are ORDER
    * paths, re-pointed across every rebuild by `repointReplaces`
-   * (`@cfs/core/utils/substitutions`).
+   * (`@cfs/core/utils/substitutions`). An entry naming a row the document no
+   * longer carries is KEPT — a difference to surface, not a defect to fix.
    *
    * The invoice does not carry it: `projectOrderItemToInvoiceItem` picks its keys.
    */
