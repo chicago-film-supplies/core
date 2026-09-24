@@ -248,7 +248,7 @@ const rules: CollectionRule[] = [
     target: "stock",
     mode: "fan-out",
     invariant:
-      "The OOS half of stock.unavailable[] is re-derived from every non-terminal (not complete/canceled) OOS record for the product, pre-reduced by `unavailableFromOOS` to the same anonymous interval shape. Same interval model as bookings; an open-ended record (end: null) reduces availability in every window from its start onward. ⚠️ An OOS record claims its FULL quantity until terminal: a 5-unit record with breakdown.returned_to_service = 3 still claims 5, and reducing from the breakdown looks like a cleanup and is a live oversell.",
+      "The OOS half of stock.unavailable[] is re-derived from every non-terminal (not complete/canceled) OOS record for the product, pre-reduced by `unavailableFromOOS` to the same anonymous interval shape. Same interval model as bookings; an open-ended record (end: null) reduces availability in every window from its start onward. ⚠️ An OOS record claims its UNRESOLVED units until terminal — quantity − breakdown.written_off − breakdown.returned_to_service — because the API posts both resolutions to the ledger the moment units enter those buckets (api-cloudrun#1094 step 6): a written-off unit has already left quantity_held, a returned one is back in service. This inverted the earlier full-quantity rule, which was right only while the writer posted resolutions at close; the count and the writer's posting moment must move together.",
     enforced_by: [FOLD, INTERVAL_MODEL],
     trigger: REBUILD_TRIGGER,
     fields: [

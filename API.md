@@ -30185,6 +30185,7 @@ Just enough of an out-of-service record to reduce it to an unavailable interval.
 interface StockOOSSource {
   status: OOSStatusType;
   quantity: number;
+  breakdown: Pick<OOSBreakdown, "written_off" | "returned_to_service">;
   dates: typeLiteral;
 }
 ```
@@ -30277,15 +30278,32 @@ filtering can use this function directly.
 
 ### `oosConsumes(o: typeLiteral): number`
 
-Units an out-of-service record consumes — its **full `quantity`** until it
-reaches a terminal status, then zero.
+Units an out-of-service record consumes — the units still OUT of service:
+`quantity − written_off − returned_to_service` until it reaches a terminal
+status, then zero.
 
-⚠️ **Never reduce this by `breakdown.returned_to_service`.** A 5-unit record
-with 3 returned to service still holds 5 out of service: the returned units
-are accounted for by the record's own status transition, and subtracting them
-here hands the same units back twice. It looks like a tidy-up and it is a live
-oversell. (Swept 2026-08-13: no site in the workspace does this — keep it that
-way.)
+## ⭐ The two resolution buckets are applied to the ledger the moment units enter them
+
+api-cloudrun#1094 step 6 (owner, 2026-09-23: *"write off is a state"*). A unit
+moved into `written_off` posts its `write_off` movement in that same save, so it
+has already left `quantity_held`; a unit moved into `returned_to_service` posts
+its `return_to_service` movement (or, for a record that flags units in place,
+was on its shelf all along), so it is back in service. Counting either here
+would subtract it from availability a SECOND time.
+
+🔴 **This INVERTS the rule that stood here until then, so do not re-derive it
+from the old warning.** It said *"never reduce this by
+`breakdown.returned_to_service`"*, and it was right for its writer: the API
+applied both buckets only when the record CLOSED, so until then every unit was
+still held and the full quantity was the honest count. Subtracting under that
+writer handed units back twice. The rule is not about the buckets; it is
+**count exactly the units the ledger has not already accounted for** — and
+which those are is decided by when the writer posts. Change one without the
+other and the projection over- or under-sells.
+
+Throws on a record with no `breakdown` rather than defaulting it: a field mask
+that forgot it would otherwise read as "nothing resolved" and consume the whole
+record, silently.
 
 ### `peakStockConsumption(stock: Pick<Stock, "quantity_held" | "unavailable">): PeakStockConsumption`
 
@@ -30371,9 +30389,8 @@ Reduce an out-of-service record to the interval it makes unavailable, or `null`
 when it makes none.
 
 The liveness rule is {@link oosConsumes}'s — terminal statuses hold zero — so
-the status set is not restated here. See that function for the rule that must
-never be "cleaned up": a live record claims its **full `quantity`**, never
-reduced by `breakdown.returned_to_service`.
+the status set is not restated here. See that function for which units a live
+record claims, and why that answer is tied to when the writer posts.
 
 ### `unitsClaimedOnShelves(b: typeLiteral): number`
 

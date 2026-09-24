@@ -11,7 +11,7 @@
  * double-subtract a sale. Asserting that they diverge on a specific booking is
  * the only shape that fails on that refactor.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 
 import {
   type AvailabilityWindow,
@@ -105,22 +105,25 @@ Deno.test("bookingHoldsStock: the shelf-side liveness gate", () => {
   assert(!bookingHoldsStock(booking("rental", { quoted: 5, returned: 3, lost: 1 })));
 });
 
-Deno.test("oosConsumes: FULL quantity until terminal, never reduced by returned_to_service", () => {
-  assertEquals(oosConsumes({ status: "active", quantity: 5 }), 5);
-  assertEquals(oosConsumes({ status: "draft", quantity: 5 }), 5);
-  assertEquals(oosConsumes({ status: "planned", quantity: 5 }), 5);
-  assertEquals(oosConsumes({ status: "blocked", quantity: 5 }), 5);
-  assertEquals(oosConsumes({ status: "complete", quantity: 5 }), 0);
-  assertEquals(oosConsumes({ status: "canceled", quantity: 5 }), 0);
+Deno.test("oosConsumes: the units still OUT of service, zero once terminal", () => {
+  const none = { written_off: 0, returned_to_service: 0 };
+  for (const status of ["active", "draft", "planned", "blocked"] as const) {
+    assertEquals(oosConsumes({ status, quantity: 5, breakdown: none }), 5);
+  }
+  assertEquals(oosConsumes({ status: "complete", quantity: 5, breakdown: none }), 0);
+  assertEquals(oosConsumes({ status: "canceled", quantity: 5, breakdown: none }), 0);
 
-  // The trap, stated as a test: a 5-unit record with 3 returned to service still
-  // holds 5. Reducing from `breakdown.returned_to_service` looks like a cleanup
-  // and is a live oversell — so the function takes no breakdown at all, and this
-  // asserts the resulting number rather than the absence of a parameter.
+  // Both resolution buckets are posted to the ledger the moment units enter them
+  // (api-cloudrun#1094 step 6): a written-off unit has left `quantity_held`, a
+  // returned one is back in service. Counting either would take it out of
+  // availability twice. This INVERTS the rule that stood until then.
   assertEquals(
-    oosConsumes({ status: "active", quantity: 5, breakdown: { returned_to_service: 3 } } as never),
-    5,
+    oosConsumes({ status: "active", quantity: 5, breakdown: { written_off: 1, returned_to_service: 3 } }),
+    1,
   );
+
+  // A read that masked the breakdown away must fail, not consume the whole record.
+  assertThrows(() => oosConsumes({ status: "active", quantity: 5 } as never));
 
   assertEquals([...TERMINAL_OOS_STATUSES].sort(), ["canceled", "complete"]);
 });
@@ -217,28 +220,37 @@ Deno.test("unavailableFromBooking: a null bound is preserved, never coerced to a
   assertEquals(pendingSale, { start: D1, end: null, quantity: 2, kind: "booking" });
 });
 
-Deno.test("unavailableFromOOS: FULL quantity until terminal, and no breakdown reaches it", () => {
-  assertEquals(unavailableFromOOS({ status: "active", quantity: 5, dates: { start: D1, end: D5 } }), {
-    start: D1,
-    end: D5,
-    quantity: 5,
-    kind: "oos",
-  });
+Deno.test("unavailableFromOOS: the unresolved units until terminal", () => {
+  const none = { written_off: 0, returned_to_service: 0 };
+  assertEquals(
+    unavailableFromOOS({ status: "active", quantity: 5, breakdown: none, dates: { start: D1, end: D5 } }),
+    { start: D1, end: D5, quantity: 5, kind: "oos" },
+  );
   for (const status of ["complete", "canceled"] as const) {
     assertEquals(
-      unavailableFromOOS({ status, quantity: 5, dates: { start: D1, end: D5 } }),
+      unavailableFromOOS({ status, quantity: 5, breakdown: none, dates: { start: D1, end: D5 } }),
       null,
       `${status} holds no units`,
     );
   }
-  // The oversell trap again, at the reducer: 5 out of service with 3 returned to
-  // service still claims 5. `StockOOSSource` has no `breakdown` field at all, so
-  // this asserts the number rather than the absence of a parameter.
   assertEquals(
-    unavailableFromOOS(
-      { status: "active", quantity: 5, breakdown: { returned_to_service: 3 }, dates: { start: D1, end: D5 } } as never,
-    )?.quantity,
-    5,
+    unavailableFromOOS({
+      status: "active",
+      quantity: 5,
+      breakdown: { written_off: 2, returned_to_service: 1 },
+      dates: { start: D1, end: D5 },
+    })?.quantity,
+    2,
+  );
+  // Fully resolved but not yet closed contributes nothing, not a zero-quantity entry.
+  assertEquals(
+    unavailableFromOOS({
+      status: "active",
+      quantity: 2,
+      breakdown: { written_off: 1, returned_to_service: 1 },
+      dates: { start: D1, end: D5 },
+    }),
+    null,
   );
 });
 
@@ -494,7 +506,9 @@ function randomCase(seed: number) {
     const quantity = next(5);
     const start = next(5) === 0 ? null : dayIso(next(28));
     const end = next(5) === 0 ? null : dayIso(next(28));
-    oosSources.push({ status, quantity, dates: { start, end } });
+    const written_off = quantity > 0 ? next(quantity + 1) : 0;
+    const returned_to_service = next(quantity - written_off + 1);
+    oosSources.push({ status, quantity, breakdown: { written_off, returned_to_service }, dates: { start, end } });
   }
 
   const quantity_held = next(20);

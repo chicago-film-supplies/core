@@ -13684,7 +13684,7 @@
         {
           "kind": "interface",
           "name": "StockOOSSource",
-          "declaration": "interface StockOOSSource {\n  status: OOSStatusType;\n  quantity: number;\n  dates: typeLiteral;\n}",
+          "declaration": "interface StockOOSSource {\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: Pick<OOSBreakdown, \"written_off\" | \"returned_to_service\">;\n  dates: typeLiteral;\n}",
           "doc": "Just enough of an out-of-service record to reduce it to an unavailable interval."
         },
         {
@@ -13737,7 +13737,7 @@
           "kind": "function",
           "name": "oosConsumes",
           "signature": "oosConsumes(o: typeLiteral): number",
-          "doc": "Units an out-of-service record consumes — its **full `quantity`** until it\nreaches a terminal status, then zero.\n\n⚠️ **Never reduce this by `breakdown.returned_to_service`.** A 5-unit record\nwith 3 returned to service still holds 5 out of service: the returned units\nare accounted for by the record's own status transition, and subtracting them\nhere hands the same units back twice. It looks like a tidy-up and it is a live\noversell. (Swept 2026-08-13: no site in the workspace does this — keep it that\nway.)",
+          "doc": "Units an out-of-service record consumes — the units still OUT of service:\n`quantity − written_off − returned_to_service` until it reaches a terminal\nstatus, then zero.\n\n## ⭐ The two resolution buckets are applied to the ledger the moment units enter them\n\napi-cloudrun#1094 step 6 (owner, 2026-09-23: *\"write off is a state\"*). A unit\nmoved into `written_off` posts its `write_off` movement in that same save, so it\nhas already left `quantity_held`; a unit moved into `returned_to_service` posts\nits `return_to_service` movement (or, for a record that flags units in place,\nwas on its shelf all along), so it is back in service. Counting either here\nwould subtract it from availability a SECOND time.\n\n🔴 **This INVERTS the rule that stood here until then, so do not re-derive it\nfrom the old warning.** It said *\"never reduce this by\n`breakdown.returned_to_service`\"*, and it was right for its writer: the API\napplied both buckets only when the record CLOSED, so until then every unit was\nstill held and the full quantity was the honest count. Subtracting under that\nwriter handed units back twice. The rule is not about the buckets; it is\n**count exactly the units the ledger has not already accounted for** — and\nwhich those are is decided by when the writer posts. Change one without the\nother and the projection over- or under-sells.\n\nThrows on a record with no `breakdown` rather than defaulting it: a field mask\nthat forgot it would otherwise read as \"nothing resolved\" and consume the whole\nrecord, silently.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13761,7 +13761,7 @@
           "kind": "function",
           "name": "unavailableFromOOS",
           "signature": "unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | null",
-          "doc": "Reduce an out-of-service record to the interval it makes unavailable, or `null`\nwhen it makes none.\n\nThe liveness rule is {@link oosConsumes}'s — terminal statuses hold zero — so\nthe status set is not restated here. See that function for the rule that must\nnever be \"cleaned up\": a live record claims its **full `quantity`**, never\nreduced by `breakdown.returned_to_service`.",
+          "doc": "Reduce an out-of-service record to the interval it makes unavailable, or `null`\nwhen it makes none.\n\nThe liveness rule is {@link oosConsumes}'s — terminal statuses hold zero — so\nthe status set is not restated here. See that function for which units a live\nrecord claims, and why that answer is tied to when the writer posts.",
           "paramTags": [],
           "returnsTag": null
         },
