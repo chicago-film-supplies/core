@@ -41,10 +41,14 @@ export interface Quote {
   /**
    * `documentSourceHash("order", …)` of the order this PDF was rendered from —
    * what `@cfs/core/utils/contentHash` compares against the live order to flag a
-   * saved version as out of date. Absent = not recorded (every version saved
-   * before the field existed), and absent never produces a flag.
+   * saved version as out of date.
+   *
+   * Required. Every artifact carries one: the legacy corpus was stamped with the
+   * hash of its CURRENT source document (`api-cloudrun`'s `backfill-source-hash`,
+   * 2026-09-24, both projects), so a legacy version reads as not stale until its
+   * order next changes.
    */
-  source_hash?: string;
+  source_hash: string;
   deleted_at: FirestoreTimestampType | null;
   expires_at: FirestoreTimestampType | null;
   created_at: FirestoreTimestampType;
@@ -65,15 +69,11 @@ export const QuoteSchema: z.ZodType<Quote> = z.strictObject({
   // materializes on a write (`validateBeforeWrite` discards `result.data`), so
   // it would only license a future writer to forget the stamp.
   params_context: RenderParamsContextSchema.nullable(),
-  // Optional, unlike `params_context` above, on purpose: `params_context` needed
-  // a corpus backfill (and a prod window) to become required, and this field is
-  // a flag hint whose ABSENCE has one safe meaning — "not recorded", never a
-  // flag. Not `.nullable()` as well: every writer HAS a hash, so a third state
-  // would only be a place for one to hide (`tests/stored-optionality.test.ts`).
-  // No `.default()` either — stored fields carry none
-  // (`tests/stored-defaults.test.ts`). Writers of a NEW version state it; the
-  // stored corpus that lacks the key keeps parsing.
-  source_hash: z.string().optional(),
+  // Required and NOT nullable: every artifact has a real source, and the legacy
+  // corpus was stamped with the hash of its current one, so there is no
+  // "unknown" state to represent. Shipped optional first (beta.540) so the
+  // backfill could run against a build that already declared the key.
+  source_hash: z.string(),
   deleted_at: FirestoreTimestamp.nullable(),
   expires_at: FirestoreTimestamp.nullable(),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),

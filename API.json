@@ -2937,7 +2937,7 @@
         {
           "kind": "interface",
           "name": "OrderDocument",
-          "declaration": "interface OrderDocument {\n  uid: string;\n  uuid: string;\n  mime: string;\n  name: string;\n  orderUpdatedAt: FirestoreTimestampType;\n  source_hash?: string;\n}",
+          "declaration": "interface OrderDocument {\n  uid: string;\n  uuid: string;\n  mime: string;\n  name: string;\n  orderUpdatedAt: FirestoreTimestampType;\n  source_hash: string;\n}",
           "doc": "Metadata for a single generated order document (quote / packing list PDF)."
         },
         {
@@ -3471,7 +3471,7 @@
         {
           "kind": "interface",
           "name": "Quote",
-          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash?: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
         },
         {
@@ -9850,7 +9850,7 @@
         {
           "kind": "interface",
           "name": "Quote",
-          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash?: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
         },
         {

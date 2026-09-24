@@ -1052,9 +1052,26 @@ Deno.test("InvoiceSchema accepts a pdf_versions row carrying its render params",
         uid_template_version: "testtplversion000001",
         params: [{ key: "hide_zero_priced_components", type: "boolean", label: "Hide zero-priced components", default: false }],
       },
+      source_hash: "1:abc123def",
     }],
   });
   assertEquals(res.success, true);
+});
+
+Deno.test("InvoiceSchema rejects a pdf_versions row with no source_hash", () => {
+  const res = InvoiceSchema.safeParse({
+    ...validInvoice,
+    pdf_versions: [{
+      version: 1,
+      uploadcare_uuid: "11111111-2222-4333-8444-555555555555",
+      created_at: mockTimestamp,
+      created_by: { uid: "u1000000000000000000", name: "Tester" },
+      deleted_at: null,
+      params: {},
+      params_context: null,
+    }],
+  });
+  assertEquals(res.success, false);
 });
 
 Deno.test("InvoiceSchema rejects a pdf_versions row with no params key", () => {

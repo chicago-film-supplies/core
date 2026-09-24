@@ -999,9 +999,9 @@ export interface Invoice {
     params_context: RenderParamsContext | null;
     /**
      * `documentSourceHash("invoice", …)` of the invoice this row's PDF was
-     * rendered from — see `Quote.source_hash`. Absent = not recorded.
+     * rendered from — see `Quote.source_hash`. Required.
      */
-    source_hash?: string;
+    source_hash: string;
   }>;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   /**
@@ -1130,10 +1130,11 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     deleted_at: FirestoreTimestamp.nullable(),
     params: z.record(z.string(), z.boolean()),
     params_context: RenderParamsContextSchema.nullable(),
-    // Optional: rows saved before the field existed lack the key, and an array
-    // member cannot be censused (`stored-optionality`'s `array-member-uncensusable`)
-    // — see `Quote.source_hash`.
-    source_hash: z.string().optional(),
+    // Required — see `Quote.source_hash`. An array member cannot be censused
+    // (`stored-optionality`'s `array-member-uncensusable`), so this one rests on
+    // the backfill's per-row count (55 rows over 33 invoices, 0 pending in both
+    // projects, 2026-09-24) rather than on a corpus census.
+    source_hash: z.string(),
   })),
   // NOT tightened — see the interface. `createInvoice` writes no top-level
   // `crms_id`; the 1,019/1,019 reading is about the CRMS ingest.

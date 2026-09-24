@@ -61,10 +61,11 @@ export interface OrderDocument {
   /**
    * `documentSourceHash("packing-list", …)` of the order this file was rendered from.
    * The packing list is rendered on read: a stored file whose hash equals the
-   * live order's is served as-is, otherwise it is re-rendered. Absent = not
-   * recorded (every file rendered before the field existed).
+   * live order's is served as-is, otherwise it is re-rendered. Required: the
+   * legacy documents were stamped from their current order in the 2026-09-24
+   * backfill.
    */
-  source_hash?: string;
+  source_hash: string;
 }
 
 /** Zod schema for OrderDocument. */
@@ -79,9 +80,8 @@ export const OrderDocumentSchema: z.ZodType<OrderDocument> = z.strictObject({
   mime: z.string().min(1).meta({ column: true, label: "Type" }),
   name: z.string().min(1).meta({ column: true, label: "Name" }),
   orderUpdatedAt: FirestoreTimestamp,
-  // Optional so the stored documents that lack it keep parsing — see
-  // `Quote.source_hash`.
-  source_hash: z.string().optional(),
+  // Required — see `Quote.source_hash`.
+  source_hash: z.string(),
 }).meta({
   title: "Order Document",
   collection: "orders/{uid}/documents",

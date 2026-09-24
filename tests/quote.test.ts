@@ -25,6 +25,7 @@ function baseQuote(extra: Record<string, unknown> = {}): Record<string, unknown>
     uploadcare_uuid: "11111111-2222-4333-8444-555555555555",
     params: {},
     params_context: null,
+    source_hash: "1:abc123def",
     deleted_at: null,
     expires_at: null,
     created_at: mockTimestamp,
@@ -55,6 +56,14 @@ Deno.test("QuoteSchema rejects a non-boolean param value", () => {
     QuoteSchema.safeParse(baseQuote({ params: { hide_zero_priced_components: "true" } })).success,
     false,
   );
+});
+
+Deno.test("QuoteSchema rejects a document with no source_hash — every artifact carries one", () => {
+  const doc = baseQuote() as Record<string, unknown>;
+  delete doc.source_hash;
+  assertEquals(QuoteSchema.safeParse(doc).success, false);
+  // Nor is `null` a state: the legacy corpus was stamped from its current source.
+  assertEquals(QuoteSchema.safeParse(baseQuote({ source_hash: null } as never)).success, false);
 });
 
 Deno.test("QuoteSchema rejects a document with no params_context key", () => {

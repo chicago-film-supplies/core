@@ -6760,7 +6760,7 @@ interface OrderDocument {
   mime: string;
   name: string;
   orderUpdatedAt: FirestoreTimestampType;
-  source_hash?: string;
+  source_hash: string;
 }
 ```
 
@@ -8086,7 +8086,7 @@ interface Quote {
   uploadcare_uuid: string | null;
   params: Record<string, boolean>;
   params_context: RenderParamsContext | null;
-  source_hash?: string;
+  source_hash: string;
   deleted_at: FirestoreTimestampType | null;
   expires_at: FirestoreTimestampType | null;
   created_at: FirestoreTimestampType;
@@ -22233,7 +22233,7 @@ interface Quote {
   uploadcare_uuid: string | null;
   params: Record<string, boolean>;
   params_context: RenderParamsContext | null;
-  source_hash?: string;
+  source_hash: string;
   deleted_at: FirestoreTimestampType | null;
   expires_at: FirestoreTimestampType | null;
   created_at: FirestoreTimestampType;
