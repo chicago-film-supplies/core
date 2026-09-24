@@ -30,6 +30,7 @@ import * as allocationUtils from "../src/utils/allocation.ts";
 import * as bookingIdUtils from "../src/utils/booking-id.ts";
 import * as bookingUtils from "../src/utils/bookings.ts";
 import * as cardUtils from "../src/utils/cards.ts";
+import * as contentHashUtils from "../src/utils/contentHash.ts";
 import * as contactNameUtils from "../src/utils/contact-name.ts";
 import * as dateUtils from "../src/utils/dates.ts";
 import * as destinationUtils from "../src/utils/destinations.ts";
@@ -93,6 +94,11 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   destinations: destinationUtils,
   cards: cardUtils,
   "contact-name": contactNameUtils,
+  // Same exception as `documentDiff`: `utils/contentHash.ts` fingerprints a
+  // document for the API's task dedup and the manager's "saved version is out of
+  // date" flag. A template renders a document; it has nothing to fingerprint.
+  // Listed so the drift guard sees its exports.
+  contentHash: contentHashUtils,
   dates: dateUtils,
   // Same exception as `substitutions`: `utils/documentDiff.ts` compares a document
   // against its SIBLINGS (order, fulfillment, invoices) for the manager's detail

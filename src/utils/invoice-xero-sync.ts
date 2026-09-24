@@ -28,6 +28,7 @@
  */
 import type { Invoice, XeroSyncState } from "../schemas/mod.ts";
 import { isInvoiceLineItem } from "../schemas/mod.ts";
+import { canonicalJson, hash48 } from "./contentHash.ts";
 
 /**
  * The part of an invoice that the Xero update body is built from.
@@ -64,34 +65,10 @@ export function invoiceXeroProjection(invoice: Partial<Invoice>): unknown {
   };
 }
 
-/**
- * Stable JSON: object keys sorted recursively, arrays in order. An object with
- * `toJSON` (a Firestore `Timestamp`) serializes through it.
- */
-export function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value) ?? "null";
-  }
-  if (Array.isArray(value)) {
-    return "[" + value.map(canonicalJson).join(",") + "]";
-  }
-  if (typeof (value as { toJSON?: unknown }).toJSON === "function") {
-    return JSON.stringify(value);
-  }
-  const obj = value as { [key: string]: unknown };
-  return "{" + Object.keys(obj).sort().map((k) => JSON.stringify(k) + ":" + canonicalJson(obj[k])).join(",") + "}";
-}
-
-/** 48-bit FNV-1a of a string, base36. Deterministic, dependency-free, browser-safe. */
-export function hash48(input: string): string {
-  let h = 0xcbf29ce484222325n;
-  const prime = 0x100000001b3n;
-  const mask = (1n << 64n) - 1n;
-  for (let i = 0; i < input.length; i++) {
-    h = (h ^ BigInt(input.charCodeAt(i))) * prime & mask;
-  }
-  return (h & ((1n << 48n) - 1n)).toString(36);
-}
+// The two primitives live in `contentHash.ts`, the one copy. Re-exported so this
+// module's public surface — and the `invoice-xero-sync` denylist entries — are
+// unchanged.
+export { canonicalJson, hash48 };
 
 /** The hash a successful push records as the invoice sidecar's `pushed_hash`. */
 export function invoiceXeroProjectionHash(invoice: Partial<Invoice>): string {

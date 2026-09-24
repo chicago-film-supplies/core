@@ -53,7 +53,7 @@ Deno.test("canonicalJson/hash48: key order does not move the hash; content does"
   assertEquals(canonicalJson({ b: 1, a: { d: 2, c: 3 } }), canonicalJson({ a: { c: 3, d: 2 }, b: 1 }));
   assertEquals(hash48(canonicalJson({ b: 1, a: 2 })), hash48(canonicalJson({ a: 2, b: 1 })));
   assertNotEquals(hash48("a"), hash48("b"));
-  // Pinned values, produced by the pre-existing `api-cloudrun/src/lib/contentHash.ts` for the
+  // Pinned values, produced by api-cloudrun's own (since deleted) `contentHash` module for the
   // same inputs — so moving the function here changes no stored task name or watermark.
   assertEquals(hash48("xero"), "2qcdkbu6zt");
   assertEquals(hash48(canonicalJson({ b: [1, { d: null, c: "x" }], a: true })), "ks5pjp85x");

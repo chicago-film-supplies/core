@@ -64,6 +64,7 @@
     "./utils/bookings": "./src/utils/bookings.ts",
     "./utils/cards": "./src/utils/cards.ts",
     "./utils/contact-name": "./src/utils/contact-name.ts",
+    "./utils/contentHash": "./src/utils/contentHash.ts",
     "./utils/dates": "./src/utils/dates.ts",
     "./utils/destinations": "./src/utils/destinations.ts",
     "./utils/documentDiff": "./src/utils/documentDiff.ts",

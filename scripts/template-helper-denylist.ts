@@ -471,6 +471,18 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   documentDiff: [
     "computeDocumentDiffs",
   ],
+  // `utils/contentHash.ts` fingerprints a document — the API's content-addressed
+  // task names and Xero push watermark, and the manager's "saved version is out
+  // of date" flag (`documentSourceHash` / `isSourceHashStale`). A template
+  // renders a document and has nothing to fingerprint. Listed in UTIL_MODULES
+  // only so the drift guard sees its exports.
+  contentHash: [
+    "canonicalJson",
+    "documentSourceCanonical",
+    "documentSourceHash",
+    "hash48",
+    "isSourceHashStale",
+  ],
   // `utils/invoice-xero-sync.ts` answers whether an issued invoice's Xero twin is
   // current, from the invoice and its `xero-sync/state` sidecar (api-cloudrun#1009).
   // A template renders the document alone and holds no sidecar.

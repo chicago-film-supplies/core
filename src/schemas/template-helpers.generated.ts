@@ -49,6 +49,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "contact-name": [
     { name: "deriveName", expr: "it.contact-name.deriveName(parts)", desc: "Canonical join rule for deriving a single display string from name parts. Joins `[first_name, middle_name, last_name]` with single spaces (missing parts are dropped, never produce empty padding) and appends ` (pronunciation)` when set. This is the single source of truth — every `name` field on a stored document and `ActorRef.name` is computed by passing through here.", returns: "string" },
   ],
+  "contentHash": [
+
+  ],
   "dates": [
     { name: "billableDays", expr: "it.dates.billableDays(days)", desc: "**The days a set of windows bills: Σ `max(days, 5)`.** Every window carries the one-week minimum, a 0-day window included (charge-windows decision 2).", returns: "number" },
     { name: "chargeEnvelope", expr: "it.dates.chargeEnvelope(dates)", desc: "**The span a pair's windows cover**: the first window's start and the last window's end. `null` when the pair has no windows.", returns: "typeLiteral | null" },

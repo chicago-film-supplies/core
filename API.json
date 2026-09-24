@@ -2937,7 +2937,7 @@
         {
           "kind": "interface",
           "name": "OrderDocument",
-          "declaration": "interface OrderDocument {\n  uid: string;\n  uuid: string;\n  mime: string;\n  name: string;\n  orderUpdatedAt: FirestoreTimestampType;\n}",
+          "declaration": "interface OrderDocument {\n  uid: string;\n  uuid: string;\n  mime: string;\n  name: string;\n  orderUpdatedAt: FirestoreTimestampType;\n  source_hash?: string;\n}",
           "doc": "Metadata for a single generated order document (quote / packing list PDF)."
         },
         {
@@ -3471,7 +3471,7 @@
         {
           "kind": "interface",
           "name": "Quote",
-          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash?: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
         },
         {
@@ -9850,7 +9850,7 @@
         {
           "kind": "interface",
           "name": "Quote",
-          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash?: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
         },
         {
@@ -11331,6 +11331,82 @@
           "name": "splitFullName",
           "signature": "splitFullName(name: string | null | undefined): SplitName",
           "doc": "Parse a free-text \"full name\" into `first_name` / `middle_name` /\n`last_name`.\n\nThe canonical arity rule — this function is the ONE author of it, and its\ninverse is `deriveName`:\n\n| tokens | result |\n|---|---|\n| 0 (empty / whitespace / nullish) | `{ first_name: \"\" }` |\n| 1 | `{ first_name }` |\n| 2 | `{ first_name, last_name }` |\n| 3 | `{ first_name, middle_name, last_name }` |\n| 4+ | `{ first_name: <the whole trimmed string> }` |\n\n⚠️ **4+ is deliberately NOT a round-trip.** A two-word surname (\"Ana Maria\nde la Cruz\") is likelier than a three-name-plus-suffix parse, so the whole\nstring goes to `first_name` and the operator corrects it in the split-name\neditor. `deriveName(splitFullName(s)) === s` holds for the 1-, 2- and\n3-token cases and is asserted NOT to hold here — see\n`tests/contact-name.test.ts`, which exists to stop someone \"repairing\" this\nbranch into a guess.\n\n⚠️ **Empty input returns `{ first_name: \"\" }`, which no create input\naccepts** — `NamePartsFieldsInput.first_name` is `min(1)`. That is\ndeliberate: the caller's schema should reject an empty name rather than have\nthis function invent a placeholder. (The api-cloudrun copy this was promoted\nfrom returned `{ first_name: \"-\" }`, a CRMS-webhook artefact — that webhook\nhad to mint a contact from whatever it was sent, and it is being deleted\nwith api-cloudrun#556.)",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/contentHash",
+      "moduleDoc": "",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "INVOICE_SOURCE_HASH_EXCLUDED_FIELDS",
+          "declaration": "const INVOICE_SOURCE_HASH_EXCLUDED_FIELDS: ReadonlySet<string>;",
+          "doc": "Top-level keys that never change what an invoice PDF renders.\n\nThe first block is the PDF pipeline's own write-back — everything\n`generateInvoicePdf` / `saveInvoicePdfVersion` stamp on the invoice they just\nrendered. Hashing any of it would make a save change the very hash it\nrecords. The second block is bookkeeping no template reads.\n\n⚠️ `totals` is deliberately NOT excluded: the invoice template prints\n`amount_paid_cents` / `amount_credited_cents` / `amount_due_cents`, so a\npayment landing after a save legitimately makes that saved PDF out of date."
+        },
+        {
+          "kind": "variable",
+          "name": "ORDER_SOURCE_HASH_EXCLUDED_FIELDS",
+          "declaration": "const ORDER_SOURCE_HASH_EXCLUDED_FIELDS: ReadonlySet<string>;",
+          "doc": "Top-level keys that never change what an order-derived document (quote,\npacking list) renders.\n\nEach entry is a claim that **no template reads it** — checked against the\n`templates/` repo 2026-09-23 (`bookings_breakdown`, `query_by_*`, `invoices`,\n`xero_id`, `uid_thread`, `crms_*`: no `.eta` file or partial names any of\nthem; `it.invoices` there is the invoice util namespace, not the order field).\n⚠️ **The failure is one-sided and quiet**: an entry that IS rendered means a\nsaved version never flags when that field changes; an entry missing here only\nflags a version that did not need it. Re-grep before adding a template that\nreads one of these.\n\n`bookings_breakdown` and `invoices` are the two that earn their place for\nbehaviour, not tidiness: they change on every checkout, return and invoice\ncreation, so leaving them in would flag every saved quote \"out of date\" after\nthe most ordinary events in an order's life.\n\n⚠️ This is NOT api-cloudrun's `ORDER_FANOUT_EXCLUDED_FIELDS`, and must not be\nmerged with it: that set answers \"does any fan-out JOB read this\", this one\nanswers \"does any TEMPLATE render this\". The two have different readers, so a\nfield added to one for its own reason would silently narrow the other."
+        },
+        {
+          "kind": "variable",
+          "name": "PACKING_LIST_SOURCE_HASH_EXCLUDED_FIELDS",
+          "declaration": "const PACKING_LIST_SOURCE_HASH_EXCLUDED_FIELDS: ReadonlySet<string>;",
+          "doc": "{@link ORDER_SOURCE_HASH_EXCLUDED_FIELDS} minus `bookings_breakdown`.\n\nThe packing list renders a pick sheet (`completePickSheet` in api-cloudrun),\nwhich folds only the order's OPEN bookings, and `bookings_breakdown` is the\norder-side record of exactly that progress — it is what moves when a booking\nis picked or closed. Excluding it would serve a stale sheet after a pick;\nincluding it for a QUOTE would flag every saved quote after every checkout.\nEach kind takes the answer that is right for what it renders."
+        },
+        {
+          "kind": "variable",
+          "name": "SOURCE_HASH_VERSION",
+          "declaration": "const SOURCE_HASH_VERSION: 1;",
+          "doc": "Bumped whenever the NORMALIZATION or an exclusion set changes in a way that\nmoves the hash of an unchanged document. It is the first token of every\nhash, so {@link isSourceHashStale} can tell \"the document changed\" from \"the\ntwo sides disagree about how to hash\" and answer *not stale* for the second."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SourceHashKind",
+          "declaration": "type SourceHashKind = \"order\" | \"packing-list\" | \"invoice\";",
+          "doc": "What a PDF was rendered from. Three kinds, because the order-derived\ndocuments do not read the same fields: a quote renders the order alone, while\nthe packing list renders a PICK SHEET, which folds the order's open bookings —\nso `bookings_breakdown` is input to the second and noise to the first."
+        },
+        {
+          "kind": "function",
+          "name": "canonicalJson",
+          "signature": "canonicalJson(value: unknown): string",
+          "doc": "Stable JSON serialization: object keys are sorted recursively so the output\nis invariant to key insertion order.\n\nThis matters for hashing a Firestore-event document: `unwrapProtoValue`\n(api-cloudrun `firestoreEvent.ts`) builds maps by iterating a proto field map\nwhose order is not guaranteed stable across redeliveries, so a plain\n`JSON.stringify` would let the hash flap and defeat dedup on redelivery.\nArrays keep their order (order is semantic there). Any object exposing\n`toJSON` (e.g. a firebase-admin `Timestamp`, which serializes to a stable\n`{_seconds,_nanoseconds}`) is emitted via its `toJSON` form rather than\nrecursed into.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "documentSourceCanonical",
+          "signature": "documentSourceCanonical(kind: SourceHashKind, doc: object): string",
+          "doc": "The canonical string {@link documentSourceHash} hashes. Exported for tests and\nfor diagnosing a disagreement: two sides that differ in the hash can be\ndiffed here.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "documentSourceHash",
+          "signature": "documentSourceHash(kind: SourceHashKind, doc: object): string",
+          "doc": "What a saved quote / invoice PDF was rendered FROM, as a short token.\n\nPass the document **as stored** — the Firestore snapshot's data on the API\nside and the raw snapshot data on the manager side — never a Zod-parsed copy:\na parse materializes schema defaults, and those depend on which `@cfs/core`\neach side pins, while the two products deploy on independent release trains.\nA raw document changes only when the document does.\n\nForm: `\"<SOURCE_HASH_VERSION>:<hash48>\"`, e.g. `\"1:abc123def\"`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "hash48",
+          "signature": "hash48(input: string): string",
+          "doc": "48-bit FNV-1a of a string, base36 — compact, deterministic, no deps.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isSourceHashStale",
+          "signature": "isSourceHashStale(stored: string | null | undefined, live: string): boolean",
+          "doc": "Is a saved version out of date against the live document?\n\n`false` — never a flag — when the saved version recorded no hash (`null` or\nabsent: every version saved before this existed), or recorded one under a\ndifferent {@link SOURCE_HASH_VERSION}, since a hash the two sides compute\ndifferently says nothing about the document.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -13083,7 +13159,7 @@
           "kind": "function",
           "name": "canonicalJson",
           "signature": "canonicalJson(value: unknown): string",
-          "doc": "Stable JSON: object keys sorted recursively, arrays in order. An object with\n`toJSON` (a Firestore `Timestamp`) serializes through it.",
+          "doc": "Stable JSON serialization: object keys are sorted recursively so the output\nis invariant to key insertion order.\n\nThis matters for hashing a Firestore-event document: `unwrapProtoValue`\n(api-cloudrun `firestoreEvent.ts`) builds maps by iterating a proto field map\nwhose order is not guaranteed stable across redeliveries, so a plain\n`JSON.stringify` would let the hash flap and defeat dedup on redelivery.\nArrays keep their order (order is semantic there). Any object exposing\n`toJSON` (e.g. a firebase-admin `Timestamp`, which serializes to a stable\n`{_seconds,_nanoseconds}`) is emitted via its `toJSON` form rather than\nrecursed into.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13091,7 +13167,7 @@
           "kind": "function",
           "name": "hash48",
           "signature": "hash48(input: string): string",
-          "doc": "48-bit FNV-1a of a string, base36. Deterministic, dependency-free, browser-safe.",
+          "doc": "48-bit FNV-1a of a string, base36 — compact, deterministic, no deps.",
           "paramTags": [],
           "returnsTag": null
         },
