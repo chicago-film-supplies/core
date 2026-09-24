@@ -1100,12 +1100,15 @@ Deno.test("InvoiceSchema requires pdf_versions", () => {
   assertEquals(InvoiceSchema.safeParse(doc).success, false);
 });
 
-Deno.test("InvoiceSchema requires pdf_params_context", () => {
-  // core#74's required decision, the top-level half. `null` = not recorded;
-  // absent is not an answer.
+Deno.test("InvoiceSchema accepts an invoice with none of the retiring draft-PDF fields", () => {
+  // api-cloudrun#1129 step 1: the four fields are optional so the API can stop
+  // writing them before the purge. An invoice created after that carries none.
   const doc = { ...validInvoice } as Record<string, unknown>;
+  delete doc.uploadcare_uuid;
+  delete doc.pdf_generated_at;
+  delete doc.pdf_params;
   delete doc.pdf_params_context;
-  assertEquals(InvoiceSchema.safeParse(doc).success, false);
+  assertEquals(InvoiceSchema.safeParse(doc).success, true);
 });
 
 Deno.test("InvoiceSchema requires params_context on a pdf_versions row", () => {
@@ -1133,12 +1136,6 @@ Deno.test("InvoiceSchema accepts a pdf_params_context snapshot", () => {
     },
   });
   assertEquals(res.success, true);
-});
-
-Deno.test("InvoiceSchema requires pdf_params", () => {
-  const doc = { ...validInvoice } as Record<string, unknown>;
-  delete doc.pdf_params;
-  assertEquals(InvoiceSchema.safeParse(doc).success, false);
 });
 
 Deno.test("InvoiceSchema accepts an empty pdf_params — the 'nothing recorded' state", () => {

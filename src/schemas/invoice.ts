@@ -961,15 +961,21 @@ export interface Invoice {
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotalsType;
   xero_id: string | null;
-  uploadcare_uuid: string | null;
-  pdf_generated_at: FirestoreTimestampType | null;
+  /**
+   * RETIRING (api-cloudrun#1129) — the four draft-PDF fields below. On-demand
+   * documents stopped the background render that authored them, so no writer
+   * sets them any more; they are optional only until the purge empties storage,
+   * and then they are deleted. Do not add a reader.
+   */
+  uploadcare_uuid?: string | null;
+  pdf_generated_at?: FirestoreTimestampType | null;
   /**
    * Render params the CURRENT draft PDF was rendered at — the twin of
    * `pdf_generated_at`, for the artifact `uploadcare_uuid` points at. The map
    * `resolveRenderParams` returned inside `renderDocument`, handed back by it
    * rather than re-derived. `{}` means none were recorded.
    */
-  pdf_params: Record<string, boolean>;
+  pdf_params?: Record<string, boolean>;
   /**
    * The param DECLARATION `pdf_params` was resolved against, snapshotted at
    * render time — see {@link RenderParamsContext}. `null` = not recorded.
@@ -978,7 +984,7 @@ export interface Invoice {
    * is what pairs it here: this document carries TWO params maps, and the other
    * one's context sits inside `pdf_versions[]` under `params_context`.
    */
-  pdf_params_context: RenderParamsContext | null;
+  pdf_params_context?: RenderParamsContext | null;
   pdf_versions: Array<{
     version: number;
     uploadcare_uuid: string;
@@ -1100,17 +1106,13 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     .superRefine(checkZeroPricedComponents),
   totals: InvoiceDocTotals,
   xero_id: z.uuid().nullable(),
-  uploadcare_uuid: uploadcareRef(z.string().nullable()),
-  pdf_generated_at: FirestoreTimestamp.nullable(),
-  // Required and no `.default({})`: a default never materializes on a write
-  // (`validateBeforeWrite` discards `result.data`), so it would only license a
-  // future writer to forget the stamp. `generateInvoicePdf` is the sole author.
-  pdf_params: z.record(z.string(), z.boolean()),
-  // Required and NULLABLE for the same reason `pdf_params` is required with no
-  // `.default({})`: a default never materializes on a write, so it would only
-  // license a future writer to forget the stamp. `generateInvoicePdf` is the
-  // sole author of both.
-  pdf_params_context: RenderParamsContextSchema.nullable(),
+  // RETIRING (api-cloudrun#1129): the draft-PDF fields. Optional only while
+  // the purge empties storage — the first step of the four-step strictObject
+  // removal. No writer sets them; the next core release deletes them.
+  uploadcare_uuid: uploadcareRef(z.string().nullable()).optional(),
+  pdf_generated_at: FirestoreTimestamp.nullable().optional(),
+  pdf_params: z.record(z.string(), z.boolean()).optional(),
+  pdf_params_context: RenderParamsContextSchema.nullable().optional(),
   // REQUIRED as of the documents-menu campaign (api-cloudrun#651), and the
   // writer is what licenses it: `createInvoice` has always written
   // `pdf_versions: []` on create (`services/invoices.ts`), so the 143 prod
