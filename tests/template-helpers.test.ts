@@ -488,9 +488,11 @@ Deno.test("availableUtilNamespaces takes lists (forward-compatible with multi-co
  * Helpers a shared template partial may call through a family-supplied `u`.
  *
  * Adding to this list is a real decision: it must hold for EVERY family whose
- * namespace can be passed as `u`, which today means orders and invoices.
+ * namespace can be passed as `u` — orders, invoices, fulfillments and pick
+ * sheets.
  */
 const SHARED_DOC_HELPERS = [
+  "componentDepthOf",
   "getDestinationsLegend",
   "isSameAsDeliveryDates",
   "orderHasDiscount",
@@ -505,6 +507,7 @@ Deno.test("the shared sub-interface is exported by EVERY document namespace", ()
         ["orders", orderUtils],
         ["invoices", invoiceUtils],
         ["fulfillments", fulfillmentUtils],
+        ["pickSheets", pickSheetUtils],
       ] as const
     ) {
       const fn = (mod as Record<string, unknown>)[name];
@@ -525,7 +528,13 @@ Deno.test("the document namespaces agree on IDENTITY, not just on the name", () 
   // identity is the strongest available assertion and the cheapest to keep.
   for (const name of SHARED_DOC_HELPERS) {
     const o = (orderUtils as Record<string, unknown>)[name];
-    for (const [ns, mod] of [["invoices", invoiceUtils], ["fulfillments", fulfillmentUtils]] as const) {
+    for (
+      const [ns, mod] of [
+        ["invoices", invoiceUtils],
+        ["fulfillments", fulfillmentUtils],
+        ["pickSheets", pickSheetUtils],
+      ] as const
+    ) {
       assertEquals(
         (mod as Record<string, unknown>)[name],
         o,
@@ -546,11 +555,13 @@ Deno.test("every shared helper is reachable from a real family's resolved namesp
     ["invoice", ["invoices"], ["invoices"]],
     // A packing list renders from what was PICKED — see TEMPLATE_COLLECTION_UTILS.
     ["packing-list", ["fulfillments"], ["packing_lists"]],
+    ["pick-sheet", ["pick-sheets"], ["packing_lists"]],
   ];
   const byNamespace: Record<string, unknown> = {
     orders: orderUtils,
     invoices: invoiceUtils,
     fulfillments: fulfillmentUtils,
+    pickSheets: pickSheetUtils,
   };
 
   for (const [family, sources, targets] of families) {

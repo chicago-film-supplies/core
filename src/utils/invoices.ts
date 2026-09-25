@@ -16,6 +16,7 @@ export {
   calculateItemPrice,
   calculateItemSubtotal,
   calculateItemTax,
+  componentDepthOf,
   computeItemPaths,
   getItemSubtreeRange,
   getParentProductUid,

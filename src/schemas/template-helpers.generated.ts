@@ -94,6 +94,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "fulfillments": [
     { name: "buildPackingList", expr: "it.fulfillments.buildPackingList(items, consolidated, destinationDividerUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
+    { name: "componentDepthOf", expr: "it.fulfillments.componentDepthOf(items)", desc: "How deep a line sits UNDER ANOTHER LINE — 0 for a top-level line, 1 for a kit component, 2 for a component of a component. What a document indents by.", returns: "fnOrConstructor" },
     { name: "consolidateItems", expr: "it.fulfillments.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities. The seed a `bookings` document is built from.", returns: "ConsolidatedItem[]" },
     { name: "getDestinationPairItemName", expr: "it.fulfillments.getDestinationPairItemName(destination, index)", desc: "Build a display name for a destination pair from its delivery/collection addresses. Falls back to \"Destination N\" when no addresses are present.", returns: "string" },
     { name: "getDestinationsLegend", expr: "it.fulfillments.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
@@ -118,6 +119,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "calculateItemPrice", expr: "it.invoices.calculateItemPrice(item, taxes, arg3)", desc: "Calculate the complete price for a single line item. Runs the full pipeline: subtotal → discount → taxes → total.", returns: "typeLiteral" },
     { name: "calculateItemSubtotal", expr: "it.invoices.calculateItemSubtotal(item, arg2)", desc: "Calculate the pre-discount and post-discount subtotals for a single line item.", returns: "typeLiteral" },
     { name: "calculateItemTax", expr: "it.invoices.calculateItemTax(item, taxes, arg3)", desc: "Calculate tax amounts for a single line item from the Tax[] parameter. Returns a PriceModifier[] with computed amounts.", returns: "PriceModifier[]" },
+    { name: "componentDepthOf", expr: "it.invoices.componentDepthOf(items)", desc: "How deep a line sits UNDER ANOTHER LINE — 0 for a top-level line, 1 for a kit component, 2 for a component of a component. What a document indents by.", returns: "fnOrConstructor" },
     { name: "derivePaymentStatus", expr: "it.invoices.derivePaymentStatus(currentStatus, amountPaidCents, amountDueCents, arg4)", desc: "Derive invoice status from settlement amounts. Pure function — does not mutate the invoice.", returns: "InvoiceStatusType" },
     { name: "extensionSectionTargets", expr: "it.invoices.extensionSectionTargets(scopedItems, orderDividerUid)", desc: "The date-extension sections in one order scope of an invoice: each extension divider's uid → the ORDER-relative path of the order destination divider it extends (`path_extension_for`).", returns: "Map<string, string[]>" },
     { name: "getDestinationsLegend", expr: "it.invoices.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
@@ -167,6 +169,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "calculateItemSubtotal", expr: "it.orders.calculateItemSubtotal(item, arg2)", desc: "Calculate the pre-discount and post-discount subtotals for a single line item.", returns: "typeLiteral" },
     { name: "calculateItemTax", expr: "it.orders.calculateItemTax(item, taxes, arg3)", desc: "Calculate tax amounts for a single line item from the Tax[] parameter. Returns a PriceModifier[] with computed amounts.", returns: "PriceModifier[]" },
     { name: "calculateReplacementTotals", expr: "it.orders.calculateReplacementTotals(items, taxes)", desc: "Calculate the total replacement cost across all pre-tax items that carry a NON-ZERO replacement value on their price object.", returns: "ReplacementTotals" },
+    { name: "componentDepthOf", expr: "it.orders.componentDepthOf(items)", desc: "How deep a line sits UNDER ANOTHER LINE — 0 for a top-level line, 1 for a kit component, 2 for a component of a component. What a document indents by.", returns: "fnOrConstructor" },
     { name: "consolidateItems", expr: "it.orders.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities. The seed a `bookings` document is built from.", returns: "ConsolidatedItem[]" },
     { name: "getDefaultChargeDays", expr: "it.orders.getDefaultChargeDays(dates, holidays)", desc: "The days a pair's charge windows charge, counted against `holidays`: Σ each window's business days. Returns `null` when the dates are incomplete or a window cannot be counted.", returns: "number | null" },
     { name: "getDestinationPairItemName", expr: "it.orders.getDestinationPairItemName(destination, index)", desc: "Build a display name for a destination pair from its delivery/collection addresses. Falls back to \"Destination N\" when no addresses are present.", returns: "string" },
@@ -200,6 +203,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "pickSheets": [
     { name: "buildPackingList", expr: "it.pickSheets.buildPackingList(items, consolidated, destinationDividerUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
+    { name: "componentDepthOf", expr: "it.pickSheets.componentDepthOf(items)", desc: "How deep a line sits UNDER ANOTHER LINE — 0 for a top-level line, 1 for a kit component, 2 for a component of a component. What a document indents by.", returns: "fnOrConstructor" },
     { name: "consolidateItems", expr: "it.pickSheets.consolidateItems(lineItems)", desc: "Deduplicate line items by product UID and sum quantities. The seed a `bookings` document is built from.", returns: "ConsolidatedItem[]" },
     { name: "getDestinationsLegend", expr: "it.pickSheets.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
     { name: "groupByDestination", expr: "it.pickSheets.groupByDestination(items, destinations)", desc: "Slice the flat items array into destination sections, each carrying the endpoints its PAIR names.", returns: "DestinationGroup[]" },

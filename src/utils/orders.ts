@@ -2292,6 +2292,47 @@ export function validateZeroPricedComponents<T extends LineItem>(items: T[]): Ze
 }
 
 /**
+ * How deep a line sits UNDER ANOTHER LINE — 0 for a top-level line, 1 for a kit
+ * component, 2 for a component of a component. What a document indents by.
+ *
+ * Returns a lookup built once over `items`, because every row asks and the
+ * answer needs the whole array: an ancestor counts only when it is a LINE
+ * present in `items`, resolved by `path` prefix.
+ *
+ * ⭐ **Counts line ancestors rather than subtracting divider levels**, so it is
+ * indifferent to how many divider levels a grain has — `[destination, group]`
+ * on an order, `[order, destination, group]` on an invoice — and to a divider
+ * being ABSENT from the array. A pick-sheet leg carries its group dividers but
+ * not its destination divider; a "skip the divider uids" form would count that
+ * missing destination as a line and indent every row one level too deep.
+ *
+ * 🔴 **One document's items, never a pool.** `path` is a row identity within ONE
+ * document, so on a cross-order view (a pick sheet) build one lookup per
+ * `(order, destination)` section.
+ *
+ * ⚠️ Pass the FULL array, before any rows are hidden. A row hidden from the
+ * render is still its children's ancestor, and dropping it first would pull its
+ * components up a level.
+ */
+export function componentDepthOf(
+  items: readonly { type: string; path?: readonly string[] | null }[],
+): (item: { path?: readonly string[] | null }) => number {
+  const SEP = String.fromCharCode(0);
+  const lines = new Set<string>();
+  for (const item of items) {
+    if (item.path && itemContract(item.type)?.kind !== "divider") lines.add(item.path.join(SEP));
+  }
+  return (item) => {
+    const path = item.path ?? [];
+    let depth = 0;
+    for (let n = 1; n < path.length; n++) {
+      if (lines.has(path.slice(0, n).join(SEP))) depth++;
+    }
+    return depth;
+  };
+}
+
+/**
  * A single uniqueness violation reported by {@link validateItemUniqueness}
  * (and the invoice-scoped variant in `@cfs/core/utils/invoices`).
  */

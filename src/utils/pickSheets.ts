@@ -106,6 +106,7 @@ import {
  * which would answer about a document no customer receives.
  */
 export {
+  componentDepthOf,
   getDestinationsLegend,
   isSameAsDeliveryDates,
   orderHasDiscount,

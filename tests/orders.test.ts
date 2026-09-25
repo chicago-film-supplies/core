@@ -28,6 +28,7 @@ import {
   calculateItemPrice,
   calculateItemSubtotal,
   calculateItemTax,
+  componentDepthOf,
   computeItemTaxAmountCents,
   isTaxableCoa,
   TAXABLE_REVENUE_COAS,
@@ -4341,4 +4342,51 @@ Deno.test("THE MIGRATION INVARIANT — retyping sale -> transaction_fee does not
   // The tax base is unchanged, which is the half a reader will doubt: a fee is
   // not an `isPreTaxItem`, so it never entered `getTaxTotals` even as a `sale`.
   assertEquals(after.taxes, before.taxes);
+});
+
+// ── componentDepthOf ────────────────────────────────────────────────
+
+Deno.test("componentDepthOf counts line ancestors, not divider levels", () => {
+  const items = [
+    { type: "destination", path: ["d"] },
+    { type: "group", path: ["d", "g"] },
+    { type: "rental", path: ["d", "g", "kit"] },
+    { type: "rental", path: ["d", "g", "kit", "case"] },
+    { type: "rental", path: ["d", "g", "kit", "case", "bar"] },
+    { type: "rental", path: ["d", "loose"] },
+  ];
+  const depth = componentDepthOf(items);
+  assertEquals(items.map(depth), [0, 0, 0, 1, 2, 0]);
+});
+
+Deno.test("componentDepthOf is unmoved by an ABSENT divider — the pick-sheet leg shape", () => {
+  // A pick-sheet leg carries its groups but not its destination divider. A
+  // form that skips KNOWN divider uids would count the missing `d` as a line.
+  const items = [
+    { type: "group", path: ["d", "g"] },
+    { type: "rental", path: ["d", "g", "kit"] },
+    { type: "rental", path: ["d", "g", "kit", "part"] },
+  ];
+  assertEquals(items.map(componentDepthOf(items)), [0, 0, 1]);
+});
+
+Deno.test("componentDepthOf resolves by PATH, so a repeated uid does not borrow depth", () => {
+  // `x` is a top-level line AND a component of `kit` in the same document.
+  const items = [
+    { type: "rental", path: ["d", "x"] },
+    { type: "rental", path: ["d", "kit"] },
+    { type: "rental", path: ["d", "kit", "x"] },
+  ];
+  assertEquals(items.map(componentDepthOf(items)), [0, 0, 1]);
+});
+
+Deno.test("componentDepthOf at invoice grain — three divider levels", () => {
+  const items = [
+    { type: "order", path: ["o"] },
+    { type: "destination", path: ["o", "d"] },
+    { type: "group", path: ["o", "d", "g"] },
+    { type: "rental", path: ["o", "d", "g", "kit"] },
+    { type: "rental", path: ["o", "d", "g", "kit", "part"] },
+  ];
+  assertEquals(items.map(componentDepthOf(items)), [0, 0, 0, 0, 1]);
 });

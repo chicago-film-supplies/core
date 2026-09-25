@@ -57,9 +57,10 @@
  * ⚠️ `isSameAsDeliveryDates` has an address-shaped sibling,
  * `isSameAsDeliveryDestination`, and a packing list showing both legs needs
  * both — collapsing a return that goes back where it came from. It is exported
- * below rather than here because it is not part of the shared five.
+ * below rather than here because it is not part of the shared six.
  */
 export {
+  componentDepthOf,
   getDestinationsLegend,
   isSameAsDeliveryDates,
   orderHasDiscount,
@@ -104,7 +105,7 @@ export {
  * every fulfillment line, so exporting them would advertise a helper that can
  * only ever say no. That is the difference between them and `orderHasDiscount` /
  * `orderHasTax` above, which are also always-false here and are still exported —
- * those two are part of the SHARED FIVE, a contract the `u` prop depends on and
+ * those two are part of the SHARED SIX, a contract the `u` prop depends on and
  * a ratchet asserts across all three namespaces. A contract is kept even where
  * an arm of it is trivially satisfied; a convenience is not.
  *

@@ -27988,6 +27988,30 @@ item. The field list is not restated here on purpose; this delegates to
 
 **Returns** — Rebuilt items with invoice-specific overrides applied
 
+### `componentDepthOf(items: readonly typeLiteral[]): fnOrConstructor`
+
+How deep a line sits UNDER ANOTHER LINE — 0 for a top-level line, 1 for a kit
+component, 2 for a component of a component. What a document indents by.
+
+Returns a lookup built once over `items`, because every row asks and the
+answer needs the whole array: an ancestor counts only when it is a LINE
+present in `items`, resolved by `path` prefix.
+
+⭐ **Counts line ancestors rather than subtracting divider levels**, so it is
+indifferent to how many divider levels a grain has — `[destination, group]`
+on an order, `[order, destination, group]` on an invoice — and to a divider
+being ABSENT from the array. A pick-sheet leg carries its group dividers but
+not its destination divider; a "skip the divider uids" form would count that
+missing destination as a line and indent every row one level too deep.
+
+🔴 **One document's items, never a pool.** `path` is a row identity within ONE
+document, so on a cross-order view (a pick sheet) build one lookup per
+`(order, destination)` section.
+
+⚠️ Pass the FULL array, before any rows are hidden. A row hidden from the
+render is still its children's ancestor, and dropping it first would pull its
+components up a level.
+
 ### `computeInvoiceItemPaths(items: T[]): T[]`
 
 Compute paths for all invoice items, respecting order divider scoping.
@@ -29388,6 +29412,30 @@ divider's uid is the section's identity and matches exactly one section.
 measured across the `templates` repo, 2026-08-25.)
 
 Excludes structural rows, surcharges, transaction fees, and services.
+
+### `componentDepthOf(items: readonly typeLiteral[]): fnOrConstructor`
+
+How deep a line sits UNDER ANOTHER LINE — 0 for a top-level line, 1 for a kit
+component, 2 for a component of a component. What a document indents by.
+
+Returns a lookup built once over `items`, because every row asks and the
+answer needs the whole array: an ancestor counts only when it is a LINE
+present in `items`, resolved by `path` prefix.
+
+⭐ **Counts line ancestors rather than subtracting divider levels**, so it is
+indifferent to how many divider levels a grain has — `[destination, group]`
+on an order, `[order, destination, group]` on an invoice — and to a divider
+being ABSENT from the array. A pick-sheet leg carries its group dividers but
+not its destination divider; a "skip the divider uids" form would count that
+missing destination as a line and indent every row one level too deep.
+
+🔴 **One document's items, never a pool.** `path` is a row identity within ONE
+document, so on a cross-order view (a pick sheet) build one lookup per
+`(order, destination)` section.
+
+⚠️ Pass the FULL array, before any rows are hidden. A row hidden from the
+render is still its children's ancestor, and dropping it first would pull its
+components up a level.
 
 ### `consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]`
 
@@ -32691,6 +32739,30 @@ quantizes: `currency(12.345).divide(100) === 0.12`. Both are measured on every
 run by the fail-closed companion in `tests/orders.test.ts` — the assertion
 pins divide-first, the benign form is reported.
 
+### `componentDepthOf(items: readonly typeLiteral[]): fnOrConstructor`
+
+How deep a line sits UNDER ANOTHER LINE — 0 for a top-level line, 1 for a kit
+component, 2 for a component of a component. What a document indents by.
+
+Returns a lookup built once over `items`, because every row asks and the
+answer needs the whole array: an ancestor counts only when it is a LINE
+present in `items`, resolved by `path` prefix.
+
+⭐ **Counts line ancestors rather than subtracting divider levels**, so it is
+indifferent to how many divider levels a grain has — `[destination, group]`
+on an order, `[order, destination, group]` on an invoice — and to a divider
+being ABSENT from the array. A pick-sheet leg carries its group dividers but
+not its destination divider; a "skip the divider uids" form would count that
+missing destination as a line and indent every row one level too deep.
+
+🔴 **One document's items, never a pool.** `path` is a row identity within ONE
+document, so on a cross-order view (a pick sheet) build one lookup per
+`(order, destination)` section.
+
+⚠️ Pass the FULL array, before any rows are hidden. A row hidden from the
+render is still its children's ancestor, and dropping it first would pull its
+components up a level.
+
 ### `computeItemPaths(items: T[], _: unknown): T[]`
 
 Compute full structural paths for a flat items array AND linearize it
@@ -34946,6 +35018,30 @@ divider's uid is the section's identity and matches exactly one section.
 measured across the `templates` repo, 2026-08-25.)
 
 Excludes structural rows, surcharges, transaction fees, and services.
+
+### `componentDepthOf(items: readonly typeLiteral[]): fnOrConstructor`
+
+How deep a line sits UNDER ANOTHER LINE — 0 for a top-level line, 1 for a kit
+component, 2 for a component of a component. What a document indents by.
+
+Returns a lookup built once over `items`, because every row asks and the
+answer needs the whole array: an ancestor counts only when it is a LINE
+present in `items`, resolved by `path` prefix.
+
+⭐ **Counts line ancestors rather than subtracting divider levels**, so it is
+indifferent to how many divider levels a grain has — `[destination, group]`
+on an order, `[order, destination, group]` on an invoice — and to a divider
+being ABSENT from the array. A pick-sheet leg carries its group dividers but
+not its destination divider; a "skip the divider uids" form would count that
+missing destination as a line and indent every row one level too deep.
+
+🔴 **One document's items, never a pool.** `path` is a row identity within ONE
+document, so on a cross-order view (a pick sheet) build one lookup per
+`(order, destination)` section.
+
+⚠️ Pass the FULL array, before any rows are hidden. A row hidden from the
+render is still its children's ancestor, and dropping it first would pull its
+components up a level.
 
 ### `consolidateItems(lineItems: LineItem[]): ConsolidatedItem[]`
 
