@@ -38,6 +38,8 @@ export {
 } from "./propagation.ts";
 
 export {
+  LedgerGroupCommitLogRecordSchema,
+  type LedgerGroupCommitLogRecord,
   TransactionLogRecordSchema,
   type TransactionLogRecord,
   type TransactionStatusType,
@@ -172,7 +174,7 @@ import { OAuthRefreshLogRecordSchema } from "./oauth.ts";
 import { PropagationLogRecordSchema } from "./propagation.ts";
 import { RequestLogRecordSchema } from "./request.ts";
 import { SyncErrorLogRecordSchema } from "./sync.ts";
-import { TransactionLogRecordSchema } from "./transaction.ts";
+import { LedgerGroupCommitLogRecordSchema, TransactionLogRecordSchema } from "./transaction.ts";
 import { ValidationErrorLogRecordSchema } from "./validation.ts";
 
 import {
@@ -231,7 +233,7 @@ import type { OAuthRefreshLogRecord } from "./oauth.ts";
 import type { PropagationLogRecord } from "./propagation.ts";
 import type { RequestLogRecord } from "./request.ts";
 import type { SyncErrorLogRecord } from "./sync.ts";
-import type { TransactionLogRecord } from "./transaction.ts";
+import type { LedgerGroupCommitLogRecord, TransactionLogRecord } from "./transaction.ts";
 import type { ValidationErrorLogRecord } from "./validation.ts";
 
 import type { AccessControlEventLogRecord } from "./access-control-event.ts";
@@ -269,6 +271,7 @@ export type TypedLogRecord =
   | DmarcAggregateLogRecord
   | EmailSendFailedLogRecord
   | EmailSentLogRecord
+  | LedgerGroupCommitLogRecord
   | OAuthRefreshLogRecord
   | PropagationLogRecord
   | RequestLogRecord
@@ -307,6 +310,7 @@ export const MSG_SCHEMA_REGISTRY: ReadonlyMap<string, z.ZodType> = new Map<strin
   ["dmarc_aggregate_record", DmarcAggregateLogRecordSchema as z.ZodType],
   ["email_send_failed", EmailSendFailedLogRecordSchema as z.ZodType],
   ["email_sent", EmailSentLogRecordSchema as z.ZodType],
+  ["ledger_group_commit", LedgerGroupCommitLogRecordSchema as z.ZodType],
   ["oauth_refresh", OAuthRefreshLogRecordSchema as z.ZodType],
   ["propagation", PropagationLogRecordSchema as z.ZodType],
   ["request", RequestLogRecordSchema as z.ZodType],

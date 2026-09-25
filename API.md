@@ -10374,7 +10374,7 @@ The `log-records.test.ts` coverage test asserts union ↔ registry
 symmetry so it's impossible to add one without the other.
 
 ```ts
-type TypedLogRecord = ClientLogRecord | DmarcAggregateLogRecord | EmailSendFailedLogRecord | EmailSentLogRecord | OAuthRefreshLogRecord | PropagationLogRecord | RequestLogRecord | SyncErrorLogRecord | TransactionLogRecord | ValidationErrorLogRecord | AccessControlEventLogRecord | CalendarEventLogRecord | CloudTaskEventLogRecord | DomainEventLogRecord | IntegrationEventLogRecord | McpEventLogRecord | OAuthEventLogRecord | SystemEventLogRecord | TemplateEventLogRecord | TypesenseEventLogRecord | UserSessionEventLogRecord | XeroEventLogRecord;
+type TypedLogRecord = ClientLogRecord | DmarcAggregateLogRecord | EmailSendFailedLogRecord | EmailSentLogRecord | LedgerGroupCommitLogRecord | OAuthRefreshLogRecord | PropagationLogRecord | RequestLogRecord | SyncErrorLogRecord | TransactionLogRecord | ValidationErrorLogRecord | AccessControlEventLogRecord | CalendarEventLogRecord | CloudTaskEventLogRecord | DomainEventLogRecord | IntegrationEventLogRecord | McpEventLogRecord | OAuthEventLogRecord | SystemEventLogRecord | TemplateEventLogRecord | TypesenseEventLogRecord | UserSessionEventLogRecord | XeroEventLogRecord;
 ```
 
 ### `TypesenseConfig`
@@ -23465,6 +23465,53 @@ Discriminated msg union for Integration-archetype log records.
 type IntegrationEventMsg = indexedAccess;
 ```
 
+### `LedgerGroupCommitLogRecord`
+
+One GROUP commit of the ledger writer — `api-cloudrun/src/lib/ledgerWriter.ts`
+(api-cloudrun#1120). Concurrent movements of the same products on one
+instance are merged into one group, applied one by one in memory, and
+committed as ONE compare-and-set batch.
+
+Emitted once per group, however it ends — at `info` on a commit and `warn`
+when the group as a whole failed (its retry budget ran out, or the commit
+failed for another reason). Every group emits, so a ratio over this record
+has its denominator.
+
+⚠️ `attempts` counts compare-and-set attempts, and only a race with ANOTHER
+INSTANCE costs one: racers on the same instance are merged rather than
+retried. A sustained `attempts > 1` is therefore the cross-instance herd
+that owner ruling R6 says to watch for before reaching for a serializer.
+
+```ts
+interface LedgerGroupCommitLogRecord {
+  level: LogLevelType;
+  msg: "ledger_group_commit";
+  ts: string;
+  tx_name: string;
+  status: indexedAccess;
+  members: number;
+  committed: number;
+  rejected: number;
+  deferred: number;
+  products: number;
+  attempts: number;
+  duration_ms: number;
+  write_count: number;
+  error_message?: string;
+  request_id?: string;
+  trace_id?: string;
+  span_id?: string;
+}
+```
+
+### `LedgerGroupCommitLogRecordSchema`
+
+Zod schema for {@link LedgerGroupCommitLogRecord}.
+
+```ts
+const LedgerGroupCommitLogRecordSchema: z.ZodType<LedgerGroupCommitLogRecord>;
+```
+
 ### `LogLevelEnum`
 
 Zod enum for log levels — exported for reuse in arm schemas.
@@ -23996,7 +24043,7 @@ The `log-records.test.ts` coverage test asserts union ↔ registry
 symmetry so it's impossible to add one without the other.
 
 ```ts
-type TypedLogRecord = ClientLogRecord | DmarcAggregateLogRecord | EmailSendFailedLogRecord | EmailSentLogRecord | OAuthRefreshLogRecord | PropagationLogRecord | RequestLogRecord | SyncErrorLogRecord | TransactionLogRecord | ValidationErrorLogRecord | AccessControlEventLogRecord | CalendarEventLogRecord | CloudTaskEventLogRecord | DomainEventLogRecord | IntegrationEventLogRecord | McpEventLogRecord | OAuthEventLogRecord | SystemEventLogRecord | TemplateEventLogRecord | TypesenseEventLogRecord | UserSessionEventLogRecord | XeroEventLogRecord;
+type TypedLogRecord = ClientLogRecord | DmarcAggregateLogRecord | EmailSendFailedLogRecord | EmailSentLogRecord | LedgerGroupCommitLogRecord | OAuthRefreshLogRecord | PropagationLogRecord | RequestLogRecord | SyncErrorLogRecord | TransactionLogRecord | ValidationErrorLogRecord | AccessControlEventLogRecord | CalendarEventLogRecord | CloudTaskEventLogRecord | DomainEventLogRecord | IntegrationEventLogRecord | McpEventLogRecord | OAuthEventLogRecord | SystemEventLogRecord | TemplateEventLogRecord | TypesenseEventLogRecord | UserSessionEventLogRecord | XeroEventLogRecord;
 ```
 
 ### `TypesenseEventLogRecord`

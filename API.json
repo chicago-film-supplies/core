@@ -4503,7 +4503,7 @@
         {
           "kind": "typeAlias",
           "name": "TypedLogRecord",
-          "declaration": "type TypedLogRecord = ClientLogRecord | DmarcAggregateLogRecord | EmailSendFailedLogRecord | EmailSentLogRecord | OAuthRefreshLogRecord | PropagationLogRecord | RequestLogRecord | SyncErrorLogRecord | TransactionLogRecord | ValidationErrorLogRecord | AccessControlEventLogRecord | CalendarEventLogRecord | CloudTaskEventLogRecord | DomainEventLogRecord | IntegrationEventLogRecord | McpEventLogRecord | OAuthEventLogRecord | SystemEventLogRecord | TemplateEventLogRecord | TypesenseEventLogRecord | UserSessionEventLogRecord | XeroEventLogRecord;",
+          "declaration": "type TypedLogRecord = ClientLogRecord | DmarcAggregateLogRecord | EmailSendFailedLogRecord | EmailSentLogRecord | LedgerGroupCommitLogRecord | OAuthRefreshLogRecord | PropagationLogRecord | RequestLogRecord | SyncErrorLogRecord | TransactionLogRecord | ValidationErrorLogRecord | AccessControlEventLogRecord | CalendarEventLogRecord | CloudTaskEventLogRecord | DomainEventLogRecord | IntegrationEventLogRecord | McpEventLogRecord | OAuthEventLogRecord | SystemEventLogRecord | TemplateEventLogRecord | TypesenseEventLogRecord | UserSessionEventLogRecord | XeroEventLogRecord;",
           "doc": "Discriminated union of every typed log record, keyed by the `msg`\nliteral. The new `logTyped<R extends TypedLogRecord>` API in\n`api-cloudrun/src/lib/logger.ts` constrains its argument to this\nunion — TS narrows to the matching arm based on the supplied `msg`,\ngiving compile-time enforcement that every field is correctly named\nand typed.\n\nAdding a new arm requires:\n  1. Define schema + interface in `./<archetype>.ts`\n  2. Re-export both above\n  3. Add to this union\n  4. Add to {@link MSG_SCHEMA_REGISTRY} below\n\nThe `log-records.test.ts` coverage test asserts union ↔ registry\nsymmetry so it's impossible to add one without the other."
         },
         {
@@ -10317,6 +10317,18 @@
           "doc": "Discriminated msg union for Integration-archetype log records."
         },
         {
+          "kind": "interface",
+          "name": "LedgerGroupCommitLogRecord",
+          "declaration": "interface LedgerGroupCommitLogRecord {\n  level: LogLevelType;\n  msg: \"ledger_group_commit\";\n  ts: string;\n  tx_name: string;\n  status: indexedAccess;\n  members: number;\n  committed: number;\n  rejected: number;\n  deferred: number;\n  products: number;\n  attempts: number;\n  duration_ms: number;\n  write_count: number;\n  error_message?: string;\n  request_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
+          "doc": "One GROUP commit of the ledger writer — `api-cloudrun/src/lib/ledgerWriter.ts`\n(api-cloudrun#1120). Concurrent movements of the same products on one\ninstance are merged into one group, applied one by one in memory, and\ncommitted as ONE compare-and-set batch.\n\nEmitted once per group, however it ends — at `info` on a commit and `warn`\nwhen the group as a whole failed (its retry budget ran out, or the commit\nfailed for another reason). Every group emits, so a ratio over this record\nhas its denominator.\n\n⚠️ `attempts` counts compare-and-set attempts, and only a race with ANOTHER\nINSTANCE costs one: racers on the same instance are merged rather than\nretried. A sustained `attempts > 1` is therefore the cross-instance herd\nthat owner ruling R6 says to watch for before reaching for a serializer."
+        },
+        {
+          "kind": "variable",
+          "name": "LedgerGroupCommitLogRecordSchema",
+          "declaration": "const LedgerGroupCommitLogRecordSchema: z.ZodType<LedgerGroupCommitLogRecord>;",
+          "doc": "Zod schema for {@link LedgerGroupCommitLogRecord}."
+        },
+        {
           "kind": "variable",
           "name": "LogLevelEnum",
           "declaration": "const LogLevelEnum: z.ZodType<LogLevelType>;",
@@ -10541,7 +10553,7 @@
         {
           "kind": "typeAlias",
           "name": "TypedLogRecord",
-          "declaration": "type TypedLogRecord = ClientLogRecord | DmarcAggregateLogRecord | EmailSendFailedLogRecord | EmailSentLogRecord | OAuthRefreshLogRecord | PropagationLogRecord | RequestLogRecord | SyncErrorLogRecord | TransactionLogRecord | ValidationErrorLogRecord | AccessControlEventLogRecord | CalendarEventLogRecord | CloudTaskEventLogRecord | DomainEventLogRecord | IntegrationEventLogRecord | McpEventLogRecord | OAuthEventLogRecord | SystemEventLogRecord | TemplateEventLogRecord | TypesenseEventLogRecord | UserSessionEventLogRecord | XeroEventLogRecord;",
+          "declaration": "type TypedLogRecord = ClientLogRecord | DmarcAggregateLogRecord | EmailSendFailedLogRecord | EmailSentLogRecord | LedgerGroupCommitLogRecord | OAuthRefreshLogRecord | PropagationLogRecord | RequestLogRecord | SyncErrorLogRecord | TransactionLogRecord | ValidationErrorLogRecord | AccessControlEventLogRecord | CalendarEventLogRecord | CloudTaskEventLogRecord | DomainEventLogRecord | IntegrationEventLogRecord | McpEventLogRecord | OAuthEventLogRecord | SystemEventLogRecord | TemplateEventLogRecord | TypesenseEventLogRecord | UserSessionEventLogRecord | XeroEventLogRecord;",
           "doc": "Discriminated union of every typed log record, keyed by the `msg`\nliteral. The new `logTyped<R extends TypedLogRecord>` API in\n`api-cloudrun/src/lib/logger.ts` constrains its argument to this\nunion — TS narrows to the matching arm based on the supplied `msg`,\ngiving compile-time enforcement that every field is correctly named\nand typed.\n\nAdding a new arm requires:\n  1. Define schema + interface in `./<archetype>.ts`\n  2. Re-export both above\n  3. Add to this union\n  4. Add to {@link MSG_SCHEMA_REGISTRY} below\n\nThe `log-records.test.ts` coverage test asserts union ↔ registry\nsymmetry so it's impossible to add one without the other."
         },
         {

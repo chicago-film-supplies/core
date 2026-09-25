@@ -141,3 +141,67 @@ export const TransactionLogRecordSchema: z.ZodType<TransactionLogRecord> = z.obj
   contended_ranges: z.array(z.string()).max(20).optional(),
   aborted: z.boolean().optional(),
 }).passthrough().meta({ title: "TransactionLogRecord" });
+
+const LEDGER_GROUP_STATUSES = ["completed", "failed"] as const;
+
+/**
+ * One GROUP commit of the ledger writer — `api-cloudrun/src/lib/ledgerWriter.ts`
+ * (api-cloudrun#1120). Concurrent movements of the same products on one
+ * instance are merged into one group, applied one by one in memory, and
+ * committed as ONE compare-and-set batch.
+ *
+ * Emitted once per group, however it ends — at `info` on a commit and `warn`
+ * when the group as a whole failed (its retry budget ran out, or the commit
+ * failed for another reason). Every group emits, so a ratio over this record
+ * has its denominator.
+ *
+ * ⚠️ `attempts` counts compare-and-set attempts, and only a race with ANOTHER
+ * INSTANCE costs one: racers on the same instance are merged rather than
+ * retried. A sustained `attempts > 1` is therefore the cross-instance herd
+ * that owner ruling R6 says to watch for before reaching for a serializer.
+ */
+export interface LedgerGroupCommitLogRecord {
+  level: LogLevelType;
+  msg: "ledger_group_commit";
+  ts: string;
+  /** The FIRST member's transaction id. The group's read phase is `<tx_name>:ledger` in `msg:"transaction"`. */
+  tx_name: string;
+  status: (typeof LEDGER_GROUP_STATUSES)[number];
+  /** Requests in the group. */
+  members: number;
+  /** Members whose writes landed. */
+  committed: number;
+  /** Members refused on their own (a failed check, a stale version). Their neighbours are unaffected. */
+  rejected: number;
+  /** Members sent to the next group (a document an earlier member writes, or the batch budget). */
+  deferred: number;
+  /** Distinct products, i.e. ledgers, the group could move. */
+  products: number;
+  /** Compare-and-set attempts used, including the one that committed. */
+  attempts: number;
+  duration_ms: number;
+  /** Documents in the committed batch, excluding claim patches. 0 on a failed group. */
+  write_count: number;
+  /** Supplied by the logger from the error, capped in `baseLogFields`. */
+  error_message?: string;
+  request_id?: string;
+  trace_id?: string;
+  span_id?: string;
+  [key: string]: unknown;
+}
+
+/** Zod schema for {@link LedgerGroupCommitLogRecord}. */
+export const LedgerGroupCommitLogRecordSchema: z.ZodType<LedgerGroupCommitLogRecord> = z.object({
+  ...baseLogFields,
+  msg: z.literal("ledger_group_commit"),
+  tx_name: z.string(),
+  status: z.enum(LEDGER_GROUP_STATUSES),
+  members: z.number(),
+  committed: z.number(),
+  rejected: z.number(),
+  deferred: z.number(),
+  products: z.number(),
+  attempts: z.number(),
+  duration_ms: z.number(),
+  write_count: z.number(),
+}).passthrough().meta({ title: "LedgerGroupCommitLogRecord" });
