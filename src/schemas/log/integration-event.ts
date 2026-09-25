@@ -1,6 +1,6 @@
 /**
  * External-integration archetype — CRMS, Uploadcare, DMARC ingest,
- * Eventarc dispatch, Trello sync, devReplica mirror, draft-quote dispatch,
+ * Eventarc dispatch, Trello sync, devReplica mirror,
  * generic sync orchestration, geocoding via Mapbox, and other small
  * pipelines that don't warrant a per-service archetype.
  *
@@ -20,17 +20,12 @@ export const INTEGRATION_EVENT_MSGS = [
   "uploadcare_orphan_batch_failed",
   "uploadcare_orphan_cleanup_failed",
   "uploadcare_orphan_sweep_completed",
-  // A CDN file was uploaded but the transaction that would have recorded a
-  // reference to it failed ambiguously (e.g. a lost commit ack), so we
-  // deliberately do NOT delete it — the write may have landed. Left for the
-  // orphan sweep to reap; deleting here risks a live order with dead PDF links.
-  "uploadcare_upload_abandoned",
   "dmarc_report_ingest_failed",
   "dmarc_report_processor_run",
   "eventarc_duplicate_event",
   "eventarc_processed",
   // The activity feed's capture branch (manager's `/activity`,
-  // `.claude/plans/activity-feed.md`). A PAIR, and both halves are needed for
+  // `api-cloudrun/.claude/plans/activity-feed.md`). A PAIR, and both halves are needed for
   // the same reason the org-tree watch above emits two: the feed is silent when
   // it decides not to write, so "captured nothing today" and "the branch never
   // ran" are indistinguishable from `activity_captured` alone.
@@ -63,9 +58,6 @@ export const INTEGRATION_EVENT_MSGS = [
   "mirror_set_failed_terminal",
   "mirror_set_queue_failed",
   "mirror_skipped_stale",
-  "draft_quote_skipped_deleted",
-  "draft_quote_skipped_invalid_order",
-  "draft_quote_superseded",
   "dns_record_check",
   "dns_record_check_resolve_failed",
   "location_integrity_check",

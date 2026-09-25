@@ -1218,64 +1218,6 @@ const finalizeOrderTransaction: TransactionDefinition = {
   ],
 };
 
-// ── process-order-docs ─────────────────────────────────────────────
-//
-// Async fanout: after `processOrderDocs` uploads a fresh packing-list PDF to
-// Uploadcare and writes orders/{uid}/documents/{docUid}, the Cloud Run task
-// finds every order-derived event card (cards.where(sources array-contains
-// {collection:'orders', uid: order.uid})) and writes/replaces the attachment
-// whose `type === "packing"` with the new uuid + filename. Replaces in place
-// on each regeneration; the previous uuid is already cleaned by the
-// processOrderDocs orphan-uuid sweep, so the card never references a deleted
-// file. Server-internal write — bypasses CARD_LOCK on `attachments`.
-
-const processOrderDocsRules: CollectionRule[] = [
-  {
-    id: "process-order-docs:doc-to-cards",
-    source: "orders/documents",
-    target: "cards",
-    mode: "fan-out",
-    invariant:
-      "After the packing-list PDF is uploaded to Uploadcare, the resulting uuid is written into the `attachments[]` of every order-derived card (sources contains {collection:'orders', uid: order.uid}). One attachment per card, identified by `type === 'packing'`. Replaces in place on each regeneration; locked from picker writes (server-internal write bypasses the `attachments` lock).",
-    transaction: "process-order-docs",
-    enforced_by: [{
-      kind: "audit",
-      ref: "api-cloudrun/scripts/audit-card-attachments.ts",
-      clause:
-        "all four clauses — the fan-out reaching every in-scope card, the one-per-card cardinality, the mime_type/filename/locked conformance, and the reverse orphan check. `size_bytes` is excluded on purpose: the writer hard-codes 0, so asserting it would compare the implementation with itself",
-      gates: true,
-    }],
-    fields: [
-      { source: ["uuid"], target: ["attachments", "uid"] },
-      { source: ["mime"], target: ["attachments", "mime_type"] },
-      {
-        source: [],
-        target: ["attachments", "type"],
-        transform: "'packing' (constant)",
-      },
-      {
-        source: [],
-        target: ["attachments", "filename"],
-        transform: "`Packing List #${order.number}.pdf`",
-      },
-      {
-        source: [],
-        target: ["attachments", "locked"],
-        transform: "true (server-managed)",
-      },
-    ],
-  },
-];
-
-const processOrderDocsTransaction: TransactionDefinition = {
-  id: "process-order-docs",
-  description:
-    "Async Cloud Task path: CRMS prepares the packing-list PDF, the API uploads it to Uploadcare, writes the order's documents subcollection, then fans the resulting Uploadcare uuid out to every order-derived event card so the picker UI can deep-link to the live PDF.",
-  steps: [
-    "process-order-docs:doc-to-cards",
-  ],
-};
-
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/orders.ts` contributes to the propagation catalog. */
 export const orders: PropagationModule = {
@@ -1283,7 +1225,6 @@ export const orders: PropagationModule = {
     ...createOrderRules,
     ...updateOrderRules,
     ...updateBookingRules,
-    ...processOrderDocsRules,
   ],
   transactions: [
     createOrderTransaction,
@@ -1294,6 +1235,5 @@ export const orders: PropagationModule = {
     bulkFulfillmentBookingsTransaction,
     crossOrderBookingsTransaction,
     finalizeOrderTransaction,
-    processOrderDocsTransaction,
   ],
 };

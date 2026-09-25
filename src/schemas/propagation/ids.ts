@@ -58,7 +58,6 @@ export type TransactionId =
   | "bulk-fulfillment-bookings"
   | "cross-order-bookings"
   | "finalize-order"
-  | "process-order-docs"
   // out-of-service.ts
   | "create-out-of-service-record"
   | "update-out-of-service-record"
@@ -184,7 +183,6 @@ export type RuleId =
   | "update-booking:transactions-to-locations"
   | "update-booking:booking-to-order"
   | "update-booking:booking-to-cards"
-  | "process-order-docs:doc-to-cards"
   // out-of-service.ts
   | "create-out-of-service-record:sources-to-record"
   | "update-out-of-service-record:record-to-transactions"
