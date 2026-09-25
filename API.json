@@ -2055,7 +2055,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  query_by_out_of_service?: string[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  uploadcare_uuid?: string | null;\n  pdf_generated_at?: FirestoreTimestampType | null;\n  pdf_params?: Record<string, boolean>;\n  pdf_params_context?: RenderParamsContext | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  query_by_out_of_service?: string[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -3471,7 +3471,7 @@
         {
           "kind": "interface",
           "name": "Quote",
-          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number;\n  is_draft?: boolean;\n  uploadcare_uuid: string;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
         },
         {
@@ -3490,7 +3490,7 @@
           "kind": "variable",
           "name": "QuoteId",
           "declaration": "const QuoteId: z.ZodType<string>;",
-          "doc": "`quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or\n`{uid_order}:draft` (the working draft). Built in\n`api-cloudrun/src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`)."
+          "doc": "`quotes.uid` — deterministic composite `{uid_order}:v{N}`, one per saved\nversion. Built in `api-cloudrun/src/services/quotes.ts`\n(`${uidOrder}:v${version}`). The `{uid_order}:draft` arm went with the draft\nPDF (api-cloudrun#1129)."
         },
         {
           "kind": "typeAlias",
@@ -3886,7 +3886,7 @@
           "kind": "variable",
           "name": "StatementDocumentId",
           "declaration": "const StatementDocumentId: z.ZodType<string>;",
-          "doc": "`statement-documents.uid` — `{uid_organization}:v{N}`.\n\n⭐ **{@link QuoteId} minus the `:draft` arm, and the absence is the design.** A\nquote has a canonical draft because the ORDER decides its content; a statement\ndoes not, because the REQUEST decides it — there is no \"the statement for this\norganization\" for a draft to be of. Built in\n`api-cloudrun/src/services/reporting/statement.ts`."
+          "doc": "`statement-documents.uid` — `{uid_organization}:v{N}`. The same shape as\n{@link QuoteId}, and deliberately a separate declaration: a statement has no\ncanonical document to be a version of, because the REQUEST decides its\ncontent, so nothing ties the two shapes together. Built in\n`api-cloudrun/src/services/reporting/statement.ts`."
         },
         {
           "kind": "variable",
@@ -6187,7 +6187,7 @@
           "kind": "variable",
           "name": "QuoteId",
           "declaration": "const QuoteId: z.ZodType<string>;",
-          "doc": "`quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or\n`{uid_order}:draft` (the working draft). Built in\n`api-cloudrun/src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`)."
+          "doc": "`quotes.uid` — deterministic composite `{uid_order}:v{N}`, one per saved\nversion. Built in `api-cloudrun/src/services/quotes.ts`\n(`${uidOrder}:v${version}`). The `{uid_order}:draft` arm went with the draft\nPDF (api-cloudrun#1129)."
         },
         {
           "kind": "variable",
@@ -6265,7 +6265,7 @@
           "kind": "variable",
           "name": "StatementDocumentId",
           "declaration": "const StatementDocumentId: z.ZodType<string>;",
-          "doc": "`statement-documents.uid` — `{uid_organization}:v{N}`.\n\n⭐ **{@link QuoteId} minus the `:draft` arm, and the absence is the design.** A\nquote has a canonical draft because the ORDER decides its content; a statement\ndoes not, because the REQUEST decides it — there is no \"the statement for this\norganization\" for a draft to be of. Built in\n`api-cloudrun/src/services/reporting/statement.ts`."
+          "doc": "`statement-documents.uid` — `{uid_organization}:v{N}`. The same shape as\n{@link QuoteId}, and deliberately a separate declaration: a statement has no\ncanonical document to be a version of, because the REQUEST decides its\ncontent, so nothing ties the two shapes together. Built in\n`api-cloudrun/src/services/reporting/statement.ts`."
         },
         {
           "kind": "variable",
@@ -7268,7 +7268,7 @@
         {
           "kind": "interface",
           "name": "Invoice",
-          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  query_by_out_of_service?: string[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  uploadcare_uuid?: string | null;\n  pdf_generated_at?: FirestoreTimestampType | null;\n  pdf_params?: Record<string, boolean>;\n  pdf_params_context?: RenderParamsContext | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Invoice {\n  uid: string;\n  number: number;\n  status: InvoiceStatusType;\n  query_by_orders: string[];\n  number_orders: number[];\n  query_by_out_of_service?: string[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date?: string;\n  due_date_fs?: FirestoreTimestampType;\n  subject: string;\n  reference: string | null;\n  notes: string | null;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: InvoiceDocDestinationType[];\n  items: InvoiceDocItemType[];\n  totals: InvoiceDocTotalsType;\n  xero_id: string | null;\n  pdf_versions: Array<typeLiteral>;\n  crms_id?: number | null;\n  crms_opportunity_ids?: number[];\n  uid_thread: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An invoice document in the invoices Firestore collection."
         },
         {
@@ -9850,7 +9850,7 @@
         {
           "kind": "interface",
           "name": "Quote",
-          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number | null;\n  is_draft: boolean;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number;\n  is_draft?: boolean;\n  uploadcare_uuid: string;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
         },
         {
@@ -11344,7 +11344,7 @@
           "kind": "variable",
           "name": "INVOICE_SOURCE_HASH_EXCLUDED_FIELDS",
           "declaration": "const INVOICE_SOURCE_HASH_EXCLUDED_FIELDS: ReadonlySet<string>;",
-          "doc": "Top-level keys that never change what an invoice PDF renders.\n\nThe first block is the PDF pipeline's own write-back — everything\n`generateInvoicePdf` / `saveInvoicePdfVersion` stamp on the invoice they just\nrendered. Hashing any of it would make a save change the very hash it\nrecords. The second block is bookkeeping no template reads.\n\n⚠️ `totals` is deliberately NOT excluded: the invoice template prints\n`amount_paid_cents` / `amount_credited_cents` / `amount_due_cents`, so a\npayment landing after a save legitimately makes that saved PDF out of date."
+          "doc": "Top-level keys that never change what an invoice PDF renders.\n\nThe first block is the PDF pipeline's own write-back — everything\n`saveInvoicePdfVersion` stamps on the invoice it just\nrendered. Hashing any of it would make a save change the very hash it\nrecords. The second block is bookkeeping no template reads.\n\n⚠️ `totals` is deliberately NOT excluded: the invoice template prints\n`amount_paid_cents` / `amount_credited_cents` / `amount_due_cents`, so a\npayment landing after a save legitimately makes that saved PDF out of date."
         },
         {
           "kind": "variable",

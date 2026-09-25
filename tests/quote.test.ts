@@ -17,11 +17,10 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 
 function baseQuote(extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    uid: "testorder10000000000:draft",
+    uid: "testorder10000000000:v1",
     uid_order: "testorder10000000000",
     order_number: 1000,
-    version: null,
-    is_draft: true,
+    version: 1,
     uploadcare_uuid: "11111111-2222-4333-8444-555555555555",
     params: {},
     params_context: null,
@@ -113,8 +112,19 @@ Deno.test("QuoteSchema accepts a saved version row", () => {
   const res = QuoteSchema.safeParse(baseQuote({
     uid: "testorder10000000000:v3",
     version: 3,
-    is_draft: false,
     params: { hide_zero_priced_components: false },
   }));
   assertEquals(res.success, true);
+});
+
+// api-cloudrun#1129: the draft quote is gone, so every stored quote is a saved
+// version with a PDF. `is_draft` is optional only until storage is stripped.
+Deno.test("QuoteSchema still accepts a stored is_draft: false while it retires", () => {
+  assertEquals(QuoteSchema.safeParse(baseQuote({ is_draft: false })).success, true);
+});
+
+Deno.test("QuoteSchema rejects the draft shape — null version, null uuid, :draft uid", () => {
+  assertEquals(QuoteSchema.safeParse(baseQuote({ version: null })).success, false);
+  assertEquals(QuoteSchema.safeParse(baseQuote({ uploadcare_uuid: null })).success, false);
+  assertEquals(QuoteSchema.safeParse(baseQuote({ uid: "testorder10000000000:draft" })).success, false);
 });

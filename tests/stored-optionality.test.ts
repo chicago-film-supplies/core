@@ -217,12 +217,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["invoices.organization.jurisdiction_claim", "mid-expand"],
   ["orders.organization.jurisdiction_claim", "mid-expand"],
   ["organizations.jurisdiction_claim", "mid-expand"],
-  // ── pending-removal — the draft-PDF fields (api-cloudrun#1129). Optional so the
-  //    API can stop writing them; deleted once the purge empties storage.
-  //    (`pdf_params` is `.optional()` alone, so it is not in this inventory.)
-  ["invoices.pdf_generated_at", "pending-removal"],
-  ["invoices.pdf_params_context", "pending-removal"],
-  ["invoices.uploadcare_uuid", "pending-removal"],
   // Tax classes (api-cloudrun#993) — expand step. Line `uid_tax_class` has been
   // contracted to required (both grains); the override and the product-side
   // fields are still in transit.

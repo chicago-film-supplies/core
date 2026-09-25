@@ -143,10 +143,13 @@ Deno.test("isProductShapedUid: false for a bare divider uuid, true for a product
   assertEquals(isProductShapedUid("custom-fe847108-d824-4f3a-aac8-ce60a9743ffc"), true);
 });
 
-Deno.test("QuoteId accepts {order}:v{N} and {order}:draft", () => {
+Deno.test("QuoteId accepts {order}:v{N}", () => {
   accepts(QuoteId, "00iNtfho7YCp6FllPi9f:v1");
   accepts(QuoteId, "00iNtfho7YCp6FllPi9f:v42");
-  accepts(QuoteId, "00iNtfho7YCp6FllPi9f:draft");
+});
+
+Deno.test("QuoteId rejects the retired {order}:draft arm (api-cloudrun#1129)", () => {
+  rejects(QuoteId, "00iNtfho7YCp6FllPi9f:draft");
 });
 
 Deno.test("QuoteId rejects bad order segment / version / arity", () => {

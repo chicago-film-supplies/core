@@ -139,7 +139,7 @@ export const PACKING_LIST_SOURCE_HASH_EXCLUDED_FIELDS: ReadonlySet<string> = new
  * Top-level keys that never change what an invoice PDF renders.
  *
  * The first block is the PDF pipeline's own write-back — everything
- * `generateInvoicePdf` / `saveInvoicePdfVersion` stamp on the invoice they just
+ * `saveInvoicePdfVersion` stamps on the invoice it just
  * rendered. Hashing any of it would make a save change the very hash it
  * records. The second block is bookkeeping no template reads.
  *
@@ -154,10 +154,6 @@ export const INVOICE_SOURCE_HASH_EXCLUDED_FIELDS: ReadonlySet<string> = new Set(
   "created_by",
   "updated_by",
   // PDF pipeline write-back.
-  "uploadcare_uuid",
-  "pdf_generated_at",
-  "pdf_params",
-  "pdf_params_context",
   "pdf_versions",
   // Bookkeeping no template reads.
   "xero_id",

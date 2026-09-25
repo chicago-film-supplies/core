@@ -175,15 +175,14 @@ Deno.test("getInitialValues — records default to empty object", () => {
   assertEquals(userResult.prefs_typesense, {});
 });
 
-Deno.test("getInitialValues — the invoice PDF stamps seed to their empty states", () => {
+Deno.test("getInitialValues — the invoice PDF journal seeds to its empty state", () => {
   // 1.6 of the documents-menu plan rests on the claim that the TYPE-DERIVED
   // zero is already the right seed for these fields, so none of them needs
-  // `.meta({ initial })`. That is a claim, so it gets an assertion: `{}` for
-  // the record and `[]` for the array genuinely ARE the blank states — unlike
+  // `.meta({ initial })`. That is a claim, so it gets an assertion: `[]` for
+  // the array genuinely IS the blank state — unlike
   // the `z.boolean().default(true)` case `.meta({ initial })` was invented for,
   // where the derived zero (`false`) is the wrong answer.
   const result = getInitialValues(InvoiceSchema);
-  assertEquals(result.pdf_params, {});
   assertEquals(result.pdf_versions, []);
 });
 

@@ -4668,10 +4668,6 @@ interface Invoice {
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotalsType;
   xero_id: string | null;
-  uploadcare_uuid?: string | null;
-  pdf_generated_at?: FirestoreTimestampType | null;
-  pdf_params?: Record<string, boolean>;
-  pdf_params_context?: RenderParamsContext | null;
   pdf_versions: Array<typeLiteral>;
   crms_id?: number | null;
   crms_opportunity_ids?: number[];
@@ -8081,9 +8077,9 @@ interface Quote {
   uid: string;
   uid_order: string;
   order_number: number;
-  version: number | null;
-  is_draft: boolean;
-  uploadcare_uuid: string | null;
+  version: number;
+  is_draft?: boolean;
+  uploadcare_uuid: string;
   params: Record<string, boolean>;
   params_context: RenderParamsContext | null;
   source_hash: string;
@@ -8108,9 +8104,10 @@ type QuoteDeleted = EventEnvelope<Quote> & typeLiteral;
 
 ### `QuoteId`
 
-`quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or
-`{uid_order}:draft` (the working draft). Built in
-`api-cloudrun/src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
+`quotes.uid` — deterministic composite `{uid_order}:v{N}`, one per saved
+version. Built in `api-cloudrun/src/services/quotes.ts`
+(`${uidOrder}:v${version}`). The `{uid_order}:draft` arm went with the draft
+PDF (api-cloudrun#1129).
 
 ```ts
 const QuoteId: z.ZodType<string>;
@@ -8925,12 +8922,10 @@ interface StatementDocument {
 
 ### `StatementDocumentId`
 
-`statement-documents.uid` — `{uid_organization}:v{N}`.
-
-⭐ **{@link QuoteId} minus the `:draft` arm, and the absence is the design.** A
-quote has a canonical draft because the ORDER decides its content; a statement
-does not, because the REQUEST decides it — there is no "the statement for this
-organization" for a draft to be of. Built in
+`statement-documents.uid` — `{uid_organization}:v{N}`. The same shape as
+{@link QuoteId}, and deliberately a separate declaration: a statement has no
+canonical document to be a version of, because the REQUEST decides its
+content, so nothing ties the two shapes together. Built in
 `api-cloudrun/src/services/reporting/statement.ts`.
 
 ```ts
@@ -13996,9 +13991,10 @@ type ProductTypeType = indexedAccess;
 
 ### `QuoteId`
 
-`quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or
-`{uid_order}:draft` (the working draft). Built in
-`api-cloudrun/src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
+`quotes.uid` — deterministic composite `{uid_order}:v{N}`, one per saved
+version. Built in `api-cloudrun/src/services/quotes.ts`
+(`${uidOrder}:v${version}`). The `{uid_order}:draft` arm went with the draft
+PDF (api-cloudrun#1129).
 
 ```ts
 const QuoteId: z.ZodType<string>;
@@ -14160,12 +14156,10 @@ type SettlementTypeType = indexedAccess;
 
 ### `StatementDocumentId`
 
-`statement-documents.uid` — `{uid_organization}:v{N}`.
-
-⭐ **{@link QuoteId} minus the `:draft` arm, and the absence is the design.** A
-quote has a canonical draft because the ORDER decides its content; a statement
-does not, because the REQUEST decides it — there is no "the statement for this
-organization" for a draft to be of. Built in
+`statement-documents.uid` — `{uid_organization}:v{N}`. The same shape as
+{@link QuoteId}, and deliberately a separate declaration: a statement has no
+canonical document to be a version of, because the REQUEST decides its
+content, so nothing ties the two shapes together. Built in
 `api-cloudrun/src/services/reporting/statement.ts`.
 
 ```ts
@@ -16277,10 +16271,6 @@ interface Invoice {
   items: InvoiceDocItemType[];
   totals: InvoiceDocTotalsType;
   xero_id: string | null;
-  uploadcare_uuid?: string | null;
-  pdf_generated_at?: FirestoreTimestampType | null;
-  pdf_params?: Record<string, boolean>;
-  pdf_params_context?: RenderParamsContext | null;
   pdf_versions: Array<typeLiteral>;
   crms_id?: number | null;
   crms_opportunity_ids?: number[];
@@ -22228,9 +22218,9 @@ interface Quote {
   uid: string;
   uid_order: string;
   order_number: number;
-  version: number | null;
-  is_draft: boolean;
-  uploadcare_uuid: string | null;
+  version: number;
+  is_draft?: boolean;
+  uploadcare_uuid: string;
   params: Record<string, boolean>;
   params_context: RenderParamsContext | null;
   source_hash: string;
@@ -25651,7 +25641,7 @@ with api-cloudrun#556.)
 Top-level keys that never change what an invoice PDF renders.
 
 The first block is the PDF pipeline's own write-back — everything
-`generateInvoicePdf` / `saveInvoicePdfVersion` stamp on the invoice they just
+`saveInvoicePdfVersion` stamps on the invoice it just
 rendered. Hashing any of it would make a save change the very hash it
 records. The second block is bookkeeping no template reads.
 

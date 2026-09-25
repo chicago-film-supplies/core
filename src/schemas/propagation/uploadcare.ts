@@ -82,7 +82,7 @@ const WORK_LIST_FIELDS: CollectionRule["fields"] = [
   {
     source: [],
     target: ["kind"],
-    transform: "'draft_pdf' | 'versioned_pdf', by producer path",
+    transform: "'versioned_pdf' for a saved document version, by producer path",
   },
   {
     source: [],
@@ -104,7 +104,7 @@ const uploadcareWorkListRules: CollectionRule[] = [
     target: "uploadcare-worklist",
     mode: "co-write",
     invariant:
-      "Every uuid an invoice PDF render uploads gets a `uploadcare-worklist` entry, created in the SAME batch as the invoice write that conditionally promotes it — so an entry is visible exactly when its uuid is either live or genuinely displaced, never in between. Covers both producers on that document: the draft regeneration and the explicit versioned save, which share one work list and one collector precisely so the draft path cannot collect the versioned path's `pdf_versions[]` files. The render's predecessor is adopted into the list in the same write, because a document that has never been rendered under this mechanism owns a live file no entry names.",
+      "Every uuid an invoice PDF render uploads gets a `uploadcare-worklist` entry, created in the SAME batch as the invoice write that conditionally promotes it — so an entry is visible exactly when its uuid is either live or genuinely displaced, never in between. The producer is the explicit versioned save (`saveInvoicePdfVersion`); the draft regeneration that once shared this list was removed by api-cloudrun#1129.",
     enforced_by: [DISPLACEMENT_SIGNAL],
     fields: WORK_LIST_FIELDS,
   },
@@ -114,7 +114,7 @@ const uploadcareWorkListRules: CollectionRule[] = [
     target: "uploadcare-worklist",
     mode: "co-write",
     invariant:
-      "Every uuid a quote PDF render uploads gets a `uploadcare-worklist` entry, created in the SAME batch as the quote write that conditionally promotes it. The quote path's live set is its own — a quote id is `{orderUid}:v{N}` or `:draft`, and a released version's uuid stays live for the life of the row — which is why the entry's `uid_document` is deliberately typed to admit a quote id rather than a 20-char Firestore id.",
+      "Every uuid a quote PDF render uploads gets a `uploadcare-worklist` entry, created in the SAME batch as the quote write that conditionally promotes it. The quote path's live set is its own — a quote id is `{orderUid}:v{N}`, and a released version's uuid stays live for the life of the row — which is why the entry's `uid_document` is deliberately typed to admit a quote id rather than a 20-char Firestore id.",
     enforced_by: [DISPLACEMENT_SIGNAL],
     fields: WORK_LIST_FIELDS,
   },
@@ -124,7 +124,7 @@ const uploadcareWorkListRules: CollectionRule[] = [
     target: "uploadcare-worklist",
     mode: "co-write",
     invariant:
-      "Every uuid an org-statement render uploads gets a `uploadcare-worklist` entry, created in the SAME batch as the `statement-documents` write that claims the version. ⭐ **The one producer with NO draft to displace** — an invoice and a quote each keep a regenerating draft whose predecessor this list exists to collect, and a statement has none, because a statement is a function of its REQUEST rather than of a parent document. So every entry this rule writes names a LIVE file, the collector can never have anything to reclaim, and `api-cloudrun/src/services/statements.ts` deliberately ends without the `reconcileUploadcareFiles` tail its two twins carry. ⚠️ The entry is written anyway, to keep one invariant across every producer: every uuid a producer uploaded is named by the document that produced it. The one file that CAN strand — a crash between the upload and the batch — is invisible to the collector for the same reason it is invisible here (no entry was written at all), and is reclaimed by the weekly sweep, which harvests values rather than entries.",
+      "Every uuid an org-statement render uploads gets a `uploadcare-worklist` entry, created in the SAME batch as the `statement-documents` write that claims the version. ⭐ **A producer with no draft to displace** — a statement is a function of its REQUEST rather than of a parent document. (Invoices and quotes lost their regenerating drafts with api-cloudrun#1129.) So every entry this rule writes names a LIVE file, the collector can never have anything to reclaim, and `api-cloudrun/src/services/statements.ts` deliberately ends without the `reconcileUploadcareFiles` tail its two twins carry. ⚠️ The entry is written anyway, to keep one invariant across every producer: every uuid a producer uploaded is named by the document that produced it. The one file that CAN strand — a crash between the upload and the batch — is invisible to the collector for the same reason it is invisible here (no entry was written at all), and is reclaimed by the weekly sweep, which harvests values rather than entries.",
     enforced_by: [DISPLACEMENT_SIGNAL],
     fields: WORK_LIST_FIELDS,
   },

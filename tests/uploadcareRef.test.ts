@@ -69,7 +69,8 @@ function collectCorpus(): { leaves: CorpusLeaf[]; unhandled: string[] } {
 const isAnnotated = (leaf: LeafPath) => leaf.meta[UPLOADCARE_REF_META] === true;
 
 /**
- * The eleven CDN reference leaves, as of 2026-07-26.
+ * The CDN reference leaves. `invoices.uploadcare_uuid` left with the draft PDF
+ * (api-cloudrun#1129).
  *
  * Deliberately does NOT include `invoices::uploadcare_files[].uuid` or its
  * `quotes` twin. Those are real CDN ids, but they are a transient producer work
@@ -81,7 +82,7 @@ const isAnnotated = (leaf: LeafPath) => leaf.meta[UPLOADCARE_REF_META] === true;
  */
 const EXPECTED_REF_PATHS: Record<string, string[]> = {
   "quotes": ["uploadcare_uuid"],
-  "invoices": ["pdf_versions[].uploadcare_uuid", "uploadcare_uuid"],
+  "invoices": ["pdf_versions[].uploadcare_uuid"],
   "products": ["images[].uuid", "images[].uuid_cutout", "query_by_images[]"],
   "cards": ["attachments[].uid"],
   "recurrences": ["prototype.attachments[].uid"],

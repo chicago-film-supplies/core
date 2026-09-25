@@ -1090,8 +1090,20 @@ Deno.test("InvoiceSchema rejects a pdf_versions row with no params key", () => {
 });
 
 Deno.test("InvoiceSchema rejects a non-boolean render param value", () => {
-  const withDraft = { ...validInvoice, pdf_params: { hide_zero_priced_components: "true" } };
-  assertEquals(InvoiceSchema.safeParse(withDraft).success, false);
+  const res = InvoiceSchema.safeParse({
+    ...validInvoice,
+    pdf_versions: [{
+      version: 1,
+      uploadcare_uuid: "11111111-2222-4333-8444-555555555555",
+      created_at: mockTimestamp,
+      created_by: { uid: "u1000000000000000000", name: "Tester" },
+      deleted_at: null,
+      params: { hide_zero_priced_components: "true" },
+      params_context: null,
+      source_hash: "1:abc123def",
+    }],
+  });
+  assertEquals(res.success, false);
 });
 
 Deno.test("InvoiceSchema requires pdf_versions", () => {
@@ -1100,16 +1112,18 @@ Deno.test("InvoiceSchema requires pdf_versions", () => {
   assertEquals(InvoiceSchema.safeParse(doc).success, false);
 });
 
-Deno.test("InvoiceSchema accepts an invoice with none of the retiring draft-PDF fields", () => {
-  // api-cloudrun#1129 step 1: the four fields are optional so the API can stop
-  // writing them before the purge. An invoice created after that carries none.
-  const doc = { ...validInvoice } as Record<string, unknown>;
-  delete doc.uploadcare_uuid;
-  delete doc.pdf_generated_at;
-  delete doc.pdf_params;
-  delete doc.pdf_params_context;
-  assertEquals(InvoiceSchema.safeParse(doc).success, true);
-});
+// api-cloudrun#1129: the four draft-PDF fields were purged from storage in both
+// projects and then deleted, so a strict invoice now refuses each of them.
+for (const [field, value] of [
+  ["uploadcare_uuid", "11111111-2222-4333-8444-555555555555"],
+  ["pdf_generated_at", mockTimestamp],
+  ["pdf_params", {}],
+  ["pdf_params_context", null],
+] as const) {
+  Deno.test(`InvoiceSchema rejects the retired draft-PDF field ${field}`, () => {
+    assertEquals(InvoiceSchema.safeParse({ ...validInvoice, [field]: value }).success, false);
+  });
+}
 
 Deno.test("InvoiceSchema requires params_context on a pdf_versions row", () => {
   const res = InvoiceSchema.safeParse({
@@ -1124,22 +1138,6 @@ Deno.test("InvoiceSchema requires params_context on a pdf_versions row", () => {
     }],
   });
   assertEquals(res.success, false);
-});
-
-Deno.test("InvoiceSchema accepts a pdf_params_context snapshot", () => {
-  const res = InvoiceSchema.safeParse({
-    ...validInvoice,
-    pdf_params: { hide_zero_priced_components: true },
-    pdf_params_context: {
-      uid_template_version: "testtplversion000001",
-      params: [{ key: "hide_zero_priced_components", type: "boolean", default: false }],
-    },
-  });
-  assertEquals(res.success, true);
-});
-
-Deno.test("InvoiceSchema accepts an empty pdf_params — the 'nothing recorded' state", () => {
-  assertEquals(InvoiceSchema.safeParse({ ...validInvoice, pdf_params: {} }).success, true);
 });
 
 // ── substituted_for (manager#399, manager#414) ──────────────────

@@ -125,7 +125,6 @@ export const UploadcareOwnerCollectionEnum: z.ZodType<UploadcareOwnerCollectionT
  * `lib/uploadcareOrphanClasses.ts` has to do today.
  */
 const UPLOADCARE_UPLOAD_KINDS = [
-  "draft_pdf",
   "versioned_pdf",
   "packing_list",
   "golden_baseline",
@@ -165,18 +164,17 @@ export interface UploadcareWorkListEntry {
    * The owning document's id — the key `reconcileUploadcareFiles` queries by.
    *
    * ⚠️ Not `FirestoreId` alone. `quotes` is a declared owner and a quote's id
-   * is `{orderUid}:v{N}` or `{orderUid}:draft` (`QuoteId`), which no 20-char
-   * pattern admits — typing this `FirestoreId` rejected every quote-produced
-   * entry at `validateBeforeWrite`, silently, since quotes are exactly where
-   * draft-PDF displacement was first measured.
+   * is `{orderUid}:v{N}` (`QuoteId`), which no 20-char pattern admits — typing
+   * this `FirestoreId` rejected every quote-produced entry at
+   * `validateBeforeWrite`, silently.
    *
    * ⚠️ **`StatementDocumentId` is named even though `QuoteId` would already
    * admit it.** A statement id is `{orgUid}:v{N}`, which is byte-identical in
    * shape to `QuoteId`'s first arm — so the member adds no value today and
-   * exists so the dependency is not a coincidence: narrowing `QuoteId` later
-   * (dropping `:draft`, adding an order-side prefix) would otherwise start
-   * rejecting every statement-produced entry, silently, in exactly the way this
-   * paragraph's first half records for quotes.
+   * exists so the dependency is not a coincidence: narrowing `QuoteId` (as
+   * api-cloudrun#1129 did, dropping `:draft`) or adding an order-side prefix
+   * would otherwise start rejecting every statement-produced entry, silently,
+   * in exactly the way this paragraph's first half records for quotes.
    */
   uid_document: string;
   collection: UploadcareOwnerCollectionType;

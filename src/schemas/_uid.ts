@@ -310,22 +310,18 @@ export const MovementId: z.ZodType<string> = z.templateLiteral([
 export const OutOfServiceId: z.ZodType<string> = z.union([FirestoreId, MovementId]);
 
 /**
- * `quotes.uid` — deterministic composite `{uid_order}:v{N}` (saved versions) or
- * `{uid_order}:draft` (the working draft). Built in
- * `api-cloudrun/src/services/quotes.ts` (`${uidOrder}:v${version}` / `${uidOrder}:draft`).
+ * `quotes.uid` — deterministic composite `{uid_order}:v{N}`, one per saved
+ * version. Built in `api-cloudrun/src/services/quotes.ts`
+ * (`${uidOrder}:v${version}`). The `{uid_order}:draft` arm went with the draft
+ * PDF (api-cloudrun#1129).
  */
-export const QuoteId: z.ZodType<string> = z.union([
-  z.templateLiteral([firestoreId, ":v", z.number()]),
-  z.templateLiteral([firestoreId, ":draft"]),
-]);
+export const QuoteId: z.ZodType<string> = z.templateLiteral([firestoreId, ":v", z.number()]);
 
 /**
- * `statement-documents.uid` — `{uid_organization}:v{N}`.
- *
- * ⭐ **{@link QuoteId} minus the `:draft` arm, and the absence is the design.** A
- * quote has a canonical draft because the ORDER decides its content; a statement
- * does not, because the REQUEST decides it — there is no "the statement for this
- * organization" for a draft to be of. Built in
+ * `statement-documents.uid` — `{uid_organization}:v{N}`. The same shape as
+ * {@link QuoteId}, and deliberately a separate declaration: a statement has no
+ * canonical document to be a version of, because the REQUEST decides its
+ * content, so nothing ties the two shapes together. Built in
  * `api-cloudrun/src/services/reporting/statement.ts`.
  */
 export const StatementDocumentId: z.ZodType<string> = z.templateLiteral([

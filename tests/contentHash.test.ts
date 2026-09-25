@@ -163,10 +163,6 @@ Deno.test("documentSourceHash - the PDF pipeline's own write-back never moves an
   const rendered = { number: 9, subject: "S", totals: { total_cents: 100 } };
   const afterSave = {
     ...rendered,
-    uploadcare_uuid: "u",
-    pdf_generated_at: new AdminTs(1, 1),
-    pdf_params: { x: true },
-    pdf_params_context: null,
     pdf_versions: [{ version: 1 }],
     xero_id: "x",
   };
