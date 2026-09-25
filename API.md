@@ -8078,7 +8078,6 @@ interface Quote {
   uid_order: string;
   order_number: number;
   version: number;
-  is_draft?: boolean;
   uploadcare_uuid: string;
   params: Record<string, boolean>;
   params_context: RenderParamsContext | null;
@@ -22219,7 +22218,6 @@ interface Quote {
   uid_order: string;
   order_number: number;
   version: number;
-  is_draft?: boolean;
   uploadcare_uuid: string;
   params: Record<string, boolean>;
   params_context: RenderParamsContext | null;

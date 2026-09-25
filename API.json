@@ -3471,7 +3471,7 @@
         {
           "kind": "interface",
           "name": "Quote",
-          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number;\n  is_draft?: boolean;\n  uploadcare_uuid: string;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number;\n  uploadcare_uuid: string;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
         },
         {
@@ -9850,7 +9850,7 @@
         {
           "kind": "interface",
           "name": "Quote",
-          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number;\n  is_draft?: boolean;\n  uploadcare_uuid: string;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number;\n  uploadcare_uuid: string;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
         },
         {

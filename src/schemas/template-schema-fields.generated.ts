@@ -739,7 +739,6 @@ export const templateSchemaFields: Partial<
     { path: "uid_order", type: "string" },
     { path: "order_number", type: "number" },
     { path: "version", type: "number" },
-    { path: "is_draft", type: "boolean?" },
     { path: "uploadcare_uuid", type: "string" },
     { path: "params", type: "Record<string, ...>" },
     { path: "params_context", type: "object | null" },

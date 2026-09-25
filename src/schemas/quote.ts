@@ -16,12 +16,6 @@ export interface Quote {
   uid_order: string;
   order_number: number;
   version: number;
-  /**
-   * RETIRING (api-cloudrun#1129). Every stored quote is a saved version, so this
-   * is always `false`; it is optional only until storage is stripped, and then
-   * it is deleted. Do not add a reader or a writer.
-   */
-  is_draft?: boolean;
   uploadcare_uuid: string;
   /**
    * The render params this PDF was actually rendered at — the map
@@ -66,9 +60,6 @@ export const QuoteSchema: z.ZodType<Quote> = z.strictObject({
   uid_order: FirestoreId,
   order_number: z.number().meta({ column: true, label: "Order #" }),
   version: z.int().min(0),
-  // RETIRING (api-cloudrun#1129): optional so the API can stop writing it,
-  // then storage is stripped, then it is deleted.
-  is_draft: z.boolean().optional(),
   // Non-null since the draft (the only artifact without a PDF yet) went away.
   uploadcare_uuid: uploadcareRef(z.string()),
   params: z.record(z.string(), z.boolean()),

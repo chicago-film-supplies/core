@@ -118,9 +118,9 @@ Deno.test("QuoteSchema accepts a saved version row", () => {
 });
 
 // api-cloudrun#1129: the draft quote is gone, so every stored quote is a saved
-// version with a PDF. `is_draft` is optional only until storage is stripped.
-Deno.test("QuoteSchema still accepts a stored is_draft: false while it retires", () => {
-  assertEquals(QuoteSchema.safeParse(baseQuote({ is_draft: false })).success, true);
+// version with a PDF, and `is_draft` was stripped from storage and deleted.
+Deno.test("QuoteSchema rejects the retired is_draft key", () => {
+  assertEquals(QuoteSchema.safeParse(baseQuote({ is_draft: false })).success, false);
 });
 
 Deno.test("QuoteSchema rejects the draft shape — null version, null uuid, :draft uid", () => {
