@@ -302,6 +302,28 @@ export const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
 // ── Update input ──────────────────────────────────────────────
 
 /**
+ * Of the units a save brings to `returned`, how many are FLAGGED at check-in —
+ * R2 (owner, 2026-09-24): dirty-on-return is a `cleaning` flag and wear-and-tear
+ * a `maintenance` flag. The booking still closes as `returned`; no breakdown
+ * bucket is added, and neither is billable.
+ *
+ * The server writes one `flag` movement per reason on the shelves the
+ * `check_in` landed the units on, and opens one out-of-service record per
+ * reason from it. Σ must not exceed the units this save returns — a 400
+ * otherwise.
+ */
+export interface BookingReturnFlagsType {
+  cleaning: number;
+  maintenance: number;
+}
+
+/** Zod schema for BookingReturnFlagsType. */
+export const BookingReturnFlags: z.ZodType<BookingReturnFlagsType> = z.object({
+  cleaning: z.int().min(0),
+  maintenance: z.int().min(0),
+});
+
+/**
  * Input for updating a single booking via `PUT /bookings/{uid}`.
  *
  * Status and breakdown are independently optional — most warehouse PUTs only
@@ -317,6 +339,8 @@ export const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
 export interface UpdateBookingInputType {
   status?: BookingStatusType;
   breakdown?: Booking["breakdown"];
+  /** See {@link BookingReturnFlagsType}. */
+  return_flags?: BookingReturnFlagsType;
   version: number;
   /**
    * The client-minted uuid identifying ONE operator action, required.
@@ -349,6 +373,7 @@ export const UpdateBookingInput: z.ZodType<UpdateBookingInputType> = z.object({
     reserved: z.int().min(0),
     returned: z.int().min(0),
   }).optional(),
+  return_flags: BookingReturnFlags.optional(),
   version: z.int().min(0),
   uuid_session: z.uuid(),
 });
@@ -364,6 +389,8 @@ export interface BookingUpdateType {
   uid: string;
   status?: BookingStatusType;
   breakdown?: Booking["breakdown"];
+  /** See {@link BookingReturnFlagsType}. */
+  return_flags?: BookingReturnFlagsType;
   version: number;
 }
 
@@ -371,6 +398,7 @@ export const BookingUpdate: z.ZodType<BookingUpdateType> = z.object({
   uid: BookingId,
   status: BookingStatus.optional(),
   breakdown: BookingBreakdownSchema.optional(),
+  return_flags: BookingReturnFlags.optional(),
   version: z.int().min(0),
 });
 

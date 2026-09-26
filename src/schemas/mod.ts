@@ -721,6 +721,8 @@ export {
   type BookingBreakdown,
   type BookingDestinationRef,
   BookingDestinationRefSchema,
+  BookingReturnFlags,
+  type BookingReturnFlagsType,
   type BookingStore,
   BookingStoreSchema,
   type BookingStoreLocation,
