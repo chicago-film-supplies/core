@@ -156,6 +156,8 @@ Deno.test("classifySharedFields: order → fulfillment, every shared key and its
     "propagated subject",
     "propagated reference",
     "homonym version",
+    "homonym created_by",
+    "homonym updated_by",
     "homonym created_at",
     "homonym updated_at",
   ]);
@@ -185,6 +187,11 @@ Deno.test("orderFulfillmentSharedFields: classified once, grouped by merge unit"
       "derived query_by_contacts",
       "derived query_by_dates",
       "homonym version",
+      // Stamped by the writer, never copied from the order: the order's actor
+      // authored the quote, the fulfillment's authored this write
+      // (api-cloudrun#1112).
+      "homonym created_by",
+      "homonym updated_by",
       "homonym created_at",
       "homonym updated_at",
     ],

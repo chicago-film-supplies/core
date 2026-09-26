@@ -4144,6 +4144,8 @@ interface Fulfillment {
   query_by_contacts: string[];
   query_by_dates: string[];
   version: number;
+  created_by?: ActorRefType | null;
+  updated_by?: ActorRefType | null;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
@@ -18511,6 +18513,8 @@ interface Fulfillment {
   query_by_contacts: string[];
   query_by_dates: string[];
   version: number;
+  created_by?: ActorRefType | null;
+  updated_by?: ActorRefType | null;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }

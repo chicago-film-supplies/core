@@ -1821,7 +1821,7 @@
         {
           "kind": "interface",
           "name": "Fulfillment",
-          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  due_at: string | null;\n  due_at_fs: FirestoreTimestampType | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  due_at: string | null;\n  due_at_fs: FirestoreTimestampType | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by?: ActorRefType | null;\n  updated_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Sanitized order document for the fulfillment client view.\nMirrors the order by uid — one fulfillment doc per order."
         },
         {
@@ -8270,7 +8270,7 @@
         {
           "kind": "interface",
           "name": "Fulfillment",
-          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  due_at: string | null;\n  due_at_fs: FirestoreTimestampType | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  due_at: string | null;\n  due_at_fs: FirestoreTimestampType | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by?: ActorRefType | null;\n  updated_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Sanitized order document for the fulfillment client view.\nMirrors the order by uid — one fulfillment doc per order."
         },
         {

@@ -24,6 +24,8 @@ import { z } from "zod";
 import { FirestoreId, ItemUid } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
+  ActorRef,
+  type ActorRefType,
   checkZeroPricedAmount,
   checkZeroPricedComponents,
   FirestoreTimestamp,
@@ -470,6 +472,30 @@ export interface Fulfillment {
    * 409s on mismatch. Mirrors `Order.version`.
    */
   version: number;
+  /**
+   * Who created this fulfillment — the actor of the order write that projected
+   * it (`createOrder`), since the two are one transaction.
+   *
+   * ⚠️ **Mid-expand (api-cloudrun#1112).** `.nullable().optional()` so the
+   * writers can deploy ahead of the backfill; it tightens to required-nullable
+   * once every stored fulfillment carries the key. `null` means "not known" —
+   * a fulfillment whose order carried no `created_by` either.
+   */
+  created_by?: ActorRefType | null;
+  /**
+   * Who last wrote this fulfillment — a picker on the fulfillment routes, or the
+   * actor of the ORDER edit whose projection wrote it.
+   *
+   * ⭐ **The projection is stamped with the order edit's actor, never a bot.**
+   * That is what lets the activity feed treat it as one action with no extra
+   * read: the order and fulfillment writes share a commit, so they share a
+   * `correlation`, and manager's `groupActivityByAction` folds rows on
+   * `(actor.uid, correlation)`. A bot actor here would split one operator edit
+   * into two actions.
+   *
+   * Same mid-expand status as {@link created_by}.
+   */
+  updated_by?: ActorRefType | null;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
@@ -520,6 +546,10 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   query_by_contacts: z.array(z.string()),
   query_by_dates: z.array(z.string()),
   version: z.int().min(0).default(0),
+  // `propagate: false` — the order carries both keys too, and they are
+  // HOMONYMS: the order's actor authored the quote, this one the fulfillment.
+  created_by: ActorRef.nullable().optional().meta({ column: true, label: "Created By", propagate: false }),
+  updated_by: ActorRef.nullable().optional().meta({ column: true, label: "Updated By", propagate: false }),
   ...TimestampFields,
 }).superRefine(checkStoredEndpoints).superRefine(checkSwapReplacements).meta({
   title: "Fulfillment",

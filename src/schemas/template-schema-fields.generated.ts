@@ -529,6 +529,12 @@ export const templateSchemaFields: Partial<
     { path: "reference", type: "string | null" },
     { path: "due_at", type: "string | null" },
     { path: "version", type: "number" },
+    { path: "created_by", type: "object? | null" },
+    { path: "created_by.uid", type: "string" },
+    { path: "created_by.name", type: "string" },
+    { path: "updated_by", type: "object? | null" },
+    { path: "updated_by.uid", type: "string" },
+    { path: "updated_by.name", type: "string" },
   ],
   "movement-sessions": [
     { path: "uuid_session", type: "string" },
