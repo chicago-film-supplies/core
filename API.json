@@ -356,6 +356,18 @@
         },
         {
           "kind": "variable",
+          "name": "BookingReturnFlags",
+          "declaration": "const BookingReturnFlags: z.ZodType<BookingReturnFlagsType>;",
+          "doc": "Zod schema for BookingReturnFlagsType."
+        },
+        {
+          "kind": "interface",
+          "name": "BookingReturnFlagsType",
+          "declaration": "interface BookingReturnFlagsType {\n  cleaning: number;\n  maintenance: number;\n}",
+          "doc": "Of the units a save brings to `returned`, how many are FLAGGED at check-in —\nR2 (owner, 2026-09-24): dirty-on-return is a `cleaning` flag and wear-and-tear\na `maintenance` flag. The booking still closes as `returned`; no breakdown\nbucket is added, and neither is billable.\n\nThe server writes one `flag` movement per reason on the shelves the\n`check_in` landed the units on, and opens one out-of-service record per\nreason from it. Σ must not exceed the units this save returns — a 400\notherwise."
+        },
+        {
+          "kind": "variable",
           "name": "BookingSchema",
           "declaration": "const BookingSchema: z.ZodType<Booking>;",
           "doc": "Zod schema for Booking."
@@ -399,7 +411,7 @@
         {
           "kind": "interface",
           "name": "BookingUpdateType",
-          "declaration": "interface BookingUpdateType {\n  uid: string;\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n}",
+          "declaration": "interface BookingUpdateType {\n  uid: string;\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  return_flags?: BookingReturnFlagsType;\n  version: number;\n}",
           "doc": "Per-row entry for the bulk fulfillment-bookings endpoint. Matches\n`UpdateBookingInputType` field-for-field, plus the booking `uid` to address\nthe row (since the URL carries the fulfillment uid, not the booking uid)."
         },
         {
@@ -4611,7 +4623,7 @@
         {
           "kind": "interface",
           "name": "UpdateBookingInputType",
-          "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n  uuid_session: string;\n}",
+          "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  return_flags?: BookingReturnFlagsType;\n  version: number;\n  uuid_session: string;\n}",
           "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
         },
         {
@@ -6661,6 +6673,18 @@
         },
         {
           "kind": "variable",
+          "name": "BookingReturnFlags",
+          "declaration": "const BookingReturnFlags: z.ZodType<BookingReturnFlagsType>;",
+          "doc": "Zod schema for BookingReturnFlagsType."
+        },
+        {
+          "kind": "interface",
+          "name": "BookingReturnFlagsType",
+          "declaration": "interface BookingReturnFlagsType {\n  cleaning: number;\n  maintenance: number;\n}",
+          "doc": "Of the units a save brings to `returned`, how many are FLAGGED at check-in —\nR2 (owner, 2026-09-24): dirty-on-return is a `cleaning` flag and wear-and-tear\na `maintenance` flag. The booking still closes as `returned`; no breakdown\nbucket is added, and neither is billable.\n\nThe server writes one `flag` movement per reason on the shelves the\n`check_in` landed the units on, and opens one out-of-service record per\nreason from it. Σ must not exceed the units this save returns — a 400\notherwise."
+        },
+        {
+          "kind": "variable",
           "name": "BookingSchema",
           "declaration": "const BookingSchema: z.ZodType<Booking>;",
           "doc": "Zod schema for Booking."
@@ -6698,7 +6722,7 @@
         {
           "kind": "interface",
           "name": "BookingUpdateType",
-          "declaration": "interface BookingUpdateType {\n  uid: string;\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n}",
+          "declaration": "interface BookingUpdateType {\n  uid: string;\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  return_flags?: BookingReturnFlagsType;\n  version: number;\n}",
           "doc": "Per-row entry for the bulk fulfillment-bookings endpoint. Matches\n`UpdateBookingInputType` field-for-field, plus the booking `uid` to address\nthe row (since the URL carries the fulfillment uid, not the booking uid)."
         },
         {
@@ -6734,7 +6758,7 @@
         {
           "kind": "interface",
           "name": "UpdateBookingInputType",
-          "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  version: number;\n  uuid_session: string;\n}",
+          "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  return_flags?: BookingReturnFlagsType;\n  version: number;\n  uuid_session: string;\n}",
           "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
         },
         {

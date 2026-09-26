@@ -881,6 +881,33 @@ segment" section above. Built only through `booking-id.ts`'s
 const BookingId: z.ZodType<string>;
 ```
 
+### `BookingReturnFlags`
+
+Zod schema for BookingReturnFlagsType.
+
+```ts
+const BookingReturnFlags: z.ZodType<BookingReturnFlagsType>;
+```
+
+### `BookingReturnFlagsType`
+
+Of the units a save brings to `returned`, how many are FLAGGED at check-in —
+R2 (owner, 2026-09-24): dirty-on-return is a `cleaning` flag and wear-and-tear
+a `maintenance` flag. The booking still closes as `returned`; no breakdown
+bucket is added, and neither is billable.
+
+The server writes one `flag` movement per reason on the shelves the
+`check_in` landed the units on, and opens one out-of-service record per
+reason from it. Σ must not exceed the units this save returns — a 400
+otherwise.
+
+```ts
+interface BookingReturnFlagsType {
+  cleaning: number;
+  maintenance: number;
+}
+```
+
 ### `BookingSchema`
 
 Zod schema for Booking.
@@ -957,6 +984,7 @@ interface BookingUpdateType {
   uid: string;
   status?: BookingStatusType;
   breakdown?: indexedAccess;
+  return_flags?: BookingReturnFlagsType;
   version: number;
 }
 ```
@@ -10582,6 +10610,7 @@ field's own note.
 interface UpdateBookingInputType {
   status?: BookingStatusType;
   breakdown?: indexedAccess;
+  return_flags?: BookingReturnFlagsType;
   version: number;
   uuid_session: string;
 }
@@ -14990,6 +15019,33 @@ Zod schema for BookingDestinationRef — also the out-of-service record's `desti
 const BookingDestinationRefSchema: z.ZodType<BookingDestinationRef>;
 ```
 
+### `BookingReturnFlags`
+
+Zod schema for BookingReturnFlagsType.
+
+```ts
+const BookingReturnFlags: z.ZodType<BookingReturnFlagsType>;
+```
+
+### `BookingReturnFlagsType`
+
+Of the units a save brings to `returned`, how many are FLAGGED at check-in —
+R2 (owner, 2026-09-24): dirty-on-return is a `cleaning` flag and wear-and-tear
+a `maintenance` flag. The booking still closes as `returned`; no breakdown
+bucket is added, and neither is billable.
+
+The server writes one `flag` movement per reason on the shelves the
+`check_in` landed the units on, and opens one out-of-service record per
+reason from it. Σ must not exceed the units this save returns — a 400
+otherwise.
+
+```ts
+interface BookingReturnFlagsType {
+  cleaning: number;
+  maintenance: number;
+}
+```
+
 ### `BookingSchema`
 
 Zod schema for Booking.
@@ -15060,6 +15116,7 @@ interface BookingUpdateType {
   uid: string;
   status?: BookingStatusType;
   breakdown?: indexedAccess;
+  return_flags?: BookingReturnFlagsType;
   version: number;
 }
 ```
@@ -15153,6 +15210,7 @@ field's own note.
 interface UpdateBookingInputType {
   status?: BookingStatusType;
   breakdown?: indexedAccess;
+  return_flags?: BookingReturnFlagsType;
   version: number;
   uuid_session: string;
 }
