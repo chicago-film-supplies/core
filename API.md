@@ -3903,8 +3903,10 @@ const ExchangeDispositionEnum: z.ZodType<ExchangeDispositionType>;
 
 ### `ExchangeDispositionType`
 
-`exchange` — the damaged unit comes back on the same trip. `send_now` — the
-replacement goes out now and the damaged unit comes back at the normal return.
+`exchange` — the units taken back come back on the same trip. `send_now` — the
+replacement goes out now and the units come back at the normal return (or,
+for a `lost` entry, never). A fact about the TRIP; why each unit comes back is
+the `replaces` entry's `reason`.
 
 ```ts
 type ExchangeDispositionType = indexedAccess;
@@ -4246,7 +4248,7 @@ interface FulfillmentItemInputLineType {
   path: string[];
   quantity: number;
   substituted_for?: SubstitutedForEntryType[];
-  replaces?: SubstitutedForEntryType[];
+  replaces?: SwapReplacementEntryType[];
   quantity_order?: number;
 }
 ```
@@ -4283,7 +4285,7 @@ interface FulfillmentLineItemType {
   uid_order?: string;
   quantity_order?: number;
   substituted_for?: SubstitutedForEntryType[];
-  replaces?: SubstitutedForEntryType[];
+  replaces?: SwapReplacementEntryType[];
 }
 ```
 
@@ -6835,7 +6837,7 @@ interface OrderDocLineItemType {
   coa_revenue?: COARevenueType | null;
   uid_tax_class: string;
   uid_tax_class_override?: string | null;
-  replaces?: SubstitutedForEntryType[];
+  replaces?: SwapReplacementEntryType[];
 }
 ```
 
@@ -6989,7 +6991,7 @@ interface OrderItemLineType {
   order_number?: number;
   uid_order?: string;
   uid_tax_class_override?: string | null;
-  replaces?: SubstitutedForEntryType[];
+  replaces?: SwapReplacementEntryType[];
 }
 ```
 
@@ -9453,6 +9455,70 @@ Zod schema for Supplier.
 
 ```ts
 const SupplierSchema: z.ZodType<Supplier>;
+```
+
+### `SwapReplacementEntry`
+
+```ts
+const SwapReplacementEntry: z.ZodType<SwapReplacementEntryType>;
+```
+
+### `SwapReplacementEntryType`
+
+One `replaces` entry: a row the swap takes units back from, how many, and
+WHY they come back (api-cloudrun#1116, owner 2026-09-26).
+
+⭐ **`reason` is the out-of-service vocabulary itself, imported rather than
+restated**, so a new out-of-service reason reaches swaps with no change here.
+The swap's checkout rider turns it into the unit's state: `damaged` marks the
+booking damaged, `cleaning`/`maintenance` return the units and flag them on
+the shelf (never billed), and `lost` is recorded at the normal return. A
+`lost` unit cannot be collected on the swap's own trip, so it is valid only on
+a `send_now` leg ({@link SwapReplacementEntryType} is checked against its
+pair by `checkSwapReplacements`).
+
+It is {@link SubstitutedForEntryType} plus `reason`, so every rule that reads a
+`{path, quantity}[]` still reads it.
+
+```ts
+interface SwapReplacementEntryType {
+  reason: OOSReasonType;
+}
+```
+
+### `SwapReplacementList`
+
+`replaces` on a swap's replacement line: the rows this row is going out
+against, with how many units each and why they come back.
+
+⭐ **The shape of {@link SubstitutedForList} plus a `reason`, deliberately,
+and a different meaning.** Both say "this row stands in relation to those
+rows, by this many units", so every rule that reads a `{path, quantity}[]`
+reads both — the carry-forward across a rebuild, the row-identity rules, the
+document diff. What differs is the physical story, and it is the whole
+distinction:
+
+| | `substituted_for` | `replaces` |
+|---|---|---|
+| X went out | no — Y went instead | yes, and it is out NOW |
+| X's booking | cancelled by the netting | kept, and marked by `reason` |
+| why | the picker had no X on the shelf | X broke, got dirty or was lost mid-rental |
+
+🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a
+substitution away — X's booking is cancelled and Y's inherits its custody —
+which is exactly the wrong answer for a swap, where X is on set and its units
+are what the swap takes back.
+
+⚠️ **It lives on the ROW rather than on the exchange PAIR**, because a swap
+TRIP legitimately carries replacements for several damaged lines at once: one
+leg, one card, one drive. A pair-level field would force one leg per damaged
+line and put three trip cards on the dispatch board for one physical trip —
+and it would state "what" a level above the `quantity` that says "how many".
+Trip facts (which leg it returns on, whether X comes back on it) stay on the
+pair; line facts live here.
+
+```ts
+const SwapReplacementList: z.ZodType<SwapReplacementEntryType[]>;
 ```
 
 ### `SyncErrorLogRecord`
@@ -12535,6 +12601,12 @@ The contract for a settlement `type`, or `undefined` for a value outside
 {@link SETTLEMENT_TYPES}. Tolerant of a `string` for the same reason
 {@link itemContract} is — callers hold types from loosely-typed sources.
 
+### `swapReplacementKey(entry: typeLiteral): string`
+
+The identity of a `replaces` entry: its row AND its reason. One damaged line
+of 3 may send back 2 dirty units and 1 broken one on the same trip, which is
+two entries on one path.
+
 ### `templateHelpers`
 
 Helper catalogue keyed by utils namespace — `templateHelpers["orders"]` is what
@@ -14419,28 +14491,57 @@ could not be reversed.
 const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]>;
 ```
 
+### `SwapReplacementEntry`
+
+```ts
+const SwapReplacementEntry: z.ZodType<SwapReplacementEntryType>;
+```
+
+### `SwapReplacementEntryType`
+
+One `replaces` entry: a row the swap takes units back from, how many, and
+WHY they come back (api-cloudrun#1116, owner 2026-09-26).
+
+⭐ **`reason` is the out-of-service vocabulary itself, imported rather than
+restated**, so a new out-of-service reason reaches swaps with no change here.
+The swap's checkout rider turns it into the unit's state: `damaged` marks the
+booking damaged, `cleaning`/`maintenance` return the units and flag them on
+the shelf (never billed), and `lost` is recorded at the normal return. A
+`lost` unit cannot be collected on the swap's own trip, so it is valid only on
+a `send_now` leg ({@link SwapReplacementEntryType} is checked against its
+pair by `checkSwapReplacements`).
+
+It is {@link SubstitutedForEntryType} plus `reason`, so every rule that reads a
+`{path, quantity}[]` still reads it.
+
+```ts
+interface SwapReplacementEntryType {
+  reason: OOSReasonType;
+}
+```
+
 ### `SwapReplacementList`
 
-`replaces` on a swap's replacement line: the DAMAGED rows this row is going
-out against, with how many units each.
+`replaces` on a swap's replacement line: the rows this row is going out
+against, with how many units each and why they come back.
 
-⭐ **Same shape as {@link SubstitutedForList}, deliberately, and a different
-meaning.** Both say "this row stands in relation to those rows, by this many
-units", so they share an entry schema and every rule that reads a
-`{path, quantity}[]` — the carry-forward across a rebuild, the row-identity
-rules, the document diff. What differs is the physical story, and it is the
-whole distinction:
+⭐ **The shape of {@link SubstitutedForList} plus a `reason`, deliberately,
+and a different meaning.** Both say "this row stands in relation to those
+rows, by this many units", so every rule that reads a `{path, quantity}[]`
+reads both — the carry-forward across a rebuild, the row-identity rules, the
+document diff. What differs is the physical story, and it is the whole
+distinction:
 
 | | `substituted_for` | `replaces` |
 |---|---|---|
 | X went out | no — Y went instead | yes, and it is out NOW |
-| X's booking | cancelled by the netting | kept, and marked damaged |
-| why | the picker had no X on the shelf | the customer damaged X mid-rental |
+| X's booking | cancelled by the netting | kept, and marked by `reason` |
+| why | the picker had no X on the shelf | X broke, got dirty or was lost mid-rental |
 
 🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a
 substitution away — X's booking is cancelled and Y's inherits its custody —
 which is exactly the wrong answer for a swap, where X is on set and its units
-are what the operator is about to mark damaged.
+are what the swap takes back.
 
 ⚠️ **It lives on the ROW rather than on the exchange PAIR**, because a swap
 TRIP legitimately carries replacements for several damaged lines at once: one
@@ -14451,7 +14552,7 @@ Trip facts (which leg it returns on, whether X comes back on it) stay on the
 pair; line facts live here.
 
 ```ts
-const SwapReplacementList: z.ZodType<SubstitutedForEntryType[]>;
+const SwapReplacementList: z.ZodType<SwapReplacementEntryType[]>;
 ```
 
 ### `TAX_JURISDICTIONS`
@@ -14757,6 +14858,12 @@ contract and every derived predicate answers `false` for it.
 The contract for a settlement `type`, or `undefined` for a value outside
 {@link SETTLEMENT_TYPES}. Tolerant of a `string` for the same reason
 {@link itemContract} is — callers hold types from loosely-typed sources.
+
+### `swapReplacementKey(entry: typeLiteral): string`
+
+The identity of a `replaces` entry: its row AND its reason. One damaged line
+of 3 may send back 2 dirty units and 1 broken one on the same trip, which is
+two entries on one path.
 
 ### `toRegionCode(input: string): string`
 
@@ -17614,8 +17721,10 @@ const ExchangeDispositionEnum: z.ZodType<ExchangeDispositionType>;
 
 ### `ExchangeDispositionType`
 
-`exchange` — the damaged unit comes back on the same trip. `send_now` — the
-replacement goes out now and the damaged unit comes back at the normal return.
+`exchange` — the units taken back come back on the same trip. `send_now` — the
+replacement goes out now and the units come back at the normal return (or,
+for a `lost` entry, never). A fact about the TRIP; why each unit comes back is
+the `replaces` entry's `reason`.
 
 ```ts
 type ExchangeDispositionType = indexedAccess;
@@ -17966,7 +18075,7 @@ interface OrderDocLineItemType {
   coa_revenue?: COARevenueType | null;
   uid_tax_class: string;
   uid_tax_class_override?: string | null;
-  replaces?: SubstitutedForEntryType[];
+  replaces?: SwapReplacementEntryType[];
 }
 ```
 
@@ -18097,7 +18206,7 @@ interface OrderItemLineType {
   order_number?: number;
   uid_order?: string;
   uid_tax_class_override?: string | null;
-  replaces?: SubstitutedForEntryType[];
+  replaces?: SwapReplacementEntryType[];
 }
 ```
 
@@ -18305,12 +18414,18 @@ document can check it:
 
 1. the row carrying it sits under a pair marked `exchange` — a swap's
    replacement line, not an ordinary one;
-2. every path it names is on that pair's PARENT leg (`path[0]`) — the damaged
-   units are on the leg being swapped against, by definition.
+2. every path it names is on that pair's PARENT leg, or on ANOTHER swap leg of
+   the same parent (`path[0]`) — the units taken back are ones the family of
+   legs sent out. The second arm is FLAT chaining (api-cloudrun#1116, owner
+   2026-09-26): a replacement that breaks or gets dirty in turn is taken back
+   by a new swap on the ORIGINAL leg naming the earlier swap's row, so
+   `exchange.uid_pair` is never a swap and `:end` stays one level deep;
+3. a `lost` entry sits on a `send_now` leg — a lost unit cannot come back on
+   the swap's own trip.
 
 ⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without
 it a swap could name a row on an unrelated leg, and the checkout rider would
-mark units damaged on a trip that never carried them.
+move units on a trip that never carried them.
 
 🔴 **It deliberately does NOT require the named row to EXIST** (api-cloudrun#1114,
 owner 2026-09-22). The order, the fulfillment and the invoice legitimately
@@ -18500,7 +18615,7 @@ interface FulfillmentItemInputLineType {
   path: string[];
   quantity: number;
   substituted_for?: SubstitutedForEntryType[];
-  replaces?: SubstitutedForEntryType[];
+  replaces?: SwapReplacementEntryType[];
   quantity_order?: number;
 }
 ```
@@ -18537,7 +18652,7 @@ interface FulfillmentLineItemType {
   uid_order?: string;
   quantity_order?: number;
   substituted_for?: SubstitutedForEntryType[];
-  replaces?: SubstitutedForEntryType[];
+  replaces?: SwapReplacementEntryType[];
 }
 ```
 
@@ -31000,6 +31115,18 @@ interface MaybeSubstitution {
 }
 ```
 
+### `OverclaimedRow`
+
+One row a write over-claims: the swaps now take back more than it holds.
+
+```ts
+interface OverclaimedRow {
+  path: string[];
+  quantity: number;
+  claimed: number;
+}
+```
+
 ### `PathForwardMap`
 
 A path correspondence across one rebuild — the `toPath` half of
@@ -31019,6 +31146,7 @@ One `replaces` entry, as a swap's replacement row carries it.
 interface ReplacesEntry {
   readonly path: readonly string[];
   readonly quantity: number;
+  readonly reason: OOSReasonType;
 }
 ```
 
@@ -31179,6 +31307,30 @@ wire boundary, use {@link isInSubstitutedSubtree} and check Y separately.
 
 **Returns** — Whether the row is a substitution's own row or one of its components
 
+### `overclaimedReplacements(prev: ReadonlyArray<typeLiteral>, next: ReadonlyArray<typeLiteral>): OverclaimedRow[]`
+
+The rows THIS write pushes past their quantity by what swaps take back from
+them (api-cloudrun#1116, owner 2026-09-26: the cap is checked at AUTHORING).
+
+🔴 **Deliberately NOT a stored refinement.** A warehouse-staged swap lives on
+the fulfillment alone, so a sales edit that lowers X on the order would make
+the merged fulfillment over-claim and fail its write — refused because of a
+document the sender never saw, the trap api-cloudrun#1114 ruled out for
+existence. So a row is reported only when its claimed total GREW in this
+write and now exceeds its quantity; a row the write merely shrank is a
+difference to surface, not refuse, and the checkout rider's `min(…, out)`
+still bounds what physically moves.
+
+A row the document does not carry is skipped: that entry dangles, which
+`checkSwapReplacements` already allows.
+
+Pure, shared by the API's writers and the manager's pre-submit check.
+
+**Parameters**
+
+- `prev` — The document's rows before the write (`[]` for a new document)
+- `next` — The document's rows as they will be stored
+
 ### `repointReplaces(entries: readonly ReplacesEntry[], rows: ReadonlyArray<typeLiteral>, _: unknown): Array<typeLiteral>`
 
 Re-point a swap row's `replaces` entries at the rows a document carries NOW
@@ -31199,8 +31351,9 @@ realign, never resolved by a write. This deliberately does NOT follow X onto a
 substitution stand-in: which physical unit broke is the operator's fact, not
 something to infer from which row replaced which.
 
-Two entries landing on one row are MERGED by summing their quantities, because
-`SwapReplacementList` is unique by path.
+Two entries landing on one row with one reason are MERGED by summing their
+quantities, because `SwapReplacementList` is unique by (path, reason). The
+reason is carried verbatim: it is why the units come back, not where.
 
 **Parameters**
 

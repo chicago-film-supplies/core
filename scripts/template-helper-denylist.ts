@@ -644,6 +644,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // A write-path re-pointer (api-cloudrun#1114) — a template renders the
     // stored `replaces`, never re-derives it.
     "repointReplaces",
+    // The authoring cap on swap claims (api-cloudrun#1116) — a writer's
+    // refusal, not something a document renders.
+    "overclaimedReplacements",
     "standInUnits",
     "substitutionCredit",
     "substitutionResync",

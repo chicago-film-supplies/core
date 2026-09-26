@@ -38,6 +38,7 @@ import {
   SubstitutedForList,
   SwapReplacementList,
   type SubstitutedForEntryType,
+  type SwapReplacementEntryType,
   TimestampFields,
 } from "./common.ts";
 import {
@@ -163,7 +164,7 @@ export interface FulfillmentLineItemType {
    * Only valid on a row under a pair carrying `exchange` — asserted at the
    * document level, because a row cannot see its own pair.
    */
-  replaces?: SubstitutedForEntryType[];
+  replaces?: SwapReplacementEntryType[];
 }
 
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
@@ -327,7 +328,7 @@ export interface FulfillmentItemInputLineType {
    * records above: a plain `z.object` STRIPS an undeclared key, so without it a
    * picker write would silently drop the swap's link to what it replaces.
    */
-  replaces?: SubstitutedForEntryType[];
+  replaces?: SwapReplacementEntryType[];
   /** Declared so the service can REFUSE it — see the note above. */
   quantity_order?: number;
 }

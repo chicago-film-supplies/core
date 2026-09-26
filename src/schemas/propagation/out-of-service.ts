@@ -38,7 +38,7 @@ import { STOCK_STEPS } from "./stock.ts";
 const OOS_SOURCES_SHAPE: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/out-of-service/outOfService.test.ts::POST /out-of-service-records — creates record + thread",
+    "api-cloudrun/tests/integration/out-of-service/outOfService.test.ts::POST /out-of-service-records — creates record + thread: damaged in the building is ONE flag, flagged where the units stand",
   clause:
     "the EMPTY end — an ad-hoc create stores `sources: []` and `query_by_sources: []`, plus the derived `status`/`breakdown`/`uid_thread`. The two-source end comes from the booking path (`bookings.test.ts::returns 1 + loses 1 + damages 1 → cowrites two OOS records and auto-completes order`); the one-source `[orders]` case and the sources↔query_by_sources parity are unchecked.",
   gates: true,
@@ -52,7 +52,7 @@ const OOS_SOURCES_SHAPE: EnforcementRef = {
 const OOS_COWRITES_MOVEMENT: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/out-of-service/outOfService.test.ts::PUT — moves all units to written_off (derives complete) → cowrites write_off transaction",
+    "api-cloudrun/tests/integration/out-of-service/outOfService.test.ts::PUT — moves all units to written_off (derives complete) → cowrites write_off transaction, relieving the bucket AND the shelf",
   clause:
     "the WRITE-OFF arm — deriving `complete` cowrites exactly one `write_off` movement for the full quantity, linked by `query_by_sources`, drawing `from` a locations doc with `to: null`. The `return-to-service` arm of the same rule is not asserted.",
   gates: true,

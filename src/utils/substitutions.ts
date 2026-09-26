@@ -74,7 +74,7 @@
  * @module
  */
 
-import { isLineItemType } from "../schemas/common.ts";
+import { isLineItemType, type OOSReasonType, swapReplacementKey } from "../schemas/common.ts";
 
 /**
  * A substitution row, reduced to what the predicates need.
@@ -479,6 +479,7 @@ export function substitutionResync(
 export interface ReplacesEntry {
   readonly path: readonly string[];
   readonly quantity: number;
+  readonly reason: OOSReasonType;
 }
 
 /**
@@ -508,8 +509,9 @@ export interface PathForwardMap {
  * substitution stand-in: which physical unit broke is the operator's fact, not
  * something to infer from which row replaced which.
  *
- * Two entries landing on one row are MERGED by summing their quantities, because
- * `SwapReplacementList` is unique by path.
+ * Two entries landing on one row with one reason are MERGED by summing their
+ * quantities, because `SwapReplacementList` is unique by (path, reason). The
+ * reason is carried verbatim: it is why the units come back, not where.
  *
  * @param entries - The row's `replaces`, as stored or as sent
  * @param rows - The document's rows as they stand after the rebuild
@@ -520,11 +522,11 @@ export function repointReplaces(
   entries: readonly ReplacesEntry[],
   rows: ReadonlyArray<{ readonly path: readonly string[] }>,
   maps: readonly PathForwardMap[] = [],
-): Array<{ path: string[]; quantity: number }> {
+): Array<{ path: string[]; quantity: number; reason: OOSReasonType }> {
   const key = (p: readonly string[]) => p.join("\u0000");
   const present = new Set(rows.filter((r) => r.path.length > 0).map((r) => key(r.path)));
 
-  const merged = new Map<string, { path: string[]; quantity: number }>();
+  const merged = new Map<string, { path: string[]; quantity: number; reason: OOSReasonType }>();
   for (const entry of entries) {
     let path: readonly string[] = entry.path;
     if (!present.has(key(path))) {
@@ -536,9 +538,71 @@ export function repointReplaces(
         }
       }
     }
-    const hit = merged.get(key(path));
+    const k = swapReplacementKey({ path, reason: entry.reason });
+    const hit = merged.get(k);
     if (hit) hit.quantity += entry.quantity;
-    else merged.set(key(path), { path: [...path], quantity: entry.quantity });
+    else merged.set(k, { path: [...path], quantity: entry.quantity, reason: entry.reason });
   }
   return [...merged.values()];
+}
+
+/** One row a write over-claims: the swaps now take back more than it holds. */
+export interface OverclaimedRow {
+  /** The row every entry names. */
+  path: string[];
+  /** The row's own quantity. */
+  quantity: number;
+  /** Σ `replaces[].quantity` naming it, over every row of the document, after the write. */
+  claimed: number;
+}
+
+/**
+ * The rows THIS write pushes past their quantity by what swaps take back from
+ * them (api-cloudrun#1116, owner 2026-09-26: the cap is checked at AUTHORING).
+ *
+ * 🔴 **Deliberately NOT a stored refinement.** A warehouse-staged swap lives on
+ * the fulfillment alone, so a sales edit that lowers X on the order would make
+ * the merged fulfillment over-claim and fail its write — refused because of a
+ * document the sender never saw, the trap api-cloudrun#1114 ruled out for
+ * existence. So a row is reported only when its claimed total GREW in this
+ * write and now exceeds its quantity; a row the write merely shrank is a
+ * difference to surface, not refuse, and the checkout rider's `min(…, out)`
+ * still bounds what physically moves.
+ *
+ * A row the document does not carry is skipped: that entry dangles, which
+ * `checkSwapReplacements` already allows.
+ *
+ * Pure, shared by the API's writers and the manager's pre-submit check.
+ *
+ * @param prev - The document's rows before the write (`[]` for a new document)
+ * @param next - The document's rows as they will be stored
+ */
+export function overclaimedReplacements(
+  prev: ReadonlyArray<{ readonly path: readonly string[]; readonly replaces?: readonly ReplacesEntry[] }>,
+  next: ReadonlyArray<{
+    readonly path: readonly string[];
+    readonly quantity?: number | null;
+    readonly replaces?: readonly ReplacesEntry[];
+  }>,
+): OverclaimedRow[] {
+  const key = (p: readonly string[]) => p.join("\u0000");
+  const claims = (rows: ReadonlyArray<{ readonly replaces?: readonly ReplacesEntry[] }>) => {
+    const out = new Map<string, number>();
+    for (const row of rows) {
+      for (const e of row.replaces ?? []) out.set(key(e.path), (out.get(key(e.path)) ?? 0) + e.quantity);
+    }
+    return out;
+  };
+  const before = claims(prev);
+  const after = claims(next);
+  const result: OverclaimedRow[] = [];
+  for (const row of next) {
+    const k = key(row.path);
+    const claimed = after.get(k);
+    if (claimed === undefined || row.quantity == null) continue;
+    if (claimed > row.quantity && claimed > (before.get(k) ?? 0)) {
+      result.push({ path: [...row.path], quantity: row.quantity, claimed });
+    }
+  }
+  return result;
 }

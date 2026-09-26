@@ -95,6 +95,30 @@ export const FirestoreTimestamp: z.ZodType<FirestoreTimestampType> = z.custom<Fi
   description: "Firestore Timestamp (serialized as an ISO datetime in the spec).",
 });
 
+const OOS_REASONS = ["cleaning", "damaged", "maintenance", "lost"] as const;
+/** Allowed values for out-of-service reason. */
+export type OOSReasonType = typeof OOS_REASONS[number];
+/** Zod schema for OOSReasonType. */
+export const OOSReasonEnum: z.ZodType<OOSReasonType> = z.enum(OOS_REASONS);
+
+/**
+ * The reasons a unit can be FLAGGED for while it stays on a shelf — every
+ * reason but `lost`. Owner, 2026-09-25: a lost unit is on no shelf anywhere,
+ * while a damaged, cleaning or maintenance unit has a location. So `lost` is a
+ * PLACE (the unit stands at its out-of-service record) and these three are a
+ * STATE. The `flag` movement and an in-place reason edit take these only.
+ */
+export const OOS_FLAG_REASONS = ["cleaning", "damaged", "maintenance"] as const;
+/** A reason a unit can be flagged for on a shelf. */
+export type OOSFlagReasonType = typeof OOS_FLAG_REASONS[number];
+
+// Every flag reason is a reason. A literal list is the right spelling (it has
+// to be `as const` for JSR's declaration emit), and this is what stops it
+// drifting from `OOS_REASONS`.
+type _FlagReasonsAreReasons = OOSFlagReasonType extends OOSReasonType ? true : never;
+const _flagReasonParity: _FlagReasonsAreReasons = true;
+void _flagReasonParity;
+
 /**
  * One substitution a downstream row stands in for (manager#414, owner decision D1).
  *
@@ -141,26 +165,62 @@ export const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]> = z.array(
 });
 
 /**
- * `replaces` on a swap's replacement line: the DAMAGED rows this row is going
- * out against, with how many units each.
+ * One `replaces` entry: a row the swap takes units back from, how many, and
+ * WHY they come back (api-cloudrun#1116, owner 2026-09-26).
  *
- * ⭐ **Same shape as {@link SubstitutedForList}, deliberately, and a different
- * meaning.** Both say "this row stands in relation to those rows, by this many
- * units", so they share an entry schema and every rule that reads a
- * `{path, quantity}[]` — the carry-forward across a rebuild, the row-identity
- * rules, the document diff. What differs is the physical story, and it is the
- * whole distinction:
+ * ⭐ **`reason` is the out-of-service vocabulary itself, imported rather than
+ * restated**, so a new out-of-service reason reaches swaps with no change here.
+ * The swap's checkout rider turns it into the unit's state: `damaged` marks the
+ * booking damaged, `cleaning`/`maintenance` return the units and flag them on
+ * the shelf (never billed), and `lost` is recorded at the normal return. A
+ * `lost` unit cannot be collected on the swap's own trip, so it is valid only on
+ * a `send_now` leg ({@link SwapReplacementEntryType} is checked against its
+ * pair by `checkSwapReplacements`).
+ *
+ * It is {@link SubstitutedForEntryType} plus `reason`, so every rule that reads a
+ * `{path, quantity}[]` still reads it.
+ */
+export interface SwapReplacementEntryType extends SubstitutedForEntryType {
+  reason: OOSReasonType;
+}
+
+/** @see {@link SwapReplacementEntryType} */
+export const SwapReplacementEntry: z.ZodType<SwapReplacementEntryType> = z.strictObject({
+  path: z.array(ItemUid).min(1),
+  quantity: z.int().positive(),
+  reason: OOSReasonEnum,
+});
+
+/**
+ * The identity of a `replaces` entry: its row AND its reason. One damaged line
+ * of 3 may send back 2 dirty units and 1 broken one on the same trip, which is
+ * two entries on one path.
+ */
+export function swapReplacementKey(entry: { path: readonly string[]; reason: string }): string {
+  return `${entry.path.join("/")}\u0000${entry.reason}`;
+}
+
+/**
+ * `replaces` on a swap's replacement line: the rows this row is going out
+ * against, with how many units each and why they come back.
+ *
+ * ⭐ **The shape of {@link SubstitutedForList} plus a `reason`, deliberately,
+ * and a different meaning.** Both say "this row stands in relation to those
+ * rows, by this many units", so every rule that reads a `{path, quantity}[]`
+ * reads both — the carry-forward across a rebuild, the row-identity rules, the
+ * document diff. What differs is the physical story, and it is the whole
+ * distinction:
  *
  * | | `substituted_for` | `replaces` |
  * |---|---|---|
  * | X went out | no — Y went instead | yes, and it is out NOW |
- * | X's booking | cancelled by the netting | kept, and marked damaged |
- * | why | the picker had no X on the shelf | the customer damaged X mid-rental |
+ * | X's booking | cancelled by the netting | kept, and marked by `reason` |
+ * | why | the picker had no X on the shelf | X broke, got dirty or was lost mid-rental |
  *
  * 🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a
  * substitution away — X's booking is cancelled and Y's inherits its custody —
  * which is exactly the wrong answer for a swap, where X is on set and its units
- * are what the operator is about to mark damaged.
+ * are what the swap takes back.
  *
  * ⚠️ **It lives on the ROW rather than on the exchange PAIR**, because a swap
  * TRIP legitimately carries replacements for several damaged lines at once: one
@@ -170,16 +230,16 @@ export const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]> = z.array(
  * Trip facts (which leg it returns on, whether X comes back on it) stay on the
  * pair; line facts live here.
  */
-export const SwapReplacementList: z.ZodType<SubstitutedForEntryType[]> = z.array(SubstitutedForEntry)
+export const SwapReplacementList: z.ZodType<SwapReplacementEntryType[]> = z.array(SwapReplacementEntry)
   .superRefine((entries, ctx) => {
     const seen = new Set<string>();
     for (const [i, entry] of entries.entries()) {
-      const k = entry.path.join("/");
+      const k = swapReplacementKey(entry);
       if (seen.has(k)) {
         ctx.addIssue({
           code: "custom",
           path: [i, "path"],
-          message: "replaces entries must be unique by path; add to the existing entry's quantity",
+          message: "replaces entries must be unique by path and reason; add to the existing entry's quantity",
         });
       }
       seen.add(k);
@@ -1637,30 +1697,6 @@ const INVOICE_STATUSES = ["draft", "issued", "part_paid", "paid", "void"] as con
 export type InvoiceStatusType = typeof INVOICE_STATUSES[number];
 /** Zod schema for InvoiceStatusType. */
 export const InvoiceStatusEnum: z.ZodType<InvoiceStatusType> = z.enum(INVOICE_STATUSES);
-
-const OOS_REASONS = ["cleaning", "damaged", "maintenance", "lost"] as const;
-/** Allowed values for out-of-service reason. */
-export type OOSReasonType = typeof OOS_REASONS[number];
-/** Zod schema for OOSReasonType. */
-export const OOSReasonEnum: z.ZodType<OOSReasonType> = z.enum(OOS_REASONS);
-
-/**
- * The reasons a unit can be FLAGGED for while it stays on a shelf — every
- * reason but `lost`. Owner, 2026-09-25: a lost unit is on no shelf anywhere,
- * while a damaged, cleaning or maintenance unit has a location. So `lost` is a
- * PLACE (the unit stands at its out-of-service record) and these three are a
- * STATE. The `flag` movement and an in-place reason edit take these only.
- */
-export const OOS_FLAG_REASONS = ["cleaning", "damaged", "maintenance"] as const;
-/** A reason a unit can be flagged for on a shelf. */
-export type OOSFlagReasonType = typeof OOS_FLAG_REASONS[number];
-
-// Every flag reason is a reason. A literal list is the right spelling (it has
-// to be `as const` for JSR's declaration emit), and this is what stops it
-// drifting from `OOS_REASONS`.
-type _FlagReasonsAreReasons = OOSFlagReasonType extends OOSReasonType ? true : never;
-const _flagReasonParity: _FlagReasonsAreReasons = true;
-void _flagReasonParity;
 
 // ── Settlements ──────────────────────────────────────────────────
 //

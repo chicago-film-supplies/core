@@ -1422,12 +1422,12 @@ function docWithSwapLine(replaces: unknown, exchange: unknown = { uid_pair: PARE
 }
 
 Deno.test("OrderSchema accepts `replaces` naming a row on the leg the swap exchanges against", () => {
-  const parsed = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, X_LINE], quantity: 1 }]));
+  const parsed = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "damaged" }]));
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
 });
 
 Deno.test("OrderSchema refuses `replaces` on a row that is not under an exchange pair", () => {
-  const parsed = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, X_LINE], quantity: 1 }], null));
+  const parsed = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "damaged" }], null));
   assertEquals(parsed.success, false);
   assertEquals(parsed.error?.issues.some((i) => i.path.join(".") === "items.3.replaces"), true);
 });
@@ -1435,7 +1435,7 @@ Deno.test("OrderSchema refuses `replaces` on a row that is not under an exchange
 Deno.test("OrderSchema refuses `replaces` naming a row on some OTHER leg", () => {
   // The same shared refine the fulfillment runs — one author, so the order
   // cannot accept a pointer its own projection would then fail to store.
-  const otherLeg = OrderSchema.safeParse(docWithSwapLine([{ path: [SWAP_PAIR, Y_LINE], quantity: 1 }]));
+  const otherLeg = OrderSchema.safeParse(docWithSwapLine([{ path: [SWAP_PAIR, Y_LINE], quantity: 1, reason: "damaged" }]));
   assertEquals(otherLeg.success, false);
 });
 
@@ -1443,7 +1443,7 @@ Deno.test("🔴 OrderSchema ACCEPTS `replaces` naming a parent-leg row the order
   // Sales removed the damaged line (the unit is still out on set). That is a
   // difference to surface for an operator, not a document to refuse — requiring
   // the row to exist forced writers to refuse the edit or drop the pointer.
-  const gone = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, "testprodgone00000000"], quantity: 1 }]));
+  const gone = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, "testprodgone00000000"], quantity: 1, reason: "damaged" }]));
   assertEquals(gone.success, true, JSON.stringify(gone.success ? {} : gone.error.issues));
 });
 
@@ -1454,7 +1454,7 @@ Deno.test("OrderItem (input) carries `replaces` through a parse", () => {
     uid: Y_LINE,
     type: "rental",
     path: [SWAP_PAIR, Y_LINE],
-    replaces: [{ path: [PARENT_PAIR, X_LINE], quantity: 1 }],
+    replaces: [{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "damaged" }],
   });
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
   assertEquals((parsed.success ? parsed.data as { replaces?: unknown[] } : {}).replaces?.length, 1);

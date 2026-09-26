@@ -517,7 +517,9 @@ const createFulfillmentExchangeTransaction: TransactionDefinition = {
   description:
     "Stage a mid-rental SWAP on a fulfillment: a destination pair carrying " +
     "`exchange: { uid_pair, disposition }`, its divider, and the replacement row(s) " +
-    "under it naming — through `replaces` — the damaged rows they go out against. " +
+    "under it naming — through `replaces` — the rows they go out against, each entry " +
+    "with its `reason`. Chaining is FLAT: the pair always names the original leg, and " +
+    "a later swap may name a row on an earlier swap leg of it (api-cloudrun#1116). " +
     "Optimistic concurrency via `version`; writes the fulfillment doc and its cards.\n\n" +
     "🔴 The BOOKINGS that follow are not a step of this transaction, for exactly the " +
     "reason `update-fulfillment-destinations` records: `buildBookingDates` has one " +
@@ -525,11 +527,11 @@ const createFulfillmentExchangeTransaction: TransactionDefinition = {
     "INPUT (`api-cloudrun/src/lib/exchangeLegs.ts`, the api-cloudrun#882 pattern), so " +
     "the next order write creates the replacement's booking whether or not the " +
     "best-effort organization echo this route fires wins its version race.\n\n" +
-    "⚠️ The damaged unit X is NOT touched here. For `disposition: \"exchange\"` it moves " +
-    "`out → damaged` when the swap's own trip is checked out (the rider in " +
-    "`api-cloudrun/src/lib/swapCustody.ts`); for `send_now` the operator marks it at " +
-    "check-in, because `mark_damaged` means \"back on a shelf\" and the unit is still " +
-    "on set.",
+    "⚠️ The unit taken back, X, is NOT touched here. For `disposition: \"exchange\"` it " +
+    "moves when the swap's own trip is checked out (the rider in " +
+    "`api-cloudrun/src/lib/swapCustody.ts`): `out → damaged` for a `damaged` entry, " +
+    "`out → returned` with a cleaning/maintenance `return_flags` for those reasons. For " +
+    "`send_now` the operator records it at check-in, because the unit is still on set.",
   steps: [
     "create-fulfillment-exchange:leg-self",
     "create-fulfillment-exchange:fulfillment-to-cards",

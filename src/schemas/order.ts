@@ -38,7 +38,7 @@ import {
   type RateType,
   StockMethodEnum,
   type StockMethodType,
-  type SubstitutedForEntryType,
+  type SwapReplacementEntryType,
   SwapReplacementList,
   type InvoiceStatusType,
   InvoiceStatusEnum,
@@ -381,8 +381,10 @@ export const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType> = z.s
 /** What happens to the damaged unit the replacement is going out against. */
 export const EXCHANGE_DISPOSITIONS = ["exchange", "send_now"] as const;
 /**
- * `exchange` — the damaged unit comes back on the same trip. `send_now` — the
- * replacement goes out now and the damaged unit comes back at the normal return.
+ * `exchange` — the units taken back come back on the same trip. `send_now` — the
+ * replacement goes out now and the units come back at the normal return (or,
+ * for a `lost` entry, never). A fact about the TRIP; why each unit comes back is
+ * the `replaces` entry's `reason`.
  */
 export type ExchangeDispositionType = typeof EXCHANGE_DISPOSITIONS[number];
 /** Zod schema for {@link ExchangeDispositionType}. */
@@ -408,8 +410,10 @@ export const ExchangeDispositionEnum: z.ZodType<ExchangeDispositionType> = z.enu
 export interface DestinationExchangeType {
   /**
    * The pair this one swaps units on — another pair of the SAME document, and
-   * never itself an exchange pair. Chaining is unrepresentable on purpose: two
-   * swaps against one leg are two exchange pairs naming the same parent.
+   * never itself an exchange pair. Chaining is FLAT (api-cloudrun#1116, owner
+   * 2026-09-26): a replacement that is itself swapped later gets a new pair on
+   * the SAME parent, whose `replaces` names the earlier swap's row
+   * ({@link checkSwapReplacements}) — never a pair naming a swap.
    */
   uid_pair: string;
   disposition: ExchangeDispositionType;
@@ -515,12 +519,18 @@ export function checkStoredEndpoints(
  *
  * 1. the row carrying it sits under a pair marked `exchange` — a swap's
  *    replacement line, not an ordinary one;
- * 2. every path it names is on that pair's PARENT leg (`path[0]`) — the damaged
- *    units are on the leg being swapped against, by definition.
+ * 2. every path it names is on that pair's PARENT leg, or on ANOTHER swap leg of
+ *    the same parent (`path[0]`) — the units taken back are ones the family of
+ *    legs sent out. The second arm is FLAT chaining (api-cloudrun#1116, owner
+ *    2026-09-26): a replacement that breaks or gets dirty in turn is taken back
+ *    by a new swap on the ORIGINAL leg naming the earlier swap's row, so
+ *    `exchange.uid_pair` is never a swap and `:end` stays one level deep;
+ * 3. a `lost` entry sits on a `send_now` leg — a lost unit cannot come back on
+ *    the swap's own trip.
  *
  * ⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without
  * it a swap could name a row on an unrelated leg, and the checkout rider would
- * mark units damaged on a trip that never carried them.
+ * move units on a trip that never carried them.
  *
  * 🔴 **It deliberately does NOT require the named row to EXIST** (api-cloudrun#1114,
  * owner 2026-09-22). The order, the fulfillment and the invoice legitimately
@@ -546,15 +556,15 @@ export function checkSwapReplacements(
   ctx: z.RefinementCtx,
 ): void {
   const exchangeByPair = new Map(
-    doc.destinations.filter((p) => p.exchange != null).map((p) => [p.uid, p.exchange!.uid_pair]),
+    doc.destinations.filter((p) => p.exchange != null).map((p) => [p.uid, p.exchange!]),
   );
 
   doc.items.forEach((item, i) => {
-    const entries = (item as { replaces?: SubstitutedForEntryType[] }).replaces;
+    const entries = (item as { replaces?: SwapReplacementEntryType[] }).replaces;
     if (entries === undefined) return;
     const leg = item.path[0];
-    const parentLeg = leg === undefined ? undefined : exchangeByPair.get(leg);
-    if (parentLeg === undefined) {
+    const exchange = leg === undefined ? undefined : exchangeByPair.get(leg);
+    if (exchange === undefined) {
       ctx.addIssue({
         code: "custom",
         path: ["items", i, "replaces"],
@@ -562,12 +572,26 @@ export function checkSwapReplacements(
       });
       return;
     }
+    const parentLeg = exchange.uid_pair;
     entries.forEach((entry, j) => {
-      if (entry.path[0] !== parentLeg) {
+      const target = entry.path[0];
+      // Flat chaining (api-cloudrun#1116): the parent leg, or a SIBLING swap on
+      // the same parent — never this row's own leg.
+      const onFamily = target === parentLeg ||
+        (target !== leg && target !== undefined && exchangeByPair.get(target)?.uid_pair === parentLeg);
+      if (!onFamily) {
         ctx.addIssue({
           code: "custom",
           path: ["items", i, "replaces", j, "path"],
-          message: `replaces names ${entry.path.join("/")}, which is not on the leg this swap exchanges against`,
+          message: `replaces names ${entry.path.join("/")}, which is neither the leg this swap exchanges ` +
+            `against nor another swap on it`,
+        });
+      }
+      if (entry.reason === "lost" && exchange.disposition !== "send_now") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["items", i, "replaces", j, "reason"],
+          message: "a lost unit cannot be collected on the swap's trip — use disposition send_now",
         });
       }
     });
@@ -1105,7 +1129,7 @@ export interface OrderItemLineType {
    * `z.object`: an undeclared key is STRIPPED, so without it every order PUT
    * would silently drop a swap's link to the damaged row it goes out against.
    */
-  replaces?: SubstitutedForEntryType[];
+  replaces?: SwapReplacementEntryType[];
 }
 
 // Un-annotated for `_zod.propValues` — see `_dividers.ts`. `z.object`, not
@@ -1513,7 +1537,7 @@ export interface OrderDocLineItemType {
    *
    * The invoice does not carry it: `projectOrderItemToInvoiceItem` picks its keys.
    */
-  replaces?: SubstitutedForEntryType[];
+  replaces?: SwapReplacementEntryType[];
 }
 
 // Un-annotated so `_zod.propValues` survives for `z.discriminatedUnion` below;

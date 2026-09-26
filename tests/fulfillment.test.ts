@@ -122,7 +122,7 @@ Deno.test("FulfillmentItemInputLine carries `replaces` through a parse", () => {
     uid: "Item0000000000000009",
     path: ["Destination000000002", "Item0000000000000009"],
     quantity: 1,
-    replaces: [{ path: ["Destination000000001", "Item0000000000000001"], quantity: 1 }],
+    replaces: [{ path: ["Destination000000001", "Item0000000000000001"], quantity: 1, reason: "damaged" }],
   });
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
   assertEquals(parsed.success && parsed.data.replaces?.[0].quantity, 1);
@@ -164,7 +164,7 @@ function swapDoc(replaces: unknown, opts: { markExchange?: boolean } = {}) {
 }
 
 Deno.test("FulfillmentSchema accepts `replaces` naming a row on the leg the swap exchanges against", () => {
-  const parsed = FulfillmentSchema.safeParse(swapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1 }]));
+  const parsed = FulfillmentSchema.safeParse(swapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" }]));
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
 });
 
@@ -172,7 +172,7 @@ Deno.test("FulfillmentSchema refuses `replaces` on a row that is not under an ex
   // 🔴 The field says "this row goes out against a damaged one", which is only
   // meaningful on a swap's trip. Off a swap it would be a free-form pointer.
   const parsed = FulfillmentSchema.safeParse(
-    swapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1 }], { markExchange: false }),
+    swapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" }], { markExchange: false }),
   );
   assertEquals(parsed.success, false);
 });
@@ -181,6 +181,68 @@ Deno.test("FulfillmentSchema refuses `replaces` naming a row on some OTHER leg",
   // The damaged units are on the leg being swapped against, by definition —
   // otherwise the checkout rider marks units damaged on a trip that never
   // carried them.
-  const parsed = FulfillmentSchema.safeParse(swapDoc([{ path: [SWAP_LEG, Y_ROW], quantity: 1 }]));
+  const parsed = FulfillmentSchema.safeParse(swapDoc([{ path: [SWAP_LEG, Y_ROW], quantity: 1, reason: "damaged" }]));
   assertEquals(parsed.success, false);
+});
+
+// ── Flat chaining and the entry's reason (api-cloudrun#1116) ─────────
+
+const SWAP_LEG_2 = "33333333-3333-4333-8333-333333333333";
+const Y2_ROW = "Item0000000000000010";
+
+/** `swapDoc` plus a SECOND swap leg on the same parent, whose row carries `replaces`. */
+function chainedSwapDoc(replaces: unknown, disposition = "exchange") {
+  const doc = swapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" }]);
+  const pair = doc.destinations[1] as Record<string, unknown>;
+  const line = doc.items[3] as Record<string, unknown>;
+  return {
+    ...doc,
+    destinations: [...doc.destinations, { ...pair, uid: SWAP_LEG_2, exchange: { uid_pair: PARENT_LEG, disposition } }],
+    items: [
+      ...doc.items,
+      { uid: SWAP_LEG_2, type: "destination", name: "Exchange", description: "", path: [SWAP_LEG_2] },
+      { ...line, uid: Y2_ROW, path: [SWAP_LEG_2, Y2_ROW], replaces },
+    ],
+  };
+}
+
+const issuesOf = (r: { success: boolean; error?: { issues: Array<{ path: PropertyKey[] }> } }) =>
+  JSON.stringify(r.success ? {} : r.error?.issues);
+
+Deno.test("⭐ FulfillmentSchema accepts a swap naming a row on a SIBLING swap leg of the same parent (flat chaining)", () => {
+  const parsed = FulfillmentSchema.safeParse(chainedSwapDoc([{ path: [SWAP_LEG, Y_ROW], quantity: 1, reason: "cleaning" }]));
+  assertEquals(parsed.success, true, issuesOf(parsed));
+});
+
+Deno.test("FulfillmentSchema refuses a swap leg naming ANOTHER swap as its parent — chaining is flat", () => {
+  const doc = chainedSwapDoc([{ path: [SWAP_LEG, Y_ROW], quantity: 1, reason: "damaged" }]);
+  (doc.destinations[2] as Record<string, unknown>).exchange = { uid_pair: SWAP_LEG, disposition: "exchange" };
+  assertEquals(FulfillmentSchema.safeParse(doc).success, false);
+});
+
+Deno.test("FulfillmentSchema refuses a `replaces` entry with no reason", () => {
+  assertEquals(FulfillmentSchema.safeParse(swapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1 }])).success, false);
+});
+
+Deno.test("🔴 FulfillmentSchema refuses `lost` on an `exchange` leg — a lost unit cannot come back on the trip", () => {
+  const exchange = FulfillmentSchema.safeParse(chainedSwapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "lost" }]));
+  assertEquals(exchange.success, false);
+  assertEquals(exchange.error?.issues.some((i) => i.path.at(-1) === "reason"), true, issuesOf(exchange));
+  const sendNow = FulfillmentSchema.safeParse(
+    chainedSwapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "lost" }], "send_now"),
+  );
+  assertEquals(sendNow.success, true, issuesOf(sendNow));
+});
+
+Deno.test("FulfillmentSchema accepts one row under two reasons, and refuses one row under the same reason twice", () => {
+  const two = chainedSwapDoc([
+    { path: [PARENT_LEG, X_ROW], quantity: 1, reason: "cleaning" },
+    { path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" },
+  ]);
+  assertEquals(FulfillmentSchema.safeParse(two).success, true, issuesOf(FulfillmentSchema.safeParse(two)));
+  const dup = chainedSwapDoc([
+    { path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" },
+    { path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" },
+  ]);
+  assertEquals(FulfillmentSchema.safeParse(dup).success, false);
 });

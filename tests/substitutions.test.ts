@@ -7,6 +7,7 @@ import {
   isInSubstitutedSubtree,
   isRemovedBySubstitution,
   isStrictlyBelow,
+  overclaimedReplacements,
   repointReplaces,
   standInUnits,
   substitutionResync,
@@ -296,25 +297,25 @@ Deno.test("substitutionResync: X reparented re-points the entry", () => {
 // ── repointReplaces — a swap's pointer follows X (api-cloudrun#1114) ─────
 
 Deno.test("repointReplaces: an entry naming a row that is there is kept as it is", () => {
-  const r = repointReplaces([{ path: ["L", "X"], quantity: 2 }], [{ path: ["L", "X"] }]);
-  assertEquals(r, [{ path: ["L", "X"], quantity: 2 }]);
+  const r = repointReplaces([{ path: ["L", "X"], quantity: 2, reason: "damaged" }], [{ path: ["L", "X"] }]);
+  assertEquals(r, [{ path: ["L", "X"], quantity: 2, reason: "damaged" }]);
 });
 
 Deno.test("repointReplaces: X regrouped — the map carries the entry to X's new path", () => {
   const prev = [{ uid: "X", path: ["L", "X"] }];
   const next = [{ uid: "G", path: ["L", "G"] }, { uid: "X", path: ["L", "G", "X"] }];
-  const r = repointReplaces([{ path: ["L", "X"], quantity: 1 }], next, [mapPathsAcrossRebuild(prev, next)]);
-  assertEquals(r, [{ path: ["L", "G", "X"], quantity: 1 }]);
+  const r = repointReplaces([{ path: ["L", "X"], quantity: 1, reason: "damaged" }], next, [mapPathsAcrossRebuild(prev, next)]);
+  assertEquals(r, [{ path: ["L", "G", "X"], quantity: 1, reason: "damaged" }]);
 });
 
 Deno.test("🔴 repointReplaces: X substituted away — NOT moved onto the stand-in; which unit broke is the operator's fact", () => {
   const rows = [{ path: ["L", "Z"], substituted_for: [{ path: ["L", "X"], quantity: 1 }] }];
-  assertEquals(repointReplaces([{ path: ["L", "X"], quantity: 1 }], rows), [{ path: ["L", "X"], quantity: 1 }]);
+  assertEquals(repointReplaces([{ path: ["L", "X"], quantity: 1, reason: "damaged" }], rows), [{ path: ["L", "X"], quantity: 1, reason: "damaged" }]);
 });
 
 Deno.test("🔴 repointReplaces: X gone — the entry is KEPT verbatim, a difference to surface, never dropped", () => {
-  const r = repointReplaces([{ path: ["L", "X"], quantity: 3 }], [{ path: ["L", "Y"] }]);
-  assertEquals(r, [{ path: ["L", "X"], quantity: 3 }]);
+  const r = repointReplaces([{ path: ["L", "X"], quantity: 3, reason: "damaged" }], [{ path: ["L", "Y"] }]);
+  assertEquals(r, [{ path: ["L", "X"], quantity: 3, reason: "damaged" }]);
 });
 
 Deno.test("repointReplaces: two entries landing on one row MERGE, so the list stays unique by path", () => {
@@ -322,9 +323,58 @@ Deno.test("repointReplaces: two entries landing on one row MERGE, so the list st
   // refuses a duplicate path, so the result must sum rather than repeat.
   const moved = { toPath: (p: readonly string[] | undefined) => (p?.join("/") === "L/Xold" ? ["L", "X"] : undefined) };
   const r = repointReplaces(
-    [{ path: ["L", "X"], quantity: 1 }, { path: ["L", "Xold"], quantity: 2 }],
+    [{ path: ["L", "X"], quantity: 1, reason: "damaged" }, { path: ["L", "Xold"], quantity: 2, reason: "damaged" }],
     [{ path: ["L", "X"] }],
     [moved],
   );
-  assertEquals(r, [{ path: ["L", "X"], quantity: 3 }]);
+  assertEquals(r, [{ path: ["L", "X"], quantity: 3, reason: "damaged" }]);
+});
+
+Deno.test("repointReplaces: the reason is carried, and one row under two reasons stays TWO entries", () => {
+  const r = repointReplaces(
+    [{ path: ["L", "X"], quantity: 2, reason: "cleaning" }, { path: ["L", "X"], quantity: 1, reason: "damaged" }],
+    [{ path: ["L", "X"] }],
+  );
+  assertEquals(r, [
+    { path: ["L", "X"], quantity: 2, reason: "cleaning" },
+    { path: ["L", "X"], quantity: 1, reason: "damaged" },
+  ]);
+});
+
+// ── overclaimedReplacements — the authoring cap (api-cloudrun#1116) ──────
+
+const row = (path: string[], quantity: number, replaces?: Array<{ path: string[]; quantity: number }>) => ({
+  path,
+  quantity,
+  replaces: replaces?.map((e) => ({ ...e, reason: "damaged" as const })),
+});
+
+Deno.test("overclaimedReplacements: swaps within the row's quantity report nothing", () => {
+  const next = [row(["R", "X"], 5), row(["S1", "Y"], 2, [{ path: ["R", "X"], quantity: 2 }]), row(["S2", "Y"], 3, [{ path: ["R", "X"], quantity: 3 }])];
+  assertEquals(overclaimedReplacements([], next), []);
+});
+
+Deno.test("overclaimedReplacements: a new swap pushing the SUM over the row is reported", () => {
+  const prev = [row(["R", "X"], 5), row(["S1", "Y"], 4, [{ path: ["R", "X"], quantity: 4 }])];
+  const next = [...prev, row(["S2", "Y"], 2, [{ path: ["R", "X"], quantity: 2 }])];
+  assertEquals(overclaimedReplacements(prev, next), [{ path: ["R", "X"], quantity: 5, claimed: 6 }]);
+});
+
+Deno.test("🔴 overclaimedReplacements: lowering X under an EXISTING claim is not refused — a difference, not a write error", () => {
+  const prev = [row(["R", "X"], 5), row(["S1", "Y"], 4, [{ path: ["R", "X"], quantity: 4 }])];
+  const next = [row(["R", "X"], 3), row(["S1", "Y"], 4, [{ path: ["R", "X"], quantity: 4 }])];
+  assertEquals(overclaimedReplacements(prev, next), []);
+});
+
+Deno.test("overclaimedReplacements: a chained claim counts against the earlier swap's row, not the root's", () => {
+  const next = [
+    row(["R", "X"], 1),
+    row(["S1", "Y"], 1, [{ path: ["R", "X"], quantity: 1 }]),
+    row(["S2", "Y"], 1, [{ path: ["S1", "Y"], quantity: 1 }]),
+  ];
+  assertEquals(overclaimedReplacements([], next), []);
+});
+
+Deno.test("overclaimedReplacements: a dangling entry is skipped", () => {
+  assertEquals(overclaimedReplacements([], [row(["S1", "Y"], 9, [{ path: ["R", "gone"], quantity: 9 }])]), []);
 });
