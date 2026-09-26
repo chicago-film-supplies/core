@@ -97,7 +97,57 @@ const createOutOfServiceRules: CollectionRule[] = [
       { source: [], target: ["reason"] },
       { source: [], target: ["quantity"] },
       { source: [], target: ["dates", "start"] },
-      { source: [], target: ["stores"] },
+    ],
+  },
+  {
+    id: "create-out-of-service-record:record-to-transactions",
+    source: "out-of-service",
+    target: "transactions",
+    mode: "co-write",
+    invariant:
+      "A record that is in effect (a pinned start) is born from ONE movement written in the same batch: a `flag` `{null → reason}` on the shelves its units are on for damaged/cleaning/maintenance, a `send_away` `{null → lost}` off the shelf for lost. The record takes that movement's id and number — no movement, no record — so a retried create with the same uuid_session lands on the same id. A record not yet in effect (future start) writes no movement: its units are still in service, and its window is reserved on stock/{P} through the record.",
+    enforced_by: [OOS_COWRITES_MOVEMENT],
+    transaction: "create-out-of-service-record",
+    fields: [
+      { source: ["uid_product"], target: ["uid_product"] },
+      { source: ["quantity"], target: ["quantity"] },
+      {
+        source: ["reason"],
+        target: ["service", "to"],
+        transform: "the record's reason — flag for a flag reason, send_away for lost",
+      },
+      {
+        source: ["uid"],
+        target: ["sources", "uid"],
+        transform: "the movement's sources[] names the record; the record's uid IS the movement's id",
+      },
+      {
+        source: ["stores"],
+        target: ["lines"],
+        transform: "the record's stores[] is DERIVED from these lines, never typed by an operator",
+      },
+    ],
+  },
+  {
+    id: "create-out-of-service-record:transactions-to-ledger",
+    source: "transactions",
+    target: "inventory-ledgers",
+    mode: "derive",
+    invariant:
+      "The born-with movement folds through the one ledger writer: a flag moves out_of_service_breakdown[reason] and the shelf's quantity_out_of_service; a send_away takes the units off the shelf and counts them at the record. quantity_held does not move either way.",
+    enforced_by: [OOS_LEDGER_PARTITION],
+    transaction: "create-out-of-service-record",
+    fields: [
+      {
+        source: ["quantity"],
+        target: ["quantity_out_of_service"],
+        transform: "+ quantity, filed under the reason",
+      },
+      {
+        source: ["quantity"],
+        target: ["quantity_in_service"],
+        transform: "− quantity",
+      },
     ],
   },
 ];
@@ -105,9 +155,11 @@ const createOutOfServiceRules: CollectionRule[] = [
 const createOutOfServiceTransaction: TransactionDefinition = {
   id: "create-out-of-service-record",
   description:
-    "Creates an out-of-service record, rebuilds the affected product's `stock/{P}` projection, and cowrites a default thread for the record. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Creating an OOS record.",
+    "Creates an out-of-service record from the movement that puts its units out of service (a flag on the shelf, or a send_away to the record for a loss), rebuilds the affected product's `stock/{P}` projection, and cowrites a default thread for the record. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Creating an OOS record.",
   steps: [
     "create-out-of-service-record:sources-to-record",
+    "create-out-of-service-record:record-to-transactions",
+    "create-out-of-service-record:transactions-to-ledger",
     ...STOCK_STEPS,
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
@@ -121,30 +173,35 @@ const updateOutOfServiceRules: CollectionRule[] = [
     target: "transactions",
     mode: "co-write",
     invariant:
-      "Once derived status === 'complete' (breakdown.returned_to_service + breakdown.written_off === quantity), cowrite an inventory transaction in the same Firestore transaction — a 'return-to-service' for breakdown.returned_to_service > 0 and/or a 'write-off' for breakdown.written_off > 0. Each cowritten transaction follows the standard create-transaction rules (ledger update + locations update + stock recalc).",
+      "Each bucket change is posted in the save that makes it, as the movement that makes it true, read against the record's journal so only the DIFFERENCE is written: into `flagged` a flag {null → reason}; flagged → `away` a send_away; `away` → `returned_to_service` a return_to_service; flagged → `returned_to_service` a clearing flag {reason → null}; into `written_off` a write_off (from the record for away units, from the shelf for flagged ones, clearing their flag); out of `written_off` a reversal. A `reason` edit among damaged/cleaning/maintenance is a flag {old → new}. Every movement names the record in sources[].",
     enforced_by: [OOS_COWRITES_MOVEMENT],
     transaction: "update-out-of-service-record",
     fields: [
       { source: ["uid_product"], target: ["uid_product"] },
       {
+        source: ["breakdown", "flagged"],
+        target: ["service"],
+        transform: "units entering or leaving flagged move a shelf flag",
+      },
+      {
+        source: ["breakdown", "away"],
+        target: ["lines"],
+        transform: "units entering away leave the shelf for the record; leaving it, they come back",
+      },
+      {
         source: ["breakdown", "returned_to_service"],
         target: ["quantity"],
-        transform: "if > 0, build a return-to-service transaction",
+        transform: "a return_to_service or a clearing flag, sized by the journal",
       },
       {
         source: ["breakdown", "written_off"],
         target: ["quantity"],
-        transform: "if > 0, build a write-off transaction",
+        transform: "a write_off, or a reversal of one, sized by the journal",
       },
-      // ⚠️ Both targets drifted behind the movement-journal rebuild and resolved
-      // against nothing until 2026-08-17: a Movement has `lines[]` and
-      // `sources[]`, never `stores` or a singular `source`. The SOURCE side
-      // (`oos.stores`) is still right — only the movement's half moved.
       {
-        source: ["stores"],
-        target: ["lines"],
-        transform:
-          "store/location allocation copied from oos.stores into the movement's lines[]",
+        source: ["reason"],
+        target: ["service", "to"],
+        transform: "an in-place reason edit is a flag {old → new}",
       },
       {
         source: ["uid"],
@@ -159,7 +216,7 @@ const updateOutOfServiceRules: CollectionRule[] = [
     target: "inventory-ledgers",
     mode: "derive",
     invariant:
-      "Cowritten transactions cascade through the standard create-transaction:transaction-to-ledger path — applyTransactionToLedger updates quantity_held / quantity_in_service / quantity_out_of_service.",
+      "Cowritten movements fold through the one ledger writer — applyMovementToLedger moves quantity_held (a write-off only), the per-reason out_of_service_breakdown, the shelf's quantity_out_of_service, and quantity_in_service = held − out of service.",
     enforced_by: [OOS_LEDGER_PARTITION],
     transaction: "update-out-of-service-record",
     fields: [
@@ -171,13 +228,13 @@ const updateOutOfServiceRules: CollectionRule[] = [
       {
         source: ["quantity"],
         target: ["quantity_in_service"],
-        transform: "+ for return-to-service; − for write-off",
+        transform: "+ for a return to service or a cleared flag; − for a new flag",
       },
       {
         source: ["quantity"],
         target: ["quantity_out_of_service"],
         transform:
-          "− on either return-to-service or write-off (the OOS bucket empties)",
+          "the sum of out_of_service_breakdown, which each movement's service axis moves",
       },
     ],
   },
@@ -186,7 +243,7 @@ const updateOutOfServiceRules: CollectionRule[] = [
 const updateOutOfServiceTransaction: TransactionDefinition = {
   id: "update-out-of-service-record",
   description:
-    "Updates an out-of-service record. Quantity changes rebuild the product's `stock/{P}` projection. When derived status reaches 'complete' with non-zero breakdown.returned_to_service or breakdown.written_off, cowrite the corresponding inventory transactions, which cascade through the ledger and stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Any OOS quantity/date/status change — including a cancel, which drops the record from the array entirely.",
+    "Updates an out-of-service record. Every bucket change and in-place reason edit is posted as the movement that makes it true (flag, send_away, return_to_service, write_off, or a reversal), which cascades through the one ledger writer and the stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Any OOS quantity/date/status change — including a cancel, which drops the record from the array entirely.",
   steps: [
     ...STOCK_STEPS,
     "update-out-of-service-record:record-to-transactions",

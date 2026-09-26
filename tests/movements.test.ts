@@ -19,7 +19,12 @@ import {
   negateLines,
 } from "../src/utils/movements.ts";
 import { MOVEMENT_CONTRACTS, MOVEMENT_TYPES } from "../src/schemas/mod.ts";
-import type { InventoryLedger, MovementContract, MovementLineType } from "../src/schemas/mod.ts";
+import type {
+  InventoryLedger,
+  MovementContract,
+  MovementCustodyType,
+  MovementLineType,
+} from "../src/schemas/mod.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const LOC_A = "testloc1000000000000";
@@ -473,7 +478,7 @@ Deno.test("no contract pairs `places: null` with a required cost — the fold co
   // predicate that can never return true reports just as cleanly. Plant the
   // depreciation-shaped contract this exists to catch and assert it is caught.
   assertEquals(
-    costOnly({ custody: "forbidden", cost: "required", places: null, booking: "forbidden" }),
+    costOnly({ custody: "forbidden", cost: "required", places: null, booking: "forbidden", service: "forbidden" }),
     true,
     "a planted cost-only contract must be caught",
   );
@@ -601,11 +606,25 @@ Deno.test("two lines naming the same location sum rather than collide (#287)", (
   assertEquals(next.store_breakdown[0].locations[0].quantity, 5);
 });
 
+/**
+ * The pre-axis call shape — `(ledger, lines, custody, reason)` — for the tests
+ * written against it, which all describe movements with NO `service` axis.
+ * Every one of them must still hold: the corpus is full of such movements.
+ */
+function legacyDerive(
+  l: InventoryLedger,
+  lines: MovementLineType[],
+  custody: MovementCustodyType | null,
+  reason: keyof InventoryLedger["out_of_service_breakdown"] | null,
+) {
+  return deriveServiceQuantities(l, { lines, custody }, reason);
+}
+
 // ── The three formerly-vestigial fields ─────────────────────────────
 
 Deno.test("units at an OOS record leave service without leaving ownership", () => {
   const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
-  const derived = deriveServiceQuantities(start, [line(3, atBooking, atOos)], null, "lost");
+  const derived = legacyDerive(start, [line(3, atBooking, atOos)], null, "lost");
   assertEquals(derived.quantity_out_of_service, 3);
   assertEquals(derived.out_of_service_breakdown.lost, 3, "the breakdown IS the source");
   assertEquals(derived.quantity_in_service, 7);
@@ -621,7 +640,7 @@ Deno.test("returning to service restores the in-service count", () => {
     quantity_out_of_service: 3,
     out_of_service_breakdown: { cleaning: 0, damaged: 0, maintenance: 0, lost: 3 },
   });
-  const derived = deriveServiceQuantities(start, [line(3, atOos, at(LOC_A))], null, "lost");
+  const derived = legacyDerive(start, [line(3, atOos, at(LOC_A))], null, "lost");
   assertEquals(derived.quantity_out_of_service, 0);
   assertEquals(derived.out_of_service_breakdown.lost, 0);
   assertEquals(derived.quantity_in_service, 10);
@@ -634,7 +653,7 @@ Deno.test("a damaged unit leaves service WITHOUT leaving its shelf", () => {
   // — identical to a clean `check_in` — so the placement term sees nothing, and
   // reading placement alone would report a broken unit as fully in service.
   const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
-  const derived = deriveServiceQuantities(
+  const derived = legacyDerive(
     start,
     [line(3, atBooking, at(LOC_A))],
     { from: "out", to: "damaged" },
@@ -651,7 +670,7 @@ Deno.test("a clean return moves nothing out of service", () => {
   // passes against an implementation that counts every `bookings → locations`
   // line.
   const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
-  const derived = deriveServiceQuantities(
+  const derived = legacyDerive(
     start,
     [line(3, atBooking, at(LOC_A))],
     { from: "out", to: "returned" },
@@ -668,13 +687,13 @@ Deno.test("the placement and in-place terms cannot double-count", () => {
   // checker refuses it. This asserts the arithmetic consequence: a lost unit is
   // counted once by placement and a damaged unit once by state, never both.
   const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
-  const lost = deriveServiceQuantities(start, [line(2, atBooking, atOos)], {
+  const lost = legacyDerive(start, [line(2, atBooking, atOos)], {
     from: "out",
     to: "lost",
   }, "lost");
   assertEquals(lost.quantity_out_of_service, 2, "placement term only");
 
-  const damaged = deriveServiceQuantities(start, [line(2, atBooking, at(LOC_A))], {
+  const damaged = legacyDerive(start, [line(2, atBooking, at(LOC_A))], {
     from: "out",
     to: "damaged",
   }, "damaged");
@@ -694,12 +713,178 @@ Deno.test("a LEGACY mark_damaged row is counted once, not twice", () => {
   // scripts that replay the whole journal would report every one of those
   // products as twice as broken as it is.
   const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
-  const legacy = deriveServiceQuantities(start, [line(4, atBooking, atOos)], {
+  const legacy = legacyDerive(start, [line(4, atBooking, atOos)], {
     from: "out",
     to: "damaged",
   }, "damaged");
   assertEquals(legacy.quantity_out_of_service, 4, "counted by placement, once");
   assertEquals(legacy.quantity_in_service, 6);
+});
+
+// ── The `service` axis: a STATE on a shelf, a PLACE at the record ──
+
+/** A ledger holding 10 units on Shelf A, optionally some flagged there. */
+function shelved(flagged: Partial<InventoryLedger["out_of_service_breakdown"]> = {}): InventoryLedger {
+  const breakdown = { cleaning: 0, damaged: 0, maintenance: 0, lost: 0, ...flagged };
+  const oos = Object.values(breakdown).reduce((a, b) => a + b, 0);
+  return ledger({
+    quantity_held: 10,
+    quantity_in_service: 10 - oos,
+    quantity_out_of_service: oos,
+    out_of_service_breakdown: breakdown,
+    store_breakdown: [{
+      uid_store: "teststore10000000000",
+      name: "Main",
+      default: true,
+      crms_stock_level_id: null,
+      quantity: 10,
+      locations: [{
+        uid_location: LOC_A,
+        name: "Shelf A",
+        default: true,
+        max: null,
+        quantity: 10,
+        ...(oos > 0 ? { quantity_out_of_service: oos } : {}),
+      }],
+    }],
+  });
+}
+
+function fold(
+  start: InventoryLedger,
+  type: "flag" | "send_away" | "return_to_service" | "write_off",
+  lines: MovementLineType[],
+  service: { from: "cleaning" | "damaged" | "maintenance" | "lost" | null; to: "cleaning" | "damaged" | "maintenance" | "lost" | null },
+) {
+  return applyMovementToLedger(
+    start,
+    {
+      type,
+      quantity: lines.reduce((sum, l) => sum + l.quantity, 0),
+      lines,
+      cost: type === "write_off" ? { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] } : null,
+      custody: null,
+      reverses: null,
+      service,
+    },
+    placements,
+    mockTimestamp,
+  );
+}
+
+function shelf(l: InventoryLedger, uid: string) {
+  return l.store_breakdown.flatMap((s) => s.locations).find((x) => x.uid_location === uid);
+}
+
+Deno.test("a flag puts units out of service on the shelf they are on", () => {
+  const { ledger: next, oosUnattributedDelta } = fold(
+    shelved(),
+    "flag",
+    [line(3, at(LOC_A), at(LOC_A))],
+    { from: null, to: "cleaning" },
+  );
+  assertEquals(next.out_of_service_breakdown.cleaning, 3);
+  assertEquals(next.quantity_out_of_service, 3);
+  assertEquals(next.quantity_in_service, 7);
+  assertEquals(next.quantity_held, 10, "nothing left ownership");
+  assertEquals(shelf(next, LOC_A)?.quantity, 10, "nothing left the shelf");
+  assertEquals(shelf(next, LOC_A)?.quantity_out_of_service, 3);
+  assertEquals(oosUnattributedDelta, 0);
+});
+
+Deno.test("a flag that moves lands its flag at the DESTINATION", () => {
+  // R1: the operator may move flagged units in the same movement.
+  const { ledger: next } = fold(
+    shelved(),
+    "flag",
+    [line(2, at(LOC_A), at(LOC_B))],
+    { from: null, to: "damaged" },
+  );
+  assertEquals(shelf(next, LOC_A)?.quantity, 8);
+  assertEquals(shelf(next, LOC_A)?.quantity_out_of_service, undefined, "an unflagged source is untouched");
+  assertEquals(shelf(next, LOC_B)?.quantity, 2);
+  assertEquals(shelf(next, LOC_B)?.quantity_out_of_service, 2);
+  assertEquals(next.out_of_service_breakdown.damaged, 2);
+});
+
+Deno.test("a reclassification moves the bucket and leaves the shelf count alone", () => {
+  const { ledger: next } = fold(
+    shelved({ damaged: 3 }),
+    "flag",
+    [line(3, at(LOC_A), at(LOC_A))],
+    { from: "damaged", to: "cleaning" },
+  );
+  assertEquals(next.out_of_service_breakdown.damaged, 0);
+  assertEquals(next.out_of_service_breakdown.cleaning, 3);
+  assertEquals(next.quantity_out_of_service, 3);
+  assertEquals(shelf(next, LOC_A)?.quantity_out_of_service, 3);
+});
+
+Deno.test("clearing a flag puts units back in service where they stand", () => {
+  const { ledger: next } = fold(
+    shelved({ maintenance: 3 }),
+    "flag",
+    [line(3, at(LOC_A), at(LOC_A))],
+    { from: "maintenance", to: null },
+  );
+  assertEquals(next.quantity_out_of_service, 0);
+  assertEquals(next.quantity_in_service, 10);
+  assertEquals(shelf(next, LOC_A)?.quantity_out_of_service, 0);
+});
+
+Deno.test("sending a flagged unit away moves it from the shelf count to the record, bucket unchanged", () => {
+  // `{damaged → damaged}`: the flag comes off the shelf, placement goes on at
+  // the record. The ledger still counts it damaged — it is, at a vendor.
+  const { ledger: next } = fold(
+    shelved({ damaged: 3 }),
+    "send_away",
+    [line(2, at(LOC_A), atOos)],
+    { from: "damaged", to: "damaged" },
+  );
+  assertEquals(next.out_of_service_breakdown.damaged, 3, "net zero on the bucket");
+  assertEquals(shelf(next, LOC_A)?.quantity, 8, "two units left the shelf");
+  assertEquals(shelf(next, LOC_A)?.quantity_out_of_service, 1, "one flagged unit is still here");
+  assertEquals(next.quantity_held, 10, "a vendor trip is still owned");
+});
+
+Deno.test("a shelf loss is a send_away to lost", () => {
+  const { ledger: next } = fold(shelved(), "send_away", [line(1, at(LOC_A), atOos)], { from: null, to: "lost" });
+  assertEquals(next.out_of_service_breakdown.lost, 1);
+  assertEquals(shelf(next, LOC_A)?.quantity, 9);
+  assertEquals(shelf(next, LOC_A)?.quantity_out_of_service, undefined);
+});
+
+Deno.test("writing off a FLAGGED unit from its shelf relieves the bucket and the shelf count", () => {
+  // 🔴 The latent defect this axis closes: before it, a shelf write-off had no
+  // custody and no out-of-service endpoint, so the `damaged` bucket never came
+  // back down while `quantity_held` fell.
+  const { ledger: next } = fold(
+    shelved({ damaged: 2 }),
+    "write_off",
+    [line(2, at(LOC_A), null)],
+    { from: "damaged", to: null },
+  );
+  assertEquals(next.quantity_held, 8);
+  assertEquals(next.out_of_service_breakdown.damaged, 0);
+  assertEquals(next.quantity_out_of_service, 0);
+  assertEquals(next.quantity_in_service, 8);
+  assertEquals(shelf(next, LOC_A)?.quantity_out_of_service, 0);
+});
+
+Deno.test("with an axis, the record endpoint reads the AXIS, not the caller's reason", () => {
+  const start = ledger({
+    quantity_held: 10,
+    quantity_in_service: 8,
+    quantity_out_of_service: 2,
+    out_of_service_breakdown: { cleaning: 2, damaged: 0, maintenance: 0, lost: 0 },
+  });
+  const derived = deriveServiceQuantities(
+    start,
+    { lines: [line(2, atOos, at(LOC_A))], custody: null, service: { from: "cleaning", to: null } },
+    "lost",
+  );
+  assertEquals(derived.out_of_service_breakdown.cleaning, 0);
+  assertEquals(derived.out_of_service_breakdown.lost, 0);
 });
 
 Deno.test("in_service and out_of_service always partition held", () => {
@@ -917,7 +1102,7 @@ Deno.test("🔴 the out-of-service scalar cannot drift from its breakdown", () =
 
   // A movement that touches service state AT ALL now re-derives the scalar from
   // the breakdown, so the drift cannot survive one fold.
-  const healed = deriveServiceQuantities(
+  const healed = legacyDerive(
     drifted,
     [line(1, atBooking, at(LOC_A))],
     { from: "out", to: "damaged" },
@@ -934,7 +1119,7 @@ Deno.test("a delta with no reason to file it under is REPORTED, not silently dro
   // two of the three callers are corpus-wide replay scans, where a throw
   // mid-run reports nothing and looks exactly like a clean corpus.
   const start = ledger({ quantity_held: 10, quantity_in_service: 10 });
-  const orphan = deriveServiceQuantities(start, [line(3, atBooking, atOos)], null, null);
+  const orphan = legacyDerive(start, [line(3, atBooking, atOos)], null, null);
   assertEquals(orphan.quantity_out_of_service, 0, "the breakdown could not take it");
   assertEquals(orphan.oosUnattributedDelta, 3, "and it says so");
 });
@@ -946,7 +1131,7 @@ Deno.test("a movement that moves no service units leaves the breakdown alone", (
     quantity_out_of_service: 2,
     out_of_service_breakdown: { cleaning: 0, damaged: 2, maintenance: 0, lost: 0 },
   });
-  const quiet = deriveServiceQuantities(start, [line(1, null, at(LOC_A))], null, null);
+  const quiet = legacyDerive(start, [line(1, null, at(LOC_A))], null, null);
   assertEquals(quiet.quantity_out_of_service, 2);
   assertEquals(quiet.out_of_service_breakdown.damaged, 2);
   assertEquals(quiet.oosUnattributedDelta, 0);

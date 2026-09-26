@@ -20,8 +20,8 @@
 import type {
   InventoryLedger,
   Movement,
-  MovementCustodyType,
   MovementLineType,
+  MovementServiceType,
   MovementTypeType,
   ProductTypeType,
   StoreBreakdownEntry,
@@ -322,7 +322,7 @@ export function applyMovementToLedger(
   // `reverses` joined this Pick for api-cloudrun#1069: a reversal relieves the
   // EXACT amount its original applied, and nothing else on the movement can say
   // that this IS a reversal. See the cost branch below.
-  movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody" | "reverses">,
+  movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody" | "reverses" | "service">,
   placements: ReadonlyMap<string, LocationPlacement>,
   now: InventoryLedger["updated_at"],
   /**
@@ -414,11 +414,18 @@ export function applyMovementToLedger(
       location.max = placement.max;
       location.quantity += line.quantity * sign;
       store.quantity += line.quantity * sign;
+      // The shelf's own out-of-service count moves with a flag on this
+      // endpoint — see `endpointServiceReason`. Written only when touched, so
+      // `undefined` keeps meaning "never written" (`StoreBreakdownLocationSchema`).
+      if (endpointServiceReason(movement, side, "locations", null) !== null) {
+        location.quantity_out_of_service = (location.quantity_out_of_service ?? 0) +
+          line.quantity * sign;
+      }
     }
   }
 
   // ── The three fields that used to be vestigial ──
-  const service = deriveServiceQuantities(next, movement.lines, movement.custody, oosReason);
+  const service = deriveServiceQuantities(next, movement, oosReason);
   next.out_of_service_breakdown = service.out_of_service_breakdown;
   next.quantity_out_of_service = service.quantity_out_of_service;
   next.quantity_in_service = service.quantity_in_service;
@@ -439,69 +446,90 @@ export function applyMovementToLedger(
 }
 
 /**
- * `quantity_in_service` and `quantity_out_of_service` from placement kind.
+ * The out-of-service reason a line endpoint's units carry on one side of a
+ * movement, or `null` for "in service there".
+ *
+ * ⭐ **With a `service` axis the axis answers, whatever the place.** At an
+ * out-of-service record it is the bucket the units are counted under while
+ * they stand there; at a shelf it is the flag they carry on it; at a booking or
+ * outside ownership `checkMovementContract` rule 4 has already refused
+ * anything but `null`.
+ *
+ * **Without one — every movement written before the axis — the two legacy
+ * carriers answer, one per place kind:**
+ * - at a record: `fallback`, the RECORD's reason, which only the caller can
+ *   read (a `mark_lost`'s `lost`, a record-driven write-off's `oos.reason`);
+ * - at a shelf: `custody.to/from === "damaged"` — a `mark_damaged` lands its
+ *   unit on a shelf, flagged, and its undo takes the flag back off.
+ *
+ * 🔴 **The legacy carriers are disjoint by place kind, and that is what keeps
+ * the 8 pre-model `mark_damaged` rows counted ONCE.** Those rows are
+ * `bookings → out-of-service` with `custody.to === "damaged"` (measured
+ * 2026-09-19, 4 prod + 4 dev). They name no shelf, so the custody carrier never
+ * fires for them and the record carrier counts them, exactly as it did when
+ * they were written. The old two-term fold needed an explicit guard for this;
+ * keying on the endpoint's place kind makes it structural.
+ */
+export function endpointServiceReason(
+  movement: Pick<Movement, "custody" | "service">,
+  side: "from" | "to",
+  kind: "locations" | "out-of-service",
+  fallback: keyof InventoryLedger["out_of_service_breakdown"] | null,
+): keyof InventoryLedger["out_of_service_breakdown"] | null {
+  const service: MovementServiceType | null = movement.service ?? null;
+  if (service !== null) return service[side];
+  if (kind === "out-of-service") return fallback;
+  return movement.custody?.[side] === "damaged" ? "damaged" : null;
+}
+
+/**
+ * `quantity_in_service`, `quantity_out_of_service` and the per-reason
+ * breakdown, after one movement.
  *
  * These moved in exact lockstep with `quantity_held` before the journal — so
  * `in_service` always equalled `held` — while `out_of_service` was written once
- * as zero at ledger creation and never moved again, meaning the ledger reported
- * every product as 100% in service. Under the line model they are derived:
- * units at a `locations` doc or a `booking` are in service, units at an
- * `out-of-service` record are not.
+ * as zero at ledger creation and never moved again. Under the line model they
+ * are derived, one line ENDPOINT at a time:
  *
- * 🔴 **TWO terms, because out-of-service is a PLACE for `lost` and a STATE for
- * `damaged`.** A damaged unit stays on its shelf — see `CUSTODY_PLACE_KINDS` —
- * so it never touches an `out-of-service` place and the endpoint term alone
- * cannot see it. Reading placement alone would report a shelf full of broken
- * units as fully in service.
+ * - an endpoint at an `out-of-service` record moves the bucket of the reason
+ *   its units are counted under there — `lost`, or a unit at a vendor (a
+ *   PLACE);
+ * - an endpoint at a shelf moves the bucket of the flag its units carry there
+ *   — `damaged`, `cleaning`, `maintenance` in the building (a STATE);
+ * - `+q` on a `to` side, `−q` on a `from` side.
  *
- * 🔴 **The two terms ARE guarded, and the guard is load-bearing on stored data.**
- * Rule 3 of the balance checker refuses a movement that both carries
- * `custody: "damaged"` and names an `out-of-service` place — so for anything
- * written under this contract the terms are disjoint by construction and the
- * guard is dead weight. **But rule 3 only ever ran at WRITE time, under the
- * table it had then.** Measured 2026-09-19: all 4 `mark_damaged` movements in
- * prod and all 4 in dev are `bookings → out-of-service` carrying
- * `custody.to === "damaged"`, because that is what the old model asked for.
- * Every one of them satisfies BOTH terms, and replaying one without the guard
- * doubles its contribution — `audit-ledger-replay` and
- * `audit-unjournaled-consumption` both fold stored movements through this
- * function.
+ * So one rule covers every shape: a flag `{null→r}` is `+q r`; a reclassify
+ * `{r→r′}` is `−q r, +q r′`; a clear `{r→null}` is `−q r`; a `send_away` of a
+ * flagged unit `{r→r}` is `−q r` at the shelf and `+q r` at the record, net 0;
+ * a `mark_lost` is `+q lost` at the record. Which reason each endpoint carries
+ * is {@link endpointServiceReason}'s answer.
  *
- * ⚠️ So the guard is not defensive coding: a legacy row keeps being counted
- * ONCE, by placement, which is the answer that was correct when it was written
- * and is still the only answer recoverable from it. The shelf those units are
- * on is not in the document and cannot be reconstructed, which is exactly why
- * this model had to land before `mark_damaged` became operator-reachable.
+ * 🔴 **Out-of-service was a PLACE for `lost` and a STATE for `damaged` before
+ * this axis existed, and this is still true.** A damaged unit stays on its
+ * shelf (`CUSTODY_PLACE_KINDS`), so reading placement alone would report a
+ * shelf full of broken units as fully in service. The endpoint rule counts it
+ * at the shelf; an off-shelf unit is counted at the record; no endpoint is
+ * both.
  *
- * ⚠️ This is an **extension** of the placement term and not a replacement of
- * it — `lost` is still a genuine movement to an `out-of-service` record, and
- * dropping the endpoint term would stop counting every lost unit.
- *
- * `out_of_service_breakdown` needs the OOS record's `reason`, which this module
- * cannot read, so the caller supplies it — see `applyOutOfServiceReason`.
- *
- * @param custody The movement's custody axis, or `null` when it has none.
- *   Required rather than optional: a forgotten argument would silently drop the
- *   in-place term, which is the exact failure this parameter exists to remove
- *   and one that reads as "no damage recorded" rather than as an error.
+ * @param movement Its `lines`, `custody` and `service`. `custody` and
+ *   `service` are required keys of the argument (though `service` may be
+ *   absent on a stored document): a forgotten custody drops the legacy
+ *   in-place carrier silently, which reads as "no damage recorded" rather than
+ *   as an error.
  */
 export function deriveServiceQuantities(
   ledger: InventoryLedger,
-  lines: readonly MovementLineType[],
-  custody: MovementCustodyType | null,
+  movement: Pick<Movement, "lines" | "custody" | "service">,
   /**
-   * Which bucket this movement's out-of-service units belong to. The reason
-   * lives on the out-of-service DOCUMENT, so only the caller can read it.
+   * The RECORD's reason, for an endpoint at an out-of-service record on a
+   * movement with no `service` axis. The reason lives on the out-of-service
+   * DOCUMENT, so only the caller can read it. Ignored when the axis is present.
    *
    * 🔴 **It is the ONLY thing the caller supplies, and that is the fix.** The
-   * caller used to pass a QUANTITY too — `transition.quantity` from
-   * `services/bookings.ts`, `fromRecord` from `services/outOfService.ts` — and
-   * apply it to the breakdown itself, AFTER this function had separately moved
-   * the scalar. Two independent maintainers of one fact, and only the breakdown
-   * self-corrected (`applyOutOfServiceReason` clamps at 0). The scalar ratcheted.
-   *
-   * Every one of those caller quantities was already equal to the `oosDelta`
-   * computed below, so nothing is lost by dropping them.
+   * caller used to pass a QUANTITY too and apply it to the breakdown itself,
+   * AFTER this function had separately moved the scalar. Two independent
+   * maintainers of one fact, and only the breakdown self-corrected
+   * (`applyOutOfServiceReason` clamps at 0). The scalar ratcheted.
    */
   reason: keyof InventoryLedger["out_of_service_breakdown"] | null,
 ): Pick<
@@ -509,68 +537,46 @@ export function deriveServiceQuantities(
   "quantity_in_service" | "quantity_out_of_service" | "out_of_service_breakdown"
 > & {
   /**
-   * 🔴 Units that moved out of service with NO reason to file them under.
+   * 🔴 Units that moved at an out-of-service record with NO reason to file
+   * them under — a legacy movement whose caller passed no `reason`.
    *
    * Non-zero means the breakdown cannot represent the move, so the scalar
    * derived from it would silently under-count. **Reported, never thrown** —
-   * two of this fold's three callers are corpus-wide replay scans, where a
-   * throw mid-run reports nothing and looks exactly like a clean corpus. The
-   * WRITER refuses; a SCAN counts. Same split as `basisUnderflowCents`.
+   * callers include corpus-wide replay scans, where a throw mid-run reports
+   * nothing and looks exactly like a clean corpus. The WRITER refuses; a SCAN
+   * counts. Same split as `basisUnderflowCents`.
    */
   oosUnattributedDelta: number;
 } {
-  let oosDelta = 0;
+  let breakdown = ledger.out_of_service_breakdown;
+  let unattributed = 0;
 
-  // Term 1 — placement. A unit that moved to or from an out-of-service record.
-  let placementQuantity = 0;
-  for (const line of lines) {
-    let touchesOos = false;
+  for (const line of movement.lines) {
     for (const side of ["from", "to"] as const) {
       const source = line.location[side];
-      if (source === null || source.collection !== "out-of-service") continue;
-      touchesOos = true;
-      oosDelta += (side === "to" ? 1 : -1) * line.quantity;
+      if (source === null) continue;
+      const kind = source.collection;
+      if (kind !== "locations" && kind !== "out-of-service") continue;
+      const delta = (side === "to" ? 1 : -1) * line.quantity;
+      const endpointReason = endpointServiceReason(movement, side, kind, reason);
+      if (endpointReason !== null) {
+        breakdown = applyOutOfServiceReason(breakdown, endpointReason, delta);
+      } else if (kind === "out-of-service") {
+        unattributed += delta;
+      }
     }
-    if (touchesOos) placementQuantity += line.quantity;
-  }
-
-  // Term 2 — state. A unit flagged damaged in place, which moves no further
-  // than the shelf it is already on.
-  //
-  // ⚠️ Summed over the lines term 1 did NOT account for. Under this contract
-  // that is every line; for the 8 legacy `mark_damaged` rows it is none, and
-  // they stay counted exactly once. See the docblock.
-  //
-  // The `from` arm is unreachable today (`applyBookingUpdate` refuses a decrease
-  // of `breakdown.damaged` outright), and it is written anyway because the
-  // alternative is a one-way ratchet: the day a repair path exists, an absent
-  // arm undercounts service silently rather than failing.
-  if (custody !== null) {
-    const total = lines.reduce((sum, line) => sum + line.quantity, 0);
-    const inPlace = total - placementQuantity;
-    if (custody.to === "damaged") oosDelta += inPlace;
-    if (custody.from === "damaged") oosDelta -= inPlace;
   }
 
   // 🔴 **ONE SOURCE OF TRUTH: the breakdown.** The scalar is its SUM, derived
   // here and nowhere else, so the two cannot disagree by construction.
-  //
-  // It used to be `ledger.quantity_out_of_service + oosDelta` — an incremental
-  // counter maintained beside a breakdown the CALLER incremented separately.
-  // Nothing reconciled them, and only the breakdown clamped, so a stored scalar
-  // that drifted stayed drifted and every later fold carried it forward.
-  // Measured 2026-09-19: 285 of 285 prod ledgers already satisfy
-  // `scalar == sum(breakdown)`, so deriving it is behaviour-preserving there;
-  // the one dev ledger that violated it was ratcheting on every suite run.
-  const breakdown = reason !== null && oosDelta !== 0
-    ? applyOutOfServiceReason(ledger.out_of_service_breakdown, reason, oosDelta)
-    : ledger.out_of_service_breakdown;
+  // Measured 2026-09-19: 285 of 285 prod ledgers already satisfied
+  // `scalar == sum(breakdown)` when this became the rule.
   const outOfService = Object.values(breakdown).reduce((sum, n) => sum + n, 0);
   return {
     out_of_service_breakdown: breakdown,
     quantity_out_of_service: outOfService,
     quantity_in_service: ledger.quantity_held - outOfService,
-    oosUnattributedDelta: reason === null ? oosDelta : 0,
+    oosUnattributedDelta: unattributed,
   };
 }
 

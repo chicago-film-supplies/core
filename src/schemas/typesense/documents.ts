@@ -527,12 +527,15 @@ export interface OutOfServiceDocument {
   status: string;
   quantity: number;
   breakdown: {
-    draft: number;
-    planned: number;
-    active: number;
-    blocked: number;
+    flagged: number;
+    away: number;
     written_off: number;
     returned_to_service: number;
+  };
+  uid_destination?: string;
+  supplier?: {
+    uid?: string;
+    name?: string;
   };
   organization?: {
     uid?: string;

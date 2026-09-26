@@ -185,6 +185,8 @@ export type RuleId =
   | "update-booking:booking-to-cards"
   // out-of-service.ts
   | "create-out-of-service-record:sources-to-record"
+  | "create-out-of-service-record:record-to-transactions"
+  | "create-out-of-service-record:transactions-to-ledger"
   | "update-out-of-service-record:record-to-transactions"
   | "update-out-of-service-record:transactions-to-ledger"
   // transactions.ts

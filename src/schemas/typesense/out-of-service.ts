@@ -3,12 +3,14 @@ import type { TypesenseCollectionConfig } from "./types.ts";
 /** Typesense collection config for out-of-service records. */
 export const outOfService: TypesenseCollectionConfig = {
   alias: "out-of-service",
-  version: 1,
+  // v2: the breakdown became placement-only (flagged / away / written_off /
+  // returned_to_service) and the record gained a destination and a supplier.
+  version: 2,
   firestoreCollection: "out-of-service",
-  collectionName: "out-of-service_v1",
+  collectionName: "out-of-service_v2",
   enabled: true,
   schema: {
-    name: "out-of-service_v1",
+    name: "out-of-service_v2",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -19,15 +21,17 @@ export const outOfService: TypesenseCollectionConfig = {
       { name: "status", type: "string", facet: true },
       { name: "quantity", type: "int32", sort: true, index: true, facet: false },
       { name: "breakdown", type: "object" },
-      { name: "breakdown.draft", type: "int32", sort: true, index: true, facet: false },
-      { name: "breakdown.planned", type: "int32", sort: true, index: true, facet: false },
-      { name: "breakdown.active", type: "int32", sort: true, index: true, facet: false },
-      { name: "breakdown.blocked", type: "int32", sort: true, index: true, facet: false },
+      { name: "breakdown.flagged", type: "int32", sort: true, index: true, facet: false },
+      { name: "breakdown.away", type: "int32", sort: true, index: true, facet: false },
       { name: "breakdown.written_off", type: "int32", sort: true, index: true, facet: false },
       { name: "breakdown.returned_to_service", type: "int32", sort: true, index: true, facet: false },
       { name: "organization", type: "object", optional: true },
       { name: "organization.uid", type: "string", facet: false, optional: true },
       { name: "organization.name", type: "string", sort: true, stem: true, facet: false, optional: true },
+      { name: "uid_destination", type: "string", facet: true, optional: true },
+      { name: "supplier", type: "object", optional: true },
+      { name: "supplier.uid", type: "string", facet: true, optional: true },
+      { name: "supplier.name", type: "string", sort: true, stem: true, facet: false, optional: true },
       { name: "dates", type: "object" },
       { name: "dates.start_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "dates.end_fs", type: "int64", sort: true, index: true, facet: false, optional: true },

@@ -8,7 +8,7 @@
  * The collection keeps its name — the journal was migrated in place — but the
  * document is a `Movement`, not the old current-state `Transaction`.
  *
- * ## Three axes
+ * ## Four axes
  *
  * Each answers an independent question about the same physical unit:
  *
@@ -17,6 +17,11 @@
  * | `custody`  | How far through this order is it?     | `booking.breakdown` — the seven keys      |
  * | `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |
  * | `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |
+ * | `service`  | Is it out of service, and why?        | `out_of_service_breakdown`; per-shelf OOS |
+ *
+ * `service` is the newest and the only optional one: movements written before
+ * it existed carry no key, and read as "no service change" — see
+ * {@link MovementServiceType}.
  *
  * `cost` is **cost only, never revenue** — customer-facing money lives in Xero;
  * the only money here is inventory's carrying value.
@@ -53,6 +58,9 @@ import {
   type DocSourceType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  OOS_FLAG_REASONS,
+  OOSReasonEnum,
+  type OOSReasonType,
   TimestampFields,
   UidNameRef,
   type UidNameRefType,
@@ -242,6 +250,29 @@ export const MOVEMENT_TYPES = [
   // Placement only — nets to zero on ownership and touches no cost.
   "transfer",
   "return_to_service",
+  // ── out of service: a STATE on a shelf, or a PLACE at the record ──
+  //
+  // Owner, 2026-09-25: a `lost` unit is on no shelf anywhere; a `damaged`,
+  // `cleaning` or `maintenance` unit HAS a location — usually in the building,
+  // sometimes at a vendor. So the reason is a state and the location is a
+  // place, and they are separate facts carried on separate axes:
+  //
+  // - `flag` changes the STATE of units on a shelf and moves nothing off it:
+  //   `{null→r}` flags, `{r→r′}` reclassifies, `{r→null}` clears (a flagged
+  //   unit going back into service), `{r→r}` between two shelves moves flagged
+  //   units. The flag lands at the destination.
+  // - `send_away` moves units off the shelf to the out-of-service RECORD, the
+  //   way `check_out` moves them to a booking: a shelf loss (`{null→lost}`) or
+  //   a vendor trip (`{damaged→damaged}` for an already-flagged unit). Coming
+  //   back is `return_to_service`, as coming back from a customer is `check_in`.
+  //
+  // Each pairs with the record bucket it produces, as `write_off` pairs with
+  // `written_off`: `flag` → `flagged`, `send_away` → `away`. Both are
+  // ownership-neutral and cost-forbidden, so `getTransactionMultiplier` returns
+  // 0 and `xeroPostingFor` skips them on `no_cost_contract` with no arm of its
+  // own. api-cloudrun#768, #1118.
+  "flag",
+  "send_away",
 ] as const;
 
 /** Union of all movement type string literals. */
@@ -318,23 +349,36 @@ export interface MovementContract {
   places: { from: readonly PlaceKindType[]; to: readonly PlaceKindType[] } | null;
   /** Whether a `uid_booking` subject must, must not, or may appear. */
   booking: "required" | "forbidden" | "optional";
+  /**
+   * Whether the {@link MovementServiceType} axis must, must not, or may appear.
+   *
+   * `optional` only where a movement may or may not change service state:
+   * a `write_off` from a shelf of units that were never flagged changes none,
+   * and one of flagged units clears them. `mark_damaged` / `mark_damaged_undo`
+   * are `forbidden`, deliberately — their in-place damage is carried by the
+   * custody axis (`custody.to === "damaged"`), and a second carrier on the same
+   * movement is how a unit gets counted twice.
+   */
+  service: "required" | "forbidden" | "optional";
 }
 
 /** The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member. */
 export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContract>> = {
   // Reserved and prepped units are both on the shelf, so nothing moves.
-  prep: { custody: "required", cost: "forbidden", places: null, booking: "required" },
+  prep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden" },
   check_out: {
     custody: "required",
     cost: "forbidden",
     places: { from: ["locations"], to: ["bookings"] },
     booking: "required",
+    service: "forbidden",
   },
   check_in: {
     custody: "required",
     cost: "forbidden",
     places: { from: ["bookings"], to: ["locations"] },
     booking: "required",
+    service: "forbidden",
   },
   // A damaged return IS a return that also sets a flag — identical in places to
   // `check_in`, so `allocationSide` answers `"to"` and the return flow picks the
@@ -356,6 +400,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     cost: "forbidden",
     places: { from: ["bookings"], to: ["locations"] },
     booking: "required",
+    service: "forbidden",
   },
   // `locations` is a legitimate origin here and NOT for `mark_damaged`, and the
   // asymmetry is the model rather than an oversight: a unit that should be on a
@@ -368,6 +413,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     cost: "forbidden",
     places: { from: ["bookings", "locations"], to: ["out-of-service"] },
     booking: "required",
+    service: "forbidden",
   },
   // ── the reachable rewinds, mirrored ──
   // Each is its forward twin's `places` swapped end for end. Mirroring here
@@ -375,18 +421,20 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
   // places of the RIGHT KIND, just in the opposite order — the same reasoning
   // `checkMovementContract` applies to a reversal, stated once per type instead
   // of inferred from a `reverses` that a rewind has no business setting.
-  unprep: { custody: "required", cost: "forbidden", places: null, booking: "required" },
+  unprep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden" },
   check_out_undo: {
     custody: "required",
     cost: "forbidden",
     places: { from: ["bookings"], to: ["locations"] },
     booking: "required",
+    service: "forbidden",
   },
   check_in_undo: {
     custody: "required",
     cost: "forbidden",
     places: { from: ["locations"], to: ["bookings"] },
     booking: "required",
+    service: "forbidden",
   },
   // 🔴 **Mirrored EXACTLY, including the widening on `mark_lost`'s origin.** A
   // loss may come off the booking (`out → lost`) or off a shelf
@@ -401,12 +449,14 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     cost: "forbidden",
     places: { from: ["out-of-service"], to: ["bookings", "locations"] },
     booking: "required",
+    service: "forbidden",
   },
   mark_damaged_undo: {
     custody: "required",
     cost: "forbidden",
     places: { from: ["locations"], to: ["bookings"] },
     booking: "required",
+    service: "forbidden",
   },
   // A one-sided line: the units leave both the shelf and ownership, and that is
   // what drops `quantity_held`.
@@ -421,6 +471,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     cost: "required",
     places: { from: ["locations", "bookings"], to: ["outside"] },
     booking: "optional",
+    service: "forbidden",
   },
   // A no-refund return is the same event with `cost.amount === 0` — the zero IS
   // the decision, which is why cost is required rather than nullable here.
@@ -429,48 +480,56 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     cost: "required",
     places: { from: ["outside"], to: ["locations"] },
     booking: "optional",
+    service: "forbidden",
   },
   opening_balance: {
     custody: "forbidden",
     cost: "required",
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
+    service: "forbidden",
   },
   purchase: {
     custody: "forbidden",
     cost: "required",
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
+    service: "forbidden",
   },
   find: {
     custody: "forbidden",
     cost: "required",
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
+    service: "forbidden",
   },
   make: {
     custody: "forbidden",
     cost: "required",
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
+    service: "forbidden",
   },
   adjustment_increase: {
     custody: "forbidden",
     cost: "required",
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
+    service: "forbidden",
   },
   adjustment_decrease: {
     custody: "forbidden",
     cost: "required",
     places: { from: ["locations"], to: ["outside"] },
     booking: "forbidden",
+    service: "forbidden",
   },
   trade_in: {
     custody: "forbidden",
     cost: "required",
     places: { from: ["locations"], to: ["outside"] },
     booking: "forbidden",
+    service: "forbidden",
   },
   // ── the twin reclass ──
   // Mirrors of `adjustment_decrease` / `adjustment_increase`: the units leave
@@ -483,12 +542,14 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     cost: "required",
     places: { from: ["locations"], to: ["outside"] },
     booking: "forbidden",
+    service: "forbidden",
   },
   reclass_in: {
     custody: "forbidden",
     cost: "required",
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
+    service: "forbidden",
   },
   // No custody: the booking keeps `damaged: N` forever — a terminal key and part
   // of its history — so removing it would break `sum(breakdown) === quantity`.
@@ -503,6 +564,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     cost: "required",
     places: { from: ["out-of-service", "locations"], to: ["outside"] },
     booking: "forbidden",
+    service: "optional",
   },
   // Nets to zero on ownership, so it has no cost object to mis-gate — which is
   // what made #286 (a costed transfer corrupting the basis) possible.
@@ -511,6 +573,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     cost: "forbidden",
     places: { from: ["locations"], to: ["locations"] },
     booking: "forbidden",
+    service: "forbidden",
   },
   // The found-and-returned resolution: a unit recorded lost turns up and goes
   // back on a shelf. Until this existed `out-of-service` was a ONE-WAY place —
@@ -535,6 +598,29 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     cost: "forbidden",
     places: { from: ["out-of-service"], to: ["locations"] },
     booking: "forbidden",
+    service: "optional",
+  },
+  // ── out of service ──
+  // In place. `with_booking` rather than `forbidden`: a booking `returned →
+  // damaged` changes a custody key and is this movement, while a check-in
+  // cleaning flag, a reclassification or a move of flagged units changes none
+  // and names its booking in `sources[]` instead.
+  flag: {
+    custody: "with_booking",
+    cost: "forbidden",
+    places: { from: ["locations"], to: ["locations"] },
+    booking: "optional",
+    service: "required",
+  },
+  // Shelf → record. `booking: "forbidden"` for the reason `return_to_service`
+  // gives: the trip belongs to the RECORD, not to whichever order happened to
+  // surface it, and the booking (if any) is named in `sources[]`.
+  send_away: {
+    custody: "forbidden",
+    cost: "forbidden",
+    places: { from: ["locations"], to: ["out-of-service"] },
+    booking: "forbidden",
+    service: "required",
   },
 };
 
@@ -661,6 +747,46 @@ export const MovementCustody: z.ZodType<MovementCustodyType> = z.strictObject({
 );
 
 /**
+ * The out-of-service reason on each side of this event — `null` on a side means
+ * "in service" there.
+ *
+ * Named `service` and deliberately NOT `reason`, for the reason `custody` is not
+ * `status`: `OutOfService.reason` is a different field (the record's CURRENT
+ * reason), and `service: {to: "damaged"}` must not misread as it.
+ *
+ * It answers per line ENDPOINT, by the kind of place the endpoint is:
+ *
+ * - at an `out-of-service` record, the side's reason is the bucket the units
+ *   are counted in while they stand there (a `lost` unit, a unit at a vendor);
+ * - at a `locations` shelf, it is the FLAG the units carry on that shelf, and
+ *   it moves the shelf's own `quantity_out_of_service` as well as the bucket;
+ * - at a booking or outside ownership it must be `null`: units at a customer or
+ *   gone are not out of service.
+ *
+ * So `send_away` of a flagged unit is `{damaged → damaged}`: the shelf's flag
+ * comes off and the record's placement goes on, and the `damaged` bucket nets
+ * to zero. See `deriveServiceQuantities` (`utils/movements.ts`).
+ *
+ * ⚠️ **Optional on the document** — movements written before this axis carry
+ * no key, and read as "no service change". Their in-place damage is carried by
+ * `custody.to === "damaged"` and their placement reason by the out-of-service
+ * record, exactly as before; the fold keeps both paths.
+ */
+export interface MovementServiceType {
+  from: OOSReasonType | null;
+  to: OOSReasonType | null;
+}
+
+/** Zod schema for a service transition. */
+export const MovementService: z.ZodType<MovementServiceType> = z.strictObject({
+  from: OOSReasonEnum.nullable(),
+  to: OOSReasonEnum.nullable(),
+}).refine(
+  (sv) => sv.from !== null || sv.to !== null,
+  { message: "A service transition must name at least one side" },
+);
+
+/**
  * The carrying-value change this event records. `amount_cents` is signed:
  * negative removes basis, positive adds it. `unit_costs_cents[]` carries the
  * per-unit basis actually consumed or added, which the weighted-average cost
@@ -726,6 +852,12 @@ export interface Movement {
   type: MovementTypeType;
   quantity: number;
   custody: MovementCustodyType | null;
+  /**
+   * The out-of-service state change, or `null` / absent for none. Absent on
+   * every movement written before the axis existed — see
+   * {@link MovementServiceType}.
+   */
+  service?: MovementServiceType | null;
   cost: MovementCostType | null;
   /** Physical movement. Empty when nothing moved. */
   lines: MovementLineType[];
@@ -994,6 +1126,112 @@ function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
       });
     }
   }
+
+  // Rule 4: the service axis, and agreement between it and the places.
+  checkMovementService(m, contract, ctx);
+}
+
+/**
+ * Rule 4 of {@link checkMovementContract}: the `service` axis.
+ *
+ * `service == null` covers both an absent key (a movement written before the
+ * axis) and an explicit `null`; a required axis must be present, a forbidden
+ * one must not be.
+ *
+ * Then, per line endpoint (see {@link MovementServiceType}): a side at an
+ * `out-of-service` record must name the reason the units are counted under
+ * there, and a side at a booking or outside ownership must name none. A shelf
+ * side may name either — `null` is an unflagged unit.
+ *
+ * A reversal swaps the axis end for end, as it swaps `places` and `custody`.
+ */
+function checkMovementService(
+  m: Movement,
+  contract: MovementContract,
+  ctx: z.RefinementCtx,
+): void {
+  const service = m.service ?? null;
+  if (contract.service === "required" && service === null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["service"],
+      message: `"${m.type}" changes service state and requires a service transition`,
+    });
+    return;
+  }
+  if (contract.service === "forbidden" && service !== null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["service"],
+      message: `"${m.type}" must not carry a service transition`,
+    });
+    return;
+  }
+  if (service === null) return;
+
+  // The type-specific rules read the FORWARD direction.
+  const forward: MovementServiceType = m.reverses === null
+    ? service
+    : { from: service.to, to: service.from };
+
+  if (m.type === "flag") {
+    // `lost` is a PLACE, never a flag on a shelf: a lost unit is on no shelf.
+    for (const side of ["from", "to"] as const) {
+      const reason = forward[side];
+      if (reason !== null && !(OOS_FLAG_REASONS as readonly string[]).includes(reason)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["service", side],
+          message: `a flag is ${OOS_FLAG_REASONS.join(", ")} on a shelf; "${reason}" is not`,
+        });
+      }
+    }
+    // `{r → r}` changes no state, so it is only a movement if it MOVES.
+    if (forward.from === forward.to && m.lines.some((l) => l.location.from?.uid === l.location.to?.uid)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lines"],
+        message: "a flag that keeps its reason must move the units to a different location",
+      });
+    }
+  }
+  if (m.type === "send_away" && forward.to === null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["service", "to"],
+      message: `"send_away" puts units out of service at the record and must name why`,
+    });
+  }
+  if ((m.type === "write_off" || m.type === "return_to_service") && forward.to !== null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["service", "to"],
+      message: `"${m.type}" takes units out of the out-of-service state; service.to must be null`,
+    });
+  }
+
+  m.lines.forEach((line, i) => {
+    for (const side of ["from", "to"] as const) {
+      const kind = placeKind(line.location[side]);
+      const reason = service[side];
+      if (kind === "out-of-service" && reason === null) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["service", side],
+          message: `line ${i} is ${side === "from" ? "leaving" : "landing at"} an out-of-service record, ` +
+            `so service.${side} must name the reason its units are counted under`,
+        });
+      }
+      if ((kind === "bookings" || kind === "outside") && reason !== null) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["service", side],
+          message: `line ${i}'s ${side} is ${kind === "bookings" ? "a booking" : "outside ownership"}, ` +
+            `which is never out of service; service.${side} must be null`,
+        });
+      }
+    }
+  });
 }
 
 /** Zod schema for a Movement. */
@@ -1007,6 +1245,11 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   type: MovementTypeEnum.meta({ column: true, label: "Type" }),
   quantity: z.number().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
   custody: MovementCustody.nullable(),
+  // `.nullable().optional()`: ~1,400 movements per env predate the key. It is
+  // "mid-expand" in `tests/stored-optionality.test.ts`; `movementScaffold`
+  // (api-cloudrun) stamps it on every write, so the absent population cannot
+  // grow. No `.default()` — see `tests/inert-defaults.test.ts`.
+  service: MovementService.nullable().optional(),
   cost: MovementCost.nullable(),
   lines: z.array(MovementLine).meta({ label: "Line" }),
   date: chicagoInstant().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),

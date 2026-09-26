@@ -1644,6 +1644,24 @@ export type OOSReasonType = typeof OOS_REASONS[number];
 /** Zod schema for OOSReasonType. */
 export const OOSReasonEnum: z.ZodType<OOSReasonType> = z.enum(OOS_REASONS);
 
+/**
+ * The reasons a unit can be FLAGGED for while it stays on a shelf — every
+ * reason but `lost`. Owner, 2026-09-25: a lost unit is on no shelf anywhere,
+ * while a damaged, cleaning or maintenance unit has a location. So `lost` is a
+ * PLACE (the unit stands at its out-of-service record) and these three are a
+ * STATE. The `flag` movement and an in-place reason edit take these only.
+ */
+export const OOS_FLAG_REASONS = ["cleaning", "damaged", "maintenance"] as const;
+/** A reason a unit can be flagged for on a shelf. */
+export type OOSFlagReasonType = typeof OOS_FLAG_REASONS[number];
+
+// Every flag reason is a reason. A literal list is the right spelling (it has
+// to be `as const` for JSR's declaration emit), and this is what stops it
+// drifting from `OOS_REASONS`.
+type _FlagReasonsAreReasons = OOSFlagReasonType extends OOSReasonType ? true : never;
+const _flagReasonParity: _FlagReasonsAreReasons = true;
+void _flagReasonParity;
+
 // ── Settlements ──────────────────────────────────────────────────
 //
 // The vocabulary of the `settlements` journal — the revenue-side twin of the

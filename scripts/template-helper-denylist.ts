@@ -171,6 +171,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   movements: [
     "applyMovementToLedger", // the ledger fold — write-path only
     "deriveServiceQuantities", // ledger derivation — write-path only
+    "endpointServiceReason", // ledger derivation — write-path only
     "applyOutOfServiceReason", // ledger derivation — write-path only
     "negateLines", // reversal transform — write-path only
     "heldDelta", // conservation arithmetic over a line
@@ -525,6 +526,13 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // OOS records and the sibling invoices at once; a template renders one
   // document and holds neither. Listed in UTIL_MODULES only so the drift guard
   // sees its exports.
+  // The record's status rule and breakdown sums. A rendered record carries its
+  // stored `status` already; deriving it again at render time answers nothing.
+  "out-of-service": [
+    "deriveOOSStatus",
+    "emptyOOSBreakdown",
+    "sumOOSBreakdown",
+  ],
   replacements: [
     "billedOutOfService",
     "isBillableOutOfService",

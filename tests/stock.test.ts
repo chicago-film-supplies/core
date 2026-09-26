@@ -107,9 +107,9 @@ Deno.test("bookingHoldsStock: the shelf-side liveness gate", () => {
 
 Deno.test("oosConsumes: the units still OUT of service, zero once terminal", () => {
   const none = { written_off: 0, returned_to_service: 0 };
-  for (const status of ["active", "draft", "planned", "blocked"] as const) {
-    assertEquals(oosConsumes({ status, quantity: 5, breakdown: none }), 5);
-  }
+  // `active` is the one non-terminal status; it covers flagged, away and a
+  // record not yet in effect (units in no bucket) alike.
+  assertEquals(oosConsumes({ status: "active", quantity: 5, breakdown: none }), 5);
   assertEquals(oosConsumes({ status: "complete", quantity: 5, breakdown: none }), 0);
   assertEquals(oosConsumes({ status: "canceled", quantity: 5, breakdown: none }), 0);
 
@@ -502,7 +502,9 @@ function randomCase(seed: number) {
   const oosSources: StockOOSSource[] = [];
   const oosCount = next(4);
   for (let i = 0; i < oosCount; i++) {
-    const status = (["active", "planned", "complete", "canceled"] as const)[next(4)];
+    // `active` twice keeps the draw — and so every later draw — where it was
+    // when `planned` was a fourth status.
+    const status = (["active", "active", "complete", "canceled"] as const)[next(4)];
     const quantity = next(5);
     const start = next(5) === 0 ? null : dayIso(next(28));
     const end = next(5) === 0 ? null : dayIso(next(28));

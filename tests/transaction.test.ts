@@ -81,6 +81,42 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     reclass_in: null,
     transfer: null,
     return_to_service: null,
+    // `with_booking`: the fixture attaches a booking, so it names the one
+    // custody change a flag can carry — a damaged return found on the shelf.
+    flag: { from: "returned", to: "damaged" },
+    send_away: null,
+  };
+
+  // TOTAL for the same reason as `custodyFor`. `null` on every type whose
+  // contract makes the axis optional or forbidden, so "no service change" is
+  // stated rather than defaulted.
+  const serviceFor: Record<MovementTypeType, { from: string | null; to: string | null } | null> = {
+    prep: null,
+    check_out: null,
+    check_in: null,
+    mark_damaged: null,
+    mark_lost: null,
+    unprep: null,
+    check_out_undo: null,
+    check_in_undo: null,
+    mark_lost_undo: null,
+    mark_damaged_undo: null,
+    sale: null,
+    sale_return: null,
+    opening_balance: null,
+    purchase: null,
+    find: null,
+    make: null,
+    adjustment_increase: null,
+    adjustment_decrease: null,
+    trade_in: null,
+    write_off: null,
+    reclass_out: null,
+    reclass_in: null,
+    transfer: null,
+    return_to_service: null,
+    flag: { from: null, to: "damaged" },
+    send_away: { from: null, to: "lost" },
   };
 
   let lines: unknown[] = [];
@@ -108,6 +144,7 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     type,
     quantity: 2,
     custody: custodyNeeded ? custodyFor[type] : null,
+    service: serviceFor[type],
     cost: contract.cost === "required" ? { amount_cents: -40000, unit_cost: 200, unit_costs_cents: [200, 200] } : null,
     // ⚠️ A `purchase` MUST carry one — `base` comes from `getInitialValues`,
     // which resolves a nullable to `null`, and a stored purchase with an
@@ -200,6 +237,9 @@ Deno.test("the reversal of every type is writable — its contract is mirrored",
       custody: forward.custody
         ? { from: (forward.custody as { to: unknown }).to, to: (forward.custody as { from: unknown }).from }
         : null,
+      // Swapped end for end, exactly as custody is: the reversal's lines leave
+      // where the original's landed, so each side's reason travels with them.
+      service: forward.service ? { from: forward.service.to, to: forward.service.from } : null,
     });
     const result = MovementSchema.safeParse(reversal);
     assertEquals(
@@ -843,4 +883,68 @@ Deno.test("CreateTransactionInput accepts quantity === Σ allocations", () => {
 Deno.test("CreateTransactionInput still accepts no allocations at all", () => {
   const { allocations: _drop, ...noAllocs } = { ...validCreateInput, allocations: undefined };
   assertEquals(CreateTransactionInput.safeParse(noAllocs).success, true);
+});
+
+// ── rule 4: the service axis ────────────────────────────────────────
+
+Deno.test("rule 4: a type that forbids the axis refuses one", () => {
+  const bad = movement("transfer", {
+    lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_B) } }],
+    service: { from: null, to: "damaged" },
+  });
+  assertEquals(MovementSchema.safeParse(bad).success, false);
+});
+
+Deno.test("rule 4: flag and send_away require the axis", () => {
+  assertEquals(MovementSchema.safeParse(movement("flag", { service: null })).success, false);
+  assertEquals(MovementSchema.safeParse(movement("send_away", { service: null })).success, false);
+});
+
+Deno.test("rule 4: lost is a PLACE, never a flag on a shelf", () => {
+  const bad = movement("flag", { service: { from: null, to: "lost" } });
+  assertEquals(MovementSchema.safeParse(bad).success, false);
+});
+
+Deno.test("rule 4: a flag that keeps its reason must move", () => {
+  const same = movement("flag", {
+    uid_booking: null,
+    uid: `${SESSION}|flag|${PRODUCT}`,
+    custody: null,
+    service: { from: "damaged", to: "damaged" },
+  });
+  assertEquals(MovementSchema.safeParse(same).success, false, "same shelf, same reason: no event");
+  const moved = { ...same, lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_B) } }] };
+  assertEquals(MovementSchema.safeParse(moved).success, true, "moving flagged units is an event");
+});
+
+Deno.test("rule 4: send_away must name the reason at the record", () => {
+  const bad = movement("send_away", { service: { from: "damaged", to: null } });
+  assertEquals(MovementSchema.safeParse(bad).success, false);
+});
+
+Deno.test("rule 4: a write-off may not leave units out of service", () => {
+  const bad = movement("write_off", {
+    lines: [{ quantity: 2, location: { from: atOos, to: null } }],
+    service: { from: "lost", to: "lost" },
+  });
+  assertEquals(MovementSchema.safeParse(bad).success, false);
+  const good = { ...bad, service: { from: "lost", to: null } };
+  assertEquals(MovementSchema.safeParse(good).success, true);
+});
+
+Deno.test("rule 4: an axis must name the reason at a record endpoint", () => {
+  // return_to_service off a record with an axis that forgot the record side.
+  const bad = movement("return_to_service", { service: { from: null, to: null } });
+  assertEquals(MovementSchema.safeParse(bad).success, false, "an all-null axis is refused outright");
+  const missing = movement("write_off", {
+    lines: [{ quantity: 2, location: { from: atOos, to: null } }],
+    service: { from: null, to: null },
+  });
+  assertEquals(MovementSchema.safeParse(missing).success, false);
+});
+
+Deno.test("rule 4: a stored movement with no service key still parses", () => {
+  const legacy = movement("transfer", { lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_B) } }] });
+  delete (legacy as Record<string, unknown>).service;
+  assertEquals(MovementSchema.safeParse(legacy).success, true);
 });

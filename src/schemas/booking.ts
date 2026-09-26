@@ -271,7 +271,8 @@ export interface Booking {
   updated_at: FirestoreTimestampType;
 }
 
-const BookingDestinationRefSchema: z.ZodType<BookingDestinationRef> = z.strictObject({
+/** Zod schema for BookingDestinationRef — also the out-of-service record's `destination`. */
+export const BookingDestinationRefSchema: z.ZodType<BookingDestinationRef> = z.strictObject({
   uid: FirestoreId,
   address: Address,
 });

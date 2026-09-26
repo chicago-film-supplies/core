@@ -64,6 +64,7 @@ import * as itemPairingUtils from "../src/utils/item-pairing.ts";
 import * as taxClassUtils from "../src/utils/tax-classes.ts";
 import * as priceDocumentUtils from "../src/utils/price-document.ts";
 import * as replacementUtils from "../src/utils/replacements.ts";
+import * as outOfServiceUtils from "../src/utils/out-of-service.ts";
 
 import { templateHelpers } from "../src/schemas/template-helpers.generated.ts";
 import {
@@ -112,6 +113,10 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // record has been BILLED — a sum over an order's sibling invoices and its
   // out-of-service records, neither of which a render context holds.
   replacements: replacementUtils,
+  // `utils/out-of-service.ts` is the record's status rule and breakdown sums —
+  // write-path derivations shared by the API writers and the manager's preview.
+  // Listed so the drift guard sees its exports.
+  "out-of-service": outOfServiceUtils,
   icons: iconUtils,
   fulfillments: fulfillmentUtils,
   // Same exception as `citations` and `template-lint`: `utils/fulfillment-items.ts`

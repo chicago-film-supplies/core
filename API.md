@@ -857,6 +857,14 @@ interface BookingDestinationRef {
 }
 ```
 
+### `BookingDestinationRefSchema`
+
+Zod schema for BookingDestinationRef — also the out-of-service record's `destination`.
+
+```ts
+const BookingDestinationRefSchema: z.ZodType<BookingDestinationRef>;
+```
+
 ### `BookingId`
 
 `bookings.uid` — deterministic composite, sparse by construction:
@@ -2584,9 +2592,10 @@ interface CreateOutOfServiceInputType {
   quantity: number;
   dates: typeLiteral;
   sources?: DocSourceType[];
-  stores?: OOSStore[];
-  crms_id?: number | null;
-  crms_stock_level_id?: number | null;
+  uuid_session: string;
+  allocations?: MovementAllocationInputType[];
+  destination?: typeLiteral | null;
+  supplier?: typeLiteral | null;
 }
 ```
 
@@ -5630,7 +5639,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service" | "flag" | "send_away"[];
 ```
 
 ### `MSG_SCHEMA_REGISTRY`
@@ -5770,6 +5779,7 @@ interface Movement {
   type: MovementTypeType;
   quantity: number;
   custody: MovementCustodyType | null;
+  service?: MovementServiceType | null;
   cost: MovementCostType | null;
   lines: MovementLineType[];
   date: string;
@@ -5833,6 +5843,7 @@ interface MovementContract {
   cost: "required" | "forbidden";
   places: typeLiteral | null;
   booking: "required" | "forbidden" | "optional";
+  service: "required" | "forbidden" | "optional";
 }
 ```
 
@@ -5961,6 +5972,48 @@ Zod schema for a Movement.
 
 ```ts
 const MovementSchema: z.ZodType<Movement>;
+```
+
+### `MovementService`
+
+Zod schema for a service transition.
+
+```ts
+const MovementService: z.ZodType<MovementServiceType>;
+```
+
+### `MovementServiceType`
+
+The out-of-service reason on each side of this event — `null` on a side means
+"in service" there.
+
+Named `service` and deliberately NOT `reason`, for the reason `custody` is not
+`status`: `OutOfService.reason` is a different field (the record's CURRENT
+reason), and `service: {to: "damaged"}` must not misread as it.
+
+It answers per line ENDPOINT, by the kind of place the endpoint is:
+
+- at an `out-of-service` record, the side's reason is the bucket the units
+  are counted in while they stand there (a `lost` unit, a unit at a vendor);
+- at a `locations` shelf, it is the FLAG the units carry on that shelf, and
+  it moves the shelf's own `quantity_out_of_service` as well as the bucket;
+- at a booking or outside ownership it must be `null`: units at a customer or
+  gone are not out of service.
+
+So `send_away` of a flagged unit is `{damaged → damaged}`: the shelf's flag
+comes off and the record's placement goes on, and the `damaged` bucket nets
+to zero. See `deriveServiceQuantities` (`utils/movements.ts`).
+
+⚠️ **Optional on the document** — movements written before this axis carry
+no key, and read as "no service change". Their in-place damage is carried by
+`custody.to === "damaged"` and their placement reason by the out-of-service
+record, exactly as before; the fold keeps both paths.
+
+```ts
+interface MovementServiceType {
+  from: OOSReasonType | null;
+  to: OOSReasonType | null;
+}
 ```
 
 ### `MovementSession`
@@ -6255,17 +6308,23 @@ const OAuthRefreshLogRecordSchema: z.ZodType<OAuthRefreshLogRecord>;
 
 ### `OOSBreakdown`
 
-Per-phase quantity breakdown — sum equals top-level `quantity`.
+Per-bucket quantities. Σ ≤ `quantity` — the shortfall is "not yet in effect".
 
 ```ts
 interface OOSBreakdown {
-  draft: number;
-  planned: number;
-  active: number;
-  blocked: number;
+  flagged: number;
+  away: number;
   written_off: number;
   returned_to_service: number;
 }
+```
+
+### `OOSBreakdownKeyType`
+
+One out-of-service breakdown bucket.
+
+```ts
+type OOSBreakdownKeyType = indexedAccess;
 ```
 
 ### `OOSBreakdownSchema`
@@ -6280,9 +6339,9 @@ const OOSBreakdownSchema: z.ZodType<OOSBreakdown>;
 
 Date object — booking-style start/end with paired Firestore timestamps.
 
-`start` is nullable for `draft` records (operator composing) and `planned`
-records (scheduled maintenance with no pinned start instant). Once the
-record reaches `active`, `start` should be set (writer enforces).
+`start` is the instant the units went out of service — or, for a record not
+yet in effect, will. `end` is when they are due back (a vendor trip) or came
+back.
 
 ```ts
 interface OOSDates {
@@ -6291,6 +6350,14 @@ interface OOSDates {
   end: string | null;
   end_fs: FirestoreTimestampType | null;
 }
+```
+
+### `OOSFlagReasonType`
+
+A reason a unit can be flagged for on a shelf.
+
+```ts
+type OOSFlagReasonType = indexedAccess;
 ```
 
 ### `OOSReasonEnum`
@@ -6319,7 +6386,7 @@ const OOSStatusEnum: z.ZodType<OOSStatusType>;
 
 ### `OOSStatusType`
 
-Allowed out-of-service statuses. Server-derived from breakdown + number + canceled_at; only "canceled" is operator-set.
+Allowed out-of-service statuses. See {@link OOS_STATUSES}.
 
 ```ts
 type OOSStatusType = indexedAccess;
@@ -6354,40 +6421,53 @@ interface OOSStoreLocation {
 }
 ```
 
-### `OOSTransaction`
+### `OOS_BREAKDOWN_KEYS`
 
-A transaction entry within an out-of-service record.
+Where a record's units are — see the module docblock's table.
 
 ```ts
-interface OOSTransaction {
-  crms_id?: number | null;
-  crms_quarantine_id?: number | null;
-  crms_stock_level_id?: number | null;
-  crms_stock_level_uid?: string;
-  date: string;
-  date_fs: FirestoreTimestampType;
-  quantity: number;
-  source: DocSourceType;
-  type: OOSTransactionTypeType;
-}
+const OOS_BREAKDOWN_KEYS: "flagged" | "away" | "written_off" | "returned_to_service"[];
 ```
 
-### `OOSTransactionTypeEnum`
+### `OOS_BREAKDOWN_LABELS`
 
-Zod schema for OOSTransactionTypeType.
+Operator-facing labels, one per {@link OOS_BREAKDOWN_KEYS} member.
 
 ```ts
-const OOSTransactionTypeEnum: z.ZodType<OOSTransactionTypeType>;
+const OOS_BREAKDOWN_LABELS: Readonly<Record<OOSBreakdownKeyType, string>>;
 ```
 
-### `OOSTransactionTypeType`
+### `OOS_FLAG_REASONS`
 
-Allowed types for an `OOSTransaction`. Terminal types match the breakdown
-keys 1:1 — a transaction with `type === "written_off"` and `quantity === N`
-corresponds to `breakdown.written_off += N`.
+The reasons a unit can be FLAGGED for while it stays on a shelf — every
+reason but `lost`. Owner, 2026-09-25: a lost unit is on no shelf anywhere,
+while a damaged, cleaning or maintenance unit has a location. So `lost` is a
+PLACE (the unit stands at its out-of-service record) and these three are a
+STATE. The `flag` movement and an in-place reason edit take these only.
 
 ```ts
-type OOSTransactionTypeType = indexedAccess;
+const OOS_FLAG_REASONS: "cleaning" | "damaged" | "maintenance"[];
+```
+
+### `OOS_STATUSES`
+
+Derived, never client-set, by `deriveOOSStatus` (`@cfs/core/utils/out-of-service`):
+`canceled` once `canceled_at` is set, `complete` once every unit is written
+off or back in service, `active` otherwise.
+
+`active` rather than `open`: orders, bookings, cards and recurrences all say
+`active` for "in progress".
+
+```ts
+const OOS_STATUSES: "active" | "complete" | "canceled"[];
+```
+
+### `OOS_USER_STATUSES`
+
+The only status a client may ask for; the writer translates it into `canceled_at`.
+
+```ts
+const OOS_USER_STATUSES: "canceled"[];
 ```
 
 ### `ORDER_COMPUTED_STATUSES`
@@ -7109,6 +7189,9 @@ interface OutOfService {
   canceled_at: FirestoreTimestampType | null;
   organization: typeLiteral | null;
   dates: OOSDates;
+  destination: BookingDestinationRef | null;
+  uid_destination: string | null;
+  supplier: UidNameRefType | null;
   sources: DocSourceType[];
   query_by_sources: string[];
   crms_id?: number | null;
@@ -7116,7 +7199,6 @@ interface OutOfService {
   stores: OOSStore[];
   query_by_uid_store: string[];
   query_by_uid_location: string[];
-  transactions?: OOSTransaction[];
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -8637,7 +8719,7 @@ deliberately shorter than the transaction name (`create-org:*` under
 `create-organization`). Read the prefix as a namespace, never as a join key.
 
 ```ts
-type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "create-out-of-service-record:sources-to-record" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:transactions-to-ledger" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock";
+type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:transactions-to-ledger" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock";
 ```
 
 ### `SEEDED_ROLE_NAMES`
@@ -10883,24 +10965,27 @@ const UpdateOutOfServiceInput: z.ZodType<UpdateOutOfServiceInputType>;
 
 Input for updating an out-of-service record.
 
-`breakdown` (when supplied) must be the complete next state — the writer
-enforces `sum(breakdown) === quantity`. `status` is server-derived; only
-`"canceled"` is honored from the client and translated into
-`canceled_at = now()`.
+`breakdown` (when supplied) is the complete next state, Σ ≤ `quantity`. The
+writer turns each bucket change into the movement that makes it true —
+`flag`, `send_away`, `return_to_service`, `write_off`, or a reversal of one.
+`status` is server-derived; only `"canceled"` is honored.
 
-`dates.start` is honored on update only when the record has no sources
-(`sources.length === 0` — manually created / ad-hoc). Source-bound records
-(booking PUT or order check-in lineage) reject `dates.start` updates with a
-400 — the start there reflects a real ledger event recorded by the upstream
-writer, and operator-side drift would desync the OOS from the source's
-audit trail.
+`reason` edits the record IN PLACE, and only among the flag reasons: a
+`lost` ↔ other change is a change of PLACE, not of reason (R3). The writer
+records it as a `flag` `{r → r′}`, so the journal keeps the history.
+
+`dates.start` is honored only on a record with no sources (ad-hoc); a
+source-bound record's start reflects the upstream event that pinned it.
 
 ```ts
 interface UpdateOutOfServiceInputType {
-  status?: OOSStatusType;
+  status?: indexedAccess;
+  reason?: OOSFlagReasonType;
   breakdown?: OOSBreakdown;
   dates?: typeLiteral;
-  stores?: OOSStore[];
+  destination?: typeLiteral | null;
+  supplier?: typeLiteral | null;
+  uuid_session: string;
   version: number;
 }
 ```
@@ -12659,7 +12744,7 @@ deliberately shorter than the transaction name (`create-org:*` under
 `create-organization`). Read the prefix as a namespace, never as a join key.
 
 ```ts
-type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "create-out-of-service-record:sources-to-record" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:transactions-to-ledger" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock";
+type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:transactions-to-ledger" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock";
 ```
 
 ### `TransactionDefinition`
@@ -13702,6 +13787,14 @@ interface NamePartsLike {
 }
 ```
 
+### `OOSFlagReasonType`
+
+A reason a unit can be flagged for on a shelf.
+
+```ts
+type OOSFlagReasonType = indexedAccess;
+```
+
 ### `OOSReasonEnum`
 
 Zod schema for OOSReasonType.
@@ -13716,6 +13809,18 @@ Allowed values for out-of-service reason.
 
 ```ts
 type OOSReasonType = indexedAccess;
+```
+
+### `OOS_FLAG_REASONS`
+
+The reasons a unit can be FLAGGED for while it stays on a shelf — every
+reason but `lost`. Owner, 2026-09-25: a lost unit is on no shelf anywhere,
+while a damaged, cleaning or maintenance unit has a location. So `lost` is a
+PLACE (the unit stands at its out-of-service record) and these three are a
+STATE. The `flag` movement and an in-place reason edit take these only.
+
+```ts
+const OOS_FLAG_REASONS: "cleaning" | "damaged" | "maintenance"[];
 ```
 
 ### `OrderDerivedOrgPath`
@@ -14875,6 +14980,14 @@ interface BookingDestinationRef {
   uid: string;
   address: AddressType | null;
 }
+```
+
+### `BookingDestinationRefSchema`
+
+Zod schema for BookingDestinationRef — also the out-of-service record's `destination`.
+
+```ts
+const BookingDestinationRefSchema: z.ZodType<BookingDestinationRef>;
 ```
 
 ### `BookingSchema`
@@ -18610,25 +18723,32 @@ interface CreateOutOfServiceInputType {
   quantity: number;
   dates: typeLiteral;
   sources?: DocSourceType[];
-  stores?: OOSStore[];
-  crms_id?: number | null;
-  crms_stock_level_id?: number | null;
+  uuid_session: string;
+  allocations?: MovementAllocationInputType[];
+  destination?: typeLiteral | null;
+  supplier?: typeLiteral | null;
 }
 ```
 
 ### `OOSBreakdown`
 
-Per-phase quantity breakdown — sum equals top-level `quantity`.
+Per-bucket quantities. Σ ≤ `quantity` — the shortfall is "not yet in effect".
 
 ```ts
 interface OOSBreakdown {
-  draft: number;
-  planned: number;
-  active: number;
-  blocked: number;
+  flagged: number;
+  away: number;
   written_off: number;
   returned_to_service: number;
 }
+```
+
+### `OOSBreakdownKeyType`
+
+One out-of-service breakdown bucket.
+
+```ts
+type OOSBreakdownKeyType = indexedAccess;
 ```
 
 ### `OOSBreakdownSchema`
@@ -18643,9 +18763,9 @@ const OOSBreakdownSchema: z.ZodType<OOSBreakdown>;
 
 Date object — booking-style start/end with paired Firestore timestamps.
 
-`start` is nullable for `draft` records (operator composing) and `planned`
-records (scheduled maintenance with no pinned start instant). Once the
-record reaches `active`, `start` should be set (writer enforces).
+`start` is the instant the units went out of service — or, for a record not
+yet in effect, will. `end` is when they are due back (a vendor trip) or came
+back.
 
 ```ts
 interface OOSDates {
@@ -18666,7 +18786,7 @@ const OOSStatusEnum: z.ZodType<OOSStatusType>;
 
 ### `OOSStatusType`
 
-Allowed out-of-service statuses. Server-derived from breakdown + number + canceled_at; only "canceled" is operator-set.
+Allowed out-of-service statuses. See {@link OOS_STATUSES}.
 
 ```ts
 type OOSStatusType = indexedAccess;
@@ -18701,40 +18821,41 @@ interface OOSStoreLocation {
 }
 ```
 
-### `OOSTransaction`
+### `OOS_BREAKDOWN_KEYS`
 
-A transaction entry within an out-of-service record.
+Where a record's units are — see the module docblock's table.
 
 ```ts
-interface OOSTransaction {
-  crms_id?: number | null;
-  crms_quarantine_id?: number | null;
-  crms_stock_level_id?: number | null;
-  crms_stock_level_uid?: string;
-  date: string;
-  date_fs: FirestoreTimestampType;
-  quantity: number;
-  source: DocSourceType;
-  type: OOSTransactionTypeType;
-}
+const OOS_BREAKDOWN_KEYS: "flagged" | "away" | "written_off" | "returned_to_service"[];
 ```
 
-### `OOSTransactionTypeEnum`
+### `OOS_BREAKDOWN_LABELS`
 
-Zod schema for OOSTransactionTypeType.
+Operator-facing labels, one per {@link OOS_BREAKDOWN_KEYS} member.
 
 ```ts
-const OOSTransactionTypeEnum: z.ZodType<OOSTransactionTypeType>;
+const OOS_BREAKDOWN_LABELS: Readonly<Record<OOSBreakdownKeyType, string>>;
 ```
 
-### `OOSTransactionTypeType`
+### `OOS_STATUSES`
 
-Allowed types for an `OOSTransaction`. Terminal types match the breakdown
-keys 1:1 — a transaction with `type === "written_off"` and `quantity === N`
-corresponds to `breakdown.written_off += N`.
+Derived, never client-set, by `deriveOOSStatus` (`@cfs/core/utils/out-of-service`):
+`canceled` once `canceled_at` is set, `complete` once every unit is written
+off or back in service, `active` otherwise.
+
+`active` rather than `open`: orders, bookings, cards and recurrences all say
+`active` for "in progress".
 
 ```ts
-type OOSTransactionTypeType = indexedAccess;
+const OOS_STATUSES: "active" | "complete" | "canceled"[];
+```
+
+### `OOS_USER_STATUSES`
+
+The only status a client may ask for; the writer translates it into `canceled_at`.
+
+```ts
+const OOS_USER_STATUSES: "canceled"[];
 ```
 
 ### `OutOfService`
@@ -18753,6 +18874,9 @@ interface OutOfService {
   canceled_at: FirestoreTimestampType | null;
   organization: typeLiteral | null;
   dates: OOSDates;
+  destination: BookingDestinationRef | null;
+  uid_destination: string | null;
+  supplier: UidNameRefType | null;
   sources: DocSourceType[];
   query_by_sources: string[];
   crms_id?: number | null;
@@ -18760,7 +18884,6 @@ interface OutOfService {
   stores: OOSStore[];
   query_by_uid_store: string[];
   query_by_uid_location: string[];
-  transactions?: OOSTransaction[];
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -18790,24 +18913,27 @@ const UpdateOutOfServiceInput: z.ZodType<UpdateOutOfServiceInputType>;
 
 Input for updating an out-of-service record.
 
-`breakdown` (when supplied) must be the complete next state — the writer
-enforces `sum(breakdown) === quantity`. `status` is server-derived; only
-`"canceled"` is honored from the client and translated into
-`canceled_at = now()`.
+`breakdown` (when supplied) is the complete next state, Σ ≤ `quantity`. The
+writer turns each bucket change into the movement that makes it true —
+`flag`, `send_away`, `return_to_service`, `write_off`, or a reversal of one.
+`status` is server-derived; only `"canceled"` is honored.
 
-`dates.start` is honored on update only when the record has no sources
-(`sources.length === 0` — manually created / ad-hoc). Source-bound records
-(booking PUT or order check-in lineage) reject `dates.start` updates with a
-400 — the start there reflects a real ledger event recorded by the upstream
-writer, and operator-side drift would desync the OOS from the source's
-audit trail.
+`reason` edits the record IN PLACE, and only among the flag reasons: a
+`lost` ↔ other change is a change of PLACE, not of reason (R3). The writer
+records it as a `flag` `{r → r′}`, so the journal keeps the history.
+
+`dates.start` is honored only on a record with no sources (ad-hoc); a
+source-bound record's start reflects the upstream event that pinned it.
 
 ```ts
 interface UpdateOutOfServiceInputType {
-  status?: OOSStatusType;
+  status?: indexedAccess;
+  reason?: OOSFlagReasonType;
   breakdown?: OOSBreakdown;
   dates?: typeLiteral;
-  stores?: OOSStore[];
+  destination?: typeLiteral | null;
+  supplier?: typeLiteral | null;
+  uuid_session: string;
   version: number;
 }
 ```
@@ -20190,7 +20316,7 @@ signed lines, grouped with its siblings by a client-minted `uuid_session`.
 The collection keeps its name — the journal was migrated in place — but the
 document is a `Movement`, not the old current-state `Transaction`.
 
-## Three axes
+## Four axes
 
 Each answers an independent question about the same physical unit:
 
@@ -20199,6 +20325,11 @@ Each answers an independent question about the same physical unit:
 | `custody`  | How far through this order is it?     | `booking.breakdown` — the seven keys      |
 | `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |
 | `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |
+| `service`  | Is it out of service, and why?        | `out_of_service_breakdown`; per-shelf OOS |
+
+`service` is the newest and the only optional one: movements written before
+it existed carry no key, and read as "no service change" — see
+{@link MovementServiceType}.
 
 `cost` is **cost only, never revenue** — customer-facing money lives in Xero;
 the only money here is inventory's carrying value.
@@ -20386,7 +20517,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service" | "flag" | "send_away"[];
 ```
 
 ### `Movement`
@@ -20402,6 +20533,7 @@ interface Movement {
   type: MovementTypeType;
   quantity: number;
   custody: MovementCustodyType | null;
+  service?: MovementServiceType | null;
   cost: MovementCostType | null;
   lines: MovementLineType[];
   date: string;
@@ -20465,6 +20597,7 @@ interface MovementContract {
   cost: "required" | "forbidden";
   places: typeLiteral | null;
   booking: "required" | "forbidden" | "optional";
+  service: "required" | "forbidden" | "optional";
 }
 ```
 
@@ -20560,6 +20693,48 @@ Zod schema for a Movement.
 
 ```ts
 const MovementSchema: z.ZodType<Movement>;
+```
+
+### `MovementService`
+
+Zod schema for a service transition.
+
+```ts
+const MovementService: z.ZodType<MovementServiceType>;
+```
+
+### `MovementServiceType`
+
+The out-of-service reason on each side of this event — `null` on a side means
+"in service" there.
+
+Named `service` and deliberately NOT `reason`, for the reason `custody` is not
+`status`: `OutOfService.reason` is a different field (the record's CURRENT
+reason), and `service: {to: "damaged"}` must not misread as it.
+
+It answers per line ENDPOINT, by the kind of place the endpoint is:
+
+- at an `out-of-service` record, the side's reason is the bucket the units
+  are counted in while they stand there (a `lost` unit, a unit at a vendor);
+- at a `locations` shelf, it is the FLAG the units carry on that shelf, and
+  it moves the shelf's own `quantity_out_of_service` as well as the bucket;
+- at a booking or outside ownership it must be `null`: units at a customer or
+  gone are not out of service.
+
+So `send_away` of a flagged unit is `{damaged → damaged}`: the shelf's flag
+comes off and the record's placement goes on, and the `damaged` bucket nets
+to zero. See `deriveServiceQuantities` (`utils/movements.ts`).
+
+⚠️ **Optional on the document** — movements written before this axis carry
+no key, and read as "no service change". Their in-place damage is carried by
+`custody.to === "damaged"` and their placement reason by the out-of-service
+record, exactly as before; the fold keeps both paths.
+
+```ts
+interface MovementServiceType {
+  from: OOSReasonType | null;
+  to: OOSReasonType | null;
+}
 ```
 
 ### `MovementTypeEnum`
@@ -21237,6 +21412,8 @@ interface OutOfServiceDocument {
   status: string;
   quantity: number;
   breakdown: typeLiteral;
+  uid_destination?: string;
+  supplier?: typeLiteral;
   organization?: typeLiteral;
   dates: typeLiteral;
   stores?: Array<typeLiteral>;
@@ -31456,7 +31633,7 @@ Returning the side rather than letting callers decide is the point: the client
 sends a direction-agnostic `[{uid_location, quantity}]` and never has to know
 which way a type moves.
 
-### `applyMovementToLedger(ledger: InventoryLedger, movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody" | "reverses">, placements: ReadonlyMap<string, LocationPlacement>, now: indexedAccess, _: unknown): LedgerFoldResult`
+### `applyMovementToLedger(ledger: InventoryLedger, movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody" | "reverses" | "service">, placements: ReadonlyMap<string, LocationPlacement>, now: indexedAccess, _: unknown): LedgerFoldResult`
 
 Fold one movement onto a ledger, returning a NEW ledger.
 
@@ -31504,55 +31681,69 @@ The previous ledger fold did exactly that: it read the stored
 `average_unit_cost` (already quantized) and multiplied. Here the division
 happens last, on exact integer cents.
 
-### `deriveServiceQuantities(ledger: InventoryLedger, lines: readonly MovementLineType[], custody: MovementCustodyType | null, reason: keyof indexedAccess | null): Pick<InventoryLedger, "quantity_in_service" | "quantity_out_of_service" | "out_of_service_breakdown"> & typeLiteral`
+### `deriveServiceQuantities(ledger: InventoryLedger, movement: Pick<Movement, "lines" | "custody" | "service">, reason: keyof indexedAccess | null): Pick<InventoryLedger, "quantity_in_service" | "quantity_out_of_service" | "out_of_service_breakdown"> & typeLiteral`
 
-`quantity_in_service` and `quantity_out_of_service` from placement kind.
+`quantity_in_service`, `quantity_out_of_service` and the per-reason
+breakdown, after one movement.
 
 These moved in exact lockstep with `quantity_held` before the journal — so
 `in_service` always equalled `held` — while `out_of_service` was written once
-as zero at ledger creation and never moved again, meaning the ledger reported
-every product as 100% in service. Under the line model they are derived:
-units at a `locations` doc or a `booking` are in service, units at an
-`out-of-service` record are not.
+as zero at ledger creation and never moved again. Under the line model they
+are derived, one line ENDPOINT at a time:
 
-🔴 **TWO terms, because out-of-service is a PLACE for `lost` and a STATE for
-`damaged`.** A damaged unit stays on its shelf — see `CUSTODY_PLACE_KINDS` —
-so it never touches an `out-of-service` place and the endpoint term alone
-cannot see it. Reading placement alone would report a shelf full of broken
-units as fully in service.
+- an endpoint at an `out-of-service` record moves the bucket of the reason
+  its units are counted under there — `lost`, or a unit at a vendor (a
+  PLACE);
+- an endpoint at a shelf moves the bucket of the flag its units carry there
+  — `damaged`, `cleaning`, `maintenance` in the building (a STATE);
+- `+q` on a `to` side, `−q` on a `from` side.
 
-🔴 **The two terms ARE guarded, and the guard is load-bearing on stored data.**
-Rule 3 of the balance checker refuses a movement that both carries
-`custody: "damaged"` and names an `out-of-service` place — so for anything
-written under this contract the terms are disjoint by construction and the
-guard is dead weight. **But rule 3 only ever ran at WRITE time, under the
-table it had then.** Measured 2026-09-19: all 4 `mark_damaged` movements in
-prod and all 4 in dev are `bookings → out-of-service` carrying
-`custody.to === "damaged"`, because that is what the old model asked for.
-Every one of them satisfies BOTH terms, and replaying one without the guard
-doubles its contribution — `audit-ledger-replay` and
-`audit-unjournaled-consumption` both fold stored movements through this
-function.
+So one rule covers every shape: a flag `{null→r}` is `+q r`; a reclassify
+`{r→r′}` is `−q r, +q r′`; a clear `{r→null}` is `−q r`; a `send_away` of a
+flagged unit `{r→r}` is `−q r` at the shelf and `+q r` at the record, net 0;
+a `mark_lost` is `+q lost` at the record. Which reason each endpoint carries
+is {@link endpointServiceReason}'s answer.
 
-⚠️ So the guard is not defensive coding: a legacy row keeps being counted
-ONCE, by placement, which is the answer that was correct when it was written
-and is still the only answer recoverable from it. The shelf those units are
-on is not in the document and cannot be reconstructed, which is exactly why
-this model had to land before `mark_damaged` became operator-reachable.
-
-⚠️ This is an **extension** of the placement term and not a replacement of
-it — `lost` is still a genuine movement to an `out-of-service` record, and
-dropping the endpoint term would stop counting every lost unit.
-
-`out_of_service_breakdown` needs the OOS record's `reason`, which this module
-cannot read, so the caller supplies it — see `applyOutOfServiceReason`.
+🔴 **Out-of-service was a PLACE for `lost` and a STATE for `damaged` before
+this axis existed, and this is still true.** A damaged unit stays on its
+shelf (`CUSTODY_PLACE_KINDS`), so reading placement alone would report a
+shelf full of broken units as fully in service. The endpoint rule counts it
+at the shelf; an off-shelf unit is counted at the record; no endpoint is
+both.
 
 **Parameters**
 
-- `custody` — The movement's custody axis, or `null` when it has none.
-Required rather than optional: a forgotten argument would silently drop the
-in-place term, which is the exact failure this parameter exists to remove
-and one that reads as "no damage recorded" rather than as an error.
+- `movement` — Its `lines`, `custody` and `service`. `custody` and
+`service` are required keys of the argument (though `service` may be
+absent on a stored document): a forgotten custody drops the legacy
+in-place carrier silently, which reads as "no damage recorded" rather than
+as an error.
+
+### `endpointServiceReason(movement: Pick<Movement, "custody" | "service">, side: "from" | "to", kind: "locations" | "out-of-service", fallback: keyof indexedAccess | null): keyof indexedAccess | null`
+
+The out-of-service reason a line endpoint's units carry on one side of a
+movement, or `null` for "in service there".
+
+⭐ **With a `service` axis the axis answers, whatever the place.** At an
+out-of-service record it is the bucket the units are counted under while
+they stand there; at a shelf it is the flag they carry on it; at a booking or
+outside ownership `checkMovementContract` rule 4 has already refused
+anything but `null`.
+
+**Without one — every movement written before the axis — the two legacy
+carriers answer, one per place kind:**
+- at a record: `fallback`, the RECORD's reason, which only the caller can
+  read (a `mark_lost`'s `lost`, a record-driven write-off's `oos.reason`);
+- at a shelf: `custody.to/from === "damaged"` — a `mark_damaged` lands its
+  unit on a shelf, flagged, and its undo takes the flag back off.
+
+🔴 **The legacy carriers are disjoint by place kind, and that is what keeps
+the 8 pre-model `mark_damaged` rows counted ONCE.** Those rows are
+`bookings → out-of-service` with `custody.to === "damaged"` (measured
+2026-09-19, 4 prod + 4 dev). They name no shelf, so the custody carrier never
+fires for them and the record carrier counts them, exactly as it did when
+they were written. The old two-term fold needed an explicit guard for this;
+keying on the endpoint's place kind makes it structural.
 
 ### `heldDelta(line: MovementLineType): number`
 
@@ -31631,6 +31822,35 @@ bill?"*, never for classifying a stored movement. It is deliberately NOT
 optional-with-a-default: a forgotten argument defaulting to the forward
 direction is precisely the silent wrong answer this parameter exists to
 remove, so every call site is made to state which question it is asking.
+
+## `@cfs/core/utils/out-of-service`
+
+Out-of-service record helpers — the status rule and the breakdown sums.
+
+`deriveOOSStatus` used to live in api-cloudrun `src/services/outOfService.ts`
+while the booking path wrote a literal `status: "active"` beside it. One rule,
+one author: both writers and the manager's preview read this.
+
+### `deriveOOSStatus(record: Pick<OutOfService, "quantity" | "breakdown" | "canceled_at">): OOSStatusType`
+
+The record's status, derived — never client-set.
+
+- `canceled` once `canceled_at` is set;
+- `complete` once every unit is written off or back in service;
+- `active` otherwise — including a record not yet in effect, whose units are
+  in no bucket.
+
+The old `number` parameter is gone: it existed only to tell `draft` from
+`planned`, and neither is a status any more.
+
+### `emptyOOSBreakdown(): OOSBreakdown`
+
+A breakdown with every bucket at zero.
+
+### `sumOOSBreakdown(breakdown: OOSBreakdown): number`
+
+Units the breakdown places. Σ ≤ `quantity`: the shortfall is a record not yet
+in effect (a future start), whose units are still in service on their shelf.
 
 ## `@cfs/core/utils/order-lines`
 

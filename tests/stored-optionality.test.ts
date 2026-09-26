@@ -95,6 +95,10 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["bookings.destinations.collection.address.user_coordinates", "pending-census"],
   ["bookings.destinations.delivery.address.address_coordinates", "pending-census"],
   ["bookings.destinations.delivery.address.user_coordinates", "pending-census"],
+  // The same `Address` shape, reused by the out-of-service record's vendor
+  // `destination` (2026-09-25) — inherited, not a new decision.
+  ["out-of-service.destination.address.address_coordinates", "pending-census"],
+  ["out-of-service.destination.address.user_coordinates", "pending-census"],
   ["cards.destination.address.address_coordinates", "pending-census"],
   ["cards.destination.address.user_coordinates", "pending-census"],
   ["credit-notes.organization.billing_address", "pending-census"],
@@ -175,7 +179,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["orders.items[].price.replacement_cents", "array-member-uncensusable"],
   ["out-of-service.sources[].label", "array-member-uncensusable"],
   ["out-of-service.stores[].locations[].max", "array-member-uncensusable"],
-  ["out-of-service.transactions[].source.label", "array-member-uncensusable"],
   ["products.component_of[].price.base_percent", "array-member-uncensusable"],
   ["products.component_of[].price.replacement_cents", "array-member-uncensusable"],
   ["products.components[].price.base_percent", "array-member-uncensusable"],
@@ -202,9 +205,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["orders.organization.crms_id", "crms-pending-removal"],
   ["out-of-service.crms_id", "crms-pending-removal"],
   ["out-of-service.crms_stock_level_id", "crms-pending-removal"],
-  ["out-of-service.transactions[].crms_id", "crms-pending-removal"],
-  ["out-of-service.transactions[].crms_quarantine_id", "crms-pending-removal"],
-  ["out-of-service.transactions[].crms_stock_level_id", "crms-pending-removal"],
   ["products.component_of[].crms_accessory_id", "crms-pending-removal"],
   ["products.components[].crms_accessory_id", "crms-pending-removal"],
   ["products.crms_linked_rental_id", "crms-pending-removal"],
@@ -226,6 +226,11 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["products.uid_tax_class", "mid-expand"],
   ["webshop-products.tax_class_name", "mid-expand"],
   ["webshop-products.uid_tax_class", "mid-expand"],
+  // The movement `service` axis (api-cloudrun#768, 2026-09-25). ~1,400 movements
+  // per env predate it; `movementScaffold` stamps it on every new write. It can
+  // be contracted to required-nullable once a census finds no absent key — the
+  // #1088 journal rebuild rewrites the whole corpus, which is the natural moment.
+  ["transactions.service", "mid-expand"],
   // ── refused — a written refusal sits beside the declaration, with its corpus
   //    count. See `src/schemas/supplier.ts`.
   ["transactions.supplier", "refused:no-writer-yet"],

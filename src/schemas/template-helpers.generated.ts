@@ -192,6 +192,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "organizations": [
     { name: "composeOrgName", expr: "it.organizations.composeOrgName(path, arg2)", desc: "Render an organization node's display name from its `path`.", returns: "string" },
   ],
+  "out-of-service": [
+
+  ],
   "pick-sheet-fold": [
     { name: "chooseBookingOwner", expr: "it.pick-sheet-fold.chooseBookingOwner(occurrences)", desc: "Which of an aggregate booking's occurrences carries its quantities.", returns: "T | null" },
     { name: "compareSheetOrders", expr: "it.pick-sheet-fold.compareSheetOrders(a, b)", desc: "The sheet's total order over orders. Exported so a pager sorts identically.", returns: "number" },
