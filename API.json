@@ -16,7 +16,7 @@
           "kind": "variable",
           "name": "ACTIVITY_FEED_PERMISSIONS",
           "declaration": "const ACTIVITY_FEED_PERMISSIONS: readonly Permission[];",
-          "doc": "The DISTINCT permissions a feed row can carry — the universe a client\nintersects against.\n\n⚠️ **22, not 23** — `templates` and `template-components` both map to\n`templates.read`. Derived rather than listed so it cannot disagree with the\nmap above; the COUNT is asserted in `tests/activity.test.ts`, because the\nnumber is the thing that has to stay under Firestore's `in` cap of 30 and a\ncomment cannot notice when it stops being true.\n\n🔴 **The cap binds on the ADMIN first**, which is the counter-intuitive half:\nthe feed breaks for the most privileged user, because they are the only one\nholding enough permissions to exceed it. `manager/firestore.rules` gates **34\ndistinct permissions** across 42 collection rules (measured 2026-09-05), so\n\"one permission per readable collection\" is *already* over the cap by four —\nonly the feed's narrower scope keeps it under, and every new actor-carrying\ncollection spends one of the 8 spare."
+          "doc": "The DISTINCT permissions a feed row can carry — the universe a client\nintersects against.\n\n⚠️ **25, not 26** — `templates` and `template-components` both map to\n`templates.read`. Derived rather than listed so it cannot disagree with the\nmap above; the COUNT is asserted in `tests/activity.test.ts`, because the\nnumber is the thing that has to stay under Firestore's `in` cap of 30 and a\ncomment cannot notice when it stops being true.\n\n🔴 **The cap binds on the ADMIN first**, which is the counter-intuitive half:\nthe feed breaks for the most privileged user, because they are the only one\nholding enough permissions to exceed it. `manager/firestore.rules` gates **34\ndistinct permissions** across 42 collection rules (measured 2026-09-05), so\n\"one permission per readable collection\" is *already* over the cap by four —\nonly the feed's narrower scope keeps it under, and every new actor-carrying\ncollection spends one of the 5 spare."
         },
         {
           "kind": "variable",
@@ -1821,7 +1821,7 @@
         {
           "kind": "interface",
           "name": "Fulfillment",
-          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  due_at: string | null;\n  due_at_fs: FirestoreTimestampType | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by?: ActorRefType | null;\n  updated_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  due_at: string | null;\n  due_at_fs: FirestoreTimestampType | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by: ActorRefType | null;\n  updated_by: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Sanitized order document for the fulfillment client view.\nMirrors the order by uid — one fulfillment doc per order."
         },
         {
@@ -8270,7 +8270,7 @@
         {
           "kind": "interface",
           "name": "Fulfillment",
-          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  due_at: string | null;\n  due_at_fs: FirestoreTimestampType | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by?: ActorRefType | null;\n  updated_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Fulfillment {\n  uid: string;\n  number: number;\n  status: FulfillmentOrderStatusType;\n  organization: typeLiteral;\n  destinations: DocDestinationType[];\n  items: FulfillmentItemType[];\n  subject: string;\n  reference: string | null;\n  due_at: string | null;\n  due_at_fs: FirestoreTimestampType | null;\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  version: number;\n  created_by: ActorRefType | null;\n  updated_by: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Sanitized order document for the fulfillment client view.\nMirrors the order by uid — one fulfillment doc per order."
         },
         {

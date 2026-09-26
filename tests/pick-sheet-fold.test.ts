@@ -145,6 +145,8 @@ function fulfillment(overrides: Partial<Fulfillment> = {}): Fulfillment {
     query_by_contacts: [],
     query_by_dates: [],
     version: 3,
+    created_by: null,
+    updated_by: null,
     created_at: TS,
     updated_at: TS,
     ...overrides,

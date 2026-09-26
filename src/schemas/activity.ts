@@ -101,6 +101,7 @@ const ACTIVITY_SUBJECT_COLLECTIONS = [
   "contacts",
   "credit-notes",
   "department-types",
+  "fulfillments",
   "holiday-definitions",
   "invoices",
   "lists",
@@ -169,6 +170,9 @@ export const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<
   "contacts": "contacts.read",
   "credit-notes": "creditNotes.read",
   "department-types": "departmentTypes.read",
+  // Singular — the rule in `manager/firestore.rules` gates on
+  // `fulfillment.read`, and there is no `fulfillments.read`.
+  "fulfillments": "fulfillment.read",
   // NOT `holidayDefinitions.read` — no such permission exists.
   "holiday-definitions": "holidays.read",
   "invoices": "invoices.read",
@@ -196,7 +200,7 @@ export const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<
  * The DISTINCT permissions a feed row can carry — the universe a client
  * intersects against.
  *
- * ⚠️ **22, not 23** — `templates` and `template-components` both map to
+ * ⚠️ **25, not 26** — `templates` and `template-components` both map to
  * `templates.read`. Derived rather than listed so it cannot disagree with the
  * map above; the COUNT is asserted in `tests/activity.test.ts`, because the
  * number is the thing that has to stay under Firestore's `in` cap of 30 and a
@@ -208,7 +212,7 @@ export const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<
  * distinct permissions** across 42 collection rules (measured 2026-09-05), so
  * "one permission per readable collection" is *already* over the cap by four —
  * only the feed's narrower scope keeps it under, and every new actor-carrying
- * collection spends one of the 8 spare.
+ * collection spends one of the 5 spare.
  */
 export const ACTIVITY_FEED_PERMISSIONS: readonly Permission[] = [
   ...new Set(Object.values(ACTIVITY_READ_PERMISSION_BY_COLLECTION)),

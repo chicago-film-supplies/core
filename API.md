@@ -17,7 +17,7 @@ const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[];
 The DISTINCT permissions a feed row can carry — the universe a client
 intersects against.
 
-⚠️ **22, not 23** — `templates` and `template-components` both map to
+⚠️ **25, not 26** — `templates` and `template-components` both map to
 `templates.read`. Derived rather than listed so it cannot disagree with the
 map above; the COUNT is asserted in `tests/activity.test.ts`, because the
 number is the thing that has to stay under Firestore's `in` cap of 30 and a
@@ -29,7 +29,7 @@ holding enough permissions to exceed it. `manager/firestore.rules` gates **34
 distinct permissions** across 42 collection rules (measured 2026-09-05), so
 "one permission per readable collection" is *already* over the cap by four —
 only the feed's narrower scope keeps it under, and every new actor-carrying
-collection spends one of the 8 spare.
+collection spends one of the 5 spare.
 
 ```ts
 const ACTIVITY_FEED_PERMISSIONS: readonly Permission[];
@@ -4144,8 +4144,8 @@ interface Fulfillment {
   query_by_contacts: string[];
   query_by_dates: string[];
   version: number;
-  created_by?: ActorRefType | null;
-  updated_by?: ActorRefType | null;
+  created_by: ActorRefType | null;
+  updated_by: ActorRefType | null;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
@@ -18513,8 +18513,8 @@ interface Fulfillment {
   query_by_contacts: string[];
   query_by_dates: string[];
   version: number;
-  created_by?: ActorRefType | null;
-  updated_by?: ActorRefType | null;
+  created_by: ActorRefType | null;
+  updated_by: ActorRefType | null;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }

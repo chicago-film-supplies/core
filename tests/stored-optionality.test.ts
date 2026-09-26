@@ -234,8 +234,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   // Fulfillment actors (api-cloudrun#1112, 2026-09-26). Writers stamp both from
   // the API release carrying this beta; the backfill fills the ~1,046 per env
   // that predate it, and then both tighten to required-nullable.
-  ["fulfillments.created_by", "mid-expand"],
-  ["fulfillments.updated_by", "mid-expand"],
   // ── refused — a written refusal sits beside the declaration, with its corpus
   //    count. See `src/schemas/supplier.ts`.
   ["transactions.supplier", "refused:no-writer-yet"],
