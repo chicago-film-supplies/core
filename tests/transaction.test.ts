@@ -18,6 +18,7 @@ import {
   MOVEMENT_CONTRACTS,
   MOVEMENT_TYPES,
   MovementSchema,
+  PutAwayInput,
   type MovementTypeType,
   UpdateTransactionInput,
 } from "../src/schemas/transaction.ts";
@@ -947,4 +948,20 @@ Deno.test("rule 4: a stored movement with no service key still parses", () => {
   const legacy = movement("transfer", { lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_B) } }] });
   delete (legacy as Record<string, unknown>).service;
   assertEquals(MovementSchema.safeParse(legacy).success, true);
+});
+
+Deno.test("PutAwayInput: every line key is required; uid_out_of_service is an answer, null included", () => {
+  const line = { uid_location: "testloc1000000000000", quantity: 2, uid_out_of_service: null };
+  const ok = (lines: unknown[]) =>
+    PutAwayInput.safeParse({
+      uid_product: "testprod100000000000",
+      uuid_session: "9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48",
+      lines,
+    }).success;
+  assertEquals(ok([line]), true, "unflagged units");
+  assertEquals(ok([{ ...line, uid_out_of_service: "testoos1000000000000" }]), true, "one record's flagged units");
+  const { uid_out_of_service: _, ...noRecordKey } = line;
+  assertEquals(ok([noRecordKey]), false, "uid_out_of_service must be present, even as null");
+  assertEquals(ok([]), false, "at least one line");
+  assertEquals(ok([{ ...line, quantity: 0 }]), false, "quantity must be positive");
 });

@@ -200,3 +200,34 @@ Deno.test("UpdateOutOfServiceInput: a reason edit is a flag reason only", () => 
     "only canceled is client-settable",
   );
 });
+
+Deno.test("OOS destination input: { kind: uid } or { kind: address }, or null to clear", () => {
+  const base = {
+    uid_product: "testprod100000000000",
+    reason: "damaged" as const,
+    quantity: 1,
+    dates: {},
+    uuid_session: "9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48",
+  };
+  const address = {
+    city: "Chicago",
+    country_name: "United States",
+    full: "1 Vendor Way, Chicago, IL 60601",
+    name: "1 Vendor Way",
+    postcode: "60601",
+    region: "IL",
+    street: "1 Vendor Way",
+  };
+  const parse = (destination: unknown) => CreateOutOfServiceInput.safeParse({ ...base, destination }).success;
+  assertEquals(parse({ kind: "uid", uid: "testdest100000000000" }), true, "an existing destination");
+  assertEquals(parse({ kind: "address", address }), true, "a new address the server resolves");
+  assertEquals(parse(null), true, "null clears");
+  assertEquals(parse({ uid: "testdest100000000000" }), false, "the discriminator is required");
+  assertEquals(parse({ kind: "uid", uid: "testdest100000000000", address }), false, "one arm's keys only");
+  assertEquals(parse({ kind: "address", address: null }), false, "the address arm refuses null");
+  assertEquals(
+    UpdateOutOfServiceInput.safeParse({ uuid_session: base.uuid_session, version: 1, destination: { kind: "address", address } }).success,
+    true,
+    "update takes the same union",
+  );
+});

@@ -50,6 +50,8 @@ import { z } from "zod";
 import { FirestoreId, OutOfServiceId, ThreadId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
+  Address,
+  type AddressType,
   ActorRef,
   type ActorRefType,
   DocSource,
@@ -302,6 +304,38 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
 
 // ── Inputs ───────────────────────────────────────────────────────────
 
+/**
+ * Where an `away` unit went, as an operator names it: an existing
+ * `destinations` document, or an address the server resolves to one.
+ *
+ * An address goes through the SAME dedupe as an order leg's endpoint
+ * (api-cloudrun `findOrCreateDestination`: mapbox id → coordinates → exact
+ * text), into the ONE `destinations` pool. A destination is an address and
+ * stores no role — the role lives on the reference (an order pair says
+ * "deliver here", the record's `supplier` says who is paid) — so a vendor's
+ * workshop and a customer's stage at one address are one document. Owner
+ * ruling, 2026-09-27.
+ *
+ * A DISCRIMINATED union — `{ kind: "uid", uid }` or `{ kind: "address",
+ * address }` — with no optional keys. The discriminator is what lets the PII
+ * walker (`pii/walker.ts`) pick the address arm and mask it; a plain
+ * `z.union` of `{uid}` / `{address}` has nothing to dispatch on, so the walker
+ * skips it and the address ships raw (`tests/pii.test.ts` caught exactly
+ * that). The address arm refuses `null`, which `Address` alone admits.
+ */
+export type OOSDestinationInputType =
+  | { kind: "uid"; uid: string }
+  | { kind: "address"; address: AddressType };
+
+/** Zod schema for {@link OOSDestinationInputType}. */
+export const OOSDestinationInput: z.ZodType<OOSDestinationInputType> = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("uid"), uid: FirestoreId }),
+  z.strictObject({ kind: z.literal("address"), address: Address }).refine(
+    (d): d is { kind: "address"; address: AddressType } => d.address !== null,
+    { message: "address is required", path: ["address"] },
+  ),
+]);
+
 /** Input for creating an out-of-service record. */
 export interface CreateOutOfServiceInputType {
   uid_product: string;
@@ -322,8 +356,8 @@ export interface CreateOutOfServiceInputType {
    * `stores[]` is derived from its movements.
    */
   allocations?: MovementAllocationInputType[];
-  /** The uid only — the server resolves the snapshot, as for a movement's supplier. */
-  destination?: { uid: string } | null;
+  /** An existing destination or a new address — see {@link OOSDestinationInput}. */
+  destination?: OOSDestinationInputType | null;
   /** The uid only — the server resolves the name. */
   supplier?: { uid: string } | null;
 }
@@ -340,7 +374,7 @@ export const CreateOutOfServiceInput: z.ZodType<CreateOutOfServiceInputType> = z
   sources: z.array(DocSource).optional(),
   uuid_session: z.uuid(),
   allocations: z.array(MovementAllocationInput).min(1).optional(),
-  destination: z.object({ uid: FirestoreId }).nullable().optional(),
+  destination: OOSDestinationInput.nullable().optional(),
   supplier: z.object({ uid: FirestoreId }).nullable().optional(),
 }).refine(
   (t) => !t.allocations || t.quantity === t.allocations.reduce((sum, a) => sum + a.quantity, 0),
@@ -367,7 +401,7 @@ export interface UpdateOutOfServiceInputType {
   reason?: OOSFlagReasonType;
   breakdown?: OOSBreakdown;
   dates?: { start?: string | null; end?: string | null };
-  destination?: { uid: string } | null;
+  destination?: OOSDestinationInputType | null;
   supplier?: { uid: string } | null;
   /** Client-minted per operator action; names the movements this save writes. */
   uuid_session: string;
@@ -383,7 +417,7 @@ export const UpdateOutOfServiceInput: z.ZodType<UpdateOutOfServiceInputType> = z
     start: chicagoInstant().nullable().optional(),
     end: chicagoInstant().nullable().optional(),
   }).optional(),
-  destination: z.object({ uid: FirestoreId }).nullable().optional(),
+  destination: OOSDestinationInput.nullable().optional(),
   supplier: z.object({ uid: FirestoreId }).nullable().optional(),
   uuid_session: z.uuid(),
   version: z.int().min(0),

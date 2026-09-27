@@ -117,6 +117,11 @@ Deno.test("allocationSide follows the contract, so the client stays direction-ag
   assertEquals(allocationSide("mark_damaged"), "to", "booking → shelf, same as check_in");
   assertEquals(allocationSide("mark_lost"), "from", "off a shelf, pending a resolution");
   assertEquals(allocationSide("return_to_service"), "to", "found, and back on a shelf");
+  // A put-away of flagged units moves the flag WITH them (R1): the contract's
+  // two location ends are independently chosen, exactly as a transfer's.
+  // "Fixing" this to "from" would make a travelling flag inexpressible.
+  assertEquals(allocationSide("flag"), "both", "in place, or carried by a put-away");
+  assertEquals(allocationSide("send_away"), "from", "off a shelf, to the record");
 });
 
 // ── Cost: checked against exact rational arithmetic ─────────────────

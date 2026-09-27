@@ -48,7 +48,7 @@
  * @module
  */
 import { z } from "zod";
-import { BookingId, FirestoreId, MovementId } from "./_uid.ts";
+import { BookingId, FirestoreId, MovementId, OutOfServiceId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
@@ -605,6 +605,15 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
   // damaged` changes a custody key and is this movement, while a check-in
   // cleaning flag, a reclassification or a move of flagged units changes none
   // and names its booking in `sources[]` instead.
+  //
+  // ⚠️ **`locations → locations`, the same places as `transfer`, and that is
+  // the model, not a coincidence.** A flag written where the units already sit
+  // has `from.uid === to.uid`; a PUT-AWAY of flagged units (R1, 2026-09-24:
+  // "the flag lands at the destination") has them differ, which is how a flag
+  // travels with the unit instead of staying on the location it left. So
+  // `allocationSide("flag")` answers `"both"`, correctly. The out-of-service
+  // and check-in inputs do NOT route through `allocationSide`: their own
+  // docstrings fix which side their locations name.
   flag: {
     custody: "with_booking",
     cost: "forbidden",
@@ -1559,6 +1568,56 @@ export const CreateStoreTransferInput: z.ZodType<CreateStoreTransferInputType> =
     asset_tags: z.array(z.string()).default([]),
     serial_numbers: z.array(z.string()).default([]),
   }).nullable().optional(),
+});
+
+/**
+ * One line of a put-away: `quantity` units of the product leave the path's
+ * location for `uid_location`.
+ *
+ * `uid_out_of_service` says WHICH units. `null` moves units that are not
+ * flagged, and becomes a `transfer`. A record uid moves THAT record's flagged
+ * units, and becomes a `flag {r → r}` whose ends differ — so the flag travels
+ * with the unit instead of staying on the location it left. It names a record
+ * rather than a reason because one location can hold several records' flagged
+ * units, with different reasons.
+ *
+ * All three keys are required; `null` is an answer, not an absence.
+ */
+export interface PutAwayLineInputType {
+  uid_location: string;
+  quantity: number;
+  uid_out_of_service: string | null;
+}
+
+/** Zod schema for one put-away line. */
+export const PutAwayLineInput: z.ZodType<PutAwayLineInputType> = z.strictObject({
+  uid_location: FirestoreId,
+  quantity: z.number().int().positive(),
+  uid_out_of_service: OutOfServiceId.nullable(),
+});
+
+/**
+ * Input for `POST /locations/{uid}/put-away` — moving one product's units off
+ * a location, typically the store's default location, where every arrival
+ * (check-in, a damaged return, back from a vendor) lands.
+ *
+ * Counting and identifying out-of-service returns happens BEFORE anything is
+ * put away (owner, 2026-09-27), so arrivals land on one known location and
+ * this is the separate step that shelves them. It is also the ONLY route that
+ * moves a flagged unit: a plain `transfer` refuses to take a location below
+ * its flagged count.
+ */
+export interface PutAwayInputType {
+  uid_product: string;
+  uuid_session: string;
+  lines: PutAwayLineInputType[];
+}
+
+/** Zod schema for {@link PutAwayInputType}. */
+export const PutAwayInput: z.ZodType<PutAwayInputType> = z.strictObject({
+  uid_product: FirestoreId,
+  uuid_session: z.uuid(),
+  lines: z.array(PutAwayLineInput).min(1),
 });
 
 // Totality of `MOVEMENT_CONTRACTS` over `MOVEMENT_TYPES`, and of

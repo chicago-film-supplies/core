@@ -837,6 +837,8 @@ export {
   UpdateTransactionInput,
   ReverseTransactionInput,
   CreateStoreTransferInput,
+  PutAwayInput,
+  PutAwayLineInput,
   type Movement,
   type MovementTypeType,
   type MovementContract,
@@ -850,6 +852,8 @@ export {
   type UpdateTransactionInputType,
   type ReverseTransactionInputType,
   type CreateStoreTransferInputType,
+  type PutAwayInputType,
+  type PutAwayLineInputType,
 } from "./transaction.ts";
 
 export {
@@ -869,6 +873,8 @@ export {
   type OOSDates,
   CreateOutOfServiceInput,
   type CreateOutOfServiceInputType,
+  OOSDestinationInput,
+  type OOSDestinationInputType,
   UpdateOutOfServiceInput,
   type UpdateOutOfServiceInputType,
 } from "./out-of-service.ts";

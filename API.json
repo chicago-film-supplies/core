@@ -1149,7 +1149,7 @@
         {
           "kind": "interface",
           "name": "CreateOutOfServiceInputType",
-          "declaration": "interface CreateOutOfServiceInputType {\n  uid_product: string;\n  reason: OOSReasonType;\n  quantity: number;\n  dates: typeLiteral;\n  sources?: DocSourceType[];\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  destination?: typeLiteral | null;\n  supplier?: typeLiteral | null;\n}",
+          "declaration": "interface CreateOutOfServiceInputType {\n  uid_product: string;\n  reason: OOSReasonType;\n  quantity: number;\n  dates: typeLiteral;\n  sources?: DocSourceType[];\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n}",
           "doc": "Input for creating an out-of-service record."
         },
         {
@@ -2779,6 +2779,18 @@
           "doc": "Date object — booking-style start/end with paired Firestore timestamps.\n\n`start` is the instant the units went out of service — or, for a record not\nyet in effect, will. `end` is when they are due back (a vendor trip) or came\nback."
         },
         {
+          "kind": "variable",
+          "name": "OOSDestinationInput",
+          "declaration": "const OOSDestinationInput: z.ZodType<OOSDestinationInputType>;",
+          "doc": "Zod schema for {@link OOSDestinationInputType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "OOSDestinationInputType",
+          "declaration": "type OOSDestinationInputType = typeLiteral | typeLiteral;",
+          "doc": "Where an `away` unit went, as an operator names it: an existing\n`destinations` document, or an address the server resolves to one.\n\nAn address goes through the SAME dedupe as an order leg's endpoint\n(api-cloudrun `findOrCreateDestination`: mapbox id → coordinates → exact\ntext), into the ONE `destinations` pool. A destination is an address and\nstores no role — the role lives on the reference (an order pair says\n\"deliver here\", the record's `supplier` says who is paid) — so a vendor's\nworkshop and a customer's stage at one address are one document. Owner\nruling, 2026-09-27.\n\nA DISCRIMINATED union — `{ kind: \"uid\", uid }` or `{ kind: \"address\",\naddress }` — with no optional keys. The discriminator is what lets the PII\nwalker (`pii/walker.ts`) pick the address arm and mask it; a plain\n`z.union` of `{uid}` / `{address}` has nothing to dispatch on, so the walker\nskips it and the address ships raw (`tests/pii.test.ts` caught exactly\nthat). The address arm refuses `null`, which `Address` alone admits."
+        },
+        {
           "kind": "typeAlias",
           "name": "OOSFlagReasonType",
           "declaration": "type OOSFlagReasonType = indexedAccess;",
@@ -3521,6 +3533,30 @@
           "name": "PropagationStatusType",
           "declaration": "type PropagationStatusType = indexedAccess;",
           "doc": "Status outcome of a propagation rule execution."
+        },
+        {
+          "kind": "variable",
+          "name": "PutAwayInput",
+          "declaration": "const PutAwayInput: z.ZodType<PutAwayInputType>;",
+          "doc": "Zod schema for {@link PutAwayInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "PutAwayInputType",
+          "declaration": "interface PutAwayInputType {\n  uid_product: string;\n  uuid_session: string;\n  lines: PutAwayLineInputType[];\n}",
+          "doc": "Input for `POST /locations/{uid}/put-away` — moving one product's units off\na location, typically the store's default location, where every arrival\n(check-in, a damaged return, back from a vendor) lands.\n\nCounting and identifying out-of-service returns happens BEFORE anything is\nput away (owner, 2026-09-27), so arrivals land on one known location and\nthis is the separate step that shelves them. It is also the ONLY route that\nmoves a flagged unit: a plain `transfer` refuses to take a location below\nits flagged count."
+        },
+        {
+          "kind": "variable",
+          "name": "PutAwayLineInput",
+          "declaration": "const PutAwayLineInput: z.ZodType<PutAwayLineInputType>;",
+          "doc": "Zod schema for one put-away line."
+        },
+        {
+          "kind": "interface",
+          "name": "PutAwayLineInputType",
+          "declaration": "interface PutAwayLineInputType {\n  uid_location: string;\n  quantity: number;\n  uid_out_of_service: string | null;\n}",
+          "doc": "One line of a put-away: `quantity` units of the product leave the path's\nlocation for `uid_location`.\n\n`uid_out_of_service` says WHICH units. `null` moves units that are not\nflagged, and becomes a `transfer`. A record uid moves THAT record's flagged\nunits, and becomes a `flag {r → r}` whose ends differ — so the flag travels\nwith the unit instead of staying on the location it left. It names a record\nrather than a reason because one location can hold several records' flagged\nunits, with different reasons.\n\nAll three keys are required; `null` is an answer, not an absence."
         },
         {
           "kind": "interface",
@@ -4815,7 +4851,7 @@
         {
           "kind": "interface",
           "name": "UpdateOutOfServiceInputType",
-          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  dates?: typeLiteral;\n  destination?: typeLiteral | null;\n  supplier?: typeLiteral | null;\n  uuid_session: string;\n  version: number;\n}",
+          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uuid_session: string;\n  version: number;\n}",
           "doc": "Input for updating an out-of-service record.\n\n`breakdown` (when supplied) is the complete next state, Σ ≤ `quantity`. The\nwriter turns each bucket change into the movement that makes it true —\n`flag`, `send_away`, `return_to_service`, `write_off`, or a reversal of one.\n`status` is server-derived; only `\"canceled\"` is honored.\n\n`reason` edits the record IN PLACE, and only among the flag reasons: a\n`lost` ↔ other change is a change of PLACE, not of reason (R3). The writer\nrecords it as a `flag` `{r → r′}`, so the journal keeps the history.\n\n`dates.start` is honored only on a record with no sources (ad-hoc); a\nsource-bound record's start reflects the upstream event that pinned it."
         },
         {
@@ -8452,7 +8488,7 @@
         {
           "kind": "interface",
           "name": "CreateOutOfServiceInputType",
-          "declaration": "interface CreateOutOfServiceInputType {\n  uid_product: string;\n  reason: OOSReasonType;\n  quantity: number;\n  dates: typeLiteral;\n  sources?: DocSourceType[];\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  destination?: typeLiteral | null;\n  supplier?: typeLiteral | null;\n}",
+          "declaration": "interface CreateOutOfServiceInputType {\n  uid_product: string;\n  reason: OOSReasonType;\n  quantity: number;\n  dates: typeLiteral;\n  sources?: DocSourceType[];\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n}",
           "doc": "Input for creating an out-of-service record."
         },
         {
@@ -8478,6 +8514,18 @@
           "name": "OOSDates",
           "declaration": "interface OOSDates {\n  start: string | null;\n  start_fs: FirestoreTimestampType | null;\n  end: string | null;\n  end_fs: FirestoreTimestampType | null;\n}",
           "doc": "Date object — booking-style start/end with paired Firestore timestamps.\n\n`start` is the instant the units went out of service — or, for a record not\nyet in effect, will. `end` is when they are due back (a vendor trip) or came\nback."
+        },
+        {
+          "kind": "variable",
+          "name": "OOSDestinationInput",
+          "declaration": "const OOSDestinationInput: z.ZodType<OOSDestinationInputType>;",
+          "doc": "Zod schema for {@link OOSDestinationInputType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "OOSDestinationInputType",
+          "declaration": "type OOSDestinationInputType = typeLiteral | typeLiteral;",
+          "doc": "Where an `away` unit went, as an operator names it: an existing\n`destinations` document, or an address the server resolves to one.\n\nAn address goes through the SAME dedupe as an order leg's endpoint\n(api-cloudrun `findOrCreateDestination`: mapbox id → coordinates → exact\ntext), into the ONE `destinations` pool. A destination is an address and\nstores no role — the role lives on the reference (an order pair says\n\"deliver here\", the record's `supplier` says who is paid) — so a vendor's\nworkshop and a customer's stage at one address are one document. Owner\nruling, 2026-09-27.\n\nA DISCRIMINATED union — `{ kind: \"uid\", uid }` or `{ kind: \"address\",\naddress }` — with no optional keys. The discriminator is what lets the PII\nwalker (`pii/walker.ts`) pick the address arm and mask it; a plain\n`z.union` of `{uid}` / `{address}` has nothing to dispatch on, so the walker\nskips it and the address ships raw (`tests/pii.test.ts` caught exactly\nthat). The address arm refuses `null`, which `Address` alone admits."
         },
         {
           "kind": "variable",
@@ -8548,7 +8596,7 @@
         {
           "kind": "interface",
           "name": "UpdateOutOfServiceInputType",
-          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  dates?: typeLiteral;\n  destination?: typeLiteral | null;\n  supplier?: typeLiteral | null;\n  uuid_session: string;\n  version: number;\n}",
+          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uuid_session: string;\n  version: number;\n}",
           "doc": "Input for updating an out-of-service record.\n\n`breakdown` (when supplied) is the complete next state, Σ ≤ `quantity`. The\nwriter turns each bucket change into the movement that makes it true —\n`flag`, `send_away`, `return_to_service`, `write_off`, or a reversal of one.\n`status` is server-derived; only `\"canceled\"` is honored.\n\n`reason` edits the record IN PLACE, and only among the flag reasons: a\n`lost` ↔ other change is a change of PLACE, not of reason (R3). The writer\nrecords it as a `flag` `{r → r′}`, so the journal keeps the history.\n\n`dates.start` is honored only on a record with no sources (ad-hoc); a\nsource-bound record's start reflects the upstream event that pinned it."
         }
       ]
@@ -9286,6 +9334,30 @@
           "name": "PlaceKindType",
           "declaration": "type PlaceKindType = indexedAccess;",
           "doc": "One kind of place a unit can occupy."
+        },
+        {
+          "kind": "variable",
+          "name": "PutAwayInput",
+          "declaration": "const PutAwayInput: z.ZodType<PutAwayInputType>;",
+          "doc": "Zod schema for {@link PutAwayInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "PutAwayInputType",
+          "declaration": "interface PutAwayInputType {\n  uid_product: string;\n  uuid_session: string;\n  lines: PutAwayLineInputType[];\n}",
+          "doc": "Input for `POST /locations/{uid}/put-away` — moving one product's units off\na location, typically the store's default location, where every arrival\n(check-in, a damaged return, back from a vendor) lands.\n\nCounting and identifying out-of-service returns happens BEFORE anything is\nput away (owner, 2026-09-27), so arrivals land on one known location and\nthis is the separate step that shelves them. It is also the ONLY route that\nmoves a flagged unit: a plain `transfer` refuses to take a location below\nits flagged count."
+        },
+        {
+          "kind": "variable",
+          "name": "PutAwayLineInput",
+          "declaration": "const PutAwayLineInput: z.ZodType<PutAwayLineInputType>;",
+          "doc": "Zod schema for one put-away line."
+        },
+        {
+          "kind": "interface",
+          "name": "PutAwayLineInputType",
+          "declaration": "interface PutAwayLineInputType {\n  uid_location: string;\n  quantity: number;\n  uid_out_of_service: string | null;\n}",
+          "doc": "One line of a put-away: `quantity` units of the product leave the path's\nlocation for `uid_location`.\n\n`uid_out_of_service` says WHICH units. `null` moves units that are not\nflagged, and becomes a `transfer`. A record uid moves THAT record's flagged\nunits, and becomes a `flag {r → r}` whose ends differ — so the flag travels\nwith the unit instead of staying on the location it left. It names a record\nrather than a reason because one location can hold several records' flagged\nunits, with different reasons.\n\nAll three keys are required; `null` is an answer, not an absence."
         },
         {
           "kind": "variable",
@@ -14512,7 +14584,7 @@
           "kind": "function",
           "name": "allocationSide",
           "signature": "allocationSide(type: MovementTypeType): \"from\" | \"to\" | \"both\" | null",
-          "doc": "Which side of a line an operator-supplied allocation lands on, per the type's\ncontract. `check_out` is location→booking so an allocation names the source;\n`check_in` is booking→location so it names the destination.\n\nReturning the side rather than letting callers decide is the point: the client\nsends a direction-agnostic `[{uid_location, quantity}]` and never has to know\nwhich way a type moves.",
+          "doc": "Which side of a line an operator-supplied allocation lands on, per the type's\ncontract. `check_out` is location→booking so an allocation names the source;\n`check_in` is booking→location so it names the destination.\n\nReturning the side rather than letting callers decide is the point: the client\nsends a direction-agnostic `[{uid_location, quantity}]` and never has to know\nwhich way a type moves.\n\n⚠️ **`\"both\"` means the contract admits two INDEPENDENTLY chosen sides** —\n`transfer`, and `flag`, whose `from` and `to` differ on a put-away of flagged\nunits. It is not \"one location, read on both ends\": a flag written in place\nmerely happens to choose the same location twice. So do not special-case\n`flag` to `\"from\"` here. A surface that only ever names one side — the\nout-of-service create/update inputs, whose `allocations` are the SOURCE\nlocations by their own docstring — should take its side from that input's\ncontract and not call this function at all.",
           "paramTags": [],
           "returnsTag": null
         },

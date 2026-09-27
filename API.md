@@ -2622,7 +2622,7 @@ interface CreateOutOfServiceInputType {
   sources?: DocSourceType[];
   uuid_session: string;
   allocations?: MovementAllocationInputType[];
-  destination?: typeLiteral | null;
+  destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
 }
 ```
@@ -6384,6 +6384,38 @@ interface OOSDates {
 }
 ```
 
+### `OOSDestinationInput`
+
+Zod schema for {@link OOSDestinationInputType}.
+
+```ts
+const OOSDestinationInput: z.ZodType<OOSDestinationInputType>;
+```
+
+### `OOSDestinationInputType`
+
+Where an `away` unit went, as an operator names it: an existing
+`destinations` document, or an address the server resolves to one.
+
+An address goes through the SAME dedupe as an order leg's endpoint
+(api-cloudrun `findOrCreateDestination`: mapbox id → coordinates → exact
+text), into the ONE `destinations` pool. A destination is an address and
+stores no role — the role lives on the reference (an order pair says
+"deliver here", the record's `supplier` says who is paid) — so a vendor's
+workshop and a customer's stage at one address are one document. Owner
+ruling, 2026-09-27.
+
+A DISCRIMINATED union — `{ kind: "uid", uid }` or `{ kind: "address",
+address }` — with no optional keys. The discriminator is what lets the PII
+walker (`pii/walker.ts`) pick the address arm and mask it; a plain
+`z.union` of `{uid}` / `{address}` has nothing to dispatch on, so the walker
+skips it and the address ships raw (`tests/pii.test.ts` caught exactly
+that). The address arm refuses `null`, which `Address` alone admits.
+
+```ts
+type OOSDestinationInputType = typeLiteral | typeLiteral;
+```
+
 ### `OOSFlagReasonType`
 
 A reason a unit can be flagged for on a shelf.
@@ -8180,6 +8212,64 @@ Status outcome of a propagation rule execution.
 
 ```ts
 type PropagationStatusType = indexedAccess;
+```
+
+### `PutAwayInput`
+
+Zod schema for {@link PutAwayInputType}.
+
+```ts
+const PutAwayInput: z.ZodType<PutAwayInputType>;
+```
+
+### `PutAwayInputType`
+
+Input for `POST /locations/{uid}/put-away` — moving one product's units off
+a location, typically the store's default location, where every arrival
+(check-in, a damaged return, back from a vendor) lands.
+
+Counting and identifying out-of-service returns happens BEFORE anything is
+put away (owner, 2026-09-27), so arrivals land on one known location and
+this is the separate step that shelves them. It is also the ONLY route that
+moves a flagged unit: a plain `transfer` refuses to take a location below
+its flagged count.
+
+```ts
+interface PutAwayInputType {
+  uid_product: string;
+  uuid_session: string;
+  lines: PutAwayLineInputType[];
+}
+```
+
+### `PutAwayLineInput`
+
+Zod schema for one put-away line.
+
+```ts
+const PutAwayLineInput: z.ZodType<PutAwayLineInputType>;
+```
+
+### `PutAwayLineInputType`
+
+One line of a put-away: `quantity` units of the product leave the path's
+location for `uid_location`.
+
+`uid_out_of_service` says WHICH units. `null` moves units that are not
+flagged, and becomes a `transfer`. A record uid moves THAT record's flagged
+units, and becomes a `flag {r → r}` whose ends differ — so the flag travels
+with the unit instead of staying on the location it left. It names a record
+rather than a reason because one location can hold several records' flagged
+units, with different reasons.
+
+All three keys are required; `null` is an answer, not an absence.
+
+```ts
+interface PutAwayLineInputType {
+  uid_location: string;
+  quantity: number;
+  uid_out_of_service: string | null;
+}
 ```
 
 ### `Quote`
@@ -11080,7 +11170,7 @@ interface UpdateOutOfServiceInputType {
   reason?: OOSFlagReasonType;
   breakdown?: OOSBreakdown;
   dates?: typeLiteral;
-  destination?: typeLiteral | null;
+  destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
   uuid_session: string;
   version: number;
@@ -18902,7 +18992,7 @@ interface CreateOutOfServiceInputType {
   sources?: DocSourceType[];
   uuid_session: string;
   allocations?: MovementAllocationInputType[];
-  destination?: typeLiteral | null;
+  destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
 }
 ```
@@ -18951,6 +19041,38 @@ interface OOSDates {
   end: string | null;
   end_fs: FirestoreTimestampType | null;
 }
+```
+
+### `OOSDestinationInput`
+
+Zod schema for {@link OOSDestinationInputType}.
+
+```ts
+const OOSDestinationInput: z.ZodType<OOSDestinationInputType>;
+```
+
+### `OOSDestinationInputType`
+
+Where an `away` unit went, as an operator names it: an existing
+`destinations` document, or an address the server resolves to one.
+
+An address goes through the SAME dedupe as an order leg's endpoint
+(api-cloudrun `findOrCreateDestination`: mapbox id → coordinates → exact
+text), into the ONE `destinations` pool. A destination is an address and
+stores no role — the role lives on the reference (an order pair says
+"deliver here", the record's `supplier` says who is paid) — so a vendor's
+workshop and a customer's stage at one address are one document. Owner
+ruling, 2026-09-27.
+
+A DISCRIMINATED union — `{ kind: "uid", uid }` or `{ kind: "address",
+address }` — with no optional keys. The discriminator is what lets the PII
+walker (`pii/walker.ts`) pick the address arm and mask it; a plain
+`z.union` of `{uid}` / `{address}` has nothing to dispatch on, so the walker
+skips it and the address ships raw (`tests/pii.test.ts` caught exactly
+that). The address arm refuses `null`, which `Address` alone admits.
+
+```ts
+type OOSDestinationInputType = typeLiteral | typeLiteral;
 ```
 
 ### `OOSStatusEnum`
@@ -19108,7 +19230,7 @@ interface UpdateOutOfServiceInputType {
   reason?: OOSFlagReasonType;
   breakdown?: OOSBreakdown;
   dates?: typeLiteral;
-  destination?: typeLiteral | null;
+  destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
   uuid_session: string;
   version: number;
@@ -20945,6 +21067,64 @@ One kind of place a unit can occupy.
 
 ```ts
 type PlaceKindType = indexedAccess;
+```
+
+### `PutAwayInput`
+
+Zod schema for {@link PutAwayInputType}.
+
+```ts
+const PutAwayInput: z.ZodType<PutAwayInputType>;
+```
+
+### `PutAwayInputType`
+
+Input for `POST /locations/{uid}/put-away` — moving one product's units off
+a location, typically the store's default location, where every arrival
+(check-in, a damaged return, back from a vendor) lands.
+
+Counting and identifying out-of-service returns happens BEFORE anything is
+put away (owner, 2026-09-27), so arrivals land on one known location and
+this is the separate step that shelves them. It is also the ONLY route that
+moves a flagged unit: a plain `transfer` refuses to take a location below
+its flagged count.
+
+```ts
+interface PutAwayInputType {
+  uid_product: string;
+  uuid_session: string;
+  lines: PutAwayLineInputType[];
+}
+```
+
+### `PutAwayLineInput`
+
+Zod schema for one put-away line.
+
+```ts
+const PutAwayLineInput: z.ZodType<PutAwayLineInputType>;
+```
+
+### `PutAwayLineInputType`
+
+One line of a put-away: `quantity` units of the product leave the path's
+location for `uid_location`.
+
+`uid_out_of_service` says WHICH units. `null` moves units that are not
+flagged, and becomes a `transfer`. A record uid moves THAT record's flagged
+units, and becomes a `flag {r → r}` whose ends differ — so the flag travels
+with the unit instead of staying on the location it left. It names a record
+rather than a reason because one location can hold several records' flagged
+units, with different reasons.
+
+All three keys are required; `null` is an answer, not an absence.
+
+```ts
+interface PutAwayLineInputType {
+  uid_location: string;
+  quantity: number;
+  uid_out_of_service: string | null;
+}
 ```
 
 ### `ReverseTransactionInput`
@@ -31847,6 +32027,15 @@ contract. `check_out` is location→booking so an allocation names the source;
 Returning the side rather than letting callers decide is the point: the client
 sends a direction-agnostic `[{uid_location, quantity}]` and never has to know
 which way a type moves.
+
+⚠️ **`"both"` means the contract admits two INDEPENDENTLY chosen sides** —
+`transfer`, and `flag`, whose `from` and `to` differ on a put-away of flagged
+units. It is not "one location, read on both ends": a flag written in place
+merely happens to choose the same location twice. So do not special-case
+`flag` to `"from"` here. A surface that only ever names one side — the
+out-of-service create/update inputs, whose `allocations` are the SOURCE
+locations by their own docstring — should take its side from that input's
+contract and not call this function at all.
 
 ### `applyMovementToLedger(ledger: InventoryLedger, movement: Pick<Movement, "type" | "quantity" | "lines" | "cost" | "custody" | "reverses" | "service">, placements: ReadonlyMap<string, LocationPlacement>, now: indexedAccess, _: unknown): LedgerFoldResult`
 

@@ -10,6 +10,17 @@ export interface Store {
   uid: string;
   name: string;
   default: boolean;
+  /**
+   * The store's one default location — and, since 2026-09-27, where EVERY
+   * arrival lands: a check-in, a damaged return, a unit back from a vendor, a
+   * lost unit found. Counting and identifying out-of-service returns happens
+   * before anything is put away, so units arrive on one known location and a
+   * put-away (`POST /locations/{uid}/put-away`) shelves them.
+   *
+   * Read from THIS document, never from a ledger's per-location `default` flag,
+   * which is re-stamped only when that ledger is next touched. `null` means an
+   * arrival at this store is refused, not placed somewhere invented.
+   */
   default_location: UidNameRefType | null;
   /**
    * The `destinations/{uid}` this store sells FROM — its origin for sourcing.
