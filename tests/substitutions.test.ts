@@ -11,6 +11,7 @@ import {
   repointReplaces,
   standInUnits,
   substitutionResync,
+  unresolvedReplaces,
 } from "../src/utils/substitutions.ts";
 import { SubstitutedForList } from "../src/schemas/common.ts";
 import { mapPathsAcrossRebuild } from "../src/utils/item-pairing.ts";
@@ -377,4 +378,40 @@ Deno.test("overclaimedReplacements: a chained claim counts against the earlier s
 
 Deno.test("overclaimedReplacements: a dangling entry is skipped", () => {
   assertEquals(overclaimedReplacements([], [row(["S1", "Y"], 9, [{ path: ["R", "gone"], quantity: 9 }])]), []);
+});
+
+// ── unresolvedReplaces — a dangling pointer is surfaced, not refused (manager#537) ─
+
+Deno.test("unresolvedReplaces: an entry naming a row the document carries is resolved", () => {
+  const rows = [
+    { path: ["L"] },
+    { path: ["L", "X"] },
+    { path: ["S"] },
+    { path: ["S", "Y"], replaces: [{ path: ["L", "X"], quantity: 1, reason: "damaged" as const }] },
+  ];
+  // Population: the document DOES carry a replaces entry, so an empty answer means resolved, not absent.
+  assertEquals(rows.flatMap((r) => r.replaces ?? []).length, 1);
+  assertEquals(unresolvedReplaces(rows), []);
+});
+
+Deno.test("🔴 unresolvedReplaces: an entry naming a row the document no longer carries is reported, with the row carrying it", () => {
+  const rows = [
+    { path: ["L"] },
+    { path: ["S"] },
+    { path: ["S", "Y"], replaces: [
+      { path: ["L", "X"], quantity: 2, reason: "damaged" as const },
+      { path: ["L", "Z"], quantity: 1, reason: "cleaning" as const },
+    ] },
+    { path: ["L", "Z"] },
+  ];
+  assertEquals(unresolvedReplaces(rows), [{ path: ["S", "Y"], entry: { path: ["L", "X"], quantity: 2, reason: "damaged" } }]);
+});
+
+Deno.test("unresolvedReplaces: a path that names a divider is present — presence is by path, not by row type", () => {
+  const rows = [
+    { path: ["L"] },
+    { path: ["L", "G"] },
+    { path: ["S", "Y"], replaces: [{ path: ["L", "G"], quantity: 1, reason: "damaged" as const }] },
+  ];
+  assertEquals(unresolvedReplaces(rows), []);
 });

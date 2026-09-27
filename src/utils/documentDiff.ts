@@ -142,7 +142,7 @@ import type {
   Order,
   OrderDocItemType,
 } from "../schemas/mod.ts";
-import { isDividerItemType, isFulfillableItemType } from "../schemas/mod.ts";
+import { isDividerItemType, isFulfillableItemType, swapReplacementKey } from "../schemas/mod.ts";
 import {
   canonicalizePayload,
   explainInvoiceItemDifferences,
@@ -162,6 +162,7 @@ import {
   isInSubstitutedSubtree,
   isRemovedBySubstitution,
   type MaybeSubstitution,
+  type ReplacesEntry,
   standInUnits,
   type SubstitutionAnchor,
 } from "./substitutions.ts";
@@ -529,9 +530,15 @@ function lineFields(
     const fulfillmentQuantity = (viewed.kind === "fulfillment" ? here : there).quantity ?? 0;
     const orderQuantity = (viewed.kind === "order" ? here : there).quantity ?? 0;
     const expected = expectedFulfillmentQuantity ?? orderQuantity;
-    return fulfillmentQuantity === expected
+    const fields: DocumentDiffField[] = fulfillmentQuantity === expected
       ? []
       : [{ field: "quantity", here: here.quantity ?? null, there: there.quantity ?? null }];
+    // A swap's `replaces` is shared whole with the fulfillment
+    // (`shared: "value"`), so a picker can re-aim it (manager#537).
+    if (replacesDiffer(here, there)) {
+      fields.push({ field: "replaces", here: replacesOf(here), there: replacesOf(there) });
+    }
+    return fields;
   }
   // order ↔ invoice: the badge's comparator and explanation arms, then the owner's field filter.
   const order = (viewed.kind === "order" ? viewed.doc : source.doc) as Order;
@@ -576,6 +583,32 @@ function lineFields(
     // through its arithmetic.
     .filter((f) => !derived.has(f) || termsDiffer(orderLine, invoiceLine, f))
     .map((field) => ({ field, here: readField(here, field), there: readField(there, field) }));
+}
+
+/** A line's `replaces`, with absent read as none. */
+function replacesOf(item: LineItem): ReplacesEntry[] {
+  return [...((item as { replaces?: readonly ReplacesEntry[] }).replaces ?? [])];
+}
+
+/**
+ * Whether two lines' `replaces` differ as MULTISETS keyed by
+ * `swapReplacementKey` — the identity `SwapReplacementList` is unique by — with
+ * the quantity compared per key. Order is not meaning, and absent equals `[]`.
+ */
+function replacesDiffer(a: LineItem, b: LineItem): boolean {
+  const tally = (item: LineItem) => {
+    const m = new Map<string, number>();
+    for (const e of replacesOf(item)) {
+      const k = swapReplacementKey(e);
+      m.set(k, (m.get(k) ?? 0) + e.quantity);
+    }
+    return m;
+  };
+  const x = tally(a);
+  const y = tally(b);
+  if (x.size !== y.size) return true;
+  for (const [k, q] of x) if (y.get(k) !== q) return true;
+  return false;
 }
 
 /**

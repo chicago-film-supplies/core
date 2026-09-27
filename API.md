@@ -31360,6 +31360,17 @@ interface SubstitutionResync {
 }
 ```
 
+### `UnresolvedReplacesEntry`
+
+One `replaces` entry naming a row its own document does not carry.
+
+```ts
+interface UnresolvedReplacesEntry {
+  path: string[];
+  entry: ReplacesEntry;
+}
+```
+
 ### `collectSubstitutionAnchors(rows: readonly MaybeSubstitution[]): SubstitutionAnchor[]`
 
 Reduce a row set to its substitution anchors.
@@ -31599,6 +31610,24 @@ must answer identically.
 - `prevOrderItems` — The order before the edit
 - `nextOrderItems` — The order after it (the same array for a one-order read)
 - `toPath` — Where a previous-order line path sits on the next order, if it moved
+
+### `unresolvedReplaces(rows: ReadonlyArray<typeLiteral>): UnresolvedReplacesEntry[]`
+
+The `replaces` entries of ONE document that name a row that document does
+not carry (manager#537).
+
+`checkSwapReplacements` deliberately does not require the named row to exist
+(api-cloudrun#1114): sales may remove the damaged line from the order while
+the unit is still out, the picker may substitute it away. That is a
+difference to SURFACE, and this is the surfacing half — a self-consistency
+check over one document's rows, not a comparison of two documents, so it is
+not part of `computeDocumentDiffs`.
+
+**Parameters**
+
+- `rows` — One document's items
+
+**Returns** — Every dangling entry, in document order
 
 ## `@cfs/core/utils/money`
 

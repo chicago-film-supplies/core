@@ -14166,6 +14166,12 @@
           "doc": ""
         },
         {
+          "kind": "interface",
+          "name": "UnresolvedReplacesEntry",
+          "declaration": "interface UnresolvedReplacesEntry {\n  path: string[];\n  entry: ReplacesEntry;\n}",
+          "doc": "One `replaces` entry naming a row its own document does not carry."
+        },
+        {
           "kind": "function",
           "name": "collectSubstitutionAnchors",
           "signature": "collectSubstitutionAnchors(rows: readonly MaybeSubstitution[]): SubstitutionAnchor[]",
@@ -14376,6 +14382,19 @@
             }
           ],
           "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "unresolvedReplaces",
+          "signature": "unresolvedReplaces(rows: ReadonlyArray<typeLiteral>): UnresolvedReplacesEntry[]",
+          "doc": "The `replaces` entries of ONE document that name a row that document does\nnot carry (manager#537).\n\n`checkSwapReplacements` deliberately does not require the named row to exist\n(api-cloudrun#1114): sales may remove the damaged line from the order while\nthe unit is still out, the picker may substitute it away. That is a\ndifference to SURFACE, and this is the surfacing half — a self-consistency\ncheck over one document's rows, not a comparison of two documents, so it is\nnot part of `computeDocumentDiffs`.",
+          "paramTags": [
+            {
+              "name": "rows",
+              "doc": "One document's items"
+            }
+          ],
+          "returnsTag": "Every dangling entry, in document order"
         }
       ]
     },

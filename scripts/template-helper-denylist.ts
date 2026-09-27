@@ -647,6 +647,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // The authoring cap on swap claims (api-cloudrun#1116) — a writer's
     // refusal, not something a document renders.
     "overclaimedReplacements",
+    // The manager's dangling-pointer warning (manager#537) — an operator
+    // surface, not something a customer document renders.
+    "unresolvedReplaces",
     "standInUnits",
     "substitutionCredit",
     "substitutionResync",

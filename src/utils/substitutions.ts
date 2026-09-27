@@ -482,6 +482,54 @@ export interface ReplacesEntry {
   readonly reason: OOSReasonType;
 }
 
+/** The join key of a path — `\u0000` cannot occur in a uid. */
+function pathKey(p: readonly string[]): string {
+  return p.join("\u0000");
+}
+
+/**
+ * The paths a document carries, keyed by {@link pathKey}. The ONE answer to
+ * "does this path still exist here", shared by {@link repointReplaces} and
+ * {@link unresolvedReplaces} so the two cannot disagree about a pointer.
+ */
+function presentPaths(rows: ReadonlyArray<{ readonly path: readonly string[] }>): Set<string> {
+  return new Set(rows.filter((r) => r.path.length > 0).map((r) => pathKey(r.path)));
+}
+
+/** One `replaces` entry naming a row its own document does not carry. */
+export interface UnresolvedReplacesEntry {
+  /** The swap's replacement row — the row carrying the entry. */
+  path: string[];
+  entry: ReplacesEntry;
+}
+
+/**
+ * The `replaces` entries of ONE document that name a row that document does
+ * not carry (manager#537).
+ *
+ * `checkSwapReplacements` deliberately does not require the named row to exist
+ * (api-cloudrun#1114): sales may remove the damaged line from the order while
+ * the unit is still out, the picker may substitute it away. That is a
+ * difference to SURFACE, and this is the surfacing half — a self-consistency
+ * check over one document's rows, not a comparison of two documents, so it is
+ * not part of `computeDocumentDiffs`.
+ *
+ * @param rows - One document's items
+ * @returns Every dangling entry, in document order
+ */
+export function unresolvedReplaces(
+  rows: ReadonlyArray<{ readonly path: readonly string[]; readonly replaces?: readonly ReplacesEntry[] }>,
+): UnresolvedReplacesEntry[] {
+  const present = presentPaths(rows);
+  const out: UnresolvedReplacesEntry[] = [];
+  for (const row of rows) {
+    for (const entry of row.replaces ?? []) {
+      if (!present.has(pathKey(entry.path))) out.push({ path: [...row.path], entry });
+    }
+  }
+  return out;
+}
+
 /**
  * A path correspondence across one rebuild — the `toPath` half of
  * `RebuildPathMap` (`@cfs/core/utils/item-pairing`), which is all this needs.
@@ -523,8 +571,8 @@ export function repointReplaces(
   rows: ReadonlyArray<{ readonly path: readonly string[] }>,
   maps: readonly PathForwardMap[] = [],
 ): Array<{ path: string[]; quantity: number; reason: OOSReasonType }> {
-  const key = (p: readonly string[]) => p.join("\u0000");
-  const present = new Set(rows.filter((r) => r.path.length > 0).map((r) => key(r.path)));
+  const key = pathKey;
+  const present = presentPaths(rows);
 
   const merged = new Map<string, { path: string[]; quantity: number; reason: OOSReasonType }>();
   for (const entry of entries) {
@@ -585,7 +633,7 @@ export function overclaimedReplacements(
     readonly replaces?: readonly ReplacesEntry[];
   }>,
 ): OverclaimedRow[] {
-  const key = (p: readonly string[]) => p.join("\u0000");
+  const key = pathKey;
   const claims = (rows: ReadonlyArray<{ readonly replaces?: readonly ReplacesEntry[] }>) => {
     const out = new Map<string, number>();
     for (const row of rows) {
