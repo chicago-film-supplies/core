@@ -67,6 +67,7 @@ export type TransactionId =
   | "reclass-stock"
   // store-transfers.ts
   | "create-store-transfer"
+  | "put-away"
   // products.ts
   | "create-product"
   | "update-product"
@@ -199,6 +200,9 @@ export type RuleId =
   // store-transfers.ts
   | "create-store-transfer:transaction-to-ledger"
   | "create-store-transfer:transaction-to-locations"
+  | "put-away:transaction-to-ledger"
+  | "put-away:transaction-to-locations"
+  | "put-away:transaction-to-out-of-service"
   // products.ts
   | "create-product:product-to-tags"
   | "create-product:product-to-tracking-categories"
