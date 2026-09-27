@@ -18,7 +18,7 @@ import {
   MOVEMENT_CONTRACTS,
   MOVEMENT_TYPES,
   MovementSchema,
-  PutAwayInput,
+  StoreTransferLineInput,
   type MovementTypeType,
   UpdateTransactionInput,
 } from "../src/schemas/transaction.ts";
@@ -163,6 +163,8 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     updated_by: { uid: "test-bot", name: "Test Bot" },
     created_at: mockTimestamp,
     updated_at: mockTimestamp,
+    // A change of service state belongs to a record, named in `sources[]`.
+    sources: ("service" in over ? over.service : serviceFor[type]) ? [{ collection: "out-of-service", uid: OOS }] : [],
     ...over,
   };
 }
@@ -820,18 +822,16 @@ Deno.test("UpdateTransactionInput carries no balance-affecting field", () => {
   }
 });
 
-Deno.test("CreateStoreTransferInput is one event with both sides", () => {
+Deno.test("CreateStoreTransferInput takes explicit lines", () => {
   const input = {
     uid_product: PRODUCT,
-    quantity: 4,
     date: "2026-03-01T00:00:00Z",
     reference: "move",
     uuid_session: SESSION,
-    from: [{ uid_location: LOC_A, quantity: 4 }],
-    to: [{ uid_location: LOC_B, quantity: 4 }],
+    lines: [{ from: LOC_A, to: LOC_B, quantity: 4, oos: null }],
   };
   assertEquals(CreateStoreTransferInput.safeParse(input).success, true);
-  assertEquals(CreateStoreTransferInput.safeParse({ ...input, to: [] }).success, false);
+  assertEquals(CreateStoreTransferInput.safeParse({ ...input, lines: [] }).success, false);
   // No total_cost: a transfer nets to zero on ownership.
   const costed = CreateStoreTransferInput.safeParse({ ...input, total_cost_cents: 10000 });
   assertEquals(
@@ -889,10 +889,7 @@ Deno.test("CreateTransactionInput still accepts no allocations at all", () => {
 // ── rule 4: the service axis ────────────────────────────────────────
 
 Deno.test("rule 4: a type that forbids the axis refuses one", () => {
-  const bad = movement("transfer", {
-    lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_B) } }],
-    service: { from: null, to: "damaged" },
-  });
+  const bad = movement("check_in", { service: { from: null, to: "damaged" } });
   assertEquals(MovementSchema.safeParse(bad).success, false);
 });
 
@@ -906,16 +903,50 @@ Deno.test("rule 4: lost is a PLACE, never a flag on a shelf", () => {
   assertEquals(MovementSchema.safeParse(bad).success, false);
 });
 
-Deno.test("rule 4: a flag that keeps its reason must move", () => {
-  const same = movement("flag", {
+Deno.test("rule 4: a flag is always in place, and must change the reason", () => {
+  const flag = movement("flag", {
     uid_booking: null,
     uid: `${SESSION}|flag|${PRODUCT}`,
     custody: null,
-    service: { from: "damaged", to: "damaged" },
+    service: { from: null, to: "damaged" },
   });
-  assertEquals(MovementSchema.safeParse(same).success, false, "same shelf, same reason: no event");
-  const moved = { ...same, lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_B) } }] };
-  assertEquals(MovementSchema.safeParse(moved).success, true, "moving flagged units is an event");
+  assertEquals(MovementSchema.safeParse(flag).success, true, "flagging units where they stand");
+  const same = { ...flag, service: { from: "damaged", to: "damaged" } };
+  assertEquals(MovementSchema.safeParse(same).success, false, "{r → r} in place changes nothing");
+  const moved = { ...flag, lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_B) } }] };
+  assertEquals(MovementSchema.safeParse(moved).success, false, "moving flagged units is a transfer, never a flag");
+});
+
+Deno.test("rule 4: a transfer carries flagged units with their flag, sourced to ONE record", () => {
+  const plain = movement("transfer", { lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_B) } }] });
+  assertEquals(MovementSchema.safeParse(plain).success, true, "units in service: service null, no record");
+  const flagged = { ...plain, service: { from: "cleaning", to: "cleaning" }, sources: [{ collection: "out-of-service", uid: OOS }] };
+  assertEquals(MovementSchema.safeParse(flagged).success, true, "a record's flagged units, flag and all");
+  assertEquals(
+    MovementSchema.safeParse({ ...flagged, sources: [] }).success,
+    false,
+    "a flagged transfer must name its record",
+  );
+  assertEquals(
+    MovementSchema.safeParse({ ...flagged, sources: [{ collection: "out-of-service", uid: OOS }, { collection: "out-of-service", uid: "testoos2000000000000" }] }).success,
+    false,
+    "ONE record per movement",
+  );
+  assertEquals(
+    MovementSchema.safeParse({ ...flagged, service: { from: null, to: "cleaning" } }).success,
+    false,
+    "a transfer never changes the reason — that is a flag, in place",
+  );
+  assertEquals(
+    MovementSchema.safeParse({ ...flagged, service: { from: "lost", to: "lost" } }).success,
+    false,
+    "lost is a place, never a flag on a shelf",
+  );
+});
+
+Deno.test("rule 4: every change of service state names its record", () => {
+  const unsourced = movement("send_away", { sources: [] });
+  assertEquals(MovementSchema.safeParse(unsourced).success, false);
 });
 
 Deno.test("rule 4: send_away must name the reason at the record", () => {
@@ -944,24 +975,20 @@ Deno.test("rule 4: an axis must name the reason at a record endpoint", () => {
   assertEquals(MovementSchema.safeParse(missing).success, false);
 });
 
-Deno.test("rule 4: a stored movement with no service key still parses", () => {
+Deno.test("rule 4: the service key is always present — backfilled 2026-09-27", () => {
   const legacy = movement("transfer", { lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_B) } }] });
   delete (legacy as Record<string, unknown>).service;
-  assertEquals(MovementSchema.safeParse(legacy).success, true);
+  assertEquals(MovementSchema.safeParse(legacy).success, false, "absent is not a spelling of null");
 });
 
-Deno.test("PutAwayInput: every line key is required; uid_out_of_service is an answer, null included", () => {
-  const line = { uid_location: "testloc1000000000000", quantity: 2, uid_out_of_service: null };
-  const ok = (lines: unknown[]) =>
-    PutAwayInput.safeParse({
-      uid_product: "testprod100000000000",
-      uuid_session: "9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48",
-      lines,
-    }).success;
-  assertEquals(ok([line]), true, "unflagged units");
-  assertEquals(ok([{ ...line, uid_out_of_service: "testoos1000000000000" }]), true, "one record's flagged units");
-  const { uid_out_of_service: _, ...noRecordKey } = line;
-  assertEquals(ok([noRecordKey]), false, "uid_out_of_service must be present, even as null");
-  assertEquals(ok([]), false, "at least one line");
-  assertEquals(ok([{ ...line, quantity: 0 }]), false, "quantity must be positive");
+Deno.test("StoreTransferLineInput: every key is required; oos is an answer, null included", () => {
+  const line = { from: LOC_A, to: LOC_B, quantity: 2, oos: null };
+  const ok = (l: unknown) => StoreTransferLineInput.safeParse(l).success;
+  assertEquals(ok(line), true, "units in service");
+  assertEquals(ok({ ...line, oos: { uid: OOS } }), true, "one record's flagged units");
+  const { oos: _, ...noOos } = line;
+  assertEquals(ok(noOos), false, "oos must be present, even as null");
+  assertEquals(ok({ ...line, oos: { uid: OOS, reason: "cleaning" } }), false, "the client names the record, nothing else");
+  assertEquals(ok({ ...line, to: LOC_A }), false, "a line moves units to a DIFFERENT location");
+  assertEquals(ok({ ...line, quantity: 0 }), false);
 });

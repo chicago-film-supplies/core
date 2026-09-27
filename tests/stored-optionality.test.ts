@@ -230,7 +230,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   // per env predate it; `movementScaffold` stamps it on every new write. It can
   // be contracted to required-nullable once a census finds no absent key — the
   // #1088 journal rebuild rewrites the whole corpus, which is the natural moment.
-  ["transactions.service", "mid-expand"],
   // Fulfillment actors (api-cloudrun#1112, 2026-09-26). Writers stamp both from
   // the API release carrying this beta; the backfill fills the ~1,046 per env
   // that predate it, and then both tighten to required-nullable.

@@ -837,8 +837,7 @@ export {
   UpdateTransactionInput,
   ReverseTransactionInput,
   CreateStoreTransferInput,
-  PutAwayInput,
-  PutAwayLineInput,
+  StoreTransferLineInput,
   type Movement,
   type MovementTypeType,
   type MovementContract,
@@ -852,8 +851,7 @@ export {
   type UpdateTransactionInputType,
   type ReverseTransactionInputType,
   type CreateStoreTransferInputType,
-  type PutAwayInputType,
-  type PutAwayLineInputType,
+  type StoreTransferLineInputType,
 } from "./transaction.ts";
 
 export {

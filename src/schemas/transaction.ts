@@ -350,16 +350,18 @@ export interface MovementContract {
   /** Whether a `uid_booking` subject must, must not, or may appear. */
   booking: "required" | "forbidden" | "optional";
   /**
-   * Whether the {@link MovementServiceType} axis must, must not, or may appear.
+   * Whether the {@link MovementServiceType} axis must be an axis, must be
+   * `null`, or may be either. The KEY is always present; this is about its
+   * VALUE, which is why the third arm is `nullable` and not `optional`.
    *
-   * `optional` only where a movement may or may not change service state:
+   * `nullable` only where a movement may or may not change service state:
    * a `write_off` from a shelf of units that were never flagged changes none,
    * and one of flagged units clears them. `mark_damaged` / `mark_damaged_undo`
    * are `forbidden`, deliberately — their in-place damage is carried by the
    * custody axis (`custody.to === "damaged"`), and a second carrier on the same
    * movement is how a unit gets counted twice.
    */
-  service: "required" | "forbidden" | "optional";
+  service: "required" | "forbidden" | "nullable";
 }
 
 /** The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member. */
@@ -564,16 +566,22 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     cost: "required",
     places: { from: ["out-of-service", "locations"], to: ["outside"] },
     booking: "forbidden",
-    service: "optional",
+    service: "nullable",
   },
   // Nets to zero on ownership, so it has no cost object to mis-gate — which is
   // what made #286 (a costed transfer corrupting the basis) possible.
+  // THE one movement that changes a unit's location (owner, 2026-09-27: one
+  // route moves units between locations). Its `service` is `null` for units
+  // that are in service, or `{r → r}` for one out-of-service record's flagged
+  // units, which travel WITH their flag — and then `sources[]` names that
+  // record, because a location carries one flagged count with no reason and a
+  // record finds its units only through `query_by_sources`.
   transfer: {
     custody: "forbidden",
     cost: "forbidden",
     places: { from: ["locations"], to: ["locations"] },
     booking: "forbidden",
-    service: "forbidden",
+    service: "nullable",
   },
   // The found-and-returned resolution: a unit recorded lost turns up and goes
   // back on a shelf. Until this existed `out-of-service` was a ONE-WAY place —
@@ -598,7 +606,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     cost: "forbidden",
     places: { from: ["out-of-service"], to: ["locations"] },
     booking: "forbidden",
-    service: "optional",
+    service: "nullable",
   },
   // ── out of service ──
   // In place. `with_booking` rather than `forbidden`: a booking `returned →
@@ -606,14 +614,11 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
   // cleaning flag, a reclassification or a move of flagged units changes none
   // and names its booking in `sources[]` instead.
   //
-  // ⚠️ **`locations → locations`, the same places as `transfer`, and that is
-  // the model, not a coincidence.** A flag written where the units already sit
-  // has `from.uid === to.uid`; a PUT-AWAY of flagged units (R1, 2026-09-24:
-  // "the flag lands at the destination") has them differ, which is how a flag
-  // travels with the unit instead of staying on the location it left. So
-  // `allocationSide("flag")` answers `"both"`, correctly. The out-of-service
-  // and check-in inputs do NOT route through `allocationSide`: their own
-  // docstrings fix which side their locations name.
+  // ⚠️ **In place, always** — every line's `from` and `to` are the SAME
+  // location (owner, 2026-09-27). A flag changes what units ARE where they
+  // stand; moving flagged units is a `transfer` carrying `{r → r}`. The places
+  // are `locations → locations` only because a line needs two ends, which is
+  // why `allocationSide("flag")` answers `"both"` without meaning a flag moves.
   flag: {
     custody: "with_booking",
     cost: "forbidden",
@@ -862,11 +867,12 @@ export interface Movement {
   quantity: number;
   custody: MovementCustodyType | null;
   /**
-   * The out-of-service state change, or `null` / absent for none. Absent on
-   * every movement written before the axis existed — see
-   * {@link MovementServiceType}.
+   * The out-of-service state change, or `null` for none — see
+   * {@link MovementServiceType}. ALWAYS present (owner, 2026-09-27): every
+   * stored movement was backfilled to `null` before this tightened, and a
+   * non-null axis names its out-of-service record in `sources[]`.
    */
-  service?: MovementServiceType | null;
+  service: MovementServiceType | null;
   cost: MovementCostType | null;
   /** Physical movement. Empty when nothing moved. */
   lines: MovementLineType[];
@@ -1143,9 +1149,8 @@ function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
 /**
  * Rule 4 of {@link checkMovementContract}: the `service` axis.
  *
- * `service == null` covers both an absent key (a movement written before the
- * axis) and an explicit `null`; a required axis must be present, a forbidden
- * one must not be.
+ * A required axis must be non-null, a forbidden one must be `null`; the key
+ * itself is always present.
  *
  * Then, per line endpoint (see {@link MovementServiceType}): a side at an
  * `out-of-service` record must name the reason the units are counted under
@@ -1159,7 +1164,7 @@ function checkMovementService(
   contract: MovementContract,
   ctx: z.RefinementCtx,
 ): void {
-  const service = m.service ?? null;
+  const service = m.service;
   if (contract.service === "required" && service === null) {
     ctx.addIssue({
       code: "custom",
@@ -1195,14 +1200,57 @@ function checkMovementService(
         });
       }
     }
-    // `{r → r}` changes no state, so it is only a movement if it MOVES.
-    if (forward.from === forward.to && m.lines.some((l) => l.location.from?.uid === l.location.to?.uid)) {
+    // In place, always: moving flagged units is a `transfer` carrying the flag.
+    m.lines.forEach((l, i) => {
+      if (l.location.from?.uid !== l.location.to?.uid) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["lines", i, "location"],
+          message: "a flag changes units where they stand; moving flagged units is a transfer",
+        });
+      }
+    });
+    // …so `{r → r}` in place changes nothing at all.
+    if (forward.from === forward.to) {
       ctx.addIssue({
         code: "custom",
-        path: ["lines"],
-        message: "a flag that keeps its reason must move the units to a different location",
+        path: ["service"],
+        message: "a flag must change the reason: {r → r} in place changes nothing",
       });
     }
+  }
+  if (m.type === "transfer") {
+    // A flagged transfer carries ONE record's units: the same flag reason
+    // leaves and arrives, and that record is named in `sources[]`.
+    if (forward.from === null || forward.from !== forward.to) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["service"],
+        message: "a transfer carries flagged units with their flag: service must be {r → r}",
+      });
+    } else if (!(OOS_FLAG_REASONS as readonly string[]).includes(forward.from)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["service", "from"],
+        message: `a transfer moves units on a shelf; "${forward.from}" is not a flag`,
+      });
+    }
+    if (m.sources.filter((s) => s.collection === "out-of-service").length !== 1) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sources"],
+        message: "a flagged transfer names exactly ONE out-of-service record in sources[]",
+      });
+    }
+  }
+  // Every change of service state belongs to a record — a record finds its
+  // movements only through `query_by_sources`.
+  if (!m.sources.some((s) => s.collection === "out-of-service")) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["sources"],
+      message: `"${m.type}" changes out-of-service state, so sources[] must name its out-of-service record`,
+    });
   }
   if (m.type === "send_away" && forward.to === null) {
     ctx.addIssue({
@@ -1254,11 +1302,10 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   type: MovementTypeEnum.meta({ column: true, label: "Type" }),
   quantity: z.number().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
   custody: MovementCustody.nullable(),
-  // `.nullable().optional()`: ~1,400 movements per env predate the key. It is
-  // "mid-expand" in `tests/stored-optionality.test.ts`; `movementScaffold`
-  // (api-cloudrun) stamps it on every write, so the absent population cannot
-  // grow. No `.default()` — see `tests/inert-defaults.test.ts`.
-  service: MovementService.nullable().optional(),
+  // Required-nullable: backfilled to `null` in both projects on 2026-09-27
+  // (prod 2642/2642, dev 3635/3635) after `movementScaffold` had stamped it on
+  // every write. No `.default()` — see `tests/inert-defaults.test.ts`.
+  service: MovementService.nullable(),
   cost: MovementCost.nullable(),
   lines: z.array(MovementLine).meta({ label: "Line" }),
   date: chicagoInstant().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
@@ -1536,88 +1583,67 @@ export const ReverseTransactionInput: z.ZodType<ReverseTransactionInputType> = z
   date: chicagoInstant().optional(),
 });
 
+/**
+ * One line of a transfer: `quantity` units leave location `from` for location
+ * `to`. `oos` says WHICH units:
+ *
+ *  - `null` — units that are in service;
+ *  - `{ uid }` — THAT out-of-service record's flagged units, which travel with
+ *    their flag. The server writes them as a `transfer {r → r}` naming the
+ *    record in `sources[]`, checks the record has that many flagged units on
+ *    `from`, and re-derives its `stores[]`.
+ *
+ * Every key is required; `null` is an answer. The client sends the record's
+ * identity only — its reason and number are the server's to read.
+ */
+export interface StoreTransferLineInputType {
+  from: string;
+  to: string;
+  quantity: number;
+  oos: { uid: string } | null;
+}
+
+/** Zod schema for {@link StoreTransferLineInputType}. */
+export const StoreTransferLineInput: z.ZodType<StoreTransferLineInputType> = z.strictObject({
+  from: FirestoreId,
+  to: FirestoreId,
+  quantity: z.number().int().positive(),
+  oos: z.strictObject({ uid: OutOfServiceId }).nullable(),
+}).refine((l) => l.from !== l.to, {
+  message: "a transfer line moves units to a DIFFERENT location",
+  path: ["to"],
+});
+
 /** Input for creating a store-to-store transfer. */
 export interface CreateStoreTransferInputType {
   uid_product: string;
-  quantity: number;
   date: string;
   reference: string;
   uuid_session: string;
-  from: MovementAllocationInputType[];
-  to: MovementAllocationInputType[];
+  lines: StoreTransferLineInputType[];
   serialized_details?: { asset_tags: string[]; serial_numbers: string[] } | null;
 }
 
 /**
- * Input schema for a store-to-store transfer.
+ * Input schema for `POST /store-transfers` — THE one route that moves units
+ * between locations (owner, 2026-09-27), in service or flagged.
  *
- * One event, not the old `transfer_increase` + `transfer_decrease` pair:
- * `location: {from, to}` says what two documents used to. `total_cost` is gone —
- * a transfer nets to zero on ownership, so it has no cost object to mis-gate,
- * which is what made #286 possible.
+ * Explicit lines rather than paired `from[]` / `to[]` arrays: one line is one
+ * physical move, so there is no hidden pairing rule, and a line can say whose
+ * flagged units it carries. `total_cost` is gone — a transfer nets to zero on
+ * ownership, so it has no cost object to mis-gate, which is what made #286
+ * possible.
  */
 export const CreateStoreTransferInput: z.ZodType<CreateStoreTransferInputType> = z.object({
   uid_product: FirestoreId,
-  quantity: z.number().int().positive(),
   date: chicagoInstant(),
   reference: z.string(),
   uuid_session: z.uuid(),
-  from: z.array(MovementAllocationInput).min(1),
-  to: z.array(MovementAllocationInput).min(1),
+  lines: z.array(StoreTransferLineInput).min(1),
   serialized_details: z.object({
     asset_tags: z.array(z.string()).default([]),
     serial_numbers: z.array(z.string()).default([]),
   }).nullable().optional(),
-});
-
-/**
- * One line of a put-away: `quantity` units of the product leave the path's
- * location for `uid_location`.
- *
- * `uid_out_of_service` says WHICH units. `null` moves units that are not
- * flagged, and becomes a `transfer`. A record uid moves THAT record's flagged
- * units, and becomes a `flag {r → r}` whose ends differ — so the flag travels
- * with the unit instead of staying on the location it left. It names a record
- * rather than a reason because one location can hold several records' flagged
- * units, with different reasons.
- *
- * All three keys are required; `null` is an answer, not an absence.
- */
-export interface PutAwayLineInputType {
-  uid_location: string;
-  quantity: number;
-  uid_out_of_service: string | null;
-}
-
-/** Zod schema for one put-away line. */
-export const PutAwayLineInput: z.ZodType<PutAwayLineInputType> = z.strictObject({
-  uid_location: FirestoreId,
-  quantity: z.number().int().positive(),
-  uid_out_of_service: OutOfServiceId.nullable(),
-});
-
-/**
- * Input for `POST /locations/{uid}/put-away` — moving one product's units off
- * a location, typically the store's default location, where every arrival
- * (check-in, a damaged return, back from a vendor) lands.
- *
- * Counting and identifying out-of-service returns happens BEFORE anything is
- * put away (owner, 2026-09-27), so arrivals land on one known location and
- * this is the separate step that shelves them. It is also the ONLY route that
- * moves a flagged unit: a plain `transfer` refuses to take a location below
- * its flagged count.
- */
-export interface PutAwayInputType {
-  uid_product: string;
-  uuid_session: string;
-  lines: PutAwayLineInputType[];
-}
-
-/** Zod schema for {@link PutAwayInputType}. */
-export const PutAwayInput: z.ZodType<PutAwayInputType> = z.strictObject({
-  uid_product: FirestoreId,
-  uuid_session: z.uuid(),
-  lines: z.array(PutAwayLineInput).min(1),
 });
 
 // Totality of `MOVEMENT_CONTRACTS` over `MOVEMENT_TYPES`, and of

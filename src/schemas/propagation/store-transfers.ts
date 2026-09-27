@@ -1,5 +1,5 @@
 /**
- * Store-transfer propagation rules — create-store-transfer and put-away.
+ * Store-transfer propagation rules — create-store-transfer.
  *
  * **A transfer is ONE movement now, not a document pair.** It used to be written
  * as a `transfer_decrease` leg out of the source and a `transfer_increase` leg
@@ -149,111 +149,49 @@ const createStoreTransferTransaction: TransactionDefinition = {
   steps: [
     "create-store-transfer:transaction-to-ledger",
     "create-store-transfer:transaction-to-locations",
+    "create-store-transfer:transaction-to-out-of-service",
   ],
 };
 
-// ── put-away ───────────────────────────────────────────────────────
+// ── flagged units ───────────────────────────────────────────────────
 //
-// Every arrival (a check-in, a damaged return, a unit back from a vendor)
-// lands on its store's DEFAULT location, where it is counted and checked;
-// a put-away is the separate step that shelves it (owner, 2026-09-27). Its
-// unflagged units are an ordinary `transfer`. A record's FLAGGED units move as
-// a `flag {r → r}` whose two ends differ, so the flag travels with the unit —
-// and the record's derived `stores[]` follows it. Like a transfer it nets to
-// zero on `quantity_held` and changes no availability answer, so it has no
-// stock rule either.
+// A transfer is THE one movement that changes a unit's location (owner,
+// 2026-09-27). A line naming an out-of-service record moves that record's
+// FLAGGED units: the server writes them as a `transfer {r → r}` sourced to the
+// record, so the flag travels with the unit, and re-derives the record's
+// `stores[]` in the same commit.
 
-const PUT_AWAY_UNFLAGGED: EnforcementRef = {
+const TRANSFER_CARRIES_FLAG: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/locations/putAway.test.ts::put-away of unflagged units is one transfer, net zero on quantity_held",
+  ref: "api-cloudrun/tests/integration/transactions/createStoreTransfer.test.ts::a line naming a record moves its flagged units WITH the flag",
   clause:
-    "the unflagged half — one `transfer` whose lines pair the source location with each destination, leaving `quantity_held` unchanged",
-  gates: true,
-};
-
-const PUT_AWAY_CARRIES_FLAG: EnforcementRef = {
-  kind: "test",
-  ref: "api-cloudrun/tests/integration/locations/putAway.test.ts::put-away of a record's flagged units carries the flag to the destination",
-  clause:
-    "the flagged half — a `flag {r → r}` with `from ≠ to` moves the per-location `quantity_out_of_service` with the units, leaves the ledger's out-of-service total unchanged, and re-derives the record's `stores[]`",
+    "a `transfer {r → r}` sourced to the record moves the per-location `quantity_out_of_service` with the units, leaves the ledger's out-of-service total unchanged, and re-derives the record's `stores[]`",
   gates: true,
 };
 
 const FLAG_NEVER_STRANDED: EnforcementRef = {
   kind: "test",
-  ref: "api-cloudrun/tests/integration/locations/putAway.test.ts::a plain transfer that would strand a flag is refused",
+  ref: "api-cloudrun/tests/integration/transactions/createStoreTransfer.test.ts::moving flagged units as in-service units is refused",
   clause:
-    "the refusal half — `assertLedgerNonNegative` refuses any movement leaving a location with more flagged units than units, so a flagged unit can only move by a put-away",
+    "`assertLedgerNonNegative` refuses any movement leaving a location with more flagged units than units, so flagged units move only on a line that names their record",
   gates: true,
 };
 
-const putAwayRules: CollectionRule[] = [
-  {
-    id: "put-away:transaction-to-ledger",
-    source: "transactions",
-    target: "inventory-ledgers",
-    mode: "co-write",
-    invariant:
-      "quantity_held and quantity_in_service net to ZERO — every line carries both endpoints. Unflagged units move by a `transfer`; a record's flagged units by a `flag {r → r}` whose ends differ, which moves each location's quantity_out_of_service with its units. No location may end holding more flagged units than units.",
-    enforced_by: [PUT_AWAY_UNFLAGGED, PUT_AWAY_CARRIES_FLAG, FLAG_NEVER_STRANDED],
-    transaction: "put-away",
-    fields: [
-      {
-        source: ["lines", "location"],
-        target: ["store_breakdown", "locations", "quantity"],
-        transform: "− at the source location, + at each destination",
-      },
-      {
-        source: ["service"],
-        target: ["store_breakdown", "locations", "quantity_out_of_service"],
-        transform: "a flag line moves its flagged count from the source location to the destination",
-      },
-    ],
-  },
-  {
-    id: "put-away:transaction-to-locations",
-    source: "transactions",
-    target: "locations",
-    mode: "co-write",
-    invariant:
-      "Both endpoints of every line rewrite their location document's per-product quantity in ONE staging pass, exactly as a transfer does.",
-    enforced_by: [PUT_AWAY_UNFLAGGED],
-    transaction: "put-away",
-    fields: [
-      {
-        source: ["lines", "location"],
-        target: ["products", "quantity"],
-        transform: "−quantity at the line's `from` location, +quantity at its `to`",
-      },
-    ],
-  },
-  {
-    id: "put-away:transaction-to-out-of-service",
-    source: "transactions",
-    target: "out-of-service",
-    mode: "co-write",
-    invariant:
-      "A record whose flagged units moved has its `stores[]` re-derived from its journal in the same commit, and its `version` bumped. Fires only when a line names a record.",
-    enforced_by: [PUT_AWAY_CARRIES_FLAG],
-    transaction: "put-away",
-    fields: [
-      {
-        source: ["lines", "location"],
-        target: ["stores"],
-        transform: "re-derived from where the record's flagged units now stand",
-      },
-    ],
-  },
-];
-
-const putAwayTransaction: TransactionDefinition = {
-  id: "put-away",
-  description:
-    "Shelves one product's units off a location — typically the store's default location, where every arrival lands. Unflagged units move as one `transfer`; each named out-of-service record's flagged units move as a `flag {r → r}` with different ends, carrying the flag. Touches neither `stock` (no availability answer changes) nor the cost basis.",
-  steps: [
-    "put-away:transaction-to-ledger",
-    "put-away:transaction-to-locations",
-    "put-away:transaction-to-out-of-service",
+const createStoreTransferOosRule: CollectionRule = {
+  id: "create-store-transfer:transaction-to-out-of-service",
+  source: "transactions",
+  target: "out-of-service",
+  mode: "co-write",
+  invariant:
+    "A record whose flagged units a transfer moved has its `stores[]` re-derived from its journal in the same commit, and its `version` bumped. Fires only when a line names a record.",
+  enforced_by: [TRANSFER_CARRIES_FLAG, FLAG_NEVER_STRANDED],
+  transaction: "create-store-transfer",
+  fields: [
+    {
+      source: ["lines", "location"],
+      target: ["stores"],
+      transform: "re-derived from where the record's flagged units now stand",
+    },
   ],
 };
 
@@ -262,10 +200,9 @@ const putAwayTransaction: TransactionDefinition = {
 export const storeTransfers: PropagationModule = {
   rules: [
     ...createStoreTransferRules,
-    ...putAwayRules,
+    createStoreTransferOosRule,
   ],
   transactions: [
     createStoreTransferTransaction,
-    putAwayTransaction,
   ],
 };

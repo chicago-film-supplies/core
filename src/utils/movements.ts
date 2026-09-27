@@ -148,14 +148,13 @@ export function negateLines(lines: readonly MovementLineType[]): MovementLineTyp
  * sends a direction-agnostic `[{uid_location, quantity}]` and never has to know
  * which way a type moves.
  *
- * ⚠️ **`"both"` means the contract admits two INDEPENDENTLY chosen sides** —
- * `transfer`, and `flag`, whose `from` and `to` differ on a put-away of flagged
- * units. It is not "one location, read on both ends": a flag written in place
- * merely happens to choose the same location twice. So do not special-case
- * `flag` to `"from"` here. A surface that only ever names one side — the
- * out-of-service create/update inputs, whose `allocations` are the SOURCE
- * locations by their own docstring — should take its side from that input's
- * contract and not call this function at all.
+ * ⚠️ **`"both"` for `transfer` means two independently chosen sides; for
+ * `flag` it does not.** A flag is always in place (owner, 2026-09-27), so its
+ * two ends are one location named twice — the contract says
+ * `locations → locations` only because a line needs two ends. A surface that
+ * names one side — the out-of-service create/update `allocations`, which are
+ * the locations the units stand on by that input's own docstring — should take
+ * its side from that input and not call this function at all.
  */
 export function allocationSide(type: MovementTypeType): "from" | "to" | "both" | null {
   const places = MOVEMENT_CONTRACTS[type].places;
