@@ -11406,6 +11406,14 @@
         },
         {
           "kind": "function",
+          "name": "hasCustodyHistory",
+          "signature": "hasCustodyHistory(b: Pick<Booking, \"breakdown\">): boolean",
+          "doc": "Whether custody ever moved on a booking: any of `prepped`, `out`, `returned`,\n`lost` or `damaged`. Such a booking is part of what happened, and an order\nedit must not delete it (api-cloudrun#1147, Q4); only a plan-only booking\n(`quoted`/`reserved`) goes with its line.\n\n⚠️ Deliberately wider than {@link liveCustody}: a booking is KEPT on history,\na fulfillment row on live custody, so a removed line whose units all came\nback keeps its booking and loses its row.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isBookingClosed",
           "signature": "isBookingClosed(b: Pick<Booking, \"type\" | \"breakdown\">): boolean",
           "doc": "Per-booking closure rule.\n\n`quoted + reserved + prepped` must always be zero. The treatment of `out`\ndepends on `booking.type`:\n\n- `rental`: `out` is in-flight — units must be returned (or lost/damaged)\n  before the booking is closed.\n- any other type (`sale`, defensively `service`/`surcharge`): `out` is\n  terminal — checkout is delivery and the units don't come back. The\n  booking can sit in `out` indefinitely without blocking completion.\n\nSale items still expose Return/Lost/Damaged actions in the picker (a sold\nitem *can* be returned for credit and lost/damaged-in-transit is real) —\nthey're available, just not required for closure.",
@@ -14791,6 +14799,47 @@
           "signature": "buildOrderLineFromProduct(doc: ProductDocument, opts: OrderLineBuildOptions): OrderDocLineItemType",
           "doc": "Build a top-level order line item from a `ProductDocument`.\n\n`path` carries the component ancestry only — the item's own uid and the\nstructural destination/group prefix are appended by `computeItemPaths`, which\nis the sole author of a stored `path`.",
           "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/order-edit-delta",
+      "moduleDoc": "",
+      "symbols": [
+        {
+          "kind": "typeAlias",
+          "name": "BookingCustodyFacts",
+          "declaration": "type BookingCustodyFacts = Pick<Booking, \"type\" | \"breakdown\">;",
+          "doc": "What this module reads of a stored booking."
+        },
+        {
+          "kind": "interface",
+          "name": "OrderEditDelta",
+          "declaration": "interface OrderEditDelta {\n  keptLegUids: ReadonlySet<string>;\n  keepFor(prevPath: readonly string[]): RowKeep | undefined;\n  hasLiveCustody(row: typeLiteral): boolean;\n}",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "RowKeep",
+          "declaration": "interface RowKeep {\n  share: number;\n  sameGrain: boolean;\n  bookingId: string;\n  live: number;\n}",
+          "doc": "The fate of one PREVIOUS-order row under the edit, when its grain keeps a share."
+        },
+        {
+          "kind": "function",
+          "name": "computeOrderEditDelta",
+          "signature": "computeOrderEditDelta(args: typeLiteral): OrderEditDelta",
+          "doc": "The row and leg keep for one order edit.",
+          "paramTags": [
+            {
+              "name": "args.storedBookings",
+              "doc": "The order's stored bookings by id — the COMPLETE\nset, read before the edit is decided. A booking whose id names another\norder, or does not parse, is ignored."
+            },
+            {
+              "name": "args.fulfillmentRows",
+              "doc": "The stored fulfillment rows; a row's `before` is\nits physical quantity there, falling back to the previous order's.\n\n```ts\nconst delta = computeOrderEditDelta({ orderUid, prevOrder, nextOrder, fulfillmentRows, storedBookings });\nfor (const row of prevOrder.items) {\nconst keep = delta.keepFor(row.path); // { share, sameGrain, bookingId, live } | undefined\n}\n```"
+            }
+          ],
           "returnsTag": null
         }
       ]

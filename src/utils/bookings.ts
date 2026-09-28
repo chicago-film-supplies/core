@@ -331,6 +331,21 @@ export function liveCustody(b: Pick<Booking, "type" | "breakdown">): number {
   return b.breakdown.prepped + (b.type === "rental" ? b.breakdown.out : 0);
 }
 
+/**
+ * Whether custody ever moved on a booking: any of `prepped`, `out`, `returned`,
+ * `lost` or `damaged`. Such a booking is part of what happened, and an order
+ * edit must not delete it (api-cloudrun#1147, Q4); only a plan-only booking
+ * (`quoted`/`reserved`) goes with its line.
+ *
+ * ⚠️ Deliberately wider than {@link liveCustody}: a booking is KEPT on history,
+ * a fulfillment row on live custody, so a removed line whose units all came
+ * back keeps its booking and loses its row.
+ */
+export function hasCustodyHistory(b: Pick<Booking, "breakdown">): boolean {
+  const { prepped, out, returned, lost, damaged } = b.breakdown;
+  return prepped + out + returned + lost + damaged > 0;
+}
+
 /** One order row at a booking grain, before and after an order edit. */
 export interface GrainRow {
   /** Caller-chosen row key, returned in {@link GrainKeep.byRow}. */

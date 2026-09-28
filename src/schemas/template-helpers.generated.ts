@@ -32,6 +32,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "calculateBookingBreakdown", expr: "it.bookings.calculateBookingBreakdown(status, type, quantity, existingBreakdown)", desc: "Project a booking's breakdown for a given **order** status, item type, and total quantity. Pure sync — no I/O.", returns: "indexedAccess" },
     { name: "emptyBookingsBreakdown", expr: "it.bookings.emptyBookingsBreakdown()", desc: "The empty breakdown shape — all seven keys at zero.", returns: "indexedAccess" },
     { name: "grainKeep", expr: "it.bookings.grainKeep(live, rows)", desc: "How much of a grain's live custody an order edit leaves uncovered, and which rows keep it (api-cloudrun#1147, decision 3). A grain is one booking: `(product, leg, component signature)`.", returns: "GrainKeep" },
+    { name: "hasCustodyHistory", expr: "it.bookings.hasCustodyHistory(b)", desc: "Whether custody ever moved on a booking: any of `prepped`, `out`, `returned`, `lost` or `damaged`. Such a booking is part of what happened, and an order edit must not delete it (api-cloudrun#1147, Q4); only a plan-only booking (`quoted`/`reserved`) goes with its line.", returns: "boolean" },
     { name: "isBookingClosed", expr: "it.bookings.isBookingClosed(b)", desc: "Per-booking closure rule.", returns: "boolean" },
     { name: "isOrderBookingsClosed", expr: "it.bookings.isOrderBookingsClosed(bookings)", desc: "Predicate: is the order fully closed?", returns: "boolean" },
     { name: "liveCustody", expr: "it.bookings.liveCustody(b)", desc: "Units a booking physically holds that have not come back: `prepped`, plus `out` on a rental. A sale's `out` is delivered and never comes back, the same split {@link isBookingClosed} makes.", returns: "number" },
@@ -158,6 +159,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "toCentsBig", expr: "it.money.toCentsBig(dollars)", desc: "The `bigint` flavour of {@linkcode toCents}, for factor arithmetic whose intermediates exceed `Number.MAX_SAFE_INTEGER`.", returns: "bigint" },
   ],
   "movements": [
+
+  ],
+  "order-edit-delta": [
 
   ],
   "order-lines": [

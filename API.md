@@ -25870,6 +25870,17 @@ answer from the same inputs.
 grainKeep(3, [{ key: "a", before: 5, after: 1 }]); // { kept: 2, byRow: a→2 }
 ```
 
+### `hasCustodyHistory(b: Pick<Booking, "breakdown">): boolean`
+
+Whether custody ever moved on a booking: any of `prepped`, `out`, `returned`,
+`lost` or `damaged`. Such a booking is part of what happened, and an order
+edit must not delete it (api-cloudrun#1147, Q4); only a plan-only booking
+(`quoted`/`reserved`) goes with its line.
+
+⚠️ Deliberately wider than {@link liveCustody}: a booking is KEPT on history,
+a fulfillment row on live custody, so a removed line whose units all came
+back keeps its booking and loses its row.
+
 ### `isBookingClosed(b: Pick<Booking, "type" | "breakdown">): boolean`
 
 Per-booking closure rule.
@@ -32450,6 +32461,58 @@ Build a top-level order line item from a `ProductDocument`.
 `path` carries the component ancestry only — the item's own uid and the
 structural destination/group prefix are appended by `computeItemPaths`, which
 is the sole author of a stored `path`.
+
+## `@cfs/core/utils/order-edit-delta`
+
+### `BookingCustodyFacts`
+
+What this module reads of a stored booking.
+
+```ts
+type BookingCustodyFacts = Pick<Booking, "type" | "breakdown">;
+```
+
+### `OrderEditDelta`
+
+```ts
+interface OrderEditDelta {
+  keptLegUids: ReadonlySet<string>;
+  keepFor(prevPath: readonly string[]): RowKeep | undefined;
+  hasLiveCustody(row: typeLiteral): boolean;
+}
+```
+
+### `RowKeep`
+
+The fate of one PREVIOUS-order row under the edit, when its grain keeps a share.
+
+```ts
+interface RowKeep {
+  share: number;
+  sameGrain: boolean;
+  bookingId: string;
+  live: number;
+}
+```
+
+### `computeOrderEditDelta(args: typeLiteral): OrderEditDelta`
+
+The row and leg keep for one order edit.
+
+**Parameters**
+
+- `args.storedBookings` — The order's stored bookings by id — the COMPLETE
+set, read before the edit is decided. A booking whose id names another
+order, or does not parse, is ignored.
+- `args.fulfillmentRows` — The stored fulfillment rows; a row's `before` is
+its physical quantity there, falling back to the previous order's.
+
+```ts
+const delta = computeOrderEditDelta({ orderUid, prevOrder, nextOrder, fulfillmentRows, storedBookings });
+for (const row of prevOrder.items) {
+const keep = delta.keepFor(row.path); // { share, sameGrain, bookingId, live } | undefined
+}
+```
 
 ## `@cfs/core/utils/orders`
 

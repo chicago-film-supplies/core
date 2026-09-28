@@ -364,6 +364,12 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // never holds (`template-context.ts` has no `product`; templates render orders,
   // invoices and quotes, which already carry their `items[]`). A template
   // producing new line items would be authoring data, not rendering it.
+  "order-edit-delta": [
+    // The order-edit custody decision (api-cloudrun#1147): which rows an edit
+    // must keep, from the stored bookings. Write-path and prompt-path only; no
+    // render context holds bookings or a previous order.
+    "computeOrderEditDelta",
+  ],
   "order-lines": [
     "buildOrderLineFromProduct", // stages an order line from the catalog
     "buildCustomOrderLine", // mints a `custom-` order line

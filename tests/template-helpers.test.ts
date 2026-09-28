@@ -45,6 +45,7 @@ import * as fulfillmentStageUtils from "../src/utils/fulfillment-stage.ts";
 import * as locationUtils from "../src/utils/locations.ts";
 import * as moneyUtils from "../src/utils/money.ts";
 import * as movementUtils from "../src/utils/movements.ts";
+import * as orderEditDeltaUtils from "../src/utils/order-edit-delta.ts";
 import * as orderLineUtils from "../src/utils/order-lines.ts";
 import * as orderUtils from "../src/utils/orders.ts";
 import * as organizationUtils from "../src/utils/organizations.ts";
@@ -155,6 +156,7 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   locations: locationUtils,
   money: moneyUtils,
   movements: movementUtils,
+  "order-edit-delta": orderEditDeltaUtils,
   "order-lines": orderLineUtils,
   pickSheets: pickSheetUtils,
   // Same exception as `fulfillment-stage` and `item-pairing`, and for the

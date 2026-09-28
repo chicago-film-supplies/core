@@ -84,6 +84,7 @@
     "./utils/movements": "./src/utils/movements.ts",
     "./utils/out-of-service": "./src/utils/out-of-service.ts",
     "./utils/order-lines": "./src/utils/order-lines.ts",
+    "./utils/order-edit-delta": "./src/utils/order-edit-delta.ts",
     "./utils/orders": "./src/utils/orders.ts",
     "./utils/price-document": "./src/utils/price-document.ts",
     "./utils/organizations": "./src/utils/organizations.ts",
