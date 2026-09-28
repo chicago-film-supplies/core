@@ -1361,6 +1361,7 @@ export interface ZeroPricedItemLike {
   readonly name?: string;
   readonly path?: readonly string[];
   readonly zero_priced?: boolean | null;
+  readonly quantity?: number;
 }
 
 /** One violation of either array-level invariant. */
@@ -1509,6 +1510,55 @@ export function checkZeroPricedComponents(
         `component "${f.name}" states no zero_priced — it is a component of a ${f.parentType} line, ` +
         `so it must say whether it is included at no charge. An absent or null value is not "undecided", ` +
         `it resolves to CHARGED (core#100).`,
+    });
+  }
+}
+
+/**
+ * **A component line never carries `quantity: 0`** (owner, 2026-09-27; manager#557).
+ * The picker lists a `default` component at its catalog quantity, which may be 0,
+ * to OFFER it — not to add a line. Persisting that 0 stores a line that is
+ * neither ordered nor nothing: a booking grain with no demand, and a
+ * `quantity_ordered` of `0` that would then read the same as a KEPT row (a line
+ * the order removed while units were still out), which is why the fulfillment's
+ * `quantity_ordered: 0` is unambiguous only because of this rule.
+ *
+ * A component is a line whose parent (by path) is also a line, the same
+ * definition {@link zeroPricedUnstatedComponents} uses. A top-level line may
+ * legitimately be 0 and is not reported, and a parent that resolves to nothing
+ * is `validateItemParentage`'s finding rather than this one.
+ *
+ * ⚠️ **ORDER only.** A fulfillment carries kept kit ancestors at quantity 0 (the
+ * ancestor of a kept component can itself be a component), and an invoice is
+ * scoped to what it bills, so neither grain attaches {@link checkZeroQuantityComponents}.
+ */
+export function zeroQuantityComponents(
+  items: readonly ZeroPricedItemLike[],
+): ZeroPricedComponentFinding[] {
+  const byPath = indexItemsByPath(items);
+  const findings: ZeroPricedComponentFinding[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.quantity !== 0) continue;
+    if (!isLineItemType(item.type)) continue;
+    const parentType = parentTypeOf(item, byPath);
+    if (!isLineItemType(parentType)) continue; // not a component
+    findings.push({ index: i, uid: item.uid, name: item.name ?? "", parentType });
+  }
+  return findings;
+}
+
+/** {@link zeroQuantityComponents} as an array-level refinement, attached to the order's `items`. */
+export function checkZeroQuantityComponents(
+  items: readonly ZeroPricedItemLike[],
+  ctx: z.RefinementCtx,
+): void {
+  for (const f of zeroQuantityComponents(items)) {
+    ctx.addIssue({
+      code: "custom",
+      path: [f.index, "quantity"],
+      message: `component "${f.name}" of a ${f.parentType} line has quantity 0 — a zero-quantity component ` +
+        `is offered in the picker, never stored on an order (manager#557).`,
     });
   }
 }

@@ -222,6 +222,10 @@ export {
   getOrderStatusTransitions,
   isValidOrderStatusTransition,
   type PlaceablePair,
+  checkDestinationJoin,
+  destinationJoinViolations,
+  type DestinationJoinViolation,
+  isSingleEntryDeduction,
   unplacedEndpoints,
   type UnplacedEndpoint,
 } from "./order.ts";
@@ -334,6 +338,8 @@ export {
   // the omission. `utils/orders.ts` imports the first of these, so this repo
   // would have caught it; a consumer-only symbol would not have been.
   checkZeroPricedComponents,
+  checkZeroQuantityComponents,
+  zeroQuantityComponents,
   zeroPricedFlaggedNonComponents,
   zeroPricedUnstatedComponents,
   type ZeroPricedComponentFinding,

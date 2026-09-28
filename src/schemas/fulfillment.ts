@@ -44,6 +44,7 @@ import {
   TimestampFields,
 } from "./common.ts";
 import {
+  checkDestinationJoin,
   checkExchangePairs,
   checkStoredEndpoints,
   checkSwapReplacements,
@@ -552,7 +553,7 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   created_by: ActorRef.nullable().meta({ column: true, label: "Created By", propagate: false }),
   updated_by: ActorRef.nullable().meta({ column: true, label: "Updated By", propagate: false }),
   ...TimestampFields,
-}).superRefine(checkStoredEndpoints).superRefine(checkSwapReplacements).meta({
+}).superRefine(checkStoredEndpoints).superRefine(checkDestinationJoin).superRefine(checkSwapReplacements).meta({
   title: "Fulfillment",
   collection: "fulfillments",
   displayDefaults: {

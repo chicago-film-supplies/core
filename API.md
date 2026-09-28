@@ -3309,6 +3309,18 @@ interface DestinationExchangeType {
 }
 ```
 
+### `DestinationJoinViolation`
+
+One way the destination dividers and the destination pairs fail to join.
+
+```ts
+interface DestinationJoinViolation {
+  kind: "pair_without_divider" | "divider_without_pair";
+  uid: string;
+  index?: number;
+}
+```
+
 ### `DestinationLevelType`
 
 The level a destination node sits at, read off `path.length`.
@@ -11905,6 +11917,7 @@ interface ZeroPricedItemLike {
   readonly name?: string;
   readonly path?: readonly string[];
   readonly zero_priced?: boolean | null;
+  readonly quantity?: number;
 }
 ```
 
@@ -11962,6 +11975,21 @@ May an operator move `from` to `to` via `PUT /invoices/{uid}`?
 Read this rather than the column, so the manager cannot offer a button the
 server will 400 — and so a status outside the vocabulary answers `false`
 instead of throwing on an undefined lookup.
+
+### `checkDestinationJoin(doc: typeLiteral, ctx: z.RefinementCtx): void`
+
+{@link destinationJoinViolations} as a document-level refinement. Attached to
+the ORDER and FULFILLMENT documents only.
+
+⚠️ **The INVOICE deliberately does not carry it**: an invoice is scoped to what
+it bills, so its dividers and pairs are whatever the billed lines need. The
+API's write guard still applies the same function to an invoice at write time.
+
+⚠️ **A document-level refinement, so a single-field PATCH does not see it** —
+`assertValidPatch` validates each key alone, and a writer patching only
+`items` or only `destinations` is checked when it supplies the merged document.
+It is a REFINE, so under `z.strictObject` a stored violator becomes unwritable
+the moment a consumer pins it: the corpus has to read 0 first.
 
 ### `checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void`
 
@@ -12030,6 +12058,10 @@ rather than a second opinion.
 
 Invariant (1) — *a flagged line carries no charge* — stays per-item in
 {@link checkZeroPricedAmount}, because it needs only the item it is given.
+
+### `checkZeroQuantityComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void`
+
+{@link zeroQuantityComponents} as an array-level refinement, attached to the order's `items`.
 
 ### `collectDisplayColumns(schema: z.ZodType, opts?: typeLiteral): CollectDisplayColumnsResult`
 
@@ -12184,6 +12216,24 @@ But `images` remains the sole authority on display order: this field exists
 for Firestore `array-contains`, and the refinement below compares it as a
 multiset, so a differently-ordered mirror holding the same uuids is still
 valid. Nothing may read order back out of it.
+
+### `destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]`
+
+Where the destination dividers and pairs of one document disagree — the rule
+{@link checkDestinationJoin} enforces on the order and fulfillment schemas, as
+data, so a WRITER can refuse the same input with a 400 before it builds a
+document the schema would reject with a 500. One author: the refinement is this
+function plus an `addIssue` per entry, and api-cloudrun's write guard (which
+also covers invoices) calls it rather than keeping a second copy.
+
+The join is the divider's `uid` = the pair's `uid` (see
+{@link DocDestinationType.uid}). It is a biconditional except for the one shape
+{@link isSingleEntryDeduction} names:
+- **divider → pair** is unconditional, and vacuous when no divider exists;
+- **pair → divider** is unconditional unless the document has no dividers and
+  one pair.
+
+A row with a non-string `uid` is skipped: the schema parse owns it.
 
 ### `enumValues(schema: z.ZodType<T>): T[]`
 
@@ -12519,6 +12569,21 @@ never contains a `-`. This is `core/src/utils/booking-id.ts`'s
 `componentAncestry` filter, exported from the grammar it reads rather than
 from the booking-specific module that consumes it.
 
+### `isSingleEntryDeduction(dividerCount: number, pairCount: number): boolean`
+
+The ONE sanctioned divider-less shape: no destination dividers at all, and
+exactly one pair.
+
+🔴 **Not "no dividers" alone, and not "one pair" alone.** With no divider a
+line cannot address a destination by `item.path`, so the answer has to come
+from somewhere else — and with exactly ONE pair there is no other answer to
+pick, which makes it a deduction rather than a guess. With two or more pairs
+the deduction has nothing to deduce from and every pair is unaddressable; one
+divider beside two pairs is a broken join and stays refused.
+
+Asked by {@link destinationJoinViolations} and by any writer that reports the
+same shape, so the report and the refusal cannot drift apart.
+
 ### `isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: "manual" | "propagation"): boolean`
 
 Server-side gate for an order status write. `source: "manual"` rejects
@@ -12801,6 +12866,25 @@ components are asked.
 was: `api-cloudrun/scripts/backfill-zero-priced-projections.ts` took all three
 grains to 0 unstated component rows in both projects on 2026-09-10, from 9,213.
 Ordering a contract behind its corpus is the whole of that pattern.
+
+### `zeroQuantityComponents(items: readonly ZeroPricedItemLike[]): ZeroPricedComponentFinding[]`
+
+**A component line never carries `quantity: 0`** (owner, 2026-09-27; manager#557).
+The picker lists a `default` component at its catalog quantity, which may be 0,
+to OFFER it — not to add a line. Persisting that 0 stores a line that is
+neither ordered nor nothing: a booking grain with no demand, and a
+`quantity_ordered` of `0` that would then read the same as a KEPT row (a line
+the order removed while units were still out), which is why the fulfillment's
+`quantity_ordered: 0` is unambiguous only because of this rule.
+
+A component is a line whose parent (by path) is also a line, the same
+definition {@link zeroPricedUnstatedComponents} uses. A top-level line may
+legitimately be 0 and is not reported, and a parent that resolves to nothing
+is `validateItemParentage`'s finding rather than this one.
+
+⚠️ **ORDER only.** A fulfillment carries kept kit ancestors at quantity 0 (the
+ancestor of a kept component can itself be a component), and an invoice is
+scoped to what it bills, so neither grain attaches {@link checkZeroQuantityComponents}.
 
 ## `@cfs/core/schemas/propagation`
 
@@ -14738,6 +14822,7 @@ interface ZeroPricedItemLike {
   readonly name?: string;
   readonly path?: readonly string[];
   readonly zero_priced?: boolean | null;
+  readonly quantity?: number;
 }
 ```
 
@@ -14839,6 +14924,10 @@ rather than a second opinion.
 
 Invariant (1) — *a flagged line carries no charge* — stays per-item in
 {@link checkZeroPricedAmount}, because it needs only the item it is given.
+
+### `checkZeroQuantityComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void`
+
+{@link zeroQuantityComponents} as an array-level refinement, attached to the order's `items`.
 
 ### `deriveName(parts: NamePartsLike): string`
 
@@ -14999,6 +15088,25 @@ components are asked.
 was: `api-cloudrun/scripts/backfill-zero-priced-projections.ts` took all three
 grains to 0 unstated component rows in both projects on 2026-09-10, from 9,213.
 Ordering a contract behind its corpus is the whole of that pattern.
+
+### `zeroQuantityComponents(items: readonly ZeroPricedItemLike[]): ZeroPricedComponentFinding[]`
+
+**A component line never carries `quantity: 0`** (owner, 2026-09-27; manager#557).
+The picker lists a `default` component at its catalog quantity, which may be 0,
+to OFFER it — not to add a line. Persisting that 0 stores a line that is
+neither ordered nor nothing: a booking grain with no demand, and a
+`quantity_ordered` of `0` that would then read the same as a KEPT row (a line
+the order removed while units were still out), which is why the fulfillment's
+`quantity_ordered: 0` is unambiguous only because of this rule.
+
+A component is a line whose parent (by path) is also a line, the same
+definition {@link zeroPricedUnstatedComponents} uses. A top-level line may
+legitimately be 0 and is not reported, and a parent that resolves to nothing
+is `validateItemParentage`'s finding rather than this one.
+
+⚠️ **ORDER only.** A fulfillment carries kept kit ancestors at quantity 0 (the
+ancestor of a kept component can itself be a component), and an invoice is
+scoped to what it bills, so neither grain attaches {@link checkZeroQuantityComponents}.
 
 ## `@cfs/core/schemas/booking`
 
@@ -17572,6 +17680,18 @@ interface DestinationExchangeType {
 }
 ```
 
+### `DestinationJoinViolation`
+
+One way the destination dividers and the destination pairs fail to join.
+
+```ts
+interface DestinationJoinViolation {
+  kind: "pair_without_divider" | "divider_without_pair";
+  uid: string;
+  index?: number;
+}
+```
+
 ### `DestinationPairCore`
 
 The destination-pair fields the ORDER/FULFILLMENT grain and the INVOICE grain
@@ -18436,6 +18556,21 @@ interface UpdateOrderInputType {
 }
 ```
 
+### `checkDestinationJoin(doc: typeLiteral, ctx: z.RefinementCtx): void`
+
+{@link destinationJoinViolations} as a document-level refinement. Attached to
+the ORDER and FULFILLMENT documents only.
+
+⚠️ **The INVOICE deliberately does not carry it**: an invoice is scoped to what
+it bills, so its dividers and pairs are whatever the billed lines need. The
+API's write guard still applies the same function to an invoice at write time.
+
+⚠️ **A document-level refinement, so a single-field PATCH does not see it** —
+`assertValidPatch` validates each key alone, and a writer patching only
+`items` or only `destinations` is checked when it supplies the merged document.
+It is a REFINE, so under `z.strictObject` a stored violator becomes unwritable
+the moment a consumer pins it: the corpus has to read 0 first.
+
 ### `checkExchangePairs(pairs: ReadonlyArray<typeLiteral>, ctx: z.RefinementCtx): void`
 
 Every exchange pair names a parent pair of the same document, and that parent
@@ -18509,6 +18644,24 @@ Shared by the order and fulfillment documents, attached exactly as
 because `fulfillment.ts` already imports this module; the reverse import would
 be a cycle.
 
+### `destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]`
+
+Where the destination dividers and pairs of one document disagree — the rule
+{@link checkDestinationJoin} enforces on the order and fulfillment schemas, as
+data, so a WRITER can refuse the same input with a 400 before it builds a
+document the schema would reject with a 500. One author: the refinement is this
+function plus an `addIssue` per entry, and api-cloudrun's write guard (which
+also covers invoices) calls it rather than keeping a second copy.
+
+The join is the divider's `uid` = the pair's `uid` (see
+{@link DocDestinationType.uid}). It is a biconditional except for the one shape
+{@link isSingleEntryDeduction} names:
+- **divider → pair** is unconditional, and vacuous when no divider exists;
+- **pair → divider** is unconditional unless the document has no dividers and
+  one pair.
+
+A row with a non-string `uid` is skipped: the schema parse owns it.
+
 ### `getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]`
 
 The statuses an operator can move to from the given current status.
@@ -18538,6 +18691,21 @@ Type guard that narrows an order doc item to a line item (excludes
 destination/group dividers). Sound: every non-divider `type` is now backed by
 exactly one shape, so the narrowing cannot hand a caller a `price` of the
 wrong kind.
+
+### `isSingleEntryDeduction(dividerCount: number, pairCount: number): boolean`
+
+The ONE sanctioned divider-less shape: no destination dividers at all, and
+exactly one pair.
+
+🔴 **Not "no dividers" alone, and not "one pair" alone.** With no divider a
+line cannot address a destination by `item.path`, so the answer has to come
+from somewhere else — and with exactly ONE pair there is no other answer to
+pick, which makes it a deduction rather than a guess. With two or more pairs
+the deduction has nothing to deduce from and every pair is unaddressable; one
+divider beside two pairs is a broken join and stays refused.
+
+Asked by {@link destinationJoinViolations} and by any writer that reports the
+same shape, so the report and the refusal cannot drift apart.
 
 ### `isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: "manual" | "propagation"): boolean`
 

@@ -14,6 +14,7 @@ import {
   checkItemContract,
   checkZeroPricedAmount,
   checkZeroPricedComponents,
+  checkZeroQuantityComponents,
   checkItemPriceFormula,
   checkPriceBaseUnit,
   COARevenueEnum,
@@ -596,6 +597,116 @@ export function checkSwapReplacements(
       }
     });
   });
+}
+
+/**
+ * The ONE sanctioned divider-less shape: no destination dividers at all, and
+ * exactly one pair.
+ *
+ * 🔴 **Not "no dividers" alone, and not "one pair" alone.** With no divider a
+ * line cannot address a destination by `item.path`, so the answer has to come
+ * from somewhere else — and with exactly ONE pair there is no other answer to
+ * pick, which makes it a deduction rather than a guess. With two or more pairs
+ * the deduction has nothing to deduce from and every pair is unaddressable; one
+ * divider beside two pairs is a broken join and stays refused.
+ *
+ * Asked by {@link destinationJoinViolations} and by any writer that reports the
+ * same shape, so the report and the refusal cannot drift apart.
+ */
+export function isSingleEntryDeduction(dividerCount: number, pairCount: number): boolean {
+  return dividerCount === 0 && pairCount === 1;
+}
+
+/** One way the destination dividers and the destination pairs fail to join. */
+export interface DestinationJoinViolation {
+  /**
+   * `pair_without_divider`: a pair whose `uid` names no destination divider.
+   * `divider_without_pair`: a divider no pair answers — its whole section
+   * resolves to no destination, which every reader takes as "source to the origin".
+   */
+  kind: "pair_without_divider" | "divider_without_pair";
+  /** The pair's `uid` or the divider's `uid`, whichever is unjoined. */
+  uid: string;
+  /** The pair's position in `destinations`; absent for a divider. */
+  index?: number;
+}
+
+/**
+ * Where the destination dividers and pairs of one document disagree — the rule
+ * {@link checkDestinationJoin} enforces on the order and fulfillment schemas, as
+ * data, so a WRITER can refuse the same input with a 400 before it builds a
+ * document the schema would reject with a 500. One author: the refinement is this
+ * function plus an `addIssue` per entry, and api-cloudrun's write guard (which
+ * also covers invoices) calls it rather than keeping a second copy.
+ *
+ * The join is the divider's `uid` = the pair's `uid` (see
+ * {@link DocDestinationType.uid}). It is a biconditional except for the one shape
+ * {@link isSingleEntryDeduction} names:
+ * - **divider → pair** is unconditional, and vacuous when no divider exists;
+ * - **pair → divider** is unconditional unless the document has no dividers and
+ *   one pair.
+ *
+ * A row with a non-string `uid` is skipped: the schema parse owns it.
+ */
+export function destinationJoinViolations(
+  items: ReadonlyArray<unknown>,
+  destinations: ReadonlyArray<unknown>,
+): DestinationJoinViolation[] {
+  const dividerUids = new Set<string>();
+  for (const row of items) {
+    const it = row as { uid?: unknown; type?: unknown } | null;
+    if (it?.type !== "destination" || typeof it.uid !== "string") continue;
+    dividerUids.add(it.uid);
+  }
+  const singleEntry = isSingleEntryDeduction(dividerUids.size, destinations.length);
+
+  const violations: DestinationJoinViolation[] = [];
+  const claimed = new Set<string>();
+  destinations.forEach((dest, index) => {
+    const uid = (dest as { uid?: unknown } | null)?.uid;
+    if (typeof uid !== "string") return;
+    if (dividerUids.has(uid)) claimed.add(uid);
+    else if (!singleEntry) violations.push({ kind: "pair_without_divider", uid, index });
+  });
+  for (const uid of dividerUids) {
+    if (!claimed.has(uid)) violations.push({ kind: "divider_without_pair", uid });
+  }
+  return violations;
+}
+
+/**
+ * {@link destinationJoinViolations} as a document-level refinement. Attached to
+ * the ORDER and FULFILLMENT documents only.
+ *
+ * ⚠️ **The INVOICE deliberately does not carry it**: an invoice is scoped to what
+ * it bills, so its dividers and pairs are whatever the billed lines need. The
+ * API's write guard still applies the same function to an invoice at write time.
+ *
+ * ⚠️ **A document-level refinement, so a single-field PATCH does not see it** —
+ * `assertValidPatch` validates each key alone, and a writer patching only
+ * `items` or only `destinations` is checked when it supplies the merged document.
+ * It is a REFINE, so under `z.strictObject` a stored violator becomes unwritable
+ * the moment a consumer pins it: the corpus has to read 0 first.
+ */
+export function checkDestinationJoin(
+  doc: { items: ReadonlyArray<unknown>; destinations: ReadonlyArray<unknown> },
+  ctx: z.RefinementCtx,
+): void {
+  for (const v of destinationJoinViolations(doc.items, doc.destinations)) {
+    ctx.addIssue(
+      v.kind === "pair_without_divider"
+        ? {
+          code: "custom",
+          path: ["destinations", v.index!, "uid"],
+          message: `destinations[${v.index}].uid ${v.uid} names no destination divider`,
+        }
+        : {
+          code: "custom",
+          path: ["items"],
+          message: `destination divider ${v.uid} is answered by no pair`,
+        },
+    );
+  }
 }
 
 /** A destination pair as far as {@link unplacedEndpoints} reads it. */
@@ -1309,6 +1420,7 @@ export const CreateOrderInput: z.ZodType<CreateOrderInputType> = z.object({
       (items) => items.length === 0 || items[0].type === "destination",
       { message: "First item must be a destination divider" },
     )
+    .superRefine(checkZeroQuantityComponents)
     .optional(),
   subject: z.string().optional(),
   reference: z.string().nullable().optional(),
@@ -1361,6 +1473,7 @@ export const UpdateOrderInput: z.ZodType<UpdateOrderInputType> = z.object({
       (items) => items.length === 0 || items[0].type === "destination",
       { message: "First item must be a destination divider" },
     )
+    .superRefine(checkZeroQuantityComponents)
     .optional(),
   subject: z.string().optional(),
   reference: z.string().nullable().optional(),
@@ -1959,7 +2072,8 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   // `items.price.taxes.rate` ("Item Tax Rate") distinct from the order-level
   // `totals.taxes.rate` ("Tax Rate") — the same field shape at two depths.
   items: z.array(OrderDocItem).meta({ label: "Item" })
-    .superRefine(checkZeroPricedComponents),
+    .superRefine(checkZeroPricedComponents)
+    .superRefine(checkZeroQuantityComponents),
   // Present but NULLABLE, not optional — `null` is a value meaning "inherit the
   // organization's profile", so it has to be stored rather than absent. Still
   // no `.default()`: one never materializes on a write (see the note in
@@ -2052,7 +2166,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   updated_by: ActorRef.nullable().optional().meta({ column: true, label: "Updated By", propagate: false }),
   created_at: TimestampFields.created_at.meta({ propagate: false }),
   updated_at: TimestampFields.updated_at.meta({ propagate: false }),
-}).superRefine(checkStoredEndpoints).superRefine(checkSwapReplacements).meta({
+}).superRefine(checkStoredEndpoints).superRefine(checkDestinationJoin).superRefine(checkSwapReplacements).meta({
   title: "Order",
   collection: "orders",
   displayDefaults: {

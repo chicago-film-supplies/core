@@ -1459,6 +1459,12 @@
           "doc": "A mid-rental swap, stated ON the destination pair that carries it.\n\n🔴 **A swap IS a destination pair — an exchange LEG — not a structure of its\nown.** The replacement unit goes out on its own trip, so it needs its own\ndates, its own booking, its own card and its own section of items; a\ndestination pair is all four already. Making it a pair is what puts a swap\nthrough the three-way merge (`utils/shared-fields.ts`) and the diff\n(`utils/documentDiff.ts`) unchanged: a swap made on the order propagates to\nthe fulfillment and the invoice unless overridden, and a swap made on the\nfulfillment shows as a diff against both.\n\n⚠️ **The parent's collection endpoint and dates are COPIED, not referenced.**\nThe units go back on the parent leg's return trip, which is why an exchange\npair gets no `:end` card (`utils/cards.ts`) and why its collection half must\nagree with its parent's."
         },
         {
+          "kind": "interface",
+          "name": "DestinationJoinViolation",
+          "declaration": "interface DestinationJoinViolation {\n  kind: \"pair_without_divider\" | \"divider_without_pair\";\n  uid: string;\n  index?: number;\n}",
+          "doc": "One way the destination dividers and the destination pairs fail to join."
+        },
+        {
           "kind": "typeAlias",
           "name": "DestinationLevelType",
           "declaration": "type DestinationLevelType = indexedAccess;",
@@ -5181,7 +5187,7 @@
         {
           "kind": "interface",
           "name": "ZeroPricedItemLike",
-          "declaration": "interface ZeroPricedItemLike {\n  readonly uid: string;\n  readonly type: string;\n  readonly name?: string;\n  readonly path?: readonly string[];\n  readonly zero_priced?: boolean | null;\n}",
+          "declaration": "interface ZeroPricedItemLike {\n  readonly uid: string;\n  readonly type: string;\n  readonly name?: string;\n  readonly path?: readonly string[];\n  readonly zero_priced?: boolean | null;\n  readonly quantity?: number;\n}",
           "doc": "The minimum an item has to expose for the two ARRAY-level `zero_priced`\ninvariants. Structural rather than one of the three stored item unions,\nbecause the whole point is that an order item, an invoice item and a\nfulfillment item answer these questions identically — and `T[]` is invariant,\nso naming the unions would need a cast per grain to say so."
         },
         {
@@ -5227,6 +5233,14 @@
         },
         {
           "kind": "function",
+          "name": "checkDestinationJoin",
+          "signature": "checkDestinationJoin(doc: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "{@link destinationJoinViolations} as a document-level refinement. Attached to\nthe ORDER and FULFILLMENT documents only.\n\n⚠️ **The INVOICE deliberately does not carry it**: an invoice is scoped to what\nit bills, so its dividers and pairs are whatever the billed lines need. The\nAPI's write guard still applies the same function to an invoice at write time.\n\n⚠️ **A document-level refinement, so a single-field PATCH does not see it** —\n`assertValidPatch` validates each key alone, and a writer patching only\n`items` or only `destinations` is checked when it supplies the merged document.\nIt is a REFINE, so under `z.strictObject` a stored violator becomes unwritable\nthe moment a consumer pins it: the corpus has to read 0 first.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "checkItemContract",
           "signature": "checkItemContract(item: typeLiteral, ctx: z.RefinementCtx): void",
           "doc": "The full per-item contract check — {@link checkItemPriceFormula} plus the\n`replacement` axis. Attached with `.superRefine` to the ORDER line-item arm,\nthe one item shape whose price carries a `replacement` channel. The direct\nanalogue of `checkMovementContract` in `schemas/transaction.ts`.\n\n`required_when_stocked` treats a MISSING `stock_method` as stocked — the\nconservative reading, and the one the hand-written refine this replaced always\nenforced. **Both callers now make the field required** (`OrderDocLineItemInner`\nas of W5, `ComponentObject` from the start), so that branch is unreachable\nthrough either one; it is kept because a refinement is not a parse and this\nfunction takes a structural bound, not a schema.\n\nThe `stock_method` requirement is also why the axis does not run on the\ninvoice arm: an invoice line drops `stock_method` and `price.replacement`\ntogether, so an absent `stock_method` there means \"this shape has no answer\",\nnot \"unknown\" — and running it would reject all 7,076 invoice rentals in prod.\n\n⚠️ **This function takes a STRUCTURAL BOUND, not a schema, so the compiler\ncannot tell you when a field it reads has been renamed away.** During the\ndollars→cents migration `price.replacement` became `price.replacement_cents`\neverywhere; had the bound below not moved with it, `deno check` would have\nstayed green while `item.price?.replacement` read `undefined` forever — the\n`forbidden` arm permanently vacuous (a transaction_fee could carry a\nreplacement price) and the `required_when_stocked` arm firing on every\nstocked rental. Any future rename of a field named here must edit this\nsignature; `tests/common.test.ts` pins both arms against a live shape so a\nvacuous bound fails rather than passes.",
@@ -5246,6 +5260,14 @@
           "name": "checkZeroPricedComponents",
           "signature": "checkZeroPricedComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void",
           "doc": "The ARRAY-level `zero_priced` refinement, holding **both directions in one\nplace** — a flagged line is a component, and a component states the flag.\n\n🔴 **It cannot be per-item and it cannot be split.** Deciding componenthood\nneeds the sibling array, so a per-item refinement would red the test sites that\nparse a line item in isolation for having no siblings — failures with nothing\nto do with `zero_priced`. And splitting the two directions across a schema\nrefinement and a write-boundary check gives one fact two homes: `core#100`\nasked for both here because `validateCollection` re-parses every stored\ndocument through its Zod schema, so a schema-level rule audits the whole corpus\nfor free where a boundary-only rule is invisible to it.\n\n⚠️ **This runs STRICTLY BEFORE `api-cloudrun/src/lib/validate.ts`'s arm**, which\n`validateBeforeWrite` reaches only after `safeParse` has succeeded — so that\narm's invariant-(2) check is unreachable once this lands, and is dead code\nrather than a second opinion.\n\nInvariant (1) — *a flagged line carries no charge* — stays per-item in\n{@link checkZeroPricedAmount}, because it needs only the item it is given.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkZeroQuantityComponents",
+          "signature": "checkZeroQuantityComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void",
+          "doc": "{@link zeroQuantityComponents} as an array-level refinement, attached to the order's `items`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -5286,6 +5308,14 @@
           "name": "deriveProductImageUuids",
           "signature": "deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]",
           "doc": "Derive `query_by_images` from `images` — each row's `uuid` followed by its\n`uuid_cutout` when set, walking `images` in order.\n\nThe single source of the denormalization, called by every writer. Defined here\nrather than in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\n**Ordered, but not an ordering source.** The emitted array follows `images`\nrow order — it costs nothing (one pass either way) and a mirror that tracks\nthe display array is easier to eyeball in the console than an arbitrary one.\nBut `images` remains the sole authority on display order: this field exists\nfor Firestore `array-contains`, and the refinement below compares it as a\nmultiset, so a differently-ordered mirror holding the same uuids is still\nvalid. Nothing may read order back out of it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "destinationJoinViolations",
+          "signature": "destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]",
+          "doc": "Where the destination dividers and pairs of one document disagree — the rule\n{@link checkDestinationJoin} enforces on the order and fulfillment schemas, as\ndata, so a WRITER can refuse the same input with a 400 before it builds a\ndocument the schema would reject with a 500. One author: the refinement is this\nfunction plus an `addIssue` per entry, and api-cloudrun's write guard (which\nalso covers invoices) calls it rather than keeping a second copy.\n\nThe join is the divider's `uid` = the pair's `uid` (see\n{@link DocDestinationType.uid}). It is a biconditional except for the one shape\n{@link isSingleEntryDeduction} names:\n- **divider → pair** is unconditional, and vacuous when no divider exists;\n- **pair → divider** is unconditional unless the document has no dividers and\n  one pair.\n\nA row with a non-string `uid` is skipped: the schema parse owns it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -5497,6 +5527,14 @@
         },
         {
           "kind": "function",
+          "name": "isSingleEntryDeduction",
+          "signature": "isSingleEntryDeduction(dividerCount: number, pairCount: number): boolean",
+          "doc": "The ONE sanctioned divider-less shape: no destination dividers at all, and\nexactly one pair.\n\n🔴 **Not \"no dividers\" alone, and not \"one pair\" alone.** With no divider a\nline cannot address a destination by `item.path`, so the answer has to come\nfrom somewhere else — and with exactly ONE pair there is no other answer to\npick, which makes it a deduction rather than a guess. With two or more pairs\nthe deduction has nothing to deduce from and every pair is unaddressable; one\ndivider beside two pairs is a broken join and stays refused.\n\nAsked by {@link destinationJoinViolations} and by any writer that reports the\nsame shape, so the report and the refusal cannot drift apart.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isValidOrderStatusTransition",
           "signature": "isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: \"manual\" | \"propagation\"): boolean",
           "doc": "Server-side gate for an order status write. `source: \"manual\"` rejects\nwrites that move into a computed status or out of a computed status into\nanything other than the same value (no-op). `source: \"propagation\"`\ntrusts the booking write path that sets `active` or `complete`.",
@@ -5684,6 +5722,14 @@
           "name": "zeroPricedUnstatedComponents",
           "signature": "zeroPricedUnstatedComponents(items: readonly ZeroPricedItemLike[]): ZeroPricedComponentFinding[]",
           "doc": "**Invariant (3): a COMPONENT states the flag.** The converse of invariant (2),\nand the reason this pair is one refinement rather than two — `core#100`.\n\n🔴 **An absent value is not \"no answer\", it is *charged*.**\n{@link checkZeroPricedAmount} fires only on `=== true` and the zero-priced-first\nsort groups only on `=== true`, so a component that states nothing has its\nbilling decided by a default. On a kit component, *\"included at no charge with\nits parent\"* versus *\"billed separately\"* is a real distinction and it was\nbeing made by omission on 9,213 rows.\n\n⚠️ **`null` fails this, and that is the whole point** — it is what today's\nwriter emits when the catalog says nothing (`comp.zero_priced ?? null` in\n`utils/order-lines.ts`), so accepting it would leave the defect representable\nunder a different spelling. A non-component line correctly carries `null`; only\ncomponents are asked.\n\n⭐ **The corpus was emptied before this could land**, exactly as invariant (2)\nwas: `api-cloudrun/scripts/backfill-zero-priced-projections.ts` took all three\ngrains to 0 unstated component rows in both projects on 2026-09-10, from 9,213.\nOrdering a contract behind its corpus is the whole of that pattern.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "zeroQuantityComponents",
+          "signature": "zeroQuantityComponents(items: readonly ZeroPricedItemLike[]): ZeroPricedComponentFinding[]",
+          "doc": "**A component line never carries `quantity: 0`** (owner, 2026-09-27; manager#557).\nThe picker lists a `default` component at its catalog quantity, which may be 0,\nto OFFER it — not to add a line. Persisting that 0 stores a line that is\nneither ordered nor nothing: a booking grain with no demand, and a\n`quantity_ordered` of `0` that would then read the same as a KEPT row (a line\nthe order removed while units were still out), which is why the fulfillment's\n`quantity_ordered: 0` is unambiguous only because of this rule.\n\nA component is a line whose parent (by path) is also a line, the same\ndefinition {@link zeroPricedUnstatedComponents} uses. A top-level line may\nlegitimately be 0 and is not reported, and a parent that resolves to nothing\nis `validateItemParentage`'s finding rather than this one.\n\n⚠️ **ORDER only.** A fulfillment carries kept kit ancestors at quantity 0 (the\nancestor of a kept component can itself be a component), and an invoice is\nscoped to what it bills, so neither grain attaches {@link checkZeroQuantityComponents}.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -6506,7 +6552,7 @@
         {
           "kind": "interface",
           "name": "ZeroPricedItemLike",
-          "declaration": "interface ZeroPricedItemLike {\n  readonly uid: string;\n  readonly type: string;\n  readonly name?: string;\n  readonly path?: readonly string[];\n  readonly zero_priced?: boolean | null;\n}",
+          "declaration": "interface ZeroPricedItemLike {\n  readonly uid: string;\n  readonly type: string;\n  readonly name?: string;\n  readonly path?: readonly string[];\n  readonly zero_priced?: boolean | null;\n  readonly quantity?: number;\n}",
           "doc": "The minimum an item has to expose for the two ARRAY-level `zero_priced`\ninvariants. Structural rather than one of the three stored item unions,\nbecause the whole point is that an order item, an invoice item and a\nfulfillment item answer these questions identically — and `T[]` is invariant,\nso naming the unions would need a cast per grain to say so."
         },
         {
@@ -6546,6 +6592,14 @@
           "name": "checkZeroPricedComponents",
           "signature": "checkZeroPricedComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void",
           "doc": "The ARRAY-level `zero_priced` refinement, holding **both directions in one\nplace** — a flagged line is a component, and a component states the flag.\n\n🔴 **It cannot be per-item and it cannot be split.** Deciding componenthood\nneeds the sibling array, so a per-item refinement would red the test sites that\nparse a line item in isolation for having no siblings — failures with nothing\nto do with `zero_priced`. And splitting the two directions across a schema\nrefinement and a write-boundary check gives one fact two homes: `core#100`\nasked for both here because `validateCollection` re-parses every stored\ndocument through its Zod schema, so a schema-level rule audits the whole corpus\nfor free where a boundary-only rule is invisible to it.\n\n⚠️ **This runs STRICTLY BEFORE `api-cloudrun/src/lib/validate.ts`'s arm**, which\n`validateBeforeWrite` reaches only after `safeParse` has succeeded — so that\narm's invariant-(2) check is unreachable once this lands, and is dead code\nrather than a second opinion.\n\nInvariant (1) — *a flagged line carries no charge* — stays per-item in\n{@link checkZeroPricedAmount}, because it needs only the item it is given.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkZeroQuantityComponents",
+          "signature": "checkZeroQuantityComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void",
+          "doc": "{@link zeroQuantityComponents} as an array-level refinement, attached to the order's `items`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -6666,6 +6720,14 @@
           "name": "zeroPricedUnstatedComponents",
           "signature": "zeroPricedUnstatedComponents(items: readonly ZeroPricedItemLike[]): ZeroPricedComponentFinding[]",
           "doc": "**Invariant (3): a COMPONENT states the flag.** The converse of invariant (2),\nand the reason this pair is one refinement rather than two — `core#100`.\n\n🔴 **An absent value is not \"no answer\", it is *charged*.**\n{@link checkZeroPricedAmount} fires only on `=== true` and the zero-priced-first\nsort groups only on `=== true`, so a component that states nothing has its\nbilling decided by a default. On a kit component, *\"included at no charge with\nits parent\"* versus *\"billed separately\"* is a real distinction and it was\nbeing made by omission on 9,213 rows.\n\n⚠️ **`null` fails this, and that is the whole point** — it is what today's\nwriter emits when the catalog says nothing (`comp.zero_priced ?? null` in\n`utils/order-lines.ts`), so accepting it would leave the defect representable\nunder a different spelling. A non-component line correctly carries `null`; only\ncomponents are asked.\n\n⭐ **The corpus was emptied before this could land**, exactly as invariant (2)\nwas: `api-cloudrun/scripts/backfill-zero-priced-projections.ts` took all three\ngrains to 0 unstated component rows in both projects on 2026-09-10, from 9,213.\nOrdering a contract behind its corpus is the whole of that pattern.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "zeroQuantityComponents",
+          "signature": "zeroQuantityComponents(items: readonly ZeroPricedItemLike[]): ZeroPricedComponentFinding[]",
+          "doc": "**A component line never carries `quantity: 0`** (owner, 2026-09-27; manager#557).\nThe picker lists a `default` component at its catalog quantity, which may be 0,\nto OFFER it — not to add a line. Persisting that 0 stores a line that is\nneither ordered nor nothing: a booking grain with no demand, and a\n`quantity_ordered` of `0` that would then read the same as a KEPT row (a line\nthe order removed while units were still out), which is why the fulfillment's\n`quantity_ordered: 0` is unambiguous only because of this rule.\n\nA component is a line whose parent (by path) is also a line, the same\ndefinition {@link zeroPricedUnstatedComponents} uses. A top-level line may\nlegitimately be 0 and is not reported, and a parent that resolves to nothing\nis `validateItemParentage`'s finding rather than this one.\n\n⚠️ **ORDER only.** A fulfillment carries kept kit ancestors at quantity 0 (the\nancestor of a kept component can itself be a component), and an invoice is\nscoped to what it bills, so neither grain attaches {@link checkZeroQuantityComponents}.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -7874,6 +7936,12 @@
           "doc": "A mid-rental swap, stated ON the destination pair that carries it.\n\n🔴 **A swap IS a destination pair — an exchange LEG — not a structure of its\nown.** The replacement unit goes out on its own trip, so it needs its own\ndates, its own booking, its own card and its own section of items; a\ndestination pair is all four already. Making it a pair is what puts a swap\nthrough the three-way merge (`utils/shared-fields.ts`) and the diff\n(`utils/documentDiff.ts`) unchanged: a swap made on the order propagates to\nthe fulfillment and the invoice unless overridden, and a swap made on the\nfulfillment shows as a diff against both.\n\n⚠️ **The parent's collection endpoint and dates are COPIED, not referenced.**\nThe units go back on the parent leg's return trip, which is why an exchange\npair gets no `:end` card (`utils/cards.ts`) and why its collection half must\nagree with its parent's."
         },
         {
+          "kind": "interface",
+          "name": "DestinationJoinViolation",
+          "declaration": "interface DestinationJoinViolation {\n  kind: \"pair_without_divider\" | \"divider_without_pair\";\n  uid: string;\n  index?: number;\n}",
+          "doc": "One way the destination dividers and the destination pairs fail to join."
+        },
+        {
           "kind": "variable",
           "name": "DestinationPairCore",
           "declaration": "const DestinationPairCore: typeLiteral;",
@@ -8223,6 +8291,14 @@
         },
         {
           "kind": "function",
+          "name": "checkDestinationJoin",
+          "signature": "checkDestinationJoin(doc: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "{@link destinationJoinViolations} as a document-level refinement. Attached to\nthe ORDER and FULFILLMENT documents only.\n\n⚠️ **The INVOICE deliberately does not carry it**: an invoice is scoped to what\nit bills, so its dividers and pairs are whatever the billed lines need. The\nAPI's write guard still applies the same function to an invoice at write time.\n\n⚠️ **A document-level refinement, so a single-field PATCH does not see it** —\n`assertValidPatch` validates each key alone, and a writer patching only\n`items` or only `destinations` is checked when it supplies the merged document.\nIt is a REFINE, so under `z.strictObject` a stored violator becomes unwritable\nthe moment a consumer pins it: the corpus has to read 0 first.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "checkExchangePairs",
           "signature": "checkExchangePairs(pairs: ReadonlyArray<typeLiteral>, ctx: z.RefinementCtx): void",
           "doc": "Every exchange pair names a parent pair of the same document, and that parent\nis not itself an exchange. Shared by the order and fulfillment destination\narrays — one statement, so the two grains cannot disagree about what a swap\nis. ⚠️ **The INVOICE array deliberately does not carry it** (see the note at\n`FulfillmentSchema.destinations`): an invoice is scoped to what it bills, so it\ncan hold an exchange pair whose parent leg another invoice carries.\n\n⚠️ **It reads the array, so it is attached at `z.array(...)` rather than to a\npair** — a pair alone cannot see its siblings.",
@@ -8247,6 +8323,14 @@
         },
         {
           "kind": "function",
+          "name": "destinationJoinViolations",
+          "signature": "destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]",
+          "doc": "Where the destination dividers and pairs of one document disagree — the rule\n{@link checkDestinationJoin} enforces on the order and fulfillment schemas, as\ndata, so a WRITER can refuse the same input with a 400 before it builds a\ndocument the schema would reject with a 500. One author: the refinement is this\nfunction plus an `addIssue` per entry, and api-cloudrun's write guard (which\nalso covers invoices) calls it rather than keeping a second copy.\n\nThe join is the divider's `uid` = the pair's `uid` (see\n{@link DocDestinationType.uid}). It is a biconditional except for the one shape\n{@link isSingleEntryDeduction} names:\n- **divider → pair** is unconditional, and vacuous when no divider exists;\n- **pair → divider** is unconditional unless the document has no dividers and\n  one pair.\n\nA row with a non-string `uid` is skipped: the schema parse owns it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "getOrderStatusTransitions",
           "signature": "getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]",
           "doc": "The statuses an operator can move to from the given current status.\nReturns an empty list for computed statuses (`active`, `complete`) and\nfilters the current status out of the user-settable set.",
@@ -8266,6 +8350,14 @@
           "name": "isLineItem",
           "signature": "isLineItem(item: OrderDocItemType): item is OrderDocLineItemType",
           "doc": "Type guard that narrows an order doc item to a line item (excludes\ndestination/group dividers). Sound: every non-divider `type` is now backed by\nexactly one shape, so the narrowing cannot hand a caller a `price` of the\nwrong kind.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isSingleEntryDeduction",
+          "signature": "isSingleEntryDeduction(dividerCount: number, pairCount: number): boolean",
+          "doc": "The ONE sanctioned divider-less shape: no destination dividers at all, and\nexactly one pair.\n\n🔴 **Not \"no dividers\" alone, and not \"one pair\" alone.** With no divider a\nline cannot address a destination by `item.path`, so the answer has to come\nfrom somewhere else — and with exactly ONE pair there is no other answer to\npick, which makes it a deduction rather than a guess. With two or more pairs\nthe deduction has nothing to deduce from and every pair is unaddressable; one\ndivider beside two pairs is a broken join and stays refused.\n\nAsked by {@link destinationJoinViolations} and by any writer that reports the\nsame shape, so the report and the refusal cannot drift apart.",
           "paramTags": [],
           "returnsTag": null
         },

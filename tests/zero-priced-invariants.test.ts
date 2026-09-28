@@ -42,6 +42,10 @@ function line(uid: string, path: string[], zero_priced: boolean | null | undefin
     uid,
     type: "sale",
     path,
+    // `getTestDoc` mints the smallest integer, 0 — and a zero-quantity COMPONENT
+    // is refused on an order (`checkZeroQuantityComponents`), which would fail
+    // these arms for a reason other than the one under test.
+    quantity: 1,
     ...(zero_priced === undefined ? {} : { zero_priced }),
   });
 }
@@ -64,6 +68,17 @@ function fulfillmentLine(uid: string, path: string[], zero_priced: boolean | nul
   });
 }
 
+/**
+ * Point a fixture's single pair at {@link DIV}, so the divider the arms hang
+ * their lines under is ANSWERED by a pair. `getTestDoc` mints an unrelated pair
+ * uid, and the order and fulfillment schemas refuse a divider no pair answers
+ * (`checkDestinationJoin`) — an arm failing on THAT would read as the
+ * `zero_priced` refinement firing.
+ */
+function joined<D extends { destinations: { uid: string }[] }>(doc: D): D {
+  return { ...doc, destinations: doc.destinations.map((p, i) => (i === 0 ? { ...p, uid: DIV } : p)) };
+}
+
 /** The `destination` divider both grains hang their lines under. */
 const divider = { uid: DIV, type: "destination" as const, name: "Site", description: "", path: [DIV] };
 
@@ -76,7 +91,7 @@ function refusedAt(result: { success: boolean; error?: { issues: { path: Propert
 }
 
 Deno.test("invariant (2): a flagged line must be a COMPONENT", async (t) => {
-  const base = getTestDoc(OrderSchema, { uid: "testorder00000000001", created_at: mockTimestamp, updated_at: mockTimestamp }, { now: mockTimestamp });
+  const base = joined(getTestDoc(OrderSchema, { uid: "testorder00000000001", created_at: mockTimestamp, updated_at: mockTimestamp }, { now: mockTimestamp }));
 
   await t.step("a flag on a line under a DIVIDER is refused, at that row", () => {
     const doc = { ...base, items: [divider, line(PARENT, [DIV, PARENT], true)] };
@@ -95,7 +110,7 @@ Deno.test("invariant (2): a flagged line must be a COMPONENT", async (t) => {
 });
 
 Deno.test("invariant (3): a COMPONENT must state the flag", async (t) => {
-  const base = getTestDoc(OrderSchema, { uid: "testorder00000000002", created_at: mockTimestamp, updated_at: mockTimestamp }, { now: mockTimestamp });
+  const base = joined(getTestDoc(OrderSchema, { uid: "testorder00000000002", created_at: mockTimestamp, updated_at: mockTimestamp }, { now: mockTimestamp }));
   const withChild = (flag: boolean | null | undefined) => ({
     ...base,
     items: [divider, line(PARENT, [DIV, PARENT], null), line(CHILD, [DIV, PARENT, CHILD], flag)],
@@ -140,7 +155,7 @@ Deno.test("the refinement is wired on ALL THREE grains, not just the order", asy
   });
 
   await t.step("fulfillments", () => {
-    const base = getTestDoc(FulfillmentSchema, { uid: "testfulfillment00001", created_at: mockTimestamp, updated_at: mockTimestamp }, { now: mockTimestamp });
+    const base = joined(getTestDoc(FulfillmentSchema, { uid: "testfulfillment00001", created_at: mockTimestamp, updated_at: mockTimestamp }, { now: mockTimestamp }));
     const items = (flag: boolean | null) => [
       divider,
       fulfillmentLine(PARENT, [DIV, PARENT], null),

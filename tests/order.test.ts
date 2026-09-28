@@ -552,7 +552,7 @@ Deno.test("OrderSchema validates a complete document", () => {
     ...minimalDoc,
     items: [
       {
-        uid: "550e8400-e29b-41d4-a716-446655440000",
+        uid: "11111111-1111-4111-8111-111111111111",
         type: "destination",
         name: "Test Chicago Office",
         description: "",
@@ -563,14 +563,14 @@ Deno.test("OrderSchema validates a complete document", () => {
         type: "group",
         name: "Test Lighting",
         description: "",
-        path: ["550e8400-e29b-41d4-a716-446655440000"],
+        path: ["11111111-1111-4111-8111-111111111111"],
       },
       {
         uid: "testprod100000000000",
         type: "rental",
         name: "Camera",
         description: "",
-        path: ["550e8400-e29b-41d4-a716-446655440000", "550e8400-e29b-41d4-a716-446655440001"],
+        path: ["11111111-1111-4111-8111-111111111111", "550e8400-e29b-41d4-a716-446655440001"],
         quantity: 2,
         uid_tax_class: "TaxC1assDefau1tAAAAA",
         price: {
@@ -1323,8 +1323,12 @@ const SWAP_PAIR = "22222222-2222-4222-8222-222222222222";
 
 /** The minimal document with a parent leg and a swap leg against it. */
 function docWithSwap(exchange: unknown, swapUid = SWAP_PAIR) {
+  // Each pair is answered by its divider (`checkDestinationJoin`); the swap
+  // uid is a parameter so a test can point a pair at a divider that exists.
+  const divider = (uid: string) => ({ uid, type: "destination", name: "Site", description: "", path: [uid] });
   return {
     ...minimalDoc,
+    items: [divider(PARENT_PAIR), divider(swapUid)],
     destinations: [
       validDocDestination,
       { ...validDocDestination, uid: swapUid, exchange },
