@@ -26961,28 +26961,6 @@ must not take down every write in its subtree.
 
 ## `@cfs/core/utils/documentDiff`
 
-### `DocumentBilledEntry`
-
-"Billed N of M" — what every aligned invoice, summed, bills at one order line
-against what the order asks for. Like `uninvoiced` it is a statement about all
-of the invoices, so it names every one that was summed.
-
-Emitted only when something bills the line (nothing billing it is
-`uninvoiced`) and the answer is not zero on both money axes. Cents are PRE-TAX
-and signed: negative is over-billing.
-
-```ts
-interface DocumentBilledEntry {
-  kind: "billed";
-  invoices: DocumentRef[];
-  ordered: number;
-  billed: number;
-  quantity_cents: number;
-  extension_cents: number;
-  crms_blocked: boolean;
-}
-```
-
 ### `DocumentDiffContext`
 
 What the order ↔ invoice explanation arms need, per order.
@@ -26999,7 +26977,7 @@ interface DocumentDiffContext {
 One entry at one key of the viewed document. Discriminated on `kind`.
 
 ```ts
-type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentUninvoicedEntry | DocumentSubstitutionEntry | DocumentBilledEntry | DocumentFulfilledEntry;
+type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentSubstitutionEntry | DocumentQuantityEntry;
 ```
 
 ### `DocumentDiffField`
@@ -27016,18 +26994,11 @@ interface DocumentDiffField {
 
 ### `DocumentDiffKind`
 
-- `differs` — the same path on both sides, a compared field disagrees
-- `only_here` — on the viewed document, absent from the source
-- `missing_here` — on the source, absent from the viewed document
-- `pair_field` — a destination pair's compared field disagrees
-- `doc_field` — a DOCUMENT-level shared field disagrees (organization, subject,
-  reference, `tax_exempt`, `uid_store`) — not a row, so it is filed on its own
-- `uninvoiced` — an order/fulfillment line that no invoice carries
-- `substituted` — one side carries a substitute where the other carries the line it replaced
-- `billed` — the invoices, summed, bill a different quantity or chargeable days than the order
+Every entry kind, read off the entries rather than listed beside them. The
+hand-kept list this replaced had already lost `fulfilled`.
 
 ```ts
-type DocumentDiffKind = "differs" | "only_here" | "missing_here" | "pair_field" | "doc_field" | "uninvoiced" | "substituted" | "billed";
+type DocumentDiffKind = indexedAccess;
 ```
 
 ### `DocumentDiffMap`
@@ -27046,7 +27017,16 @@ interface DocumentDiffMap {
   unaligned: Array<typeLiteral>;
   status: Array<typeLiteral>;
   doc: DocumentDiffEntry[];
+  unplaced_out_of_service: DocumentQuantityEntry[];
 }
+```
+
+### `DocumentDiffOutOfService`
+
+What the diff reads of an `out-of-service` record.
+
+```ts
+type DocumentDiffOutOfService = Pick<OutOfService, "uid" | "reason" | "status" | "quantity" | "query_by_sources"> & typeLiteral;
 ```
 
 ### `DocumentDiffSources`
@@ -27058,48 +27038,7 @@ interface DocumentDiffSources {
   orders?: readonly Order[];
   fulfillments?: readonly Fulfillment[];
   invoices?: readonly Invoice[];
-}
-```
-
-### `DocumentFulfilledEntry`
-
-What the invoices bill at this line, judged against the FULFILLMENT's own
-quantity — the sibling of {@link DocumentBilledEntry}, which judges
-the same billing against the ORDER.
-
-⚠️ **Named for the DOCUMENT, not for a custody event.** It was `sent` first,
-which claimed a rung of the ladder (`quoted → prep → checkout → return →
-complete`) that the number does not carry: a fulfillment row's quantity is
-the same figure before anything is picked and after everything has come
-back. How many units are physically out lives on the booking's breakdown.
-The governing parallel is `billed`, which asserts what the invoices SAY
-rather than that money moved — payment is settlements' fact, not the
-invoice's.
-
-🔴 **Both entries exist on purpose, and they are MEANT to disagree.** The
-three documents are three authorities on three different questions, and all
-three are mutable: the ORDER is the quote given to the customer, the
-FULFILLMENT records what actually happened, and the INVOICE is the operator's
-decision about what to bill. Reconciling them into one number would pick a
-winner on the operator's behalf. An invoice that bills exactly what was
-quoted while a unit more went out the door is *aligned with the order* and
-*diverged from reality*, and the operator needs both facts to decide.
-
-⚠️ **Summed across invoices, exactly as `billed` is, and for the same
-reason.** An order is routinely billed across several invoices, so asking
-this per invoice would report "fulfilled 5, this invoice bills 2" against every
-one of them. That is why it is emitted here and not from `lineFields`, whose
-fulfillment ↔ invoice arm stays empty.
-
-⚠️ Advisory. Nothing refuses a write on it.
-
-```ts
-interface DocumentFulfilledEntry {
-  kind: "fulfilled";
-  invoices: DocumentRef[];
-  fulfilled: number;
-  billed: number;
-  quantity_cents: number;
+  outOfService?: readonly DocumentDiffOutOfService[];
 }
 ```
 
@@ -27109,6 +27048,54 @@ The three document kinds a diff can be viewed from or sourced from.
 
 ```ts
 type DocumentKind = "order" | "fulfillment" | "invoice";
+```
+
+### `DocumentQuantityEntry`
+
+How many units the three documents each state at one line — **ordered**,
+**fulfilled**, **invoiced**, in the documents' own words — emitted when they
+disagree (core#118).
+
+It replaced three kinds that each carried one pair of the three numbers:
+`billed` (ordered vs invoiced), `fulfilled` (fulfilled vs invoiced) and
+`uninvoiced` (invoiced is zero). Three entries on one row could state one
+fact twice, and a reader had to join them to see the row.
+
+🔴 **The three are MEANT to disagree, and the entry picks no winner.** The
+order is the quote, the fulfillment is what happened, the invoice is what is
+billed; all three are mutable. An invoice billing exactly what was quoted
+while a unit more went out the door is aligned with the order and not with
+reality, and the operator needs both facts to decide.
+
+Emitted only when at least one ALIGNED invoice for the order was passed: an
+order not yet invoiced is not flagged line by line, and an unaligned invoice
+cannot vouch for or against any line. Then it is emitted when invoiced
+differs from ordered, when the order's window adds days to units already
+invoiced, or when fulfilled differs from BOTH of the others. The last clause
+is deliberately narrow: fulfilled agreeing with ordered adds nothing the
+ordered-vs-invoiced half does not already say.
+
+Summed across invoices: an order is routinely billed across several, so
+"this invoice bills 3 of 5" says nothing when a sibling bills the other 2.
+The invoice view therefore needs the sibling invoices passed in
+(`order.invoices`); without them a line billed on a sibling reads as not
+invoiced.
+
+⚠️ Advisory. Nothing refuses a write on it.
+
+```ts
+interface DocumentQuantityEntry {
+  kind: "quantity";
+  invoices: DocumentRef[];
+  ordered: number | null;
+  fulfilled: number | null;
+  invoiced: number;
+  quantity_cents: number | null;
+  extension_cents: number | null;
+  fulfilled_quantity_cents: number | null;
+  crms_blocked: boolean;
+  uid_out_of_service: string | null;
+}
 ```
 
 ### `DocumentRef`
@@ -27126,11 +27113,22 @@ interface DocumentRef {
 
 ### `DocumentSourceDiffEntry`
 
-One source's difference at one key of the viewed document.
+What one source says about one key of the viewed document.
+
+- `differs` — the same path on both sides, a compared field disagrees
+- `not_on_source` — on the viewed document, absent from the source
+- `only_on_source` — on the source, absent from the viewed document
+- `pair_field` — a destination pair's compared field disagrees
+- `doc_field` — a DOCUMENT-level shared field disagrees (organization, subject,
+  reference, `tax_exempt`, `uid_store`) — not a row, so it is filed on its own
+
+The two presence kinds are named for the sentence the UI reads them as
+("not on the fulfillment", "only on the invoice"). They were `only_here` /
+`missing_here` until core#118.
 
 ```ts
 interface DocumentSourceDiffEntry {
-  kind: Exclude<DocumentDiffKind, "uninvoiced" | "substituted" | "billed">;
+  kind: "differs" | "not_on_source" | "only_on_source" | "pair_field" | "doc_field";
   source: DocumentRef;
   fields: DocumentDiffField[];
 }
@@ -27148,7 +27146,7 @@ type DocumentStatusIssue = "live_invoice_on_canceled_order";
 
 A substitution between the viewed document and one source. Filed at
 whichever of the two lines the viewed document carries — `replaced` on the
-side without the swap, `substitute` on the side with it — so the entry always
+side without the substitute, `substitute` on the side with it — so the entry always
 lands on a row. The other key names the source's line.
 
 Both keys are in the VIEWED document's path space, like every map key.
@@ -27159,18 +27157,6 @@ interface DocumentSubstitutionEntry {
   source: DocumentRef;
   replaced: string;
   substitute: string;
-}
-```
-
-### `DocumentUninvoicedEntry`
-
-A line no invoice carries. It has no single source — it is a statement about
-all of them — so it names every invoice that was checked instead.
-
-```ts
-interface DocumentUninvoicedEntry {
-  kind: "uninvoiced";
-  invoices: DocumentRef[];
 }
 ```
 
@@ -32497,6 +32483,20 @@ interface RowKeep {
 }
 ```
 
+### `bookingIdsByPath(doc: Pick<Order, "uid" | "items" | "destinations">): Array<typeLiteral>`
+
+Every row path on an order (or on its fulfillment, which shares the order's
+path space) that books, and the booking id it books into. Several rows can
+share one id: a grain is `(product, leg, signature)`, and two groups on one
+leg holding the same product are one grain.
+
+⚠️ Derived by the same walk the order-edit delta keeps custody by, so a
+reader filing something per booking (an out-of-service record, in
+`computeDocumentDiffs`) cannot disagree with the writer about which row a
+booking belongs to. Do not rebuild the id with `buildBookingId` beside it.
+
+**Returns** — `[path, bookingId]` pairs in document order
+
 ### `computeOrderEditDelta(args: typeLiteral): OrderEditDelta`
 
 The row and leg keep for one order edit.
@@ -34903,14 +34903,18 @@ deleted — the sum simply stops counting it.
 ## One module, two askers
 
 The manager calls {@link seedReplacementLines} to OFFER the lines; the API
-calls {@link billedOutOfService} to REFUSE an over-bill. Both read the same
-sum, so the offer and the refusal cannot disagree.
+calls {@link overbilledOutOfService} to WARN of an over-bill — an advisory
+`overbilled_out_of_service` in the response and an `oos_overbilled` log line,
+never a refusal (api-cloudrun#1147: the invoice is what is billed, and the
+operator may bill past the record). Both read the same sum, so the offer and
+the warning cannot disagree. `computeDocumentDiffs` reads it too, for a
+record's `invoiced` figure.
 
 ⚠️ **The sum is only as complete as the invoices passed in.** A caller must
 pass EVERY invoice whose `query_by_out_of_service` names the records in
-question (one `array-contains-any` query per ≤30 uids). On the API side that
-read has to be a completeness read inside the transaction that writes the
-invoice — a partial list under-counts and admits a double bill.
+question (one `array-contains-any` query per ≤30 uids). A partial list
+under-counts: the offer re-offers units already billed, and the warning
+misses a double bill.
 
 ### `BILLABLE_OOS_REASONS`
 
@@ -35007,7 +35011,8 @@ Is this record a lost/damaged unit a customer can be billed for?
 ### `overbilledOutOfService(lines: ReadonlyArray<typeLiteral>, records: readonly Pick<ReplacementSourceRecord, "uid" | "quantity">[], otherInvoices: readonly ReplacementBillingInvoice[], invoiceUid?: string): Array<typeLiteral>`
 
 Every record whose lines would bill more than it holds, given the lines an
-invoice is about to carry. The API's refusal: an empty result is the pass.
+invoice is about to carry. The API's over-bill advisory: an empty result
+means nothing to warn about. It never refuses a write (api-cloudrun#1147).
 
 **Parameters**
 

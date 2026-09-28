@@ -22,14 +22,18 @@
  * ## One module, two askers
  *
  * The manager calls {@link seedReplacementLines} to OFFER the lines; the API
- * calls {@link billedOutOfService} to REFUSE an over-bill. Both read the same
- * sum, so the offer and the refusal cannot disagree.
+ * calls {@link overbilledOutOfService} to WARN of an over-bill — an advisory
+ * `overbilled_out_of_service` in the response and an `oos_overbilled` log line,
+ * never a refusal (api-cloudrun#1147: the invoice is what is billed, and the
+ * operator may bill past the record). Both read the same sum, so the offer and
+ * the warning cannot disagree. `computeDocumentDiffs` reads it too, for a
+ * record's `invoiced` figure.
  *
  * ⚠️ **The sum is only as complete as the invoices passed in.** A caller must
  * pass EVERY invoice whose `query_by_out_of_service` names the records in
- * question (one `array-contains-any` query per ≤30 uids). On the API side that
- * read has to be a completeness read inside the transaction that writes the
- * invoice — a partial list under-counts and admits a double bill.
+ * question (one `array-contains-any` query per ≤30 uids). A partial list
+ * under-counts: the offer re-offers units already billed, and the warning
+ * misses a double bill.
  *
  * @module
  */
@@ -136,7 +140,8 @@ export function isBillableOutOfService(record: Pick<ReplacementSourceRecord, "re
 
 /**
  * Every record whose lines would bill more than it holds, given the lines an
- * invoice is about to carry. The API's refusal: an empty result is the pass.
+ * invoice is about to carry. The API's over-bill advisory: an empty result
+ * means nothing to warn about. It never refuses a write (api-cloudrun#1147).
  *
  * @param lines - The invoice's lines as they will be written.
  * @param records - Every record those lines name.

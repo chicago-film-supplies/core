@@ -42,7 +42,7 @@
  * Pure and db-free.
  */
 import { grainKeep, type GrainRow, liveCustody } from "./bookings.ts";
-import { componentSignatureHash, parseBookingId } from "./booking-id.ts";
+import { buildBookingIdFromSignature, componentSignatureHash, parseBookingId } from "./booking-id.ts";
 import { mapPathsAcrossRebuild } from "./item-pairing.ts";
 import { groupByDestination } from "./orders.ts";
 import { isFulfillableItem } from "../schemas/mod.ts";
@@ -90,20 +90,60 @@ export interface OrderEditDelta {
   keptLegUids: ReadonlySet<string>;
 }
 
-/** Each fulfillable row's grain on one order, by path key. */
-function grainsByPath(order: Order): Map<string, { grain: string; legUid: string }> {
-  const out = new Map<string, { grain: string; legUid: string }>();
-  for (const group of groupByDestination(order.items, order.destinations)) {
+/** One row's grain, and the id of the booking that grain books. */
+interface RowGrain {
+  grain: string;
+  legUid: string;
+  bookingId: string;
+}
+
+/**
+ * Each row's grain on one order-shaped document, by path key — the ONE
+ * enumeration of which booking a row belongs to, shared by the edit delta and
+ * {@link bookingIdsByPath}.
+ */
+function grainsByPath(doc: Pick<Order, "uid" | "items" | "destinations">): Map<string, RowGrain> {
+  const out = new Map<string, RowGrain>();
+  for (const group of groupByDestination(doc.items, doc.destinations)) {
     // Same leg derivation as the booking writer. A draft's unplaced leg has
     // neither and books nothing, so it has no grain.
     const legUid = group.uid ?? group.uid_delivery;
     if (legUid === null) continue;
     for (const item of group.items) {
+      const signature = componentSignatureHash(item.path);
       out.set(keyOf(item.path), {
-        grain: grainKey(item.uid, legUid, componentSignatureHash(item.path)),
+        grain: grainKey(item.uid, legUid, signature),
         legUid,
+        bookingId: buildBookingIdFromSignature(doc.uid, item.uid, legUid, signature),
       });
     }
+  }
+  return out;
+}
+
+/**
+ * Every row path on an order (or on its fulfillment, which shares the order's
+ * path space) that books, and the booking id it books into. Several rows can
+ * share one id: a grain is `(product, leg, signature)`, and two groups on one
+ * leg holding the same product are one grain.
+ *
+ * ⚠️ Derived by the same walk the order-edit delta keeps custody by, so a
+ * reader filing something per booking (an out-of-service record, in
+ * `computeDocumentDiffs`) cannot disagree with the writer about which row a
+ * booking belongs to. Do not rebuild the id with `buildBookingId` beside it.
+ *
+ * @returns `[path, bookingId]` pairs in document order
+ */
+export function bookingIdsByPath(
+  doc: Pick<Order, "uid" | "items" | "destinations">,
+): Array<{ path: readonly string[]; bookingId: string }> {
+  const grains = grainsByPath(doc);
+  const out: Array<{ path: readonly string[]; bookingId: string }> = [];
+  for (const item of doc.items) {
+    // Only a fulfillable line books; the walk also passes dividers and fees.
+    if (!isFulfillableItem(item)) continue;
+    const g = grains.get(keyOf(item.path));
+    if (g !== undefined) out.push({ path: item.path, bookingId: g.bookingId });
   }
   return out;
 }

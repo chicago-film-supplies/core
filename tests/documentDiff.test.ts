@@ -7,12 +7,21 @@ import { assertEquals } from "@std/assert";
 import type { Fulfillment, Invoice, InvoiceDocItemType, Order } from "../src/schemas/mod.ts";
 import { buildOrderScopedItems } from "../src/utils/invoices.ts";
 import type { LineItem } from "../src/utils/orders.ts";
-import { computeDocumentDiffs, type DocumentDiffContext, type DocumentDiffMap } from "../src/utils/documentDiff.ts";
+import {
+  computeDocumentDiffs,
+  type DocumentDiffContext,
+  type DocumentDiffKind,
+  type DocumentDiffMap,
+  type DocumentDiffOutOfService,
+} from "../src/utils/documentDiff.ts";
 
 const O = "order-1";
 const O2 = "order-2";
-const D = "dest-1";
-const G = "group-1";
+// Dividers are bare UUIDs, as stored: a booking's component signature reads
+// every NON-uuid path segment as a product, so a readable divider uid would
+// read as a kit and change every booking id the out-of-service tests file by.
+const D = "0b6c3a51-6c1a-4f0e-9a51-6f1f2b9d0a01";
+const G = "0b6c3a51-6c1a-4f0e-9a51-6f1f2b9d0a02";
 const LIGHT = "prod-light";
 const TRIPOD = "prod-tripod";
 
@@ -84,14 +93,13 @@ function summary(map: DocumentDiffMap["lines"] | DocumentDiffMap["pairs"]): Reco
   const out: Record<string, string[]> = {};
   for (const [k, entries] of [...map].sort(([a], [b]) => a.localeCompare(b))) {
     out[k] = entries.map((e) =>
-      e.kind === "uninvoiced"
-        ? `unbilled[${e.invoices.map((i) => `#${i.number}`).join(",")}]`
+      e.kind === "quantity"
+        ? `qty[${e.invoices.map((i) => `#${i.number}`).join(",")}](o${e.ordered ?? "-"} f${e.fulfilled ?? "-"} i${e.invoiced}` +
+          (e.quantity_cents === null ? "" : `,q${e.quantity_cents},x${e.extension_cents}`) +
+          (e.fulfilled_quantity_cents === null ? "" : `,fq${e.fulfilled_quantity_cents}`) +
+          (e.uid_out_of_service === null ? "" : `,oos:${e.uid_out_of_service}`) + ")"
         : e.kind === "substituted"
         ? `${e.source.kind}#${e.source.number}:substituted(${e.replaced}→${e.substitute})`
-        : e.kind === "billed"
-        ? `billed[${e.invoices.map((i) => `#${i.number}`).join(",")}](${e.billed} of ${e.ordered},q${e.quantity_cents},x${e.extension_cents})`
-        : e.kind === "fulfilled"
-        ? `fulfilled[${e.invoices.map((i) => `#${i.number}`).join(",")}](${e.billed} of ${e.fulfilled} fulfilled,q${e.quantity_cents})`
         : `${e.source.kind}#${e.source.number}:${e.kind}` +
           (e.fields.length ? `(${e.fields.map((f) => `${f.field}=${JSON.stringify(f.here)}→${JSON.stringify(f.there)}`).join(",")})` : "")
     );
@@ -215,20 +223,15 @@ Deno.test("documentDiff: derived money alone NEVER produces a row, split or no s
   );
 });
 
-Deno.test("documentDiff: a line no invoice carries is ONE uninvoiced entry on all three views", () => {
+Deno.test("documentDiff: a line no invoice carries is ONE quantity entry, invoiced 0, on all three views", () => {
   const partial = orderItems().filter((it) => it.uid !== TRIPOD);
   const sources = { orders: [order()], fulfillments: [fulfillment()], invoices: [invoice("inv-1", [{ order: O, items: partial }])] };
 
-  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
-    [`${D}/${G}/${TRIPOD}`]: ["unbilled[#2241]"],
-  });
-  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
-    [`${D}/${G}/${TRIPOD}`]: ["unbilled[#2241]"],
-  });
+  const entry = ["qty[#2241](o1 f1 i0,q3000,x0,fq3000)"];
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), { [`${D}/${G}/${TRIPOD}`]: entry });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), { [`${D}/${G}/${TRIPOD}`]: entry });
   // The order and the fulfillment both lack it on the invoice: one entry, not one per source.
-  assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).lines), {
-    [`${O}/${D}/${G}/${TRIPOD}`]: ["unbilled[#2241]"],
-  });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).lines), { [`${O}/${D}/${G}/${TRIPOD}`]: entry });
 });
 
 Deno.test("documentDiff: an order billed across two invoices has no presence entries on any view", () => {
@@ -244,7 +247,7 @@ Deno.test("documentDiff: an order billed across two invoices has no presence ent
   // Without the sibling passed, invoice A cannot know B bills the Tripod — so it says so.
   assertEquals(
     summary(computeDocumentDiffs({ orders: [order()], invoices: [a] }, { kind: "invoice", uid: "inv-a" }, CONTEXT).lines),
-    { [`${O}/${D}/${G}/${TRIPOD}`]: ["unbilled[#2241]"], [`${O}/${D}/${LIGHT}`]: ["unbilled[#2241]"] },
+    { [`${O}/${D}/${G}/${TRIPOD}`]: ["qty[#2241](o1 f- i0,q3000,x0)"], [`${O}/${D}/${LIGHT}`]: ["qty[#2241](o4 f- i0,q4000,x0)"] },
   );
 });
 
@@ -262,23 +265,24 @@ Deno.test("documentDiff: a picker add and an invoice add of the same product are
   const sources = { orders: [order()], fulfillments: [f], invoices: [inv] };
 
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
-    [invAddKey]: ["invoice#2241:missing_here"],
-    [`${D}/${TRIPOD}`]: ["order#1001:only_here", "unbilled[#2241]"],
+    [invAddKey]: ["invoice#2241:only_on_source"],
+    // A row only the fulfillment carries: no order line, so no money on the entry.
+    [`${D}/${TRIPOD}`]: ["order#1001:not_on_source", "qty[#2241](o- f1 i0)"],
   });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).lines), {
-    [`${O}/${invAddKey}`]: ["order#1001:only_here", "fulfillment#1001:only_here"],
-    [`${O}/${D}/${TRIPOD}`]: ["unbilled[#2241]"],
+    [`${O}/${invAddKey}`]: ["order#1001:not_on_source", "fulfillment#1001:not_on_source"],
+    [`${O}/${D}/${TRIPOD}`]: ["qty[#2241](o- f1 i0)"],
   });
 });
 
-Deno.test("documentDiff: quantity against invoices is ONE billed entry over the sum, never a differs per invoice", () => {
+Deno.test("documentDiff: quantity against invoices is ONE quantity entry over the sum, never a differs per invoice", () => {
   // A bills the whole order; B bills the grip Light again. Both say 5 of it.
   const a = invoice("inv-a", [{ order: O, items: orderItems() }], 2241);
   const b = invoice("inv-b", [{ order: O, items: orderItems().filter((it) => it.path.join("/") !== `${D}/${G}/${TRIPOD}` && it.path.join("/") !== `${D}/${LIGHT}`) }], 2250);
   for (const inv of [a, b]) patchLine(inv.items, `${O}/${D}/${G}/${LIGHT}`, (it) => { it.quantity = 5; });
   const diff = computeDocumentDiffs({ orders: [order()], invoices: [a, b] }, { kind: "order", uid: O }, CONTEXT);
   // 5 + 5 billed against 2 ordered: 8 units over, at 1000¢ each.
-  assertEquals(summary(diff.lines)[`${D}/${G}/${LIGHT}`], ["billed[#2241,#2250](10 of 2,q-8000,x0)"]);
+  assertEquals(summary(diff.lines)[`${D}/${G}/${LIGHT}`], ["qty[#2241,#2250](o2 f- i10,q-8000,x0)"]);
   // The two invoices that each bill the right quantity report nothing.
   assertEquals(Object.keys(summary(diff.lines)), [`${D}/${G}/${LIGHT}`]);
 });
@@ -288,7 +292,7 @@ Deno.test("documentDiff: a multi-order invoice compares only the scopes whose or
   patchLine(inv.items, `${O}/${D}/${G}/${LIGHT}`, (it) => { it.quantity = 5; });
   patchLine(inv.items, `${O2}/${D}/${G}/${LIGHT}`, (it) => { it.quantity = 6; });
   const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv] }, { kind: "invoice", uid: "inv-1" }, CONTEXT);
-  assertEquals(summary(diff.lines), { [`${O}/${D}/${G}/${LIGHT}`]: ["billed[#2241](5 of 2,q-3000,x0)"] });
+  assertEquals(summary(diff.lines), { [`${O}/${D}/${G}/${LIGHT}`]: ["qty[#2241](o2 f- i5,q-3000,x0)"] });
 });
 
 Deno.test("documentDiff: a misaligned invoice scope is one unaligned entry, never a row per line", () => {
@@ -377,7 +381,7 @@ Deno.test("documentDiff: a fulfillment substitution is ONE entry at the substitu
   assertEquals(summary(diff.lines), { [`${D}/${G}/${MONOPOD}`]: [`order#1001:substituted(${D}/${G}/${TRIPOD}→${D}/${G}/${MONOPOD})`] });
 });
 
-Deno.test("documentDiff: a fulfillment substitution is ONE entry at the replaced line on the order view — no only_here, no missing_here", () => {
+Deno.test("documentDiff: a fulfillment substitution is ONE entry at the replaced line on the order view — no presence entries", () => {
   const f = fulfillment();
   substitute(f.items as unknown as LineItem[], `${D}/${G}/${TRIPOD}`, MONOPOD);
   const diff = computeDocumentDiffs({ orders: [order()], fulfillments: [f] }, { kind: "order", uid: O }, CONTEXT);
@@ -404,7 +408,7 @@ Deno.test("documentDiff: substituting a KIT explains the replaced kit's componen
   });
 });
 
-Deno.test("documentDiff: an invoice substitution covers the replaced line — substituted, never uninvoiced — from the order view", () => {
+Deno.test("documentDiff: an invoice substitution covers the replaced line — substituted, never invoiced 0 — from the order view", () => {
   const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
   substitute(inv.items, `${O}/${D}/${G}/${TRIPOD}`, MONOPOD, [O]);
   const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv] }, { kind: "order", uid: O }, CONTEXT);
@@ -433,8 +437,8 @@ Deno.test("documentDiff: a substitute whose replaced line the other side does NO
   const rows = f.items as unknown as LineItem[];
   rows.push({ uid: MONOPOD, type: "rental", name: "Monopod", description: "", quantity: 1, path: [D, MONOPOD], substituted_for: [{ path: [D, "gone"], quantity: 1 }] } as unknown as LineItem);
   const sources = { orders: [order()], fulfillments: [f] };
-  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), { [`${D}/${MONOPOD}`]: ["order#1001:only_here"] });
-  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), { [`${D}/${MONOPOD}`]: ["fulfillment#1001:missing_here"] });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), { [`${D}/${MONOPOD}`]: ["order#1001:not_on_source"] });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), { [`${D}/${MONOPOD}`]: ["fulfillment#1001:only_on_source"] });
 });
 
 /** `status` as `issue:kind#number` strings. */
@@ -445,13 +449,13 @@ function statusSummary(map: DocumentDiffMap): string[] {
 const voided = (inv: Invoice): Invoice => ({ ...inv, status: "void" }) as Invoice;
 const canceled = (o: Order): Order => ({ ...o, status: "canceled" }) as Order;
 
-Deno.test("documentDiff: a void invoice covers nothing — the line only it billed is uninvoiced against the live invoice", () => {
+Deno.test("documentDiff: a void invoice covers nothing — the line only it billed reads invoiced 0 against the live invoice", () => {
   const live = invoice("inv-live", [{ order: O, items: orderItems().filter((it) => it.uid !== TRIPOD) }], 2242);
   const dead = voided(invoice("inv-void", [{ order: O, items: orderItems() }], 2241));
   // The void invoice differs on money too; none of that may show.
   patchLine(dead.items, `${O}/${D}/${G}/${LIGHT}`, (it) => { (it.price as Record<string, unknown>).total_cents = 1; });
   const diff = computeDocumentDiffs({ orders: [order()], invoices: [live, dead] }, { kind: "order", uid: O }, CONTEXT);
-  assertEquals(summary(diff.lines), { [`${D}/${G}/${TRIPOD}`]: ["unbilled[#2242]"] });
+  assertEquals(summary(diff.lines), { [`${D}/${G}/${TRIPOD}`]: ["qty[#2242](o1 f- i0,q3000,x0)"] });
   assertEquals([diff.unaligned.length, diff.status.length], [0, 0]);
 });
 
@@ -532,15 +536,15 @@ Deno.test("documentDiff: a split bill — 3 + 2 of 5 — reports nothing from an
   }
 });
 
-Deno.test("documentDiff: a remainder — 4 billed of 6 — is one billed entry on the order, the fulfillment and the invoice", () => {
+Deno.test("documentDiff: a remainder — 4 invoiced of 6 — is one quantity entry on the order, the fulfillment and the invoice", () => {
   const sources = { orders: [billedOrder(6)], fulfillments: [fulfillment(billedOrder(6).items as unknown as LineItem[])], invoices: [billing("inv-a", 2241, 4)] };
-  const entry = ["billed[#2241](4 of 6,q2000,x0)"];
+  const entry = ["qty[#2241](o6 f6 i4,q2000,x0,fq2000)"];
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), { [`${D}/${G}/${LIGHT}`]: entry });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), { [`${D}/${G}/${LIGHT}`]: entry });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-a" }, CONTEXT).lines), { [`${O}/${D}/${G}/${LIGHT}`]: entry });
 });
 
-Deno.test("documentDiff: the warehouse over-fulfilled and billing matched the QUOTE — one fulfilled entry, no billed entry", () => {
+Deno.test("documentDiff: the warehouse over-fulfilled and billing matched the QUOTE — the quantity entry still fires on fulfilled", () => {
   // 🔴 The case that was invisible. Ordered 2, shipped 3, billed 2: billing
   // agrees with the quote, so `accountLine`'s `ordered − billed` is 0 and the
   // `billed` entry early-returns. Before the `fulfilled` entry the invoice read as
@@ -552,7 +556,7 @@ Deno.test("documentDiff: the warehouse over-fulfilled and billing matched the QU
   // fulfillment `differs` — "you quoted 2, we fulfilled 3". That entry and the
   // `fulfilled` one are both wanted and say different things: one compares the
   // shipment to the quote, the other compares the billing to the shipment.
-  const fulfilled_ = "fulfilled[#2241](2 of 3 fulfilled,q1000)";
+  const fulfilled_ = "qty[#2241](o2 f3 i2,q0,x0,fq1000)";
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
     [`${D}/${G}/${LIGHT}`]: ["fulfillment#1001:differs(quantity=2→3)", fulfilled_],
   });
@@ -569,7 +573,7 @@ Deno.test("documentDiff: the warehouse over-fulfilled and billing matched the QU
   });
 });
 
-Deno.test("documentDiff: under-shipped AND under-billed — BOTH entries, saying different things", () => {
+Deno.test("documentDiff: under-shipped AND under-invoiced — ONE entry carrying all three numbers", () => {
   // Ordered 6, shipped 5, billed 4. The two authorities disagree with the
   // invoice by different amounts, which is exactly when the pair earns its
   // keep: "2 short of the quote" and "1 short of what shipped".
@@ -581,13 +585,12 @@ Deno.test("documentDiff: under-shipped AND under-billed — BOTH entries, saying
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
     [`${D}/${G}/${LIGHT}`]: [
       "fulfillment#1001:differs(quantity=6→5)",
-      "billed[#2241](4 of 6,q2000,x0)",
-      "fulfilled[#2241](4 of 5 fulfilled,q1000)",
+      "qty[#2241](o6 f5 i4,q2000,x0,fq1000)",
     ],
   });
 });
 
-Deno.test("documentDiff: the fulfillment agreeing with the order emits NO fulfilled entry — it would repeat the billed one", () => {
+Deno.test("documentDiff: the fulfillment agreeing with the order does not by itself raise the entry — ordered vs invoiced does", () => {
   // Ordered 6, shipped 6, billed 4. A `fulfilled` entry here would read "4 of 6
   // fulfilled" beside "4 of 6" — two entries carrying one fact.
   const sources = {
@@ -595,12 +598,12 @@ Deno.test("documentDiff: the fulfillment agreeing with the order emits NO fulfil
     fulfillments: [fulfillment(billedOrder(6).items as unknown as LineItem[])],
     invoices: [billing("inv-a", 2241, 4)],
   };
-  const entries = computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines.get(`${D}/${G}/${LIGHT}`) ?? [];
-  assertEquals(entries.filter((e) => e.kind === "fulfilled").length, 0);
-  assertEquals(entries.filter((e) => e.kind === "billed").length, 1);
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
+    [`${D}/${G}/${LIGHT}`]: ["qty[#2241](o6 f6 i4,q2000,x0,fq2000)"],
+  });
 });
 
-Deno.test("documentDiff: a billed entry says whether the over-billing offer is BLOCKED by CRMS (gap 7)", () => {
+Deno.test("documentDiff: a quantity entry says whether the over-billing offer is BLOCKED by CRMS (gap 7)", () => {
   // The copy and the offer must refuse on the SAME condition, or a surface keeps
   // rendering "over-billed" that no button can ever clear. Deciding it needs the
   // invoices' `crms_id`, which the entry's `invoices` refs do not carry — so the
@@ -626,14 +629,14 @@ Deno.test("documentDiff: ANY live CRMS invoice blocks the offer, not only an all
   assertEquals((entry?.[0] as { crms_blocked: boolean }).crms_blocked, true);
 });
 
-Deno.test("documentDiff: a date extension is money on the billed entry, not a chargeable_days differs", () => {
+Deno.test("documentDiff: a date extension is money on the quantity entry, not a chargeable_days differs", () => {
   // Billed 2 at 3 chargeable days (floored to one week: 2 × 1000 = 2000¢); the
   // order now charges 7 days (2 × 1000 × 7 ÷ 5 = 2800¢). 800¢ left to bill —
   // not price(4 days) = 2000¢, which is what pricing "the extra days" would say.
   // The extension is the pairs' windows: the invoice's charged 3 days to Sep 3, the order's now 7 to Sep 9.
   const sources = { orders: [dated(billedOrder(2, 7), 7, "2026-09-09")], invoices: [dated(billing("inv-a", 2241, 2, 3), 3, "2026-09-03")] };
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
-    [`${D}/${G}/${LIGHT}`]: ["billed[#2241](2 of 2,q0,x800)"],
+    [`${D}/${G}/${LIGHT}`]: ["qty[#2241](o2 f- i2,q0,x800)"],
   });
 });
 
@@ -652,6 +655,32 @@ function dated<T extends Order | Invoice>(doc: T, days: number, endDay: string):
   }));
   return { ...doc, destinations } as T;
 }
+
+Deno.test("documentDiff: a discount whose AMOUNT alone moved is no row — its terms still are (G2, core#118)", () => {
+  // 🔴 The leak this pins: the comparator names a price difference at the KEY
+  // (`price.discount`) while the classification is per LEAF
+  // (`price.discount.amount_cents` derived, `.rate`/`.type` propagated). Compared
+  // at the key, a split bill's smaller discount AMOUNT read as an override.
+  const discounted = (quantity: number, rate = 10) => {
+    const it = line(LIGHT, [D, G, LIGHT], quantity, 1000) as unknown as { price: Record<string, unknown> };
+    it.price.discount = { type: "percent", rate, amount_cents: quantity * 1000 * rate / 100 };
+    return it as unknown as LineItem;
+  };
+  const ord = order([DEST_ITEM, GROUP_ITEM, discounted(5)]);
+  const split = (uid: string, number: number, quantity: number, rate = 10) =>
+    invoice(uid, [{ order: O, items: [DEST_ITEM, GROUP_ITEM, discounted(quantity, rate)] }], number);
+
+  assertEquals(
+    summary(computeDocumentDiffs({ orders: [ord], invoices: [split("inv-a", 2241, 3), split("inv-b", 2250, 2)] }, { kind: "order", uid: O }, CONTEXT).lines),
+    {},
+    "3 + 2 of 5 at the same 10%: only the derived amount differs",
+  );
+  // Mutation control: the same line with its RATE moved reports exactly the rate.
+  assertEquals(
+    summary(computeDocumentDiffs({ orders: [ord], invoices: [split("inv-a", 2241, 5, 20)] }, { kind: "order", uid: O }, CONTEXT).lines),
+    { [`${D}/${G}/${LIGHT}`]: ["invoice#2241:differs(price.discount.rate=10→20)"] },
+  );
+});
 
 Deno.test("documentDiff: a split bill still reports a base price the invoice changed", () => {
   const a = billing("inv-a", 2241, 3);
@@ -855,4 +884,169 @@ Deno.test("documentDiff: replaces entries in a different order are equal — it 
   const f = fulfillment();
   patchLine(f.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.replaces = [b, a]; });
   assertEquals(computeDocumentDiffs({ orders: [o], fulfillments: [f] }, { kind: "order", uid: O }, CONTEXT).lines.size, 0);
+});
+
+// ── core#118: one-sided legs and kits, kept rows, exchange units, L&D ────────
+
+Deno.test("documentDiff: the kind set is exactly seven — derived from the entries, so it cannot drift", () => {
+  // Compile-time: a kind added or removed without updating this literal fails
+  // `deno check`, in both directions (an extra key is excess, a missing one is required).
+  const kinds: Record<DocumentDiffKind, true> = {
+    differs: true, not_on_source: true, only_on_source: true, pair_field: true,
+    doc_field: true, substituted: true, quantity: true,
+  };
+  assertEquals(Object.keys(kinds).length, 7);
+});
+
+const LEG2 = "0b6c3a51-6c1a-4f0e-9a51-6f1f2b9d0a03";
+
+Deno.test("documentDiff: a leg only the fulfillment carries is ONE pair entry — its rows are not listed again", () => {
+  const f = fulfillment();
+  (f.items as unknown as LineItem[]).push(
+    { uid: LEG2, type: "destination", name: "Exchange", description: "", path: [LEG2] } as unknown as LineItem,
+    { uid: TRIPOD, type: "rental", name: TRIPOD, description: "", quantity: 1, path: [LEG2, TRIPOD] } as unknown as LineItem,
+  );
+  (f.destinations as unknown as Record<string, unknown>[]).push({ ...structuredClone(PAIR), uid: LEG2 });
+  const sources = { orders: [order()], fulfillments: [f] };
+
+  const onOrder = computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT);
+  assertEquals(summary(onOrder.pairs), { [LEG2]: ["fulfillment#1001:only_on_source"] });
+  assertEquals(summary(onOrder.lines), {}, "the row under the one-sided leg is the pair entry's, not its own");
+
+  const onFulfillment = computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT);
+  assertEquals(summary(onFulfillment.pairs), { [LEG2]: ["order#1001:not_on_source"] });
+  assertEquals(summary(onFulfillment.lines), {});
+});
+
+Deno.test("documentDiff: an invoice without one of the order's legs is UNALIGNED — one entry, no pair or line entries", () => {
+  // Leg presence is never compared against an invoice: an aligned invoice
+  // carries every divider the order does, so a one-sided leg there is an
+  // unaligned scope, and is reported as exactly that.
+  const items = [...orderItems(), { uid: LEG2, type: "destination", name: "Second", description: "", path: [LEG2] } as unknown as LineItem, line(TRIPOD, [LEG2, TRIPOD], 1, 3000)];
+  const ord = order(items);
+  (ord.destinations as unknown as Record<string, unknown>[]).push({ ...structuredClone(PAIR), uid: LEG2 });
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  const diff = computeDocumentDiffs({ orders: [ord], invoices: [inv] }, { kind: "order", uid: O }, CONTEXT);
+  assertEquals([summary(diff.pairs), summary(diff.lines), diff.unaligned.map((u) => u.source.kind)], [{}, {}, ["invoice"]]);
+});
+
+const KIT = "prod-kit";
+const COMP = "comp-a";
+
+Deno.test("documentDiff: a kit parent on one side only reports ONCE — its components are suppressed", () => {
+  const items = [...orderItems(), line(KIT, [D, KIT], 1, 5000), line(COMP, [D, KIT, COMP], 2, 0)];
+  const sources = { orders: [order()], fulfillments: [fulfillment(items)] };
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
+    [`${D}/${KIT}`]: ["fulfillment#1001:only_on_source"],
+  });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
+    [`${D}/${KIT}`]: ["order#1001:not_on_source"],
+  });
+  // Mutation control: with the parent on both sides, the component alone reports.
+  const both = { orders: [order([...orderItems(), line(KIT, [D, KIT], 1, 5000)])], fulfillments: [fulfillment(items)] };
+  assertEquals(summary(computeDocumentDiffs(both, { kind: "order", uid: O }, CONTEXT).lines), {
+    [`${D}/${KIT}/${COMP}`]: ["fulfillment#1001:only_on_source"],
+  });
+});
+
+Deno.test("documentDiff: a KEPT kit (the order removed it, units still out) — presence once, quantity per row", () => {
+  // api-cloudrun#1147's shape: the order dropped the kit; the fulfillment keeps
+  // the component at its live custody and its product ancestor at 0, both
+  // stamped `quantity_order: 0`.
+  const f = fulfillment();
+  (f.items as unknown as LineItem[]).push(
+    { uid: KIT, type: "rental", name: KIT, description: "", quantity: 0, quantity_order: 0, path: [D, KIT] } as unknown as LineItem,
+    { uid: COMP, type: "rental", name: COMP, description: "", quantity: 2, quantity_order: 0, path: [D, KIT, COMP] } as unknown as LineItem,
+  );
+  const sources = { orders: [order()], fulfillments: [f], invoices: [invoice("inv-1", [{ order: O, items: orderItems() }])] };
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
+    // One presence fact, at the kept ancestor. Its quantity (0 of 0) says nothing.
+    [`${D}/${KIT}`]: ["fulfillment#1001:only_on_source"],
+  });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
+    [`${D}/${KIT}`]: ["order#1001:not_on_source"],
+    // The two units still out are on no order line and no invoice: the billing question survives.
+    [`${D}/${KIT}/${COMP}`]: ["qty[#2241](o- f2 i0)"],
+  });
+});
+
+Deno.test("documentDiff: an exchange unit is shown, never owed — no quantity entry against invoices (decision 8)", () => {
+  const exchange = { replaces: [{ path: [D, G, TRIPOD], quantity: 1, reason: "damaged" }] };
+  const items = [...orderItems(), line("prod-tripod-x", [D, "prod-tripod-x"], 1, 0, exchange)];
+  const sources = { orders: [order(items)], fulfillments: [fulfillment(items)], invoices: [invoice("inv-1", [{ order: O, items: orderItems() }])] };
+  for (const viewing of [{ kind: "order", uid: O }, { kind: "fulfillment", uid: O }, { kind: "invoice", uid: "inv-1" }] as const) {
+    assertEquals(summary(computeDocumentDiffs(sources, viewing, CONTEXT).lines), {}, viewing.kind);
+  }
+  // Mutation control: the same line without `replaces` IS owed.
+  const plain = [...orderItems(), line("prod-tripod-x", [D, "prod-tripod-x"], 1, 0)];
+  assertEquals(
+    Object.keys(summary(computeDocumentDiffs({ ...sources, orders: [order(plain)], fulfillments: [fulfillment(plain)] }, { kind: "order", uid: O }, CONTEXT).lines)),
+    [`${D}/prod-tripod-x`],
+  );
+});
+
+/** A lost/damaged record against the ungrouped Light's booking (`{order}:{item}:{leg}`). */
+function oos(uid: string, quantity: number, extra: Record<string, unknown> = {}): DocumentDiffOutOfService {
+  return {
+    uid, reason: "lost", status: "active", quantity, breakdown: { returned_to_service: 0 },
+    query_by_sources: [`orders:${O}`, `bookings:${O}:${LIGHT}:${D}`],
+    ...extra,
+  } as unknown as DocumentDiffOutOfService;
+}
+
+/** An invoice over the whole order plus one `replacement` line billing a record. */
+function invoiceBilling(uidOos: string, quantity: number): Invoice {
+  const inv = invoice("inv-1", [{ order: O, items: [...orderItems(), line(`repl-${uidOos}`, [D, `repl-${uidOos}`], quantity, 5000, { type: "replacement" })] }]);
+  // Set after the build: the order→invoice projection does not carry an invoice-only field.
+  patchLine(inv.items, `${O}/${D}/repl-${uidOos}`, (it) => { it.uid_out_of_service = uidOos; });
+  return inv;
+}
+
+Deno.test("documentDiff: a lost record is a quantity entry at the row that owns its booking — and its invoice line is no presence row", () => {
+  const inv = invoiceBilling("oos-1", 1);
+  const sources = { orders: [order()], fulfillments: [fulfillment()], invoices: [inv], outOfService: [oos("oos-1", 3)] };
+  // Two of the three lost units are not yet invoiced. The Light at [D, G] and
+  // the one at [D] are the same product on the same leg — ONE grain — so the
+  // record files at the first row in document order.
+  const entry = ["qty[#2241](o- f3 i1,oos:oos-1)"];
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), { [`${D}/${G}/${LIGHT}`]: entry });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), { [`${D}/${G}/${LIGHT}`]: entry });
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).lines), { [`${O}/${D}/${G}/${LIGHT}`]: entry });
+
+  // Fully invoiced: nothing, from any view.
+  const all = { ...sources, outOfService: [oos("oos-1", 1)] };
+  assertEquals(summary(computeDocumentDiffs(all, { kind: "order", uid: O }, CONTEXT).lines), {});
+});
+
+Deno.test("documentDiff: a record's billable units drop what came back, and a canceled record owes nothing", () => {
+  const inv = invoiceBilling("oos-1", 2);
+  const base = { orders: [order()], invoices: [inv] };
+  const returned = oos("oos-1", 3, { breakdown: { returned_to_service: 1 } });
+  assertEquals(summary(computeDocumentDiffs({ ...base, outOfService: [returned] }, { kind: "order", uid: O }, CONTEXT).lines), {});
+  const canceledRecord = oos("oos-1", 3, { status: "canceled" });
+  assertEquals(summary(computeDocumentDiffs({ ...base, outOfService: [canceledRecord] }, { kind: "order", uid: O }, CONTEXT).lines), {
+    [`${D}/${G}/${LIGHT}`]: ["qty[#2241](o- f0 i2,oos:oos-1)"],
+  });
+});
+
+Deno.test("documentDiff: a record no row books is listed as unplaced, never dropped; a cleaning record is not compared", () => {
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  const stray = oos("oos-2", 1, { query_by_sources: [`orders:${O}`, `bookings:${O}:prod-gone:${D}`] });
+  const cleaning = oos("oos-3", 1, { reason: "cleaning" });
+  const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv], outOfService: [stray, cleaning] }, { kind: "order", uid: O }, CONTEXT);
+  assertEquals(summary(diff.lines), {});
+  assertEquals(diff.unplaced_out_of_service.map((e) => `${e.uid_out_of_service}:f${e.fulfilled} i${e.invoiced}`), ["oos-2:f1 i0"]);
+});
+
+Deno.test("documentDiff: out-of-service is silent without the source, and without an aligned invoice", () => {
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  assertEquals(computeDocumentDiffs({ orders: [order()], invoices: [inv] }, { kind: "order", uid: O }, CONTEXT).lines.size, 0);
+  assertEquals(computeDocumentDiffs({ orders: [order()], outOfService: [oos("oos-1", 3)] }, { kind: "order", uid: O }, CONTEXT).lines.size, 0);
+});
+
+Deno.test("documentDiff: on the invoice view, a MISSING order does not make the fulfillment unaligned", () => {
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  (inv.items as unknown as LineItem[]).splice(2, 1); // misaligned too — but with no order, nothing can say so
+  const diff = computeDocumentDiffs({ fulfillments: [fulfillment()], invoices: [inv] }, { kind: "invoice", uid: "inv-1" }, CONTEXT);
+  assertEquals([diff.lines.size, diff.pairs.size, diff.unaligned.length], [0, 0, 0]);
 });

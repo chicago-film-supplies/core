@@ -369,6 +369,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // must keep, from the stored bookings. Write-path and prompt-path only; no
     // render context holds bookings or a previous order.
     "computeOrderEditDelta",
+    // Row → booking id, for a reader filing something per booking
+    // (`computeDocumentDiffs`' out-of-service records). A booking id is a
+    // write-path join key, not something a document renders.
+    "bookingIdsByPath",
   ],
   "order-lines": [
     "buildOrderLineFromProduct", // stages an order line from the catalog

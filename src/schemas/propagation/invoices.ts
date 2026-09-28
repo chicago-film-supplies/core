@@ -2,9 +2,10 @@
  * Invoice propagation rules — bidirectional invoice↔order cross-references.
  *
  * 1. create-invoice: co-writes invoice summary (uid, number, status) to each
- *    referenced order's `invoices` array and `query_by_invoices`, and
- *    floor-raises a referenced order's `status` from `draft` to `reserved`
- *    (any other status is left untouched).
+ *    referenced order's `invoices` array and `query_by_invoices`. It no longer
+ *    writes the order's `status`: a referenced `draft` order is reserved
+ *    through update-order BEFORE this transaction (api-cloudrun#1151), so the
+ *    raise runs the booking reconcile and the fulfillment sync like any edit.
  *
  * 2. update-invoice: CONVERGES each order's `invoices` array entry on the
  *    invoice document — on every invoice write, not only when the status moved.
@@ -135,7 +136,7 @@ const createInvoiceRules: CollectionRule[] = [
     target: "orders",
     mode: "co-write",
     invariant:
-      "Orders carry a denormalized array of their invoices so the UI can show invoice status without a collection-group query. A draft order is promoted to reserved the moment a real invoice exists against it.",
+      "Orders carry a denormalized array of their invoices so the UI can show invoice status without a collection-group query. A draft order referenced by a new invoice is first reserved through update-order, before the invoice transaction runs, so its bookings, stock claim and fulfillment status follow from the order writer (api-cloudrun#1151); a draft order seen inside the invoice transaction is a 409.",
     enforced_by: [INVOICE_BACKREF_CREATED],
     transaction: "create-invoice",
     fields: [
@@ -146,12 +147,6 @@ const createInvoiceRules: CollectionRule[] = [
         source: ["uid"],
         target: ["query_by_invoices"],
         transform: "append invoice uid to array",
-      },
-      {
-        source: ["status"],
-        target: ["status"],
-        transform:
-          "draft → reserved floor-raise; any other order status is left untouched",
       },
     ],
   },

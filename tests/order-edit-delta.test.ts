@@ -3,7 +3,7 @@ import { FulfillmentItem, type FulfillmentItemType, type Order, OrderDocLineItem
 import { getTestDoc } from "../src/schemas/testing.ts";
 import { hasCustodyHistory } from "../src/utils/bookings.ts";
 import { buildBookingIdFromSignature, componentSignatureHash } from "../src/utils/booking-id.ts";
-import { type BookingCustodyFacts, computeOrderEditDelta } from "../src/utils/order-edit-delta.ts";
+import { type BookingCustodyFacts, bookingIdsByPath, computeOrderEditDelta } from "../src/utils/order-edit-delta.ts";
 import { fid, legUid } from "./helpers/ids.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -229,4 +229,23 @@ Deno.test("a booking of another order is ignored", () => {
   const d = delta(order([row]), order([]), [booking(A, { prepped: 2 }, { orderUid: fid("otherorder") })]);
   assertEquals(d.keepFor(pathOf(row)), undefined);
   assertEquals(d.hasLiveCustody({ uid: A, path: pathOf(row) }), false);
+});
+
+Deno.test("bookingIdsByPath: every bookable row and the booking it books into — dividers excluded, components signed", () => {
+  const ord = order([
+    { uid: A, quantity: 2, group: G1 },
+    { uid: A, quantity: 1, group: G2 },
+    { uid: A, quantity: 1, parent: KIT, leg: LEG_2 },
+  ]);
+  const top = buildBookingIdFromSignature(ORDER, A, LEG_1, null);
+  const component = buildBookingIdFromSignature(ORDER, A, LEG_2, componentSignatureHash([LEG_2, KIT, A]));
+  assertEquals(bookingIdsByPath(ord).map((r) => [r.path.join("/"), r.bookingId]), [
+    // Two groups, one leg, one product: ONE grain, so one id on both rows.
+    [`${LEG_1}/${G1}/${A}`, top],
+    [`${LEG_1}/${G2}/${A}`, top],
+    [`${LEG_2}/${KIT}`, buildBookingIdFromSignature(ORDER, KIT, LEG_2, null)],
+    [`${LEG_2}/${KIT}/${A}`, component],
+  ]);
+  // The component's id is the 4-segment form, distinct from the top-level one.
+  assertEquals(component === top, false);
 });
