@@ -22,6 +22,13 @@
  *   `reuseMemberUids` already use, with `uid` in place of `name`. Position is
  *   never the identity — only ever a tie-break among members already identical
  *   under one.
+ * - **…within a component signature first.** {@link mapPathsAcrossRebuild}
+ *   pairs on `(uid, component ancestry, k)` before falling back to `(uid, k)`.
+ *   A kit component's grain includes its kit, so the same product standalone
+ *   and inside a kit are two rows that merely share a uid; pairing them by `k`
+ *   alone paired a merge's survivor with the REMOVED occurrence
+ *   (api-cloudrun#1147, repro A). {@link pairItemsByUidOccurrence} itself is
+ *   unchanged and stays on `(uid, k)`.
  *
  * ⚠️ **It lives here because the callers are in two repos**, exactly as
  * `utils/substitutions.ts` does. `adoptOrderDividerStructure`
@@ -50,9 +57,19 @@
  * @module
  */
 
+import { componentAncestry } from "./booking-id.ts";
+
 /** `path` as a map key. `\x1f` cannot occur in a uid, so this cannot collide. */
 function pathKey(path: readonly string[] | undefined): string {
   return (path ?? []).join("\x1f");
+}
+
+/**
+ * `(uid, component ancestry)` as one key. The ancestry is a filter of `path`
+ * (`componentAncestry`), so an unpathed row keys on its uid alone.
+ */
+function signatureKey(it: PathedItem): string {
+  return `${it.uid}\x1e${componentAncestry(it.path ?? []).join("\x1f")}`;
 }
 
 /** The shape a pairing needs; deliberately narrower than a line item. */
@@ -116,24 +133,42 @@ export function pairItemsByUidOccurrence<A extends PairableItem, B extends Paira
   from: readonly A[],
   to: readonly B[],
 ): UidOccurrencePairing<A, B> {
-  const toByUid = new Map<string, B[]>();
+  return pairByKeyOccurrence(from, to, (it) => it.uid);
+}
+
+/**
+ * The k-th-occurrence loop behind both pairings, over an arbitrary key. The
+ * ambiguity report is still per UID: a key bucket that repeats is a guess about
+ * the uid it belongs to.
+ */
+function pairByKeyOccurrence<A extends PairableItem, B extends PairableItem>(
+  from: readonly A[],
+  to: readonly B[],
+  keyOf: (it: A | B) => string,
+): UidOccurrencePairing<A, B> {
+  const toByKey = new Map<string, B[]>();
   for (const it of to) {
-    const bucket = toByUid.get(it.uid);
+    const key = keyOf(it);
+    const bucket = toByKey.get(key);
     if (bucket) bucket.push(it);
-    else toByUid.set(it.uid, [it]);
+    else toByKey.set(key, [it]);
   }
 
   const fromCounts = new Map<string, number>();
-  for (const it of from) fromCounts.set(it.uid, (fromCounts.get(it.uid) ?? 0) + 1);
+  for (const it of from) {
+    const key = keyOf(it);
+    fromCounts.set(key, (fromCounts.get(key) ?? 0) + 1);
+  }
 
   const cursor = new Map<string, number>();
   const forward = new Map<A, B>();
   const matched = new Set<B>();
   for (const row of from) {
-    const bucket = toByUid.get(row.uid);
+    const key = keyOf(row);
+    const bucket = toByKey.get(key);
     if (!bucket) continue;
-    const k = cursor.get(row.uid) ?? 0;
-    cursor.set(row.uid, k + 1);
+    const k = cursor.get(key) ?? 0;
+    cursor.set(key, k + 1);
     const match = bucket[k];
     if (!match) continue;
     forward.set(row, match);
@@ -141,11 +176,11 @@ export function pairItemsByUidOccurrence<A extends PairableItem, B extends Paira
   }
 
   const ambiguous: AmbiguousPairing[] = [];
-  for (const [uid, bucket] of toByUid) {
-    const fromOccurrences = fromCounts.get(uid) ?? 0;
+  for (const [key, bucket] of toByKey) {
+    const fromOccurrences = fromCounts.get(key) ?? 0;
     if (fromOccurrences === 0) continue;
     if (bucket.length > 1 || fromOccurrences > 1) {
-      ambiguous.push({ uid, fromOccurrences, toOccurrences: bucket.length });
+      ambiguous.push({ uid: bucket[0].uid, fromOccurrences, toOccurrences: bucket.length });
     }
   }
 
@@ -187,7 +222,19 @@ export function mapPathsAcrossRebuild<A extends PathedItem, B extends PathedItem
   from: readonly A[],
   to: readonly B[],
 ): RebuildPathMap {
-  const { forward, ambiguous } = pairItemsByUidOccurrence(from, to);
+  // Pass 1 pairs within a component SIGNATURE (the product ancestry, the same
+  // chain a booking id hashes), so a kit component merged into a same-product
+  // line elsewhere pairs the survivor with ITS OWN previous occurrence rather
+  // than with whichever occurrence of the uid came first (api-cloudrun#1147,
+  // repro A). Pass 2 pairs what is left by `(uid, k)`, which is what lets a row
+  // that genuinely changed signature — a component dragged out of its kit — still
+  // read as moved rather than as new.
+  const bySignature = pairByKeyOccurrence(from, to, signatureKey);
+  const fromRest = from.filter((it) => !bySignature.forward.has(it));
+  const toRest = to.filter((it) => !bySignature.matched.has(it));
+  const byUid = pairItemsByUidOccurrence(fromRest, toRest);
+  const forward = new Map<A, B>([...bySignature.forward, ...byUid.forward]);
+  const ambiguous = [...bySignature.ambiguous, ...byUid.ambiguous];
 
   const toByFrom = new Map<string, readonly string[]>();
   const fromByTo = new Map<string, readonly string[]>();

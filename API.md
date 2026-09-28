@@ -25768,6 +25768,27 @@ One key of the booking lifecycle breakdown.
 type BookingBreakdownKeyType = indexedAccess;
 ```
 
+### `GrainKeep`
+
+```ts
+interface GrainKeep {
+  kept: number;
+  byRow: ReadonlyMap<string, number>;
+}
+```
+
+### `GrainRow`
+
+One order row at a booking grain, before and after an order edit.
+
+```ts
+interface GrainRow {
+  key: string;
+  before: number;
+  after: number;
+}
+```
+
 ### `applyBookingBreakdownDelta(orderBreakdown: indexedAccess, prev: indexedAccess, next: indexedAccess): void`
 
 Apply a per-key delta to an order's bookings_breakdown roll-up in place.
@@ -25828,6 +25849,27 @@ Use as the seed for new orders and as the target shape for fresh bookings.
 const order = { ...orderInput, bookings_breakdown: emptyBookingsBreakdown() };
 ```
 
+### `grainKeep(live: number, rows: readonly GrainRow[]): GrainKeep`
+
+How much of a grain's live custody an order edit leaves uncovered, and which
+rows keep it (api-cloudrun#1147, decision 3). A grain is one booking:
+`(product, leg, component signature)`.
+
+- `kept = max(0, live − Σ after)`: an edit may remove or shrink rows down to
+  the grain's live custody and no further; only the SHORTFALL is kept.
+- The shortfall is allocated to the rows that DECREASED, in the order given,
+  each up to `before − after`. Anything left over (a picker that sent more
+  than the rows held) goes to the last decreasing row.
+- With no decreasing row, `byRow` is empty and `kept` is still reported: the
+  edit did not uncover anything, and the booking floors itself.
+
+Pure, so the api writer and the manager's removal prompt compute the same
+answer from the same inputs.
+
+```ts
+grainKeep(3, [{ key: "a", before: 5, after: 1 }]); // { kept: 2, byRow: a→2 }
+```
+
 ### `isBookingClosed(b: Pick<Booking, "type" | "breakdown">): boolean`
 
 Per-booking closure rule.
@@ -25856,6 +25898,18 @@ auto-completing an empty order simply because it has nothing in flight.
 Drives the auto-cascade in the booking write path: when this predicate
 flips to true after applying booking deltas, the order's status is set to
 "complete" in the same Firestore transaction.
+
+### `liveCustody(b: Pick<Booking, "type" | "breakdown">): number`
+
+Units a booking physically holds that have not come back: `prepped`, plus
+`out` on a rental. A sale's `out` is delivered and never comes back, the same
+split {@link isBookingClosed} makes.
+
+⚠️ **Not `custodyMovedQuantity`.** That counts `returned`/`lost`/`damaged`
+too — it answers "did custody ever move?", which decides whether a booking
+may be DELETED (never, once it has any history — api-cloudrun#1147, Q4).
+This answers "what is still out there?", which decides how much of a removed
+or shrunk fulfillment row an order edit must KEEP (decision 3).
 
 ### `mergeBookingBreakdown(current: indexedAccess, patch: Partial<indexedAccess> | undefined): indexedAccess`
 
@@ -30164,6 +30218,13 @@ the ONE pairing, asked across two rebuilds by two repos.
   `reuseMemberUids` already use, with `uid` in place of `name`. Position is
   never the identity — only ever a tie-break among members already identical
   under one.
+- **…within a component signature first.** {@link mapPathsAcrossRebuild}
+  pairs on `(uid, component ancestry, k)` before falling back to `(uid, k)`.
+  A kit component's grain includes its kit, so the same product standalone
+  and inside a kit are two rows that merely share a uid; pairing them by `k`
+  alone paired a merge's survivor with the REMOVED occurrence
+  (api-cloudrun#1147, repro A). {@link pairItemsByUidOccurrence} itself is
+  unchanged and stays on `(uid, k)`.
 
 ⚠️ **It lives here because the callers are in two repos**, exactly as
 `utils/substitutions.ts` does. `adoptOrderDividerStructure`

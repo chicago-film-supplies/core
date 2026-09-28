@@ -315,3 +315,76 @@ export function isOrderBookingsClosed(
   if (bookings.length === 0) return false;
   return bookings.every(isBookingClosed);
 }
+
+/**
+ * Units a booking physically holds that have not come back: `prepped`, plus
+ * `out` on a rental. A sale's `out` is delivered and never comes back, the same
+ * split {@link isBookingClosed} makes.
+ *
+ * ⚠️ **Not `custodyMovedQuantity`.** That counts `returned`/`lost`/`damaged`
+ * too — it answers "did custody ever move?", which decides whether a booking
+ * may be DELETED (never, once it has any history — api-cloudrun#1147, Q4).
+ * This answers "what is still out there?", which decides how much of a removed
+ * or shrunk fulfillment row an order edit must KEEP (decision 3).
+ */
+export function liveCustody(b: Pick<Booking, "type" | "breakdown">): number {
+  return b.breakdown.prepped + (b.type === "rental" ? b.breakdown.out : 0);
+}
+
+/** One order row at a booking grain, before and after an order edit. */
+export interface GrainRow {
+  /** Caller-chosen row key, returned in {@link GrainKeep.byRow}. */
+  key: string;
+  /** The row's physical quantity before the edit (the stored fulfillment row's, else the previous order's). */
+  before: number;
+  /** The next order's quantity for the row, `0` when the edit removes it. */
+  after: number;
+}
+
+/** @see {@link grainKeep} */
+export interface GrainKeep {
+  /** Units of live custody the next order no longer covers. */
+  kept: number;
+  /** How many of those each decreasing row keeps, by {@link GrainRow.key}. Only rows with a share appear. */
+  byRow: ReadonlyMap<string, number>;
+}
+
+/**
+ * How much of a grain's live custody an order edit leaves uncovered, and which
+ * rows keep it (api-cloudrun#1147, decision 3). A grain is one booking:
+ * `(product, leg, component signature)`.
+ *
+ * - `kept = max(0, live − Σ after)`: an edit may remove or shrink rows down to
+ *   the grain's live custody and no further; only the SHORTFALL is kept.
+ * - The shortfall is allocated to the rows that DECREASED, in the order given,
+ *   each up to `before − after`. Anything left over (a picker that sent more
+ *   than the rows held) goes to the last decreasing row.
+ * - With no decreasing row, `byRow` is empty and `kept` is still reported: the
+ *   edit did not uncover anything, and the booking floors itself.
+ *
+ * Pure, so the api writer and the manager's removal prompt compute the same
+ * answer from the same inputs.
+ *
+ * ```ts
+ * grainKeep(3, [{ key: "a", before: 5, after: 1 }]); // { kept: 2, byRow: a→2 }
+ * ```
+ */
+export function grainKeep(live: number, rows: readonly GrainRow[]): GrainKeep {
+  const covered = rows.reduce((sum, r) => sum + r.after, 0);
+  const kept = Math.max(0, live - covered);
+  const byRow = new Map<string, number>();
+  const decreasing = rows.filter((r) => r.before > r.after);
+  if (kept === 0 || decreasing.length === 0) return { kept, byRow };
+  let remaining = kept;
+  for (const r of decreasing) {
+    const share = Math.min(remaining, r.before - r.after);
+    if (share > 0) byRow.set(r.key, share);
+    remaining -= share;
+    if (remaining === 0) break;
+  }
+  if (remaining > 0) {
+    const last = decreasing[decreasing.length - 1];
+    byRow.set(last.key, (byRow.get(last.key) ?? 0) + remaining);
+  }
+  return { kept, byRow };
+}

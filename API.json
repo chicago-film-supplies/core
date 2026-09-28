@@ -11361,6 +11361,18 @@
           "doc": "One key of the booking lifecycle breakdown."
         },
         {
+          "kind": "interface",
+          "name": "GrainKeep",
+          "declaration": "interface GrainKeep {\n  kept: number;\n  byRow: ReadonlyMap<string, number>;\n}",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "GrainRow",
+          "declaration": "interface GrainRow {\n  key: string;\n  before: number;\n  after: number;\n}",
+          "doc": "One order row at a booking grain, before and after an order edit."
+        },
+        {
           "kind": "function",
           "name": "applyBookingBreakdownDelta",
           "signature": "applyBookingBreakdownDelta(orderBreakdown: indexedAccess, prev: indexedAccess, next: indexedAccess): void",
@@ -11386,6 +11398,14 @@
         },
         {
           "kind": "function",
+          "name": "grainKeep",
+          "signature": "grainKeep(live: number, rows: readonly GrainRow[]): GrainKeep",
+          "doc": "How much of a grain's live custody an order edit leaves uncovered, and which\nrows keep it (api-cloudrun#1147, decision 3). A grain is one booking:\n`(product, leg, component signature)`.\n\n- `kept = max(0, live − Σ after)`: an edit may remove or shrink rows down to\n  the grain's live custody and no further; only the SHORTFALL is kept.\n- The shortfall is allocated to the rows that DECREASED, in the order given,\n  each up to `before − after`. Anything left over (a picker that sent more\n  than the rows held) goes to the last decreasing row.\n- With no decreasing row, `byRow` is empty and `kept` is still reported: the\n  edit did not uncover anything, and the booking floors itself.\n\nPure, so the api writer and the manager's removal prompt compute the same\nanswer from the same inputs.\n\n```ts\ngrainKeep(3, [{ key: \"a\", before: 5, after: 1 }]); // { kept: 2, byRow: a→2 }\n```",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isBookingClosed",
           "signature": "isBookingClosed(b: Pick<Booking, \"type\" | \"breakdown\">): boolean",
           "doc": "Per-booking closure rule.\n\n`quoted + reserved + prepped` must always be zero. The treatment of `out`\ndepends on `booking.type`:\n\n- `rental`: `out` is in-flight — units must be returned (or lost/damaged)\n  before the booking is closed.\n- any other type (`sale`, defensively `service`/`surcharge`): `out` is\n  terminal — checkout is delivery and the units don't come back. The\n  booking can sit in `out` indefinitely without blocking completion.\n\nSale items still expose Return/Lost/Damaged actions in the picker (a sold\nitem *can* be returned for credit and lost/damaged-in-transit is real) —\nthey're available, just not required for closure.",
@@ -11397,6 +11417,14 @@
           "name": "isOrderBookingsClosed",
           "signature": "isOrderBookingsClosed(bookings: ReadonlyArray<Pick<Booking, \"type\" | \"breakdown\">>): boolean",
           "doc": "Predicate: is the order fully closed?\n\nAn order is closed when every booking is closed (per `isBookingClosed`)\nand the order has at least one booking. The non-empty guard prevents\nauto-completing an empty order simply because it has nothing in flight.\n\nDrives the auto-cascade in the booking write path: when this predicate\nflips to true after applying booking deltas, the order's status is set to\n\"complete\" in the same Firestore transaction.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "liveCustody",
+          "signature": "liveCustody(b: Pick<Booking, \"type\" | \"breakdown\">): number",
+          "doc": "Units a booking physically holds that have not come back: `prepped`, plus\n`out` on a rental. A sale's `out` is delivered and never comes back, the same\nsplit {@link isBookingClosed} makes.\n\n⚠️ **Not `custodyMovedQuantity`.** That counts `returned`/`lost`/`damaged`\ntoo — it answers \"did custody ever move?\", which decides whether a booking\nmay be DELETED (never, once it has any history — api-cloudrun#1147, Q4).\nThis answers \"what is still out there?\", which decides how much of a removed\nor shrunk fulfillment row an order edit must KEEP (decision 3).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13618,7 +13646,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/item-pairing",
-      "moduleDoc": "\"Which row of the NEW array is the same row as this one in the OLD array?\" —\nthe ONE pairing, asked across two rebuilds by two repos.\n\n## Why the key is `(uid, k-th occurrence)` and not the obvious two\n\n- **Not `uid` alone.** `item.uid` repeats within one items array on 18% of\n  prod orders — a priced principal beside zero-priced accessory copies, a\n  `splitItem`, or a product appearing standalone and as a kit component. A\n  uid-keyed pairing silently applies one row's answer to every row sharing its\n  uid.\n- **Not `path`.** A path is only as stable as the dividers above it, and\n  divider uids are reused BY NAME (`reuseMemberUids`), so a group rename — or\n  an operator dragging a line into another group — churns every descendant\n  path while changing nothing about the lines themselves. That is precisely\n  the api-cloudrun#897 defect this module exists to remove: two syncs asked\n  *\"was this row on the previous order?\"* with a raw path-string lookup, so a\n  reparented line read as brand new and was projected fresh **beside the\n  substitute that had replaced it**.\n- **`(uid, k-th occurrence in document order)`** is what\n  `api-cloudrun`'s `carryForwardRowField` (`api-cloudrun/src/lib/itemNesting.ts`) and\n  `reuseMemberUids` already use, with `uid` in place of `name`. Position is\n  never the identity — only ever a tie-break among members already identical\n  under one.\n\n⚠️ **It lives here because the callers are in two repos**, exactly as\n`utils/substitutions.ts` does. `adoptOrderDividerStructure`\n(`utils/invoices.ts`) grew the first copy of this loop; `syncItems`\n(`api-cloudrun/src/lib/orderFulfillmentSync.ts`) needed the second. Two copies\nof one pairing rule in one domain is precisely what api-cloudrun#593 was —\ntwo carry-forwards in one file that had drifted onto different keys with\nnothing making them agree — so there is one implementation and both callers\ntake it.\n\n## 🔴 A pairing is a GUESS wherever a uid repeats, and it says so\n\n{@link AmbiguousPairing} is reported, never silently resolved. The pairing\nstill happens — refusing would be worse, because the alternative to a k-th\nguess is no answer at all — but a caller that can surface it to an operator\nmust, and `api-cloudrun/scripts/repair-invoice-structure.ts` is the worked example.\n\n## Paths never leave this module as strings\n\n{@link RebuildPathMap} hands back **path arrays**, not keys. Its two consumers\nkey paths differently (`utils/invoices.ts` joins on `/`,\n`api-cloudrun/src/lib/orderFulfillmentSync.ts` on `\\x1f`), and a map handed\nout under one of those spellings is a map half its callers would look up\nwrongly. The joiner below is private for that reason.",
+      "moduleDoc": "\"Which row of the NEW array is the same row as this one in the OLD array?\" —\nthe ONE pairing, asked across two rebuilds by two repos.\n\n## Why the key is `(uid, k-th occurrence)` and not the obvious two\n\n- **Not `uid` alone.** `item.uid` repeats within one items array on 18% of\n  prod orders — a priced principal beside zero-priced accessory copies, a\n  `splitItem`, or a product appearing standalone and as a kit component. A\n  uid-keyed pairing silently applies one row's answer to every row sharing its\n  uid.\n- **Not `path`.** A path is only as stable as the dividers above it, and\n  divider uids are reused BY NAME (`reuseMemberUids`), so a group rename — or\n  an operator dragging a line into another group — churns every descendant\n  path while changing nothing about the lines themselves. That is precisely\n  the api-cloudrun#897 defect this module exists to remove: two syncs asked\n  *\"was this row on the previous order?\"* with a raw path-string lookup, so a\n  reparented line read as brand new and was projected fresh **beside the\n  substitute that had replaced it**.\n- **`(uid, k-th occurrence in document order)`** is what\n  `api-cloudrun`'s `carryForwardRowField` (`api-cloudrun/src/lib/itemNesting.ts`) and\n  `reuseMemberUids` already use, with `uid` in place of `name`. Position is\n  never the identity — only ever a tie-break among members already identical\n  under one.\n- **…within a component signature first.** {@link mapPathsAcrossRebuild}\n  pairs on `(uid, component ancestry, k)` before falling back to `(uid, k)`.\n  A kit component's grain includes its kit, so the same product standalone\n  and inside a kit are two rows that merely share a uid; pairing them by `k`\n  alone paired a merge's survivor with the REMOVED occurrence\n  (api-cloudrun#1147, repro A). {@link pairItemsByUidOccurrence} itself is\n  unchanged and stays on `(uid, k)`.\n\n⚠️ **It lives here because the callers are in two repos**, exactly as\n`utils/substitutions.ts` does. `adoptOrderDividerStructure`\n(`utils/invoices.ts`) grew the first copy of this loop; `syncItems`\n(`api-cloudrun/src/lib/orderFulfillmentSync.ts`) needed the second. Two copies\nof one pairing rule in one domain is precisely what api-cloudrun#593 was —\ntwo carry-forwards in one file that had drifted onto different keys with\nnothing making them agree — so there is one implementation and both callers\ntake it.\n\n## 🔴 A pairing is a GUESS wherever a uid repeats, and it says so\n\n{@link AmbiguousPairing} is reported, never silently resolved. The pairing\nstill happens — refusing would be worse, because the alternative to a k-th\nguess is no answer at all — but a caller that can surface it to an operator\nmust, and `api-cloudrun/scripts/repair-invoice-structure.ts` is the worked example.\n\n## Paths never leave this module as strings\n\n{@link RebuildPathMap} hands back **path arrays**, not keys. Its two consumers\nkey paths differently (`utils/invoices.ts` joins on `/`,\n`api-cloudrun/src/lib/orderFulfillmentSync.ts` on `\\x1f`), and a map handed\nout under one of those spellings is a map half its callers would look up\nwrongly. The joiner below is private for that reason.",
       "symbols": [
         {
           "kind": "interface",

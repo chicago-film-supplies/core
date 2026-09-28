@@ -3,8 +3,10 @@ import {
   applyBookingBreakdownDelta,
   calculateBookingBreakdown,
   emptyBookingsBreakdown,
+  grainKeep,
   isBookingClosed,
   isOrderBookingsClosed,
+  liveCustody,
   mergeBookingBreakdown,
   sumBookingBreakdown,
   sumBookingsBreakdown,
@@ -283,4 +285,42 @@ Deno.test("calculateBookingBreakdown: repairs corrupt double-bucket from buggy w
   const repaired = calculateBookingBreakdown("reserved", "rental", 30, corrupt);
   assertEquals(repaired, sample({ reserved: 30 }));
   assertEquals(sumBookingBreakdown(repaired), 30);
+});
+
+Deno.test("liveCustody — prepped always, out only on a rental", () => {
+  const b = sample({ reserved: 4, prepped: 2, out: 3, returned: 5, lost: 1, damaged: 1 });
+  assertEquals(liveCustody({ type: "rental", breakdown: b }), 5);
+  assertEquals(liveCustody({ type: "sale", breakdown: b }), 2);
+  assertEquals(liveCustody({ type: "rental", breakdown: sample({ returned: 3 }) }), 0);
+});
+
+Deno.test("grainKeep — decision 3 cases", async (t) => {
+  await t.step("two groups on one leg, A prepped: removing B keeps nothing", () => {
+    const k = grainKeep(2, [{ key: "A", before: 2, after: 2 }, { key: "B", before: 3, after: 0 }]);
+    assertEquals(k.kept, 0);
+    assertEquals(k.byRow.size, 0);
+  });
+  await t.step("removing A keeps nothing: B's order still covers the prepped units", () => {
+    const k = grainKeep(2, [{ key: "A", before: 2, after: 0 }, { key: "B", before: 3, after: 3 }]);
+    assertEquals(k.kept, 0);
+  });
+  await t.step("removing both: the shortfall lands on the removed rows in order", () => {
+    const k = grainKeep(4, [{ key: "A", before: 2, after: 0 }, { key: "B", before: 3, after: 0 }]);
+    assertEquals(k.kept, 4);
+    assertEquals([...k.byRow], [["A", 2], ["B", 2]]);
+  });
+  await t.step("shrink 5 → 1 with live 3: that row keeps 2", () => {
+    const k = grainKeep(3, [{ key: "A", before: 5, after: 1 }]);
+    assertEquals(k.kept, 2);
+    assertEquals(k.byRow.get("A"), 2);
+  });
+  await t.step("a remainder beyond every decrease goes to the last decreasing row", () => {
+    const k = grainKeep(6, [{ key: "A", before: 2, after: 0 }, { key: "B", before: 1, after: 0 }]);
+    assertEquals([...k.byRow], [["A", 2], ["B", 4]]);
+  });
+  await t.step("no decreasing row: kept is reported, nothing is allocated", () => {
+    const k = grainKeep(3, [{ key: "A", before: 1, after: 1 }]);
+    assertEquals(k.kept, 2);
+    assertEquals(k.byRow.size, 0);
+  });
 });
