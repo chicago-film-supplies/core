@@ -51,6 +51,13 @@ export const DOMAIN_EVENT_MSGS = [
   // `{ organization_uid, xero_id, holder_uids }`. Emitted from
   // `api-cloudrun/src/services/organizations.ts` in api-cloudrun.
   "organization_xero_id_shared",
+  // A re-parent collided with a sibling and MERGED the moved node into it
+  // (api-cloudrun#1153): every reference repointed, the loser deleted. The
+  // loser's Xero contact is deliberately left alone, so this record is where
+  // both contact ids are kept. `{ organization_uid (the survivor), loser_uid,
+  // survivor_xero_id, loser_xero_id, repointed_counts, quote_repushes }`.
+  // Emitted from `api-cloudrun/src/services/organizationMerge.ts`.
+  "organization_merged",
   "item_path_invariant_failed",
   // An `order.invoices[]` entry disagreed with the invoice document and was
   // converged. `source:"writer"` = a CFS service write repaired a ref a

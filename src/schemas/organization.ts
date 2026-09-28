@@ -187,6 +187,21 @@ export interface Organization {
    */
   activity_at: FirestoreTimestampType;
   /**
+   * The uids of every organization MERGED into this one, carried transitively
+   * (api-cloudrun#1153) — `survivor ∪ loser ∪ loser.merged_from` at each merge.
+   *
+   * ⭐ **A record of an event, not a denorm of a structure**: written once, when
+   * a merge deletes the loser, and never recomputed. What it buys is
+   * findability: a merge deliberately leaves HISTORY pointing at the loser —
+   * saved statements keep their `uid_organization` and frozen heading, activity
+   * keeps its `subject`, comment sources keep theirs — and a reader that wants
+   * "everything that was this customer's" asks `[uid, ...merged_from]`.
+   *
+   * Optional, and absent means `[]`: only a merge writes it, and there is no
+   * backfill because no merge preceded the field.
+   */
+  merged_from?: string[];
+  /**
    * The organization's **human-readable account number** — despite the name.
    *
    * 🔴 **It is NOT expendable CRMS surface area, and the name says otherwise, so
@@ -490,6 +505,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   }).nullable(),
   uid_department_type: FirestoreId.nullable(),
   activity_at: FirestoreTimestamp.meta({ column: true, label: "Last Active" }),
+  merged_from: z.array(FirestoreId).optional(),
   crms_id: z.int().nullable(),
   xero_id: z.uuid().nullable(),
   // ⚠️ The "Required (no `.default(\"tax_applied\")`) … TAX_PROFILES[0]" note

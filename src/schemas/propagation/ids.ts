@@ -90,6 +90,10 @@ export type TransactionId =
   // The Eventarc `activity_at` stamper (api-cloudrun#979) — its OWN id, never a
   // borrowed `update-organization`: a stamp must not read as a rename.
   | "organization-activity-stamp"
+  // A re-parent that COLLIDES merges the moved node into the one already there
+  // (api-cloudrun#1153) — its own id: it repoints every reference to the loser
+  // and deletes it, which no other organization transaction does.
+  | "merge-organization"
   // contacts.ts
   | "create-contact"
   | "update-contact"
@@ -225,6 +229,19 @@ export type RuleId =
   | "create-org:org-to-contacts"
   | "create-org:node-to-tree"
   | "create-org:mint-derived-project"
+  | "merge-org:loser-to-orders"
+  | "merge-org:loser-to-invoices"
+  | "merge-org:loser-to-credit-notes"
+  | "merge-org:loser-to-settlements"
+  | "merge-org:loser-to-bookings"
+  | "merge-org:loser-to-fulfillments"
+  | "merge-org:loser-to-cards"
+  | "merge-org:loser-to-out-of-service"
+  | "merge-org:loser-to-contacts"
+  | "merge-org:activity-to-survivor"
+  | "merge-org:merged-from-to-survivor"
+  | "merge-org:delete-loser"
+  | "merge-org:thread-comments-to-survivor"
   | "update-department-type:name-to-departments"
   | "update-org:name-to-orders"
   | "update-org:billing-to-orders"

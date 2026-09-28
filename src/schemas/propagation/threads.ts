@@ -341,6 +341,43 @@ const deleteCommentTransaction: TransactionDefinition = {
   ],
 };
 
+// ── merge-organization ──────────────────────────────────────────────
+//
+// Declared HERE because this file owns what a comment's thread fields mean;
+// the transaction itself is declared in `propagation/organizations.ts`.
+
+const mergeThreadRules: CollectionRule[] = [
+  {
+    id: "merge-org:thread-comments-to-survivor",
+    source: "threads",
+    target: "comments",
+    mode: "fan-out",
+    invariant:
+      "When an organization is merged into another (api-cloudrun#1153), every comment on the loser's default thread moves to the survivor's: `uid_thread` and the denormalized `sources[]` are rewritten to the survivor thread's, so property 3 (MIRROR) holds, and the survivor thread's counters are recomputed from the comments it now holds. The loser's thread is then deleted with the loser, empty.",
+    enforced_by: [
+      {
+        kind: "test",
+        ref:
+          "api-cloudrun/tests/integration/organizations/organizationMerge.test.ts::a department collision under a (default) merges into the survivor",
+        clause: "the loser's comments land on the survivor's thread, with the survivor thread's `sources[]`.",
+        gates: true,
+      },
+      {
+        kind: "audit",
+        ref: "api-cloudrun/scripts/audit-default-threads.ts",
+        clause:
+          "property 3 (MIRROR) — a moved comment's denormalized sources[] equals its new thread's, and its uid_thread resolves",
+        gates: true,
+      },
+    ],
+    transaction: "merge-organization",
+    fields: [
+      { source: ["uid"], target: ["uid_thread"], transform: "the SURVIVOR's thread uid" },
+      { source: ["sources"], target: ["sources"], transform: "the SURVIVOR thread's sources" },
+    ],
+  },
+];
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/threads.ts` contributes to the propagation catalog. */
 export const threads: PropagationModule = {
@@ -355,6 +392,7 @@ export const threads: PropagationModule = {
     ...threadCreditNoteRules,
     ...createCommentRules,
     ...deleteCommentRules,
+    ...mergeThreadRules,
   ],
   transactions: [
     createRoleTransaction,

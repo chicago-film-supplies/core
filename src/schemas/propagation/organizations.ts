@@ -3,6 +3,7 @@
  *
  * Traced from: api-cloudrun/src/services/organizations.ts
  */
+import type { RuleId } from "./ids.ts";
 import type {
   CollectionRule,
   EnforcementRef,
@@ -213,6 +214,25 @@ const ORG_NAME_TO_DESCENDANTS: EnforcementRef[] = [
   ORG_NAME_TO_DESCENDANTS_CORPUS,
 ];
 
+const ORG_MINT_ON_REPARENT: EnforcementRef[] = [
+  {
+    kind: "test",
+    ref:
+      "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - PROMOTING a project with typed departments keeps them departments (api-cloudrun#1153 case 1)",
+    clause:
+      "the RE-PARENT arm, case 1: a project promoted to a root keeps its typed departments at depth 3 under exactly one minted derived child, with `crms_id`/`xero_id` null.",
+    gates: true,
+  },
+  {
+    kind: "test",
+    ref:
+      "api-cloudrun/tests/integration/organizations/organizations.test.ts::PUT - a department moved to an ORGANIZATION reuses its derived project (api-cloudrun#1153 case 2)",
+    clause:
+      "the RE-PARENT arm, case 2: a typed department moved under a root reuses that root's existing `(default)` — asserted as a COUNT of derived children, the only thing that separates reuse from a silent duplicate — or mints one when there is none.",
+    gates: true,
+  },
+];
+
 const ORG_REPARENT_TO_DESCENDANTS: EnforcementRef = {
   kind: "test",
   ref: "api-cloudrun/tests/integration/organizations/organizations.test.ts",
@@ -272,12 +292,10 @@ const createOrganizationRules: CollectionRule[] = [
     fields: [
       { source: ["path"], target: ["path"] },
       { source: ["path"], target: ["query_by_path"] },
-      // ⚠️ **This mapping describes a MINTED node, and it is the one field here
-      // that this rule does not author on an ordinary create.** It is left in
-      // place because `create-org:mint-derived-project` writes the node whose
-      // `derived_from.source_uid` this is, and the two rules co-write one tree
-      // in one transaction — see that rule for who sets it.
-      { source: ["uid"], target: ["derived_from", "source_uid"] },
+      // ⚠️ The `uid → derived_from.source_uid` mapping that stood here is GONE
+      // (api-cloudrun#1153). It described the MINTED ancestor, which this rule
+      // does not write, and `create-org:mint-derived-project` already declares
+      // it — so it said one fact twice, on the wrong rule.
     ],
   },
   {
@@ -286,15 +304,17 @@ const createOrganizationRules: CollectionRule[] = [
     target: "organizations",
     mode: "co-write",
     invariant:
-      "A DEPARTMENT may name an ORGANIZATION as its parent, and the server supplies the project level in between. Invariant 8 is a biconditional — a non-derived depth-3 node must name a `department-types` entry and nothing shallower may — so a department needs a project above it; requiring the operator to invent one first is two documents and two round trips through a blank form. So when `uid_department_type` is set and the resolved parent is at depth 1, this REUSES the parent's existing derived project or MINTS one: `name: \"(default)\"`, `derived: true`, `derived_from: { source_uid: <the new department>, reason: \"minted-project\" }`. `composeOrgName` drops a derived segment, so the label reads `Waterloo West Productions LLC / Grip` and no `(default)` reaches an invoice, a Xero contact or a picker. ⚠️ **REUSE-FIRST is load-bearing, not an optimisation**: invariant 6 scopes sibling-name uniqueness to NON-derived siblings, so a second `(default)` would not be refused — it would silently coexist. 🔴 **The mint must NOT recurse through the create path**: that POSTs a live CRMS member and creates a live Xero contact, and a derived ancestor carries `crms_id: null` / `xero_id: null` by construction. It is written as a plain document in the same transaction, the way the retired migration did, with its own co-written thread.",
-    enforced_by: [ORG_MINT_DERIVED_PROJECT],
+      "A DEPARTMENT may sit under an ORGANIZATION only through a project, and the server supplies that project level when nobody named one. It fires from TWO writers: a CREATE whose department names a depth-1 parent, and a RE-PARENT (api-cloudrun#1153) — a typed department moved under a root, or a project promoted to a root while it holds typed departments, whose departments are rehung under one minted `(default)` below it. Invariant 8 is a biconditional — a non-derived depth-3 node must name a `department-types` entry and nothing shallower may — so a department needs a project above it; requiring the operator to invent one first is two documents and two round trips through a blank form. So when `uid_department_type` is set and the resolved parent is at depth 1, this REUSES the parent's existing derived project or MINTS one: `name: \"(default)\"`, `derived: true`, `derived_from: { source_uid: <the new department>, reason: \"minted-project\" }`. `composeOrgName` drops a derived segment, so the label reads `Waterloo West Productions LLC / Grip` and no `(default)` reaches an invoice, a Xero contact or a picker. ⚠️ **REUSE-FIRST is load-bearing, not an optimisation**: invariant 6 scopes sibling-name uniqueness to NON-derived siblings, so a second `(default)` would not be refused — it would silently coexist. 🔴 **The mint must NOT recurse through the create path**: that POSTs a live CRMS member and creates a live Xero contact, and a derived ancestor carries `crms_id: null` / `xero_id: null` by construction. It is written as a plain document in the same transaction, the way the retired migration did, with its own co-written thread. ⚠️ **A promoted project mints WITHOUT the reuse read**: a `(default)` only ever sits at depth 2 under a root, so a node that has just become a root cannot already have one, and a subtree read there would overlap a concurrent create under the moved project.",
+    enforced_by: [ORG_MINT_DERIVED_PROJECT, ...ORG_MINT_ON_REPARENT],
     transaction: "create-organization",
-    trigger: "a create carrying `uid_department_type` whose resolved parent is at depth 1",
+    trigger:
+      "a create carrying `uid_department_type` whose resolved parent is at depth 1; or a re-parent that would leave a typed department at depth 2 — the department itself moved under a root (reuse first), or its project promoted to a root (always a mint)",
     fields: [
       { source: ["path"], target: ["path"] },
       { source: ["path"], target: ["query_by_path"] },
+      // `derived_from.reason` is the constant `"minted-project"`, not a value
+      // carried from any source field, so it has no mapping.
       { source: ["uid"], target: ["derived_from", "source_uid"] },
-      { source: ["uid"], target: ["derived_from", "reason"] },
     ],
   },
 ];
@@ -611,6 +631,10 @@ const reparentOrganizationTransaction: TransactionDefinition = {
     // ⚠️ Conditional — only where the moved subtree's `activity_at` is newer
     // than a new ancestor's (api-cloudrun#979).
     "reparent-org:activity-to-new-ancestors",
+    // ⚠️ Conditional — only where the move would otherwise leave a typed
+    // department at depth 2, and only on a MINT, never a reuse
+    // (api-cloudrun#1153).
+    "create-org:mint-derived-project",
   ],
 };
 
@@ -667,7 +691,7 @@ const organizationActivityStampTransaction: TransactionDefinition = {
 const updateOrganizationTransaction: TransactionDefinition = {
   id: "update-organization",
   description:
-    "Updates an organization with name/billing cascades to contacts, active orders, and active invoices. CRMS + Xero sync post-transaction.",
+    "Updates an organization with name/billing/tax cascades to its subtree's live orders, invoices and their order-derived children. A contact edge stores the organization's uid alone, so a rename has nothing to carry to it; a membership change co-writes both sides of the edge. Xero sync post-transaction.",
   steps: [
     "update-org:name-to-orders",
     "update-org:billing-to-orders",
@@ -682,6 +706,186 @@ const updateOrganizationTransaction: TransactionDefinition = {
   ],
 };
 
+
+// ── merge-organization ──────────────────────────────────────────────
+//
+// api-cloudrun#1153. A re-parent that would put a node beside a sibling it
+// collides with — a department of the same type, or a project of the same
+// case-folded name — MERGES it into that sibling instead of failing. The
+// sibling already there SURVIVES (uid, `crms_id`, Xero contact); the moved node
+// is the LOSER: every reference to it is repointed, and then it is deleted.
+
+const MERGE_TEST = "api-cloudrun/tests/integration/organizations/organizationMerge.test.ts";
+
+const MERGE_ENFORCEMENT: EnforcementRef[] = [
+  {
+    kind: "test",
+    ref: MERGE_TEST + "::a department collision under a (default) merges into the survivor",
+    clause:
+      "every reference to the loser repointed at the survivor, the loser and its thread deleted, its comments on the survivor's thread, `merged_from` set — for a collision under a `(default)` and under a named project.",
+    gates: true,
+  },
+  {
+    kind: "test",
+    ref: MERGE_TEST + "::the money guard refuses a merge across two Xero contacts",
+    clause:
+      "the money guard: a loser carrying invoices, credit notes or settlements under a DIFFERENT Xero contact is refused with 409 and nothing written, at pre-flight and again at write time; a shared contact merges.",
+    gates: true,
+  },
+  {
+    kind: "test",
+    ref: MERGE_TEST + "::a planted reference leaves MERGE_INCOMPLETE and a re-send completes",
+    clause:
+      "the gated delete: the loser is deleted only when a claimed read of every referencing collection is empty, otherwise 409 `MERGE_INCOMPLETE`, and re-sending the PUT resumes.",
+    gates: true,
+  },
+  {
+    kind: "test",
+    ref: "api-cloudrun/tests/unit/organizationReferenceCoverage.test.ts",
+    clause:
+      "the census: every organization-reference shape in core's schemas is in the merge's repoint table or in an exemption with a reason, with planted references proving the walk reaches arrays and union arms.",
+    gates: true,
+  },
+];
+
+/**
+ * The one invariant every merge rule shares, stated once (the
+ * `ACTIVITY_STAMP_INVARIANT` pattern) — each rule appends only what is its own.
+ */
+const MERGE_INVARIANT =
+  "A merge moves every reference from the LOSER to the SURVIVOR and then deletes the loser. The survivor is the node the move collided with, and it keeps its uid, `crms_id` and Xero contact. 🔴 **Money guard**: when the loser carries invoices, credit notes or settlements and the two hold DIFFERENT Xero contacts, the merge is refused (409) before anything is written, and the money repoints re-check it at write time, because moving them would move a receivable between two contacts in a live ledger. ⚠️ **Repoints are compare-and-set, never a blind replace**: only the organization block, `version` and `updated_at` are patched, under an `updateTime` precondition, so a concurrent edit to the same document is kept. The loser is deleted only when nothing references it any more, so a merge that stops part-way is resumed by re-sending the same PUT.";
+
+/** The four documents that carry the organization's CHAIN and nothing else of it. */
+function chainRepointRule(
+  id: RuleId,
+  target: "bookings" | "fulfillments" | "cards" | "out-of-service",
+): CollectionRule {
+  return {
+    id,
+    source: "organizations",
+    target,
+    mode: "fan-out",
+    invariant: MERGE_INVARIANT + ` A ${target} document carries the chain alone, so it takes the survivor's uid and path.`,
+    enforced_by: MERGE_ENFORCEMENT,
+    transaction: "merge-organization",
+    fields: [
+      { source: ["uid"], target: ["organization", "uid"] },
+      { source: ["path"], target: ["organization", "path"] },
+    ],
+  };
+}
+
+/** The three billing documents that carry the full resolved snapshot. */
+function snapshotRepointRule(id: RuleId, target: "orders" | "invoices" | "credit-notes"): CollectionRule {
+  return {
+    id,
+    source: "organizations",
+    target,
+    mode: "fan-out",
+    invariant: MERGE_INVARIANT +
+      ` A ${target} document takes the survivor's RESOLVED snapshot (\`buildResolvedOrganizationSnapshot\`), the same one a new document would freeze.` +
+      (target === "orders"
+        ? " Its `version` is bumped on purpose: `orders.xero_id` is the Xero QUOTE, and the bump re-pushes it under the survivor's contact — against the ~1,000/day Xero cap, so the count is logged before the merge starts."
+        : " An invoice or credit-note write cannot reach Xero: only a status transition enqueues one."),
+    enforced_by: MERGE_ENFORCEMENT,
+    transaction: "merge-organization",
+    fields: [
+      { source: ["uid"], target: ["organization", "uid"] },
+      { source: ["path"], target: ["organization", "path"] },
+      { source: ["billing_address"], target: ["organization", "billing_address"], transform: "resolved up the chain" },
+    ],
+  };
+}
+
+const mergeOrganizationRules: CollectionRule[] = [
+  snapshotRepointRule("merge-org:loser-to-orders", "orders"),
+  snapshotRepointRule("merge-org:loser-to-invoices", "invoices"),
+  snapshotRepointRule("merge-org:loser-to-credit-notes", "credit-notes"),
+  {
+    id: "merge-org:loser-to-settlements",
+    source: "organizations",
+    target: "settlements",
+    mode: "fan-out",
+    invariant: MERGE_INVARIANT +
+      " A settlement references its organization by uid alone. It is repointed through the settlements writer, never by a second writer beside it.",
+    enforced_by: MERGE_ENFORCEMENT,
+    transaction: "merge-organization",
+    fields: [{ source: ["uid"], target: ["uid_organization"] }],
+  },
+  chainRepointRule("merge-org:loser-to-bookings", "bookings"),
+  chainRepointRule("merge-org:loser-to-fulfillments", "fulfillments"),
+  chainRepointRule("merge-org:loser-to-cards", "cards"),
+  chainRepointRule("merge-org:loser-to-out-of-service", "out-of-service"),
+  {
+    id: "merge-org:loser-to-contacts",
+    source: "organizations",
+    target: "contacts",
+    mode: "fan-out",
+    invariant: MERGE_INVARIANT +
+      " The contact edge is bidirectional, so it moves through the contact writer, which keeps both sides in step; a contact linked to both ends with one edge.",
+    enforced_by: MERGE_ENFORCEMENT,
+    transaction: "merge-organization",
+    fields: [
+      { source: ["uid"], target: ["organizations", "uid"] },
+      { source: ["uid"], target: ["query_by_organizations"] },
+    ],
+  },
+  {
+    id: "merge-org:activity-to-survivor",
+    source: "organizations",
+    target: "organizations",
+    mode: "co-write",
+    invariant: MERGE_INVARIANT +
+      " The survivor's `activity_at` becomes the later of the two, by the stamper's max rule — the loser's documents are now the survivor's.",
+    enforced_by: [...MERGE_ENFORCEMENT, ORG_ACTIVITY_SHAPE],
+    transaction: "merge-organization",
+    fields: [{ source: ["activity_at"], target: ["activity_at"], transform: "max(survivor, loser)" }],
+  },
+  {
+    id: "merge-org:merged-from-to-survivor",
+    source: "organizations",
+    target: "organizations",
+    mode: "co-write",
+    invariant: MERGE_INVARIANT +
+      " The survivor records the loser's uid in `merged_from`, carried transitively (`survivor ∪ loser ∪ loser.merged_from`). It is a record of the merge, never recomputed, and it is what keeps the loser's saved statements, activity and comment sources findable: they are history and keep the loser's uid.",
+    enforced_by: MERGE_ENFORCEMENT,
+    transaction: "merge-organization",
+    fields: [{ source: ["uid"], target: ["merged_from"] }],
+  },
+  {
+    id: "merge-org:delete-loser",
+    source: "organizations",
+    target: "organizations",
+    mode: "fan-out",
+    invariant: MERGE_INVARIANT +
+      " The loser and its default thread are deleted in ONE transaction that first reads every referencing collection and finds it empty.",
+    enforced_by: MERGE_ENFORCEMENT,
+    transaction: "merge-organization",
+    fields: [{ source: ["uid"], target: ["uid"], transform: "deleted once nothing references it" }],
+  },
+];
+
+const mergeOrganizationTransaction: TransactionDefinition = {
+  id: "merge-organization",
+  description:
+    "Merges an organization node into the sibling a re-parent collided with: repoints every reference, moves its comments, records it in the survivor's `merged_from`, and deletes it. A project merge pairs its departments by type — a pair merges, the rest move. Every step is conditional: a step with nothing to repoint does not fire.",
+  steps: [
+    "merge-org:loser-to-orders",
+    "merge-org:loser-to-invoices",
+    "merge-org:loser-to-credit-notes",
+    "merge-org:loser-to-settlements",
+    "merge-org:loser-to-bookings",
+    "merge-org:loser-to-fulfillments",
+    "merge-org:loser-to-cards",
+    "merge-org:loser-to-out-of-service",
+    "merge-org:loser-to-contacts",
+    "merge-org:thread-comments-to-survivor",
+    "merge-org:activity-to-survivor",
+    "merge-org:merged-from-to-survivor",
+    "merge-org:delete-loser",
+  ],
+};
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/organizations.ts` contributes to the propagation catalog. */
 export const organizations: PropagationModule = {
@@ -691,11 +895,13 @@ export const organizations: PropagationModule = {
     nameToDescendantsRule,
     ...reparentRules,
     ...organizationActivityStampRules,
+    ...mergeOrganizationRules,
   ],
   transactions: [
     createOrganizationTransaction,
     updateOrganizationTransaction,
     reparentOrganizationTransaction,
     organizationActivityStampTransaction,
+    mergeOrganizationTransaction,
   ],
 };
