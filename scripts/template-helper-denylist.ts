@@ -122,6 +122,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // Dormancy (api-cloudrun#979) is a picker/search concern: a render context
     // holds a frozen document snapshot, which carries no `activity_at`.
     "isOrganizationDormant",
+    // The merge link (api-cloudrun#978): a snapshot carries no `merged_to`, and
+    // the validator is a write-path and audit guard like the tree one below.
+    "isOrgTombstone",
     "organizationActivityMs",
     "organizationDormantCutoffMs",
     "orgLevel",
@@ -130,6 +133,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "orgRootUid",
     "resolveBillingAddress",
     "resolveTaxAxes",
+    "validateMergeLinks",
     "validateOrganizationTree",
   ],
   // Stock primitives — the interval rules and the two consumption definitions.

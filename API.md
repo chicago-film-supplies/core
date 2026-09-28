@@ -1593,6 +1593,33 @@ interface CardOrganizationType {
 const CardSchema: z.ZodType<Card>;
 ```
 
+### `CardSources`
+
+`sources[]` on a card and on a recurrence's `prototype`: any
+{@link DocSourceType} except an organization.
+
+🔴 **Refused because an organization MERGE cannot reach it** (api-cloudrun#978).
+The merge repoints every reference to the loser it can find. A `sources[]`
+entry is matched by `array-contains` on the WHOLE element, including the
+optional `label`, so a writer cannot find every card naming an org. Such a
+card would keep pointing at a deleted node, or at a tombstone, without
+anything reporting it. Nothing writes one today: 0 stored cards or
+recurrences carry an organization source, and the manager only copies a
+card's existing `sources`. So the refinement closes a hole rather than
+breaking a writer.
+
+⚠️ **Not a narrowing of `CFS_SOURCE_COLLECTIONS`.** That enum is shared with
+threads, comments and movements, where an organization source is legal and
+the merge does repoint it.
+
+⚠️ **A REFINE on a client-sent input, so the manager ships first**
+(`cfs-release-order`). It is safe in either order today only because no
+client sends one.
+
+```ts
+const CardSources: z.ZodType<DocSourceType[]>;
+```
+
 ### `CardStatus`
 
 Allowed card statuses. Shared across field-service, to-do, shopping, calendar.
@@ -7190,6 +7217,7 @@ interface Organization {
   uid_department_type: string | null;
   activity_at: FirestoreTimestampType;
   merged_from?: string[];
+  merged_to?: string;
   crms_id: number | null;
   xero_id: string | null;
   jurisdiction_claim?: JurisdictionType | null;
@@ -15857,6 +15885,33 @@ interface CardOrganizationType {
 const CardSchema: z.ZodType<Card>;
 ```
 
+### `CardSources`
+
+`sources[]` on a card and on a recurrence's `prototype`: any
+{@link DocSourceType} except an organization.
+
+🔴 **Refused because an organization MERGE cannot reach it** (api-cloudrun#978).
+The merge repoints every reference to the loser it can find. A `sources[]`
+entry is matched by `array-contains` on the WHOLE element, including the
+optional `label`, so a writer cannot find every card naming an org. Such a
+card would keep pointing at a deleted node, or at a tombstone, without
+anything reporting it. Nothing writes one today: 0 stored cards or
+recurrences carry an organization source, and the manager only copies a
+card's existing `sources`. So the refinement closes a hole rather than
+breaking a writer.
+
+⚠️ **Not a narrowing of `CFS_SOURCE_COLLECTIONS`.** That enum is shared with
+threads, comments and movements, where an organization source is legal and
+the merge does repoint it.
+
+⚠️ **A REFINE on a client-sent input, so the manager ships first**
+(`cfs-release-order`). It is safe in either order today only because no
+client sends one.
+
+```ts
+const CardSources: z.ZodType<DocSourceType[]>;
+```
+
 ### `CardStatus`
 
 Allowed card statuses. Shared across field-service, to-do, shopping, calendar.
@@ -19034,6 +19089,7 @@ interface Organization {
   uid_department_type: string | null;
   activity_at: FirestoreTimestampType;
   merged_from?: string[];
+  merged_to?: string;
   crms_id: number | null;
   xero_id: string | null;
   jurisdiction_claim?: JurisdictionType | null;
@@ -21855,6 +21911,8 @@ interface OrganizationDocument {
   crms_id_str?: string;
   level?: string;
   derived?: boolean;
+  merged?: boolean;
+  merged_to?: string;
   xero_id?: string;
   jurisdiction_claim?: string;
   tax_exempt?: boolean;
@@ -34729,6 +34787,19 @@ what that walk consults; the un-narrowed form is what the builder requires.
 type OrgAncestors = ReadonlyMap<string, F | null>;
 ```
 
+### `OrgTombstoneFacts`
+
+The merge facts a reader may hold about a node, in either shape: the stored
+document's `merged_to` or a Typesense hit's derived `merged` bool. Every
+member is optional, so a projection that selected neither passes as live.
+
+```ts
+interface OrgTombstoneFacts {
+  merged_to?: string | null;
+  merged?: boolean | null;
+}
+```
+
 ### `ResolvedBillingAddress`
 
 What {@link resolveBillingAddress} answers.
@@ -34855,15 +34926,40 @@ sixty lines above two invariants using `ORG_LEVELS.length`, inside one file.
 
 Is this node a ROOT — the top of its tree, depth 1?
 
-### `isOrganizationDormant(node: typeLiteral, nowMs: number): boolean`
+### `isOrgTombstone(node: OrgTombstoneFacts): boolean`
 
-Whether a node is dormant at `nowMs`: its last activity is strictly older
-than {@link ORGANIZATION_DORMANT_AFTER_DAYS}. Exactly at the cutoff is still
+Whether a node is a TOMBSTONE: merged away, kept only because it still
+carries money under its own Xero contact (api-cloudrun#978). This is the one
+definition. Every reader that must leave tombstones out of the LIVE tree asks
+this: sibling uniqueness, the merge's survivor lookup, the gated delete's
+child count, pickers choosing a write target, and the tree audit.
+
+⚠️ **Narrower than {@link isOrganizationDormant}, and kept separate for that
+reason.** Dormant is a SORTING and muting fact that a node's next order
+reverses. A tombstone is refused as a write target and labelled "Merged into
+{head}", and neither of those applies to a node that has only gone quiet.
+
+Accepts either shape ({@link OrgTombstoneFacts}), the same way
+{@link organizationActivityMs} accepts a `Timestamp` or an `int64`.
+
+### `isOrganizationDormant(node: typeLiteral & OrgTombstoneFacts, nowMs: number): boolean`
+
+Whether a node is dormant at `nowMs`: it is a TOMBSTONE
+({@link isOrgTombstone}), or its last activity is strictly older than
+{@link ORGANIZATION_DORMANT_AFTER_DAYS}. Exactly at the cutoff is still
 active, matching the search sort's `>=`.
 
 ⚠️ **An UNREADABLE value is not dormant.** The key is required on the stored
 document, but a reader can still hold a projection without it, and muting a
 live customer on a missing value is the wrong direction to fail.
+
+⚠️ **A tombstone is dormant whatever its `activity_at` says** (owner,
+2026-09-28). A tombstone keeps billing its invoiced orders, and the activity
+stamper can keep its `activity_at` recent while it does. So the manager's
+Typesense sort cannot rely on `activity_at` alone either: it needs
+`_eval(activity_at:>=<cutoff> && merged:!=true)`. ⚠️ **Pass the merge field
+the reader holds.** A caller that passes `activity_at` alone reads a
+tombstone as live.
 
 ### `orgLevel(node: Pick<Organization, "path">): OrgLevel`
 
@@ -34965,19 +35061,47 @@ ancestor is reported, not guessed.
 ⚠️ **Reads the leaf from `node`, never from `ancestors`**, and reads ancestry
 from `node.path`, never a re-fetched chain.
 
-### `validateOrganizationTree(node: Pick<Organization, "uid" | "path" | "uid_department_type">, parent: Pick<Organization, "uid" | "path"> | null, siblings: readonly Pick<Organization, "uid" | "path" | "uid_department_type">[]): string[]`
+### `validateMergeLinks(node: Pick<Organization, "uid" | "merged_to">, head: Pick<Organization, "uid" | "merged_from" | "merged_to"> | null): string[]`
+
+The CROSS-DOCUMENT merge-link invariants (api-cloudrun#978), for a node
+together with the head its `merged_to` names, or `null` when the node is live
+or its head could not be read.
+
+1. a tombstone's head lists it: `n.merged_to = s ⇒ s.merged_from ∋ n`;
+2. the head is live: `s.merged_to` is absent. A merge re-points a head's
+   tombstones before it tombstones or deletes that head, so every chain has
+   exactly one hop;
+3. the head it names is the head it was given. This catches a caller that
+   passed the wrong document, which would otherwise make 1 and 2 answer
+   about some other node.
+
+⚠️ **The converse (`s.merged_from ∋ n ⇒ n deleted, or n.merged_to = s`) is
+NOT here.** Asking it needs every uid in `merged_from` resolved, including
+the deleted ones, and an absent document is a legal answer there. That walk
+belongs to the corpus audit (`api-cloudrun`'s `auditTree`), which holds the
+whole collection. This function holds two documents.
+
+⚠️ **Not wired into `validateBeforeWrite`**, for the same reason
+{@link validateOrganizationTree} is not: a write-path check must not read a
+second document. The merge primitive calls it on what it is about to write,
+and the audit calls it on what is stored.
+
+Returns every violation. An empty array means the link is consistent. A live
+node with a `null` head is trivially consistent.
+
+### `validateOrganizationTree(node: Pick<Organization, "uid" | "path" | "uid_department_type" | "merged_to">, parent: Pick<Organization, "uid" | "path"> | null, siblings: readonly Pick<Organization, "uid" | "path" | "uid_department_type" | "merged_to">[]): string[]`
 
 The THREE tree invariants that need MORE than one document — 5, 6 and 6b.
 
 🔴 **The one-document invariants are NOT here, deliberately** — 1, 2, 3, 4,
-the one-document half of 8, and 10, 11, 12 live on `OrganizationSchema` as a
+the one-document half of 8, and 10, 11, 12, 13 live on `OrganizationSchema` as a
 `superRefine`, because they read one document and nothing else, and that
 independence is what keeps this function honest. (7, the depth bound, is
 enforced where `path` is BUILT — {@link computeOrganizationNode} throws — so
 there is nothing left for a validator to re-check.)
 Invariant 5 is a fixed-point check — *"my path is my parent's path plus me"* —
 defined in terms of {@link computeOrganizationNode} and therefore only ever
-able to agree with it. It is safe **because** eight properties that hold
+able to agree with it. It is safe **because** nine properties that hold
 independently of the walk stand beside it. A guard that can only consult its
 own oracle is not a guard: that is exactly the shape that certified 79
 provably-wrong item paths as clean, corpus-wide.

@@ -4,11 +4,11 @@ import { typesenseAddressFields } from "./types.ts";
 /** Typesense collection config for organizations. */
 export const organizations: TypesenseCollectionConfig = {
   alias: "organizations",
-  version: 15,
+  version: 16,
   firestoreCollection: "organizations",
-  collectionName: "organizations_v15",
+  collectionName: "organizations_v16",
   schema: {
-    name: "organizations_v15",
+    name: "organizations_v16",
     enable_nested_fields: true,
     // `/` joins the composed name's segments (`ORG_NAME_DELIMITER`), so without
     // it a search for "Locations" cannot match
@@ -90,6 +90,36 @@ export const organizations: TypesenseCollectionConfig = {
       // `api-cloudrun/.claude/plans/post-cutover-issue-roadmap.md`, because it
       // cannot be enforced from inside this file.
       { name: "derived", type: "bool", facet: true, optional: true },
+      // ── The merge link (api-cloudrun#978) ─────────────────────────────────
+      //
+      // 🔴 **`merged` is DERIVED at index time from `merged_to`, because
+      // Typesense 30.2 cannot filter on whether a field EXISTS.** Probed on dev
+      // 2026-09-28: `xero_id:=null` matched 0 of 349 while 12 nodes carry none,
+      // because `null` is matched as the literal string. So a tombstone must be
+      // stated as a value. `translateForTypesense` sets it to
+      // `isOrgTombstone(source)` on the SOURCE document, for both polarities.
+      //
+      // ⚠️ **`optional: true`, which reverses the plan, deliberately.** This
+      // declaration ships in a core beta BEFORE api-cloudrun's producer (Renovate
+      // pins the beta within a day). A required field with no producer would make
+      // every document in `organizations_v16` fail to upsert. Optional is safe
+      // in every order because the reader asks `merged:!=true`, NOT
+      // `merged:=false`, and `!=` MATCHES a document that lacks the field (probed
+      // on dev 2026-09-28: `tax_exempt:!=true` → 337 of 349, with 254 lacking
+      // the key and 12 true; the same inside `_eval(...)`). No tombstone can
+      // exist before the producer ships, because both land in the same api
+      // commit. ⚠️ **So `merged:=false` is the wrong reader**: it drops every
+      // document indexed without the field, which is the `derived` note's
+      // empty-picker geometry above.
+      //
+      // The manager's dormancy sort becomes
+      // `_eval(activity_at:>=<cutoff> && merged:!=true)`, so a tombstone sorts
+      // last even while its invoiced orders keep `activity_at` recent.
+      { name: "merged", type: "bool", facet: true, optional: true },
+      // The head's uid, so a hit can render "Merged into {head}" without a
+      // Firestore read. It resolves natively against `Organization.merged_to`.
+      // It is not the tombstone test: absence cannot be filtered (see `merged`).
+      { name: "merged_to", type: "string", facet: false, optional: true },
       // 🔴 **These two replace `tax_profile`, and adding them is what makes the
       // removal safe rather than merely tidy.** `OrderOrg.tsx` attaches a
       // customer from SEARCH and seeds the order's organization snapshot from

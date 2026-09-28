@@ -24,7 +24,7 @@ const validPrototype = {
   body_text: "",
   status: "planned" as const,
   destination: null,
-  sources: [{ collection: "organizations", uid: "org10000000000000000" }],
+  sources: [{ collection: "invoices", uid: "inv10000000000000000" }],
   attachments: [],
   uid_assignees: [],
   locked: ["card" as const, "subject" as const],

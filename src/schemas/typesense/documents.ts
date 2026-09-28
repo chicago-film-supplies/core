@@ -611,6 +611,20 @@ export interface OrganizationDocument {
    * from a Firestore row.
    */
   derived?: boolean;
+  /**
+   * `isOrgTombstone(source)`: whether this node was merged away and kept only
+   * for the money it still carries (api-cloudrun#978). DERIVED at index time,
+   * because Typesense cannot filter on whether `merged_to` exists.
+   *
+   * ⚠️ **`undefined` means NOT a tombstone**, unlike `derived` above. Every
+   * reader asks `merged:!=true`, which matches a document that lacks the
+   * field, and no tombstone can exist before the producer that stamps it. Pass
+   * the hit straight to `isOrganizationDormant` / `isOrgTombstone`
+   * (`@cfs/core/utils/organizations`), which read this shape.
+   */
+  merged?: boolean;
+  /** `Organization.merged_to`: the live head's uid, present only on a tombstone. */
+  merged_to?: string;
   xero_id?: string;
   jurisdiction_claim?: string;
   tax_exempt?: boolean;

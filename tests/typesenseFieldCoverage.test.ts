@@ -120,6 +120,13 @@ const DERIVED_FIELDS: Record<string, string> = {
   // `api-cloudrun/tests/unit/typesenseOrgLevel.test.ts`, which asserts BOTH
   // polarities — a constant-false producer passes any single-polarity check.
   "organizations:derived": "path.at(-1).derived — hoisted to a top-level facet at index time (api-cloudrun#791)",
+  // ── `isOrgTombstone(source)`, a bool stated in BOTH polarities, because
+  //    Typesense cannot filter on whether `merged_to` EXISTS (api-cloudrun#978).
+  //    Produced in api-cloudrun's `translateForTypesense` on the SOURCE document.
+  //    ⚠️ The producer lands in api-cloudrun Session 4 of the org-node-removal
+  //    plan, AFTER this declaration publishes. That is why the field is
+  //    `optional: true`, and why readers must ask `merged:!=true`.
+  "organizations:merged": "isOrgTombstone(source) — a tombstone stated as a value (api-cloudrun#978)",
   // ── The SAME derivation, one level out: the frozen snapshot on a document.
   //    `translateForTypesense` composes these from `doc.organization.path` on
   //    the SOURCE document (api-cloudrun `af52c9f1`), keyed on the CHAIN rather

@@ -10,6 +10,7 @@ import {
   composeOrgName,
   computeOrganizationNode,
   isOrganizationDormant,
+  isOrgTombstone,
   ORGANIZATION_DORMANT_AFTER_DAYS,
   organizationActivityMs,
   organizationDormantCutoffMs,
@@ -21,6 +22,7 @@ import {
   orgRootUid,
   resolveBillingAddress,
   resolveTaxAxes,
+  validateMergeLinks,
   validateOrganizationTree,
 } from "../src/utils/organizations.ts";
 import { DocumentOrganizationSnapshot, type Organization } from "../src/schemas/mod.ts";
@@ -853,4 +855,83 @@ Deno.test("isOrganizationDormant — strictly older than 60 days, at the 60-day 
   assertEquals(organizationActivityMs({ activity_at: { seconds: 2, nanoseconds: 5_000_000 } as never }), 2005, "a cloned map still reads");
   assertEquals(isOrganizationDormant({}, now), false, "an unstamped node is never muted");
   assertEquals(isOrganizationDormant({ activity_at: null }, now), false);
+});
+
+// ── Tombstones (api-cloudrun#978) ───────────────────────────────────────────
+
+const HEAD_ID = "hhhhhhhhhhhhhhhhhhhh";
+const LOSER_ID = "llllllllllllllllllll";
+
+Deno.test("isOrgTombstone — reads the stored merged_to OR the Typesense merged bool", () => {
+  assertEquals(isOrgTombstone({}), false, "a projection that selected neither is live");
+  assertEquals(isOrgTombstone({ merged_to: HEAD_ID }), true);
+  assertEquals(isOrgTombstone({ merged_to: null }), false);
+  assertEquals(isOrgTombstone({ merged_to: "" }), false);
+  assertEquals(isOrgTombstone({ merged: true }), true);
+  assertEquals(isOrgTombstone({ merged: false }), false);
+  assertEquals(isOrgTombstone({ merged: null }), false);
+});
+
+Deno.test("isOrganizationDormant — a tombstone is dormant however recent its activity_at", () => {
+  const now = Date.UTC(2026, 8, 28);
+  // A tombstone keeps billing its invoiced orders, so the stamper can keep this fresh.
+  assertEquals(isOrganizationDormant({ activity_at: now, merged_to: HEAD_ID }, now), true);
+  assertEquals(isOrganizationDormant({ activity_at: now, merged: true }, now), true, "the Typesense hit's shape");
+  assertEquals(isOrganizationDormant({ activity_at: now, merged: false }, now), false);
+  assertEquals(isOrganizationDormant({ activity_at: now }, now), false, "the discriminating half: the same node without the link is live");
+});
+
+Deno.test("validateOrganizationTree 6 — a tombstone neither holds its name against a live sibling nor is refused for it", () => {
+  const tombstone = {
+    uid: "ffffffffffffffffffff",
+    path: [rootNode, projectNode, { uid: "ffffffffffffffffffff", name: "Locations", derived: false }],
+    uid_department_type: null,
+    merged_to: HEAD_ID,
+  };
+  const liveTwin = { ...tombstone, merged_to: undefined };
+  // The discriminating half: the same sibling, live, is a clash.
+  assertEquals(validateOrganizationTree(deptDoc, projectDoc, [liveTwin]).length, 1);
+  assertEquals(validateOrganizationTree(deptDoc, projectDoc, [tombstone]), [], "the SIBLING side");
+  // A parent rename cascades into the tombstone and re-validates IT, beside the
+  // live node that took its name.
+  assertEquals(validateOrganizationTree(tombstone, projectDoc, [deptDoc]), [], "the NODE side");
+});
+
+Deno.test("validateOrganizationTree 6b — a tombstone does not hold its department type either, on either side", () => {
+  const tombstone = {
+    uid: "ffffffffffffffffffff",
+    path: [rootNode, projectNode, { uid: "ffffffffffffffffffff", name: "Transpo", derived: false }],
+    uid_department_type: TYPE_ID,
+    merged_to: HEAD_ID,
+  };
+  assertEquals(validateOrganizationTree(deptDoc, projectDoc, [{ ...tombstone, merged_to: undefined }]).length, 1);
+  assertEquals(validateOrganizationTree(deptDoc, projectDoc, [tombstone]), []);
+  assertEquals(validateOrganizationTree(tombstone, projectDoc, [deptDoc]), []);
+});
+
+Deno.test("validateMergeLinks — a consistent tombstone and a live node both pass", () => {
+  assertEquals(validateMergeLinks({ uid: LOSER_ID, merged_to: HEAD_ID }, { uid: HEAD_ID, merged_from: [LOSER_ID] }), []);
+  assertEquals(validateMergeLinks({ uid: HEAD_ID }, null), []);
+});
+
+Deno.test("validateMergeLinks — each of the three links, refused alone", () => {
+  const tomb = { uid: LOSER_ID, merged_to: HEAD_ID };
+  const unlisted = validateMergeLinks(tomb, { uid: HEAD_ID, merged_from: [] });
+  assertEquals(unlisted.length, 1);
+  assertEquals(unlisted[0].includes("does not list it"), true);
+  assertEquals(validateMergeLinks(tomb, { uid: HEAD_ID }).length, 1, "absent merged_from means []");
+
+  const deadHead = validateMergeLinks(tomb, { uid: HEAD_ID, merged_from: [LOSER_ID], merged_to: ROOT_ID });
+  assertEquals(deadHead.length, 1);
+  assertEquals(deadHead[0].includes("re-point"), true, "a chain must be one hop — the head is itself a tombstone");
+
+  const missing = validateMergeLinks(tomb, null);
+  assertEquals(missing.length, 1);
+  assertEquals(missing[0].includes("does not exist"), true);
+
+  const wrongHead = validateMergeLinks(tomb, { uid: ROOT_ID, merged_from: [LOSER_ID] });
+  assertEquals(wrongHead.length, 1);
+  assertEquals(wrongHead[0].includes("checked against"), true, "a caller passing the wrong document gets told, not a verdict about some other node");
+
+  assertEquals(validateMergeLinks({ uid: HEAD_ID }, { uid: ROOT_ID, merged_from: [] }).length, 1, "a live node checked against a head is a caller error");
 });

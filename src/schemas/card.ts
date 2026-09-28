@@ -210,6 +210,36 @@ export const CardOrganization: z.ZodType<CardOrganizationType> = z.strictObject(
   path: OrderDerivedOrgPath,
 });
 
+/**
+ * `sources[]` on a card and on a recurrence's `prototype`: any
+ * {@link DocSourceType} except an organization.
+ *
+ * 🔴 **Refused because an organization MERGE cannot reach it** (api-cloudrun#978).
+ * The merge repoints every reference to the loser it can find. A `sources[]`
+ * entry is matched by `array-contains` on the WHOLE element, including the
+ * optional `label`, so a writer cannot find every card naming an org. Such a
+ * card would keep pointing at a deleted node, or at a tombstone, without
+ * anything reporting it. Nothing writes one today: 0 stored cards or
+ * recurrences carry an organization source, and the manager only copies a
+ * card's existing `sources`. So the refinement closes a hole rather than
+ * breaking a writer.
+ *
+ * ⚠️ **Not a narrowing of `CFS_SOURCE_COLLECTIONS`.** That enum is shared with
+ * threads, comments and movements, where an organization source is legal and
+ * the merge does repoint it.
+ *
+ * ⚠️ **A REFINE on a client-sent input, so the manager ships first**
+ * (`cfs-release-order`). It is safe in either order today only because no
+ * client sends one.
+ */
+export const CardSources: z.ZodType<DocSourceType[]> = z.array(DocSource).refine(
+  (sources) => sources.every((s) => s.collection !== "organizations"),
+  {
+    message:
+      "an organization cannot be a card or recurrence source — an organization merge cannot find it to repoint it (api-cloudrun#978); link the order or invoice instead",
+  },
+);
+
 // ── Source payloads ─────────────────────────────────────────────────
 
 /**
@@ -472,7 +502,7 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   // both positions now read 1,161/1,161 prod and 1,168/1,168 present.
   // ⚠️ The witness is gone by design — that repair is why this line can exist.
   organization: CardOrganization.nullable().meta({ label: "Organization" }),
-  sources: z.array(DocSource).meta({ label: "Source" }),
+  sources: CardSources.meta({ label: "Source" }),
   // ABSENT rather than null off an event card, by rule — see
   // `CardFulfillmentsSource`. Required ON an event card by `checkEventCard`.
   fulfillments: CardFulfillmentsSource.optional(),
@@ -542,7 +572,7 @@ export const CreateCardInput: z.ZodType<CreateCardInputType> = z.object({
   all_day: z.boolean().optional(),
   destination: DocDestinationEndpoint.nullable().optional(),
   organization: CardOrganization.nullable().optional(),
-  sources: z.array(DocSource).optional(),
+  sources: CardSources.optional(),
   attachments: z.array(CardAttachment).optional(),
   uid_assignees: z.array(FirestoreId).optional(),
   locked: z.array(CardLockKeyEnum).optional(),
@@ -605,7 +635,7 @@ export const UpdateCardInput: z.ZodType<UpdateCardInputType> = z.object({
   all_day: z.boolean().optional(),
   destination: DocDestinationEndpoint.nullable().optional(),
   organization: CardOrganization.nullable().optional(),
-  sources: z.array(DocSource).optional(),
+  sources: CardSources.optional(),
   attachments: z.array(CardAttachment).optional(),
   uid_assignees: z.array(FirestoreId).optional(),
   version: z.int().min(0),

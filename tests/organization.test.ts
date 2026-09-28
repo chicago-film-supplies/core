@@ -516,3 +516,31 @@ Deno.test("activity_at — a Timestamp or ABSENT, never null, and never client-a
     assertEquals(ok(namedProject({ [key]: false })), false, `${key} is deleted — a strict schema refuses it`);
   }
 });
+
+// ── The merge link (api-cloudrun#978) ───────────────────────────────────────
+
+Deno.test("OrganizationSchema accepts a TOMBSTONE — merged_to naming a head, with merged_from carried forward", () => {
+  const doc = validOrganization({ merged_to: "testhead000000000000", merged_from: ["testloser00000000000"] });
+  const result = OrganizationSchema.safeParse(doc);
+  assertEquals(result.success, true, JSON.stringify(result.error?.issues));
+  assertEquals(OrganizationSchema.safeParse(validOrganization()).success, true, "absent merged_to is a LIVE node — no backfill");
+});
+
+Deno.test("merge invariant 13 — a node is never its own head, nor in its own merged_from", () => {
+  const self = validOrganization({ merged_to: "testorg1000000000000" });
+  const r1 = OrganizationSchema.safeParse(self);
+  assertEquals(r1.success, false);
+  assertEquals(r1.error?.issues.map((i) => i.path.join(".")), ["merged_to"]);
+
+  const listed = validOrganization({ merged_from: ["testloser00000000000", "testorg1000000000000"] });
+  const r2 = OrganizationSchema.safeParse(listed);
+  assertEquals(r2.success, false);
+  assertEquals(r2.error?.issues.map((i) => i.path.join(".")), ["merged_from"]);
+});
+
+Deno.test("OrganizationSchema refuses a merged_to that is not a Firestore id, and an explicit null", () => {
+  assertEquals(OrganizationSchema.safeParse(validOrganization({ merged_to: "not-an-id" })).success, false);
+  // Optional, NOT nullable: "live" is spelled by absence only, so there is one
+  // spelling for readers to test and `isOrgTombstone` is the one test.
+  assertEquals(OrganizationSchema.safeParse(validOrganization({ merged_to: null })).success, false);
+});

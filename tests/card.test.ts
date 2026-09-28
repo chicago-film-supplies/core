@@ -158,7 +158,7 @@ Deno.test("checkEventCard: the SAME nulls on a to-do are accepted — the refine
 Deno.test("checkEventCard: a non-fulfillments source does not make a card an event card", () => {
   const doc = {
     ...validTodoCard,
-    sources: [{ collection: "organizations", uid: "org10000000000000000" }],
+    sources: [{ collection: "invoices", uid: "inv10000000000000000" }],
   };
   assertEquals(CardSchema.safeParse(doc).success, true);
 });
@@ -168,10 +168,27 @@ Deno.test("CardSchema accepts multiple polymorphic sources", () => {
     ...validCard,
     sources: [
       { collection: "fulfillments", uid: "order100000000000000" },
-      { collection: "organizations", uid: "org10000000000000000" },
+      { collection: "invoices", uid: "inv10000000000000000" },
     ],
   };
   assertEquals(CardSchema.safeParse(doc).success, true);
+});
+
+Deno.test("CardSources: an organization source is refused on the document and on both inputs (api-cloudrun#978)", () => {
+  const org = { collection: "organizations" as const, uid: "org10000000000000000" };
+  const inv = { collection: "invoices" as const, uid: "inv10000000000000000" };
+  const doc = CardSchema.safeParse({ ...validTodoCard, sources: [inv, org] });
+  assertEquals(doc.success, false);
+  assertEquals(doc.error?.issues.map((i) => i.path.join(".")), ["sources"]);
+  const create = CreateCardInput.safeParse({ uid_list: validTodoCard.uid_list, subject: "x", sources: [org] });
+  assertEquals(create.error?.issues.map((i) => i.path.join(".")), ["sources"]);
+  const update = UpdateCardInput.safeParse({ version: 1, sources: [org] });
+  assertEquals(update.error?.issues.map((i) => i.path.join(".")), ["sources"]);
+  // The discriminating half: the SAME inputs with the org entry removed parse.
+  // A blanket refusal of `sources` would fail these.
+  assertEquals(CardSchema.safeParse({ ...validTodoCard, sources: [inv] }).success, true);
+  assertEquals(CreateCardInput.safeParse({ uid_list: validTodoCard.uid_list, subject: "x", sources: [inv] }).success, true);
+  assertEquals(UpdateCardInput.safeParse({ version: 1, sources: [inv] }).success, true);
 });
 
 Deno.test("CardSchema accepts an EventCardId composite uid_thread (deterministic event-card thread)", () => {

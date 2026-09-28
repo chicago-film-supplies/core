@@ -211,14 +211,14 @@ export function computeOrganizationNode(
  * The THREE tree invariants that need MORE than one document — 5, 6 and 6b.
  *
  * 🔴 **The one-document invariants are NOT here, deliberately** — 1, 2, 3, 4,
- * the one-document half of 8, and 10, 11, 12 live on `OrganizationSchema` as a
+ * the one-document half of 8, and 10, 11, 12, 13 live on `OrganizationSchema` as a
  * `superRefine`, because they read one document and nothing else, and that
  * independence is what keeps this function honest. (7, the depth bound, is
  * enforced where `path` is BUILT — {@link computeOrganizationNode} throws — so
  * there is nothing left for a validator to re-check.)
  * Invariant 5 is a fixed-point check — *"my path is my parent's path plus me"* —
  * defined in terms of {@link computeOrganizationNode} and therefore only ever
- * able to agree with it. It is safe **because** eight properties that hold
+ * able to agree with it. It is safe **because** nine properties that hold
  * independently of the walk stand beside it. A guard that can only consult its
  * own oracle is not a guard: that is exactly the shape that certified 79
  * provably-wrong item paths as clean, corpus-wide.
@@ -227,9 +227,9 @@ export function computeOrganizationNode(
  * a whole document at once. An empty array means the node is well-formed.
  */
 export function validateOrganizationTree(
-  node: Pick<Organization, "uid" | "path" | "uid_department_type">,
+  node: Pick<Organization, "uid" | "path" | "uid_department_type" | "merged_to">,
   parent: Pick<Organization, "uid" | "path"> | null,
-  siblings: readonly Pick<Organization, "uid" | "path" | "uid_department_type">[],
+  siblings: readonly Pick<Organization, "uid" | "path" | "uid_department_type" | "merged_to">[],
 ): string[] {
   const violations: string[] = [];
   const path = node.path;
@@ -253,10 +253,18 @@ export function validateOrganizationTree(
   //    trimmed. Derived siblings are excluded because a minted `(default)` is
   //    not a name the operator chose and two of them under one parent is a
   //    transient state of the mint, not a collision.
+  //
+  //     ⚠️ **A TOMBSTONE takes no part in 6 or 6b, on either side**
+  //     (api-cloudrun#978). It stays under its old parent with its name kept,
+  //     so a live node may take that name again. Skipping only the sibling
+  //     side would still refuse the TOMBSTONE's own write, and a parent rename
+  //     cascades into it.
   const fold = (s: string) => s.trim().toLocaleLowerCase();
-  if (!own.derived) {
+  const nodeIsTombstone = isOrgTombstone(node);
+  if (!own.derived && !nodeIsTombstone) {
     const clash = siblings.find((sib) => {
       if (sib.uid === node.uid || sib.path === undefined || sib.path.length !== path.length) return false;
+      if (isOrgTombstone(sib)) return false;
       const sibOwn = sib.path[sib.path.length - 1];
       return !sibOwn.derived && fold(sibOwn.name) === fold(own.name);
     });
@@ -268,9 +276,10 @@ export function validateOrganizationTree(
   // 6b. For DEPARTMENTS this strengthens to catalog-entry uniqueness — a plain
   //     equality check rather than a string compare, which is the whole point of
   //     giving the department level a vocabulary.
-  if (isDepartment && node.uid_department_type != null) {
+  if (isDepartment && node.uid_department_type != null && !nodeIsTombstone) {
     const typeClash = siblings.find((sib) =>
       sib.uid !== node.uid &&
+      !isOrgTombstone(sib) &&
       sib.path?.length === path.length &&
       sib.uid_department_type === node.uid_department_type
     );
@@ -596,18 +605,117 @@ export function organizationActivityMs(
 }
 
 /**
- * Whether a node is dormant at `nowMs`: its last activity is strictly older
- * than {@link ORGANIZATION_DORMANT_AFTER_DAYS}. Exactly at the cutoff is still
+ * Whether a node is dormant at `nowMs`: it is a TOMBSTONE
+ * ({@link isOrgTombstone}), or its last activity is strictly older than
+ * {@link ORGANIZATION_DORMANT_AFTER_DAYS}. Exactly at the cutoff is still
  * active, matching the search sort's `>=`.
  *
  * ⚠️ **An UNREADABLE value is not dormant.** The key is required on the stored
  * document, but a reader can still hold a projection without it, and muting a
  * live customer on a missing value is the wrong direction to fail.
+ *
+ * ⚠️ **A tombstone is dormant whatever its `activity_at` says** (owner,
+ * 2026-09-28). A tombstone keeps billing its invoiced orders, and the activity
+ * stamper can keep its `activity_at` recent while it does. So the manager's
+ * Typesense sort cannot rely on `activity_at` alone either: it needs
+ * `_eval(activity_at:>=<cutoff> && merged:!=true)`. ⚠️ **Pass the merge field
+ * the reader holds.** A caller that passes `activity_at` alone reads a
+ * tombstone as live.
  */
 export function isOrganizationDormant(
-  node: { activity_at?: FirestoreTimestampType | number | null },
+  node: { activity_at?: FirestoreTimestampType | number | null } & OrgTombstoneFacts,
   nowMs: number,
 ): boolean {
+  if (isOrgTombstone(node)) return true;
   const ms = organizationActivityMs(node);
   return ms !== null && ms < organizationDormantCutoffMs(nowMs);
+}
+
+/**
+ * The merge facts a reader may hold about a node, in either shape: the stored
+ * document's `merged_to` or a Typesense hit's derived `merged` bool. Every
+ * member is optional, so a projection that selected neither passes as live.
+ */
+export interface OrgTombstoneFacts {
+  /** The stored document's head pointer — see `Organization.merged_to`. */
+  merged_to?: string | null;
+  /** The Typesense document's derived flag — `organizations:merged`. */
+  merged?: boolean | null;
+}
+
+/**
+ * Whether a node is a TOMBSTONE: merged away, kept only because it still
+ * carries money under its own Xero contact (api-cloudrun#978). This is the one
+ * definition. Every reader that must leave tombstones out of the LIVE tree asks
+ * this: sibling uniqueness, the merge's survivor lookup, the gated delete's
+ * child count, pickers choosing a write target, and the tree audit.
+ *
+ * ⚠️ **Narrower than {@link isOrganizationDormant}, and kept separate for that
+ * reason.** Dormant is a SORTING and muting fact that a node's next order
+ * reverses. A tombstone is refused as a write target and labelled "Merged into
+ * {head}", and neither of those applies to a node that has only gone quiet.
+ *
+ * Accepts either shape ({@link OrgTombstoneFacts}), the same way
+ * {@link organizationActivityMs} accepts a `Timestamp` or an `int64`.
+ */
+export function isOrgTombstone(node: OrgTombstoneFacts): boolean {
+  if (node.merged === true) return true;
+  return typeof node.merged_to === "string" && node.merged_to.length > 0;
+}
+
+/**
+ * The CROSS-DOCUMENT merge-link invariants (api-cloudrun#978), for a node
+ * together with the head its `merged_to` names, or `null` when the node is live
+ * or its head could not be read.
+ *
+ * 1. a tombstone's head lists it: `n.merged_to = s ⇒ s.merged_from ∋ n`;
+ * 2. the head is live: `s.merged_to` is absent. A merge re-points a head's
+ *    tombstones before it tombstones or deletes that head, so every chain has
+ *    exactly one hop;
+ * 3. the head it names is the head it was given. This catches a caller that
+ *    passed the wrong document, which would otherwise make 1 and 2 answer
+ *    about some other node.
+ *
+ * ⚠️ **The converse (`s.merged_from ∋ n ⇒ n deleted, or n.merged_to = s`) is
+ * NOT here.** Asking it needs every uid in `merged_from` resolved, including
+ * the deleted ones, and an absent document is a legal answer there. That walk
+ * belongs to the corpus audit (`api-cloudrun`'s `auditTree`), which holds the
+ * whole collection. This function holds two documents.
+ *
+ * ⚠️ **Not wired into `validateBeforeWrite`**, for the same reason
+ * {@link validateOrganizationTree} is not: a write-path check must not read a
+ * second document. The merge primitive calls it on what it is about to write,
+ * and the audit calls it on what is stored.
+ *
+ * Returns every violation. An empty array means the link is consistent. A live
+ * node with a `null` head is trivially consistent.
+ */
+export function validateMergeLinks(
+  node: Pick<Organization, "uid" | "merged_to">,
+  head: Pick<Organization, "uid" | "merged_from" | "merged_to"> | null,
+): string[] {
+  const violations: string[] = [];
+  if (!isOrgTombstone(node)) {
+    if (head !== null) {
+      violations.push(`organization ${node.uid} is live (no merged_to) but was checked against a head (${head.uid})`);
+    }
+    return violations;
+  }
+  if (head === null) {
+    violations.push(`organization ${node.uid} is a tombstone of ${node.merged_to}, which does not exist`);
+    return violations;
+  }
+  if (head.uid !== node.merged_to) {
+    violations.push(`organization ${node.uid} names head ${node.merged_to} but was checked against ${head.uid}`);
+    return violations;
+  }
+  if (!(head.merged_from ?? []).includes(node.uid)) {
+    violations.push(`organization ${node.uid} names ${head.uid} as its head, but ${head.uid}.merged_from does not list it`);
+  }
+  if (isOrgTombstone(head)) {
+    violations.push(
+      `organization ${node.uid} names ${head.uid} as its head, but ${head.uid} is itself a tombstone of ${head.merged_to} — re-point it to the live head`,
+    );
+  }
+  return violations;
 }

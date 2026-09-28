@@ -199,8 +199,42 @@ export interface Organization {
    *
    * Optional, and absent means `[]`: only a merge writes it, and there is no
    * backfill because no merge preceded the field.
+   *
+   * 🔴 **The AUTHORITATIVE side of the merge link** (api-cloudrun#978). It also
+   * names losers that were deleted, which {@link Organization.merged_to} cannot,
+   * because a deleted node has no document to carry it. ⚠️ A reader widens
+   * through it from a LIVE node only: a tombstone that is re-pointed keeps
+   * the `merged_from` it carried forward, and that list is history, not a scope.
    */
   merged_from?: string[];
+  /**
+   * Set on a **TOMBSTONE**: a merged-away node that could not be deleted
+   * because it still carries money under its own Xero contact
+   * (api-cloudrun#978). Names the LIVE HEAD, which is the node whose
+   * `merged_from` lists this one. Absent means the node is live.
+   *
+   * ⭐ **Why a tombstone instead of moving the money.** Invoices, credit notes,
+   * settlements and their orders stay on the loser untouched, along with
+   * their `organization.xero_id` snapshot, so the merge writes nothing to Xero. The
+   * survivor's money readers widen through `[uid, ...merged_from]`.
+   *
+   * ⚠️ **A DENORM of `merged_from`, with ONE writer that maintains both sides**
+   * (api-cloudrun's merge primitive): `n.merged_to = s ⇒ s.merged_from ∋ n`, and
+   * `s` is itself live. The cross-document half is `validateMergeLinks` in
+   * `@cfs/core/utils/organizations`, never this schema, because a write-path
+   * refinement reads one document.
+   *
+   * ⚠️ **Liveness is DERIVED by `isOrgTombstone`, never filtered in Firestore.**
+   * Optional with no backfill (owner, 2026-09-28): no reader asks
+   * `where("merged_to", "==", null)`, which would miss every document without
+   * the key. A tombstone is DORMANT (`isOrganizationDormant`), stays in the
+   * tree under its old parent with its `path` kept, and is refused as a write
+   * target.
+   *
+   * ⚠️ **`merged_to`, not `uid_merged_to`**, which the § *UID property naming*
+   * convention would suggest. The name pairs with `merged_from`, and the owner asked for it.
+   */
+  merged_to?: string;
   /**
    * The organization's **human-readable account number** — despite the name.
    *
@@ -304,8 +338,9 @@ export interface Organization {
 }
 
 /**
- * The EIGHT invariants that read **ONE document and nothing else** — 1, 2, 3, 4,
- * the one-document half of 8, and 10, 11, 12.
+ * The NINE invariants that read **ONE document and nothing else** — 1, 2, 3, 4,
+ * the one-document half of 8, and 10, 11, 12, 13 (13 is the merge link's
+ * self-reference check, api-cloudrun#978).
  *
  * 🔴 **Their independence is the whole point.** The rest of the tree guard is a
  * fixed-point check — *"`path` equals what the recompute produces"* — which is
@@ -326,6 +361,24 @@ export interface Organization {
  * with the optionality.
  */
 function checkOrganizationNode(doc: Organization, ctx: z.RefinementCtx): void {
+  // 13. the merge link never points at itself (api-cloudrun#978). A node cannot
+  //     be its own head, and it cannot have been merged into itself. These run
+  //     before the `path` guard below because neither reads `path`.
+  if (doc.merged_to !== undefined && doc.merged_to === doc.uid) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["merged_to"],
+      message: `a node cannot be merged into itself — merged_to must not equal uid (${doc.uid})`,
+    });
+  }
+  if (doc.merged_from !== undefined && doc.merged_from.includes(doc.uid)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["merged_from"],
+      message: `a node cannot have been merged into itself — merged_from must not contain uid (${doc.uid})`,
+    });
+  }
+
   const path = doc.path;
   if (path === undefined) return;
 
@@ -506,6 +559,7 @@ export const OrganizationSchema: z.ZodType<Organization> = z.strictObject({
   uid_department_type: FirestoreId.nullable(),
   activity_at: FirestoreTimestamp.meta({ column: true, label: "Last Active" }),
   merged_from: z.array(FirestoreId).optional(),
+  merged_to: FirestoreId.optional(),
   crms_id: z.int().nullable(),
   xero_id: z.uuid().nullable(),
   // ⚠️ The "Required (no `.default(\"tax_applied\")`) … TAX_PROFILES[0]" note

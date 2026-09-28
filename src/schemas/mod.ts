@@ -534,6 +534,7 @@ export {
   CardLockKeyEnum,
   CardOrganization,
   CardFulfillmentsSource,
+  CardSources,
   CardStatusEnum,
   CreateCardInput,
   UpdateCardInput,
