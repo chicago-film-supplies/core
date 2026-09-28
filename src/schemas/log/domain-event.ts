@@ -112,6 +112,16 @@ export const DOMAIN_EVENT_MSGS = [
   // the worst point opens, or null when open-ended entries alone carry it.
   // Emitted from `api-cloudrun/src/services/stockSummaryRebuild.ts` in api-cloudrun.
   "stock_oversold",
+  // An invoice's `replacement` lines bill more units of a lost/damaged
+  // `out-of-service` record than it holds — what this invoice bills plus what
+  // every other non-void invoice already bills exceeds the record's billable
+  // units. **ADVISORY, not a refusal** (api-cloudrun#1147, decision 11 of the
+  // order-edit custody plan): the invoice saves, the response carries the same
+  // warning, and this line is the durable trail. `{ invoice_uid,
+  // uid_out_of_service, billing_here, billed_elsewhere, quantity }`, at `warn`,
+  // one line per over-billed record. Emitted from
+  // `api-cloudrun/src/lib/replacementBilling.ts`.
+  "oos_overbilled",
   // Fulfillment picker accepted a quantity edit on a `custom-*` line
   // item. Custom uids regenerate on the next CRMS opportunity sync, so
   // the override is lossy — this is the explicit warning trail. Emitted
