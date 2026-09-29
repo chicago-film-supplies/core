@@ -214,6 +214,16 @@ const ORG_NAME_TO_DESCENDANTS: EnforcementRef[] = [
   ORG_NAME_TO_DESCENDANTS_CORPUS,
 ];
 
+/** The third writer — a project removed into a root with no `(default)` (api-cloudrun#978). */
+const ORG_MINT_ON_REMOVE: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/organizations/organizationMerge.test.ts::route — a project removed with NO survivor mints the root's (default) and moves its departments",
+  clause:
+    "the REMOVAL arm: a project removed with no survivor mints exactly one `(default)` under a root that had none, with `xero_id` null, moves its departments under it and records itself in its `merged_from`; a second removal under the same root REUSES it (asserted as a count). A `(default)` refused as the removed node mints nothing.",
+  gates: true,
+};
+
 const ORG_MINT_ON_REPARENT: EnforcementRef[] = [
   {
     kind: "test",
@@ -304,11 +314,11 @@ const createOrganizationRules: CollectionRule[] = [
     target: "organizations",
     mode: "co-write",
     invariant:
-      "A DEPARTMENT may sit under an ORGANIZATION only through a project, and the server supplies that project level when nobody named one. It fires from TWO writers: a CREATE whose department names a depth-1 parent, and a RE-PARENT (api-cloudrun#1153) — a typed department moved under a root, or a project promoted to a root while it holds typed departments, whose departments are rehung under one minted `(default)` below it. Invariant 8 is a biconditional — a non-derived depth-3 node must name a `department-types` entry and nothing shallower may — so a department needs a project above it; requiring the operator to invent one first is two documents and two round trips through a blank form. So when `uid_department_type` is set and the resolved parent is at depth 1, this REUSES the parent's existing derived project or MINTS one: `name: \"(default)\"`, `derived: true`, `derived_from: { source_uid: <the new department>, reason: \"minted-project\" }`. `composeOrgName` drops a derived segment, so the label reads `Waterloo West Productions LLC / Grip` and no `(default)` reaches an invoice, a Xero contact or a picker. ⚠️ **REUSE-FIRST is load-bearing, not an optimisation**: invariant 6 scopes sibling-name uniqueness to NON-derived siblings, so a second `(default)` would not be refused — it would silently coexist. 🔴 **The mint must NOT recurse through the create path**: that POSTs a live CRMS member and creates a live Xero contact, and a derived ancestor carries `crms_id: null` / `xero_id: null` by construction. It is written as a plain document in the same transaction, the way the retired migration did, with its own co-written thread. ⚠️ **A promoted project mints WITHOUT the reuse read**: a `(default)` only ever sits at depth 2 under a root, so a node that has just become a root cannot already have one, and a subtree read there would overlap a concurrent create under the moved project.",
-    enforced_by: [ORG_MINT_DERIVED_PROJECT, ...ORG_MINT_ON_REPARENT],
+      "A DEPARTMENT may sit under an ORGANIZATION only through a project, and the server supplies that project level when nobody named one. It fires from THREE writers: a CREATE whose department names a depth-1 parent; a RE-PARENT (api-cloudrun#1153) — a typed department moved under a root, or a project promoted to a root while it holds typed departments, whose departments are rehung under one minted `(default)` below it; and a PROJECT REMOVED with \"no project\" (`POST /organizations/{uid}/merge` with no `survivor_uid`, api-cloudrun#978), which merges into its root's `(default)` and mints one first, in its own transaction under `merge-organization`, when there is none. Invariant 8 is a biconditional — a non-derived depth-3 node must name a `department-types` entry and nothing shallower may — so a department needs a project above it; requiring the operator to invent one first is two documents and two round trips through a blank form. So when `uid_department_type` is set and the resolved parent is at depth 1, this REUSES the parent's existing derived project or MINTS one: `name: \"(default)\"`, `derived: true`, `derived_from: { source_uid: <the new department>, reason: \"minted-project\" }`. `composeOrgName` drops a derived segment, so the label reads `Waterloo West Productions LLC / Grip` and no `(default)` reaches an invoice, a Xero contact or a picker. ⚠️ **REUSE-FIRST is load-bearing, not an optimisation**: invariant 6 scopes sibling-name uniqueness to NON-derived siblings, so a second `(default)` would not be refused — it would silently coexist. 🔴 **The mint must NOT recurse through the create path**: that POSTs a live CRMS member and creates a live Xero contact, and a derived ancestor carries `crms_id: null` / `xero_id: null` by construction. It is written as a plain document in the same transaction, the way the retired migration did, with its own co-written thread. ⚠️ **A promoted project mints WITHOUT the reuse read**: a `(default)` only ever sits at depth 2 under a root, so a node that has just become a root cannot already have one, and a subtree read there would overlap a concurrent create under the moved project.",
+    enforced_by: [ORG_MINT_DERIVED_PROJECT, ...ORG_MINT_ON_REPARENT, ORG_MINT_ON_REMOVE],
     transaction: "create-organization",
     trigger:
-      "a create carrying `uid_department_type` whose resolved parent is at depth 1; or a re-parent that would leave a typed department at depth 2 — the department itself moved under a root (reuse first), or its project promoted to a root (always a mint)",
+      "a create carrying `uid_department_type` whose resolved parent is at depth 1; or a re-parent that would leave a typed department at depth 2 — the department itself moved under a root (reuse first), or its project promoted to a root (always a mint); or a project removed into a root that has no `(default)` yet (reuse first)",
     fields: [
       { source: ["path"], target: ["path"] },
       { source: ["path"], target: ["query_by_path"] },
@@ -757,6 +767,20 @@ const MERGE_ENFORCEMENT: EnforcementRef[] = [
   },
   {
     kind: "test",
+    ref: MERGE_TEST + "::route — an organization merge pairs projects by name and (default) with (default)",
+    clause:
+      "an ORGANIZATION merge: projects pair by case-folded name and `(default)` with `(default)`, each pair merging recursively (a paired department merged away), an unpaired project moved across, the unpaired `(default)` department moved under the survivor's `(default)`, and the loser root deleted. The preview names the same pairs first.",
+    gates: true,
+  },
+  {
+    kind: "test",
+    ref: MERGE_TEST + "::route — a project with money removed into (default) is tombstoned; its orders stay billable",
+    clause:
+      "a project removed into its root's `(default)` while it holds an invoice under its own contact is tombstoned onto the minted `(default)`; the invoice and its order stay, the open order moves and freezes the ROOT's `xero_id`, since a `(default)` bills its root's contact.",
+    gates: true,
+  },
+  {
+    kind: "test",
     ref: MERGE_TEST + "::a planted reference leaves MERGE_INCOMPLETE and a re-send completes",
     clause:
       "the gated delete: the loser is deleted only when a claimed read of every referencing collection is empty, otherwise 409 `MERGE_INCOMPLETE`, and re-sending the PUT resumes.",
@@ -776,7 +800,7 @@ const MERGE_ENFORCEMENT: EnforcementRef[] = [
  * `ACTIVITY_STAMP_INVARIANT` pattern) — each rule appends only what is its own.
  */
 const MERGE_INVARIANT =
-  "A merge moves the references from the LOSER to the SURVIVOR and then deletes the loser, or keeps it as a tombstone. The survivor is the node the move collided with, and it keeps its uid, `crms_id` and Xero contact. 🔴 **Money STAYS when moving it would cross Xero contacts**: a loser whose invoices, credit notes or settlements sit under a DIFFERENT contact (one it does not share with the survivor, and does have) keeps them — with the orders that have an invoice, and those orders' bookings, fulfillment and cards — untouched, so the merge writes nothing to Xero, and the loser is kept as a tombstone whose `merged_to` names the live head. The survivor's money readers widen through `merged_from`. The write-time guard still refuses (409) a money document that arrives after the merge decided to move money. ⚠️ **Repoints are compare-and-set, never a blind replace**: only the organization block, `version` and `updated_at` are patched, under an `updateTime` precondition, so a concurrent edit to the same document is kept. A loser that is deleted is deleted only when nothing references it any more, so a merge that stops part-way is resumed by re-sending the same PUT.";
+  "A merge moves the references from the LOSER to the SURVIVOR and then deletes the loser, or keeps it as a tombstone. The survivor is the node the move collided with, or the node an operator chose (`POST /organizations/{uid}/merge`), and it keeps its uid, `crms_id` and Xero contact. A root's `(default)` survivor has no contact of its own: its documents bill the ROOT's, so the money decision compares against the root's. 🔴 **Money STAYS when moving it would cross Xero contacts**: a loser whose invoices, credit notes or settlements sit under a DIFFERENT contact (one it does not share with the survivor, and does have) keeps them — with the orders that have an invoice, and those orders' bookings, fulfillment and cards — untouched, so the merge writes nothing to Xero, and the loser is kept as a tombstone whose `merged_to` names the live head. The survivor's money readers widen through `merged_from`. The write-time guard still refuses (409) a money document that arrives after the merge decided to move money. ⚠️ **Repoints are compare-and-set, never a blind replace**: only the organization block, `version` and `updated_at` are patched, under an `updateTime` precondition, so a concurrent edit to the same document is kept. A loser that is deleted is deleted only when nothing references it any more, so a merge that stops part-way is resumed by re-sending the same request.";
 
 /** The four documents that carry the organization's CHAIN and nothing else of it. */
 function chainRepointRule(
@@ -924,7 +948,7 @@ const mergeOrganizationRules: CollectionRule[] = [
 const mergeOrganizationTransaction: TransactionDefinition = {
   id: "merge-organization",
   description:
-    "Merges an organization node into the sibling a re-parent collided with: repoints the references that may move, moves its comments, records it in the survivor's `merged_from`, and then deletes the loser — or keeps it as a tombstone naming the survivor when its money must stay under its own Xero contact. A project merge pairs its departments by type — a pair merges, the rest move. Every step is conditional: a step with nothing to repoint does not fire, and the delete and tombstone steps are mutually exclusive, so a merge never fires them all.",
+    "Merges an organization node into another at the same level — the sibling a re-parent collided with, or the node an operator chose to remove it into (`POST /organizations/{uid}/merge`; a project removed with no survivor goes into its root's `(default)`, minted first when there is none): repoints the references that may move, moves its comments, records it in the survivor's `merged_from`, and then deletes the loser — or keeps it as a tombstone naming the survivor when its money must stay under its own Xero contact. A project merge pairs its departments by type; an organization merge pairs its projects by case-folded name and `(default)` with `(default)`. A pair merges (recursively, the whole tree pre-flighted before the first write), the rest move. Every step is conditional: a step with nothing to repoint does not fire, and the delete and tombstone steps are mutually exclusive, so a merge never fires them all.",
   steps: [
     "merge-org:loser-to-orders",
     "merge-org:loser-to-invoices",
@@ -942,6 +966,10 @@ const mergeOrganizationTransaction: TransactionDefinition = {
     "merge-org:delete-loser",
     "merge-org:tombstone-loser",
     "merge-org:tombstone-parent",
+    // ⚠️ Conditional — only a project removed with no survivor into a root that
+    // had no `(default)` yet (api-cloudrun#978). The mint runs in its own
+    // transaction just before the merge, and is logged on the merge's record.
+    "create-org:mint-derived-project",
   ],
 };
 
