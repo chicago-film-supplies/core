@@ -411,8 +411,28 @@ Deno.test("checkCollectionLegs: the order's leg, flag, dates and windows agree",
     assertEquals(refusedAt(r, ["destinations", 0, "charge_windows"]) || refusedAt(r, ["destinations", 0, "dates", "charge_windows"]), true);
   });
 
-  await t.step("NOT yet refused: a sales-only order past draft that still holds a placed leg (post-backfill beta)", () => {
-    const r = OrderSchema.safeParse(orderWith("reserved", [saleLine(PARENT)]));
+  await t.step("a sales-only order past draft holding a placed leg and windows is refused at both", () => {
+    for (const status of ["quoted", "reserved", "active", "complete", "canceled"]) {
+      const r = OrderSchema.safeParse(orderWith(status, [saleLine(PARENT)]));
+      assertEquals(refusedAt(r, ["destinations", 0, "collection"]), true, status);
+      assertEquals(refusedAt(r, ["destinations", 0, "dates", "charge_windows"]), true, status);
+    }
+  });
+
+  await t.step("…and at the windows alone, when only they survived", () => {
+    const r = OrderSchema.safeParse(
+      orderWith("reserved", [saleLine(PARENT)], {
+        collection: null,
+        customer_returning: null,
+        dates: { ...droppedDates(), charge_windows: placedDates().charge_windows },
+      }),
+    );
+    assertEquals(refusedAt(r, ["destinations", 0, "collection"]), false);
+    assertEquals(refusedAt(r, ["destinations", 0, "dates", "charge_windows"]), true);
+  });
+
+  await t.step("control: a DRAFT sales-only order keeps what the operator placed", () => {
+    const r = OrderSchema.safeParse(orderWith("draft", [saleLine(PARENT)]));
     assertEquals(r.success, true, JSON.stringify(r.error?.issues));
   });
 

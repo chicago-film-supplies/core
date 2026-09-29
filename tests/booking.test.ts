@@ -35,6 +35,11 @@ const validBooking = {
     path: [{ uid: "testorg1000000000000", name: "Test Acme Corp", derived: false }],
     crms_id: null,
   },
+  // A rental comes back, so it names a collection, and the flat id mirrors it.
+  destinations: {
+    delivery: { uid: "testdest100000000000", address: null },
+    collection: { uid: "testdest200000000000", address: null },
+  },
   uid_destination_delivery: "testdest100000000000",
   uid_destination_collection: "testdest200000000000",
   created_at: mockTimestamp,
@@ -65,15 +70,40 @@ Deno.test("BookingSchema validates with stores", () => {
   assertEquals(BookingSchema.safeParse(doc).success, true);
 });
 
-Deno.test("BookingSchema validates with destination refs", () => {
+Deno.test("BookingSchema validates a sale booking with no collection", () => {
   const doc = {
     ...validBooking,
-    destinations: {
-      delivery: { uid: "testdest100000000000", address: null },
-      collection: null,
-    },
+    type: "sale",
+    destinations: { ...validBooking.destinations, collection: null },
+    uid_destination_collection: null,
   };
-  assertEquals(BookingSchema.safeParse(doc).success, true);
+  assertEquals(BookingSchema.safeParse(doc).success, true, JSON.stringify(BookingSchema.safeParse(doc).error?.issues));
+});
+
+Deno.test("BookingSchema: a booking's collection follows its own type (api-cloudrun#1154)", async (t) => {
+  const refusedAt = (doc: unknown, path: PropertyKey[]) => {
+    const r = BookingSchema.safeParse(doc);
+    return !r.success && r.error.issues.some((i) => i.path.join(".") === path.join("."));
+  };
+  await t.step("a rental with no collection is refused at the collection", () => {
+    const doc = {
+      ...validBooking,
+      destinations: { ...validBooking.destinations, collection: null },
+      uid_destination_collection: null,
+    };
+    assertEquals(refusedAt(doc, ["destinations", "collection"]), true);
+  });
+  await t.step("a sale that names a collection is refused at the collection", () => {
+    assertEquals(refusedAt({ ...validBooking, type: "sale" }, ["destinations", "collection"]), true);
+  });
+  await t.step("a flat id that disagrees with the ref is refused at the flat id", () => {
+    assertEquals(
+      refusedAt({ ...validBooking, uid_destination_collection: "testdest300000000000" }, ["uid_destination_collection"]),
+      true,
+    );
+    const sale = { ...validBooking, type: "sale", destinations: { ...validBooking.destinations, collection: null } };
+    assertEquals(refusedAt(sale, ["uid_destination_collection"]), true, "a sale keeping the flat id");
+  });
 });
 
 Deno.test("BookingSchema accepts optional crms_id fields", () => {

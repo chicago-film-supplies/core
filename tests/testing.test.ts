@@ -311,7 +311,7 @@ Deno.test("overrides — objects merge key-wise, arrays and scalars replace, und
   assertThrows(() => getTestDoc(S, { gone: undefined }), Error, "gone");
 });
 
-Deno.test("enum-arm search — re-chooses exactly two arms across the corpus, by name", () => {
+Deno.test("enum-arm search — re-chooses exactly three arms across the corpus, by name", () => {
   // `product` parses only as a SALE: a rental obliges `price.replacement_cents`
   // through a superRefine. Documented, because it is surprising.
   const product = getTestDoc(ProductSchema, undefined, NOW);
@@ -319,6 +319,11 @@ Deno.test("enum-arm search — re-chooses exactly two arms across the corpus, by
 
   const version = getTestDoc(TemplateVersionSchema, undefined, NOW);
   assertEquals(version.status, "archived");
+
+  // `booking` parses only as a non-rental: a rental obliges a collection ref
+  // through a superRefine, and the walker seeds `destinations.collection: null`.
+  const booking = getTestDoc(BookingSchema, undefined, NOW);
+  assertEquals(booking.type === "rental", false);
 
   // And the corpus-wide count, so a third one cannot appear unnoticed.
   const rechosen: string[] = [];
@@ -340,7 +345,7 @@ Deno.test("enum-arm search — re-chooses exactly two arms across the corpus, by
       if (doc[key] !== undefined && doc[key] !== first) rechosen.push(`${name}.${key}`);
     }
   }
-  assertEquals(rechosen.sort(), ["product.type", "templates-versions.status"]);
+  assertEquals(rechosen.sort(), ["booking.type", "product.type", "templates-versions.status"]);
 });
 
 Deno.test("enum-arm search companion — the first arm really does fail without it", () => {

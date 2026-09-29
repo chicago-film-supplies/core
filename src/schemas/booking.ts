@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { BookingId, FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
+import { isCollectionLineType } from "./order.ts";
 import {
   Address,
   type AddressType,
@@ -277,10 +278,12 @@ export interface Booking {
    * (prod and dev, 2026-09-28) claim a collection that never happens; the
    * api-cloudrun#1154 Phase 4 backfill nulls them.
    *
-   * ⚠️ Nullable here, not yet refused: the "sale ⇒ null, rental ⇒ placed" rule
-   * ships as a refine in the beta after that backfill, because a whole-document
-   * booking write (custody replace, a kept booking) would otherwise 500 on the
-   * open sale bookings still carrying the old value.
+   * Refined on {@link BookingSchema} (`checkBookingCollection`): a `rental`
+   * states a collection and a non-rental states none, and this id is always
+   * `destinations.collection?.uid ?? null`. That shipped the beta after the
+   * backfill, because a whole-document booking write (custody replace, a kept
+   * booking) would otherwise have 500'd on the sale bookings still carrying the
+   * old value.
    */
   uid_destination_collection: string | null;
   version: number;
@@ -517,6 +520,42 @@ export const UpdateBookingResponse: z.ZodType<UpdateBookingResponseType> = z.obj
   oos_records_written: z.int().min(0),
 });
 
+/**
+ * A booking's collection follows its OWN `type` (api-cloudrun#1154): a `rental`
+ * comes back, so it names a collection; anything else never does, so both
+ * `destinations.collection` and `uid_destination_collection` are `null`. The
+ * flat id always equals the ref's `uid`, since every address-filtered query
+ * reads the flat one. `bookingCollectionFor` (`@cfs/core/utils/bookings`) is the
+ * one writer-side author; this is its stored mirror. Held on all 7,409 prod /
+ * 7,414 dev bookings after the Phase 4 backfill (2026-09-29).
+ */
+function checkBookingCollection(
+  doc: {
+    type: string;
+    destinations: { collection: { uid: string } | null };
+    uid_destination_collection: string | null;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const collection = doc.destinations.collection;
+  if (isCollectionLineType(doc.type) !== (collection !== null)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["destinations", "collection"],
+      message: collection === null
+        ? "a rental booking comes back, so it names a collection"
+        : `a ${doc.type} booking never comes back, so it names no collection`,
+    });
+  }
+  if (doc.uid_destination_collection !== (collection?.uid ?? null)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_destination_collection"],
+      message: "uid_destination_collection must equal destinations.collection.uid (null when there is no collection)",
+    });
+  }
+}
+
 /** Zod schema for Booking. */
 export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   uid: BookingId,
@@ -565,7 +604,7 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   version: z.int().min(0).default(0),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
   updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
-}).meta({
+}).superRefine(checkBookingCollection).meta({
   title: "Booking",
   collection: "bookings",
   displayDefaults: {

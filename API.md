@@ -12055,7 +12055,10 @@ Per pair:
 2. a `null` leg has no collection dates: `collection_start` / `collection_end`
    (and their `_fs` mirrors) and `days_active` are `null`;
 3. an order holding a `rental` states charge windows on every pair — a rental
-   with no window has no days to bill.
+   with no window has no days to bill;
+4. an order PAST DRAFT holding no `rental` has no leg and no windows on any
+   pair — nothing comes back and no day is billed. A draft keeps what the
+   operator set (the manager saves on blur, and legs are placed before items).
 
 🔴 **The ORDER only, never the fulfillment or the invoice.** Those follow the
 order through the three-way merge (`@cfs/core/utils/shared-fields`), which
@@ -12065,13 +12068,13 @@ stored refine there would turn that sync into a 500. The merge's post-step
 re-derives the three on a projection instead (`deriveProjectionCollection`),
 and an audit covers the rest.
 
-⚠️ **What this does NOT yet assert, and why:** *"no rental past draft ⇒ a
-null leg and null windows"*. 160 sales-only orders per project still store a
-placed leg and windows, and whole-document order writers other than
-`createOrder` / `updateOrder` (the tax recompute, the Xero-quote writeback,
-the invoice mirror) do not normalize — so that half ships in the beta after
-the backfill (api-cloudrun#1154 Phase 4). Every clause above held on 100% of
-both corpora when it shipped, because no stored leg was `null` yet.
+⚠️ **Clause 4 shipped a beta after the other three**, once the
+api-cloudrun#1154 Phase 4 backfill had nulled the 160 sales-only orders per
+project that still stored a placed leg and windows. Whole-document order
+writers other than `createOrder` / `updateOrder` (the tax recompute, the
+Xero-quote writeback, the invoice mirror) do not normalize; they preserve the
+stored legs and items, so they stay legal only because the corpus already
+is. The only paths out of draft run through `updateOrder`, which normalizes.
 
 ### `checkDestinationJoin(doc: typeLiteral, ctx: z.RefinementCtx): void`
 
@@ -18819,7 +18822,10 @@ Per pair:
 2. a `null` leg has no collection dates: `collection_start` / `collection_end`
    (and their `_fs` mirrors) and `days_active` are `null`;
 3. an order holding a `rental` states charge windows on every pair — a rental
-   with no window has no days to bill.
+   with no window has no days to bill;
+4. an order PAST DRAFT holding no `rental` has no leg and no windows on any
+   pair — nothing comes back and no day is billed. A draft keeps what the
+   operator set (the manager saves on blur, and legs are placed before items).
 
 🔴 **The ORDER only, never the fulfillment or the invoice.** Those follow the
 order through the three-way merge (`@cfs/core/utils/shared-fields`), which
@@ -18829,13 +18835,13 @@ stored refine there would turn that sync into a 500. The merge's post-step
 re-derives the three on a projection instead (`deriveProjectionCollection`),
 and an audit covers the rest.
 
-⚠️ **What this does NOT yet assert, and why:** *"no rental past draft ⇒ a
-null leg and null windows"*. 160 sales-only orders per project still store a
-placed leg and windows, and whole-document order writers other than
-`createOrder` / `updateOrder` (the tax recompute, the Xero-quote writeback,
-the invoice mirror) do not normalize — so that half ships in the beta after
-the backfill (api-cloudrun#1154 Phase 4). Every clause above held on 100% of
-both corpora when it shipped, because no stored leg was `null` yet.
+⚠️ **Clause 4 shipped a beta after the other three**, once the
+api-cloudrun#1154 Phase 4 backfill had nulled the 160 sales-only orders per
+project that still stored a placed leg and windows. Whole-document order
+writers other than `createOrder` / `updateOrder` (the tax recompute, the
+Xero-quote writeback, the invoice mirror) do not normalize; they preserve the
+stored legs and items, so they stay legal only because the corpus already
+is. The only paths out of draft run through `updateOrder`, which normalizes.
 
 ### `checkDestinationJoin(doc: typeLiteral, ctx: z.RefinementCtx): void`
 
