@@ -353,7 +353,7 @@ const mergeThreadRules: CollectionRule[] = [
     target: "comments",
     mode: "fan-out",
     invariant:
-      "When an organization is merged into another (api-cloudrun#1153), every comment on the loser's default thread moves to the survivor's: `uid_thread` and the denormalized `sources[]` are rewritten to the survivor thread's, so property 3 (MIRROR) holds, and the survivor thread's counters are recomputed from the comments it now holds. The loser's thread is then deleted with the loser, empty.",
+      "When an organization is merged into another (api-cloudrun#1153), every comment on the loser's default thread moves to the survivor's: `uid_thread` and the denormalized `sources[]` are rewritten to the survivor thread's, so property 3 (MIRROR) holds, and the survivor thread's counters are recomputed from the comments it now holds. The loser's thread is then deleted with the loser, empty — or KEPT, empty, when the loser is a tombstone, which is not deleted (api-cloudrun#978).",
     enforced_by: [
       {
         kind: "test",

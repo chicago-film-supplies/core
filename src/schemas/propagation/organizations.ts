@@ -713,7 +713,9 @@ const updateOrganizationTransaction: TransactionDefinition = {
 // collides with — a department of the same type, or a project of the same
 // case-folded name — MERGES it into that sibling instead of failing. The
 // sibling already there SURVIVES (uid, `crms_id`, Xero contact); the moved node
-// is the LOSER: every reference to it is repointed, and then it is deleted.
+// is the LOSER: every reference to it is repointed, and then it is deleted — or,
+// when its money must stay under its own Xero contact, KEPT as a tombstone that
+// names the survivor (api-cloudrun#978).
 
 const MERGE_TEST = "api-cloudrun/tests/integration/organizations/organizationMerge.test.ts";
 
@@ -729,7 +731,28 @@ const MERGE_ENFORCEMENT: EnforcementRef[] = [
     kind: "test",
     ref: MERGE_TEST + "::the money guard refuses a merge across two Xero contacts",
     clause:
-      "the money guard: a loser carrying invoices, credit notes or settlements under a DIFFERENT Xero contact is refused with 409 and nothing written, at pre-flight and again at write time; a shared contact merges.",
+      "the write-time money guard: a money document arriving AFTER the merge decided to move money, across two Xero contacts, is refused with 409 and stays where it is.",
+    gates: true,
+  },
+  {
+    kind: "test",
+    ref: MERGE_TEST + "::money across two Xero contacts TOMBSTONES the loser; its money and invoiced orders stay",
+    clause:
+      "the decision: a loser whose money would cross Xero contacts is kept as a tombstone — its invoices, credit notes, settlements and the orders that have an invoice stay untouched (no Xero write), everything else moves, and `merged_to` names the survivor; a shared contact merges fully.",
+    gates: true,
+  },
+  {
+    kind: "test",
+    ref: MERGE_TEST + "::a head that merges away takes its tombstones with it; a tombstone is no merge partner",
+    clause:
+      "a head that merges away re-points its own tombstones to the new head BEFORE it is deleted, so a chain is always one hop; merging into or again out of a tombstone is refused.",
+    gates: true,
+  },
+  {
+    kind: "test",
+    ref: MERGE_TEST + "::a paired department with money is tombstoned, and so is its PROJECT",
+    clause:
+      "a project left holding only tombstone children becomes a tombstone itself instead of being deleted, so the children keep the path that addresses them.",
     gates: true,
   },
   {
@@ -753,7 +776,7 @@ const MERGE_ENFORCEMENT: EnforcementRef[] = [
  * `ACTIVITY_STAMP_INVARIANT` pattern) — each rule appends only what is its own.
  */
 const MERGE_INVARIANT =
-  "A merge moves every reference from the LOSER to the SURVIVOR and then deletes the loser. The survivor is the node the move collided with, and it keeps its uid, `crms_id` and Xero contact. 🔴 **Money guard**: when the loser carries invoices, credit notes or settlements and the two hold DIFFERENT Xero contacts, the merge is refused (409) before anything is written, and the money repoints re-check it at write time, because moving them would move a receivable between two contacts in a live ledger. ⚠️ **Repoints are compare-and-set, never a blind replace**: only the organization block, `version` and `updated_at` are patched, under an `updateTime` precondition, so a concurrent edit to the same document is kept. The loser is deleted only when nothing references it any more, so a merge that stops part-way is resumed by re-sending the same PUT.";
+  "A merge moves the references from the LOSER to the SURVIVOR and then deletes the loser, or keeps it as a tombstone. The survivor is the node the move collided with, and it keeps its uid, `crms_id` and Xero contact. 🔴 **Money STAYS when moving it would cross Xero contacts**: a loser whose invoices, credit notes or settlements sit under a DIFFERENT contact (one it does not share with the survivor, and does have) keeps them — with the orders that have an invoice, and those orders' bookings, fulfillment and cards — untouched, so the merge writes nothing to Xero, and the loser is kept as a tombstone whose `merged_to` names the live head. The survivor's money readers widen through `merged_from`. The write-time guard still refuses (409) a money document that arrives after the merge decided to move money. ⚠️ **Repoints are compare-and-set, never a blind replace**: only the organization block, `version` and `updated_at` are patched, under an `updateTime` precondition, so a concurrent edit to the same document is kept. A loser that is deleted is deleted only when nothing references it any more, so a merge that stops part-way is resumed by re-sending the same PUT.";
 
 /** The four documents that carry the organization's CHAIN and nothing else of it. */
 function chainRepointRule(
@@ -786,7 +809,7 @@ function snapshotRepointRule(id: RuleId, target: "orders" | "invoices" | "credit
       ` A ${target} document takes the survivor's RESOLVED snapshot (\`buildResolvedOrganizationSnapshot\`), the same one a new document would freeze.` +
       (target === "orders"
         ? " Its `version` is bumped on purpose: `orders.xero_id` is the Xero QUOTE, and the bump re-pushes it under the survivor's contact — against the ~1,000/day Xero cap, so the count is logged before the merge starts."
-        : " An invoice or credit-note write cannot reach Xero: only a status transition enqueues one."),
+        : " An invoice or credit-note repoint reaches Xero when it changes the Xero projection (`shouldEnqueueInvoiceEditPush` enqueues on ANY change to it, not only a status transition), which is why a merge repoints one only across a shared or absent contact and otherwise leaves it on a tombstone."),
     enforced_by: MERGE_ENFORCEMENT,
     transaction: "merge-organization",
     fields: [
@@ -858,17 +881,50 @@ const mergeOrganizationRules: CollectionRule[] = [
     target: "organizations",
     mode: "fan-out",
     invariant: MERGE_INVARIANT +
-      " The loser and its default thread are deleted in ONE transaction that first reads every referencing collection and finds it empty.",
+      " The loser and its default thread are deleted in ONE transaction that first reads every referencing collection and finds it empty. Mutually exclusive with `merge-org:tombstone-loser` and `merge-org:tombstone-parent`: a merge either deletes its loser or keeps it.",
     enforced_by: MERGE_ENFORCEMENT,
     transaction: "merge-organization",
     fields: [{ source: ["uid"], target: ["uid"], transform: "deleted once nothing references it" }],
+  },
+  {
+    id: "merge-org:tombstone-loser",
+    source: "organizations",
+    target: "organizations",
+    mode: "co-write",
+    invariant: MERGE_INVARIANT +
+      " The loser's `merged_to` is written with the SURVIVOR's uid, after the survivor's `merged_from` already lists the loser, so `s.merged_from ∋ n` holds at every instant `n.merged_to = s` does. The loser keeps its path, its name and its Xero contact (renamed `Merged #N · …`, not archived while it holds a receivable), and is DORMANT and refused as a write target.",
+    enforced_by: MERGE_ENFORCEMENT,
+    transaction: "merge-organization",
+    fields: [{ source: ["uid"], target: ["merged_to"], transform: "the survivor's uid" }],
+  },
+  {
+    id: "merge-org:merged-to-to-tombstones",
+    source: "organizations",
+    target: "organizations",
+    mode: "fan-out",
+    invariant: MERGE_INVARIANT +
+      " A tombstone names a LIVE head, so when a head merges away, every tombstone that named it is re-pointed to the new head BEFORE the head is deleted or tombstoned itself. Without it a chain of two hops, or a pointer at a deleted document, would exist.",
+    enforced_by: MERGE_ENFORCEMENT,
+    transaction: "merge-organization",
+    fields: [{ source: ["uid"], target: ["merged_to"], transform: "the new head's uid" }],
+  },
+  {
+    id: "merge-org:tombstone-parent",
+    source: "organizations",
+    target: "organizations",
+    mode: "co-write",
+    invariant: MERGE_INVARIANT +
+      " A merged-away node whose remaining children are all tombstones becomes a tombstone itself rather than being deleted: deleting it would strand the children's `path`, which is what addresses their money. A project whose departments merged and left tombstones behind is the case.",
+    enforced_by: MERGE_ENFORCEMENT,
+    transaction: "merge-organization",
+    fields: [{ source: ["uid"], target: ["merged_to"], transform: "the survivor's uid" }],
   },
 ];
 
 const mergeOrganizationTransaction: TransactionDefinition = {
   id: "merge-organization",
   description:
-    "Merges an organization node into the sibling a re-parent collided with: repoints every reference, moves its comments, records it in the survivor's `merged_from`, and deletes it. A project merge pairs its departments by type — a pair merges, the rest move. Every step is conditional: a step with nothing to repoint does not fire.",
+    "Merges an organization node into the sibling a re-parent collided with: repoints the references that may move, moves its comments, records it in the survivor's `merged_from`, and then deletes the loser — or keeps it as a tombstone naming the survivor when its money must stay under its own Xero contact. A project merge pairs its departments by type — a pair merges, the rest move. Every step is conditional: a step with nothing to repoint does not fire, and the delete and tombstone steps are mutually exclusive, so a merge never fires them all.",
   steps: [
     "merge-org:loser-to-orders",
     "merge-org:loser-to-invoices",
@@ -882,7 +938,10 @@ const mergeOrganizationTransaction: TransactionDefinition = {
     "merge-org:thread-comments-to-survivor",
     "merge-org:activity-to-survivor",
     "merge-org:merged-from-to-survivor",
+    "merge-org:merged-to-to-tombstones",
     "merge-org:delete-loser",
+    "merge-org:tombstone-loser",
+    "merge-org:tombstone-parent",
   ],
 };
 
