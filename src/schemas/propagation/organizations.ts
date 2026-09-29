@@ -892,7 +892,7 @@ const mergeOrganizationRules: CollectionRule[] = [
     target: "organizations",
     mode: "co-write",
     invariant: MERGE_INVARIANT +
-      " The loser's `merged_to` is written with the SURVIVOR's uid, after the survivor's `merged_from` already lists the loser, so `s.merged_from ∋ n` holds at every instant `n.merged_to = s` does. The loser keeps its path, its name and its Xero contact (renamed `Merged #N · …`, not archived while it holds a receivable), and is DORMANT and refused as a write target.",
+      " The loser's `merged_to` is written with the SURVIVOR's uid, after the survivor's `merged_from` already lists the loser, so `s.merged_from ∋ n` holds at every instant `n.merged_to = s` does. The loser keeps its path, its name and its Xero contact (renamed `Merged #N · …` and archived, best-effort), and is DORMANT and refused as a write target.",
     enforced_by: MERGE_ENFORCEMENT,
     transaction: "merge-organization",
     fields: [{ source: ["uid"], target: ["merged_to"], transform: "the survivor's uid" }],

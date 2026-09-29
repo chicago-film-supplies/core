@@ -55,7 +55,7 @@ export const DOMAIN_EVENT_MSGS = [
   // (api-cloudrun#1153): every reference repointed, and the loser either deleted
   // or — when its money had to stay under its own Xero contact — KEPT as a
   // tombstone naming the survivor in `merged_to` (api-cloudrun#978). The loser's
-  // Xero contact is renamed `Merged #N · …` (and archived when deleted), so this
+  // Xero contact is renamed `Merged #N · …` and archived, best-effort, so this
   // record is where both contact ids are kept. `{ organization_uid (the
   // survivor), loser_uid, survivor_xero_id, loser_xero_id, repointed_counts,
   // quote_repushes, moved_children, resumed, tombstoned, loser_xero_contact }`.
