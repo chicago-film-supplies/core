@@ -376,7 +376,7 @@ Deno.test("buildRemainingInvoice: units billed at different days extend in one s
   const extensions = built.items.filter((it) => it.type === "rental").map((it) => [(it as { quantity: number }).quantity, (it as { price: { chargeable_days: number } }).price.chargeable_days]);
   assertEquals(extensions, [[3, 5], [2, 2]]);
   // a's window ended Sep 11, b's Sep 14.
-  assertEquals(built.destinations.slice(1).map((p) => p.dates.charge_windows[0].start), ["2026-09-12T00:00:00.000-05:00", "2026-09-15T00:00:00.000-05:00"]);
+  assertEquals(built.destinations.slice(1).map((p) => p.dates.charge_windows![0].start), ["2026-09-12T00:00:00.000-05:00", "2026-09-15T00:00:00.000-05:00"]);
   assertEquals(remainingForOrder(O, order, [...billed, asInvoice("r", built)], pairs(10)).lines, []);
 });
 
@@ -483,7 +483,7 @@ Deno.test("quantityAccounting: a later window extends by the PAIRS' days, not th
   assertEquals(remainingForOrder(O, lightOrder(2, 10), invoices, pairs(10)).lines.map((l) => [l.quantity, l.extension_cents]), [[0, 2000]]);
   const built = buildRemainingInvoice(orderSource(lightOrder(2, 10), 10), invoices, mint);
   const section = built.destinations.find((p) => p.uid !== D)!;
-  assertEquals([section.dates.charge_windows[0].start, section.dates.charge_windows[0].end, section.dates.charge_windows[0].days], [
+  assertEquals([section.dates.charge_windows![0].start, section.dates.charge_windows![0].end, section.dates.charge_windows![0].days], [
     "2026-09-12T00:00:00.000-05:00",
     "2026-09-16T00:00:00.000-05:00",
     5,

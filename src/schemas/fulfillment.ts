@@ -45,6 +45,7 @@ import {
 } from "./common.ts";
 import {
   checkDestinationJoin,
+  checkLeadingDivider,
   checkExchangePairs,
   checkStoredEndpoints,
   checkSwapReplacements,
@@ -389,9 +390,13 @@ export type FulfillmentItemType =
   | FulfillmentGroupItemType;
 
 export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z
+  // The destination arm FIRST, like the order's: `getTestDoc` builds the first
+  // arm, and a fulfillment must LEAD with its destination divider
+  // (api-cloudrun#1154), so this order is what lets a minimal fulfillment
+  // fixture build with no hand-written override.
   .discriminatedUnion("type", [
-    FulfillmentLineItemInner,
     FulfillmentDestinationItemInner,
+    FulfillmentLineItemInner,
     FulfillmentGroupItemInner,
   ]);
 
@@ -517,7 +522,9 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   // parent leg another invoice carries, and the refusal would be a write
   // failure on a correct document.
   destinations: z.array(DocDestination).min(1).superRefine(checkExchangePairs),
-  items: z.array(FulfillmentItem).meta({ label: "Item" })
+  // `.min(1)` + `checkLeadingDivider("fulfillment")` — the order's rule, because a
+  // fulfillment is built from its order's rows (api-cloudrun#1154).
+  items: z.array(FulfillmentItem).min(1).meta({ label: "Item" })
     .superRefine(checkZeroPricedComponents),
   // `mask` — see the note on `subject` in `order.ts`; same field, same ruling.
   // Bare `z.string()`, identical to the other two grains as of core#97
@@ -553,7 +560,8 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   created_by: ActorRef.nullable().meta({ column: true, label: "Created By", propagate: false }),
   updated_by: ActorRef.nullable().meta({ column: true, label: "Updated By", propagate: false }),
   ...TimestampFields,
-}).superRefine(checkStoredEndpoints).superRefine(checkDestinationJoin).superRefine(checkSwapReplacements).meta({
+}).superRefine(checkStoredEndpoints).superRefine(checkDestinationJoin).superRefine(checkSwapReplacements)
+  .superRefine(checkLeadingDivider("fulfillment")).meta({
   title: "Fulfillment",
   collection: "fulfillments",
   displayDefaults: {

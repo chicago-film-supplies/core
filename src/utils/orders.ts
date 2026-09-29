@@ -36,9 +36,16 @@ import type {
   OrderStatusType,
 } from "../schemas/mod.ts";
 import isEqual from "lodash-es/isEqual";
-import { itemContract, legDirectionFromBreakdown, zeroPricedFlaggedNonComponents } from "../schemas/mod.ts";
+import {
+  DOC_LINE_ITEM_TYPES,
+  hasCollectionLine,
+  isCollectionLineType,
+  itemContract,
+  legDirectionFromBreakdown,
+  zeroPricedFlaggedNonComponents,
+} from "../schemas/mod.ts";
 import { componentSignatureHash } from "./booking-id.ts";
-import { canonicalChargeWindows, type ChargeDates, chargedDays, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
+import { applyDateEdit, canonicalChargeWindows, type ChargeDates, chargedDays, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
 import {
   fromCents,
   roundDivHalfAwayFromZero,
@@ -291,6 +298,125 @@ export function isSameAsDeliveryDestination(destination: Pick<DestinationType, "
     && destination.delivery.instructions === destination.collection.instructions;
 }
 
+/** A pair as far as {@link normalizeCollectionLegs} reads and writes it. */
+export interface CollectionLegPair<E> {
+  delivery: E;
+  collection: E | null;
+  customer_collecting: boolean;
+  customer_returning: boolean | null;
+  dates: ChargeDates & { collection_start_fs?: unknown; collection_end_fs?: unknown };
+}
+
+/**
+ * **The one author of an ORDER's collection legs** (api-cloudrun#1154, owner
+ * 2026-09-28) — run by the manager on every items edit and status change, and by
+ * api-cloudrun's `createOrder` / `updateOrder` BEFORE validation, so every
+ * writer converges on one answer rather than each deciding it.
+ *
+ * "Needs a leg" is {@link hasCollectionLine} over the order's own items — a
+ * `rental` anywhere in the document. Document-wide, like the leg itself.
+ *
+ * | the order | each pair becomes |
+ * |---|---|
+ * | past draft, nothing comes back | `collection`, `customer_returning`, the collection dates (+ `_fs`), `days_active` and `charge_windows` all `null` |
+ * | a rental, and the pair's `collection` is `null` | re-seeded (below) |
+ * | a placed leg with a `null` flag | the flag re-seeded from `customer_collecting` |
+ * | a `null` leg with a flag (a draft) | the flag nulled |
+ * | anything else | as stored |
+ *
+ * **The re-seed mirrors the delivery leg**: `collection` is a copy of `delivery`
+ * and `customer_returning = customer_collecting` — an in-store pickup (whose
+ * delivery endpoint IS the store) becomes an in-store return, a delivered pair
+ * becomes "Same As Delivery" with us collecting. The dates are
+ * `applyDateEdit`'s `seed_collection`: collection 5 business days after the
+ * pair's delivery start, one window over possession. A seed for the operator
+ * to change, not a guess about them.
+ *
+ * ⚠️ **`holidays === null` defers the re-seed** — the pair is left exactly as
+ * it is, and the caller re-runs this once holidays load (the manager's holiday
+ * listener is not awaited at boot). Pass the LOADED list or `null`, never an
+ * empty stand-in: `[]` would count every holiday as a business day. The nulling
+ * half needs no holidays and always runs. The API always has its snapshot, so a
+ * save that lands in the gap is re-seeded server-side.
+ *
+ * ⚠️ **A DRAFT keeps what the operator set.** The manager saves on blur, and an
+ * operator may place both legs before adding a single item; nulling on that
+ * save would throw their work away. The legs, dates and windows are dropped at
+ * the first status past draft.
+ *
+ * ⚠️ **Orders only.** A fulfillment and an invoice follow their order through
+ * the three-way merge and keep what their OWN items still need
+ * (`deriveProjectionCollection`, `@cfs/core/utils/shared-fields`). Do not call
+ * this on them.
+ *
+ * Pure. Does not mint the `_fs` mirrors of a re-seeded date — the API's date
+ * canonicalization does, on the write. Returns the SAME object when nothing
+ * changes, so a caller can compare by reference to skip a write.
+ */
+export function normalizeCollectionLegs<
+  E,
+  P extends CollectionLegPair<E>,
+  O extends { status: string; items: ReadonlyArray<unknown>; destinations: ReadonlyArray<P> },
+>(order: O, holidays: readonly string[] | null): O {
+  const hasReturns = hasCollectionLine(order.items);
+  const dropLegs = !hasReturns && order.status !== "draft";
+  let changed = false;
+  const destinations = order.destinations.map((pair): P => {
+    let next: P | null = null;
+    if (dropLegs) {
+      if (!legIsDropped(pair)) next = dropLeg(pair);
+    } else if (hasReturns && pair.collection === null) {
+      if (holidays !== null) next = seedLeg(pair, holidays);
+    } else if (pair.collection !== null && pair.customer_returning === null) {
+      next = { ...pair, customer_returning: pair.customer_collecting };
+    } else if (pair.collection === null && pair.customer_returning !== null) {
+      next = { ...pair, customer_returning: null };
+    }
+    if (next === null) return pair;
+    changed = true;
+    return next;
+  });
+  return changed ? { ...order, destinations } : order;
+}
+
+/** Is this pair already in the dropped state {@link dropLeg} writes? */
+function legIsDropped<E>(pair: CollectionLegPair<E>): boolean {
+  const d = pair.dates;
+  return pair.collection === null && pair.customer_returning === null &&
+    d.collection_start == null && d.collection_end == null &&
+    d.collection_start_fs == null && d.collection_end_fs == null &&
+    d.days_active == null && d.charge_windows == null;
+}
+
+/** The pair collecting nothing and billing no days. Keys the dates do not carry stay absent. */
+function dropLeg<E, P extends CollectionLegPair<E>>(pair: P): P {
+  const dates: Record<string, unknown> = {
+    ...pair.dates,
+    collection_start: null,
+    collection_end: null,
+    charge_windows: null,
+  };
+  for (const key of ["collection_start_fs", "collection_end_fs", "days_active"] as const) {
+    if (key in pair.dates) dates[key] = null;
+  }
+  return { ...pair, collection: null, customer_returning: null, dates: dates as P["dates"] };
+}
+
+/**
+ * A rental came back: the leg mirrors delivery, the dates come from
+ * `seed_collection`. A pair with no delivery start yet (a draft being built)
+ * gets its leg and keeps its dates — there is nothing to count from.
+ */
+function seedLeg<E, P extends CollectionLegPair<E>>(pair: P, holidays: readonly string[]): P {
+  // A JSON copy, not `structuredClone`: the manager passes Solid store proxies,
+  // which `structuredClone` refuses, and an endpoint is plain data (strings,
+  // arrays, nulls — no Timestamp to flatten).
+  const collection = JSON.parse(JSON.stringify(pair.delivery)) as E;
+  const seeded = applyDateEdit(pair.dates, { type: "seed_collection" }, { holidays });
+  const dates = "dates" in seeded ? seeded.dates as P["dates"] : pair.dates;
+  return { ...pair, collection, customer_returning: pair.customer_collecting, dates };
+}
+
 /**
  * Build a display name for a destination pair from its delivery/collection addresses.
  * Falls back to "Destination N" when no addresses are present.
@@ -323,7 +449,8 @@ export function getDestinationPairItemName(
  *
  * Mapping:
  *   start: customer_collecting === true → "In Store Pickup", else → "Delivery"
- *   end:   customer_returning  === true → "In Store Return", else → "Pickup"
+ *   end:   customer_returning  === true → "In Store Return", false → "Pickup",
+ *          null (no collection leg) → nothing
  *
  * Empty input returns empty strings.
  */
@@ -338,7 +465,8 @@ export function getDestinationsLegend(
   const endSet = new Set<string>();
   for (const d of destinations) {
     startSet.add(d.customer_collecting ? "In Store Pickup" : "Delivery");
-    endSet.add(d.customer_returning ? "In Store Return" : "Pickup");
+    // `null` = the pair has no collection leg, so it contributes no end label.
+    if (d.customer_returning !== null) endSet.add(d.customer_returning ? "In Store Return" : "Pickup");
   }
 
   return {
@@ -2618,7 +2746,9 @@ function resolveBlock<T extends LineItem>(block: T[], prefix: string[], structur
 const NON_PRODUCT_TYPES = new Set(["destination", "group", "surcharge", "transaction_fee"]);
 const PACKING_LIST_ITEM_TYPES = new Set(["rental", "sale"]);
 const DELIVERY_TYPES = new Set(["rental", "sale"]);
-const COLLECTION_TYPES = new Set(["rental"]);
+// Not a second set: `@cfs/core/schemas`' `isCollectionLineType` owns "what comes
+// back", and the stored schemas' null-collection rule reads the same predicate.
+const COLLECTION_TYPES: ReadonlySet<string> = new Set(DOC_LINE_ITEM_TYPES.filter(isCollectionLineType));
 
 /**
  * Walk backwards from `index` to determine which destination and group
@@ -2767,7 +2897,8 @@ export interface DestinationPairMintInput {
   description?: string;
   dates: OrderDocDatesType;
   delivery: DocDestinationEndpointType;
-  collection: DocDestinationEndpointType;
+  /** `null` mints a pair that collects nothing; its `customer_returning` is then `null` too. */
+  collection: DocDestinationEndpointType | null;
   customer_collecting?: boolean;
   customer_returning?: boolean;
   jurisdiction?: JurisdictionType | null;
@@ -2834,7 +2965,8 @@ export function buildDestinationPairWithDivider(
     delivery: input.delivery,
     collection: input.collection,
     customer_collecting: input.customer_collecting ?? false,
-    customer_returning: input.customer_returning ?? false,
+    // Tied to the leg (`checkCollectionLegs`): no leg, no flag.
+    customer_returning: input.collection === null ? null : input.customer_returning ?? false,
     // 🔴 Required-nullable on the stored pair, so it is always written. This
     // mints an ORDINARY leg — a swap is never minted here, because an exchange
     // pair names a parent that must already exist on the document.

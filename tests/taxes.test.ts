@@ -2,7 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import { linePairs } from "./helpers/charge-windows.ts";
 import { getInitialValues, OrderDocLineItem } from "../src/schemas/mod.ts";
 import {
-  assignLineTaxes,
+  assignLineTaxes as assignLineTaxesRaw,
   deriveOrderTaxAsOf,
   destinationsForItems,
   type DocumentTaxContext,
@@ -146,7 +146,9 @@ const at = (
   region = "IL",
   extra: Partial<TaxDestination> & { uid?: string; delivery_uid?: string } = {},
 ): TaxDestination => ({
-  uid: extra.uid ?? null,
+  // Defaults to `SITE`, the divider `sited` gives a divider-less test document,
+  // so a one-destination fixture JOINS rather than leaning on a positional rule.
+  uid: extra.uid ?? SITE,
   jurisdiction: extra.jurisdiction,
   delivery: {
     uid: extra.delivery_uid ?? null,
@@ -184,6 +186,33 @@ function catalogOf(taxes: LegacyTax[]): TaxCatalog {
   });
 }
 
+/**
+ * The destination divider a divider-less test document is placed under.
+ *
+ * 🔴 **Why this exists** (api-cloudrun#1154): most tests here state bare lines
+ * against a one-pair context. They used to reach that pair through the
+ * single-entry deduction, which is deleted — and the ones whose destination
+ * matched the Chicago origin had been passing VACUOUSLY, an unjoined line
+ * sourcing to the origin and landing on the expected tax anyway. `sited` gives
+ * the document the shape every stored order now has — a leading divider whose
+ * uid IS the pair's — so every assertion below exercises the join it claims to.
+ * A document that already carries a destination divider is left alone.
+ */
+const SITE = "site";
+
+function sited<T>(items: LineItem[], run: (doc: LineItem[]) => T): T {
+  if (items.some((i) => i.type === "destination")) return run(items);
+  const divider = { ...makeItem(), uid: SITE, type: "destination", path: [SITE] } as LineItem;
+  const doc = [divider, ...items.map((i, k) => ({ ...i, path: [SITE, i.uid || `line${k}`] }))];
+  const out = run(doc);
+  items.splice(0, items.length, ...doc.slice(1).map((i, k) => ({ ...i, path: items[k].path })));
+  return out;
+}
+
+/** `assignLineTaxes` over a {@link sited} document. */
+const assignLineTaxes = (items: LineItem[], taxCtx: DocumentTaxContext) =>
+  sited(items, (doc) => assignLineTaxesRaw(doc, taxCtx));
+
 /** The context, with everything defaulted to "an ordinary Chicago document". */
 const ctx = (overrides: Partial<DocumentTaxContext> & { taxes?: LegacyTax[] } = {}): DocumentTaxContext => {
   const { taxes = CATALOG, ...rest } = overrides;
@@ -205,9 +234,11 @@ const ctx = (overrides: Partial<DocumentTaxContext> & { taxes?: LegacyTax[] } = 
  * written back into `items` so the assertions below read the priced lines.
  */
 function materialize(items: LineItem[], taxCtx: DocumentTaxContext) {
-  const priced = priceDocument(items, { document: { kind: "order", status: "draft" }, tax: taxCtx, charge_windows: linePairs(items) });
-  items.splice(0, items.length, ...priced.items);
-  return priced.warnings;
+  return sited(items, (doc) => {
+    const priced = priceDocument(doc, { document: { kind: "order", status: "draft" }, tax: taxCtx, charge_windows: linePairs(doc) });
+    doc.splice(0, doc.length, ...priced.items);
+    return priced.warnings;
+  });
 }
 
 Deno.test("the rule: a Chicago rental resolves Chicago Rental Tax and prices it", () => {
@@ -547,10 +578,24 @@ Deno.test("destinationsForItems: a divider naming NO pair does NOT fall back to 
   assertEquals(destinationsForItems(items, destinations)[1], null);
 });
 
-Deno.test("destinationsForItems: a divider-less items array takes the single entry", () => {
+Deno.test("destinationsForItems: a line with no destination ancestor resolves null, even beside ONE pair", () => {
+  // api-cloudrun#1154 deleted the single-entry deduction: the lone pair no longer
+  // answers a line that no divider places under it. The live population was 11
+  // order-level invoice lines, all non-taxable or origin-sourced, so 0 cents moved.
   const items = [makeItem({ uid: "l1", path: ["l1"] })];
-  const destinations = [at("Rantoul")];
-  assertEquals(destinationsForItems(items, destinations)[0], destinations[0]);
+  assertEquals(destinationsForItems(items, [at("Rantoul")])[0], null);
+
+  // An ORDER-level line on a one-pair invoice — the shape the rung actually served.
+  const invoice = [
+    { ...makeItem(), uid: "o1", type: "order", path: ["o1"] },
+    { ...makeItem({ type: "transaction_fee" }), uid: "fee", path: ["o1", "fee"] },
+    { ...makeItem(), uid: "d1", type: "destination", path: ["o1", "d1"] },
+    { ...makeItem(), uid: "l1", path: ["o1", "d1", "l1"] },
+  ] as LineItem[];
+  const pair = at("Rantoul", "IL", { uid: "d1" });
+  const resolved = destinationsForItems(invoice, [pair]);
+  assertEquals(resolved[1], null, "the order-level fee: no destination ancestor");
+  assertEquals(resolved[3], pair, "control: a line under the divider still joins");
 });
 
 Deno.test("destinationsForItems: NO destinations resolves null — and sources to the origin", () => {

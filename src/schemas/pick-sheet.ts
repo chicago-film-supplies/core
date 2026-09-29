@@ -140,7 +140,9 @@ export function pickSheetGateAdmits(
   gate: PickSheetGateType,
 ): boolean {
   if (gate === "all") return true;
-  if (gate === "counter") return pair.customer_collecting || pair.customer_returning;
+  // `=== true`: a null `customer_returning` is a pair with no collection leg,
+  // which has no counter return to admit.
+  if (gate === "counter") return pair.customer_collecting || pair.customer_returning === true;
   return !pair.customer_collecting;
 }
 

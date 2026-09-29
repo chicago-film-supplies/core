@@ -88,7 +88,8 @@ export interface BookingDocument {
     quantity?: number;
   }>;
   uid_destination_delivery?: string;
-  uid_destination_collection?: string;
+  /** `null` on a booking that does not come back (a `sale`). */
+  uid_destination_collection?: string | null;
   created_at?: number;
   updated_at: number;
 }

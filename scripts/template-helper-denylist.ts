@@ -102,6 +102,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // `cardPickBucket` is the `cards:pick_bucket` INDEX-TIME producer. It returns
   // a destination uid or a facet sentinel — a roll-up key, never printed text.
   cards: ["cardPickBucket"],
+  // The one author of a booking's collection fields (api-cloudrun#1154) — a
+  // WRITER decides them; a template reads `destinations.collection` off the
+  // booking or order it renders.
+  bookings: ["bookingCollectionFor"],
   destinations: [
     "applyDestinationStreet2",
     "computeDestinationNode",
@@ -235,6 +239,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // its divider together; a template renders the pair the document already
     // carries.
     "buildDestinationPairWithDivider",
+    // The one author of an order's collection legs (api-cloudrun#1154) — a WRITER
+    // decides whether a pair collects anything; a template reads `collection`
+    // (null = nothing to collect) off the document it renders.
+    "normalizeCollectionLegs",
     "computeItemPaths", // canonical path computation — write-path only
     // The totals AUDIT oracle (api-cloudrun#575): it re-derives totals from line
     // inputs to check stored ones. A template renders the stored totals.

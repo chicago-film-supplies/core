@@ -141,8 +141,7 @@ function swapDoc(replaces: unknown, opts: { markExchange?: boolean } = {}) {
     updated_at: mockTimestamp,
   }, { now: mockTimestamp });
   const pair = base.destinations[0] as unknown as Record<string, unknown>;
-  // `getTestDoc` builds an EMPTY items array (measured), so the rows are stated
-  // here — the minimum a `FulfillmentLineItem` needs to parse.
+  // The rows are stated here — the minimum a `FulfillmentLineItem` needs to parse.
   const line = { type: "rental", name: "Light", description: "", quantity: 2, zero_priced: null };
   return {
     ...base,

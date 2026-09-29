@@ -265,7 +265,24 @@ export interface Booking {
   query_by_uid_store: string[];
   query_by_uid_location: string[];
   uid_destination_delivery: string;
-  uid_destination_collection: string;
+  /**
+   * The collection ADDRESS — or `null` on a booking that does not come back.
+   *
+   * 🔴 **A booking's collection is decided by its OWN `type`**
+   * (api-cloudrun#1154): a `rental` returns and carries its pair's collection
+   * leg; a `sale` never returns, so it carries `null` here and on
+   * `destinations.collection`, even on an order whose other lines do come back.
+   * One author: `bookingCollectionFor` (`@cfs/core/utils/bookings`). Every writer
+   * used to fall back to the DELIVERY address, so all 492 stored sale bookings
+   * (prod and dev, 2026-09-28) claim a collection that never happens; the
+   * api-cloudrun#1154 Phase 4 backfill nulls them.
+   *
+   * ⚠️ Nullable here, not yet refused: the "sale ⇒ null, rental ⇒ placed" rule
+   * ships as a refine in the beta after that backfill, because a whole-document
+   * booking write (custody replace, a kept booking) would otherwise 500 on the
+   * open sale bookings still carrying the old value.
+   */
+  uid_destination_collection: string | null;
   version: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -544,7 +561,7 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   query_by_uid_store: z.array(FirestoreId),
   query_by_uid_location: z.array(FirestoreId),
   uid_destination_delivery: FirestoreId,
-  uid_destination_collection: FirestoreId,
+  uid_destination_collection: FirestoreId.nullable(),
   version: z.int().min(0).default(0),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
   updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),

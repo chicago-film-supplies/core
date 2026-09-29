@@ -1669,10 +1669,12 @@ const NO_DATES: OrderDatesType = {
   collection_start: null, collection_end: null,
   charge_windows: [],
 };
+// Both flags are required on the input pair since api-cloudrun#1154.
+const NO_FLAGS = { customer_collecting: false, customer_returning: false } as const;
 
 Deno.test("isSameAsDeliveryDestination returns true when endpoints match", () => {
   const dest: DestinationType = {
-    dates: NO_DATES,
+    dates: NO_DATES, ...NO_FLAGS,
     delivery: { ...baseEndpoint },
     collection: { ...baseEndpoint },
   };
@@ -1681,7 +1683,7 @@ Deno.test("isSameAsDeliveryDestination returns true when endpoints match", () =>
 
 Deno.test("isSameAsDeliveryDestination returns false when addresses differ", () => {
   const dest: DestinationType = {
-    dates: NO_DATES,
+    dates: NO_DATES, ...NO_FLAGS,
     delivery: { ...baseEndpoint },
     collection: { ...baseEndpoint, address: { ...baseEndpoint.address, city: "Houston" } },
   };
@@ -1690,7 +1692,7 @@ Deno.test("isSameAsDeliveryDestination returns false when addresses differ", () 
 
 Deno.test("isSameAsDeliveryDestination returns false when contacts differ", () => {
   const dest: DestinationType = {
-    dates: NO_DATES,
+    dates: NO_DATES, ...NO_FLAGS,
     delivery: { ...baseEndpoint },
     collection: { ...baseEndpoint, contact: { uid: "c2", first_name: "Jane", name: "Jane" } },
   };
@@ -1699,7 +1701,7 @@ Deno.test("isSameAsDeliveryDestination returns false when contacts differ", () =
 
 Deno.test("isSameAsDeliveryDestination returns false when instructions differ", () => {
   const dest: DestinationType = {
-    dates: NO_DATES,
+    dates: NO_DATES, ...NO_FLAGS,
     delivery: { ...baseEndpoint },
     collection: { ...baseEndpoint, instructions: "Front door" },
   };
@@ -1736,7 +1738,7 @@ Deno.test("isSameAsDeliveryDestination is key-order independent (core#87)", () =
   );
 
   const dest: DestinationType = {
-    dates: NO_DATES,
+    dates: NO_DATES, ...NO_FLAGS,
     delivery: { ...baseEndpoint },
     collection: { ...baseEndpoint, address: REORDERED_ADDRESS },
   };
@@ -1760,7 +1762,7 @@ Deno.test("isSameAsDeliveryDestination compares NESTED objects by value too (cor
   );
 
   const dest: DestinationType = {
-    dates: NO_DATES,
+    dates: NO_DATES, ...NO_FLAGS,
     delivery: { ...baseEndpoint, address: deliveryAddress },
     collection: { ...baseEndpoint, address: collectionAddress },
   };
@@ -1771,7 +1773,7 @@ Deno.test("isSameAsDeliveryDestination still says false for a genuinely differen
   // The guard against over-correcting to "always equal": this one passes both
   // before and after the swap, which is what makes the two above meaningful.
   const dest: DestinationType = {
-    dates: NO_DATES,
+    dates: NO_DATES, ...NO_FLAGS,
     delivery: { ...baseEndpoint },
     collection: { ...baseEndpoint, address: { ...REORDERED_ADDRESS, city: "Houston" } },
   };
@@ -1787,7 +1789,7 @@ Deno.test("isSameAsDeliveryDestination returns true when both null endpoints", (
 
 Deno.test("getDestinationPairItemName uses delivery and collection names", () => {
   const dest: DestinationType = {
-    dates: NO_DATES,
+    dates: NO_DATES, ...NO_FLAGS,
     delivery: { address: { name: "Warehouse A", street: "1 Main", city: "", country_name: "", full: "", postcode: "", region: "" } },
     collection: { address: { name: "Venue B", street: "2 Oak", city: "", country_name: "", full: "", postcode: "", region: "" } },
   };
@@ -1797,7 +1799,7 @@ Deno.test("getDestinationPairItemName uses delivery and collection names", () =>
 Deno.test("getDestinationPairItemName uses delivery only when same", () => {
   const addr = { name: "Warehouse A", street: "1 Main", city: "", country_name: "", full: "", postcode: "", region: "" };
   const dest: DestinationType = {
-    dates: NO_DATES,
+    dates: NO_DATES, ...NO_FLAGS,
     delivery: { address: addr },
     collection: { address: addr },
   };
@@ -1806,7 +1808,7 @@ Deno.test("getDestinationPairItemName uses delivery only when same", () => {
 
 Deno.test("getDestinationPairItemName falls back to street", () => {
   const dest: DestinationType = {
-    dates: NO_DATES,
+    dates: NO_DATES, ...NO_FLAGS,
     delivery: { address: { name: "", street: "1 Main St", city: "", country_name: "", full: "", postcode: "", region: "" } },
     collection: { address: { name: "", street: "2 Oak Ave", city: "", country_name: "", full: "", postcode: "", region: "" } },
   };
@@ -1814,14 +1816,14 @@ Deno.test("getDestinationPairItemName falls back to street", () => {
 });
 
 Deno.test("getDestinationPairItemName falls back to index", () => {
-  const dest: DestinationType = { dates: NO_DATES, delivery: {}, collection: {} };
+  const dest: DestinationType = { dates: NO_DATES, ...NO_FLAGS, delivery: {}, collection: {} };
   assertEquals(getDestinationPairItemName(dest, 0), "Destination 1");
   assertEquals(getDestinationPairItemName(dest, 2), "Destination 3");
 });
 
 Deno.test("getDestinationPairItemName uses delivery when collection has no address", () => {
   const dest: DestinationType = {
-    dates: NO_DATES,
+    dates: NO_DATES, ...NO_FLAGS,
     delivery: { address: { name: "Warehouse", street: "", city: "", country_name: "", full: "", postcode: "", region: "" } },
     collection: {},
   };
@@ -1836,8 +1838,8 @@ Deno.test("getDestinationsLegend returns empty strings when no destinations", ()
   assertEquals(getDestinationsLegend(null), { start: "", end: "" });
 });
 
-Deno.test("getDestinationsLegend default flags render Delivery / Pickup", () => {
-  const dest: DestinationType = { dates: NO_DATES, delivery: {}, collection: {} };
+Deno.test("getDestinationsLegend false flags render Delivery / Pickup", () => {
+  const dest: DestinationType = { dates: NO_DATES, ...NO_FLAGS, delivery: {}, collection: {} };
   assertEquals(getDestinationsLegend([dest]), { start: "Delivery", end: "Pickup" });
 });
 
@@ -3748,8 +3750,21 @@ Deno.test("buildDestinationPairWithDivider: a destinationless order keeps its nu
     collection: { uid: null, address: null, instructions: null, contact: null },
   });
   assertEquals(pair.delivery.uid, null);
-  assertEquals(pair.collection.uid, null);
+  assertEquals(pair.collection?.uid, null);
   assertEquals("uid_delivery" in divider, false);
+});
+
+Deno.test("buildDestinationPairWithDivider: a null collection mints a null customer_returning", () => {
+  // `checkCollectionFlag`: no leg, no flag — even when the caller states one.
+  const { pair } = buildDestinationPairWithDivider({
+    name: "",
+    dates: docDates(),
+    delivery: { uid: null, address: null, instructions: null, contact: null },
+    collection: null,
+    customer_returning: true,
+  });
+  assertEquals(pair.collection, null);
+  assertEquals(pair.customer_returning, null);
 });
 
 Deno.test("buildDestinationPairWithDivider: an unstated jurisdiction is ABSENT, not null", () => {

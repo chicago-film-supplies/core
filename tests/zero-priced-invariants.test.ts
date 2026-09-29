@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import {
-  FulfillmentItem,
+  FulfillmentLineItem,
   FulfillmentSchema,
   InvoiceDocLineItem,
   InvoiceSchema,
@@ -60,7 +60,7 @@ function invoiceLine(uid: string, path: string[], zero_priced: boolean | null | 
 }
 
 function fulfillmentLine(uid: string, path: string[], zero_priced: boolean | null | undefined) {
-  return getTestDoc(FulfillmentItem, {
+  return getTestDoc(FulfillmentLineItem, {
     uid,
     type: "sale",
     path,

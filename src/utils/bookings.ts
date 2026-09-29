@@ -14,7 +14,15 @@
  *
  * @module
  */
-import type { Booking, ComponentTypeType, Order, OrderStatusType } from "../schemas/mod.ts";
+import type {
+  AddressType,
+  Booking,
+  BookingDestinationRef,
+  ComponentTypeType,
+  Order,
+  OrderStatusType,
+} from "../schemas/mod.ts";
+import { isCollectionLineType } from "../schemas/mod.ts";
 
 /**
  * The breakdown key constants and their display labels live beside
@@ -402,4 +410,60 @@ export function grainKeep(live: number, rows: readonly GrainRow[]): GrainKeep {
     byRow.set(last.key, (byRow.get(last.key) ?? 0) + remaining);
   }
   return { kept, byRow };
+}
+
+/** A destination pair as far as {@link bookingCollectionFor} reads it. */
+export interface BookingCollectionPair {
+  delivery: { uid: string | null; address: AddressType | null };
+  collection: { uid: string | null; address: AddressType | null } | null;
+}
+
+/** What {@link bookingCollectionFor} decides for one booking. */
+export interface BookingCollection {
+  /** `Booking.destinations.collection`. */
+  collection: BookingDestinationRef | null;
+  /** `Booking.uid_destination_collection`. */
+  uid_destination_collection: string | null;
+}
+
+/**
+ * **The one author of a booking's collection** (api-cloudrun#1154) — every
+ * booking writer (the create path, the reconcile, a kept booking, a repair
+ * script) takes both collection fields from here.
+ *
+ * 🔴 **Decided by the BOOKING's own `type`, not the order's or the pair's.** A
+ * booking is one grain (`(order, product, leg, ancestry)`), and one grain has
+ * one type (`mixedBookingGrains`, `@cfs/core/schemas`), so a `sale` booking on
+ * an order that also rents still never comes back:
+ *
+ * | booking type | collection |
+ * |---|---|
+ * | `rental` | the pair's leg: `{ uid, address }` |
+ * | anything else | `null`, both fields |
+ *
+ * A rental whose leg has no `uid` yet (an unplaced leg, legal on a draft alone)
+ * takes the DELIVERY address, because `Booking.destinations.collection.uid` is a
+ * required id; that was every writer's rule before this function existed, and
+ * it is now confined to the one case that needs it.
+ *
+ * @throws Error on a `rental` whose pair has no collection leg — the order
+ *   normalizer (`normalizeCollectionLegs`) re-seeds a leg whenever a rental is
+ *   present, so reaching here without one is a writer that skipped it. A kept
+ *   booking whose order dropped its leg passes its STORED leg as `pair`.
+ */
+export function bookingCollectionFor(type: string, pair: BookingCollectionPair): BookingCollection {
+  if (!isCollectionLineType(type)) return { collection: null, uid_destination_collection: null };
+  if (pair.collection === null) {
+    throw new Error(
+      "a rental booking needs its pair's collection leg — run normalizeCollectionLegs on the order first",
+    );
+  }
+  const uid = pair.collection.uid ?? pair.delivery.uid;
+  if (uid === null) {
+    throw new Error("a rental booking's pair names no delivery or collection destination");
+  }
+  return {
+    collection: { uid, address: pair.collection.address ?? null },
+    uid_destination_collection: uid,
+  };
 }

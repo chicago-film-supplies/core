@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { FulfillmentItem, type FulfillmentItemType, type Order, OrderDocLineItem, OrderSchema } from "../src/schemas/mod.ts";
+import { FulfillmentLineItem, type FulfillmentItemType, type Order, OrderDocLineItem, OrderSchema } from "../src/schemas/mod.ts";
 import { getTestDoc } from "../src/schemas/testing.ts";
 import { hasCustodyHistory } from "../src/utils/bookings.ts";
 import { buildBookingIdFromSignature, componentSignatureHash } from "../src/utils/booking-id.ts";
@@ -142,7 +142,7 @@ Deno.test("a shrink below live custody keeps the difference on the SAME grain", 
 Deno.test("a stored fulfillment quantity is the row's BEFORE, over the previous order's", () => {
   // A picker sent 3 against an order of 2; all 3 are out, and the line is removed.
   const row = { uid: A, quantity: 2 };
-  const stored = getTestDoc(FulfillmentItem, { uid: A, type: "sale", quantity: 3, path: pathOf(row), zero_priced: null });
+  const stored = getTestDoc(FulfillmentLineItem, { uid: A, type: "sale", quantity: 3, path: pathOf(row), zero_priced: null });
   const d = delta(order([row]), order([]), [booking(A, { out: 3 })], [stored]);
   assertEquals(d.keepFor(pathOf(row))?.share, 3);
 });

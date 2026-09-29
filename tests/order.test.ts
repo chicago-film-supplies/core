@@ -66,6 +66,10 @@ const validDestination = {
   dates: validDates,
   delivery: { uid: "testdest100000000000" },
   collection: { uid: "testdest200000000000" },
+  // Required on the input since api-cloudrun#1154 — a writer default was the
+  // same "we deliver" hole the stored tightening closed.
+  customer_collecting: false,
+  customer_returning: false,
 };
 
 const validDocDestination = {
@@ -76,6 +80,10 @@ const validDocDestination = {
   // thing it is about.
   uid: "11111111-1111-4111-8111-111111111111",
   dates: validDocDates,
+  // The seed's `collection` is `null` (the leg is nullable since api-cloudrun#1154),
+  // but these dates describe a collection — so the pair states the leg they describe.
+  collection: destBase.delivery,
+  customer_returning: false,
 };
 
 // ── CreateOrderInput ─────────────────────────────────────────────
@@ -164,6 +172,8 @@ Deno.test("CreateOrderInput strips extra properties on destination endpoint", ()
       dates: validDates,
       delivery: { uid: "testdest100000000000", bonus: true },
       collection: { uid: "testdest200000000000" },
+      customer_collecting: false,
+      customer_returning: false,
     }],
   };
   const result = CreateOrderInput.safeParse(input);
@@ -182,6 +192,8 @@ Deno.test("CreateOrderInput accepts destination with null contact", () => {
       dates: validDates,
       delivery: { uid: "testdest100000000000", contact: null },
       collection: { uid: "testdest200000000000" },
+      customer_collecting: false,
+      customer_returning: false,
     }],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, true);
@@ -196,6 +208,8 @@ Deno.test("CreateOrderInput accepts destination with complete contact", () => {
       dates: validDates,
       delivery: { uid: "testdest100000000000", contact: { uid: "testcontact100000000", first_name: "Jane", last_name: "Doe", name: "Jane Doe", phones: ["312-555-0100"] } },
       collection: { uid: "testdest200000000000" },
+      customer_collecting: false,
+      customer_returning: false,
     }],
   };
   assertEquals(CreateOrderInput.safeParse(input).success, true);
@@ -342,10 +356,16 @@ Deno.test("DocDestination REFUSES a pair that omits customer_collecting/returnin
  * `z.boolean().default(true)` fields needed one precisely because theirs was
  * not (`schemas/initial.ts`).
  */
-Deno.test("getInitialValues still seeds both flags false with no default to read", () => {
+Deno.test("getInitialValues seeds collecting false, and a null collection leg with a null flag", () => {
+  // ⚠️ Since api-cloudrun#1154 `collection` and `customer_returning` are both
+  // nullable, and a nullable's type-zero is `null` — so the seed is a pair that
+  // collects nothing, which `checkCollectionFlag` accepts. Measured: no consumer
+  // seeds a pair from `getInitialValues(DocDestination)` (the manager builds pairs
+  // with `buildDestinationPairWithDivider` and states both flags).
   const seed = getInitialValues(DocDestination) as Record<string, unknown>;
   assertEquals(seed.customer_collecting, false);
-  assertEquals(seed.customer_returning, false);
+  assertEquals(seed.collection, null);
+  assertEquals(seed.customer_returning, null);
 });
 
 Deno.test("CreateOrderInput rejects invalid item inclusion_type", () => {
@@ -466,14 +486,16 @@ Deno.test("CreateOrderInput rejects items not starting with destination", () => 
   assertEquals(CreateOrderInput.safeParse(input).success, false);
 });
 
-Deno.test("CreateOrderInput accepts empty items array", () => {
+Deno.test("CreateOrderInput REFUSES an explicit empty items array — and accepts it absent", () => {
+  // api-cloudrun#1154: an order is born with its divider. Absent means "seed it";
+  // `[]` means "an order with no divider", which the stored schema refuses.
   const input = {
     uid: "testorder10000000000",
     organization: { uid: "testorg1000000000000" },
     status: "draft",
     destinations: [validDestination],
-    items: [],
   };
+  assertEquals(CreateOrderInput.safeParse({ ...input, items: [] }).success, false);
   assertEquals(CreateOrderInput.safeParse(input).success, true);
 });
 
@@ -512,6 +534,15 @@ Deno.test("UpdateOrderInput rejects missing version", () => {
 
 // ── OrderSchema (document) ───────────────────────────────────────
 
+/** The destination divider answering `validDocDestination`. */
+const DOC_DIVIDER = {
+  uid: "11111111-1111-4111-8111-111111111111",
+  type: "destination",
+  name: "Chicago",
+  description: "",
+  path: ["11111111-1111-4111-8111-111111111111"],
+};
+
 const minimalDoc = {
   ...orderBase,
   uid: "testorder10000000000",
@@ -533,6 +564,8 @@ const minimalDoc = {
     // can produce.
   },
   destinations: [validDocDestination],
+  // `items.min(1)`, led by the divider that answers the one pair (api-cloudrun#1154).
+  items: [DOC_DIVIDER],
   totals: {
     ...totalsBase,
     subtotal_cents: 10000,
@@ -685,7 +718,7 @@ Deno.test("OrderSchema rejects missing organization name", () => {
 Deno.test("OrderSchema rejects destination item with non-uuid uid", () => {
   const doc = {
     ...minimalDoc,
-    items: [{
+    items: [DOC_DIVIDER, {
       uid: "not-a-uuid",
       type: "destination",
       name: "Test",
@@ -698,7 +731,7 @@ Deno.test("OrderSchema rejects destination item with non-uuid uid", () => {
 Deno.test("OrderSchema rejects group item with non-uuid uid", () => {
   const doc = {
     ...minimalDoc,
-    items: [{
+    items: [DOC_DIVIDER, {
       uid: "not-a-uuid",
       type: "group",
       name: "Test Group",
@@ -711,14 +744,14 @@ Deno.test("OrderSchema rejects group item with non-uuid uid", () => {
 Deno.test("OrderSchema rejects line item with invalid type", () => {
   const doc = {
     ...minimalDoc,
-    items: [{ uid: "testprod100000000000", type: "invalid", name: "Thing" }],
+    items: [DOC_DIVIDER, { uid: "testprod100000000000", type: "invalid", name: "Thing" }],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
 
 Deno.test("OrderSchema accepts all doc line item types", () => {
   for (const type of ["rental", "replacement", "sale", "service", "surcharge"]) {
-    const doc = { ...minimalDoc, items: [docLine({ type, name: "Thing" })] };
+    const doc = { ...minimalDoc, items: [DOC_DIVIDER, docLine({ type, name: "Thing" })] };
     assertEquals(OrderSchema.safeParse(doc).success, true, `type "${type}" should be valid`);
   }
 });
@@ -730,34 +763,34 @@ Deno.test("OrderSchema requires price and stock_method on a stored line item", (
   for (const field of ["price", "stock_method"]) {
     const item = docLine();
     delete (item as Record<string, unknown>)[field];
-    const r = OrderSchema.safeParse({ ...minimalDoc, items: [item] });
+    const r = OrderSchema.safeParse({ ...minimalDoc, items: [DOC_DIVIDER, item] });
     assertEquals(r.success, false, `omitting "${field}" should be rejected`);
-    assertEquals(r.error?.issues[0].path, ["items", 0, field]);
+    assertEquals(r.error?.issues[0].path, ["items", 1, field]);
   }
 });
 
 Deno.test("OrderSchema rejects rental without price.replacement_cents", () => {
-  const doc = { ...minimalDoc, items: [docLine({ stock_method: "bulk" })] };
+  const doc = { ...minimalDoc, items: [DOC_DIVIDER, docLine({ stock_method: "bulk" })] };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
 
 Deno.test("OrderSchema rejects rental with null price.replacement_cents", () => {
   const doc = {
     ...minimalDoc,
-    items: [docLine({ stock_method: "bulk", price: { ...priceBase, replacement_cents: null } })],
+    items: [DOC_DIVIDER, docLine({ stock_method: "bulk", price: { ...priceBase, replacement_cents: null } })],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
 
 Deno.test("OrderSchema accepts rental with stock_method none and no price.replacement_cents", () => {
-  const doc = { ...minimalDoc, items: [docLine({ name: "Service Fee" })] };
+  const doc = { ...minimalDoc, items: [DOC_DIVIDER, docLine({ name: "Service Fee" })] };
   assertEquals(OrderSchema.safeParse(doc).success, true);
 });
 
 Deno.test("OrderSchema rejects custom line item type", () => {
   const doc = {
     ...minimalDoc,
-    items: [{ uid: "testprod100000000000", type: "custom", name: "Thing" }],
+    items: [DOC_DIVIDER, { uid: "testprod100000000000", type: "custom", name: "Thing" }],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
@@ -765,7 +798,7 @@ Deno.test("OrderSchema rejects custom line item type", () => {
 Deno.test("OrderSchema rejects float chargeable_days in price", () => {
   const doc = {
     ...minimalDoc,
-    items: [docLine({
+    items: [DOC_DIVIDER, docLine({
       price: {
         ...priceBase,
         base_cents: 10000,
@@ -782,7 +815,7 @@ Deno.test("OrderSchema rejects float chargeable_days in price", () => {
 Deno.test("OrderSchema rejects invalid price formula", () => {
   const doc = {
     ...minimalDoc,
-    items: [docLine({
+    items: [DOC_DIVIDER, docLine({
       price: {
         ...priceBase,
         base_cents: 10000,
@@ -799,7 +832,7 @@ Deno.test("OrderSchema rejects invalid price formula", () => {
 Deno.test("OrderSchema rejects invalid discount type", () => {
   const doc = {
     ...minimalDoc,
-    items: [docLine({
+    items: [DOC_DIVIDER, docLine({
       price: {
         ...priceBase,
         base_cents: 10000,
@@ -918,7 +951,7 @@ Deno.test("OrderSchema rejects empty destinations array", () => {
 Deno.test("OrderSchema rejects extra properties on line item price", () => {
   const doc = {
     ...minimalDoc,
-    items: [docLine({
+    items: [DOC_DIVIDER, docLine({
       price: {
         ...priceBase,
         base_cents: 10000,
@@ -936,7 +969,7 @@ Deno.test("OrderSchema rejects extra properties on line item price", () => {
 Deno.test("OrderSchema rejects float quantity on line items", () => {
   const doc = {
     ...minimalDoc,
-    items: [docLine({ quantity: 1.5 })],
+    items: [DOC_DIVIDER, docLine({ quantity: 1.5 })],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
@@ -944,7 +977,7 @@ Deno.test("OrderSchema rejects float quantity on line items", () => {
 Deno.test("OrderSchema rejects negative quantity on line items", () => {
   const doc = {
     ...minimalDoc,
-    items: [docLine({ quantity: -1 })],
+    items: [DOC_DIVIDER, docLine({ quantity: -1 })],
   };
   assertEquals(OrderSchema.safeParse(doc).success, false);
 });
@@ -953,7 +986,7 @@ Deno.test("OrderSchema accepts valid inclusion_type values", () => {
   for (const val of ["default", "mandatory", "optional", null]) {
     const doc = {
       ...minimalDoc,
-      items: [docLine({ inclusion_type: val })],
+      items: [DOC_DIVIDER, docLine({ inclusion_type: val })],
     };
     assertEquals(OrderSchema.safeParse(doc).success, true, `inclusion_type "${val}" should be valid`);
   }

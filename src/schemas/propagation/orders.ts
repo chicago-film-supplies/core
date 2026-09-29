@@ -358,6 +358,18 @@ const createOrderRules: CollectionRule[] = [
       },
       {
         source: ["destinations"],
+        target: ["items"],
+        transform:
+          "items absent from the input → one destination divider per pair, the pair's uid as the divider's uid (an explicit [] is a 400) — every order is born with its leading divider (api-cloudrun#1154)",
+      },
+      {
+        source: ["items"],
+        target: ["destinations", "collection"],
+        transform:
+          "normalizeCollectionLegs(order, holidays), before validation: past draft with no rental → collection, customer_returning, the collection dates and charge_windows null; a rental on a null leg → re-seeded from delivery (customer_returning = customer_collecting, dates via applyDateEdit seed_collection)",
+      },
+      {
+        source: ["destinations"],
         target: ["destinations"],
         transform:
           "per-destination dates: each ISO string gets a Firestore timestamp companion (*_fs); applyDateEdit → canonicalChargeWindows counts charge_windows[].days and days_active",
@@ -405,14 +417,18 @@ const createOrderRules: CollectionRule[] = [
       {
         source: ["destinations", "collection", "uid"],
         target: ["uid_destination_collection"],
+        transform:
+          "bookingCollectionFor(booking.type, pair): a rental takes the pair's collection address; any other type (a sale never comes back) gets null",
       },
       {
         source: ["destinations", "collection", "uid"],
         target: ["destinations", "collection", "uid"],
+        transform: "bookingCollectionFor — null on a non-rental booking",
       },
       {
         source: ["destinations", "collection", "address"],
         target: ["destinations", "collection", "address"],
+        transform: "bookingCollectionFor — null on a non-rental booking",
       },
       {
         source: ["destinations", "dates"],
@@ -622,6 +638,12 @@ const updateOrderRules: CollectionRule[] = [
         transform:
           "per-destination dates recanonicalized: Timestamp.fromDate() companions (*_fs) + canonicalChargeWindows recount",
       },
+      {
+        source: ["items"],
+        target: ["destinations", "collection"],
+        transform:
+          "normalizeCollectionLegs(merged order, holidays), before validation — the same one author as create: every items edit and status change re-decides whether the order collects and bills days",
+      },
     ],
   },
   {
@@ -656,7 +678,12 @@ const updateOrderRules: CollectionRule[] = [
       {
         source: ["destinations", "collection"],
         target: ["destinations", "collection"],
-        transform: "{uid, address}",
+        transform: "bookingCollectionFor(booking.type, pair) → {uid, address}, or null on a non-rental booking",
+      },
+      {
+        source: ["destinations", "collection", "uid"],
+        target: ["uid_destination_collection"],
+        transform: "bookingCollectionFor — null on a non-rental booking",
       },
       {
         source: ["destinations", "dates"],
@@ -733,7 +760,7 @@ const updateOrderRules: CollectionRule[] = [
         source: ["destinations"],
         target: ["destinations"],
         transform:
-          "full DocDestination with per-destination dates + contacts retained",
+          "full DocDestination with per-destination dates + contacts retained; after the per-field merge, deriveProjectionCollection(merged, stored, fulfillment items) KEEPS the stored collection leg, flag, collection dates and windows while the fulfillment's own items still hold a rental (a kept quantity_order: 0 row), and otherwise makes a null leg carry a null flag and no collection dates",
       },
       {
         source: ["items"],

@@ -788,7 +788,7 @@ interface Booking {
   query_by_uid_store: string[];
   query_by_uid_location: string[];
   uid_destination_delivery: string;
-  uid_destination_collection: string;
+  uid_destination_collection: string | null;
   version: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -3409,16 +3409,24 @@ A destination pair — delivery and collection endpoints.
 `customer_collecting` is true when the customer picks up the items at our
 warehouse for the delivery side of this pair. `customer_returning` is true
 when the customer drops the items off at our warehouse for the collection
-side. Both default to false (we deliver / we collect).
+side, and `null` exactly when there is no collection side.
+
+🔴 **Both flags are REQUIRED here, as of api-cloudrun#1154** — they used to be
+optional and the writer filled `?? false`, which moved the failure the stored
+tightening (`9435a15`) was written against into the writer: an omitted flag
+reads as *"we deliver"* / *"we collect"*, the answer that sends a crew to an
+address. The manager already sends both on every pair (it PUTs the stored
+pair back whole, and `addDestinationPair` states both), so the refusal lands
+on callers that were silently getting a default nobody chose.
 
 ```ts
 interface DestinationType {
   uid?: string;
   dates: OrderDatesType;
   delivery: DestinationEndpointType;
-  collection: DestinationEndpointType;
-  customer_collecting?: boolean;
-  customer_returning?: boolean;
+  collection: DestinationEndpointType | null;
+  customer_collecting: boolean;
+  customer_returning: boolean | null;
   jurisdiction?: JurisdictionType | null;
   exchange?: DestinationExchangeType | null;
 }
@@ -3633,9 +3641,9 @@ interface DocDestinationType {
   uid: string;
   dates: OrderDocDatesType;
   delivery: DocDestinationEndpointType;
-  collection: DocDestinationEndpointType;
+  collection: DocDestinationEndpointType | null;
   customer_collecting: boolean;
-  customer_returning: boolean;
+  customer_returning: boolean | null;
   jurisdiction?: JurisdictionType | null;
   exchange: DestinationExchangeType | null;
 }
@@ -5317,6 +5325,25 @@ a "keep in lockstep" comment that nothing enforced.
 const LIVE_IN_XERO_STATUSES: readonly InvoiceStatusType[];
 ```
 
+### `LeadingDividerGrain`
+
+Which document a {@link leadingDividerViolations} call is judging.
+
+```ts
+type LeadingDividerGrain = "order" | "fulfillment" | "invoice";
+```
+
+### `LeadingDividerViolation`
+
+A document whose first row is not the divider its grain leads with.
+
+```ts
+interface LeadingDividerViolation {
+  expected: "destination" | "order";
+  found: string | null;
+}
+```
+
 ### `LeafPath`
 
 A scalar leaf reached by {@link collectLeafPaths}.
@@ -5835,6 +5862,18 @@ Zod schema for McpOAuthToken.
 
 ```ts
 const McpOAuthTokenSchema: z.ZodType<McpOAuthToken>;
+```
+
+### `MixedBookingGrain`
+
+Two lines of one booking grain that disagree on `type`.
+
+```ts
+interface MixedBookingGrain {
+  index: number;
+  uid: string;
+  types: [string, string];
+}
 ```
 
 ### `Movement`
@@ -6698,7 +6737,7 @@ interface OrderDatesType {
   delivery_end: string | null;
   collection_start: string | null;
   collection_end: string | null;
-  charge_windows: ChargeWindowInputType[];
+  charge_windows: ChargeWindowInputType[] | null;
 }
 ```
 
@@ -6765,7 +6804,7 @@ interface OrderDocDatesType {
   collection_end: string | null;
   collection_end_fs: FirestoreTimestampType | null;
   days_active: number | null;
-  charge_windows: ChargeWindowType[];
+  charge_windows: ChargeWindowType[] | null;
 }
 ```
 
@@ -10752,7 +10791,7 @@ One missing half of one endpoint, as {@link unplacedEndpoints} reports it.
 interface UnplacedEndpoint {
   index: number;
   side: "delivery" | "collection";
-  field: "uid" | "address";
+  field: "uid" | "address" | "endpoint";
 }
 ```
 
@@ -12004,6 +12043,36 @@ Read this rather than the column, so the manager cannot offer a button the
 server will 400 — and so a status outside the vocabulary answers `false`
 instead of throwing on an undefined lookup.
 
+### `checkCollectionLegs(doc: typeLiteral, ctx: z.RefinementCtx): void`
+
+The ORDER's collection legs agree with themselves and with its items — the
+rule `normalizeCollectionLegs` (`@cfs/core/utils/orders`) writes, asserted on
+the order only.
+
+Per pair:
+1. `customer_returning` is `null` exactly when `collection` is — the flag
+   describes the leg, so no leg means no flag;
+2. a `null` leg has no collection dates: `collection_start` / `collection_end`
+   (and their `_fs` mirrors) and `days_active` are `null`;
+3. an order holding a `rental` states charge windows on every pair — a rental
+   with no window has no days to bill.
+
+🔴 **The ORDER only, never the fulfillment or the invoice.** Those follow the
+order through the three-way merge (`@cfs/core/utils/shared-fields`), which
+merges `collection` whole but the flag and the dates per FIELD — so an invoice
+that overrode its flag would keep it while its leg synced to `null`, and a
+stored refine there would turn that sync into a 500. The merge's post-step
+re-derives the three on a projection instead (`deriveProjectionCollection`),
+and an audit covers the rest.
+
+⚠️ **What this does NOT yet assert, and why:** *"no rental past draft ⇒ a
+null leg and null windows"*. 160 sales-only orders per project still store a
+placed leg and windows, and whole-document order writers other than
+`createOrder` / `updateOrder` (the tax recompute, the Xero-quote writeback,
+the invoice mirror) do not normalize — so that half ships in the beta after
+the backfill (api-cloudrun#1154 Phase 4). Every clause above held on 100% of
+both corpora when it shipped, because no stored leg was `null` yet.
+
 ### `checkDestinationJoin(doc: typeLiteral, ctx: z.RefinementCtx): void`
 
 {@link destinationJoinViolations} as a document-level refinement. Attached to
@@ -12064,6 +12133,21 @@ throws on it. Before this axis the combination was merely thrown on at
 runtime, deep in `perUnitSubtotal`; here it is unwritable. The converse is
 deliberately NOT asserted: a flat-amount fee is legitimate, and
 `calculateTransactionFeeAmount` prices one.
+
+### `checkLeadingDivider(grain: LeadingDividerGrain): fnOrConstructor`
+
+{@link leadingDividerViolations} as a document-level refinement, for one
+grain. Attached to `OrderSchema`, `FulfillmentSchema` and `InvoiceSchema`; the
+invoice's `linked` is `query_by_orders.length > 0`.
+
+⚠️ **A REFINE, so under `z.strictObject` a stored violator becomes unwritable
+the moment a consumer pins it.** The corpus read 0 in both projects before it
+shipped (2026-09-28: every order and fulfillment leads with a `destination`,
+every one of 1,035 order-linked invoices with an `order`).
+
+### `checkMixedBookingGrains(items: ReadonlyArray<unknown>, ctx: z.RefinementCtx): void`
+
+{@link mixedBookingGrains} as a refinement on the order's `items`.
 
 ### `checkZeroPricedComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void`
 
@@ -12255,11 +12339,17 @@ function plus an `addIssue` per entry, and api-cloudrun's write guard (which
 also covers invoices) calls it rather than keeping a second copy.
 
 The join is the divider's `uid` = the pair's `uid` (see
-{@link DocDestinationType.uid}). It is a biconditional except for the one shape
-{@link isSingleEntryDeduction} names:
-- **divider → pair** is unconditional, and vacuous when no divider exists;
-- **pair → divider** is unconditional unless the document has no dividers and
-  one pair.
+{@link DocDestinationType.uid}), and it is a plain biconditional: every divider
+is answered by a pair and every pair names a divider.
+
+🔴 **There is no divider-less exemption any more** (api-cloudrun#1154, owner
+2026-09-28). A document with no dividers and ONE pair used to be legal as a
+"single-entry deduction" — the lone pair answered every line — and it was the
+shape that let a second destination be added beside an unjoined first one.
+Every order is now born with its divider (`items.min(1)` plus
+{@link leadingDividerViolations}), so the shape is unrepresentable on the
+order and fulfillment and the exemption had nothing left to exempt. 0 stored
+documents used it in either project (measured 2026-09-28).
 
 A row with a non-string `uid` is skipped: the schema parse owns it.
 
@@ -12428,9 +12518,25 @@ computed rollups. `[]` for an unknown alias.
 
 Get the display defaults for a Typesense collection by alias.
 
+### `hasCollectionLine(items: ReadonlyArray<unknown>): boolean`
+
+Whether ANY row of these items comes back on a collection leg — i.e. whether
+the document needs a collection leg at all.
+
+🔴 **Document-wide, not per pair** (owner, 2026-09-28). A per-pair rule would
+be a fourth definition of "needs a collection" beside the manager's
+order-wide `showCollectionFor`. Evaluated on EACH document's own items: a
+fulfillment keeps a `quantity_order: 0` rental while custody is out, and an
+invoice keeps lines its order dropped, so the three documents can answer
+differently and each answer is right for its own document.
+
 ### `hasCosts(type: MovementTypeType): boolean`
 
 Whether a movement type carries a cost object. Derived from the contract.
+
+### `isCollectionLineType(type: unknown): boolean`
+
+Whether a line of this `type` comes back on a collection leg. See {@link hasCollectionLine}.
 
 ### `isCollectionName(name: string): name is CollectionName`
 
@@ -12597,21 +12703,6 @@ never contains a `-`. This is `core/src/utils/booking-id.ts`'s
 `componentAncestry` filter, exported from the grammar it reads rather than
 from the booking-specific module that consumes it.
 
-### `isSingleEntryDeduction(dividerCount: number, pairCount: number): boolean`
-
-The ONE sanctioned divider-less shape: no destination dividers at all, and
-exactly one pair.
-
-🔴 **Not "no dividers" alone, and not "one pair" alone.** With no divider a
-line cannot address a destination by `item.path`, so the answer has to come
-from somewhere else — and with exactly ONE pair there is no other answer to
-pick, which makes it a deduction rather than a guess. With two or more pairs
-the deduction has nothing to deduce from and every pair is unaddressable; one
-divider beside two pairs is a broken join and stays refused.
-
-Asked by {@link destinationJoinViolations} and by any writer that reports the
-same shape, so the report and the refusal cannot drift apart.
-
 ### `isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: "manual" | "propagation"): boolean`
 
 Server-side gate for an order status write. `source: "manual"` rejects
@@ -12625,6 +12716,40 @@ The contract for an item `type`, or `undefined` for a value outside
 {@link ITEM_TYPES}. Takes a `string` because the loose `LineItem` shadow in
 `@cfs/core/utils/orders` types `type` as `string`; an unrecognized type has no
 contract and every derived predicate answers `false` for it.
+
+### `leadingDividerViolations(items: ReadonlyArray<unknown>, grain: LeadingDividerGrain, linked: boolean): LeadingDividerViolation[]`
+
+Whether a document's `items[0]` is the top divider its grain leads with —
+the rule {@link checkLeadingDivider} enforces on the stored order, fulfillment
+and invoice schemas, as data, so a WRITER can refuse the same input with a 400
+before it builds a document the schema would reject with a 500. One author:
+the refinement is this function plus an `addIssue`, and api-cloudrun's write
+guard calls it rather than keeping a second copy (api-cloudrun#1154).
+
+| grain | `items[0]` must be |
+|---|---|
+| order, fulfillment | a `destination` divider |
+| invoice with a source order (`linked`) | an `order` divider |
+| invoice with no source order | unruled |
+
+⚠️ **Only the FIRST row, deliberately.** An order-linked invoice may carry
+order-level lines (a card fee, a replacement, a service) between its `order`
+divider and its first `destination` — 11 prod invoices do (measured
+2026-09-28), so an `items[1] === "destination"` rule would refuse correct
+documents.
+
+⚠️ **The order-less invoice is unruled, not exempted by accident.** 31 legacy
+invoices carry no source order and bill a bare line first; no writer produces
+that shape any more, and api-cloudrun's invoice writers require a source
+order rather than a refine here, so those 31 stay readable.
+
+Empty `items` returns `[]`: an empty order or fulfillment is `items.min(1)`'s
+error, not this one's, so the two never report one defect twice.
+
+**Parameters**
+
+- `linked` — Whether the document has a source order. Read only for the
+invoice grain; an order or fulfillment always leads with a destination.
 
 ### `legDirectionFromBreakdown(bd: BookingBreakdown): PickSheetLegType`
 
@@ -12642,6 +12767,26 @@ already completed and returns `null` before this runs (see
 {@link deriveNextEventDate}). The defence depends on that status invariant
 — pin it against {@link pickSheetLegDirection} over constructed bookings,
 never re-derive an oracle from this function itself.
+
+### `mixedBookingGrains(items: ReadonlyArray<unknown>): MixedBookingGrain[]`
+
+Lines that would consolidate into ONE booking while disagreeing on `type`.
+
+A booking is an aggregate per `(order, product, LEG, component ancestry)`
+(`@cfs/core/utils/booking-id`) and its id carries no type, so two lines of one
+product under one destination — in two different GROUPS, which path
+uniqueness allows — with the same product ancestry are one booking. If one is
+a `rental` and the other a `sale`, `consolidateItems` keeps whichever came
+first and the booking's return leg, stock claim and pick sheet follow that
+accident.
+
+The manager cannot produce it — a catalog line's type is not editable, and a
+custom line has its own uid — so this closes it for the API and MCP callers.
+0 of 9,370 booking grains mixed in either project (measured 2026-09-28).
+
+The grain key mirrors `componentAncestry` exactly: the leg is `path[0]` (an
+order's top divider), the ancestry is `path`'s product-shaped segments minus
+the line's own.
 
 ### `pickSheetGateAdmits(pair: PickSheetGatePair, gate: PickSheetGateType): boolean`
 
@@ -12829,13 +12974,25 @@ Display defaults for every Typesense collection, derived from collection config.
 const typesenseDisplayDefaults: Record<string, TypesenseDisplayDefaults>;
 ```
 
-### `unplacedEndpoints(status: string, destinations: ReadonlyArray<PlaceablePair>): UnplacedEndpoint[]`
+### `unplacedEndpoints(status: string, destinations: ReadonlyArray<PlaceablePair>, items: ReadonlyArray<unknown>): UnplacedEndpoint[]`
 
 Every endpoint half a document at `status` is missing — the rule
 {@link checkStoredEndpoints} enforces on the stored schemas, as data, so a
 WRITER can refuse the same input with a 400 before it builds a document the
 schema would reject with a 500. One author: the refinement is this function
 plus an `addIssue` per entry. Empty for a draft.
+
+🔴 **`items` is what decides a `null` collection leg** (api-cloudrun#1154).
+A document whose items hold no line that comes back has nothing to collect,
+so its collection leg may be `null`; one that holds a rental needs a PLACED
+leg on every pair, and a `null` there is one `endpoint` gap. Without `items`
+this function could not tell the two apart, which is why the signature grew.
+
+⚠️ **It does not require `null` on a sales-only document.** A placed
+collection there is still accepted: 160 sales-only orders per project store
+one today, and the refusal waits until the backfill has nulled them —
+`normalizeCollectionLegs` (`@cfs/core/utils/orders`) is what writes the
+`null` in the meantime.
 
 ### `unwrapNonArray(node: z.ZodType): z.ZodType`
 
@@ -15257,7 +15414,7 @@ interface Booking {
   query_by_uid_store: string[];
   query_by_uid_location: string[];
   uid_destination_delivery: string;
-  uid_destination_collection: string;
+  uid_destination_collection: string | null;
   version: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -17802,16 +17959,24 @@ A destination pair — delivery and collection endpoints.
 `customer_collecting` is true when the customer picks up the items at our
 warehouse for the delivery side of this pair. `customer_returning` is true
 when the customer drops the items off at our warehouse for the collection
-side. Both default to false (we deliver / we collect).
+side, and `null` exactly when there is no collection side.
+
+🔴 **Both flags are REQUIRED here, as of api-cloudrun#1154** — they used to be
+optional and the writer filled `?? false`, which moved the failure the stored
+tightening (`9435a15`) was written against into the writer: an omitted flag
+reads as *"we deliver"* / *"we collect"*, the answer that sends a crew to an
+address. The manager already sends both on every pair (it PUTs the stored
+pair back whole, and `addDestinationPair` states both), so the refusal lands
+on callers that were silently getting a default nobody chose.
 
 ```ts
 interface DestinationType {
   uid?: string;
   dates: OrderDatesType;
   delivery: DestinationEndpointType;
-  collection: DestinationEndpointType;
-  customer_collecting?: boolean;
-  customer_returning?: boolean;
+  collection: DestinationEndpointType | null;
+  customer_collecting: boolean;
+  customer_returning: boolean | null;
   jurisdiction?: JurisdictionType | null;
   exchange?: DestinationExchangeType | null;
 }
@@ -17936,9 +18101,9 @@ interface DocDestinationType {
   uid: string;
   dates: OrderDocDatesType;
   delivery: DocDestinationEndpointType;
-  collection: DocDestinationEndpointType;
+  collection: DocDestinationEndpointType | null;
   customer_collecting: boolean;
-  customer_returning: boolean;
+  customer_returning: boolean | null;
   jurisdiction?: JurisdictionType | null;
   exchange: DestinationExchangeType | null;
 }
@@ -18006,6 +18171,37 @@ interface ItemPriceType {
   discount?: DiscountInputType | null;
   taxes?: Array<typeLiteral>;
   total_cents?: number;
+}
+```
+
+### `LeadingDividerGrain`
+
+Which document a {@link leadingDividerViolations} call is judging.
+
+```ts
+type LeadingDividerGrain = "order" | "fulfillment" | "invoice";
+```
+
+### `LeadingDividerViolation`
+
+A document whose first row is not the divider its grain leads with.
+
+```ts
+interface LeadingDividerViolation {
+  expected: "destination" | "order";
+  found: string | null;
+}
+```
+
+### `MixedBookingGrain`
+
+Two lines of one booking grain that disagree on `type`.
+
+```ts
+interface MixedBookingGrain {
+  index: number;
+  uid: string;
+  types: [string, string];
 }
 ```
 
@@ -18104,7 +18300,7 @@ interface OrderDatesType {
   delivery_end: string | null;
   collection_start: string | null;
   collection_end: string | null;
-  charge_windows: ChargeWindowInputType[];
+  charge_windows: ChargeWindowInputType[] | null;
 }
 ```
 
@@ -18171,7 +18367,7 @@ interface OrderDocDatesType {
   collection_end: string | null;
   collection_end_fs: FirestoreTimestampType | null;
   days_active: number | null;
-  charge_windows: ChargeWindowType[];
+  charge_windows: ChargeWindowType[] | null;
 }
 ```
 
@@ -18580,7 +18776,7 @@ One missing half of one endpoint, as {@link unplacedEndpoints} reports it.
 interface UnplacedEndpoint {
   index: number;
   side: "delivery" | "collection";
-  field: "uid" | "address";
+  field: "uid" | "address" | "endpoint";
 }
 ```
 
@@ -18611,6 +18807,36 @@ interface UpdateOrderInputType {
 }
 ```
 
+### `checkCollectionLegs(doc: typeLiteral, ctx: z.RefinementCtx): void`
+
+The ORDER's collection legs agree with themselves and with its items — the
+rule `normalizeCollectionLegs` (`@cfs/core/utils/orders`) writes, asserted on
+the order only.
+
+Per pair:
+1. `customer_returning` is `null` exactly when `collection` is — the flag
+   describes the leg, so no leg means no flag;
+2. a `null` leg has no collection dates: `collection_start` / `collection_end`
+   (and their `_fs` mirrors) and `days_active` are `null`;
+3. an order holding a `rental` states charge windows on every pair — a rental
+   with no window has no days to bill.
+
+🔴 **The ORDER only, never the fulfillment or the invoice.** Those follow the
+order through the three-way merge (`@cfs/core/utils/shared-fields`), which
+merges `collection` whole but the flag and the dates per FIELD — so an invoice
+that overrode its flag would keep it while its leg synced to `null`, and a
+stored refine there would turn that sync into a 500. The merge's post-step
+re-derives the three on a projection instead (`deriveProjectionCollection`),
+and an audit covers the rest.
+
+⚠️ **What this does NOT yet assert, and why:** *"no rental past draft ⇒ a
+null leg and null windows"*. 160 sales-only orders per project still store a
+placed leg and windows, and whole-document order writers other than
+`createOrder` / `updateOrder` (the tax recompute, the Xero-quote writeback,
+the invoice mirror) do not normalize — so that half ships in the beta after
+the backfill (api-cloudrun#1154 Phase 4). Every clause above held on 100% of
+both corpora when it shipped, because no stored leg was `null` yet.
+
 ### `checkDestinationJoin(doc: typeLiteral, ctx: z.RefinementCtx): void`
 
 {@link destinationJoinViolations} as a document-level refinement. Attached to
@@ -18638,6 +18864,21 @@ can hold an exchange pair whose parent leg another invoice carries.
 ⚠️ **It reads the array, so it is attached at `z.array(...)` rather than to a
 pair** — a pair alone cannot see its siblings.
 
+### `checkLeadingDivider(grain: LeadingDividerGrain): fnOrConstructor`
+
+{@link leadingDividerViolations} as a document-level refinement, for one
+grain. Attached to `OrderSchema`, `FulfillmentSchema` and `InvoiceSchema`; the
+invoice's `linked` is `query_by_orders.length > 0`.
+
+⚠️ **A REFINE, so under `z.strictObject` a stored violator becomes unwritable
+the moment a consumer pins it.** The corpus read 0 in both projects before it
+shipped (2026-09-28: every order and fulfillment leads with a `destination`,
+every one of 1,035 order-linked invoices with an `order`).
+
+### `checkMixedBookingGrains(items: ReadonlyArray<unknown>, ctx: z.RefinementCtx): void`
+
+{@link mixedBookingGrains} as a refinement on the order's `items`.
+
 ### `checkStoredEndpoints(doc: typeLiteral, ctx: z.RefinementCtx): void`
 
 A STORED order, fulfillment or invoice that has left `draft` names a real place
@@ -18658,6 +18899,11 @@ repair-null-endpoint-addresses script, verified by its
 scan-null-endpoint-addresses census), because under
 `z.strictObject` every write re-parses the whole stored document: a stored
 violator would have been unwritable the moment the API pinned this.
+
+⚠️ **A `null` collection leg is not an unplaced one.** It is the answer
+*"this document collects nothing"*, legal whenever the document's items hold
+no line that comes back — see {@link unplacedEndpoints}, which reads `items`
+for exactly that.
 
 ⚠️ **A document-level refinement, so a single-field PATCH does not see it.**
 `assertValidPatch` validates each key alone; a writer patching `destinations`
@@ -18709,11 +18955,17 @@ function plus an `addIssue` per entry, and api-cloudrun's write guard (which
 also covers invoices) calls it rather than keeping a second copy.
 
 The join is the divider's `uid` = the pair's `uid` (see
-{@link DocDestinationType.uid}). It is a biconditional except for the one shape
-{@link isSingleEntryDeduction} names:
-- **divider → pair** is unconditional, and vacuous when no divider exists;
-- **pair → divider** is unconditional unless the document has no dividers and
-  one pair.
+{@link DocDestinationType.uid}), and it is a plain biconditional: every divider
+is answered by a pair and every pair names a divider.
+
+🔴 **There is no divider-less exemption any more** (api-cloudrun#1154, owner
+2026-09-28). A document with no dividers and ONE pair used to be legal as a
+"single-entry deduction" — the lone pair answered every line — and it was the
+shape that let a second destination be added beside an unjoined first one.
+Every order is now born with its divider (`items.min(1)` plus
+{@link leadingDividerViolations}), so the shape is unrepresentable on the
+order and fulfillment and the exemption had nothing left to exempt. 0 stored
+documents used it in either project (measured 2026-09-28).
 
 A row with a non-string `uid` is skipped: the schema parse owns it.
 
@@ -18722,6 +18974,22 @@ A row with a non-string `uid` is skipped: the schema parse owns it.
 The statuses an operator can move to from the given current status.
 Returns an empty list for computed statuses (`active`, `complete`) and
 filters the current status out of the user-settable set.
+
+### `hasCollectionLine(items: ReadonlyArray<unknown>): boolean`
+
+Whether ANY row of these items comes back on a collection leg — i.e. whether
+the document needs a collection leg at all.
+
+🔴 **Document-wide, not per pair** (owner, 2026-09-28). A per-pair rule would
+be a fourth definition of "needs a collection" beside the manager's
+order-wide `showCollectionFor`. Evaluated on EACH document's own items: a
+fulfillment keeps a `quantity_order: 0` rental while custody is out, and an
+invoice keeps lines its order dropped, so the three documents can answer
+differently and each answer is right for its own document.
+
+### `isCollectionLineType(type: unknown): boolean`
+
+Whether a line of this `type` comes back on a collection leg. See {@link hasCollectionLine}.
 
 ### `isFulfillableItem(item: OrderDocItemType): item is OrderDocLineItemType`
 
@@ -18747,21 +19015,6 @@ destination/group dividers). Sound: every non-divider `type` is now backed by
 exactly one shape, so the narrowing cannot hand a caller a `price` of the
 wrong kind.
 
-### `isSingleEntryDeduction(dividerCount: number, pairCount: number): boolean`
-
-The ONE sanctioned divider-less shape: no destination dividers at all, and
-exactly one pair.
-
-🔴 **Not "no dividers" alone, and not "one pair" alone.** With no divider a
-line cannot address a destination by `item.path`, so the answer has to come
-from somewhere else — and with exactly ONE pair there is no other answer to
-pick, which makes it a deduction rather than a guess. With two or more pairs
-the deduction has nothing to deduce from and every pair is unaddressable; one
-divider beside two pairs is a broken join and stays refused.
-
-Asked by {@link destinationJoinViolations} and by any writer that reports the
-same shape, so the report and the refusal cannot drift apart.
-
 ### `isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: "manual" | "propagation"): boolean`
 
 Server-side gate for an order status write. `source: "manual"` rejects
@@ -18769,13 +19022,79 @@ writes that move into a computed status or out of a computed status into
 anything other than the same value (no-op). `source: "propagation"`
 trusts the booking write path that sets `active` or `complete`.
 
-### `unplacedEndpoints(status: string, destinations: ReadonlyArray<PlaceablePair>): UnplacedEndpoint[]`
+### `leadingDividerViolations(items: ReadonlyArray<unknown>, grain: LeadingDividerGrain, linked: boolean): LeadingDividerViolation[]`
+
+Whether a document's `items[0]` is the top divider its grain leads with —
+the rule {@link checkLeadingDivider} enforces on the stored order, fulfillment
+and invoice schemas, as data, so a WRITER can refuse the same input with a 400
+before it builds a document the schema would reject with a 500. One author:
+the refinement is this function plus an `addIssue`, and api-cloudrun's write
+guard calls it rather than keeping a second copy (api-cloudrun#1154).
+
+| grain | `items[0]` must be |
+|---|---|
+| order, fulfillment | a `destination` divider |
+| invoice with a source order (`linked`) | an `order` divider |
+| invoice with no source order | unruled |
+
+⚠️ **Only the FIRST row, deliberately.** An order-linked invoice may carry
+order-level lines (a card fee, a replacement, a service) between its `order`
+divider and its first `destination` — 11 prod invoices do (measured
+2026-09-28), so an `items[1] === "destination"` rule would refuse correct
+documents.
+
+⚠️ **The order-less invoice is unruled, not exempted by accident.** 31 legacy
+invoices carry no source order and bill a bare line first; no writer produces
+that shape any more, and api-cloudrun's invoice writers require a source
+order rather than a refine here, so those 31 stay readable.
+
+Empty `items` returns `[]`: an empty order or fulfillment is `items.min(1)`'s
+error, not this one's, so the two never report one defect twice.
+
+**Parameters**
+
+- `linked` — Whether the document has a source order. Read only for the
+invoice grain; an order or fulfillment always leads with a destination.
+
+### `mixedBookingGrains(items: ReadonlyArray<unknown>): MixedBookingGrain[]`
+
+Lines that would consolidate into ONE booking while disagreeing on `type`.
+
+A booking is an aggregate per `(order, product, LEG, component ancestry)`
+(`@cfs/core/utils/booking-id`) and its id carries no type, so two lines of one
+product under one destination — in two different GROUPS, which path
+uniqueness allows — with the same product ancestry are one booking. If one is
+a `rental` and the other a `sale`, `consolidateItems` keeps whichever came
+first and the booking's return leg, stock claim and pick sheet follow that
+accident.
+
+The manager cannot produce it — a catalog line's type is not editable, and a
+custom line has its own uid — so this closes it for the API and MCP callers.
+0 of 9,370 booking grains mixed in either project (measured 2026-09-28).
+
+The grain key mirrors `componentAncestry` exactly: the leg is `path[0]` (an
+order's top divider), the ancestry is `path`'s product-shaped segments minus
+the line's own.
+
+### `unplacedEndpoints(status: string, destinations: ReadonlyArray<PlaceablePair>, items: ReadonlyArray<unknown>): UnplacedEndpoint[]`
 
 Every endpoint half a document at `status` is missing — the rule
 {@link checkStoredEndpoints} enforces on the stored schemas, as data, so a
 WRITER can refuse the same input with a 400 before it builds a document the
 schema would reject with a 500. One author: the refinement is this function
 plus an `addIssue` per entry. Empty for a draft.
+
+🔴 **`items` is what decides a `null` collection leg** (api-cloudrun#1154).
+A document whose items hold no line that comes back has nothing to collect,
+so its collection leg may be `null`; one that holds a rental needs a PLACED
+leg on every pair, and a `null` there is one `endpoint` gap. Without `items`
+this function could not tell the two apart, which is why the signature grew.
+
+⚠️ **It does not require `null` on a sales-only document.** A placed
+collection there is still accepted: 160 sales-only orders per project store
+one today, and the refusal waits until the backfill has nulled them —
+`normalizeCollectionLegs` (`@cfs/core/utils/orders`) is what writes the
+`null` in the meantime.
 
 ## `@cfs/core/schemas/fulfillment`
 
@@ -21639,7 +21958,7 @@ interface BookingDocument {
   destinations?: typeLiteral;
   stores?: Array<typeLiteral>;
   uid_destination_delivery?: string;
-  uid_destination_collection?: string;
+  uid_destination_collection?: string | null;
   created_at?: number;
   updated_at: number;
 }
@@ -25996,6 +26315,28 @@ One key of the booking lifecycle breakdown.
 type BookingBreakdownKeyType = indexedAccess;
 ```
 
+### `BookingCollection`
+
+What {@link bookingCollectionFor} decides for one booking.
+
+```ts
+interface BookingCollection {
+  collection: BookingDestinationRef | null;
+  uid_destination_collection: string | null;
+}
+```
+
+### `BookingCollectionPair`
+
+A destination pair as far as {@link bookingCollectionFor} reads it.
+
+```ts
+interface BookingCollectionPair {
+  delivery: typeLiteral;
+  collection: typeLiteral | null;
+}
+```
+
 ### `GrainKeep`
 
 ```ts
@@ -26046,6 +26387,27 @@ Two live consumer classes remain, and neither is the cascade:
 So it is kept deliberately. **Do not reach for it to maintain a roll-up in a
 writer** — a delta is lossy the moment one is dropped, which is the failure
 `sumBookingsBreakdown` exists to make unrepresentable.
+
+### `bookingCollectionFor(type: string, pair: BookingCollectionPair): BookingCollection`
+
+**The one author of a booking's collection** (api-cloudrun#1154) — every
+booking writer (the create path, the reconcile, a kept booking, a repair
+script) takes both collection fields from here.
+
+🔴 **Decided by the BOOKING's own `type`, not the order's or the pair's.** A
+booking is one grain (`(order, product, leg, ancestry)`), and one grain has
+one type (`mixedBookingGrains`, `@cfs/core/schemas`), so a `sale` booking on
+an order that also rents still never comes back:
+
+| booking type | collection |
+|---|---|
+| `rental` | the pair's leg: `{ uid, address }` |
+| anything else | `null`, both fields |
+
+A rental whose leg has no `uid` yet (an unplaced leg, legal on a draft alone)
+takes the DELIVERY address, because `Booking.destinations.collection.uid` is a
+required id; that was every writer's rule before this function existed, and
+it is now confined to the one case that needs it.
 
 ### `calculateBookingBreakdown(status: OrderStatusType, type: ComponentTypeType, quantity: number, existingBreakdown?: indexedAccess): indexedAccess`
 
@@ -26694,7 +27056,7 @@ interface CountedChargeWindow {
 An edit to one pair's dates. See {@link applyDateEdit}.
 
 ```ts
-type DateEdit = typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral;
+type DateEdit = typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral;
 ```
 
 ### `DateEditContext`
@@ -26820,6 +27182,11 @@ The edits:
 - `default_dates` — delivery at 09:00 on the next business day (tomorrow once
   the Chicago hour is past 8), collection 5 business days on at 15:00, one
   window over both.
+- `seed_collection` — a pair that had no collection leg gains one: collection
+  5 business days after its delivery start at 15:00 (`default_dates`' rule,
+  from the delivery the pair already has), and one window over possession.
+  `normalizeCollectionLegs` (`@cfs/core/utils/orders`) runs it when a rental
+  comes back (api-cloudrun#1154).
 
 Never throws for a bad edit: it returns `{ error }`.
 
@@ -26867,6 +27234,7 @@ have not been authored yet). Every stored pair has at least one window.
 
 ```ts
 chargedDays({ charge_windows: [{ start, end, days: 3 }, { start, end, days: 4 }] }); // 7
+chargedDays({ charge_windows: null }); // 0 — the pair bills no days
 ```
 
 ### `chicagoDayAtTimeOf(instant: string, days: number, timeOf: string): string`
@@ -29034,7 +29402,8 @@ renders as "In Store Pickup / Delivery".
 
 Mapping:
   start: customer_collecting === true → "In Store Pickup", else → "Delivery"
-  end:   customer_returning  === true → "In Store Return", else → "Pickup"
+  end:   customer_returning  === true → "In Store Return", false → "Pickup",
+         null (no collection leg) → nothing
 
 Empty input returns empty strings.
 
@@ -30257,7 +30626,8 @@ renders as "In Store Pickup / Delivery".
 
 Mapping:
   start: customer_collecting === true → "In Store Pickup", else → "Delivery"
-  end:   customer_returning  === true → "In Store Return", else → "Pickup"
+  end:   customer_returning  === true → "In Store Return", false → "Pickup",
+         null (no collection leg) → nothing
 
 Empty input returns empty strings.
 
@@ -32751,6 +33121,20 @@ Stored money is integer cents. A document is priced by `priceDocument`
 (`@cfs/core/utils/price-document`); this module holds the per-line pricers it
 composes, and the audit oracle {@link rederiveDocumentTotalsForAudit}.
 
+### `CollectionLegPair`
+
+A pair as far as {@link normalizeCollectionLegs} reads and writes it.
+
+```ts
+interface CollectionLegPair {
+  delivery: E;
+  collection: E | null;
+  customer_collecting: boolean;
+  customer_returning: boolean | null;
+  dates: ChargeDates & typeLiteral;
+}
+```
+
 ### `ConsolidatedItem`
 
 ```ts
@@ -32820,7 +33204,7 @@ interface DestinationPairMintInput {
   description?: string;
   dates: OrderDocDatesType;
   delivery: DocDestinationEndpointType;
-  collection: DocDestinationEndpointType;
+  collection: DocDestinationEndpointType | null;
   customer_collecting?: boolean;
   customer_returning?: boolean;
   jurisdiction?: JurisdictionType | null;
@@ -33927,7 +34311,8 @@ renders as "In Store Pickup / Delivery".
 
 Mapping:
   start: customer_collecting === true → "In Store Pickup", else → "Delivery"
-  end:   customer_returning  === true → "In Store Return", else → "Pickup"
+  end:   customer_returning  === true → "In Store Return", false → "Pickup",
+         null (no collection leg) → nothing
 
 Empty input returns empty strings.
 
@@ -34136,6 +34521,53 @@ pricer here and deleted it. {@link priceTransactionFeeLine} is the caller.
 the whole point of the shape is to describe an item mid-construction. A
 caller reaching this predicate with the quantity not yet resolved is the
 expected case, not a malformed document.
+
+### `normalizeCollectionLegs(order: O, holidays: readonly string[] | null): O`
+
+**The one author of an ORDER's collection legs** (api-cloudrun#1154, owner
+2026-09-28) — run by the manager on every items edit and status change, and by
+api-cloudrun's `createOrder` / `updateOrder` BEFORE validation, so every
+writer converges on one answer rather than each deciding it.
+
+"Needs a leg" is {@link hasCollectionLine} over the order's own items — a
+`rental` anywhere in the document. Document-wide, like the leg itself.
+
+| the order | each pair becomes |
+|---|---|
+| past draft, nothing comes back | `collection`, `customer_returning`, the collection dates (+ `_fs`), `days_active` and `charge_windows` all `null` |
+| a rental, and the pair's `collection` is `null` | re-seeded (below) |
+| a placed leg with a `null` flag | the flag re-seeded from `customer_collecting` |
+| a `null` leg with a flag (a draft) | the flag nulled |
+| anything else | as stored |
+
+**The re-seed mirrors the delivery leg**: `collection` is a copy of `delivery`
+and `customer_returning = customer_collecting` — an in-store pickup (whose
+delivery endpoint IS the store) becomes an in-store return, a delivered pair
+becomes "Same As Delivery" with us collecting. The dates are
+`applyDateEdit`'s `seed_collection`: collection 5 business days after the
+pair's delivery start, one window over possession. A seed for the operator
+to change, not a guess about them.
+
+⚠️ **`holidays === null` defers the re-seed** — the pair is left exactly as
+it is, and the caller re-runs this once holidays load (the manager's holiday
+listener is not awaited at boot). Pass the LOADED list or `null`, never an
+empty stand-in: `[]` would count every holiday as a business day. The nulling
+half needs no holidays and always runs. The API always has its snapshot, so a
+save that lands in the gap is re-seeded server-side.
+
+⚠️ **A DRAFT keeps what the operator set.** The manager saves on blur, and an
+operator may place both legs before adding a single item; nulling on that
+save would throw their work away. The legs, dates and windows are dropped at
+the first status past draft.
+
+⚠️ **Orders only.** A fulfillment and an invoice follow their order through
+the three-way merge and keep what their OWN items still need
+(`deriveProjectionCollection`, `@cfs/core/utils/shared-fields`). Do not call
+this on them.
+
+Pure. Does not mint the `_fs` mirrors of a re-seeded date — the API's date
+canonicalization does, on the write. Returns the SAME object when nothing
+changes, so a caller can compare by reference to skip a write.
 
 ### `orderHasDiscount(items: LineItem[]): boolean`
 
@@ -34539,6 +34971,11 @@ interface PricedDocument {
 
 **Build {@link PriceDocumentContext.charge_windows}** from a document's stored
 `destinations`. Reads stored window days only.
+
+A pair whose windows are `null` bills no days (a document with no rental —
+api-cloudrun#1154) and is simply absent from the context; a rental line under
+it is refused where it is priced ({@link lineChargeableDays}), which names the
+line rather than the pair.
 
 ### `chargeWindowPairViolations(items: readonly LineItem[], ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">): ChargeWindowPairViolation[]`
 
@@ -35619,6 +36056,19 @@ until 2026-09-18.
 const PROPAGATE_META_KEY: "propagate";
 ```
 
+### `ProjectionCollectionPair`
+
+A projection pair as far as {@link deriveProjectionCollection} reads it.
+
+```ts
+interface ProjectionCollectionPair {
+  collection: unknown;
+  customer_collecting: boolean;
+  customer_returning: boolean | null;
+  dates: Record<string, unknown> & typeLiteral;
+}
+```
+
 ### `SHARED_META_KEY`
 
 The meta key that marks a value merged whole: `.meta({ shared: "value" })`.
@@ -35682,6 +36132,43 @@ or a fulfillment). See the module docs for the kinds.
 
 Pure and deterministic, and cheap enough to call per sync, but callers should
 compute it once per schema pair.
+
+### `deriveProjectionCollection(merged: P, stored: P | undefined, projectionItems: ReadonlyArray<unknown>): P`
+
+**Settle a projection pair's collection leg after the three-way merge** — the
+fulfillment's or invoice's answer to what the order's
+`normalizeCollectionLegs` (`@cfs/core/utils/orders`) decides on the order.
+
+{@link mergeSharedFields} merges `collection` WHOLE but the flag and the dates
+per FIELD, so on its own it can leave a projection holding a `null` leg with a
+`true` flag (an invoice that overrode it) or a leg the order dropped over
+lines that still need one. This runs between the merge and
+{@link resolveMergedPairDates}:
+
+1. **KEEP** — the merge nulled the leg (or the windows) but the projection's
+   OWN items still hold a rental: a fulfillment row still out on custody at
+   `quantity_order: 0`, an invoice line the order dropped. The projection
+   keeps its stored leg, flag, collection dates and windows. The same shape as
+   the fulfillment's custody keep, and for the same reason: the projection
+   records what HAPPENED / what is BILLED, and a sales edit to the quote does
+   not unmake it. No marker is written; the difference from the order shows in
+   the diff surface (`computeDocumentDiffs`) for an operator to resolve, and
+   the next sync after the rental leaves the projection lets the `null` through.
+2. **DERIVE** — a `null` leg has a `null` flag and no collection dates; a
+   placed leg with a `null` flag takes `customer_collecting`'s value (the
+   re-seed rule). Neither decides an operator question: both only make the
+   pair agree with the leg the merge already chose.
+
+Nothing here INVENTS a leg. A projection that needs one and has none stored is
+left as the merge produced it, and its own write validation says so.
+
+Pure: returns `merged` unchanged when there is nothing to settle.
+
+**Parameters**
+
+- `merged` — the pair after {@link mergeSharedFields}
+- `stored` — the projection's pair as stored, `undefined` for a new pair
+- `projectionItems` — the projection's OWN items after the sync
 
 ### `fieldsUnder(c: SharedFieldClassification, row: string): SharedField[]`
 
@@ -36120,7 +36607,8 @@ renders as "In Store Pickup / Delivery".
 
 Mapping:
   start: customer_collecting === true → "In Store Pickup", else → "Delivery"
-  end:   customer_returning  === true → "In Store Return", else → "Pickup"
+  end:   customer_returning  === true → "In Store Return", false → "Pickup",
+         null (no collection leg) → nothing
 
 Empty input returns empty strings.
 
@@ -36893,15 +37381,15 @@ which moves when CRMS reorders, and no longer the endpoint uid, which is a
 `destinations/{uid}` document id and therefore *shared* by two pairs
 delivering to one address (api-cloudrun#662/#663/#664).
 
-## One join and one deduction — measured, not assumed
+## One join — measured, not assumed
 
 Measured over the whole prod corpus (19,098 priceable lines,
 `api-cloudrun/scripts/audit-tax-key.ts`, 2026-08-25; dev identical):
 
 | rung | lines | when it fires |
 |---|---|---|
-| `divider.uid` ↔ `pair.uid` | 19,008 | the ordinary case, and now the only join |
-| the single entry | 2 | a divider-less items array |
+| `divider.uid` ↔ `pair.uid` | 19,008 | the ordinary case, and the only join |
+| `null` — no destination ancestor | 11 (2026-09-28) | an ORDER-level line on a one-pair invoice (see below) |
 | `null` — no destinations at all | 88 | 31 CRMS invoices with no source order |
 | UNREACHABLE | 0 | — |
 
@@ -36917,11 +37405,18 @@ the uid join a divider that names no pair is a **defect to report**, not a
 position to guess from — api-cloudrun's write guard
 (`api-cloudrun/src/lib/firestoreWrite.ts`) refuses it at write.
 
-⚠️ **The single-entry rung is KEPT, and it is a deduction rather than a
-guess** — the same distinction `assignDestinationPairUids`' forced-leftover
-rung draws.
-With exactly one destination on the document there is no other answer to
-pick, so nothing is being inferred from position.
+🔴 **The single-entry rung is deleted too** (api-cloudrun#1154, owner
+2026-09-28). It answered a line with no destination ancestor with the
+document's lone pair. Re-measured 2026-09-28 it served **11** prod lines (dev
+identical), every one an invoice line placed directly under the `order`
+divider of a one-pair invoice: 8 `transaction_fee` card fees, 2 `service`,
+2 `replacement`. Deleting it changed **0 cents**: the fee and service lines
+are the non-taxable class and a replacement sources to the origin by type,
+and all 11 are paid or void. Going forward an order-level TAXABLE line on a
+one-pair invoice resolves to `null` → the origin — the answer a multi-pair
+invoice always gave, so the count of pairs no longer changes a line's tax.
+The doc-level divider-less shape it was written for is now unrepresentable
+(`items.min(1)` and a leading divider on the order and fulfillment).
 
 ### `isTaxableCoa(coaRevenue: number | null | undefined): boolean`
 

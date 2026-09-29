@@ -37,6 +37,7 @@ import {
   TimestampFields,
 } from "./common.ts";
 import {
+  checkLeadingDivider,
   checkStoredEndpoints,
   DestinationPairCore,
   Discount,
@@ -1117,7 +1118,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
-}).superRefine(checkStoredEndpoints).refine(
+}).superRefine(checkStoredEndpoints).superRefine(checkLeadingDivider("invoice")).refine(
   // The mirror must be EXACTLY the set its lines carry — a mirror is a claim
   // about the lines, and one a writer forgot to refresh would hide a billed
   // record from the double-bill check. Absent reads as `[]`, so an invoice with

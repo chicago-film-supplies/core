@@ -496,11 +496,10 @@ export interface DocumentTaxContext {
    * JOIN — `divider.uid === pair.uid` — and its own rung table is the statement
    * of record, so read it there rather than restating it here.
    *
-   * 🔴 The only other rung is the SINGLE-ENTRY deduction, which needs
-   * `destinations.length === 1` — where order is meaningless by construction.
-   * The divider-INDEX rung is **deleted and must not come back**; a docblock
-   * telling a caller that position matters is an argument for exactly the rung
-   * {@link destinationsForItems} forbids.
+   * 🔴 There is no other rung. The divider-INDEX rung and the single-entry
+   * deduction are both **deleted and must not come back**; a docblock telling a
+   * caller that position (or pair count) matters is an argument for exactly the
+   * rungs {@link destinationsForItems} forbids.
    */
   destinations: ReadonlyArray<TaxDestination | null | undefined>;
   /** Level 2 — `organizations/{uid}.jurisdiction_claim`. */
@@ -551,15 +550,15 @@ export interface DocumentTaxContext {
  * `destinations/{uid}` document id and therefore *shared* by two pairs
  * delivering to one address (api-cloudrun#662/#663/#664).
  *
- * ## One join and one deduction — measured, not assumed
+ * ## One join — measured, not assumed
  *
  * Measured over the whole prod corpus (19,098 priceable lines,
  * `api-cloudrun/scripts/audit-tax-key.ts`, 2026-08-25; dev identical):
  *
  * | rung | lines | when it fires |
  * |---|---|---|
- * | `divider.uid` ↔ `pair.uid` | 19,008 | the ordinary case, and now the only join |
- * | the single entry | 2 | a divider-less items array |
+ * | `divider.uid` ↔ `pair.uid` | 19,008 | the ordinary case, and the only join |
+ * | `null` — no destination ancestor | 11 (2026-09-28) | an ORDER-level line on a one-pair invoice (see below) |
  * | `null` — no destinations at all | 88 | 31 CRMS invoices with no source order |
  * | UNREACHABLE | 0 | — |
  *
@@ -575,11 +574,18 @@ export interface DocumentTaxContext {
  * position to guess from — api-cloudrun's write guard
  * (`api-cloudrun/src/lib/firestoreWrite.ts`) refuses it at write.
  *
- * ⚠️ **The single-entry rung is KEPT, and it is a deduction rather than a
- * guess** — the same distinction `assignDestinationPairUids`' forced-leftover
- * rung draws.
- * With exactly one destination on the document there is no other answer to
- * pick, so nothing is being inferred from position.
+ * 🔴 **The single-entry rung is deleted too** (api-cloudrun#1154, owner
+ * 2026-09-28). It answered a line with no destination ancestor with the
+ * document's lone pair. Re-measured 2026-09-28 it served **11** prod lines (dev
+ * identical), every one an invoice line placed directly under the `order`
+ * divider of a one-pair invoice: 8 `transaction_fee` card fees, 2 `service`,
+ * 2 `replacement`. Deleting it changed **0 cents**: the fee and service lines
+ * are the non-taxable class and a replacement sources to the origin by type,
+ * and all 11 are paid or void. Going forward an order-level TAXABLE line on a
+ * one-pair invoice resolves to `null` → the origin — the answer a multi-pair
+ * invoice always gave, so the count of pairs no longer changes a line's tax.
+ * The doc-level divider-less shape it was written for is now unrepresentable
+ * (`items.min(1)` and a leading divider on the order and fulfillment).
  */
 export function destinationsForItems(
   items: readonly LineItem[],
@@ -591,8 +597,6 @@ export function destinationsForItems(
   }
 
   return items.map((item) => {
-    if (destinations.length === 0) return null;
-
     let divider: LineItem | undefined;
     const path = item.path ?? [];
     for (let k = path.length - 1; k >= 1; k--) {
@@ -603,12 +607,8 @@ export function destinationsForItems(
       }
     }
 
-    if (divider?.uid) {
-      const byUid = destinations.find((d) => d?.uid === divider.uid);
-      if (byUid) return byUid;
-    }
-
-    return destinations.length === 1 ? destinations[0] ?? null : null;
+    if (!divider?.uid) return null;
+    return destinations.find((d) => d?.uid === divider.uid) ?? null;
   });
 }
 

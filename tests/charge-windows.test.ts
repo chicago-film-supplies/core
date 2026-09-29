@@ -459,7 +459,7 @@ Deno.test("priceDocument: only a rental five_day_week line takes days from its p
 });
 
 Deno.test("priceDocument: a rental five_day_week line under no pair is refused", () => {
-  assertThrows(() => priceDocument([line(["order-divider"])], priceCtx(pairWith([5]))), PriceRefusalError, "not under a destination pair");
+  assertThrows(() => priceDocument([line(["order-divider"])], priceCtx(pairWith([5]))), PriceRefusalError, "under no destination pair with charge windows");
 });
 
 Deno.test("priceDocument: a complete or canceled order keeps its lines' stored days", () => {
@@ -471,8 +471,18 @@ Deno.test("priceDocument: a complete or canceled order keeps its lines' stored d
   assertEquals(live.chargeable_days, 7, "an issued, unpaid invoice is re-derived");
 });
 
-Deno.test("chargeWindowContext: a pair with no windows is refused", () => {
-  assertThrows(() => chargeWindowContext([{ uid: "D", dates: { charge_windows: [] } }]), PriceRefusalError, "no charge windows");
+Deno.test("chargeWindowContext: an EMPTY windows array is refused — null means none", () => {
+  assertThrows(() => chargeWindowContext([{ uid: "D", dates: { charge_windows: [] } }]), PriceRefusalError, "empty charge_windows");
+});
+
+Deno.test("chargeWindowContext: a pair whose windows are null bills no days and is left out (api-cloudrun#1154)", () => {
+  // A sales-only document's pairs carry `charge_windows: null`. Pricing it must not
+  // throw: its lines never read days, and a rental under such a pair is refused
+  // where it is priced, naming the line.
+  assertEquals(chargeWindowContext([{ uid: "D", dates: { charge_windows: null } }]), []);
+  const sale = { ...line(["D"]), type: "sale" as const, price: { ...line(["D"]).price, formula: "fixed" as const } };
+  assertEquals(lineChargeableDays(sale as never, priceCtx([])), { chargeable_days: null });
+  assertThrows(() => lineChargeableDays(line(["D"]), priceCtx([])), PriceRefusalError, "under no destination pair with charge windows");
 });
 
 Deno.test("chargeWindowContext: an invoice pair's divider path is [uid_order, uid]", () => {

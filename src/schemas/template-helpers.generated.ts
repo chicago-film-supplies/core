@@ -259,7 +259,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "sessionQuantity", expr: "it.sessions.sessionQuantity(items)", desc: "Total units across a set of rows.", returns: "number" },
   ],
   "shared-fields": [
-
+    { name: "deriveProjectionCollection", expr: "it.shared-fields.deriveProjectionCollection(merged, stored, projectionItems)", desc: "**Settle a projection pair's collection leg after the three-way merge** — the fulfillment's or invoice's answer to what the order's `normalizeCollectionLegs` (`@cfs/core/utils/orders`) decides on the order.", returns: "P" },
   ],
   "stock": [
 

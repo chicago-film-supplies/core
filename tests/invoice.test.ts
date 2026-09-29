@@ -67,6 +67,31 @@ const validDestination = {
   exchange: null,
 };
 
+/** The source order's divider — an order-linked invoice's `items[0]` (`checkLeadingDivider`). */
+const ORDER_DIVIDER = {
+  uid: "testorder10000000000",
+  type: "order",
+  name: "Order #1000",
+  description: "",
+  path: ["testorder10000000000"],
+};
+
+const validLine = {
+  ...lineItemBase,
+  uid: "item1000000000000000",
+  type: "rental",
+  name: "Camera Rental",
+  quantity: 1,
+  price: {
+    ...priceBase,
+    base_cents: 50000,
+    chargeable_days: 5,
+    subtotal_cents: 50000,
+    subtotal_discounted_cents: 50000,
+    total_cents: 50000,
+  },
+};
+
 const validInvoice = {
   ...invoiceBase,
   uid: "testinv1000000000000",
@@ -85,21 +110,8 @@ const validInvoice = {
     billing_address: null,
   },
   destinations: [validDestination],
-  items: [{
-    ...lineItemBase,
-    uid: "item1000000000000000",
-    type: "rental",
-    name: "Camera Rental",
-    quantity: 1,
-    price: {
-      ...priceBase,
-      base_cents: 50000,
-      chargeable_days: 5,
-      subtotal_cents: 50000,
-      subtotal_discounted_cents: 50000,
-      total_cents: 50000,
-    },
-  }],
+  // Order-linked, so it LEADS with its order divider (api-cloudrun#1154).
+  items: [ORDER_DIVIDER, validLine],
   totals: {
     ...totalsBase,
     subtotal_cents: 50000,
@@ -209,11 +221,33 @@ Deno.test("checkStoredEndpoints — a draft may leave a leg unplaced; nothing pa
 
 Deno.test("unplacedEndpoints — the refinement as data, so a writer can 400 on it", () => {
   const unplaced = { uid: null, address: null };
-  assertEquals(unplacedEndpoints("draft", [{ delivery: unplaced, collection: unplaced }]), []);
-  assertEquals(unplacedEndpoints("reserved", [{ delivery: placedEndpoint, collection: placedEndpoint }]), []);
-  assertEquals(unplacedEndpoints("reserved", [{ delivery: placedEndpoint, collection: { uid: "x", address: null } }]), [
-    { index: 0, side: "collection", field: "address" },
-  ]);
+  const rental = [{ type: "rental" }];
+  assertEquals(unplacedEndpoints("draft", [{ delivery: unplaced, collection: unplaced }], rental), []);
+  assertEquals(unplacedEndpoints("reserved", [{ delivery: placedEndpoint, collection: placedEndpoint }], rental), []);
+  assertEquals(
+    unplacedEndpoints("reserved", [{ delivery: placedEndpoint, collection: { uid: "x", address: null } }], rental),
+    [{ index: 0, side: "collection", field: "address" }],
+  );
+});
+
+Deno.test("unplacedEndpoints — a null collection leg is legal exactly when nothing comes back", async (t) => {
+  await t.step("no rental: a null leg is no gap, past draft included", () => {
+    assertEquals(unplacedEndpoints("reserved", [{ delivery: placedEndpoint, collection: null }], [{ type: "sale" }]), []);
+  });
+  await t.step("a rental: a null leg is ONE gap, named `endpoint`, not two halves", () => {
+    assertEquals(
+      unplacedEndpoints("reserved", [{ delivery: placedEndpoint, collection: null }], [{ type: "sale" }, { type: "rental" }]),
+      [{ index: 0, side: "collection", field: "endpoint" }],
+    );
+  });
+  await t.step("a draft with a rental may still hold a null leg", () => {
+    assertEquals(unplacedEndpoints("draft", [{ delivery: placedEndpoint, collection: null }], [{ type: "rental" }]), []);
+  });
+  await t.step("control: an UNPLACED leg on a sales-only document is still two gaps", () => {
+    // `null` means "collects nothing"; `{ uid: null, address: null }` means "not
+    // picked yet", and past draft that stays refused whatever the items are.
+    assertEquals(unplacedEndpoints("reserved", [{ delivery: placedEndpoint, collection: { uid: null, address: null } }], []).length, 2);
+  });
 });
 
 Deno.test("InvoiceSchema accepts part_paid and void statuses", () => {
@@ -241,8 +275,8 @@ Deno.test("InvoiceSchema accepts legacy CRMS fields", () => {
       ...validInvoice.organization,
       crms_id: 100,
     },
-    items: [{
-      ...validInvoice.items[0],
+    items: [ORDER_DIVIDER, {
+      ...validLine,
       crms_opportunity_id: 100,
       crms_id: 42,
     }],
@@ -253,10 +287,10 @@ Deno.test("InvoiceSchema accepts legacy CRMS fields", () => {
 Deno.test("InvoiceSchema rejects removed legacy item-level tax_profile field", () => {
   const doc = {
     ...validInvoice,
-    items: [{
-      ...validInvoice.items[0],
+    items: [ORDER_DIVIDER, {
+      ...validLine,
       price: {
-        ...validInvoice.items[0].price,
+        ...validLine.price,
         tax_profile: "tax_chicago_rental_tax",
       },
     }],
@@ -287,8 +321,8 @@ Deno.test("InvoiceSchema rejects additional properties", () => {
 Deno.test("InvoiceSchema accepts line item with path", () => {
   const doc = {
     ...validInvoice,
-    items: [{
-      ...validInvoice.items[0],
+    items: [ORDER_DIVIDER, {
+      ...validLine,
       path: ["dest1000000000000000", "group100000000000000"],
     }],
   };
@@ -299,6 +333,7 @@ Deno.test("InvoiceSchema accepts group item in items array", () => {
   const doc = {
     ...validInvoice,
     items: [
+      ORDER_DIVIDER,
       {
         uid: "550e8400-e29b-41d4-a716-446655440000",
         type: "group",
@@ -306,7 +341,7 @@ Deno.test("InvoiceSchema accepts group item in items array", () => {
         description: "",
         path: [],
       },
-      ...validInvoice.items,
+      validLine,
     ],
   };
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
@@ -316,6 +351,7 @@ Deno.test("InvoiceSchema accepts destination item in items array", () => {
   const doc = {
     ...validInvoice,
     items: [
+      ORDER_DIVIDER,
       {
         uid: "550e8400-e29b-41d4-a716-446655440001",
         type: "destination",
@@ -323,7 +359,7 @@ Deno.test("InvoiceSchema accepts destination item in items array", () => {
         description: "",
         path: [],
       },
-      ...validInvoice.items,
+      validLine,
     ],
   };
   assertEquals(InvoiceSchema.safeParse(doc).success, true);
@@ -333,6 +369,7 @@ Deno.test("InvoiceSchema accepts mixed items (line + group + destination)", () =
   const doc = {
     ...validInvoice,
     items: [
+      ORDER_DIVIDER,
       {
         uid: "550e8400-e29b-41d4-a716-446655440001",
         type: "destination",
@@ -348,7 +385,7 @@ Deno.test("InvoiceSchema accepts mixed items (line + group + destination)", () =
         path: ["550e8400-e29b-41d4-a716-446655440001"],
       },
       {
-        ...validInvoice.items[0],
+        ...validLine,
         path: ["550e8400-e29b-41d4-a716-446655440001", "550e8400-e29b-41d4-a716-446655440000"],
       },
     ],
@@ -467,7 +504,7 @@ Deno.test("InvoiceSchema accepts order divider item in items array", () => {
         path: [],
       },
       {
-        ...validInvoice.items[0],
+        ...validLine,
         path: ["550e8400-e29b-41d4-a716-446655440002"],
       },
     ],
@@ -490,7 +527,7 @@ Deno.test("InvoiceSchema accepts an Option-B order divider: Firestore-id uid, no
         description: "",
       },
       {
-        ...validInvoice.items[0],
+        ...validLine,
         path: ["k7Hq2mNpQ4rStUvWxYz0"],
       },
     ],
@@ -537,7 +574,7 @@ Deno.test("InvoiceSchema accepts full multi-order hierarchy", () => {
         path: ["550e8400-e29b-41d4-a716-446655440010"],
       },
       {
-        ...validInvoice.items[0],
+        ...validLine,
         path: ["550e8400-e29b-41d4-a716-446655440010", "550e8400-e29b-41d4-a716-446655440001"],
       },
       {
@@ -1347,15 +1384,15 @@ Deno.test("path: required on every invoice input arm, matching the order grain (
 // ── The lost/damaged mirror is a claim about the lines ───────────
 
 Deno.test("InvoiceSchema requires query_by_out_of_service to be exactly the set its lines carry", () => {
-  const line = (validInvoice.items as Record<string, unknown>[])[0];
+  const line: Record<string, unknown> = validLine;
   const lost = { ...line, uid: "item2000000000000000", type: "replacement", uid_out_of_service: "Oos00000000000000001" };
 
   // Stated on a line, absent from the mirror → refused.
-  assertEquals(InvoiceSchema.safeParse({ ...validInvoice, items: [line, lost] }).success, false);
+  assertEquals(InvoiceSchema.safeParse({ ...validInvoice, items: [ORDER_DIVIDER, line, lost] }).success, false);
   // Mirrored → accepted.
   const mirrored = InvoiceSchema.safeParse({
     ...validInvoice,
-    items: [line, lost],
+    items: [ORDER_DIVIDER, line, lost],
     query_by_out_of_service: ["Oos00000000000000001"],
   });
   assertEquals(mirrored.success, true, JSON.stringify(mirrored.success ? {} : mirrored.error.issues));

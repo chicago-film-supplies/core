@@ -96,7 +96,8 @@ export interface ChargeWindowPair {
   /** Set on an invoice pair: the order the pair is scoped to. */
   uid_order?: string | null;
   dates: {
-    charge_windows: readonly { days: number }[];
+    /** `null` on a pair that bills no days (a document with no rental). */
+    charge_windows: readonly { days: number }[] | null;
   };
 }
 
@@ -104,14 +105,20 @@ export interface ChargeWindowPair {
  * **Build {@link PriceDocumentContext.charge_windows}** from a document's stored
  * `destinations`. Reads stored window days only.
  *
- * @throws PriceRefusalError on a pair with no windows: its lines would have no
- *   days to bill.
+ * A pair whose windows are `null` bills no days (a document with no rental —
+ * api-cloudrun#1154) and is simply absent from the context; a rental line under
+ * it is refused where it is priced ({@link lineChargeableDays}), which names the
+ * line rather than the pair.
+ *
+ * @throws PriceRefusalError on a pair whose windows are an EMPTY array — never a
+ *   stored shape (`.min(1)`), so a writer produced it by mistake.
  */
 export function chargeWindowContext(destinations: readonly ChargeWindowPair[]): PairChargeWindows[] {
   for (const pair of destinations) {
     if (!pair.uid) continue;
-    if (!pair.dates?.charge_windows?.length) {
-      throw new PriceRefusalError(`Destination pair ${pair.uid} has no charge windows`);
+    const windows = pair.dates?.charge_windows;
+    if (windows != null && windows.length === 0) {
+      throw new PriceRefusalError(`Destination pair ${pair.uid} states an empty charge_windows — null means none`);
     }
   }
   return statedChargeWindows(destinations);
@@ -342,8 +349,8 @@ export function lineChargeableDays(
   const days = windowChargeableDays(item, ctx.charge_windows);
   if (days === null) {
     throw new PriceRefusalError(
-      `Rental line ${item.uid} is not under a destination pair, so it has no charge windows to bill. ` +
-        "Move it under a destination",
+      `Rental line ${item.uid} is under no destination pair with charge windows, so it has no days to bill. ` +
+        "Move it under a destination, or give its pair charge dates",
     );
   }
   return { chargeable_days: days };

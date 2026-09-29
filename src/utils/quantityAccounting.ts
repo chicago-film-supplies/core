@@ -671,11 +671,14 @@ export function extensionGroups(
   billed: BilledAtPath | undefined,
   orderWindow: BilledWindow | null,
 ): ExtensionGroup[] {
-  if (!isPreTaxItem(orderLine) || orderWindow === null) return [];
+  // A RENTAL only (api-cloudrun#1154): days are a rental's, and a sale, service
+  // or fee stored as `five_day_week` — 360 of them on prod invoices — bills at
+  // factor 1 (`daysFromWindows`), so it has nothing to extend or credit.
+  if (!isPreTaxItem(orderLine) || orderLine.type !== "rental" || orderWindow === null) return [];
   const groups: Array<Omit<ExtensionGroup, "extension_days">> = [];
   const extensions: BilledRow[] = [];
   for (const row of billed?.rows ?? []) {
-    if (!isPreTaxItem(row.item) || row.item.price.formula !== "five_day_week") continue;
+    if (!isPreTaxItem(row.item) || row.item.type !== "rental" || row.item.price.formula !== "five_day_week") continue;
     if (row.via === "extension") {
       extensions.push(row);
       continue;
@@ -1148,7 +1151,9 @@ export function buildRemainingInvoice(
   for (const [destination, entries] of owed) {
     const divider = order.items.find((it) => it.type === "destination" && it.uid === destination);
     const orderPair = order.destinations.find((pair) => pair.uid === destination);
-    if (!divider || !orderPair) continue;
+    // A pair with no windows bills no days, so it holds no rental and nothing
+    // here can have extended it.
+    if (!divider || !orderPair || orderPair.dates.charge_windows === null) continue;
 
     /** One section: its billed window, and the entries keyed by order path. */
     const sections: Array<{ billedDays: number; billedEnd: string; extensionDays: number; byPath: Map<string, { line: LineItem; group: ExtensionGroup }> }> = [];
@@ -1203,7 +1208,7 @@ export function buildRemainingInvoice(
       }
 
       const projectedPair = toInvoiceDestinationPair(O, orderPair);
-      const orderWindows = orderPair.dates.charge_windows;
+      const orderWindows = orderPair.dates.charge_windows!;
       const start = chicagoDayAtTimeOf(section.billedEnd, 1, orderWindows[0].start);
       const end = orderWindows[orderWindows.length - 1].end;
       extensionPairs.push({

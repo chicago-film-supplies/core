@@ -69,7 +69,7 @@
  * @module
  */
 import type { z } from "zod";
-import { FulfillmentSchema, OrderSchema } from "../schemas/mod.ts";
+import { FulfillmentSchema, hasCollectionLine, OrderSchema } from "../schemas/mod.ts";
 import { readMetaThroughWrappers } from "../schemas/zod-walk.ts";
 
 /** How one shared field propagates — see the module docs. */
@@ -649,6 +649,100 @@ export function resolveMergedPairDates<D>(
     dates[fsKey] = (from ? from[fsKey] : null) ?? null;
   }
   return dates as D;
+}
+
+// ── The collection leg on a projection (api-cloudrun#1154) ──────────────────
+
+/** A projection pair as far as {@link deriveProjectionCollection} reads it. */
+export interface ProjectionCollectionPair {
+  collection: unknown;
+  customer_collecting: boolean;
+  customer_returning: boolean | null;
+  dates: Record<string, unknown> & { charge_windows?: unknown };
+}
+
+/** The collection-leg date keys a pair keeps or drops together with its leg. */
+const COLLECTION_DATE_KEYS = [
+  "collection_start",
+  "collection_start_fs",
+  "collection_end",
+  "collection_end_fs",
+  "days_active",
+] as const;
+
+/**
+ * **Settle a projection pair's collection leg after the three-way merge** — the
+ * fulfillment's or invoice's answer to what the order's
+ * `normalizeCollectionLegs` (`@cfs/core/utils/orders`) decides on the order.
+ *
+ * {@link mergeSharedFields} merges `collection` WHOLE but the flag and the dates
+ * per FIELD, so on its own it can leave a projection holding a `null` leg with a
+ * `true` flag (an invoice that overrode it) or a leg the order dropped over
+ * lines that still need one. This runs between the merge and
+ * {@link resolveMergedPairDates}:
+ *
+ * 1. **KEEP** — the merge nulled the leg (or the windows) but the projection's
+ *    OWN items still hold a rental: a fulfillment row still out on custody at
+ *    `quantity_order: 0`, an invoice line the order dropped. The projection
+ *    keeps its stored leg, flag, collection dates and windows. The same shape as
+ *    the fulfillment's custody keep, and for the same reason: the projection
+ *    records what HAPPENED / what is BILLED, and a sales edit to the quote does
+ *    not unmake it. No marker is written; the difference from the order shows in
+ *    the diff surface (`computeDocumentDiffs`) for an operator to resolve, and
+ *    the next sync after the rental leaves the projection lets the `null` through.
+ * 2. **DERIVE** — a `null` leg has a `null` flag and no collection dates; a
+ *    placed leg with a `null` flag takes `customer_collecting`'s value (the
+ *    re-seed rule). Neither decides an operator question: both only make the
+ *    pair agree with the leg the merge already chose.
+ *
+ * Nothing here INVENTS a leg. A projection that needs one and has none stored is
+ * left as the merge produced it, and its own write validation says so.
+ *
+ * Pure: returns `merged` unchanged when there is nothing to settle.
+ *
+ * @param merged - the pair after {@link mergeSharedFields}
+ * @param stored - the projection's pair as stored, `undefined` for a new pair
+ * @param projectionItems - the projection's OWN items after the sync
+ */
+export function deriveProjectionCollection<P extends ProjectionCollectionPair>(
+  merged: P,
+  stored: P | undefined,
+  projectionItems: ReadonlyArray<unknown>,
+): P {
+  let next = merged;
+  if (hasCollectionLine(projectionItems) && stored) {
+    if (next.collection === null && stored.collection !== null) {
+      const dates: Record<string, unknown> = { ...next.dates };
+      for (const key of COLLECTION_DATE_KEYS) {
+        if (key in stored.dates) dates[key] = stored.dates[key];
+      }
+      next = {
+        ...next,
+        collection: stored.collection,
+        customer_returning: stored.customer_returning,
+        dates: dates as P["dates"],
+      };
+    }
+    if (next.dates.charge_windows == null && stored.dates.charge_windows != null) {
+      next = { ...next, dates: { ...next.dates, charge_windows: stored.dates.charge_windows } };
+    }
+  }
+  if (next.collection === null) {
+    const dates: Record<string, unknown> = { ...next.dates };
+    let datesMoved = false;
+    for (const key of COLLECTION_DATE_KEYS) {
+      if (key in dates && dates[key] != null) {
+        dates[key] = null;
+        datesMoved = true;
+      }
+    }
+    if (next.customer_returning !== null || datesMoved) {
+      next = { ...next, customer_returning: null, dates: dates as P["dates"] };
+    }
+  } else if (next.customer_returning === null) {
+    next = { ...next, customer_returning: next.customer_collecting };
+  }
+  return next;
 }
 
 // ── The order → fulfillment schema pair (api-cloudrun#989) ──────────────────

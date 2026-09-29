@@ -2,12 +2,13 @@ import { assertEquals } from "@std/assert";
 import {
   CreateOrderInput,
   destinationJoinViolations,
-  FulfillmentItem,
+  FulfillmentLineItem,
   FulfillmentSchema,
   InvoiceDocDestination,
   InvoiceDocLineItem,
   InvoiceSchema,
-  isSingleEntryDeduction,
+  leadingDividerViolations,
+  mixedBookingGrains,
   OrderDocLineItem,
   OrderItemLine,
   OrderSchema,
@@ -15,6 +16,10 @@ import {
   zeroQuantityComponents,
 } from "../src/schemas/mod.ts";
 import { getTestDoc } from "../src/schemas/testing.ts";
+import { normalizeCollectionLegs } from "../src/utils/orders.ts";
+import { deriveProjectionCollection, type ProjectionCollectionPair } from "../src/utils/shared-fields.ts";
+import { bookingCollectionFor } from "../src/utils/bookings.ts";
+import { applyDateEdit, type ChargeDates, toChicagoYmd } from "../src/utils/dates.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 /**
@@ -59,7 +64,7 @@ function refusedAt(
   );
 }
 
-Deno.test("destinationJoinViolations: the biconditional and its one exemption", async (t) => {
+Deno.test("destinationJoinViolations: the biconditional, with no exemption", async (t) => {
   await t.step("joined 2:2 is clean", () => {
     assertEquals(
       destinationJoinViolations([divider(DIV_A), divider(DIV_B)], [{ uid: DIV_A }, { uid: DIV_B }]),
@@ -81,21 +86,27 @@ Deno.test("destinationJoinViolations: the biconditional and its one exemption", 
     );
   });
 
-  await t.step("no dividers and ONE pair is the sanctioned deduction", () => {
-    assertEquals(destinationJoinViolations([], [{ uid: DIV_A }]), []);
-    assertEquals(isSingleEntryDeduction(0, 1), true);
+  await t.step("no dividers and ONE pair is a violation — the single-entry deduction is gone", () => {
+    // api-cloudrun#1154: this shape used to be exempt. It is reported now, and
+    // `items.min(1)` + the leading divider make it unrepresentable on a stored
+    // order or fulfillment anyway.
+    assertEquals(destinationJoinViolations([], [{ uid: DIV_A }]), [
+      { kind: "pair_without_divider", uid: DIV_A, index: 0 },
+    ]);
   });
 
-  await t.step("…and no dividers beside TWO pairs is not", () => {
+  await t.step("…as are no dividers beside TWO pairs, and one divider beside an unrelated pair", () => {
     assertEquals(destinationJoinViolations([], [{ uid: DIV_A }, { uid: DIV_B }]).length, 2);
-    assertEquals(isSingleEntryDeduction(0, 2), false);
-    // One divider beside one unrelated pair is neither exempt nor joined.
-    assertEquals(isSingleEntryDeduction(1, 1), false);
     assertEquals(destinationJoinViolations([divider(DIV_A)], [{ uid: DIV_B }]).length, 2);
   });
 
   await t.step("a row with a non-string uid is left to the schema parse", () => {
-    assertEquals(destinationJoinViolations([{ type: "destination", uid: 7 }], [{ uid: DIV_A }]), []);
+    // The malformed divider is not reported (the parse owns it); the pair it
+    // cannot answer still is — there is no longer a divider-less exemption to
+    // hide it behind.
+    assertEquals(destinationJoinViolations([{ type: "destination", uid: 7 }], [{ uid: DIV_A }]), [
+      { kind: "pair_without_divider", uid: DIV_A, index: 0 },
+    ]);
   });
 });
 
@@ -121,9 +132,11 @@ Deno.test("checkDestinationJoin: wired on the order and the fulfillment, NOT the
       assertEquals(refusedAt(schema.safeParse(doc), ["destinations", 1, "uid"]), true);
     });
 
-    await t.step(`${name}: no dividers and one pair is accepted`, () => {
+    await t.step(`${name}: no dividers and one pair is REFUSED — empty items and the unjoined pair`, () => {
       const doc = { ...withPairs(make(), [DIV_A]), items: [] };
-      assertEquals(schema.safeParse(doc).success, true);
+      const result = schema.safeParse(doc);
+      assertEquals(refusedAt(result, ["items"]), true, "items.min(1)");
+      assertEquals(refusedAt(result, ["destinations", 0, "uid"]), true, "the pair names no divider");
     });
   }
 
@@ -204,7 +217,7 @@ Deno.test("checkZeroQuantityComponents: the stored order and BOTH inputs refuse 
       mk(CHILD, [DIV_A, PARENT, CHILD], 0, false),
     ];
     const fulfillmentItems = rows((uid, path, quantity, zero_priced) =>
-      getTestDoc(FulfillmentItem, { uid, type: "sale", path, quantity, zero_priced })
+      getTestDoc(FulfillmentLineItem, { uid, type: "sale", path, quantity, zero_priced })
     );
     const invoiceItems = rows((uid, path, quantity, zero_priced) =>
       getTestDoc(InvoiceDocLineItem, { uid, type: "sale", path, quantity, zero_priced })
@@ -213,5 +226,406 @@ Deno.test("checkZeroQuantityComponents: the stored order and BOTH inputs refuse 
     assertEquals(f.success, true, JSON.stringify(f.error?.issues));
     const i = InvoiceSchema.safeParse({ ...invoice(), destinations: invoicePairs([DIV_A]), items: invoiceItems });
     assertEquals(i.success, true, JSON.stringify(i.error?.issues));
+  });
+});
+
+// ── api-cloudrun#1154: the leading divider, the null collection leg ─────────
+
+const group = (uid: string) => ({ uid, type: "group" as const, name: "G", description: "", path: [DIV_A, uid] });
+const GROUP = "55555555-5555-4555-8555-555555555555";
+const ORDER_UID = "testorder00000000001";
+const orderDivider = () => ({ uid: ORDER_UID, type: "order" as const, name: "Order #1", description: "", path: [ORDER_UID] });
+
+Deno.test("leadingDividerViolations: the first row is the grain's top divider", async (t) => {
+  await t.step("order and fulfillment lead with a destination", () => {
+    for (const grain of ["order", "fulfillment"] as const) {
+      assertEquals(leadingDividerViolations([divider(DIV_A)], grain, false), []);
+      assertEquals(leadingDividerViolations([group(GROUP), divider(DIV_A)], grain, false), [
+        { expected: "destination", found: "group" },
+      ]);
+      assertEquals(leadingDividerViolations([{ type: "rental" }], grain, false), [
+        { expected: "destination", found: "rental" },
+      ]);
+    }
+  });
+
+  await t.step("an order-linked invoice leads with an order divider", () => {
+    assertEquals(leadingDividerViolations([orderDivider(), divider(DIV_A)], "invoice", true), []);
+    // An order-level line between the order divider and the first destination is legal.
+    assertEquals(leadingDividerViolations([orderDivider(), { type: "transaction_fee" }, divider(DIV_A)], "invoice", true), []);
+    assertEquals(leadingDividerViolations([divider(DIV_A)], "invoice", true), [{ expected: "order", found: "destination" }]);
+    assertEquals(leadingDividerViolations([{ type: "sale" }], "invoice", true), [{ expected: "order", found: "sale" }]);
+  });
+
+  await t.step("an order-less invoice is unruled", () => {
+    assertEquals(leadingDividerViolations([{ type: "sale" }], "invoice", false), []);
+  });
+
+  await t.step("empty items is min(1)'s error, not this function's", () => {
+    for (const grain of ["order", "fulfillment", "invoice"] as const) {
+      assertEquals(leadingDividerViolations([], grain, true), []);
+    }
+  });
+
+  await t.step("a row with no string type reports found: null", () => {
+    assertEquals(leadingDividerViolations([{ type: 7 }], "order", false), [{ expected: "destination", found: null }]);
+  });
+});
+
+Deno.test("checkLeadingDivider: wired on the order, the fulfillment and the invoice", async (t) => {
+  for (
+    const [name, schema, make] of [
+      ["order", OrderSchema, order],
+      ["fulfillment", FulfillmentSchema, fulfillment],
+    ] as const
+  ) {
+    await t.step(`${name}: a group first is refused at items.0.type; divider first is accepted (control)`, () => {
+      const base = withPairs(make(), [DIV_A]);
+      assertEquals(schema.safeParse({ ...base, items: [divider(DIV_A), group(GROUP)] }).success, true);
+      const result = schema.safeParse({ ...base, items: [group(GROUP), divider(DIV_A)] });
+      assertEquals(refusedAt(result, ["items", 0, "type"]), true, JSON.stringify(result.error?.issues));
+    });
+  }
+
+  await t.step("invoice: order-linked with no order divider first is refused", () => {
+    const base = { ...invoice(), destinations: invoicePairs([DIV_A]).map((p) => ({ ...p, uid_order: ORDER_UID })) };
+    const linked = { ...base, query_by_orders: [ORDER_UID] };
+    const good = InvoiceSchema.safeParse({ ...linked, items: [orderDivider(), { ...divider(DIV_A), path: [ORDER_UID, DIV_A] }] });
+    assertEquals(good.success, true, JSON.stringify(good.error?.issues));
+    const bad = InvoiceSchema.safeParse({ ...linked, items: [{ ...divider(DIV_A), path: [DIV_A] }] });
+    assertEquals(refusedAt(bad, ["items", 0, "type"]), true, JSON.stringify(bad.error?.issues));
+  });
+
+  await t.step("invoice: an order-less invoice may lead with a bare line (control)", () => {
+    const line = getTestDoc(InvoiceDocLineItem, { uid: CHILD, type: "sale", path: [CHILD], quantity: 1 });
+    const result = InvoiceSchema.safeParse({ ...invoice(), query_by_orders: [], items: [line] });
+    assertEquals(result.success, true, JSON.stringify(result.error?.issues));
+  });
+});
+
+Deno.test("CreateOrderInput / UpdateOrderInput: an explicit empty items array is refused", () => {
+  assertEquals(refusedAt(UpdateOrderInput.safeParse({ version: 0, items: [] }), ["items"]), true);
+  // Absent is still legal — `createOrder` seeds the divider, `updateOrder` keeps the stored rows.
+  assertEquals(UpdateOrderInput.safeParse({ version: 0 }).success, true);
+});
+
+/** Placed-leg dates for a pair, Monday delivery → Friday collection, one window. */
+const MON = "2026-10-05T09:00:00.000-05:00";
+const FRI = "2026-10-09T15:00:00.000-05:00";
+const placedDates = () => ({
+  delivery_start: MON,
+  delivery_start_fs: mockTimestamp,
+  delivery_end: MON,
+  delivery_end_fs: mockTimestamp,
+  collection_start: FRI,
+  collection_start_fs: mockTimestamp,
+  collection_end: FRI,
+  collection_end_fs: mockTimestamp,
+  days_active: 5,
+  charge_windows: [{ start: MON, end: FRI, days: 5 }],
+});
+/** The same pair after it stops collecting: no leg dates, no windows. */
+const droppedDates = () => ({
+  ...placedDates(),
+  collection_start: null,
+  collection_start_fs: null,
+  collection_end: null,
+  collection_end_fs: null,
+  days_active: null,
+  charge_windows: null,
+});
+const rentalLine = (uid: string) => getTestDoc(OrderDocLineItem, { uid, type: "rental", path: [DIV_A, uid], quantity: 1 });
+const saleLine = (uid: string) => getTestDoc(OrderDocLineItem, { uid, type: "sale", path: [DIV_A, uid], quantity: 1 });
+
+/** An order with one pair at DIV_A, a placed leg on it, and `lines` under it. */
+function orderWith(status: string, lines: unknown[], pairOverrides: Record<string, unknown> = {}) {
+  const base = withPairs(order(), [DIV_A]);
+  // A PLACED endpoint: past draft, `checkStoredEndpoints` needs a uid and an address.
+  const leg = {
+    uid: "destdelivery00000001",
+    address: {
+      city: "Chicago",
+      country_name: "United States",
+      full: "3100 W Fillmore St, Chicago, IL, 60612, United States",
+      name: "",
+      postcode: "60612",
+      region: "IL",
+      street: "3100 W Fillmore St",
+      street2: "",
+      address_coordinates: { latitude: 41.8708, longitude: -87.7036 },
+    },
+    instructions: null,
+    contact: null,
+  };
+  return {
+    ...base,
+    status,
+    items: [divider(DIV_A), ...lines],
+    destinations: [{
+      ...base.destinations[0],
+      delivery: leg,
+      collection: leg,
+      customer_returning: false,
+      dates: placedDates(),
+      ...pairOverrides,
+    }],
+  };
+}
+
+Deno.test("checkCollectionLegs: the order's leg, flag, dates and windows agree", async (t) => {
+  await t.step("controls: a placed rental order, and a dropped sales-only order, are accepted", () => {
+    const placed = OrderSchema.safeParse(orderWith("reserved", [rentalLine(PARENT)]));
+    assertEquals(placed.success, true, JSON.stringify(placed.error?.issues));
+    const dropped = OrderSchema.safeParse(
+      orderWith("reserved", [saleLine(PARENT)], { collection: null, customer_returning: null, dates: droppedDates() }),
+    );
+    assertEquals(dropped.success, true, JSON.stringify(dropped.error?.issues));
+  });
+
+  await t.step("a null leg with a flag is refused at the flag", () => {
+    const r = OrderSchema.safeParse(
+      orderWith("reserved", [saleLine(PARENT)], { collection: null, customer_returning: true, dates: droppedDates() }),
+    );
+    assertEquals(refusedAt(r, ["destinations", 0, "customer_returning"]), true);
+  });
+
+  await t.step("a placed leg with a null flag is refused at the flag", () => {
+    const r = OrderSchema.safeParse(orderWith("reserved", [rentalLine(PARENT)], { customer_returning: null }));
+    assertEquals(refusedAt(r, ["destinations", 0, "customer_returning"]), true);
+  });
+
+  await t.step("a null leg keeping a collection date is refused at that date", () => {
+    for (const key of ["collection_start", "collection_end", "days_active"] as const) {
+      const dates = { ...droppedDates(), [key]: key === "days_active" ? 5 : FRI };
+      const r = OrderSchema.safeParse(
+        orderWith("reserved", [saleLine(PARENT)], { collection: null, customer_returning: null, dates }),
+      );
+      assertEquals(refusedAt(r, ["destinations", 0, "dates", key]), true, key);
+    }
+  });
+
+  await t.step("a rental with null windows is refused at the windows", () => {
+    const r = OrderSchema.safeParse(
+      orderWith("reserved", [rentalLine(PARENT)], { dates: { ...placedDates(), charge_windows: null } }),
+    );
+    assertEquals(refusedAt(r, ["destinations", 0, "charge_windows"]) || refusedAt(r, ["destinations", 0, "dates", "charge_windows"]), true);
+  });
+
+  await t.step("NOT yet refused: a sales-only order past draft that still holds a placed leg (post-backfill beta)", () => {
+    const r = OrderSchema.safeParse(orderWith("reserved", [saleLine(PARENT)]));
+    assertEquals(r.success, true, JSON.stringify(r.error?.issues));
+  });
+
+  await t.step("the fulfillment does not carry it — the sync derives it there", () => {
+    const f = fulfillment();
+    const r = FulfillmentSchema.safeParse({
+      ...f,
+      destinations: [{ ...f.destinations[0], collection: null, customer_returning: true }],
+    });
+    assertEquals(refusedAt(r, ["destinations", 0, "customer_returning"]), false);
+  });
+});
+
+Deno.test("checkStoredEndpoints: a null collection leg is refused past draft only when a rental needs it", async (t) => {
+  const nullLeg = { collection: null, customer_returning: null, dates: droppedDates() };
+  await t.step("sales-only, reserved: accepted", () => {
+    const r = OrderSchema.safeParse(orderWith("reserved", [saleLine(PARENT)], nullLeg));
+    assertEquals(refusedAt(r, ["destinations", 0, "collection"]), false, JSON.stringify(r.error?.issues));
+  });
+  await t.step("a rental, reserved: refused at the collection leg", () => {
+    const r = OrderSchema.safeParse(orderWith("reserved", [rentalLine(PARENT)], { ...nullLeg, dates: { ...droppedDates(), charge_windows: placedDates().charge_windows } }));
+    assertEquals(refusedAt(r, ["destinations", 0, "collection"]), true);
+  });
+  await t.step("a rental, draft: accepted (a draft is still being built)", () => {
+    const r = OrderSchema.safeParse(orderWith("draft", [rentalLine(PARENT)], { ...nullLeg, dates: { ...droppedDates(), charge_windows: placedDates().charge_windows } }));
+    assertEquals(refusedAt(r, ["destinations", 0, "collection"]), false, JSON.stringify(r.error?.issues));
+  });
+});
+
+Deno.test("mixedBookingGrains: one product in one leg is one booking, so it has one type", async (t) => {
+  const G1 = "66666666-6666-4666-8666-666666666666";
+  const G2 = "77777777-7777-4777-8777-777777777777";
+  const PRODUCT = "prodaaaaaaaaaaaaaaaa";
+  const inGroup = (group: string, type: "rental" | "sale") =>
+    getTestDoc(OrderDocLineItem, { uid: PRODUCT, type, path: [DIV_A, group, PRODUCT], quantity: 1 });
+  const groupRow = (uid: string) => ({ uid, type: "group" as const, name: "G", description: "", path: [DIV_A, uid] });
+
+  await t.step("rental in one group and sale in another, same leg: reported, and the order refuses it", () => {
+    const items = [divider(DIV_A), groupRow(G1), inGroup(G1, "rental"), groupRow(G2), inGroup(G2, "sale")];
+    assertEquals(mixedBookingGrains(items).map((m) => [m.index, m.types]), [[4, ["rental", "sale"]]]);
+    const r = OrderSchema.safeParse({ ...withPairs(order(), [DIV_A]), items });
+    assertEquals(refusedAt(r, ["items", 4, "type"]), true);
+  });
+
+  await t.step("controls: same type in two groups, and different types in two LEGS, are not", () => {
+    assertEquals(mixedBookingGrains([divider(DIV_A), groupRow(G1), inGroup(G1, "rental"), groupRow(G2), inGroup(G2, "rental")]), []);
+    const otherLeg = getTestDoc(OrderDocLineItem, { uid: PRODUCT, type: "sale", path: [DIV_B, PRODUCT], quantity: 1 });
+    assertEquals(mixedBookingGrains([divider(DIV_A), inGroup(G1, "rental"), divider(DIV_B), otherLeg]), []);
+  });
+
+  await t.step("control: a component of a kit is its own grain", () => {
+    const KIT = "kitaaaaaaaaaaaaaaaaa";
+    const component = getTestDoc(OrderDocLineItem, { uid: PRODUCT, type: "sale", path: [DIV_A, KIT, PRODUCT], quantity: 1 });
+    assertEquals(mixedBookingGrains([divider(DIV_A), inGroup(G1, "rental"), component]), []);
+  });
+});
+
+Deno.test("applyDateEdit seed_collection and copy_from — the dates half of the leg", async (t) => {
+  await t.step("seed_collection: 5 business days on from delivery at 15:00, one window over possession", () => {
+    const r = applyDateEdit(droppedDates() as ChargeDates, { type: "seed_collection" }, { holidays: [] });
+    if (!("dates" in r)) throw new Error(r.error);
+    assertEquals(toChicagoYmd(r.dates.collection_start!), "2026-10-09");
+    assertEquals(r.dates.collection_start, FRI);
+    assertEquals(r.dates.charge_windows?.map((w: { start: string; end: string; days: number }) => [w.start, w.end, w.days]), [[MON, FRI, 5]]);
+  });
+  await t.step("seed_collection counts holidays", () => {
+    const r = applyDateEdit(droppedDates() as ChargeDates, { type: "seed_collection" }, { holidays: ["2026-10-07"] });
+    if (!("dates" in r)) throw new Error(r.error);
+    assertEquals(toChicagoYmd(r.dates.collection_start!), "2026-10-12");
+  });
+  await t.step("seed_collection with no delivery start is missing_dates", () => {
+    const r = applyDateEdit({ ...droppedDates(), delivery_start: null } as ChargeDates, { type: "seed_collection" }, { holidays: [] });
+    assertEquals(r, { error: "missing_dates" });
+  });
+  await t.step("copy_from a pair that bills no days hands over null, not the target's stale windows", () => {
+    const r = applyDateEdit(placedDates() as ChargeDates, { type: "copy_from", dates: droppedDates() }, { holidays: [] });
+    if (!("dates" in r)) throw new Error(r.error);
+    assertEquals(r.dates.charge_windows, null);
+    assertEquals(r.dates.collection_start, null);
+  });
+});
+
+Deno.test("normalizeCollectionLegs: the one author of an order's collection legs", async (t) => {
+  type Leg = { uid: string; address: null; instructions: string | null; contact: null };
+  const leg: Leg = { uid: "destdelivery00000001", address: null, instructions: "gate code", contact: null };
+  const other: Leg = { uid: "destcollection000001", address: null, instructions: null, contact: null };
+  const pair = (
+    collection: Leg | null,
+    customer_collecting: boolean,
+    customer_returning: boolean | null,
+    dates: Record<string, unknown> = collection === null ? droppedDates() : placedDates(),
+  ) => ({ delivery: leg, collection, customer_collecting, customer_returning, dates });
+  const doc = (status: string, types: string[], pairs: ReturnType<typeof pair>[]) => ({
+    status,
+    items: types.map((type) => ({ type })),
+    destinations: pairs,
+  });
+
+  await t.step("past draft, no rental: leg, flag, collection dates and windows are all nulled", () => {
+    const out = normalizeCollectionLegs(doc("reserved", ["destination", "sale"], [pair(other, false, false), pair(other, true, true)]), []);
+    assertEquals(out.destinations.map((p) => [p.collection, p.customer_returning]), [[null, null], [null, null]]);
+    assertEquals(out.destinations[0].dates, droppedDates());
+  });
+
+  await t.step("…and it needs no holidays to do it", () => {
+    const out = normalizeCollectionLegs(doc("reserved", ["destination", "sale"], [pair(other, false, false)]), null);
+    assertEquals(out.destinations[0].collection, null);
+  });
+
+  await t.step("a rental on a null leg re-seeds the leg from delivery and the dates via seed_collection", () => {
+    const out = normalizeCollectionLegs(doc("reserved", ["destination", "rental"], [pair(null, false, null), pair(null, true, null)]), []);
+    // delivered → Same As Delivery, we collect; in-store pickup → in-store return.
+    assertEquals(out.destinations.map((p) => [p.collection, p.customer_returning]), [[leg, false], [leg, true]]);
+    // A copy, never the delivery object itself — an edit to one must not move the other.
+    assertEquals(out.destinations[0].collection === leg, false);
+    assertEquals(out.destinations[0].dates.collection_start, FRI);
+    assertEquals(
+      (out.destinations[0].dates.charge_windows as { start: string; end: string }[]).map((w) => [w.start, w.end]),
+      [[MON, FRI]],
+    );
+  });
+
+  await t.step("…but DEFERS while holidays have not loaded: the pair is left exactly as it is", () => {
+    const input = doc("reserved", ["destination", "rental"], [pair(null, false, null)]);
+    assertEquals(normalizeCollectionLegs(input, null) === input, true);
+  });
+
+  await t.step("half-states are repaired from the leg", () => {
+    const out = normalizeCollectionLegs(doc("draft", ["destination"], [pair(other, true, null), pair(null, false, true)]), []);
+    assertEquals(out.destinations.map((p) => [p.collection, p.customer_returning]), [[other, true], [null, null]]);
+  });
+
+  await t.step("a draft with no rental keeps its placed leg, dates and windows", () => {
+    const input = doc("draft", ["destination", "sale"], [pair(other, false, false)]);
+    assertEquals(normalizeCollectionLegs(input, []) === input, true);
+  });
+
+  await t.step("nothing to change returns the SAME object", () => {
+    const placed = doc("reserved", ["destination", "rental"], [pair(other, false, false)]);
+    assertEquals(normalizeCollectionLegs(placed, []) === placed, true);
+    const dropped = doc("reserved", ["destination", "sale"], [pair(null, false, null)]);
+    assertEquals(normalizeCollectionLegs(dropped, []) === dropped, true);
+  });
+
+  await t.step("its output satisfies the stored order schema, past draft, both ways", () => {
+    for (const [line, expectLeg] of [[saleLine(PARENT), false], [rentalLine(PARENT), true]] as const) {
+      const input = orderWith("reserved", [line], { collection: null, customer_returning: null, dates: droppedDates() });
+      const out = normalizeCollectionLegs(input, []);
+      assertEquals(out.destinations[0].collection !== null, expectLeg);
+      const r = OrderSchema.safeParse(out);
+      assertEquals(r.success, true, JSON.stringify(r.error?.issues));
+    }
+  });
+});
+
+Deno.test("deriveProjectionCollection: a projection keeps the leg its own items still need", async (t) => {
+  const leg = { uid: "destcollection000001", address: null };
+  const stored: ProjectionCollectionPair = { collection: leg, customer_collecting: false, customer_returning: false, dates: placedDates() };
+  const nulled: ProjectionCollectionPair = { collection: null, customer_collecting: false, customer_returning: false, dates: droppedDates() };
+
+  await t.step("KEEP: the order dropped its leg, but the projection still holds a rental", () => {
+    const out = deriveProjectionCollection(nulled, stored, [{ type: "rental" }]);
+    assertEquals(out.collection, leg);
+    assertEquals(out.customer_returning, false);
+    assertEquals(out.dates.collection_start, FRI);
+    assertEquals(out.dates.charge_windows, placedDates().charge_windows);
+  });
+
+  await t.step("DERIVE: no rental left — the null leg takes a null flag and no collection dates", () => {
+    const merged: ProjectionCollectionPair = { ...nulled, customer_returning: true, dates: { ...droppedDates(), collection_start: FRI } };
+    const out = deriveProjectionCollection(merged, stored, [{ type: "sale" }]);
+    assertEquals([out.collection, out.customer_returning, out.dates.collection_start], [null, null, null]);
+  });
+
+  await t.step("DERIVE: a placed leg with a null flag takes customer_collecting", () => {
+    const merged: ProjectionCollectionPair = { ...stored, customer_collecting: true, customer_returning: null };
+    assertEquals(deriveProjectionCollection(merged, stored, [{ type: "rental" }]).customer_returning, true);
+  });
+
+  await t.step("never invents a leg: a new pair with a rental and no stored leg is left as merged", () => {
+    const merged: ProjectionCollectionPair = { ...nulled, customer_returning: null };
+    const out = deriveProjectionCollection(merged, undefined, [{ type: "rental" }]);
+    assertEquals(out === merged, true);
+  });
+});
+
+Deno.test("bookingCollectionFor: a booking's collection is its OWN type's", async (t) => {
+  const pair = {
+    delivery: { uid: "destdelivery00000001", address: null },
+    collection: { uid: "destcollection000001", address: null },
+  };
+  await t.step("rental → the pair's leg", () => {
+    assertEquals(bookingCollectionFor("rental", pair), {
+      collection: { uid: "destcollection000001", address: null },
+      uid_destination_collection: "destcollection000001",
+    });
+  });
+  await t.step("sale → null on both fields, even beside a placed leg", () => {
+    assertEquals(bookingCollectionFor("sale", pair), { collection: null, uid_destination_collection: null });
+  });
+  await t.step("rental on an unplaced leg takes the delivery address", () => {
+    assertEquals(
+      bookingCollectionFor("rental", { ...pair, collection: { uid: null, address: null } }).uid_destination_collection,
+      "destdelivery00000001",
+    );
+  });
+  await t.step("rental with no leg throws — the order normalizer was skipped", () => {
+    let threw = false;
+    try {
+      bookingCollectionFor("rental", { ...pair, collection: null });
+    } catch {
+      threw = true;
+    }
+    assertEquals(threw, true);
   });
 });

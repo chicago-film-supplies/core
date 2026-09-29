@@ -681,11 +681,13 @@ export interface ChargeDates {
  *
  * ```ts
  * chargedDays({ charge_windows: [{ start, end, days: 3 }, { start, end, days: 4 }] }); // 7
+ * chargedDays({ charge_windows: null }); // 0 — the pair bills no days
  * ```
  */
-export function chargedDays(dates: { charge_windows: readonly { days: number }[] }): number {
+export function chargedDays(dates: { charge_windows: readonly { days: number }[] | null }): number {
+  // `null` = a pair that bills no days (a document with no rental, api-cloudrun#1154).
   let sum = 0;
-  for (const w of dates.charge_windows) sum += w.days;
+  for (const w of dates.charge_windows ?? []) sum += w.days;
   return sum;
 }
 
@@ -822,7 +824,8 @@ export type DateEdit =
   | { type: "remove_window"; index: number }
   | { type: "reset_windows" }
   | { type: "copy_from"; dates: ChargeDates }
-  | { type: "default_dates"; now: Date | string };
+  | { type: "default_dates"; now: Date | string }
+  | { type: "seed_collection" };
 
 /** Why {@link applyDateEdit} refused an edit. */
 export type DateEditError =
@@ -928,6 +931,11 @@ function checkWindows(
  * - `default_dates` — delivery at 09:00 on the next business day (tomorrow once
  *   the Chicago hour is past 8), collection 5 business days on at 15:00, one
  *   window over both.
+ * - `seed_collection` — a pair that had no collection leg gains one: collection
+ *   5 business days after its delivery start at 15:00 (`default_dates`' rule,
+ *   from the delivery the pair already has), and one window over possession.
+ *   `normalizeCollectionLegs` (`@cfs/core/utils/orders`) runs it when a rental
+ *   comes back (api-cloudrun#1154).
  *
  * Never throws for a bad edit: it returns `{ error }`.
  */
@@ -1014,6 +1022,21 @@ export function applyDateEdit<D extends ChargeDates>(
           next[key] = source[key] ? toChicagoInstant(source[key]!) : null;
         }
         windows = chargeWindowsOf(source);
+        // A source that bills no days hands over `null`, not the target's stale
+        // windows — `windows === null` below would otherwise keep them.
+        if (source.charge_windows === null) next.charge_windows = null;
+        break;
+      }
+      case "seed_collection": {
+        if (!dates.delivery_start) return { error: "missing_dates" };
+        const endDay = getEndDateByChargePeriod(parseISO(dates.delivery_start, { in: CHICAGO }), 5, [...holidays]);
+        // Chicago offset form, like every stored business datetime (`cfs-datetime`).
+        const end = toChicagoInstant(
+          set(endDay, { hours: 15, minutes: 0, seconds: 0, milliseconds: 0 }, { in: CHICAGO }).toISOString(),
+        );
+        next.collection_start = end;
+        next.collection_end = end;
+        windows = [{ start: toChicagoInstant(dates.delivery_start), end }];
         break;
       }
       case "default_dates": {

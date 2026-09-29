@@ -117,7 +117,7 @@ export const FULFILLMENT_TO_CARDS_FIELDS: CollectionRule["fields"] = [
   {
     source: ["destinations", "collection"],
     target: ["destination"],
-    transform: "the pair's collection endpoint, for an :end card",
+    transform: "the pair's collection endpoint, for an :end card — a pair whose collection is null gets no :end card",
   },
   { source: ["destinations", "dates", "delivery_start"], target: ["dates", "start"] },
   { source: ["destinations", "dates", "delivery_end"], target: ["dates", "end"] },
