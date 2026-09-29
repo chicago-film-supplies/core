@@ -658,7 +658,12 @@ export interface ProjectionCollectionPair {
   collection: unknown;
   customer_collecting: boolean;
   customer_returning: boolean | null;
-  dates: Record<string, unknown> & { charge_windows?: unknown };
+  /**
+   * `object`, not `Record<string, unknown>`: a hand-written interface such as
+   * `OrderDocDatesType` carries no index signature, so the Record bound refused
+   * the very pair types this function exists for.
+   */
+  dates: object & { charge_windows?: unknown };
 }
 
 /** The collection-leg date keys a pair keeps or drops together with its leg. */
@@ -713,8 +718,9 @@ export function deriveProjectionCollection<P extends ProjectionCollectionPair>(
   if (hasCollectionLine(projectionItems) && stored) {
     if (next.collection === null && stored.collection !== null) {
       const dates: Record<string, unknown> = { ...next.dates };
+      const storedDates = stored.dates as Record<string, unknown>;
       for (const key of COLLECTION_DATE_KEYS) {
-        if (key in stored.dates) dates[key] = stored.dates[key];
+        if (key in storedDates) dates[key] = storedDates[key];
       }
       next = {
         ...next,

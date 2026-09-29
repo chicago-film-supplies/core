@@ -569,9 +569,13 @@ Deno.test("normalizeCollectionLegs: the one author of an order's collection legs
 });
 
 Deno.test("deriveProjectionCollection: a projection keeps the leg its own items still need", async (t) => {
+  // A concrete pair type, not the generic BOUND: the bound's `dates` is `object`
+  // so a hand-written interface such as `OrderDocDatesType` satisfies it, which
+  // means it names no date key for a test to read back.
+  type Pair = ProjectionCollectionPair & { dates: Record<string, unknown> };
   const leg = { uid: "destcollection000001", address: null };
-  const stored: ProjectionCollectionPair = { collection: leg, customer_collecting: false, customer_returning: false, dates: placedDates() };
-  const nulled: ProjectionCollectionPair = { collection: null, customer_collecting: false, customer_returning: false, dates: droppedDates() };
+  const stored: Pair = { collection: leg, customer_collecting: false, customer_returning: false, dates: placedDates() };
+  const nulled: Pair = { collection: null, customer_collecting: false, customer_returning: false, dates: droppedDates() };
 
   await t.step("KEEP: the order dropped its leg, but the projection still holds a rental", () => {
     const out = deriveProjectionCollection(nulled, stored, [{ type: "rental" }]);
@@ -582,18 +586,18 @@ Deno.test("deriveProjectionCollection: a projection keeps the leg its own items 
   });
 
   await t.step("DERIVE: no rental left — the null leg takes a null flag and no collection dates", () => {
-    const merged: ProjectionCollectionPair = { ...nulled, customer_returning: true, dates: { ...droppedDates(), collection_start: FRI } };
+    const merged: Pair = { ...nulled, customer_returning: true, dates: { ...droppedDates(), collection_start: FRI } };
     const out = deriveProjectionCollection(merged, stored, [{ type: "sale" }]);
     assertEquals([out.collection, out.customer_returning, out.dates.collection_start], [null, null, null]);
   });
 
   await t.step("DERIVE: a placed leg with a null flag takes customer_collecting", () => {
-    const merged: ProjectionCollectionPair = { ...stored, customer_collecting: true, customer_returning: null };
+    const merged: Pair = { ...stored, customer_collecting: true, customer_returning: null };
     assertEquals(deriveProjectionCollection(merged, stored, [{ type: "rental" }]).customer_returning, true);
   });
 
   await t.step("never invents a leg: a new pair with a rental and no stored leg is left as merged", () => {
-    const merged: ProjectionCollectionPair = { ...nulled, customer_returning: null };
+    const merged: Pair = { ...nulled, customer_returning: null };
     const out = deriveProjectionCollection(merged, undefined, [{ type: "rental" }]);
     assertEquals(out === merged, true);
   });

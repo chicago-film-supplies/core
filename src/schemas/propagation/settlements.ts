@@ -477,6 +477,60 @@ const voidInvoiceFromXeroTransaction: TransactionDefinition = {
   ],
 };
 
+// ── void-invoice-from-cancel ────────────────────────────────────────
+
+const voidInvoiceFromCancelRules: CollectionRule[] = [
+  {
+    id: "void-invoice-from-cancel:reap-settlements",
+    source: "invoices",
+    target: "settlements",
+    mode: "co-write",
+    invariant: REAP_INVARIANT,
+    enforced_by: [SETTLEMENT_TOTALS_FOLD],
+    transaction: "void-invoice-from-cancel",
+    fields: [
+      {
+        source: ["uid"],
+        target: ["reverses"],
+        transform:
+          "one reverser per unreversed settlement, sharing one uuid_session",
+      },
+    ],
+  },
+  {
+    id: "void-invoice-from-cancel:append-void-settlement",
+    source: "invoices",
+    target: "settlements",
+    mode: "co-write",
+    invariant: VOID_ROW_INVARIANT,
+    enforced_by: [SETTLEMENT_TOTALS_FOLD, SETTLEMENT_BUMPS_VERSION],
+    transaction: "void-invoice-from-cancel",
+    fields: VOID_ROW_FIELDS,
+  },
+];
+
+/**
+ * The FOURTH void origin (api-cloudrun#1154): canceling an order whose invoice
+ * bills nothing else. Before it, the cancel stripped the order's scope and left
+ * an issued `$0`, lineless invoice keeping its number — a document the customer
+ * was told they owed and that now claimed to bill nothing.
+ *
+ * ⚠️ **Its own id, never `void-invoice`'s.** A borrowed transaction id turns the
+ * drift check off silently; this one declares exactly the two money steps it
+ * runs. There is no `update-invoice:status-to-orders` step, and that is the
+ * difference from the other three: the cancel UNLINKS both sides (G1,
+ * api-cloudrun#453), so there is no order mirror left to converge.
+ */
+const voidInvoiceFromCancelTransaction: TransactionDefinition = {
+  id: "void-invoice-from-cancel",
+  description:
+    "An order is canceled and it was the LAST order an unsettled invoice billed: the invoice is voided rather than emptied — every live settlement is retracted, the `void` row is appended for `total_cents`, the totals fold, and `version` advances. Its lines and totals stay as the record of what was voided; its `query_by_orders` / `number_orders` and the order's `invoices[]` / `query_by_invoices` drop each other, so no mirror converger can re-link a canceled order. Runs inside the order's `update-order` transaction. CFS ORIGINATES this void, so an issued invoice's Xero void is pushed afterwards through `/tasks/push-xero-invoice`, which derives void from the document.",
+  steps: [
+    "void-invoice-from-cancel:reap-settlements",
+    "void-invoice-from-cancel:append-void-settlement",
+  ],
+};
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/settlements.ts` contributes to the propagation catalog. */
 export const settlements: PropagationModule = {
@@ -486,6 +540,7 @@ export const settlements: PropagationModule = {
     ...syncXeroSettlementRules,
     ...voidInvoiceRules,
     ...voidInvoiceFromXeroRules,
+    ...voidInvoiceFromCancelRules,
   ],
   transactions: [
     createSettlementTransaction,
@@ -493,5 +548,6 @@ export const settlements: PropagationModule = {
     syncXeroSettlementTransaction,
     voidInvoiceTransaction,
     voidInvoiceFromXeroTransaction,
+    voidInvoiceFromCancelTransaction,
   ],
 };

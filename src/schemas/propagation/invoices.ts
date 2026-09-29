@@ -273,7 +273,7 @@ const updateOrderInvoiceRules: CollectionRule[] = [
     target: "invoices",
     mode: "co-write",
     invariant:
-      "When an order is canceled, unpaid invoices referencing it remove the order's scoped items, destinations, and uid from query_by_orders",
+      "When an order is canceled, each unsettled invoice referencing it takes one of two arms. If the invoice bills OTHER orders too, it drops this order's scoped items, destinations, uid (query_by_orders) and number (number_orders) and re-prices. If this was its LAST order, it is VOIDED instead (transaction `void-invoice-from-cancel`) — its lines and totals stay as the record of what was voided, and only the two link arrays are dropped — so a cancel never leaves an issued, lineless $0 invoice holding its number (api-cloudrun#1154). Either way the order's own invoices[] / query_by_invoices drop the invoice (G1).",
     enforced_by: [ORDER_SCOPED_REMOVAL],
     trigger:
       "status change to canceled — targets invoices where query_by_orders contains order uid AND the invoice has no unreversed settlement (payment or credit)",
@@ -297,7 +297,7 @@ const updateOrderInvoiceRules: CollectionRule[] = [
       {
         source: [],
         target: ["totals"],
-        transform: "recalculate totals after scoped removal",
+        transform: "recalculate totals after scoped removal — the multi-order arm only; the last-link arm voids and keeps them",
       },
     ],
   },

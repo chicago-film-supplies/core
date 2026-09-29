@@ -110,6 +110,7 @@ export type TransactionId =
   | "sync-xero-settlement"
   | "void-invoice"
   | "void-invoice-from-xero"
+  | "void-invoice-from-cancel"
   // credit-notes.ts
   | "create-credit-note"
   | "allocate-credit-note"
@@ -290,6 +291,8 @@ export type RuleId =
   | "void-invoice:append-void-settlement"
   | "void-invoice-from-xero:reap-settlements"
   | "void-invoice-from-xero:append-void-settlement"
+  | "void-invoice-from-cancel:reap-settlements"
+  | "void-invoice-from-cancel:append-void-settlement"
   // credit-notes.ts
   | "create-credit-note:number-from-counter"
   | "create-credit-note:posting-account"
