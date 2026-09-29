@@ -123,9 +123,10 @@ const DERIVED_FIELDS: Record<string, string> = {
   // ── `isOrgTombstone(source)`, a bool stated in BOTH polarities, because
   //    Typesense cannot filter on whether `merged_to` EXISTS (api-cloudrun#978).
   //    Produced in api-cloudrun's `translateForTypesense` on the SOURCE document.
-  //    ⚠️ The producer lands in api-cloudrun Session 4 of the org-node-removal
-  //    plan, AFTER this declaration publishes. That is why the field is
-  //    `optional: true`, and why readers must ask `merged:!=true`.
+  //    Produced in `api-cloudrun/src/lib/typesenseTranslate.ts` (asserted by
+  //    `api-cloudrun/tests/unit/typesenseOrgLevel.test.ts`). It shipped AFTER
+  //    this declaration published, which is why the field is `optional: true`
+  //    and readers ask `merged:!=true`.
   "organizations:merged": "isOrgTombstone(source) — a tombstone stated as a value (api-cloudrun#978)",
   // ── The SAME derivation, one level out: the frozen snapshot on a document.
   //    `translateForTypesense` composes these from `doc.organization.path` on
