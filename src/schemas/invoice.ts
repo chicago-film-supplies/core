@@ -2,7 +2,7 @@
  * Invoice document schema — Firestore collection: invoices
  */
 import { z } from "zod";
-import { FirestoreId, ItemUid, ThreadId } from "./_uid.ts";
+import { FirestoreId, ItemUid, OutOfServiceId, ThreadId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { extendChecked } from "./_extend.ts";
@@ -492,7 +492,7 @@ const InvoiceDocLineItemInner = z.strictObject({
   // Plain `.optional()`, matching `FulfillmentLineItem.substituted_for`
   // exactly — see the interface docblock for why this one is not `.nullable()`.
   substituted_for: SubstitutedForList.optional(),
-  uid_out_of_service: FirestoreId.nullable().optional(),
+  uid_out_of_service: OutOfServiceId.nullable().optional(),
 }).superRefine(checkItemPriceFormula).superRefine(checkZeroPricedAmount)
   .superRefine(checkOutOfServiceLineType);
 
@@ -1024,7 +1024,7 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     column: true,
     label: "Order #",
   }),
-  query_by_out_of_service: z.array(FirestoreId).optional(),
+  query_by_out_of_service: z.array(OutOfServiceId).optional(),
   // `tax_profile` was DELETED here — api-cloudrun#596 item 3's contract third,
   // applied to prod (2,317 documents) and dev on 2026-08-22. The three steps
   // were forced, not ceremonial: every write validates the FULL document and
@@ -1292,7 +1292,7 @@ const InvoiceItemInputLineInner = z.object({
   tracking_category: z.string().nullable().optional(),
   substituted_for: SubstitutedForList.optional(),
   zero_priced: z.boolean().nullable().optional(),
-  uid_out_of_service: FirestoreId.nullable().optional(),
+  uid_out_of_service: OutOfServiceId.nullable().optional(),
 }).superRefine(checkItemPriceFormula).superRefine(checkOutOfServiceLineType);
 
 /** Zod schema for a billable invoice line (input). */

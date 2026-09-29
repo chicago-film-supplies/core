@@ -1404,3 +1404,42 @@ Deno.test("InvoiceSchema requires query_by_out_of_service to be exactly the set 
   // No L&D line, no key — the ordinary invoice.
   assertEquals(InvoiceSchema.safeParse(validInvoice).success, true);
 });
+
+/**
+ * A record marked lost/damaged at return is keyed by its movement id, not an
+ * auto-id (api-cloudrun#1094). The literal is prod order #1028's shape — the
+ * invoice that could not be created while this field was `FirestoreId`.
+ */
+Deno.test("InvoiceSchema accepts a replacement line billing a movement-keyed out-of-service record", () => {
+  const recordUid =
+    "cb6cedff-1c2d-4e3f-8a9b-0c1d2e3f4a5b|mark_damaged|clcL167FROJu5FITEpIK:J7svp77V0tLx6xBaKRBx:f035e652-4b5d-4e6f-8a9b-0c1d2e3f4a5b";
+  const line: Record<string, unknown> = validLine;
+  const lost = { ...line, uid: "item2000000000000000", type: "replacement", uid_out_of_service: recordUid };
+  const parsed = InvoiceSchema.safeParse({
+    ...validInvoice,
+    items: [ORDER_DIVIDER, line, lost],
+    query_by_out_of_service: [recordUid],
+  });
+  assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
+
+  // The request body's line — what POST /invoices parses.
+  const input = InvoiceItemInputLine.safeParse({
+    uid: "item2000000000000000",
+    type: "replacement",
+    path: ["item2000000000000000"],
+    uid_out_of_service: recordUid,
+  });
+  assertEquals(input.success, true, JSON.stringify(input.success ? {} : input.error.issues));
+  assertEquals(
+    InvoiceItemInputLine.safeParse({ uid: "item2000000000000000", type: "replacement", path: ["item2000000000000000"], uid_out_of_service: "not an id" }).success,
+    false,
+  );
+
+  // Neither id shape → still refused.
+  const garbage = { ...lost, uid_out_of_service: "not an id" };
+  assertEquals(
+    InvoiceSchema.safeParse({ ...validInvoice, items: [ORDER_DIVIDER, line, garbage], query_by_out_of_service: ["not an id"] })
+      .success,
+    false,
+  );
+});
