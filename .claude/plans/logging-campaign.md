@@ -355,7 +355,8 @@ what it means, it guesses."*
 
 5. **Six owners of "what fields does this message carry"** — the TS interface, the Zod
    schema, the prose docstring on the msg literal, the alert rule's `stats by (…)`,
-   `SAFE_PASSTHROUGH` (27 entries, `core/src/schemas/pii/safe-passthrough.ts`), and `api-cloudrun/.claude/commands/obs.md`'s
+   `SAFE_PASSTHROUGH` (27 entries, `core/src/schemas/pii/safe-passthrough.ts`), and `api-cloudrun/.claude/commands/obs.md`'s (deleted 2026-09-30; its query half is now the
+   `cfs-obs` plugin skill, which derives the list)
    hand-maintained catalogue, which is stale in every row and says so in its own text
    (*"278 total — derive it, do not trust this number"*; real count 289).
 
@@ -721,9 +722,11 @@ depend on Phase 3.**
   never write it.
 - New `cfs-logging` skill in the `cfs-skills` plugin (org-shared, so cloud agents get it):
   the naming convention, the `uid_{descriptor}` ↔ log-field boundary, the "how to add a
-  message" recipe, the `context`-bag rule, and the LogsQL cookbook.
-- **Retire the duplicates**: delete `api-cloudrun/.claude/commands/obs.md`'s hand-maintained msg catalogue and field table
-  and point at the generated file; cut `manager/.claude/skills/logging/SKILL.md`'s
+  message" recipe, and the `context`-bag rule. ⚠️ **The LogsQL cookbook is already owned by the
+  `cfs-obs` plugin skill (2026-09-30)**, so `cfs-logging` stays emission-side and points there. When the
+  generated msg file lands, `cfs-obs` § *The `msg` vocabulary* should point at it.
+- **Retire the duplicates**: ~~delete `api-cloudrun/.claude/commands/obs.md`'s hand-maintained msg catalogue and field table~~
+  (done 2026-09-30: the command moved to the `cfs-obs` plugin skill, and the catalogue became a derive command); cut `manager/.claude/skills/logging/SKILL.md`'s
   convention section down to a pointer (⚠️ its example currently teaches `order_id`, a
   third spelling, and is a live drift source); trim `api-cloudrun/CLAUDE.md`'s Structured
   Logging section to the skill reference. Derive `SAFE_PASSTHROUGH` from `LOG_EVENTS` rather

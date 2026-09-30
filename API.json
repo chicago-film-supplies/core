@@ -5435,7 +5435,7 @@
           "kind": "function",
           "name": "custodyMovementSlot",
           "signature": "custodyMovementSlot(rule: CustodyRule, bookingType: \"rental\" | \"sale\", reason?: string): string | null",
-          "doc": "The movement-id slot an action occupies in one save, or `null` when it writes\nno movement for that booking type.\n\nA movement's id is `{session}|{type}|{booking}`, so two actions of one type\nagainst one booking in one save collide. The exception is a flag with no\ncustody (`flag_returned`), whose id carries its reason, so cleaning and\nmaintenance in one save are two slots.",
+          "doc": "The movement-id slot an action occupies in one save, or `null` when it writes\nno movement for that booking type.\n\nA movement's id is `{session}|{type}|{booking}`, so two actions of one type\nagainst one booking in one save collide. The exception is a `flag` into or\nout of `cleaning`/`maintenance`, whose id is its reason's own (the api's\n`transitionMovementId`), so `flag_cleaning_returned` and\n`flag_damaged_returned` in one save are two slots. The deprecated no-custody\n`flag_returned` names its reason on the action instead, and lands on the\nsame slot as the P2b row it is read as.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -7216,7 +7216,7 @@
           "kind": "function",
           "name": "custodyMovementSlot",
           "signature": "custodyMovementSlot(rule: CustodyRule, bookingType: \"rental\" | \"sale\", reason?: string): string | null",
-          "doc": "The movement-id slot an action occupies in one save, or `null` when it writes\nno movement for that booking type.\n\nA movement's id is `{session}|{type}|{booking}`, so two actions of one type\nagainst one booking in one save collide. The exception is a flag with no\ncustody (`flag_returned`), whose id carries its reason, so cleaning and\nmaintenance in one save are two slots.",
+          "doc": "The movement-id slot an action occupies in one save, or `null` when it writes\nno movement for that booking type.\n\nA movement's id is `{session}|{type}|{booking}`, so two actions of one type\nagainst one booking in one save collide. The exception is a `flag` into or\nout of `cleaning`/`maintenance`, whose id is its reason's own (the api's\n`transitionMovementId`), so `flag_cleaning_returned` and\n`flag_damaged_returned` in one save are two slots. The deprecated no-custody\n`flag_returned` names its reason on the action instead, and lands on the\nsame slot as the P2b row it is read as.",
           "paramTags": [],
           "returnsTag": null
         },
