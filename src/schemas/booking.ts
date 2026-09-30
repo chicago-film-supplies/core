@@ -243,7 +243,15 @@ function retiredKey(key: "status" | "breakdown" | "return_flags") {
   const why = key === "status"
     ? "a booking's status is derived from its breakdown, never sent"
     : "send custody `actions` instead";
-  return z.never({ error: `"${key}" is retired: ${why}` }).optional();
+  // ⚠️ The meta is what lets a consumer's OpenAPI generator render the key.
+  // zod-to-openapi has no mapping for `never` and throws `UnknownZodTypeError`
+  // for the WHOLE document unless the schema states a `type` — the same reason
+  // `FirestoreTimestamp` carries its representation (`src/schemas/common.ts`). `{ type:
+  // "null", not: {} }` is JSON Schema's "nothing validates", which is what
+  // `never` means; the description says why a reader should not send it.
+  return z.never({ error: `"${key}" is retired: ${why}` })
+    .meta({ type: "null", not: {}, description: `Retired: ${why}. Present is a 400.` })
+    .optional();
 }
 
 /**

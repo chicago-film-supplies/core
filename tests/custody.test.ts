@@ -15,7 +15,7 @@
  *    that the G1 ruling turns into a refusal?
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import type { z } from "zod";
+import { z } from "zod";
 import {
   type Booking,
   type BookingBreakdown,
@@ -658,6 +658,26 @@ Deno.test("custody P4 - the booking inputs are actions-only, and REFUSE the reti
   }
   assert(BulkBookingUpdateInput.safeParse({ version: 1, uuid_session, updates: [{ uid, version: 1, actions }] }).success);
   assert(!BulkBookingUpdateInput.safeParse({ version: 1, uuid_session, updates: [{ uid, version: 1, actions, breakdown: retired.breakdown }] }).success);
+});
+
+Deno.test("custody P4 - every retired key states an OpenAPI `type`, or a consumer's generator throws for the whole document", () => {
+  // zod-to-openapi has no mapping for `never` and raises UnknownZodTypeError on
+  // any schema without a stated `type` — which took down api-cloudrun's whole
+  // /openapi.json the moment it pinned beta.573. This asserts the declaration
+  // the generator reads, since core carries no generator of its own.
+  for (const [name, schema] of [["UpdateBookingInput", UpdateBookingInput], ["BookingUpdate", BookingUpdate]] as const) {
+    // deno-lint-ignore no-explicit-any
+    const shape = (schema as any)._zod.def.shape as Record<string, z.ZodType>;
+    for (const key of ["status", "breakdown", "return_flags"]) {
+      // deno-lint-ignore no-explicit-any
+      const inner = (shape[key] as any)._zod.def.innerType as z.ZodType;
+      // deno-lint-ignore no-explicit-any
+      assertEquals((inner as any)._zod.def.type, "never", `${name}.${key} is still a never`);
+      const meta = z.globalRegistry.get(inner) as { type?: string; not?: unknown } | undefined;
+      assertEquals(meta?.type, "null", `${name}.${key} states a type`);
+      assertEquals(meta?.not, {}, `${name}.${key} says nothing validates`);
+    }
+  }
 });
 
 // ── the record side ──────────────────────────────────────────────────
