@@ -12212,7 +12212,7 @@
           "kind": "function",
           "name": "serviceBucketBounds",
           "signature": "serviceBucketBounds(record: Pick<BoundsRecord, \"status\" | \"reason\" | \"breakdown\">, key: OOSBreakdownKeyType): ServiceBucketBounds",
-          "doc": "The bounds the api enforces on one bucket, so an editor shows the limit at\nthe input rather than a failed save. Lifted from\n`manager/src/utils/oosBreakdownBounds.ts`.\n\n- `returned_to_service` never goes down, on any record.\n- A `lost` record flags nothing: its `flagged` bucket is pinned at 0.\n- A complete/canceled record admits ONE edit: units LEAVING `written_off`\n  (\"found after write-off\"), into any other bucket. The api re-opens it.",
+          "doc": "The bounds the api enforces on one bucket, so an editor shows the limit at\nthe input rather than a failed save. Lifted from the manager's own bounds\nutil, since deleted: its out-of-service breakdown editor calls these now.\n\n- `returned_to_service` never goes down, on any record.\n- A `lost` record flags nothing: its `flagged` bucket is pinned at 0.\n- A complete/canceled record admits ONE edit: units LEAVING `written_off`\n  (\"found after write-off\"), into any other bucket. The api re-opens it.",
           "paramTags": [],
           "returnsTag": null
         },

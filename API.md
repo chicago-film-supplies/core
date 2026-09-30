@@ -27391,8 +27391,8 @@ outside its bounds first, then the sum against the record. `null` when
 ### `serviceBucketBounds(record: Pick<BoundsRecord, "status" | "reason" | "breakdown">, key: OOSBreakdownKeyType): ServiceBucketBounds`
 
 The bounds the api enforces on one bucket, so an editor shows the limit at
-the input rather than a failed save. Lifted from
-`manager/src/utils/oosBreakdownBounds.ts`.
+the input rather than a failed save. Lifted from the manager's own bounds
+util, since deleted: its out-of-service breakdown editor calls these now.
 
 - `returned_to_service` never goes down, on any record.
 - A `lost` record flags nothing: its `flagged` bucket is pinned at 0.
