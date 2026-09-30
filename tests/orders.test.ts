@@ -2746,7 +2746,7 @@ Deno.test("deriveOrderDateEnvelope: all-null and empty inputs yield a null envel
 // ── deriveNextEventDate ────────────────────────────────────────────
 
 function bd(over: Partial<BookingBreakdown> = {}): BookingBreakdown {
-  return { damaged: 0, lost: 0, out: 0, prepped: 0, quoted: 0, reserved: 0, returned: 0, ...over };
+  return { damaged: 0, lost: 0, out: 0, prepped: 0, quoted: 0, reserved: 0, returned: 0, cleaning: 0, maintenance: 0, ...over };
 }
 
 function orderFor(

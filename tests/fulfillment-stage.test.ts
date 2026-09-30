@@ -37,6 +37,8 @@ function bk(
     type,
     status,
     breakdown: {
+      cleaning: 0,
+      maintenance: 0,
       damaged: 0,
       lost: 0,
       out: 0,

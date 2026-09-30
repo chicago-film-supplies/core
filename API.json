@@ -339,7 +339,7 @@
         {
           "kind": "interface",
           "name": "BookingBreakdown",
-          "declaration": "interface BookingBreakdown {\n  damaged: number;\n  lost: number;\n  out: number;\n  prepped: number;\n  quoted: number;\n  reserved: number;\n  returned: number;\n  cleaning?: number;\n  maintenance?: number;\n}",
+          "declaration": "interface BookingBreakdown {\n  damaged: number;\n  lost: number;\n  out: number;\n  prepped: number;\n  quoted: number;\n  reserved: number;\n  returned: number;\n  cleaning: number;\n  maintenance: number;\n}",
           "doc": "Per-status quantity breakdown for a booking.\n\n⚠️ It is no longer embedded anywhere in the stock projection. `stock/{P}`'s\nentries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this\nbreakdown down to a single `quantity` — so the breakdown reaches availability\nas a number and never as a structure.\n\n🔴 **Never add its keys up by name.** A sum spelled `returned + lost +\ndamaged` compiled through the arrival of `cleaning` and `maintenance` and\nsilently stopped counting them; that pattern is what made the P2b inventory\nlong. Sum through `sumBreakdownKeys` (`utils/bookings.ts`), which\n`tests/breakdown-sums.test.ts` enforces."
         },
         {
@@ -6975,7 +6975,7 @@
         {
           "kind": "interface",
           "name": "BookingBreakdown",
-          "declaration": "interface BookingBreakdown {\n  damaged: number;\n  lost: number;\n  out: number;\n  prepped: number;\n  quoted: number;\n  reserved: number;\n  returned: number;\n  cleaning?: number;\n  maintenance?: number;\n}",
+          "declaration": "interface BookingBreakdown {\n  damaged: number;\n  lost: number;\n  out: number;\n  prepped: number;\n  quoted: number;\n  reserved: number;\n  returned: number;\n  cleaning: number;\n  maintenance: number;\n}",
           "doc": "Per-status quantity breakdown for a booking.\n\n⚠️ It is no longer embedded anywhere in the stock projection. `stock/{P}`'s\nentries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this\nbreakdown down to a single `quantity` — so the breakdown reaches availability\nas a number and never as a structure.\n\n🔴 **Never add its keys up by name.** A sum spelled `returned + lost +\ndamaged` compiled through the arrival of `cleaning` and `maintenance` and\nsilently stopped counting them; that pattern is what made the P2b inventory\nlong. Sum through `sumBreakdownKeys` (`utils/bookings.ts`), which\n`tests/breakdown-sums.test.ts` enforces."
         },
         {
@@ -11884,7 +11884,7 @@
           "kind": "typeAlias",
           "name": "FullBookingBreakdown",
           "declaration": "type FullBookingBreakdown = Required<BookingBreakdown>;",
-          "doc": "A breakdown with every key stated — what arithmetic on one reads."
+          "doc": "A breakdown with every key stated. Since the keys' `feat!` this IS\n`BookingBreakdown`; kept as an alias for existing importers."
         },
         {
           "kind": "interface",
@@ -11918,7 +11918,7 @@
           "kind": "function",
           "name": "breakdownQuantity",
           "signature": "breakdownQuantity(b: Partial<BookingBreakdown>, key: BookingBreakdownKeyType): number",
-          "doc": "The units in one bucket. An absent key reads 0: `cleaning` and `maintenance`\nare optional until their backfill (`schemas/_breakdown.ts`), so a stored\nbreakdown may lack them.\n\n⭐ **Read a bucket through this, never `b.cleaning ?? 0` at the call site.**\nOne reader is what lets the keys' tightening delete the fallback in one place.",
+          "doc": "The units in one bucket of a possibly PARTIAL map (a delta, an override, a\nfixture). An absent key reads 0. A stored breakdown states every key\n(`schemas/_breakdown.ts`), so on one this is a plain lookup.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11934,7 +11934,7 @@
           "kind": "function",
           "name": "emptyBookingsBreakdown",
           "signature": "emptyBookingsBreakdown(): FullBookingBreakdown",
-          "doc": "The empty breakdown shape — every key at zero.\n\nUse as the seed for new orders and as the target shape for fresh bookings.\n⚠️ It STATES `cleaning` and `maintenance`, so a writer seeding from it\nauthors both keys — which a reader on a core older than the keys' beta\nrefuses (`z.strictObject`). The api pins this only after the manager's\nreader release is in prod (custody-actions P2b step 2).\n\n```ts\nconst order = { ...orderInput, bookings_breakdown: emptyBookingsBreakdown() };\n```",
+          "doc": "The empty breakdown shape — every key at zero.\n\nUse as the seed for new orders and as the target shape for fresh bookings.\n```ts\nconst order = { ...orderInput, bookings_breakdown: emptyBookingsBreakdown() };\n```",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11942,7 +11942,7 @@
           "kind": "function",
           "name": "fullBookingBreakdown",
           "signature": "fullBookingBreakdown(b: Partial<BookingBreakdown>): FullBookingBreakdown",
-          "doc": "`b` with every key stated, an absent one as 0.",
+          "doc": "`b` with every key stated, an absent one as 0 — for a partial map.",
           "paramTags": [],
           "returnsTag": null
         },

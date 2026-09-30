@@ -33,7 +33,7 @@ function custody(
   return {
     type,
     breakdown: {
-      damaged: 0, lost: 0, out: 0, prepped: 0, quoted: 0, reserved: 0, returned: 0,
+      damaged: 0, lost: 0, out: 0, prepped: 0, quoted: 0, reserved: 0, returned: 0, cleaning: 0, maintenance: 0,
       ...over,
     },
   };
@@ -197,11 +197,11 @@ Deno.test("leg: the vocabulary is closed, two-valued, and every member is decida
   assertEquals(produced.size, PICK_SHEET_LEGS.length, "every member must be reachable");
 });
 
-/** A rollup breakdown, spelled as the seven buckets so a zero is stated. */
+/** A rollup breakdown, spelled as the nine buckets so a zero is stated. */
 function breakdown(
   over: Partial<Record<"damaged" | "lost" | "out" | "prepped" | "quoted" | "reserved" | "returned", number>>,
 ): BookingBreakdown {
-  return { damaged: 0, lost: 0, out: 0, prepped: 0, quoted: 0, reserved: 0, returned: 0, ...over };
+  return { damaged: 0, lost: 0, out: 0, prepped: 0, quoted: 0, reserved: 0, returned: 0, cleaning: 0, maintenance: 0, ...over };
 }
 
 Deno.test("breakdown leg: agrees with the per-booking predicate over representative custody shapes", () => {

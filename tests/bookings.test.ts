@@ -16,16 +16,12 @@ import {
 } from "../src/utils/bookings.ts";
 import type { Booking, OrderStatusType } from "../src/schemas/mod.ts";
 
+/** A stored breakdown: every key stated, `cleaning`/`maintenance` included. */
 const sample = (overrides: Partial<Booking["breakdown"]> = {}): Booking["breakdown"] => ({
-  quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0,
-  ...overrides,
-});
-
-/** What a WRITER states: every key, `cleaning`/`maintenance` included. */
-const full = (overrides: Partial<Booking["breakdown"]> = {}): Booking["breakdown"] => ({
   ...emptyBookingsBreakdown(),
   ...overrides,
 });
+const full = sample;
 
 const booking = (
   type: Booking["type"],
@@ -41,7 +37,7 @@ Deno.test("emptyBookingsBreakdown returns all-zero shape", () => {
   });
 });
 
-Deno.test("sumBookingBreakdown sums every key, an absent optional one as 0", () => {
+Deno.test("sumBookingBreakdown sums every key, a PARTIAL map's absent one as 0", () => {
   assertEquals(sumBookingBreakdown(sample({ out: 3, returned: 2 })), 5);
   assertEquals(sumBookingBreakdown(sample()), 0);
   assertEquals(
@@ -84,11 +80,11 @@ Deno.test("sumBookingsBreakdown rolls up across bookings", () => {
 });
 
 Deno.test("applyBookingBreakdownDelta mutates roll-up by next - prev", () => {
-  const orderRollup = { quoted: 0, reserved: 0, prepped: 0, out: 5, returned: 0, lost: 0, damaged: 0 };
+  const orderRollup = sample({ out: 5 });
   const prev = sample({ out: 5 });
   const next = sample({ out: 2, returned: 2, lost: 1 });
   applyBookingBreakdownDelta(orderRollup, prev, next);
-  assertEquals(orderRollup, { quoted: 0, reserved: 0, prepped: 0, out: 2, returned: 2, lost: 1, damaged: 0 });
+  assertEquals(orderRollup, sample({ out: 2, returned: 2, lost: 1 }));
 });
 
 Deno.test("isBookingClosed: rental requires out === 0", () => {
@@ -372,17 +368,17 @@ Deno.test("P2b: a rental whose units came back dirty is closed", () => {
   assertEquals(isBookingClosed(booking("rental", { cleaning: 2, maintenance: 1, returned: 2 })), true);
 });
 
-Deno.test("P2b: sums and deltas reach the new keys, and a no-op leaves an absent key absent", () => {
+Deno.test("P2b: sums and deltas reach the new keys", () => {
   assertEquals(sumBookingsBreakdown([{ breakdown: sample() }, { breakdown: full({ cleaning: 2 }) }]).cleaning, 2);
-  const legacyRollup = sample({ out: 3 });
-  applyBookingBreakdownDelta(legacyRollup, sample({ out: 3 }), sample({ out: 1, returned: 2 }));
-  assertEquals("cleaning" in legacyRollup, false);
-  applyBookingBreakdownDelta(legacyRollup, sample({ out: 1 }), full({ cleaning: 1 }));
-  assertEquals(legacyRollup.cleaning, 1);
+  const rollup = sample({ out: 3 });
+  applyBookingBreakdownDelta(rollup, sample({ out: 3 }), sample({ out: 1, returned: 2 }));
+  assertEquals(rollup, sample({ out: 1, returned: 2 }));
+  applyBookingBreakdownDelta(rollup, sample({ out: 1 }), full({ cleaning: 1 }));
+  assertEquals(rollup, sample({ returned: 2, cleaning: 1 }));
   assertEquals(mergeBookingBreakdown(sample({ out: 2 }), { maintenance: 2, out: 0 }).maintenance, 2);
 });
 
-Deno.test("P2b: terminalQuantity and sumBreakdownKeys read absent keys as 0", () => {
+Deno.test("P2b: terminalQuantity and sumBreakdownKeys reach every terminal key", () => {
   assertEquals(terminalQuantity(sample({ returned: 1, lost: 1, damaged: 1 })), 3);
   assertEquals(terminalQuantity(full({ returned: 1, cleaning: 2, maintenance: 3 })), 6);
   assertEquals(sumBreakdownKeys(sample(), ["cleaning", "maintenance"]), 0);

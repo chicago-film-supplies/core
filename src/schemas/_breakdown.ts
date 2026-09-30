@@ -18,15 +18,13 @@
  * correction does (an undo, or a reclassification among the three flag
  * reasons).
  *
- * ⚠️ **Both keys are OPTIONAL, and that is a step of the add-field order, not
- * the destination.** Every booking and order stored before this beta lacks
- * them, and the schemas are `z.strictObject`, so requiring them now would make
- * the whole corpus unparseable. The order is: this beta reads an absent key as
- * 0 (through `breakdownQuantity`, `utils/bookings.ts` — never a `?? 0` at the
- * call site) → the writers state them → a backfill zero-fills them → a later
- * `feat!` makes them required. Prod held 0 cleaning/maintenance records when
- * this landed (dev: 2, neither linked to a booking), so nothing but the
- * zero-fill needs migrating.
+ * Both keys are REQUIRED, reached through the add-field order
+ * (`cfs-release-order`): `beta.570` added them optional and read an absent key
+ * as 0, the writers then stated them (api v0.311.0), a backfill zero-filled
+ * every stored booking and order roll-up (2026-09-30, 0 misses in both envs by
+ * `api-cloudrun/scripts/audit-breakdown-keys.ts`), and this `feat!` made them
+ * required. Prod held 0 cleaning/maintenance records when the keys were added,
+ * so nothing but the zero-fill was migrated.
  *
  * @module
  */
@@ -54,10 +52,10 @@ export interface BookingBreakdown {
   quoted: number;
   reserved: number;
   returned: number;
-  /** Came back needing cleaning. Optional until the backfill — see the module note. */
-  cleaning?: number;
-  /** Came back needing maintenance. Optional until the backfill — see the module note. */
-  maintenance?: number;
+  /** Came back needing cleaning. */
+  cleaning: number;
+  /** Came back needing maintenance. */
+  maintenance: number;
 }
 
 /**
@@ -112,10 +110,10 @@ export const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string> = 
  * the seven would move every existing breakdown column in the picker.
  */
 export const BookingBreakdownSchema: z.ZodType<BookingBreakdown> = z.strictObject({
-  cleaning: z.int().optional().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.cleaning }),
+  cleaning: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.cleaning }),
   damaged: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.damaged }),
   lost: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.lost }),
-  maintenance: z.int().optional().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.maintenance }),
+  maintenance: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.maintenance }),
   out: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.out }),
   prepped: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.prepped }),
   quoted: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.quoted }),
@@ -160,9 +158,6 @@ type _BreakdownCoversKeys = keyof BookingBreakdown extends BookingBreakdownKeyTy
 const _keyParity: [_KeysCoverBreakdown, _BreakdownCoversKeys] = [true, true];
 void _keyParity;
 
-/** The keys that are optional until the backfill; see the module note. */
-const OPTIONAL_KEYS: ReadonlySet<BookingBreakdownKeyType> = new Set(["cleaning", "maintenance"]);
-
 /**
  * A breakdown object schema DERIVED from {@link BOOKING_BREAKDOWN_KEYS}, for the
  * breakdown's two other stored or wire spellings: the order's
@@ -171,14 +166,14 @@ const OPTIONAL_KEYS: ReadonlySet<BookingBreakdownKeyType> = new Set(["cleaning",
  * non-strict `z.object` — so a new key would have been STRIPPED off the wire
  * with nothing failing.
  *
- * `leaf` is each key's schema; an optional key is wrapped `.optional()` here.
+ * `leaf` is each key's schema. Every key is required.
  */
 export function breakdownObjectSchema(
   leaf: () => z.ZodType<number>,
   mode: "strict" | "strip",
 ): z.ZodType<BookingBreakdown> {
   const shape: Record<string, z.ZodType> = {};
-  for (const key of BOOKING_BREAKDOWN_KEYS) shape[key] = OPTIONAL_KEYS.has(key) ? leaf().optional() : leaf();
+  for (const key of BOOKING_BREAKDOWN_KEYS) shape[key] = leaf();
   const schema = mode === "strict" ? z.strictObject(shape) : z.object(shape);
   return schema as unknown as z.ZodType<BookingBreakdown>;
 }

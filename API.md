@@ -878,8 +878,8 @@ interface BookingBreakdown {
   quoted: number;
   reserved: number;
   returned: number;
-  cleaning?: number;
-  maintenance?: number;
+  cleaning: number;
+  maintenance: number;
 }
 ```
 
@@ -15678,8 +15678,8 @@ interface BookingBreakdown {
   quoted: number;
   reserved: number;
   returned: number;
-  cleaning?: number;
-  maintenance?: number;
+  cleaning: number;
+  maintenance: number;
 }
 ```
 
@@ -26841,7 +26841,8 @@ interface BookingCollectionPair {
 
 ### `FullBookingBreakdown`
 
-A breakdown with every key stated — what arithmetic on one reads.
+A breakdown with every key stated. Since the keys' `feat!` this IS
+`BookingBreakdown`; kept as an alias for existing importers.
 
 ```ts
 type FullBookingBreakdown = Required<BookingBreakdown>;
@@ -26921,12 +26922,9 @@ it is now confined to the one case that needs it.
 
 ### `breakdownQuantity(b: Partial<BookingBreakdown>, key: BookingBreakdownKeyType): number`
 
-The units in one bucket. An absent key reads 0: `cleaning` and `maintenance`
-are optional until their backfill (`schemas/_breakdown.ts`), so a stored
-breakdown may lack them.
-
-⭐ **Read a bucket through this, never `b.cleaning ?? 0` at the call site.**
-One reader is what lets the keys' tightening delete the fallback in one place.
+The units in one bucket of a possibly PARTIAL map (a delta, an override, a
+fixture). An absent key reads 0. A stored breakdown states every key
+(`schemas/_breakdown.ts`), so on one this is a plain lookup.
 
 ### `calculateBookingBreakdown(status: OrderStatusType, type: ComponentTypeType, quantity: number, existingBreakdown?: indexedAccess): indexedAccess`
 
@@ -26953,18 +26951,13 @@ Status rules:
 The empty breakdown shape — every key at zero.
 
 Use as the seed for new orders and as the target shape for fresh bookings.
-⚠️ It STATES `cleaning` and `maintenance`, so a writer seeding from it
-authors both keys — which a reader on a core older than the keys' beta
-refuses (`z.strictObject`). The api pins this only after the manager's
-reader release is in prod (custody-actions P2b step 2).
-
 ```ts
 const order = { ...orderInput, bookings_breakdown: emptyBookingsBreakdown() };
 ```
 
 ### `fullBookingBreakdown(b: Partial<BookingBreakdown>): FullBookingBreakdown`
 
-`b` with every key stated, an absent one as 0.
+`b` with every key stated, an absent one as 0 — for a partial map.
 
 ### `grainKeep(live: number, rows: readonly GrainRow[]): GrainKeep`
 

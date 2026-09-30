@@ -846,10 +846,3 @@ Deno.test("custody P2b - stored movements find their rows; the R2 no-custody fla
   assertEquals(custodyRuleForMovement("flag", { from: "returned", to: "cleaning" }, { from: null, to: "maintenance" }, "rental"), null);
 });
 
-Deno.test("custody P2b - a stored breakdown lacking the keys applies and decomposes as zeros", () => {
-  const legacy = { quoted: 0, reserved: 0, prepped: 0, out: 2, returned: 0, lost: 0, damaged: 0 };
-  const r = applyCustodyActions({ type: "rental", breakdown: legacy, quantity: 2, status: "active" }, [{ rule: "mark_cleaning", quantity: 2 }]);
-  assertEquals(r.breakdown.cleaning, 2);
-  assertEquals(decomposeCustodyDelta(legacy, bd({ cleaning: 2 }), "rental").steps, [{ rule: "mark_cleaning", quantity: 2 }]);
-  assertEquals(deriveCustodyStatus(bd({ cleaning: 2 }), 2, "active"), "complete");
-});

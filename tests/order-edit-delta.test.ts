@@ -74,6 +74,8 @@ function line(uid: string, quantity: number, path: string[]): Order["items"][num
 }
 
 const breakdown = (b: Partial<BookingCustodyFacts["breakdown"]>): BookingCustodyFacts["breakdown"] => ({
+  cleaning: 0,
+  maintenance: 0,
   quoted: 0,
   reserved: 0,
   prepped: 0,

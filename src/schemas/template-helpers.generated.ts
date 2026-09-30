@@ -29,10 +29,10 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "bookings": [
     { name: "applyBookingBreakdownDelta", expr: "it.bookings.applyBookingBreakdownDelta(orderBreakdown, prev, next)", desc: "Apply a per-key delta to an order's bookings_breakdown roll-up in place.", returns: "void" },
-    { name: "breakdownQuantity", expr: "it.bookings.breakdownQuantity(b, key)", desc: "The units in one bucket. An absent key reads 0: `cleaning` and `maintenance` are optional until their backfill (`schemas/_breakdown.ts`), so a stored breakdown may lack them.", returns: "number" },
+    { name: "breakdownQuantity", expr: "it.bookings.breakdownQuantity(b, key)", desc: "The units in one bucket of a possibly PARTIAL map (a delta, an override, a fixture). An absent key reads 0. A stored breakdown states every key (`schemas/_breakdown.ts`), so on one this is a plain lookup.", returns: "number" },
     { name: "calculateBookingBreakdown", expr: "it.bookings.calculateBookingBreakdown(status, type, quantity, existingBreakdown)", desc: "Project a booking's breakdown for a given **order** status, item type, and total quantity. Pure sync — no I/O.", returns: "indexedAccess" },
     { name: "emptyBookingsBreakdown", expr: "it.bookings.emptyBookingsBreakdown()", desc: "The empty breakdown shape — every key at zero.", returns: "FullBookingBreakdown" },
-    { name: "fullBookingBreakdown", expr: "it.bookings.fullBookingBreakdown(b)", desc: "`b` with every key stated, an absent one as 0.", returns: "FullBookingBreakdown" },
+    { name: "fullBookingBreakdown", expr: "it.bookings.fullBookingBreakdown(b)", desc: "`b` with every key stated, an absent one as 0 — for a partial map.", returns: "FullBookingBreakdown" },
     { name: "grainKeep", expr: "it.bookings.grainKeep(live, rows)", desc: "How much of a grain's live custody an order edit leaves uncovered, and which rows keep it (api-cloudrun#1147, decision 3). A grain is one booking: `(product, leg, component signature)`.", returns: "GrainKeep" },
     { name: "hasCustodyHistory", expr: "it.bookings.hasCustodyHistory(b)", desc: "Whether custody ever moved on a booking: any of `prepped`, `out` or a terminal key. Such a booking is part of what happened, and an order edit must not delete it (api-cloudrun#1147, Q4); only a plan-only booking (`quoted`/`reserved`) goes with its line.", returns: "boolean" },
     { name: "isBookingClosed", expr: "it.bookings.isBookingClosed(b)", desc: "Per-booking closure rule.", returns: "boolean" },

@@ -88,7 +88,10 @@ export const CUSTODY_RULE_IDS = [
   "reclassify_maintenance_to_damaged",
   "reclassify_maintenance_to_cleaning",
   // ⚠️ DEPRECATED — R2's no-custody form, retired by P2b. Kept while the api's
-  // delta wire still translates `return_flags`; removed with the keys' `feat!`.
+  // delta wire still translates `return_flags`. Removed only once the manager's
+  // check-in stops sending `return_flags` (custody-actions P3 release 2) — prod
+  // manager 27.18.4 still sends it, so removing it earlier would have the api
+  // silently strip every check-in flag.
   "flag_returned",
   "reclassify_damaged_to_flag",
   "reclassify_flag_to_damaged",

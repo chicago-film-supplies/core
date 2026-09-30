@@ -1,6 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { BookingSchema } from "../src/schemas/booking.ts";
+import { BookingSchema, UpdateBookingInput } from "../src/schemas/booking.ts";
+import { breakdownObjectSchema } from "../src/schemas/_breakdown.ts";
+import { z } from "zod";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const bookingBase = getInitialValues(BookingSchema) as Record<string, unknown>;
@@ -133,4 +135,25 @@ Deno.test("BookingSchema accepts part-prepped status", () => {
 Deno.test("BookingSchema rejects additional properties", () => {
   const doc = { ...validBooking, bogus: true };
   assertEquals(BookingSchema.safeParse(doc).success, false);
+});
+
+// custody-actions P2b step 5: `cleaning`/`maintenance` are REQUIRED on every
+// spelling of the breakdown. One key dropped per case, and the issue must name
+// exactly it — a bare `success: false` could be failing for any reason.
+Deno.test("P2b: every breakdown spelling refuses a breakdown lacking cleaning or maintenance", () => {
+  const nine = { quoted: 0, reserved: 5, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0, cleaning: 0, maintenance: 0 };
+  const spellings: [string, z.ZodType, (b: Record<string, number>) => unknown, (string | number)[]][] = [
+    ["BookingSchema.breakdown", BookingSchema, (b) => ({ ...validBooking, breakdown: b }), ["breakdown"]],
+    ["UpdateBookingInput.breakdown", UpdateBookingInput, (b) => ({ version: 1, uuid_session: "9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48", breakdown: b }), ["breakdown"]],
+    ["the order roll-up (strict)", breakdownObjectSchema(() => z.number(), "strict"), (b) => b, []],
+  ];
+  for (const [name, schema, wrap, prefix] of spellings) {
+    assertEquals(schema.safeParse(wrap(nine)).success, true, `${name}: the nine-key control parses`);
+    for (const key of ["cleaning", "maintenance"] as const) {
+      const { [key]: _dropped, ...rest } = nine;
+      const r = schema.safeParse(wrap(rest));
+      assertEquals(r.success, false, `${name} accepted a breakdown without ${key}`);
+      assertEquals(r.error!.issues.map((i) => i.path), [[...prefix, key]], `${name}: the issue names ${key}`);
+    }
+  }
 });

@@ -235,7 +235,11 @@ export const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
  * buckets now (custody-actions P2b, owner 2026-09-30): a dirty return is the
  * `mark_cleaning` rule, `out → cleaning`, not a `check_in` with a flag beside
  * it. Kept only while the api still accepts the delta wire, which translates
- * these into the new transitions; removed with the keys' tightening `feat!`.
+ * these into the new transitions. Removed once the manager's check-in stops
+ * sending it (custody-actions P3 release 2), NOT with the keys' tightening:
+ * `UpdateBookingInput` strips unknown keys, so an api that stopped declaring
+ * this while prod manager still sent it would drop every check-in flag
+ * silently.
  *
  * Of the units a save brings to `returned`, how many are FLAGGED at check-in —
  * R2 (owner, 2026-09-24): dirty-on-return is a `cleaning` flag and wear-and-tear

@@ -11,7 +11,7 @@ import {
 import type { Booking, CardStatus } from "../src/schemas/mod.ts";
 
 const breakdown = (overrides: Partial<Booking["breakdown"]> = {}): Booking["breakdown"] => ({
-  quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0,
+  quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0, cleaning: 0, maintenance: 0,
   ...overrides,
 });
 

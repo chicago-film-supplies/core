@@ -56,6 +56,8 @@ const totalAllocated = (stores: BookingStore[]) =>
   stores.reduce((sum, s) => sum + s.locations.reduce((t, l) => t + l.quantity, 0), 0);
 
 const heldBreakdown = (reserved: number): ReservingBooking["breakdown"] => ({
+  cleaning: 0,
+  maintenance: 0,
   damaged: 0,
   lost: 0,
   out: 0,
