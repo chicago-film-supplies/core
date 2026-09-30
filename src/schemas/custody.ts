@@ -87,35 +87,12 @@ export const CUSTODY_RULE_IDS = [
   "reclassify_cleaning_to_maintenance",
   "reclassify_maintenance_to_damaged",
   "reclassify_maintenance_to_cleaning",
-  // ⚠️ DEPRECATED — R2's no-custody form, retired by P2b. Kept while the api's
-  // delta wire still translates `return_flags`. Removed only once the manager's
-  // check-in stops sending `return_flags` (custody-actions P3 release 2) — prod
-  // manager 27.18.4 still sends it, so removing it earlier would have the api
-  // silently strip every check-in flag.
-  "flag_returned",
-  "reclassify_damaged_to_flag",
-  "reclassify_flag_to_damaged",
 ] as const;
 
 /** One custody rule id. */
 export type CustodyRuleId = typeof CUSTODY_RULE_IDS[number];
 /** Zod schema for {@link CustodyRuleId}. */
 export const CustodyRuleIdEnum: z.ZodType<CustodyRuleId> = z.enum(CUSTODY_RULE_IDS);
-
-/**
- * @deprecated R2's flag reasons, named by the retiring `flag_returned` and
- * `reclassify_*_flag` rows' `reason`. Under P2b every reason is its own
- * breakdown key and its own rule, so no action names a reason.
- *
- * The flag reasons a custody ACTION may name: the in-place reasons a booking
- * keeps reading as `returned`. `damaged` is not one of them, because a damaged
- * unit is its own breakdown key (owner ruling R2, 2026-09-29).
- */
-export const CUSTODY_FLAG_REASONS = ["cleaning", "maintenance"] as const;
-/** A flag reason a custody action may name. */
-export type CustodyFlagReasonType = typeof CUSTODY_FLAG_REASONS[number];
-/** Zod schema for {@link CustodyFlagReasonType}. */
-export const CustodyFlagReasonEnum: z.ZodType<CustodyFlagReasonType> = z.enum(CUSTODY_FLAG_REASONS);
 
 // ── The row ──────────────────────────────────────────────────────────
 
@@ -132,25 +109,20 @@ export interface CustodyArm {
  * One side of a flag row's service axis.
  *
  * - `none` — in service on that side;
- * - `damaged` / `cleaning` / `maintenance` — that flag;
- * - `reason` — (deprecated, R2 rows only) the reason the ACTION names.
+ * - `damaged` / `cleaning` / `maintenance` — that flag.
  */
-export type CustodyServiceSide = "none" | "damaged" | "cleaning" | "maintenance" | "reason";
+export type CustodyServiceSide = "none" | "damaged" | "cleaning" | "maintenance";
 
-/** A flag row's service axis, in terms the action fills in. */
+/** A flag row's service axis. */
 export interface CustodyServiceShape {
   from: CustodyServiceSide;
   to: CustodyServiceSide;
 }
 
 /**
- * One legal custody step.
- *
- * `from === to` is a step that changes no breakdown key (only the deprecated
- * `flag_returned`):
- * its movement carries no custody and names its booking in `sources[]`, not in
- * `uid_booking`. Every other row's movement carries `{from, to}` as its custody
- * pair and sets `uid_booking`.
+ * One legal custody step. Every row moves units between two breakdown keys
+ * (`from !== to`, asserted by `tests/custody.test.ts`), so its movement carries
+ * `{from, to}` as its custody pair and sets `uid_booking`.
  */
 export interface CustodyRule {
   id: CustodyRuleId;
@@ -583,50 +555,6 @@ export const CUSTODY_RULES: readonly CustodyRule[] = [
     description: "A maintenance record is reclassified to cleaning: the booking moves maintenance → cleaning in the same write.",
     enforced_by: [TABLE_TEST],
   },
-  // ── ⚠️ DEPRECATED: R2's no-custody cleaning/maintenance (gap G2) ──
-  {
-    id: "flag_returned",
-    from: "returned",
-    to: "returned",
-    ...RENTAL_ONLY("flag"),
-    service: { from: "none", to: "reason" },
-    direction: "forward",
-    stage: "service",
-    inverse: null,
-    billable: false,
-    description:
-      "Flag returned units for cleaning or maintenance where they stand, at check-in or after it. The booking still reads returned, and it is never billed.",
-    enforced_by: [TABLE_TEST],
-  },
-  // ── ⚠️ DEPRECATED: R2's damaged ↔ flag reclassification (gap G3) ──
-  {
-    id: "reclassify_damaged_to_flag",
-    from: "damaged",
-    to: "returned",
-    ...RENTAL_ONLY("flag"),
-    service: { from: "damaged", to: "reason" },
-    direction: "forward",
-    stage: "service",
-    inverse: "reclassify_flag_to_damaged",
-    billable: false,
-    description:
-      "A damaged record is reclassified to cleaning or maintenance: the booking flips damaged → returned in the same write.",
-    enforced_by: [TABLE_TEST],
-  },
-  {
-    id: "reclassify_flag_to_damaged",
-    from: "returned",
-    to: "damaged",
-    ...RENTAL_ONLY("flag"),
-    service: { from: "reason", to: "damaged" },
-    direction: "forward",
-    stage: "service",
-    inverse: "reclassify_damaged_to_flag",
-    billable: true,
-    description:
-      "A cleaning or maintenance record is reclassified to damaged: the booking flips returned → damaged in the same write.",
-    enforced_by: [TABLE_TEST],
-  },
 ];
 
 /** The rule with `id`. Total over {@link CustodyRuleId}; the table test proves it. */
@@ -644,22 +572,14 @@ export function custodyRule(id: CustodyRuleId): CustodyRule {
  * against one booking in one save collide. The exception is a `flag` into or
  * out of `cleaning`/`maintenance`, whose id is its reason's own (the api's
  * `transitionMovementId`), so `flag_cleaning_returned` and
- * `flag_damaged_returned` in one save are two slots. The deprecated no-custody
- * `flag_returned` names its reason on the action instead, and lands on the
- * same slot as the P2b row it is read as.
+ * `flag_damaged_returned` in one save are two slots.
  */
-export function custodyMovementSlot(
-  rule: CustodyRule,
-  bookingType: "rental" | "sale",
-  reason?: string,
-): string | null {
+export function custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale"): string | null {
   const arm = bookingType === "rental" ? rule.rental : rule.sale;
   const movement = arm?.movement ?? null;
   if (movement === null) return null;
   if (movement !== "flag") return movement;
-  const own = rule.from === rule.to
-    ? reason
-    : FLAG_SLOT_REASONS.find((r) => rule.from === r || rule.to === r);
+  const own = FLAG_SLOT_REASONS.find((r) => rule.from === r || rule.to === r);
   return own === undefined ? movement : `${movement}:${own}`;
 }
 
@@ -671,16 +591,16 @@ const FLAG_SLOT_REASONS = ["cleaning", "maintenance"] as const;
 /**
  * One step an operator takes on a booking.
  *
- * - `reason` — required by the rows whose service axis names `reason`
- *   (`flag_returned`, the two reclassifications); refused on every other row.
  * - `uid_out_of_service` — names the record a reclassification or an undo acts
  *   on. Optional: an undo without one consumes the booking's open loss records
  *   newest first, as the delta form always has.
+ *
+ * No action names a reason: since P2b every reason is its own breakdown key and
+ * its own rule (`mark_cleaning`, `flag_maintenance_returned`, …).
  */
 export interface BookingActionType {
   rule: CustodyRuleId;
   quantity: number;
-  reason?: CustodyFlagReasonType;
   uid_out_of_service?: string;
 }
 
@@ -688,19 +608,7 @@ export interface BookingActionType {
 export const BookingAction: z.ZodType<BookingActionType> = z.object({
   rule: CustodyRuleIdEnum,
   quantity: z.int().min(1),
-  reason: CustodyFlagReasonEnum.optional(),
   uid_out_of_service: OutOfServiceId.optional(),
-}).superRefine((a, ctx) => {
-  const rule = CUSTODY_RULES.find((r) => r.id === a.rule);
-  if (!rule) return; // the enum already refused it
-  const needsReason = rule.service !== null &&
-    (rule.service.from === "reason" || rule.service.to === "reason");
-  if (needsReason && a.reason === undefined) {
-    ctx.addIssue({ code: "custom", path: ["reason"], message: `"${a.rule}" needs a reason: cleaning or maintenance` });
-  }
-  if (!needsReason && a.reason !== undefined) {
-    ctx.addIssue({ code: "custom", path: ["reason"], message: `"${a.rule}" takes no reason` });
-  }
 });
 
 /**
@@ -710,13 +618,13 @@ export const BookingAction: z.ZodType<BookingActionType> = z.object({
  * The slot is read off the RENTAL arm: a sale's arms are a subset whose
  * movements are distinct per rule, so the rental reading is the stricter one.
  */
-export function duplicateCustodySlots(actions: readonly Pick<BookingActionType, "rule" | "reason">[]): string[] {
+export function duplicateCustodySlots(actions: readonly Pick<BookingActionType, "rule">[]): string[] {
   const seen = new Set<string>();
   const dup: string[] = [];
   for (const a of actions) {
     const rule = CUSTODY_RULES.find((r) => r.id === a.rule);
     if (!rule) continue;
-    const slot = custodyMovementSlot(rule, "rental", a.reason) ?? custodyMovementSlot(rule, "sale", a.reason);
+    const slot = custodyMovementSlot(rule, "rental") ?? custodyMovementSlot(rule, "sale");
     if (slot === null) continue;
     if (seen.has(slot)) dup.push(slot);
     seen.add(slot);

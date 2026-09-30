@@ -529,8 +529,8 @@ const createFulfillmentExchangeTransaction: TransactionDefinition = {
     "best-effort organization echo this route fires wins its version race.\n\n" +
     "⚠️ The unit taken back, X, is NOT touched here. For `disposition: \"exchange\"` it " +
     "moves when the swap's own trip is checked out (the rider in " +
-    "`api-cloudrun/src/lib/swapCustody.ts`): `out → damaged` for a `damaged` entry, " +
-    "`out → returned` with a cleaning/maintenance `return_flags` for those reasons. For " +
+    "`api-cloudrun/src/lib/swapCustody.ts`): `out → damaged`, `out → cleaning` or " +
+    "`out → maintenance`, the entry's reason being its own breakdown key. For " +
     "`send_now` the operator records it at check-in, because the unit is still on set.",
   steps: [
     "create-fulfillment-exchange:leg-self",

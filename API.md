@@ -808,17 +808,17 @@ const BookingAction: z.ZodType<BookingActionType>;
 
 One step an operator takes on a booking.
 
-- `reason` — required by the rows whose service axis names `reason`
-  (`flag_returned`, the two reclassifications); refused on every other row.
 - `uid_out_of_service` — names the record a reclassification or an undo acts
   on. Optional: an undo without one consumes the booking's open loss records
   newest first, as the delta form always has.
+
+No action names a reason: since P2b every reason is its own breakdown key and
+its own rule (`mark_cleaning`, `flag_maintenance_returned`, …).
 
 ```ts
 interface BookingActionType {
   rule: CustodyRuleId;
   quantity: number;
-  reason?: CustodyFlagReasonType;
   uid_out_of_service?: string;
 }
 ```
@@ -952,23 +952,6 @@ segment" section above. Built only through `booking-id.ts`'s
 const BookingId: z.ZodType<string>;
 ```
 
-### `BookingReturnFlags`
-
-Zod schema for BookingReturnFlagsType.
-
-```ts
-const BookingReturnFlags: z.ZodType<BookingReturnFlagsType>;
-```
-
-### `BookingReturnFlagsType`
-
-```ts
-interface BookingReturnFlagsType {
-  cleaning: number;
-  maintenance: number;
-}
-```
-
 ### `BookingSchema`
 
 Zod schema for Booking.
@@ -1043,10 +1026,10 @@ the row (since the URL carries the fulfillment uid, not the booking uid).
 ```ts
 interface BookingUpdateType {
   uid: string;
-  status?: BookingStatusType;
-  breakdown?: indexedAccess;
-  return_flags?: BookingReturnFlagsType;
-  actions?: BookingActionType[];
+  actions: BookingActionType[];
+  status?: never;
+  breakdown?: never;
+  return_flags?: never;
   version: number;
 }
 ```
@@ -1273,12 +1256,6 @@ it three times invites three answers.
 const CREDIT_NOTE_REASONS: readonly SettlementReasonType[];
 ```
 
-### `CUSTODY_FLAG_REASONS`
-
-```ts
-const CUSTODY_FLAG_REASONS: "cleaning" | "maintenance"[];
-```
-
 ### `CUSTODY_PLACE_KINDS`
 
 **Location is a total function**: every owned unit is in exactly one kind of
@@ -1334,7 +1311,7 @@ directions, so a row with no id here and an id with no row both fail.
 The manager de-duplicates its menus by these ids, never by a label.
 
 ```ts
-const CUSTODY_RULE_IDS: "prep" | "unprep" | "check_out" | "check_out_undo" | "check_in" | "check_in_undo" | "mark_lost" | "mark_lost_undo" | "mark_damaged" | "mark_damaged_undo" | "mark_lost_returned" | "mark_lost_returned_undo" | "flag_damaged_returned" | "flag_damaged_returned_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "flag_cleaning_returned" | "flag_cleaning_returned_undo" | "flag_maintenance_returned" | "flag_maintenance_returned_undo" | "reclassify_damaged_to_cleaning" | "reclassify_damaged_to_maintenance" | "reclassify_cleaning_to_damaged" | "reclassify_cleaning_to_maintenance" | "reclassify_maintenance_to_damaged" | "reclassify_maintenance_to_cleaning" | "flag_returned" | "reclassify_damaged_to_flag" | "reclassify_flag_to_damaged"[];
+const CUSTODY_RULE_IDS: "prep" | "unprep" | "check_out" | "check_out_undo" | "check_in" | "check_in_undo" | "mark_lost" | "mark_lost_undo" | "mark_damaged" | "mark_damaged_undo" | "mark_lost_returned" | "mark_lost_returned_undo" | "flag_damaged_returned" | "flag_damaged_returned_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "flag_cleaning_returned" | "flag_cleaning_returned_undo" | "flag_maintenance_returned" | "flag_maintenance_returned_undo" | "reclassify_damaged_to_cleaning" | "reclassify_damaged_to_maintenance" | "reclassify_cleaning_to_damaged" | "reclassify_cleaning_to_maintenance" | "reclassify_maintenance_to_damaged" | "reclassify_maintenance_to_cleaning"[];
 ```
 
 ### `CacheGeocodes`
@@ -3253,31 +3230,11 @@ interface CustodyArm {
 }
 ```
 
-### `CustodyFlagReasonEnum`
-
-Zod schema for {@link CustodyFlagReasonType}.
-
-```ts
-const CustodyFlagReasonEnum: z.ZodType<CustodyFlagReasonType>;
-```
-
-### `CustodyFlagReasonType`
-
-A flag reason a custody action may name.
-
-```ts
-type CustodyFlagReasonType = indexedAccess;
-```
-
 ### `CustodyRule`
 
-One legal custody step.
-
-`from === to` is a step that changes no breakdown key (only the deprecated
-`flag_returned`):
-its movement carries no custody and names its booking in `sources[]`, not in
-`uid_booking`. Every other row's movement carries `{from, to}` as its custody
-pair and sets `uid_booking`.
+One legal custody step. Every row moves units between two breakdown keys
+(`from !== to`, asserted by `tests/custody.test.ts`), so its movement carries
+`{from, to}` as its custody pair and sets `uid_booking`.
 
 ```ts
 interface CustodyRule {
@@ -3314,7 +3271,7 @@ const CustodyRuleIdEnum: z.ZodType<CustodyRuleId>;
 
 ### `CustodyServiceShape`
 
-A flag row's service axis, in terms the action fills in.
+A flag row's service axis.
 
 ```ts
 interface CustodyServiceShape {
@@ -3328,11 +3285,10 @@ interface CustodyServiceShape {
 One side of a flag row's service axis.
 
 - `none` — in service on that side;
-- `damaged` / `cleaning` / `maintenance` — that flag;
-- `reason` — (deprecated, R2 rows only) the reason the ACTION names.
+- `damaged` / `cleaning` / `maintenance` — that flag.
 
 ```ts
-type CustodyServiceSide = "none" | "damaged" | "cleaning" | "maintenance" | "reason";
+type CustodyServiceSide = "none" | "damaged" | "cleaning" | "maintenance";
 ```
 
 ### `DESTINATION_LEVELS`
@@ -10999,22 +10955,25 @@ const UpdateBookingInput: z.ZodType<UpdateBookingInputType>;
 
 Input for updating a single booking via `PUT /bookings/{uid}`.
 
-Status and breakdown are independently optional — most warehouse PUTs only
-change the breakdown. When `breakdown` is supplied it must be the complete
-next state (every key); the service requires `sum(breakdown) === quantity`
-and treats the value as an absolute write, not a partial patch. Version is
-required for optimistic concurrency.
+A save is the ordered list of custody steps the operator took
+({@link BookingActionType}, `schemas/custody.ts`), applied to the booking's
+CURRENT state rather than a state the client computed — so a short source
+bucket after a concurrent write is a refusal, not an overwrite. `status` is
+derived by the server. Version is required for optimistic concurrency.
+
+⚠️ The absolute-`breakdown` delta wire is retired from every operator route
+(custody-actions P4). The api keeps a server-actor-only delta path for repair
+scripts, typed on its own side; it is not this input.
 
 {@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to
-retry once a breakdown change also appends to the movement journal — see the
-field's own note.
+retry — see the field's own note.
 
 ```ts
 interface UpdateBookingInputType {
-  status?: BookingStatusType;
-  breakdown?: indexedAccess;
-  return_flags?: BookingReturnFlagsType;
-  actions?: BookingActionType[];
+  actions: BookingActionType[];
+  status?: never;
+  breakdown?: never;
+  return_flags?: never;
   version: number;
   uuid_session: string;
 }
@@ -12466,7 +12425,7 @@ been one `.optional().nullable()` away from silently truncating. Hitting the
 cap pushes a `__depth_cap__` entry into `unhandled` rather than returning
 quietly.
 
-### `custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale", reason?: string): string | null`
+### `custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale"): string | null`
 
 The movement-id slot an action occupies in one save, or `null` when it writes
 no movement for that booking type.
@@ -12475,9 +12434,7 @@ A movement's id is `{session}|{type}|{booking}`, so two actions of one type
 against one booking in one save collide. The exception is a `flag` into or
 out of `cleaning`/`maintenance`, whose id is its reason's own (the api's
 `transitionMovementId`), so `flag_cleaning_returned` and
-`flag_damaged_returned` in one save are two slots. The deprecated no-custody
-`flag_returned` names its reason on the action instead, and lands on the
-same slot as the P2b row it is read as.
+`flag_damaged_returned` in one save are two slots.
 
 ### `custodyRule(id: CustodyRuleId): CustodyRule`
 
@@ -12566,7 +12523,7 @@ documents used it in either project (measured 2026-09-28).
 
 A row with a non-string `uid` is skipped: the schema parse owns it.
 
-### `duplicateCustodySlots(actions: readonly Pick<BookingActionType, "rule" | "reason">[]): string[]`
+### `duplicateCustodySlots(actions: readonly Pick<BookingActionType, "rule">[]): string[]`
 
 Where two actions in one list would write the same movement id. Shared by the
 wire refine and by `applyCustodyActions`, so the two cannot disagree.
@@ -15730,23 +15687,6 @@ Zod schema for BookingDestinationRef — also the out-of-service record's `desti
 const BookingDestinationRefSchema: z.ZodType<BookingDestinationRef>;
 ```
 
-### `BookingReturnFlags`
-
-Zod schema for BookingReturnFlagsType.
-
-```ts
-const BookingReturnFlags: z.ZodType<BookingReturnFlagsType>;
-```
-
-### `BookingReturnFlagsType`
-
-```ts
-interface BookingReturnFlagsType {
-  cleaning: number;
-  maintenance: number;
-}
-```
-
 ### `BookingSchema`
 
 Zod schema for Booking.
@@ -15815,10 +15755,10 @@ the row (since the URL carries the fulfillment uid, not the booking uid).
 ```ts
 interface BookingUpdateType {
   uid: string;
-  status?: BookingStatusType;
-  breakdown?: indexedAccess;
-  return_flags?: BookingReturnFlagsType;
-  actions?: BookingActionType[];
+  actions: BookingActionType[];
+  status?: never;
+  breakdown?: never;
+  return_flags?: never;
   version: number;
 }
 ```
@@ -15898,22 +15838,25 @@ const UpdateBookingInput: z.ZodType<UpdateBookingInputType>;
 
 Input for updating a single booking via `PUT /bookings/{uid}`.
 
-Status and breakdown are independently optional — most warehouse PUTs only
-change the breakdown. When `breakdown` is supplied it must be the complete
-next state (every key); the service requires `sum(breakdown) === quantity`
-and treats the value as an absolute write, not a partial patch. Version is
-required for optimistic concurrency.
+A save is the ordered list of custody steps the operator took
+({@link BookingActionType}, `schemas/custody.ts`), applied to the booking's
+CURRENT state rather than a state the client computed — so a short source
+bucket after a concurrent write is a refusal, not an overwrite. `status` is
+derived by the server. Version is required for optimistic concurrency.
+
+⚠️ The absolute-`breakdown` delta wire is retired from every operator route
+(custody-actions P4). The api keeps a server-actor-only delta path for repair
+scripts, typed on its own side; it is not this input.
 
 {@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to
-retry once a breakdown change also appends to the movement journal — see the
-field's own note.
+retry — see the field's own note.
 
 ```ts
 interface UpdateBookingInputType {
-  status?: BookingStatusType;
-  breakdown?: indexedAccess;
-  return_flags?: BookingReturnFlagsType;
-  actions?: BookingActionType[];
+  actions: BookingActionType[];
+  status?: never;
+  breakdown?: never;
+  return_flags?: never;
   version: number;
   uuid_session: string;
 }
@@ -15991,17 +15934,17 @@ const BookingAction: z.ZodType<BookingActionType>;
 
 One step an operator takes on a booking.
 
-- `reason` — required by the rows whose service axis names `reason`
-  (`flag_returned`, the two reclassifications); refused on every other row.
 - `uid_out_of_service` — names the record a reclassification or an undo acts
   on. Optional: an undo without one consumes the booking's open loss records
   newest first, as the delta form always has.
+
+No action names a reason: since P2b every reason is its own breakdown key and
+its own rule (`mark_cleaning`, `flag_maintenance_returned`, …).
 
 ```ts
 interface BookingActionType {
   rule: CustodyRuleId;
   quantity: number;
-  reason?: CustodyFlagReasonType;
   uid_out_of_service?: string;
 }
 ```
@@ -16037,12 +15980,6 @@ interface BookingActionsInputType {
 }
 ```
 
-### `CUSTODY_FLAG_REASONS`
-
-```ts
-const CUSTODY_FLAG_REASONS: "cleaning" | "maintenance"[];
-```
-
 ### `CUSTODY_RULES`
 
 The table. Order is display order within a stage; nothing reads position as
@@ -16070,7 +16007,7 @@ directions, so a row with no id here and an id with no row both fail.
 The manager de-duplicates its menus by these ids, never by a label.
 
 ```ts
-const CUSTODY_RULE_IDS: "prep" | "unprep" | "check_out" | "check_out_undo" | "check_in" | "check_in_undo" | "mark_lost" | "mark_lost_undo" | "mark_damaged" | "mark_damaged_undo" | "mark_lost_returned" | "mark_lost_returned_undo" | "flag_damaged_returned" | "flag_damaged_returned_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "flag_cleaning_returned" | "flag_cleaning_returned_undo" | "flag_maintenance_returned" | "flag_maintenance_returned_undo" | "reclassify_damaged_to_cleaning" | "reclassify_damaged_to_maintenance" | "reclassify_cleaning_to_damaged" | "reclassify_cleaning_to_maintenance" | "reclassify_maintenance_to_damaged" | "reclassify_maintenance_to_cleaning" | "flag_returned" | "reclassify_damaged_to_flag" | "reclassify_flag_to_damaged"[];
+const CUSTODY_RULE_IDS: "prep" | "unprep" | "check_out" | "check_out_undo" | "check_in" | "check_in_undo" | "mark_lost" | "mark_lost_undo" | "mark_damaged" | "mark_damaged_undo" | "mark_lost_returned" | "mark_lost_returned_undo" | "flag_damaged_returned" | "flag_damaged_returned_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "flag_cleaning_returned" | "flag_cleaning_returned_undo" | "flag_maintenance_returned" | "flag_maintenance_returned_undo" | "reclassify_damaged_to_cleaning" | "reclassify_damaged_to_maintenance" | "reclassify_cleaning_to_damaged" | "reclassify_cleaning_to_maintenance" | "reclassify_maintenance_to_damaged" | "reclassify_maintenance_to_cleaning"[];
 ```
 
 ### `CustodyArm`
@@ -16085,31 +16022,11 @@ interface CustodyArm {
 }
 ```
 
-### `CustodyFlagReasonEnum`
-
-Zod schema for {@link CustodyFlagReasonType}.
-
-```ts
-const CustodyFlagReasonEnum: z.ZodType<CustodyFlagReasonType>;
-```
-
-### `CustodyFlagReasonType`
-
-A flag reason a custody action may name.
-
-```ts
-type CustodyFlagReasonType = indexedAccess;
-```
-
 ### `CustodyRule`
 
-One legal custody step.
-
-`from === to` is a step that changes no breakdown key (only the deprecated
-`flag_returned`):
-its movement carries no custody and names its booking in `sources[]`, not in
-`uid_booking`. Every other row's movement carries `{from, to}` as its custody
-pair and sets `uid_booking`.
+One legal custody step. Every row moves units between two breakdown keys
+(`from !== to`, asserted by `tests/custody.test.ts`), so its movement carries
+`{from, to}` as its custody pair and sets `uid_booking`.
 
 ```ts
 interface CustodyRule {
@@ -16146,7 +16063,7 @@ const CustodyRuleIdEnum: z.ZodType<CustodyRuleId>;
 
 ### `CustodyServiceShape`
 
-A flag row's service axis, in terms the action fills in.
+A flag row's service axis.
 
 ```ts
 interface CustodyServiceShape {
@@ -16160,14 +16077,13 @@ interface CustodyServiceShape {
 One side of a flag row's service axis.
 
 - `none` — in service on that side;
-- `damaged` / `cleaning` / `maintenance` — that flag;
-- `reason` — (deprecated, R2 rows only) the reason the ACTION names.
+- `damaged` / `cleaning` / `maintenance` — that flag.
 
 ```ts
-type CustodyServiceSide = "none" | "damaged" | "cleaning" | "maintenance" | "reason";
+type CustodyServiceSide = "none" | "damaged" | "cleaning" | "maintenance";
 ```
 
-### `custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale", reason?: string): string | null`
+### `custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale"): string | null`
 
 The movement-id slot an action occupies in one save, or `null` when it writes
 no movement for that booking type.
@@ -16176,15 +16092,13 @@ A movement's id is `{session}|{type}|{booking}`, so two actions of one type
 against one booking in one save collide. The exception is a `flag` into or
 out of `cleaning`/`maintenance`, whose id is its reason's own (the api's
 `transitionMovementId`), so `flag_cleaning_returned` and
-`flag_damaged_returned` in one save are two slots. The deprecated no-custody
-`flag_returned` names its reason on the action instead, and lands on the
-same slot as the P2b row it is read as.
+`flag_damaged_returned` in one save are two slots.
 
 ### `custodyRule(id: CustodyRuleId): CustodyRule`
 
 The rule with `id`. Total over {@link CustodyRuleId}; the table test proves it.
 
-### `duplicateCustodySlots(actions: readonly Pick<BookingActionType, "rule" | "reason">[]): string[]`
+### `duplicateCustodySlots(actions: readonly Pick<BookingActionType, "rule">[]): string[]`
 
 Where two actions in one list would write the same movement id. Shared by the
 wire refine and by `applyCustodyActions`, so the two cannot disagree.
@@ -27171,15 +27085,14 @@ interface CustodyLossUndo {
 
 One action the UI may offer on a booking row.
 
-`key` is what a menu de-duplicates on — the rule id. (It carried a reason for
-R2's two `flag_returned` offers, which are no longer made.) Expand an offer into the actions to send with
-{@link expandCustodyOffer}; a `check_out` over reserved units is two steps.
+`key` is what a menu de-duplicates on — the rule id. Expand an offer into the
+actions to send with {@link expandCustodyOffer}; a `check_out` over reserved
+units is two steps.
 
 ```ts
 interface CustodyOffer {
   key: string;
   rule: CustodyRuleId;
-  reason?: CustodyFlagReasonType;
   max: number;
   natural: boolean;
   direction: indexedAccess;
@@ -27273,7 +27186,7 @@ type ServicePlace = "unplaced" | OOSBreakdownKeyType;
 Apply `actions`, in order, to the booking's CURRENT state.
 
 Throws {@link CustodyRefusal} on an unknown rule, a rule the booking type may
-not take, a short source bucket, a missing or stray reason, two actions that
+not take, a short source bucket, two actions that
 would write one movement id, or a loss-mark undo after a forward step. Never
 clamps: a short bucket after a concurrent write is a refusal, not an
 overwrite — the lost-update bug the absolute-breakdown wire had.
@@ -27293,8 +27206,8 @@ record's mark movement.
 Every action the UI may offer on this booking, natural next first, then
 forward in ladder order, then undos.
 
-Replaces `actionAlternatesForBooking`, `regressionAlternatesForBooking`,
-`sourceBucketSizeForBooking` and `actionableQtyTowardTarget`. Two behaviours
+It replaced the alternates vocabulary in `utils/fulfillment-stage.ts`
+(removed in custody-actions P4). Two behaviours
 change, both by owner ruling (2026-09-29):
 
 - **No pre-departure loss.** `reserved`/`prepped` units are never offered
@@ -27302,8 +27215,7 @@ change, both by owner ruling (2026-09-29):
   out-of-service record instead.
 - **Returned units get their own losses and flags** (gap G5): Lost, Damaged,
   Cleaning and Maintenance off `returned`, so `‹ Out` is no longer the only
-  way to reach them. Since P2b those are the `flag_*_returned` rows, and the
-  deprecated `flag_returned` is never offered.
+  way to reach them. Since P2b those are the `flag_*_returned` rows.
 
 ### `custodyRuleForMovement(type: MovementTypeType, custody: typeLiteral | null, service: typeLiteral | null | undefined, bookingType: "rental" | "sale"): CustodyRule | null`
 
@@ -27311,8 +27223,9 @@ The rule a STORED movement's `(type, custody, service)` is an instance of, or
 `null` — the population assertion's lookup (`audit-custody-rules` in the api
 replays every stored custody movement through it).
 
-A row's `reason` side (the deprecated R2 rows) matches cleaning or
-maintenance; every other side matches itself.
+⚠️ A `flag` with NO custody pair maps to nothing. That was R2's check-in
+flag (`flag_returned`), retired in P4 after the audit found none stored in
+either project (2026-09-30), so one appearing now is a finding.
 
 ### `decomposeCustodyDelta(prev: BookingBreakdown, next: BookingBreakdown, bookingType: indexedAccess, _: unknown): CustodyDecomposition`
 
@@ -27367,7 +27280,7 @@ check-out has always sent it. Whether a sale's `out` closes the booking is
 `isBookingClosed`'s question (`utils/bookings.ts`), and it answers per order,
 at finalize.
 
-### `expandCustodyOffer(booking: CustodyBooking, offer: Pick<CustodyOffer, "rule" | "reason">, quantity: number): BookingActionType[]`
+### `expandCustodyOffer(booking: CustodyBooking, offer: Pick<CustodyOffer, "rule">, quantity: number): BookingActionType[]`
 
 The actions an offer sends for `quantity` units.
 
@@ -31932,49 +31845,6 @@ without naming it.
 const FULFILLMENT_STAGE_LABELS: Record<FulfillmentStage, string>;
 ```
 
-### `FulfillmentActionAlternate`
-
-Either direction of override a picker may pick for a row.
-
-```ts
-type FulfillmentActionAlternate = FulfillmentForwardAlternate | FulfillmentRegressionAlternate;
-```
-
-### `FulfillmentForwardAlternate`
-
-Forward action alternate — moves qty from the booking's natural source
-bucket to a later bucket. From any non-terminal source the user can skip
-ahead (e.g. reserved → out, or out → lost / damaged).
-
-```ts
-interface FulfillmentForwardAlternate {
-  kind: "forward";
-  stage: FulfillmentStage;
-  label: string;
-  returnTo?: "returned" | "lost" | "damaged";
-}
-```
-
-### `FulfillmentRegressionAlternate`
-
-Regression alternate — moves qty one step back from a later bucket.
-Used by target-side "current state" rows to undo over-eager transitions
-(e.g. accidentally checked out, or marked returned in error).
-
-Bucket flow (one step back, terminals reversible):
-  returned/lost/damaged/cleaning/maintenance → out
-  out                   → prepped
-  prepped               → reserved
-
-```ts
-interface FulfillmentRegressionAlternate {
-  kind: "regression";
-  fromBucket: "prepped" | "out" | "returned" | "lost" | "damaged" | "cleaning" | "maintenance";
-  toBucket: "reserved" | "prepped" | "out";
-  label: string;
-}
-```
-
 ### `FulfillmentStage`
 
 One workflow stage of the fulfillment route.
@@ -32010,42 +31880,6 @@ The picker renders these as two columns, and that is where the old `"col1"` /
 ```ts
 type StageSide = "source" | "target";
 ```
-
-### `actionAlternatesForBooking(b: Pick<Booking, "type" | "breakdown">): FulfillmentForwardAlternate[]`
-
-The full list of forward override alternates for a row, in the popover's
-display order. The natural next action is always first.
-
-🔴 **Which transitions are LEGAL is a domain question, not a menu.** No
-server-side transition validation exists today, so this list is currently the
-only statement of the rule anywhere; it is in core so the server has one
-answer to check a submitted movement against rather than inventing a second.
-
-A non-rental booking that has reached `out` is *closed* (no required next
-action) but still exposes Return/Lost/Damaged — a sold item can be returned
-for credit and lost/damaged-in-transit is real (see `isBookingClosed` in
-`./bookings.ts`). So we still offer the terminal alternates whenever the
-booking has `out > 0`, regardless of type; they're just no longer the default.
-
-### `actionableQtyTowardTarget(b: Pick<Booking, "type" | "breakdown">, target: FulfillmentStage): number`
-
-The qty a forward action toward `target` moves for this booking — the picker
-default + max, the per-row action qty, and the bulk "Action All" amount.
-
-prep / checkout — SKIP-AHEAD: qty comes from the booking's natural (earliest
-  non-empty non-terminal) source bucket — exactly what `computeBookingTransition`
-  moves — provided the booking exposes a forward alternate reaching `target`.
-  So "Check Out All" sweeps reserved units straight to `out`, while an already
-  prepped-only booking is excluded from "Prep All" (no `prep` alternate),
-  keeping today's Auto behavior.
-
-return — NOT skip-ahead: `computeBookingTransition` pulls from the earliest
-  non-empty bucket, so `out` can only be returned once `reserved`/`prepped` are
-  clear. We therefore act only when the booking's natural next action IS
-  `return` (rental, `out` is the current bucket). This preserves the invariant
-  that bulk Return never sweeps a non-rental's terminal `out` (its natural next
-  is `complete`) nor still-prepped/reserved qty — those stay deliberate
-  per-item menu choices.
 
 ### `bookingsComplete(bookings: ReadonlyArray<Pick<Booking, "type" | "breakdown">>): boolean`
 
@@ -32209,23 +32043,10 @@ otherwise the section is complete.
 
 Destination-agnostic — pass any subset of bookings.
 
-### `naturalNextActionForBooking(b: Pick<Booking, "type" | "breakdown">): FulfillmentStage`
-
-The natural next action for a given booking based on its own breakdown. Used
-to label the per-row action button. A non-rental sitting in `out` has no
-*required* next action (delivery is terminal) → `complete`.
-
 ### `qtyOnStageSide(b: Pick<Booking, "type" | "breakdown">, stage: FulfillmentStage, side: StageSide): number`
 
 Sum of a booking's qty in the buckets belonging to one side of a stage
 (type-aware). `> 0` means the row appears on that side.
-
-### `regressionAlternatesForBooking(b: Pick<Booking, "breakdown">): FulfillmentRegressionAlternate[]`
-
-Regression alternates — one entry per non-empty target-side bucket on the
-booking. Order mirrors the natural undo priority (terminals first, then out,
-then prepped). The popover's "default" entry is the first; the rest live in
-the menu.
 
 ### `returnableQuantity(b: Pick<Booking, "type" | "breakdown">): number`
 
@@ -32246,12 +32067,6 @@ rentals with `out > 0` numbered 0. That one-shot would have asserted 23,440
 units of sold goods back into stock. The plan's own audit could not have
 caught it — 379 of the 380 carry no custody event at all, so it classifies
 them `no_events` and skips them by design.
-
-### `sourceBucketSizeForBooking(b: Pick<Booking, "type" | "breakdown">): number`
-
-The size of the "source" bucket for a row's natural next action — also the
-default qty for the action's input. Reducing it creates a partial transition
-(e.g. 3-of-5 prepped, or 2 returned + 1 lost).
 
 ## `@cfs/core/utils/locations`
 

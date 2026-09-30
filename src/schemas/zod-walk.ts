@@ -615,6 +615,12 @@ export function collectLeafPaths(
       return;
     }
 
+    // A `never` node admits no value, so it has no leaf and hides no subtree.
+    // It marks a key that must be ABSENT — a retired input key refused by name
+    // rather than stripped (`retiredKey`, `schemas/booking.ts`) — so there is
+    // nothing under it to tag, mask or read.
+    if (def.type === "never") return;
+
     if (LEAF_TYPES.has(def.type)) {
       leaves.push({
         path,

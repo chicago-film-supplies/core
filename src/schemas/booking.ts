@@ -4,7 +4,7 @@
 import { z } from "zod";
 import { BookingId, FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
-import { type BookingBreakdown, BookingBreakdownSchema, breakdownObjectSchema } from "./_breakdown.ts";
+import { type BookingBreakdown, BookingBreakdownSchema } from "./_breakdown.ts";
 import { BookingActions, type BookingActionType } from "./custody.ts";
 import { isCollectionLineType } from "./order.ts";
 import {
@@ -231,75 +231,54 @@ export const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
 // ── Update input ──────────────────────────────────────────────
 
 /**
- * @deprecated R2's check-in flags. `cleaning` and `maintenance` are breakdown
- * buckets now (custody-actions P2b, owner 2026-09-30): a dirty return is the
- * `mark_cleaning` rule, `out → cleaning`, not a `check_in` with a flag beside
- * it. Kept only while the api still accepts the delta wire, which translates
- * these into the new transitions. Removed once the manager's check-in stops
- * sending it (custody-actions P3 release 2), NOT with the keys' tightening:
- * `UpdateBookingInput` strips unknown keys, so an api that stopped declaring
- * this while prod manager still sent it would drop every check-in flag
- * silently.
+ * A key the delta wire carried and the actions wire retired, declared only so a
+ * payload still carrying it is REFUSED rather than stripped (custody-actions P4).
  *
- * Of the units a save brings to `returned`, how many are FLAGGED at check-in —
- * R2 (owner, 2026-09-24): dirty-on-return is a `cleaning` flag and wear-and-tear
- * a `maintenance` flag. The booking still closes as `returned`; no breakdown
- * bucket is added, and neither is billable.
- *
- * The server writes one `flag` movement per reason on the shelves the
- * `check_in` landed the units on, and opens one out-of-service record per
- * reason from it. Σ must not exceed the units this save returns — a 400
- * otherwise.
+ * Stripping is the dangerous half: `breakdown` was an ABSOLUTE next state, so a
+ * stale client sending it beside `actions` — or a script replaying an old body —
+ * would have its intent dropped with a 200. Every other unknown key still strips,
+ * as an input schema's does; only these three were ever meaningful.
  */
-export interface BookingReturnFlagsType {
-  cleaning: number;
-  maintenance: number;
+function retiredKey(key: "status" | "breakdown" | "return_flags") {
+  const why = key === "status"
+    ? "a booking's status is derived from its breakdown, never sent"
+    : "send custody `actions` instead";
+  return z.never({ error: `"${key}" is retired: ${why}` }).optional();
 }
-
-/** Zod schema for BookingReturnFlagsType. */
-export const BookingReturnFlags: z.ZodType<BookingReturnFlagsType> = z.object({
-  cleaning: z.int().min(0),
-  maintenance: z.int().min(0),
-});
 
 /**
  * Input for updating a single booking via `PUT /bookings/{uid}`.
  *
- * Status and breakdown are independently optional — most warehouse PUTs only
- * change the breakdown. When `breakdown` is supplied it must be the complete
- * next state (every key); the service requires `sum(breakdown) === quantity`
- * and treats the value as an absolute write, not a partial patch. Version is
- * required for optimistic concurrency.
+ * A save is the ordered list of custody steps the operator took
+ * ({@link BookingActionType}, `schemas/custody.ts`), applied to the booking's
+ * CURRENT state rather than a state the client computed — so a short source
+ * bucket after a concurrent write is a refusal, not an overwrite. `status` is
+ * derived by the server. Version is required for optimistic concurrency.
+ *
+ * ⚠️ The absolute-`breakdown` delta wire is retired from every operator route
+ * (custody-actions P4). The api keeps a server-actor-only delta path for repair
+ * scripts, typed on its own side; it is not this input.
  *
  * {@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to
- * retry once a breakdown change also appends to the movement journal — see the
- * field's own note.
+ * retry — see the field's own note.
  */
 export interface UpdateBookingInputType {
-  status?: BookingStatusType;
-  breakdown?: Booking["breakdown"];
-  /** See {@link BookingReturnFlagsType}. */
-  return_flags?: BookingReturnFlagsType;
-  /**
-   * The ACTION-shaped alternative to `breakdown` (`schemas/custody.ts`): the
-   * steps the operator took, applied to the booking's CURRENT state, rather
-   * than the state the client computed. Never both in one patch. A short source
-   * bucket after a concurrent write is then a refusal, not an overwrite.
-   *
-   * ⚠️ Declared ahead of its reader: the api accepts it from the
-   * custody-actions plan's P2 (`api-cloudrun/.claude/plans/custody-actions.md`).
-   */
-  actions?: BookingActionType[];
+  actions: BookingActionType[];
+  /** Retired — see `retiredKey`. Present is a 400. */
+  status?: never;
+  /** Retired — see `retiredKey`. Present is a 400. */
+  breakdown?: never;
+  /** Retired — see `retiredKey`. Present is a 400. */
+  return_flags?: never;
   version: number;
   /**
    * The client-minted uuid identifying ONE operator action, required.
    *
-   * A breakdown change now appends movement events, and appending is not
-   * idempotent the way an absolute-set write was: a lost response plus the
-   * manager's retry would say the operator returned the units twice. Every
-   * movement's document id is `{uuid_session}|{type}|{subject}`, so a retry
-   * carrying the same session resolves to the same documents and collapses to
-   * one event by construction.
+   * A custody change appends movement events, and appending is not idempotent
+   * the way an absolute-set write was: a lost response plus the manager's retry
+   * would say the operator returned the units twice. Every movement's document
+   * id is `{uuid_session}|{type}|{subject}`, so a retry carrying the same session
+   * resolves to the same documents and collapses to one event by construction.
    *
    * **Required, with no server-side fallback.** A server-minted session would be
    * fresh on every attempt, which is precisely the retry the id exists to
@@ -312,17 +291,12 @@ export interface UpdateBookingInputType {
 
 /** Zod schema for UpdateBookingInput. */
 export const UpdateBookingInput: z.ZodType<UpdateBookingInputType> = z.object({
-  status: BookingStatus.optional(),
-  // Derived from the key list: the hand-written copy it replaced was a
-  // non-strict `z.object`, so a new key was STRIPPED off the wire silently.
-  breakdown: breakdownObjectSchema(() => z.int().min(0), "strip").optional(),
-  return_flags: BookingReturnFlags.optional(),
-  actions: BookingActions.optional(),
+  actions: BookingActions,
+  status: retiredKey("status"),
+  breakdown: retiredKey("breakdown"),
+  return_flags: retiredKey("return_flags"),
   version: z.int().min(0),
   uuid_session: z.uuid(),
-}).refine((u) => u.breakdown === undefined || u.actions === undefined, {
-  message: "send breakdown or actions, not both",
-  path: ["actions"],
 });
 
 // ── Bulk update input (PUT /fulfillments/{uid}/bookings) ───────
@@ -334,25 +308,23 @@ export const UpdateBookingInput: z.ZodType<UpdateBookingInputType> = z.object({
  */
 export interface BookingUpdateType {
   uid: string;
-  status?: BookingStatusType;
-  breakdown?: Booking["breakdown"];
-  /** See {@link BookingReturnFlagsType}. */
-  return_flags?: BookingReturnFlagsType;
-  /** See {@link UpdateBookingInputType.actions}. */
-  actions?: BookingActionType[];
+  actions: BookingActionType[];
+  /** Retired — see `retiredKey`. Present is a 400. */
+  status?: never;
+  /** Retired — see `retiredKey`. Present is a 400. */
+  breakdown?: never;
+  /** Retired — see `retiredKey`. Present is a 400. */
+  return_flags?: never;
   version: number;
 }
 
 export const BookingUpdate: z.ZodType<BookingUpdateType> = z.object({
   uid: BookingId,
-  status: BookingStatus.optional(),
-  breakdown: BookingBreakdownSchema.optional(),
-  return_flags: BookingReturnFlags.optional(),
-  actions: BookingActions.optional(),
+  actions: BookingActions,
+  status: retiredKey("status"),
+  breakdown: retiredKey("breakdown"),
+  return_flags: retiredKey("return_flags"),
   version: z.int().min(0),
-}).refine((u) => u.breakdown === undefined || u.actions === undefined, {
-  message: "send breakdown or actions, not both",
-  path: ["actions"],
 });
 
 /**

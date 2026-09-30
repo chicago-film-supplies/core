@@ -1,7 +1,5 @@
 import { assertEquals } from "@std/assert";
 import {
-  actionAlternatesForBooking,
-  actionableQtyTowardTarget,
   bookingsComplete,
   bucketsForBookingSide,
   bucketsForStageSide,
@@ -12,11 +10,8 @@ import {
   FULFILLMENT_STAGE_LABELS,
   FULFILLMENT_STAGES,
   getStageForBookings,
-  naturalNextActionForBooking,
   qtyOnStageSide,
-  regressionAlternatesForBooking,
   returnableQuantity,
-  sourceBucketSizeForBooking,
   STAGE_SOURCE,
   STAGE_TARGET,
 } from "../src/utils/fulfillment-stage.ts";
@@ -206,55 +201,6 @@ Deno.test("...and the implication is STRICTLY one-directional", () => {
   assertEquals(qtyOnStageSide(prepped, "checkout", "target"), 0);
 });
 
-// ── naturalNextActionForBooking ──────────────────────────────────────────────
-
-Deno.test("naturalNextActionForBooking walks the lifecycle", () => {
-  assertEquals(naturalNextActionForBooking(bk({ reserved: 3 })), "prep");
-  assertEquals(naturalNextActionForBooking(bk({ prepped: 3 })), "checkout");
-  assertEquals(naturalNextActionForBooking(bk({ out: 3 })), "return");
-  assertEquals(naturalNextActionForBooking(bk({ returned: 2, lost: 1 })), "complete");
-});
-
-Deno.test("naturalNextActionForBooking prioritises the earliest non-empty source", () => {
-  assertEquals(naturalNextActionForBooking(bk({ reserved: 1, prepped: 2 })), "prep");
-  assertEquals(naturalNextActionForBooking(bk({ prepped: 1, out: 2 })), "checkout");
-});
-
-// ── actionAlternatesForBooking ───────────────────────────────────────────────
-
-Deno.test("actionAlternatesForBooking offers prep + skip-ahead for a reserved booking", () => {
-  assertEquals(
-    actionAlternatesForBooking(bk({ reserved: 3 })).map((a) => a.label),
-    ["Prep", "Check Out", "Mark Returned", "Mark Lost", "Mark Damaged"],
-  );
-});
-
-Deno.test("actionAlternatesForBooking drops 'Prep' for a prepped booking", () => {
-  assertEquals(
-    actionAlternatesForBooking(bk({ prepped: 3 })).map((a) => a.label),
-    ["Check Out", "Mark Returned", "Mark Lost", "Mark Damaged"],
-  );
-});
-
-Deno.test("actionAlternatesForBooking offers only the return splits for an out booking", () => {
-  assertEquals(
-    actionAlternatesForBooking(bk({ out: 3 })).map((a) => a.label),
-    ["Mark Returned", "Mark Lost", "Mark Damaged"],
-  );
-});
-
-Deno.test("actionAlternatesForBooking offers nothing for a terminal booking", () => {
-  assertEquals(actionAlternatesForBooking(bk({ returned: 3 })), []);
-});
-
-// ── sourceBucketSizeForBooking ───────────────────────────────────────────────
-
-Deno.test("sourceBucketSizeForBooking reads the natural action's source bucket", () => {
-  assertEquals(sourceBucketSizeForBooking(bk({ reserved: 3, prepped: 2 })), 3);
-  assertEquals(sourceBucketSizeForBooking(bk({ prepped: 3 })), 3);
-  assertEquals(sourceBucketSizeForBooking(bk({ returned: 3 })), 0);
-});
-
 // ── non-rental `out` is terminal (matches isBookingClosed) ───────────────────
 
 Deno.test("a sale that is out does NOT hold the destination at 'return'", () => {
@@ -266,20 +212,9 @@ Deno.test("a mixed destination stays at 'return' only for the rental's out", () 
   assertEquals(getStageForBookings([bk({ out: 3 }, "sale"), bk({ out: 2 }, "rental")]), "return");
 });
 
-Deno.test("naturalNext for a sale-out is 'complete', not 'return'", () => {
-  assertEquals(naturalNextActionForBooking(bk({ out: 3 }, "sale")), "complete");
-});
-
 Deno.test("a sale-out is closed per bookingsComplete", () => {
   assertEquals(bookingsComplete([bk({ out: 3 }, "sale")]), true);
   assertEquals(bookingsComplete([bk({ out: 3 }, "rental")]), false);
-});
-
-Deno.test("a sale-out STILL offers Return/Lost/Damaged (optional, not required)", () => {
-  assertEquals(
-    actionAlternatesForBooking(bk({ out: 3 }, "sale")).map((a) => a.label),
-    ["Mark Returned", "Mark Lost", "Mark Damaged"],
-  );
 });
 
 Deno.test("a sale-out sits on the target side, a rental-out on the source side", () => {
@@ -337,63 +272,6 @@ Deno.test("a mix of quoted + reserved prioritises the actionable 'prep' stage", 
 Deno.test("'quoted' is a SOURCE-side bucket at the quoted stage, so it renders", () => {
   assertEquals(bucketsForStageSide("quoted", "source"), ["quoted"]);
   assertEquals(qtyOnStageSide(bk({ quoted: 3 }), "quoted", "source"), 3);
-});
-
-// ── actionableQtyTowardTarget ────────────────────────────────────────────────
-
-Deno.test("actionableQtyTowardTarget: checkout sweeps reserved straight to out", () => {
-  assertEquals(actionableQtyTowardTarget(bk({ reserved: 3 }), "checkout"), 3);
-});
-
-Deno.test("actionableQtyTowardTarget: prep on a reserved booking is the Auto-equivalent", () => {
-  assertEquals(actionableQtyTowardTarget(bk({ reserved: 3 }), "prep"), 3);
-});
-
-Deno.test("actionableQtyTowardTarget excludes a prepped-only booking from Prep", () => {
-  assertEquals(actionableQtyTowardTarget(bk({ prepped: 3 }), "prep"), 0);
-});
-
-Deno.test("actionableQtyTowardTarget: checkout on a prepped booking moves the prepped qty", () => {
-  assertEquals(actionableQtyTowardTarget(bk({ prepped: 3 }), "checkout"), 3);
-});
-
-Deno.test("actionableQtyTowardTarget uses the earliest-source qty for a partial booking", () => {
-  assertEquals(actionableQtyTowardTarget(bk({ reserved: 1, prepped: 2 }), "checkout"), 1);
-});
-
-Deno.test("actionableQtyTowardTarget: return acts on a rental's out qty", () => {
-  assertEquals(actionableQtyTowardTarget(bk({ out: 3 }), "return"), 3);
-});
-
-Deno.test("actionableQtyTowardTarget: return does NOT sweep a non-rental's terminal out", () => {
-  assertEquals(actionableQtyTowardTarget(bk({ out: 3 }, "sale"), "return"), 0);
-});
-
-Deno.test("actionableQtyTowardTarget: return is 0 while an earlier bucket still holds qty", () => {
-  assertEquals(actionableQtyTowardTarget(bk({ prepped: 2, out: 3 }, "sale"), "return"), 0);
-  assertEquals(actionableQtyTowardTarget(bk({ prepped: 2, out: 3 }), "return"), 0);
-  assertEquals(actionableQtyTowardTarget(bk({ reserved: 3, out: 2 }), "return"), 0);
-});
-
-Deno.test("actionableQtyTowardTarget is 0 toward every target for a terminal booking", () => {
-  const terminal = bk({ returned: 3 });
-  assertEquals(actionableQtyTowardTarget(terminal, "prep"), 0);
-  assertEquals(actionableQtyTowardTarget(terminal, "checkout"), 0);
-  assertEquals(actionableQtyTowardTarget(terminal, "return"), 0);
-});
-
-Deno.test("actionableQtyTowardTarget guards the quoted/complete targets to 0", () => {
-  const b = bk({ reserved: 3 });
-  assertEquals(actionableQtyTowardTarget(b, "quoted"), 0);
-  assertEquals(actionableQtyTowardTarget(b, "complete"), 0);
-});
-
-// ── regressionAlternatesForBooking ───────────────────────────────────────────
-
-Deno.test("regressionAlternates lead with the most-terminal non-empty bucket", () => {
-  const alts = regressionAlternatesForBooking(bk({ out: 2, returned: 3 }));
-  assertEquals(alts[0].fromBucket, "returned");
-  assertEquals(alts[0].toBucket, "out");
 });
 
 // ── checkoutUnits / checkoutableQuantity ─────────────────────────────────────

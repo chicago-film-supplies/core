@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { BookingSchema, UpdateBookingInput } from "../src/schemas/booking.ts";
+import { BookingSchema } from "../src/schemas/booking.ts";
 import { breakdownObjectSchema } from "../src/schemas/_breakdown.ts";
 import { z } from "zod";
 import { mockTimestamp } from "./helpers/timestamp.ts";
@@ -144,7 +144,6 @@ Deno.test("P2b: every breakdown spelling refuses a breakdown lacking cleaning or
   const nine = { quoted: 0, reserved: 5, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0, cleaning: 0, maintenance: 0 };
   const spellings: [string, z.ZodType, (b: Record<string, number>) => unknown, (string | number)[]][] = [
     ["BookingSchema.breakdown", BookingSchema, (b) => ({ ...validBooking, breakdown: b }), ["breakdown"]],
-    ["UpdateBookingInput.breakdown", UpdateBookingInput, (b) => ({ version: 1, uuid_session: "9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48", breakdown: b }), ["breakdown"]],
     ["the order roll-up (strict)", breakdownObjectSchema(() => z.number(), "strict"), (b) => b, []],
   ];
   for (const [name, schema, wrap, prefix] of spellings) {

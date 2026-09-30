@@ -107,12 +107,16 @@ export function sampleValues(schema: z.ZodType, path = "", depth = 0): unknown[]
     return sampleValues(def.in, path, depth + 1);
   }
 
+  // A `never` node admits no value: the key must be absent, so it has no
+  // alternatives and the object below omits it (see `collectLeafPaths`).
+  if (def.type === "never") return [];
+
   if (def.type === "object") {
     if (!def.shape) throw new Error(`sampleValues: object with no shape at "${path}"`);
     const fields = Object.entries(def.shape).map(([key, child]) => {
       const childPath = path ? `${path}.${key}` : key;
       return [key, sampleValues(child, childPath, depth + 1)] as const;
-    });
+    }).filter(([, alts]) => alts.length > 0);
     // Zip to the longest field: every alternative of every field lands in SOME
     // document, and the document count stays linear rather than cartesian.
     const width = Math.max(1, ...fields.map(([, alts]) => alts.length));

@@ -15,6 +15,7 @@
  *    that the G1 ruling turns into a refusal?
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import type { z } from "zod";
 import {
   type Booking,
   type BookingBreakdown,
@@ -22,6 +23,7 @@ import {
   BookingAction,
   BookingActions,
   BookingUpdate,
+  BulkBookingUpdateInput,
   CUSTODY_PLACE_KINDS,
   CUSTODY_RULE_IDS,
   CUSTODY_RULES,
@@ -197,19 +199,19 @@ Deno.test("custody - the type ↔ custody-pair binding the contracts lack (tests
   assertEquals(custodyRuleForMovement("check_in", { from: "prepped", to: "returned" }, null, "rental"), null);
   // The flag rows are told apart by their service axis.
   assertEquals(custodyRuleForMovement("flag", { from: "returned", to: "damaged" }, { from: null, to: "damaged" }, "rental")?.id, "flag_damaged_returned");
-  assertEquals(custodyRuleForMovement("flag", { from: "returned", to: "damaged" }, { from: "cleaning", to: "damaged" }, "rental")?.id, "reclassify_flag_to_damaged");
+  assertEquals(custodyRuleForMovement("flag", { from: "cleaning", to: "damaged" }, { from: "cleaning", to: "damaged" }, "rental")?.id, "reclassify_cleaning_to_damaged");
   assertEquals(custodyRuleForMovement("flag", { from: "damaged", to: "returned" }, { from: "damaged", to: null }, "rental")?.id, "flag_damaged_returned_undo");
-  assertEquals(custodyRuleForMovement("flag", null, { from: null, to: "maintenance" }, "rental")?.id, "flag_returned");
+  // R2's no-custody check-in flag was retired in P4 (none stored in either
+  // project, 2026-09-30), so the shape now maps to nothing.
+  assertEquals(custodyRuleForMovement("flag", null, { from: null, to: "maintenance" }, "rental"), null);
   // Every arm finds its own row.
   for (const r of CUSTODY_RULES) {
     for (const bt of ["rental", "sale"] as const) {
       const arm = bt === "rental" ? r.rental : r.sale;
       if (!arm?.movement) continue;
-      const side = (x: "none" | "damaged" | "cleaning" | "maintenance" | "reason"): OOSReasonType | null =>
-        x === "none" ? null : x === "reason" ? "cleaning" : x;
+      const side = (x: "none" | "damaged" | "cleaning" | "maintenance"): OOSReasonType | null => x === "none" ? null : x;
       const svc = r.service === null ? null : { from: side(r.service.from), to: side(r.service.to) };
-      const custody = r.from === r.to ? null : { from: r.from, to: r.to };
-      assertEquals(custodyRuleForMovement(arm.movement, custody, svc, bt)?.id, r.id, `${r.id} (${bt})`);
+      assertEquals(custodyRuleForMovement(arm.movement, { from: r.from, to: r.to }, svc, bt)?.id, r.id, `${r.id} (${bt})`);
     }
   }
 });
@@ -364,54 +366,46 @@ Deno.test("custody - a sale's loss is legal and writes no movement", () => {
   assertEquals(r.transitions, []);
 });
 
-Deno.test("custody - flag_returned (G2): check in 3, flag 2 cleaning in the same save; 4 is refused", () => {
+Deno.test("custody - every row moves units between two breakdown keys", () => {
+  // R2's `flag_returned` was the one `from === to` row, and `custodyRuleForMovement`
+  // no longer has a no-custody branch to match one.
+  for (const r of CUSTODY_RULES) assert(r.from !== r.to, `${r.id}: from === to`);
+});
+
+Deno.test("custody - flag after return (G2): check in 3, flag 2 cleaning in the same save; the unflagged bound holds", () => {
   const b = booking(3, { out: 3 }, "active");
   const r = applyCustodyActions(b, [
     { rule: "check_in", quantity: 3 },
-    { rule: "flag_returned", quantity: 2, reason: "cleaning" },
+    { rule: "flag_cleaning_returned", quantity: 2 },
   ]);
-  assertEquals(r.breakdown, bd({ returned: 3 }));
+  assertEquals(r.breakdown, bd({ returned: 1, cleaning: 2 }));
   assertEquals(r.status, "complete");
   assertEquals(r.transitions.map((t) => [t.type, t.service]), [
     ["check_in", null],
     ["flag", { from: null, to: "cleaning" }],
   ]);
-  // Flagging on already-returned units, net of those already flagged.
+  // Flagging already-returned units, net of those already flagged.
   const back = booking(3, { returned: 3 }, "complete");
   assertThrows(
-    () => applyCustodyActions(back, [{ rule: "flag_returned", quantity: 2, reason: "maintenance" }], { unflaggedReturned: 1 }),
+    () => applyCustodyActions(back, [{ rule: "flag_maintenance_returned", quantity: 2 }], { unflaggedReturned: 1 }),
     CustodyRefusal,
     "only 1",
   );
   // Cleaning and maintenance in one save are two movement slots.
   const both = applyCustodyActions(back, [
-    { rule: "flag_returned", quantity: 1, reason: "cleaning" },
-    { rule: "flag_returned", quantity: 1, reason: "maintenance" },
+    { rule: "flag_cleaning_returned", quantity: 1 },
+    { rule: "flag_maintenance_returned", quantity: 1 },
   ]);
   assertEquals(both.transitions.length, 2);
 });
 
-Deno.test("custody - a reclassification flips the booking in the same write (G3)", () => {
-  const r = applyCustodyActions(booking(2, { damaged: 2 }, "complete"), [
-    { rule: "reclassify_damaged_to_flag", quantity: 2, reason: "cleaning" },
-  ]);
-  assertEquals(r.breakdown, bd({ returned: 2 }));
-  assertEquals(r.transitions[0].service, { from: "damaged", to: "cleaning" });
-  const back = applyCustodyActions(booking(2, { returned: 2 }, "complete"), [
-    { rule: "reclassify_flag_to_damaged", quantity: 1, reason: "maintenance" },
-  ]);
-  assertEquals(back.breakdown, bd({ returned: 1, damaged: 1 }));
-  assertEquals(back.transitions[0].service, { from: "maintenance", to: "damaged" });
-});
-
-Deno.test("custody - a loss undo after a forward step is refused, and so is a missing reason", () => {
+Deno.test("custody - a loss undo after a forward step is refused", () => {
   const b = booking(3, { out: 1, lost: 2 }, "active");
   assertThrows(
     () => applyCustodyActions(b, [{ rule: "check_in", quantity: 1 }, { rule: "mark_lost_undo", quantity: 1 }]),
     CustodyRefusal,
     "before every forward",
   );
-  assertThrows(() => applyCustodyActions(booking(1, { returned: 1 }, "complete"), [{ rule: "flag_returned", quantity: 1 }]), CustodyRefusal, "needs a reason");
 });
 
 // ── 4. the manager's 24 cases (manager tests/utils/bookingTransitions.test.ts) ──
@@ -540,12 +534,11 @@ Deno.test("custody - offers: returned units get Lost, Damaged, Cleaning and Main
   const byKey = Object.fromEntries(offers.map((o) => [o.key, o.max]));
   assertEquals(byKey["mark_lost_returned"], 2);
   assertEquals(byKey["flag_damaged_returned"], 1);
-  // P2b: the buckets' own rows, and never the deprecated no-custody flag.
+  // P2b: the buckets' own rows.
   assertEquals(byKey["flag_cleaning_returned"], 1);
   assertEquals(byKey["flag_maintenance_returned"], 1);
   assertEquals(byKey["mark_cleaning"], 2);
   assertEquals(byKey["mark_maintenance"], 2);
-  assert(!offers.some((o) => o.rule === "flag_returned"), "the R2 flag is still offered");
   assertEquals(byKey["check_in_undo"], 2);
   assertEquals(offers.filter((o) => o.natural).length, 1);
   assertEquals(new Set(offers.map((o) => o.key)).size, offers.length, "an offer key repeats");
@@ -583,7 +576,7 @@ Deno.test("custody - expandCustodyOffer draws already-prepped units first", () =
   const b = booking(5, { reserved: 3, prepped: 2 });
   assertEquals(expandCustodyOffer(b, { rule: "check_out" }, 2), [{ rule: "check_out", quantity: 2 }]);
   assertEquals(expandCustodyOffer(b, { rule: "check_out" }, 4), [{ rule: "prep", quantity: 2 }, { rule: "check_out", quantity: 4 }]);
-  assertEquals(expandCustodyOffer(b, { rule: "flag_returned", reason: "cleaning" }, 1), [{ rule: "flag_returned", quantity: 1, reason: "cleaning" }]);
+  assertEquals(expandCustodyOffer(b, { rule: "flag_cleaning_returned" }, 1), [{ rule: "flag_cleaning_returned", quantity: 1 }]);
 });
 
 Deno.test("custody - every offer, taken at its max, applies", () => {
@@ -602,26 +595,23 @@ Deno.test("custody - every offer, taken at its max, applies", () => {
 
 // ── the wire ─────────────────────────────────────────────────────────
 
-Deno.test("custody - BookingAction: a reason on exactly the rows that need one", () => {
-  assert(BookingAction.safeParse({ rule: "flag_returned", quantity: 1, reason: "cleaning" }).success);
-  assert(!BookingAction.safeParse({ rule: "flag_returned", quantity: 1 }).success);
-  assert(!BookingAction.safeParse({ rule: "check_in", quantity: 1, reason: "cleaning" }).success);
+Deno.test("custody - BookingAction: a known rule and a positive quantity; the R2 rules are gone", () => {
+  assert(BookingAction.safeParse({ rule: "check_in", quantity: 1 }).success);
+  for (const retired of ["flag_returned", "reclassify_damaged_to_flag", "reclassify_flag_to_damaged"]) {
+    assert(!BookingAction.safeParse({ rule: retired, quantity: 1 }).success, retired);
+  }
   assert(!BookingAction.safeParse({ rule: "check_in", quantity: 0 }).success);
   assert(!BookingAction.safeParse({ rule: "reserve", quantity: 1 }).success);
 });
 
 Deno.test("custody - BookingActions refuses one movement id twice and a loss undo after a forward step", () => {
   assert(!BookingActions.safeParse([{ rule: "mark_lost", quantity: 1 }, { rule: "mark_lost_returned", quantity: 1 }]).success);
-  assert(BookingActions.safeParse([
-    { rule: "flag_returned", quantity: 1, reason: "cleaning" },
-    { rule: "flag_returned", quantity: 1, reason: "maintenance" },
-  ]).success);
   assert(!BookingActions.safeParse([
-    { rule: "flag_returned", quantity: 1, reason: "cleaning" },
-    { rule: "flag_returned", quantity: 1, reason: "cleaning" },
+    { rule: "flag_cleaning_returned", quantity: 1 },
+    { rule: "flag_cleaning_returned", quantity: 1 },
   ]).success);
   // A cleaning or maintenance flag is on its reason's own id, so it shares a
-  // save with a damaged flag, and with its deprecated R2 spelling it does not.
+  // save with a damaged flag.
   assert(BookingActions.safeParse([
     { rule: "flag_cleaning_returned", quantity: 1 },
     { rule: "flag_damaged_returned", quantity: 1 },
@@ -629,10 +619,6 @@ Deno.test("custody - BookingActions refuses one movement id twice and a loss und
   assert(BookingActions.safeParse([
     { rule: "flag_cleaning_returned", quantity: 1 },
     { rule: "flag_maintenance_returned", quantity: 1 },
-  ]).success);
-  assert(!BookingActions.safeParse([
-    { rule: "flag_cleaning_returned", quantity: 1 },
-    { rule: "flag_returned", quantity: 1, reason: "cleaning" },
   ]).success);
   assert(!BookingActions.safeParse([
     { rule: "flag_damaged_returned_undo", quantity: 1 },
@@ -643,17 +629,35 @@ Deno.test("custody - BookingActions refuses one movement id twice and a loss und
   assert(!BookingActions.safeParse([]).success);
 });
 
-Deno.test("custody - the booking inputs take breakdown OR actions, never both", () => {
-  const base = { version: 1, uuid_session: crypto.randomUUID() };
-  const breakdown = bd({ out: 1 });
-  const actions = [{ rule: "check_out", quantity: 1 }];
-  assert(UpdateBookingInput.safeParse({ ...base, breakdown }).success);
-  assert(UpdateBookingInput.safeParse({ ...base, actions }).success);
-  assert(UpdateBookingInput.safeParse({ ...base, status: "complete" }).success, "the status-only form stays legal");
-  assert(!UpdateBookingInput.safeParse({ ...base, breakdown, actions }).success);
+Deno.test("custody P4 - the booking inputs are actions-only, and REFUSE the retired delta keys rather than strip them", () => {
+  const uuid_session = crypto.randomUUID();
   const uid = `aaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbb:${crypto.randomUUID()}`;
-  assert(BookingUpdate.safeParse({ uid, version: 1, actions }).success);
-  assert(!BookingUpdate.safeParse({ uid, version: 1, breakdown, actions }).success);
+  const actions = [{ rule: "check_out", quantity: 1 }];
+  const retired: Record<string, unknown> = { status: "complete", breakdown: bd({ out: 1 }), return_flags: { cleaning: 1, maintenance: 0 } };
+  const inputs: [string, z.ZodType, Record<string, unknown>][] = [
+    ["UpdateBookingInput", UpdateBookingInput, { version: 1, uuid_session, actions }],
+    ["BookingUpdate", BookingUpdate, { uid, version: 1, actions }],
+  ];
+  for (const [name, schema, valid] of inputs) {
+    assert(schema.safeParse(valid).success, `${name}: the actions-only control parses`);
+    const { actions: _a, ...noActions } = valid;
+    const missing = schema.safeParse(noActions);
+    assertEquals(missing.error?.issues.map((i) => i.path), [["actions"]], `${name}: actions are required`);
+    // Each retired key alone, beside valid actions: a 400 naming exactly it. A
+    // stripped key would parse, which is the silent no-op this exists to stop.
+    for (const [key, value] of Object.entries(retired)) {
+      const r = schema.safeParse({ ...valid, [key]: value });
+      assertEquals(r.error?.issues.map((i) => i.path), [[key]], `${name}: "${key}" must be refused, by name`);
+      assert(r.error!.issues[0].message.includes("retired"), `${name}: "${key}"'s message says why`);
+    }
+    // ...and the old delta body, with no actions at all, fails on both counts.
+    assert(!schema.safeParse({ ...noActions, breakdown: retired.breakdown }).success, `${name}: a bare delta body`);
+    // Any OTHER unknown key still strips, as an input schema's does.
+    const extra = schema.safeParse({ ...valid, client_hint: "x" });
+    assert(extra.success && !("client_hint" in (extra.data as object)), `${name}: an unrelated key strips`);
+  }
+  assert(BulkBookingUpdateInput.safeParse({ version: 1, uuid_session, updates: [{ uid, version: 1, actions }] }).success);
+  assert(!BulkBookingUpdateInput.safeParse({ version: 1, uuid_session, updates: [{ uid, version: 1, actions, breakdown: retired.breakdown }] }).success);
 });
 
 // ── the record side ──────────────────────────────────────────────────
@@ -841,7 +845,7 @@ Deno.test("custody P2b - stored movements find their rows; the R2 no-custody fla
     custodyRuleForMovement("flag", { from: "cleaning", to: "maintenance" }, { from: "cleaning", to: "maintenance" }, "rental")?.id,
     "reclassify_cleaning_to_maintenance",
   );
-  assertEquals(custodyRuleForMovement("flag", null, { from: null, to: "cleaning" }, "rental")?.id, "flag_returned");
+  assertEquals(custodyRuleForMovement("flag", null, { from: null, to: "cleaning" }, "rental"), null);
   // A custody pair and a service axis that disagree are no row.
   assertEquals(custodyRuleForMovement("flag", { from: "returned", to: "cleaning" }, { from: null, to: "maintenance" }, "rental"), null);
 });

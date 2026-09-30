@@ -29,9 +29,7 @@ import {
   type BookingActionType,
   type BookingBreakdown,
   type BookingBreakdownKeyType,
-  CUSTODY_FLAG_REASONS,
   CUSTODY_RULES,
-  type CustodyFlagReasonType,
   type CustodyRule,
   type CustodyRuleId,
   type CustodyServiceSide,
@@ -68,7 +66,7 @@ export interface CustodyTransition {
   from: BookingBreakdownKeyType;
   to: BookingBreakdownKeyType;
   quantity: number;
-  /** The flag's service axis with the action's reason filled in; `null` off the flag rows. */
+  /** The flag's service axis; `null` off the flag rows. */
   service: { from: OOSReasonType | null; to: OOSReasonType | null } | null;
 }
 
@@ -79,10 +77,9 @@ function armFor(rule: CustodyRule, type: Booking["type"]) {
   return null;
 }
 
-function serviceFor(rule: CustodyRule, reason: CustodyFlagReasonType | undefined): CustodyTransition["service"] {
+function serviceFor(rule: CustodyRule): CustodyTransition["service"] {
   if (rule.service === null) return null;
-  const side = (s: CustodyServiceSide): OOSReasonType | null =>
-    s === "none" ? null : s === "reason" ? (reason ?? null) : s;
+  const side = (s: CustodyServiceSide): OOSReasonType | null => s === "none" ? null : s;
   return { from: side(rule.service.from), to: side(rule.service.to) };
 }
 
@@ -135,10 +132,8 @@ export interface CustodyApplication {
 export interface CustodyApplyContext {
   /**
    * Returned units carrying no flag, before this save. Bounds the flags a save
-   * may add off `returned` (every `flag_*_returned`, and the deprecated
-   * `flag_returned`). Defaults to `breakdown.returned`, which is exact once no
-   * R2 no-custody flag remains on a booking's `returned` units, and is
-   * re-checked by the server against the shelves.
+   * may add off `returned` (every `flag_*_returned`). Defaults to
+   * `breakdown.returned`, and is re-checked by the server against the shelves.
    */
   unflaggedReturned?: number;
 }
@@ -147,7 +142,7 @@ export interface CustodyApplyContext {
  * Apply `actions`, in order, to the booking's CURRENT state.
  *
  * Throws {@link CustodyRefusal} on an unknown rule, a rule the booking type may
- * not take, a short source bucket, a missing or stray reason, two actions that
+ * not take, a short source bucket, two actions that
  * would write one movement id, or a loss-mark undo after a forward step. Never
  * clamps: a short bucket after a concurrent write is a refusal, not an
  * overwrite — the lost-update bug the absolute-breakdown wire had.
@@ -180,13 +175,6 @@ export function applyCustodyActions(
     }
     if (!Number.isInteger(action.quantity) || action.quantity <= 0) {
       throw new CustodyRefusal(`"${rule.id}" needs a positive whole quantity`, rule.id);
-    }
-    const needsReason = rule.service !== null && (rule.service.from === "reason" || rule.service.to === "reason");
-    if (needsReason !== (action.reason !== undefined)) {
-      throw new CustodyRefusal(
-        needsReason ? `"${rule.id}" needs a reason: ${CUSTODY_FLAG_REASONS.join(" or ")}` : `"${rule.id}" takes no reason`,
-        rule.id,
-      );
     }
     if (rule.direction === "forward") seenForward = true;
     else if (seenForward && isLossUndo(rule.id)) {
@@ -224,7 +212,7 @@ export function applyCustodyActions(
         from: rule.from,
         to: rule.to,
         quantity: action.quantity,
-        service: serviceFor(rule, action.reason),
+        service: serviceFor(rule),
       });
     }
   }
@@ -235,7 +223,7 @@ export function applyCustodyActions(
   };
 }
 
-/** A row that puts a flag on units carrying none: every `flag_*_returned`, and the deprecated `flag_returned`. */
+/** A row that puts a flag on units carrying none: every `flag_*_returned`. */
 function addsFlag(rule: CustodyRule): boolean {
   return rule.from === "returned" && rule.service !== null && rule.service.from === "none";
 }
@@ -245,14 +233,13 @@ function addsFlag(rule: CustodyRule): boolean {
 /**
  * One action the UI may offer on a booking row.
  *
- * `key` is what a menu de-duplicates on — the rule id. (It carried a reason for
- * R2's two `flag_returned` offers, which are no longer made.) Expand an offer into the actions to send with
- * {@link expandCustodyOffer}; a `check_out` over reserved units is two steps.
+ * `key` is what a menu de-duplicates on — the rule id. Expand an offer into the
+ * actions to send with {@link expandCustodyOffer}; a `check_out` over reserved
+ * units is two steps.
  */
 export interface CustodyOffer {
   key: string;
   rule: CustodyRuleId;
-  reason?: CustodyFlagReasonType;
   /** The most units the offer can take right now. Always > 0. */
   max: number;
   /** The row's natural next action. At most one offer per booking carries it. */
@@ -287,8 +274,8 @@ export interface CustodyOfferContext {
  * Every action the UI may offer on this booking, natural next first, then
  * forward in ladder order, then undos.
  *
- * Replaces `actionAlternatesForBooking`, `regressionAlternatesForBooking`,
- * `sourceBucketSizeForBooking` and `actionableQtyTowardTarget`. Two behaviours
+ * It replaced the alternates vocabulary in `utils/fulfillment-stage.ts`
+ * (removed in custody-actions P4). Two behaviours
  * change, both by owner ruling (2026-09-29):
  *
  * - **No pre-departure loss.** `reserved`/`prepped` units are never offered
@@ -296,8 +283,7 @@ export interface CustodyOfferContext {
  *   out-of-service record instead.
  * - **Returned units get their own losses and flags** (gap G5): Lost, Damaged,
  *   Cleaning and Maintenance off `returned`, so `‹ Out` is no longer the only
- *   way to reach them. Since P2b those are the `flag_*_returned` rows, and the
- *   deprecated `flag_returned` is never offered.
+ *   way to reach them. Since P2b those are the `flag_*_returned` rows.
  */
 export function custodyActionsFor(booking: CustodyBooking, ctx: CustodyOfferContext): CustodyOffer[] {
   if (booking.type !== "rental" && booking.type !== "sale") return [];
@@ -323,11 +309,6 @@ export function custodyActionsFor(booking: CustodyBooking, ctx: CustodyOfferCont
         return ctx.canPrepCheckout ? b.reserved : 0;
       case "check_out":
         return ctx.canPrepCheckout ? sumBreakdownKeys(b, ["reserved", "prepped"]) : 0;
-      // Deprecated R2 rows: legal on the wire during the transition, never offered.
-      case "flag_returned":
-      case "reclassify_damaged_to_flag":
-      case "reclassify_flag_to_damaged":
-        return 0;
     }
     const rule = custodyRule(id);
     if (addsFlag(rule)) return unflagged;
@@ -365,7 +346,7 @@ export function custodyActionsFor(booking: CustodyBooking, ctx: CustodyOfferCont
  */
 export function expandCustodyOffer(
   booking: CustodyBooking,
-  offer: Pick<CustodyOffer, "rule" | "reason">,
+  offer: Pick<CustodyOffer, "rule">,
   quantity: number,
 ): BookingActionType[] {
   if (offer.rule === "check_out") {
@@ -375,7 +356,7 @@ export function expandCustodyOffer(
       { rule: "check_out", quantity },
     ];
   }
-  return [{ rule: offer.rule, quantity, ...(offer.reason ? { reason: offer.reason } : {}) }];
+  return [{ rule: offer.rule, quantity }];
 }
 
 // ── decomposing a delta ──────────────────────────────────────────────
@@ -563,7 +544,7 @@ export function decomposeCustodyDelta(
         from: rule.from,
         to: rule.to,
         quantity: s.quantity,
-        service: serviceFor(rule, undefined),
+        service: serviceFor(rule),
       });
     }
   }
@@ -575,8 +556,9 @@ export function decomposeCustodyDelta(
  * `null` — the population assertion's lookup (`audit-custody-rules` in the api
  * replays every stored custody movement through it).
  *
- * A row's `reason` side (the deprecated R2 rows) matches cleaning or
- * maintenance; every other side matches itself.
+ * ⚠️ A `flag` with NO custody pair maps to nothing. That was R2's check-in
+ * flag (`flag_returned`), retired in P4 after the audit found none stored in
+ * either project (2026-09-30), so one appearing now is a finding.
  */
 export function custodyRuleForMovement(
   type: MovementTypeType,
@@ -584,15 +566,11 @@ export function custodyRuleForMovement(
   service: { from: OOSReasonType | null; to: OOSReasonType | null } | null | undefined,
   bookingType: "rental" | "sale",
 ): CustodyRule | null {
-  const matches = (side: CustodyServiceSide, r: OOSReasonType | null) =>
-    side === "none" ? r === null : side === "reason" ? r === "cleaning" || r === "maintenance" : r === side;
+  const matches = (side: CustodyServiceSide, r: OOSReasonType | null) => side === "none" ? r === null : r === side;
   return CUSTODY_RULES.find((rule) => {
     const arm = bookingType === "rental" ? rule.rental : rule.sale;
     if (arm?.movement !== type) return false;
-    const carriesCustody = rule.from !== rule.to;
-    if (!carriesCustody) {
-      if (custody !== null) return false;
-    } else if (custody === null || custody.from !== rule.from || custody.to !== rule.to) return false;
+    if (custody === null || custody.from !== rule.from || custody.to !== rule.to) return false;
     if (rule.service === null) return true;
     if (!service) return false;
     return matches(rule.service.from, service.from) && matches(rule.service.to, service.to);
