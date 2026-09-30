@@ -1,0 +1,699 @@
+/**
+ * The custody ruleset (`schemas/custody.ts` + `utils/custody.ts`).
+ *
+ * Four questions, and each is asked of the WHOLE population rather than a
+ * worked example, because the defect this module replaces was three copies of
+ * one rule that each looked right on its own:
+ *
+ * 1. Does every row agree with `MOVEMENT_CONTRACTS`? (the table cannot name a
+ *    movement whose places or axes contradict its custody pair)
+ * 2. Does `decomposeCustodyDelta` reproduce the api's `deriveCustodyTransitions`
+ *    over every reachable pair at quantity 4? (parity with the frozen oracle)
+ * 3. Does `applyCustodyActions` land every matched decomposition exactly on its
+ *    target? (the two functions agree with each other)
+ * 4. Do the manager's 24 `bookingTransitions` cases still hold — with the one
+ *    that the G1 ruling turns into a refusal?
+ */
+import { assert, assertEquals, assertThrows } from "@std/assert";
+import {
+  type Booking,
+  type BookingBreakdown,
+  type BookingBreakdownKeyType,
+  BookingAction,
+  BookingActions,
+  BookingUpdate,
+  CUSTODY_PLACE_KINDS,
+  CUSTODY_RULE_IDS,
+  CUSTODY_RULES,
+  type CustodyRuleId,
+  custodyRule,
+  MOVEMENT_CONTRACTS,
+  type MovementTypeType,
+  OOS_BREAKDOWN_KEYS,
+  type OOSBreakdown,
+  type OOSReasonType,
+  UpdateBookingInput,
+} from "../src/schemas/mod.ts";
+import {
+  applyCustodyActions,
+  canonicalLossUndos,
+  canEditServiceBreakdown,
+  CustodyRefusal,
+  custodyActionsFor,
+  custodyRuleForMovement,
+  decomposeCustodyDelta,
+  deriveCustodyStatus,
+  expandCustodyOffer,
+  getCustodyRulesMarkdown,
+  serviceBreakdownViolation,
+  serviceBucketBounds,
+  serviceMovesFor,
+} from "../src/utils/custody.ts";
+import * as oracle from "./helpers/custody-oracle.ts";
+
+function bd(partial: Partial<BookingBreakdown>): BookingBreakdown {
+  return { quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0, ...partial };
+}
+
+function booking(
+  quantity: number,
+  breakdown: Partial<BookingBreakdown>,
+  status: Booking["status"] = "reserved",
+  type: Booking["type"] = "rental",
+) {
+  return { type, quantity, status, breakdown: bd(breakdown) };
+}
+
+const shape = (ts: { type: string; from: string; to: string; quantity: number }[]) =>
+  ts.map((t) => `${t.type}:${t.from}→${t.to}×${t.quantity}`);
+
+/** Every breakdown over the six fulfillment keys summing to `q`. */
+function statesAt(q: number): BookingBreakdown[] {
+  const KEYS = ["reserved", "prepped", "out", "returned", "lost", "damaged"] as const;
+  const states: BookingBreakdown[] = [];
+  const walk = (i: number, left: number, acc: Partial<BookingBreakdown>) => {
+    if (i === KEYS.length) {
+      if (left === 0) states.push(bd(acc));
+      return;
+    }
+    for (let n = 0; n <= left; n++) walk(i + 1, left - n, { ...acc, [KEYS[i]]: n });
+  };
+  walk(0, q, {});
+  return states;
+}
+
+function replay(prev: BookingBreakdown, ts: { from: BookingBreakdownKeyType; to: BookingBreakdownKeyType; quantity: number }[]) {
+  const out = { ...prev };
+  for (const t of ts) {
+    out[t.from] -= t.quantity;
+    out[t.to] += t.quantity;
+  }
+  return out;
+}
+
+// ── 1. the table ─────────────────────────────────────────────────────
+
+Deno.test("custody - CUSTODY_RULE_IDS and the table's ids are the same set, both ways", () => {
+  const ids = CUSTODY_RULES.map((r) => r.id);
+  assertEquals(new Set(ids).size, ids.length, "a rule id repeats");
+  assertEquals([...ids].sort(), [...CUSTODY_RULE_IDS].sort());
+  for (const id of CUSTODY_RULE_IDS) assertEquals(custodyRule(id).id, id);
+});
+
+Deno.test("custody - every inverse names a row that points back, with the custody pair swapped", () => {
+  for (const r of CUSTODY_RULES) {
+    if (r.inverse === null) continue;
+    const inv = custodyRule(r.inverse);
+    assertEquals(inv.inverse, r.id, `${r.id} ↔ ${inv.id}`);
+    assertEquals([inv.from, inv.to], [r.to, r.from], `${r.id}'s inverse does not swap its custody pair`);
+  }
+});
+
+Deno.test("custody - there is NO row from a pre-departure key into lost or damaged (gap G1)", () => {
+  for (const r of CUSTODY_RULES) {
+    if (r.to !== "lost" && r.to !== "damaged") continue;
+    assert(!["quoted", "reserved", "prepped"].includes(r.from), `${r.id} reaches ${r.to} from ${r.from}`);
+  }
+});
+
+Deno.test("custody - every row agrees with MOVEMENT_CONTRACTS", () => {
+  const overlaps = (a: readonly string[], b: readonly string[]) => a.some((k) => b.includes(k));
+  let checked = 0;
+  for (const r of CUSTODY_RULES) {
+    for (const [type, arm] of [["rental", r.rental], ["sale", r.sale]] as const) {
+      if (!arm?.movement) continue;
+      checked++;
+      const c = MOVEMENT_CONTRACTS[arm.movement];
+      const where = `${r.id} (${type}, ${arm.movement})`;
+      const carriesCustody = r.from !== r.to;
+      if (carriesCustody) {
+        assert(c.custody !== "forbidden", `${where}: the contract forbids a custody pair`);
+        assert(c.booking !== "forbidden", `${where}: the contract forbids a booking`);
+      } else {
+        assert(c.custody !== "required", `${where}: the contract requires a custody pair`);
+        assert(c.booking !== "required", `${where}: the contract requires a booking`);
+      }
+      if (c.places === null) {
+        assertEquals([...CUSTODY_PLACE_KINDS[r.from]], ["locations"], `${where}: nothing moves, so from must be a shelf`);
+        assertEquals([...CUSTODY_PLACE_KINDS[r.to]], ["locations"], `${where}: nothing moves, so to must be a shelf`);
+      } else {
+        assert(overlaps(CUSTODY_PLACE_KINDS[r.from], c.places.from), `${where}: ${r.from} is not a place the movement leaves`);
+        assert(overlaps(CUSTODY_PLACE_KINDS[r.to], c.places.to), `${where}: ${r.to} is not a place the movement reaches`);
+      }
+      assertEquals(c.service === "required", r.service !== null, `${where}: the service axis disagrees`);
+      if (r.service) assert(r.service.from !== r.service.to, `${where}: a flag must change the reason`);
+    }
+  }
+  assert(checked >= 20, `only ${checked} arms checked — the walk stopped reaching the table`);
+});
+
+Deno.test("custody - every inverse's places mirror its forward twin's", () => {
+  let checked = 0;
+  for (const r of CUSTODY_RULES) {
+    if (r.inverse === null) continue;
+    const fwd = r.rental?.movement ? MOVEMENT_CONTRACTS[r.rental.movement].places : undefined;
+    const inv = custodyRule(r.inverse).rental?.movement;
+    if (fwd === undefined || !inv) continue;
+    const back = MOVEMENT_CONTRACTS[inv].places;
+    if (fwd === null) {
+      assertEquals(back, null, `${r.id}`);
+    } else {
+      assertEquals([...back!.from].sort(), [...fwd.to].sort(), `${r.id} → ${r.inverse}`);
+      assertEquals([...back!.to].sort(), [...fwd.from].sort(), `${r.id} → ${r.inverse}`);
+    }
+    checked++;
+  }
+  assert(checked >= 14, `only ${checked} inverse pairs checked`);
+});
+
+Deno.test("custody - the type ↔ custody-pair binding the contracts lack (tests/transaction.test.ts custodyFor)", () => {
+  // Every custody-bearing fixture pair in `tests/transaction.test.ts` is a row,
+  // and the rows are the only pairs a type may carry.
+  const fixture: Array<[MovementTypeType, BookingBreakdownKeyType, BookingBreakdownKeyType, "rental" | "sale"]> = [
+    ["prep", "reserved", "prepped", "rental"],
+    ["check_out", "prepped", "out", "rental"],
+    ["check_in", "out", "returned", "rental"],
+    ["mark_damaged", "out", "damaged", "rental"],
+    ["mark_lost", "out", "lost", "rental"],
+    ["unprep", "prepped", "reserved", "rental"],
+    ["check_out_undo", "out", "prepped", "rental"],
+    ["check_in_undo", "returned", "out", "rental"],
+    ["mark_lost_undo", "lost", "out", "rental"],
+    ["mark_damaged_undo", "damaged", "out", "rental"],
+    ["sale", "prepped", "out", "sale"],
+    ["sale_return", "out", "returned", "sale"],
+  ];
+  for (const [type, from, to, bt] of fixture) {
+    assert(custodyRuleForMovement(type, { from, to }, null, bt), `${type} ${from}→${to} has no row`);
+  }
+  // A check_in carrying any other pair is not a row.
+  assertEquals(custodyRuleForMovement("check_in", { from: "prepped", to: "returned" }, null, "rental"), null);
+  // The flag rows are told apart by their service axis.
+  assertEquals(custodyRuleForMovement("flag", { from: "returned", to: "damaged" }, { from: null, to: "damaged" }, "rental")?.id, "flag_damaged_returned");
+  assertEquals(custodyRuleForMovement("flag", { from: "returned", to: "damaged" }, { from: "cleaning", to: "damaged" }, "rental")?.id, "reclassify_flag_to_damaged");
+  assertEquals(custodyRuleForMovement("flag", { from: "damaged", to: "returned" }, { from: "damaged", to: null }, "rental")?.id, "flag_damaged_returned_undo");
+  assertEquals(custodyRuleForMovement("flag", null, { from: null, to: "maintenance" }, "rental")?.id, "flag_returned");
+  // Every arm finds its own row.
+  for (const r of CUSTODY_RULES) {
+    for (const bt of ["rental", "sale"] as const) {
+      const arm = bt === "rental" ? r.rental : r.sale;
+      if (!arm?.movement) continue;
+      const svc = r.service === null ? null : {
+        from: r.service.from === "none" ? null : r.service.from === "damaged" ? "damaged" as const : "cleaning" as const,
+        to: r.service.to === "none" ? null : r.service.to === "damaged" ? "damaged" as const : "cleaning" as const,
+      };
+      const custody = r.from === r.to ? null : { from: r.from, to: r.to };
+      assertEquals(custodyRuleForMovement(arm.movement, custody, svc, bt)?.id, r.id, `${r.id} (${bt})`);
+    }
+  }
+});
+
+Deno.test("custody - the rung table names every rule", () => {
+  const md = getCustodyRulesMarkdown();
+  for (const r of CUSTODY_RULES) assert(md.includes(`\`${r.id}\``), r.id);
+  assertEquals(md.trim().split("\n").length, CUSTODY_RULES.length + 2);
+});
+
+// ── 2. parity with the api's decomposer ─────────────────────────────
+
+Deno.test("custody - PARITY: decomposeCustodyDelta ≡ deriveCustodyTransitions over every rental pair at quantity 4", () => {
+  const states = statesAt(4);
+  let checked = 0;
+  let unmatched = 0;
+  let twoOrigin = 0;
+  for (const prev of states) {
+    for (const next of states) {
+      if (next.lost < prev.lost || next.damaged < prev.damaged) continue;
+      checked++;
+      const old = oracle.deriveCustodyTransitions(prev, next, "rental");
+      const got = decomposeCustodyDelta(prev, next, "rental");
+      const pair = `${JSON.stringify(prev)} → ${JSON.stringify(next)}`;
+      assertEquals(shape(got.transitions), shape(old), pair);
+      const exact = JSON.stringify(replay(prev, old)) === JSON.stringify(next);
+      assertEquals(got.matched, exact, `matched disagrees with the oracle's replay: ${pair}`);
+      // The api's sweep files the refused two-origin loss family apart from the
+      // unmatched count; so does this one, so the two numbers mean the same.
+      if (old.filter((t) => t.type === "mark_lost").length === 2) twoOrigin++;
+      else if (!got.matched) unmatched++;
+    }
+  }
+  // The populations the api's own sweep pins — so a filter that quietly
+  // excluded everything cannot pass.
+  assertEquals(checked, 7381);
+  assertEquals(unmatched, 3189);
+  assertEquals(twoOrigin, 111);
+});
+
+Deno.test("custody - PARITY: with canonical loss undos, over every loss-falling rental pair at quantity 4", () => {
+  const states = statesAt(4);
+  let checked = 0;
+  let undershoot = 0;
+  for (const prev of states) {
+    for (const next of states) {
+      if (next.lost >= prev.lost && next.damaged >= prev.damaged) continue;
+      checked++;
+      const old = oracle.deriveWithLossUndos(prev, next, "rental", oracle.canonicalLossUndos(prev, next));
+      const got = decomposeCustodyDelta(prev, next, "rental", canonicalLossUndos(prev, next));
+      const pair = `${JSON.stringify(prev)} → ${JSON.stringify(next)}`;
+      assertEquals(shape(got.transitions), shape(old), pair);
+      const landed = replay(prev, old);
+      if (landed.lost !== next.lost || landed.damaged !== next.damaged) undershoot++;
+      assertEquals(got.matched, JSON.stringify(landed) === JSON.stringify(next), pair);
+    }
+  }
+  assertEquals(checked, 8495);
+  assertEquals(undershoot, 1162);
+});
+
+Deno.test("custody - PARITY: sales agree on every MOVEMENT, and differ only where out → lost/damaged is now legal", () => {
+  const states = statesAt(3);
+  let newlyMatched = 0;
+  for (const prev of states) {
+    for (const next of states) {
+      const old = oracle.deriveCustodyTransitions(prev, next, "sale");
+      const got = decomposeCustodyDelta(prev, next, "sale");
+      const pair = `${JSON.stringify(prev)} → ${JSON.stringify(next)}`;
+      assertEquals(shape(got.transitions), shape(old), pair);
+      const exact = JSON.stringify(replay(prev, old)) === JSON.stringify(next);
+      if (got.matched !== exact) {
+        // The only permitted disagreement: the sale's out → lost/damaged steps,
+        // which write no movement and were unmatched before.
+        assert(got.matched && !exact, pair);
+        assert(got.steps.some((s) => s.rule === "mark_lost" || s.rule === "mark_damaged"), pair);
+        newlyMatched++;
+      }
+    }
+  }
+  assert(newlyMatched > 0, "the sale arm of mark_lost/mark_damaged never fired");
+});
+
+Deno.test("custody - a service or surcharge booking decomposes to nothing", () => {
+  const got = decomposeCustodyDelta(bd({ reserved: 2 }), bd({ out: 2 }), "service");
+  assertEquals(got, { matched: true, steps: [], transitions: [], residue: { falls: {}, rises: {} } });
+});
+
+Deno.test("custody - an unmatched delta reports its residue", () => {
+  const got = decomposeCustodyDelta(bd({ prepped: 2 }), bd({ returned: 2 }), "rental");
+  assertEquals(got.matched, false);
+  assertEquals(got.residue, { falls: { prepped: 2 }, rises: { returned: 2 } });
+  assertEquals(decomposeCustodyDelta(bd({ reserved: 1 }), bd({ lost: 1 }), "rental").residue, {
+    falls: { reserved: 1 },
+    rises: { lost: 1 },
+  });
+});
+
+// ── 3. apply ≡ decompose ─────────────────────────────────────────────
+
+Deno.test("custody - applying every matched decomposition lands exactly on next, with the same movements", () => {
+  const states = statesAt(3);
+  let applied = 0;
+  let refusedTwoOrigin = 0;
+  for (const type of ["rental", "sale"] as const) {
+    for (const prev of states) {
+      for (const next of states) {
+        const undos = type === "rental" ? canonicalLossUndos(prev, next) : [];
+        const d = decomposeCustodyDelta(prev, next, type, undos);
+        if (!d.matched || d.steps.length === 0) continue;
+        const b = booking(3, prev, "active", type);
+        try {
+          const r = applyCustodyActions(b, d.steps);
+          assertEquals(r.breakdown, next, `${type} ${JSON.stringify(prev)} → ${JSON.stringify(next)}`);
+          assertEquals(shape(r.transitions), shape(d.transitions));
+          applied++;
+        } catch (e) {
+          // Two loss marks (or undos) of one type from two places are one
+          // movement id twice: the wire refuses them, and so does apply.
+          assert(e instanceof CustodyRefusal, String(e));
+          assert(/same "(mark_lost|mark_lost_undo|flag)" movement/.test(e.message), e.message);
+          refusedTwoOrigin++;
+        }
+      }
+    }
+  }
+  assert(applied > 1000, `only ${applied} applied`);
+  assert(refusedTwoOrigin > 0);
+});
+
+Deno.test("custody - apply refuses a short source bucket rather than clamping (the lost-update bug)", () => {
+  const b = booking(3, { out: 1, returned: 2 }, "active");
+  assertThrows(() => applyCustodyActions(b, [{ rule: "check_in", quantity: 2 }]), CustodyRefusal, "holds 1");
+});
+
+Deno.test("custody - apply refuses a sale rewind and a pre-departure loss", () => {
+  assertThrows(
+    () => applyCustodyActions(booking(2, { out: 2 }, "active", "sale"), [{ rule: "check_out_undo", quantity: 1 }]),
+    CustodyRefusal,
+    "cannot take",
+  );
+  assertThrows(
+    () => applyCustodyActions(booking(2, { reserved: 2 }), [{ rule: "mark_lost", quantity: 1 }]),
+    CustodyRefusal,
+    "from out",
+  );
+});
+
+Deno.test("custody - a sale's loss is legal and writes no movement", () => {
+  const r = applyCustodyActions(booking(2, { out: 2 }, "active", "sale"), [{ rule: "mark_lost", quantity: 1 }]);
+  assertEquals(r.breakdown, bd({ out: 1, lost: 1 }));
+  assertEquals(r.transitions, []);
+});
+
+Deno.test("custody - flag_returned (G2): check in 3, flag 2 cleaning in the same save; 4 is refused", () => {
+  const b = booking(3, { out: 3 }, "active");
+  const r = applyCustodyActions(b, [
+    { rule: "check_in", quantity: 3 },
+    { rule: "flag_returned", quantity: 2, reason: "cleaning" },
+  ]);
+  assertEquals(r.breakdown, bd({ returned: 3 }));
+  assertEquals(r.status, "complete");
+  assertEquals(r.transitions.map((t) => [t.type, t.service]), [
+    ["check_in", null],
+    ["flag", { from: null, to: "cleaning" }],
+  ]);
+  // Flagging on already-returned units, net of those already flagged.
+  const back = booking(3, { returned: 3 }, "complete");
+  assertThrows(
+    () => applyCustodyActions(back, [{ rule: "flag_returned", quantity: 2, reason: "maintenance" }], { unflaggedReturned: 1 }),
+    CustodyRefusal,
+    "only 1",
+  );
+  // Cleaning and maintenance in one save are two movement slots.
+  const both = applyCustodyActions(back, [
+    { rule: "flag_returned", quantity: 1, reason: "cleaning" },
+    { rule: "flag_returned", quantity: 1, reason: "maintenance" },
+  ]);
+  assertEquals(both.transitions.length, 2);
+});
+
+Deno.test("custody - a reclassification flips the booking in the same write (G3)", () => {
+  const r = applyCustodyActions(booking(2, { damaged: 2 }, "complete"), [
+    { rule: "reclassify_damaged_to_flag", quantity: 2, reason: "cleaning" },
+  ]);
+  assertEquals(r.breakdown, bd({ returned: 2 }));
+  assertEquals(r.transitions[0].service, { from: "damaged", to: "cleaning" });
+  const back = applyCustodyActions(booking(2, { returned: 2 }, "complete"), [
+    { rule: "reclassify_flag_to_damaged", quantity: 1, reason: "maintenance" },
+  ]);
+  assertEquals(back.breakdown, bd({ returned: 1, damaged: 1 }));
+  assertEquals(back.transitions[0].service, { from: "maintenance", to: "damaged" });
+});
+
+Deno.test("custody - a loss undo after a forward step is refused, and so is a missing reason", () => {
+  const b = booking(3, { out: 1, lost: 2 }, "active");
+  assertThrows(
+    () => applyCustodyActions(b, [{ rule: "check_in", quantity: 1 }, { rule: "mark_lost_undo", quantity: 1 }]),
+    CustodyRefusal,
+    "before every forward",
+  );
+  assertThrows(() => applyCustodyActions(booking(1, { returned: 1 }, "complete"), [{ rule: "flag_returned", quantity: 1 }]), CustodyRefusal, "needs a reason");
+});
+
+// ── 4. the manager's 24 cases (manager tests/utils/bookingTransitions.test.ts) ──
+
+Deno.test("custody - manager cases: forward", async (t) => {
+  await t.step("full prep → prepped", () => {
+    const r = applyCustodyActions(booking(3, { reserved: 3 }), [{ rule: "prep", quantity: 3 }]);
+    assertEquals([r.breakdown.reserved, r.breakdown.prepped, r.status], [0, 3, "prepped"]);
+  });
+  await t.step("partial prep → part-prepped", () => {
+    const r = applyCustodyActions(booking(3, { reserved: 3 }), [{ rule: "prep", quantity: 2 }]);
+    assertEquals([r.breakdown.reserved, r.breakdown.prepped, r.status], [1, 2, "part-prepped"]);
+  });
+  await t.step("full checkout → active", () => {
+    const r = applyCustodyActions(booking(3, { prepped: 3 }, "prepped"), [{ rule: "check_out", quantity: 3 }]);
+    assertEquals([r.breakdown.prepped, r.breakdown.out, r.status], [0, 3, "active"]);
+  });
+  await t.step("partial checkout → active", () => {
+    const r = applyCustodyActions(booking(3, { prepped: 3 }, "prepped"), [{ rule: "check_out", quantity: 1 }]);
+    assertEquals([r.breakdown.prepped, r.breakdown.out, r.status], [2, 1, "active"]);
+  });
+  await t.step("full return → complete", () => {
+    const r = applyCustodyActions(booking(3, { out: 3 }, "active"), [{ rule: "check_in", quantity: 3 }]);
+    assertEquals([r.breakdown.out, r.breakdown.returned, r.status], [0, 3, "complete"]);
+  });
+  await t.step("partial return keeps active", () => {
+    const r = applyCustodyActions(booking(3, { out: 3 }, "active"), [{ rule: "check_in", quantity: 1 }]);
+    assertEquals([r.breakdown.out, r.breakdown.returned, r.status], [2, 1, "active"]);
+  });
+  await t.step("Mark Lost splits into lost", () => {
+    const r = applyCustodyActions(booking(3, { out: 3 }, "active"), [{ rule: "mark_lost", quantity: 1 }]);
+    assertEquals([r.breakdown.out, r.breakdown.lost, r.breakdown.returned, r.status], [2, 1, 0, "active"]);
+  });
+  await t.step("Mark Damaged splits into damaged", () => {
+    const r = applyCustodyActions(booking(3, { out: 3 }, "active"), [{ rule: "mark_damaged", quantity: 1 }]);
+    assertEquals([r.breakdown.damaged, r.breakdown.out, r.status], [1, 2, "active"]);
+  });
+  await t.step("returned + lost + damaged counts toward complete", () => {
+    const r = applyCustodyActions(booking(3, { out: 1, returned: 1, lost: 1 }, "active"), [{ rule: "mark_damaged", quantity: 1 }]);
+    assertEquals([r.breakdown.damaged, r.status], [1, "complete"]);
+  });
+  await t.step("🔴 Mark Lost from reserved is now REFUSED (gap G1) — the manager moved reserved → lost", () => {
+    assertThrows(() => applyCustodyActions(booking(3, { reserved: 3 }), [{ rule: "mark_lost", quantity: 1 }]), CustodyRefusal);
+    assertEquals(
+      custodyActionsFor(booking(3, { reserved: 3 }), { canPrepCheckout: true }).some((o) => o.rule === "mark_lost"),
+      false,
+    );
+  });
+  await t.step("Check Out from reserved is prep + check_out → active", () => {
+    const b = booking(3, { reserved: 3 });
+    const actions = expandCustodyOffer(b, { rule: "check_out" }, 3);
+    assertEquals(actions, [{ rule: "prep", quantity: 3 }, { rule: "check_out", quantity: 3 }]);
+    const r = applyCustodyActions(b, actions);
+    assertEquals([r.breakdown.reserved, r.breakdown.out, r.status], [0, 3, "active"]);
+  });
+  await t.step("preserves the breakdown sum", () => {
+    const r = applyCustodyActions(booking(5, { reserved: 5 }), [{ rule: "prep", quantity: 3 }]);
+    assertEquals(Object.values(r.breakdown).reduce((a, b) => a + b, 0), 5);
+  });
+  await t.step("rejects qty larger than the source bucket", () => {
+    assertThrows(
+      () => applyCustodyActions(booking(3, { reserved: 1, prepped: 2 }), [{ rule: "prep", quantity: 2 }]),
+      CustodyRefusal,
+      "reserved, which holds 1",
+    );
+  });
+  await t.step("rejects a zero quantity", () => {
+    assertThrows(() => applyCustodyActions(booking(3, { reserved: 3 }), [{ rule: "prep", quantity: 0 }]), CustodyRefusal, "positive");
+  });
+});
+
+Deno.test("custody - manager cases: regression", async (t) => {
+  const run = (b: ReturnType<typeof booking>, rule: CustodyRuleId, q: number) => applyCustodyActions(b, [{ rule, quantity: q }]);
+  await t.step("undo a full check-out → prepped", () => {
+    const r = run(booking(3, { out: 3 }, "active"), "check_out_undo", 3);
+    assertEquals([r.breakdown.out, r.breakdown.prepped, r.status], [0, 3, "prepped"]);
+  });
+  await t.step("undo a partial check-out stays active", () => {
+    const r = run(booking(3, { out: 3 }, "active"), "check_out_undo", 1);
+    assertEquals([r.breakdown.out, r.breakdown.prepped, r.status], [2, 1, "active"]);
+  });
+  await t.step("undo a full prep → reserved", () => {
+    const r = run(booking(3, { prepped: 3 }, "prepped"), "unprep", 3);
+    assertEquals([r.breakdown.prepped, r.breakdown.reserved, r.status], [0, 3, "reserved"]);
+  });
+  await t.step("undo a partial prep → part-prepped", () => {
+    const r = run(booking(3, { prepped: 3 }, "prepped"), "unprep", 1);
+    assertEquals([r.breakdown.prepped, r.breakdown.reserved, r.status], [2, 1, "part-prepped"]);
+  });
+  await t.step("undo a return → active", () => {
+    const r = run(booking(3, { returned: 3 }, "complete"), "check_in_undo", 3);
+    assertEquals([r.breakdown.returned, r.breakdown.out, r.status], [0, 3, "active"]);
+  });
+  await t.step("undo lost → active even with some still terminal", () => {
+    const r = run(booking(3, { returned: 1, lost: 2 }, "complete"), "mark_lost_undo", 1);
+    assertEquals([r.breakdown.lost, r.breakdown.out, r.status], [1, 1, "active"]);
+  });
+  await t.step("undo damaged → out", () => {
+    const r = run(booking(3, { damaged: 3 }, "complete"), "mark_damaged_undo", 2);
+    assertEquals([r.breakdown.damaged, r.breakdown.out, r.status], [1, 2, "active"]);
+  });
+  await t.step("preserves the breakdown sum", () => {
+    const r = run(booking(5, { out: 5 }, "active"), "check_out_undo", 3);
+    assertEquals(Object.values(r.breakdown).reduce((a, b) => a + b, 0), 5);
+  });
+  await t.step("rejects qty larger than the source bucket", () => {
+    assertThrows(() => run(booking(3, { out: 1 }, "active"), "check_out_undo", 2), CustodyRefusal, "out, which holds 1");
+  });
+  await t.step("rejects a zero quantity", () => {
+    assertThrows(() => run(booking(3, { out: 3 }, "active"), "check_out_undo", 0), CustodyRefusal, "positive");
+  });
+});
+
+Deno.test("custody - ONE status rule: a mixed booking reads off its breakdown, not the action taken", () => {
+  // The manager's forward rule said part-prepped here; the breakdown says units are out.
+  assertEquals(deriveCustodyStatus(bd({ reserved: 1, prepped: 1, out: 1 }), 3, "part-prepped"), "active");
+  assertEquals(deriveCustodyStatus(bd({ quoted: 1, reserved: 1 }), 2, "draft"), "draft");
+});
+
+// ── offers ───────────────────────────────────────────────────────────
+
+Deno.test("custody - offers: returned units get Lost, Damaged and both flags (G5); natural first", () => {
+  const offers = custodyActionsFor(booking(4, { out: 2, returned: 2 }, "active"), { canPrepCheckout: true, unflaggedReturned: 1 });
+  assertEquals(offers[0].key, "check_in");
+  assertEquals(offers[0].natural, true);
+  const byKey = Object.fromEntries(offers.map((o) => [o.key, o.max]));
+  assertEquals(byKey["mark_lost_returned"], 2);
+  assertEquals(byKey["flag_damaged_returned"], 1);
+  assertEquals(byKey["flag_returned:cleaning"], 1);
+  assertEquals(byKey["flag_returned:maintenance"], 1);
+  assertEquals(byKey["check_in_undo"], 2);
+  assertEquals(offers.filter((o) => o.natural).length, 1);
+  assertEquals(new Set(offers.map((o) => o.key)).size, offers.length, "an offer key repeats");
+});
+
+Deno.test("custody - offers: prep and check-out are gated on the fulfillment status; returns never are", () => {
+  const b = booking(3, { reserved: 1, out: 2 }, "active");
+  const closed = custodyActionsFor(b, { canPrepCheckout: false }).map((o) => o.key);
+  assert(!closed.includes("prep") && !closed.includes("check_out"));
+  assert(closed.includes("check_in"));
+  const open = custodyActionsFor(b, { canPrepCheckout: true }).map((o) => o.key);
+  assert(open.includes("prep") && open.includes("check_out"));
+});
+
+Deno.test("custody - offers: a sale offers no rewind but unprep, and its return is not the natural action", () => {
+  const offers = custodyActionsFor(booking(2, { prepped: 1, out: 1 }, "active", "sale"), { canPrepCheckout: true });
+  const keys = offers.map((o) => o.key);
+  assert(!keys.includes("check_out_undo"));
+  assert(keys.includes("unprep"));
+  assertEquals(offers.find((o) => o.natural)?.key, "check_out");
+  assertEquals(custodyActionsFor(booking(1, { out: 1 }, "active", "sale"), { canPrepCheckout: true }).some((o) => o.natural), false);
+});
+
+Deno.test("custody - offers: loss undos follow the context, and default to the out-origin reading", () => {
+  const b = booking(3, { lost: 2, damaged: 1 }, "complete");
+  const dflt = Object.fromEntries(custodyActionsFor(b, { canPrepCheckout: true }).map((o) => [o.key, o.max]));
+  assertEquals([dflt["mark_lost_undo"], dflt["mark_damaged_undo"], dflt["mark_lost_returned_undo"]], [2, 1, undefined]);
+  const split = Object.fromEntries(
+    custodyActionsFor(b, { canPrepCheckout: true, undoable: { mark_lost_undo: 0, mark_lost_returned_undo: 1 } }).map((o) => [o.key, o.max]),
+  );
+  assertEquals([split["mark_lost_undo"], split["mark_lost_returned_undo"], split["mark_damaged_undo"]], [undefined, 1, undefined]);
+});
+
+Deno.test("custody - expandCustodyOffer draws already-prepped units first", () => {
+  const b = booking(5, { reserved: 3, prepped: 2 });
+  assertEquals(expandCustodyOffer(b, { rule: "check_out" }, 2), [{ rule: "check_out", quantity: 2 }]);
+  assertEquals(expandCustodyOffer(b, { rule: "check_out" }, 4), [{ rule: "prep", quantity: 2 }, { rule: "check_out", quantity: 4 }]);
+  assertEquals(expandCustodyOffer(b, { rule: "flag_returned", reason: "cleaning" }, 1), [{ rule: "flag_returned", quantity: 1, reason: "cleaning" }]);
+});
+
+Deno.test("custody - every offer, taken at its max, applies", () => {
+  let applied = 0;
+  for (const type of ["rental", "sale"] as const) {
+    for (const s of statesAt(3)) {
+      const b = booking(3, s, "active", type);
+      for (const o of custodyActionsFor(b, { canPrepCheckout: true })) {
+        applyCustodyActions(b, expandCustodyOffer(b, o, o.max));
+        applied++;
+      }
+    }
+  }
+  assert(applied > 400, `only ${applied} offers applied`);
+});
+
+// ── the wire ─────────────────────────────────────────────────────────
+
+Deno.test("custody - BookingAction: a reason on exactly the rows that need one", () => {
+  assert(BookingAction.safeParse({ rule: "flag_returned", quantity: 1, reason: "cleaning" }).success);
+  assert(!BookingAction.safeParse({ rule: "flag_returned", quantity: 1 }).success);
+  assert(!BookingAction.safeParse({ rule: "check_in", quantity: 1, reason: "cleaning" }).success);
+  assert(!BookingAction.safeParse({ rule: "check_in", quantity: 0 }).success);
+  assert(!BookingAction.safeParse({ rule: "reserve", quantity: 1 }).success);
+});
+
+Deno.test("custody - BookingActions refuses one movement id twice and a loss undo after a forward step", () => {
+  assert(!BookingActions.safeParse([{ rule: "mark_lost", quantity: 1 }, { rule: "mark_lost_returned", quantity: 1 }]).success);
+  assert(BookingActions.safeParse([
+    { rule: "flag_returned", quantity: 1, reason: "cleaning" },
+    { rule: "flag_returned", quantity: 1, reason: "maintenance" },
+  ]).success);
+  assert(!BookingActions.safeParse([
+    { rule: "flag_returned", quantity: 1, reason: "cleaning" },
+    { rule: "flag_returned", quantity: 1, reason: "cleaning" },
+  ]).success);
+  assert(!BookingActions.safeParse([{ rule: "check_in", quantity: 1 }, { rule: "mark_lost_undo", quantity: 1 }]).success);
+  assert(BookingActions.safeParse([{ rule: "mark_lost_undo", quantity: 1 }, { rule: "check_in", quantity: 1 }]).success);
+  assert(!BookingActions.safeParse([]).success);
+});
+
+Deno.test("custody - the booking inputs take breakdown OR actions, never both", () => {
+  const base = { version: 1, uuid_session: crypto.randomUUID() };
+  const breakdown = bd({ out: 1 });
+  const actions = [{ rule: "check_out", quantity: 1 }];
+  assert(UpdateBookingInput.safeParse({ ...base, breakdown }).success);
+  assert(UpdateBookingInput.safeParse({ ...base, actions }).success);
+  assert(UpdateBookingInput.safeParse({ ...base, status: "complete" }).success, "the status-only form stays legal");
+  assert(!UpdateBookingInput.safeParse({ ...base, breakdown, actions }).success);
+  const uid = `aaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbb:${crypto.randomUUID()}`;
+  assert(BookingUpdate.safeParse({ uid, version: 1, actions }).success);
+  assert(!BookingUpdate.safeParse({ uid, version: 1, breakdown, actions }).success);
+});
+
+// ── the record side ──────────────────────────────────────────────────
+
+Deno.test("custody - PARITY: serviceMovesFor ≡ the api's planBucketMoves over every breakdown pair at quantity 3", () => {
+  const q = 3;
+  const oos: OOSBreakdown[] = [];
+  for (let f = 0; f <= q; f++) {
+    for (let a = 0; a <= q - f; a++) {
+      for (let w = 0; w <= q - f - a; w++) {
+        for (let r = 0; r <= q - f - a - w; r++) oos.push({ flagged: f, away: a, written_off: w, returned_to_service: r });
+      }
+    }
+  }
+  let ok = 0;
+  let refused = 0;
+  for (const reason of ["damaged", "cleaning", "maintenance", "lost"] as OOSReasonType[]) {
+    for (const prev of oos) {
+      for (const next of oos) {
+        let want: unknown;
+        let wantErr: string | null = null;
+        try {
+          want = oracle.planBucketMoves(prev, next, q, reason);
+        } catch (e) {
+          wantErr = (e as Error).message;
+        }
+        const got = serviceMovesFor({ quantity: q, reason, breakdown: prev }, next);
+        if (wantErr === null) {
+          assert(got.ok, `${reason} ${JSON.stringify(prev)} → ${JSON.stringify(next)}`);
+          assertEquals(got.moves, want);
+          ok++;
+        } else {
+          assert(!got.ok);
+          assertEquals(got.internal, wantErr === "internal");
+          refused++;
+        }
+      }
+    }
+  }
+  assert(ok > 1000 && refused > 1000, `${ok} ok / ${refused} refused`);
+});
+
+Deno.test("custody - record bounds: returned-to-service never falls, lost never flags, closed only un-writes-off", () => {
+  const open = { status: "active" as const, reason: "damaged" as const, quantity: 3, breakdown: { flagged: 1, away: 0, written_off: 0, returned_to_service: 1 } };
+  assertEquals(serviceBucketBounds(open, "returned_to_service"), { min: 1, max: null });
+  assertEquals(serviceBucketBounds({ ...open, reason: "lost" }, "flagged"), { min: 0, max: 0 });
+  const closed = { ...open, status: "complete" as const, breakdown: { flagged: 0, away: 0, written_off: 2, returned_to_service: 1 } };
+  assertEquals(serviceBucketBounds(closed, "written_off"), { min: 0, max: 2 });
+  assertEquals(serviceBucketBounds(closed, "away"), { min: 0, max: null });
+  assertEquals(canEditServiceBreakdown(closed), true);
+  assertEquals(canEditServiceBreakdown({ ...closed, breakdown: { ...closed.breakdown, written_off: 0 } }), false);
+  assertEquals(serviceBreakdownViolation(open, { ...open.breakdown, returned_to_service: 0, flagged: 2 }) !== null, true);
+  assertEquals(serviceBreakdownViolation(open, { ...open.breakdown, away: 1 }), null);
+  for (const key of OOS_BREAKDOWN_KEYS) assert(serviceBucketBounds(open, key).min >= 0);
+});
+
+Deno.test("custody - every core enforced_by ref names a file that contains its anchor", async () => {
+  let checked = 0;
+  for (const r of CUSTODY_RULES) {
+    assert(r.enforced_by.length > 0, `${r.id} names nothing that enforces it`);
+    for (const e of r.enforced_by) {
+      assert(!/:\d+$/.test(e.ref), `${r.id}: a :line ref is banned (${e.ref})`);
+      if (!e.ref.startsWith("core/")) continue;
+      const [path, anchor] = e.ref.slice("core/".length).split("::");
+      const text = await Deno.readTextFile(new URL(`../${path}`, import.meta.url));
+      if (anchor) assert(text.includes(anchor), `${r.id}: "${anchor}" is not in ${path}`);
+      checked++;
+    }
+  }
+  assertEquals(checked, CUSTODY_RULES.length);
+});

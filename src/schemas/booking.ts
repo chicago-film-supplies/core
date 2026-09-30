@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { BookingId, FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
+import { BookingActions, type BookingActionType } from "./custody.ts";
 import { isCollectionLineType } from "./order.ts";
 import {
   Address,
@@ -361,6 +362,16 @@ export interface UpdateBookingInputType {
   breakdown?: Booking["breakdown"];
   /** See {@link BookingReturnFlagsType}. */
   return_flags?: BookingReturnFlagsType;
+  /**
+   * The ACTION-shaped alternative to `breakdown` (`schemas/custody.ts`): the
+   * steps the operator took, applied to the booking's CURRENT state, rather
+   * than the state the client computed. Never both in one patch. A short source
+   * bucket after a concurrent write is then a refusal, not an overwrite.
+   *
+   * ⚠️ Declared ahead of its reader: the api accepts it from the
+   * custody-actions plan's P2 (`api-cloudrun/.claude/plans/custody-actions.md`).
+   */
+  actions?: BookingActionType[];
   version: number;
   /**
    * The client-minted uuid identifying ONE operator action, required.
@@ -394,8 +405,12 @@ export const UpdateBookingInput: z.ZodType<UpdateBookingInputType> = z.object({
     returned: z.int().min(0),
   }).optional(),
   return_flags: BookingReturnFlags.optional(),
+  actions: BookingActions.optional(),
   version: z.int().min(0),
   uuid_session: z.uuid(),
+}).refine((u) => u.breakdown === undefined || u.actions === undefined, {
+  message: "send breakdown or actions, not both",
+  path: ["actions"],
 });
 
 // ── Bulk update input (PUT /fulfillments/{uid}/bookings) ───────
@@ -411,6 +426,8 @@ export interface BookingUpdateType {
   breakdown?: Booking["breakdown"];
   /** See {@link BookingReturnFlagsType}. */
   return_flags?: BookingReturnFlagsType;
+  /** See {@link UpdateBookingInputType.actions}. */
+  actions?: BookingActionType[];
   version: number;
 }
 
@@ -419,7 +436,11 @@ export const BookingUpdate: z.ZodType<BookingUpdateType> = z.object({
   status: BookingStatus.optional(),
   breakdown: BookingBreakdownSchema.optional(),
   return_flags: BookingReturnFlags.optional(),
+  actions: BookingActions.optional(),
   version: z.int().min(0),
+}).refine((u) => u.breakdown === undefined || u.actions === undefined, {
+  message: "send breakdown or actions, not both",
+  path: ["actions"],
 });
 
 /**

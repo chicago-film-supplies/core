@@ -795,6 +795,64 @@ interface Booking {
 }
 ```
 
+### `BookingAction`
+
+Zod schema for {@link BookingActionType}.
+
+```ts
+const BookingAction: z.ZodType<BookingActionType>;
+```
+
+### `BookingActionType`
+
+One step an operator takes on a booking.
+
+- `reason` — required by the rows whose service axis names `reason`
+  (`flag_returned`, the two reclassifications); refused on every other row.
+- `uid_out_of_service` — names the record a reclassification or an undo acts
+  on. Optional: an undo without one consumes the booking's open loss records
+  newest first, as the delta form always has.
+
+```ts
+interface BookingActionType {
+  rule: CustodyRuleId;
+  quantity: number;
+  reason?: CustodyFlagReasonType;
+  uid_out_of_service?: string;
+}
+```
+
+### `BookingActions`
+
+An ordered list of actions on ONE booking. Undos come first, as the delta
+form has always applied them; two actions that would write one movement id
+are refused (make them two saves).
+
+```ts
+const BookingActions: z.ZodType<BookingActionType[]>;
+```
+
+### `BookingActionsInput`
+
+Zod schema for {@link BookingActionsInputType}.
+
+```ts
+const BookingActionsInput: z.ZodType<BookingActionsInputType>;
+```
+
+### `BookingActionsInputType`
+
+One booking's actions in a bulk write — the action-shaped twin of
+`BookingUpdate`. `status` is derived by the server, never sent.
+
+```ts
+interface BookingActionsInputType {
+  uid: string;
+  version: number;
+  actions: BookingActionType[];
+}
+```
+
 ### `BookingBreakdown`
 
 Per-status quantity breakdown for a booking.
@@ -985,6 +1043,7 @@ interface BookingUpdateType {
   status?: BookingStatusType;
   breakdown?: indexedAccess;
   return_flags?: BookingReturnFlagsType;
+  actions?: BookingActionType[];
   version: number;
 }
 ```
@@ -1211,6 +1270,16 @@ it three times invites three answers.
 const CREDIT_NOTE_REASONS: readonly SettlementReasonType[];
 ```
 
+### `CUSTODY_FLAG_REASONS`
+
+The flag reasons a custody ACTION may name: the in-place reasons a booking
+keeps reading as `returned`. `damaged` is not one of them, because a damaged
+unit is its own breakdown key (owner ruling R2, 2026-09-29).
+
+```ts
+const CUSTODY_FLAG_REASONS: "cleaning" | "maintenance"[];
+```
+
 ### `CUSTODY_PLACE_KINDS`
 
 **Location is a total function**: every owned unit is in exactly one kind of
@@ -1237,6 +1306,36 @@ disjoint by construction.
 
 ```ts
 const CUSTODY_PLACE_KINDS: Readonly<Record<BookingBreakdownKeyType, readonly PlaceKindType[]>>;
+```
+
+### `CUSTODY_RULES`
+
+The table. Order is display order within a stage; nothing reads position as
+meaning.
+
+⚠️ **There is no row for `quoted`/`reserved`/`prepped → lost/damaged`, and
+that is gap G1 closing rather than a hole.** A unit that never left the
+building is not lost at a customer; the fulfillment offers `unprep` plus a
+shelf out-of-service record instead (owner ruling, 2026-09-29).
+
+⚠️ **Multi-hop moves are SEQUENCES of rows** — `reserved → out` is
+`[prep, check_out]` — so the table never needs a skip-ahead row.
+
+```ts
+const CUSTODY_RULES: readonly CustodyRule[];
+```
+
+### `CUSTODY_RULE_IDS`
+
+Every custody rule id. A literal list with its union derived from it, the
+same spelling as `MOVEMENT_TYPES`: the wire validates against it at runtime,
+and `tests/custody.test.ts` asserts it equals the table's ids in both
+directions, so a row with no id here and an id with no row both fail.
+
+The manager de-duplicates its menus by these ids, never by a label.
+
+```ts
+const CUSTODY_RULE_IDS: "prep" | "unprep" | "check_out" | "check_out_undo" | "check_in" | "check_in_undo" | "mark_lost" | "mark_lost_undo" | "mark_damaged" | "mark_damaged_undo" | "mark_lost_returned" | "mark_lost_returned_undo" | "flag_damaged_returned" | "flag_damaged_returned_undo" | "flag_returned" | "reclassify_damaged_to_flag" | "reclassify_flag_to_damaged"[];
 ```
 
 ### `CacheGeocodes`
@@ -3141,6 +3240,99 @@ Allowed credit-note statuses.
 
 ```ts
 type CreditNoteStatusType = indexedAccess;
+```
+
+### `CustodyArm`
+
+What one booking type does under a rule. `movement: null` is LEGAL WITH NO
+MOVEMENT (a sale's `out → lost`); a type that may not take the rule at all has
+no arm (`null` on the row).
+
+```ts
+interface CustodyArm {
+  movement: MovementTypeType | null;
+}
+```
+
+### `CustodyFlagReasonEnum`
+
+Zod schema for {@link CustodyFlagReasonType}.
+
+```ts
+const CustodyFlagReasonEnum: z.ZodType<CustodyFlagReasonType>;
+```
+
+### `CustodyFlagReasonType`
+
+A flag reason a custody action may name.
+
+```ts
+type CustodyFlagReasonType = indexedAccess;
+```
+
+### `CustodyRule`
+
+One legal custody step.
+
+`from === to` is a step that changes no breakdown key (only `flag_returned`):
+its movement carries no custody and names its booking in `sources[]`, not in
+`uid_booking`. Every other row's movement carries `{from, to}` as its custody
+pair and sets `uid_booking`.
+
+```ts
+interface CustodyRule {
+  id: CustodyRuleId;
+  from: BookingBreakdownKeyType;
+  to: BookingBreakdownKeyType;
+  rental: CustodyArm | null;
+  sale: CustodyArm | null;
+  service: CustodyServiceShape | null;
+  direction: "forward" | "undo";
+  stage: "prep" | "checkout" | "return" | "service";
+  inverse: CustodyRuleId | null;
+  billable: boolean;
+  description: string;
+  enforced_by: EnforcementRef[];
+}
+```
+
+### `CustodyRuleId`
+
+One custody rule id.
+
+```ts
+type CustodyRuleId = indexedAccess;
+```
+
+### `CustodyRuleIdEnum`
+
+Zod schema for {@link CustodyRuleId}.
+
+```ts
+const CustodyRuleIdEnum: z.ZodType<CustodyRuleId>;
+```
+
+### `CustodyServiceShape`
+
+A flag row's service axis, in terms the action fills in.
+
+```ts
+interface CustodyServiceShape {
+  from: CustodyServiceSide;
+  to: CustodyServiceSide;
+}
+```
+
+### `CustodyServiceSide`
+
+One side of a flag row's service axis.
+
+- `none` — in service on that side;
+- `damaged` — the `damaged` flag;
+- `reason` — the cleaning/maintenance reason the ACTION names.
+
+```ts
+type CustodyServiceSide = "none" | "damaged" | "reason";
 ```
 
 ### `DESTINATION_LEVELS`
@@ -10822,6 +11014,7 @@ interface UpdateBookingInputType {
   status?: BookingStatusType;
   breakdown?: indexedAccess;
   return_flags?: BookingReturnFlagsType;
+  actions?: BookingActionType[];
   version: number;
   uuid_session: string;
 }
@@ -12273,6 +12466,20 @@ been one `.optional().nullable()` away from silently truncating. Hitting the
 cap pushes a `__depth_cap__` entry into `unhandled` rather than returning
 quietly.
 
+### `custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale", reason?: string): string | null`
+
+The movement-id slot an action occupies in one save, or `null` when it writes
+no movement for that booking type.
+
+A movement's id is `{session}|{type}|{booking}`, so two actions of one type
+against one booking in one save collide. The exception is a flag with no
+custody (`flag_returned`), whose id carries its reason, so cleaning and
+maintenance in one save are two slots.
+
+### `custodyRule(id: CustodyRuleId): CustodyRule`
+
+The rule with `id`. Total over {@link CustodyRuleId}; the table test proves it.
+
 ### `deriveCreditPostingAccount(reason: SettlementReasonType, coaRevenue: number | null): number | null`
 
 Where a credit line posts, from the two facts that decide it.
@@ -12355,6 +12562,14 @@ order and fulfillment and the exemption had nothing left to exempt. 0 stored
 documents used it in either project (measured 2026-09-28).
 
 A row with a non-string `uid` is skipped: the schema parse owns it.
+
+### `duplicateCustodySlots(actions: readonly Pick<BookingActionType, "rule" | "reason">[]): string[]`
+
+Where two actions in one list would write the same movement id. Shared by the
+wire refine and by `applyCustodyActions`, so the two cannot disagree.
+
+The slot is read off the RENTAL arm: a sale's arms are a subset whose
+movements are distinct per rule, so the rental reading is the stricter one.
 
 ### `enumValues(schema: z.ZodType<T>): T[]`
 
@@ -12694,6 +12909,13 @@ question**: see {@link isFulfillableItemType}.
 
 Takes a `string` because callers hold item types from loosely-typed sources.
 A value outside {@link ITEM_TYPES} has no contract and answers `false`.
+
+### `isLossUndo(id: CustodyRuleId): boolean`
+
+The loss-mark undos, which the lever applies before anything else in a save:
+an undo returns units to wherever THAT mark took them from, a fact about the
+record rather than the breakdown, so the ladder steps must read the breakdown
+the undos leave.
 
 ### `isProductShapedUid(uid: string): boolean`
 
@@ -15586,6 +15808,7 @@ interface BookingUpdateType {
   status?: BookingStatusType;
   breakdown?: indexedAccess;
   return_flags?: BookingReturnFlagsType;
+  actions?: BookingActionType[];
   version: number;
 }
 ```
@@ -15680,6 +15903,7 @@ interface UpdateBookingInputType {
   status?: BookingStatusType;
   breakdown?: indexedAccess;
   return_flags?: BookingReturnFlagsType;
+  actions?: BookingActionType[];
   version: number;
   uuid_session: string;
 }
@@ -15707,6 +15931,263 @@ interface UpdateBookingResponseType {
   oos_records_written: number;
 }
 ```
+
+## `@cfs/core/schemas/custody`
+
+The custody ruleset: which change to a booking's breakdown is LEGAL, and
+which movement records it.
+
+One row per legal step. The api's booking lever refuses anything that is not
+a sequence of these rows, the manager builds its menus from them, and a
+repair script decomposes a breakdown delta into them. Before this table the
+rule lived in three places — the manager's menus and its breakdown flattening,
+the alternates vocabulary in `utils/fulfillment-stage.ts`, and the api's
+`deriveCustodyTransitions`, which reverse-engineered movements from an
+absolute breakdown — and they had drifted: the manager offered
+`reserved → lost` and the api accepted it with no movement and no record.
+
+## What a row does NOT restate
+
+Places, cost, booking, custody mode and service mode belong to
+{@link MOVEMENT_CONTRACTS}, and a row names only its movement TYPE. What the
+contracts lack, and what this table adds, is the binding between a type and
+the custody pair it carries: nothing checked that a `check_in` moves
+`out → returned` until this existed. `tests/custody.test.ts` cross-checks
+every row against the contracts and {@link CUSTODY_PLACE_KINDS}.
+
+## Kept apart from the propagation catalog, on purpose
+
+`@cfs/core/schemas/propagation` says which DATA flows between collections;
+this says which STATE CHANGE is legal and which EVENT records it. The two
+share conventions (typed ids, `enforced_by`, one exported table) and nothing
+else.
+
+## Sales
+
+A sale's rows are encoded as a sale behaves today, not as a sale might
+ideally behave: `out → lost` and `out → damaged` are legal and emit NO
+movement (the units left CFS ownership at the point of sale, so there is no
+inventory event), and every sale rewind is refused (api-cloudrun#1054).
+
+### `BookingAction`
+
+Zod schema for {@link BookingActionType}.
+
+```ts
+const BookingAction: z.ZodType<BookingActionType>;
+```
+
+### `BookingActionType`
+
+One step an operator takes on a booking.
+
+- `reason` — required by the rows whose service axis names `reason`
+  (`flag_returned`, the two reclassifications); refused on every other row.
+- `uid_out_of_service` — names the record a reclassification or an undo acts
+  on. Optional: an undo without one consumes the booking's open loss records
+  newest first, as the delta form always has.
+
+```ts
+interface BookingActionType {
+  rule: CustodyRuleId;
+  quantity: number;
+  reason?: CustodyFlagReasonType;
+  uid_out_of_service?: string;
+}
+```
+
+### `BookingActions`
+
+An ordered list of actions on ONE booking. Undos come first, as the delta
+form has always applied them; two actions that would write one movement id
+are refused (make them two saves).
+
+```ts
+const BookingActions: z.ZodType<BookingActionType[]>;
+```
+
+### `BookingActionsInput`
+
+Zod schema for {@link BookingActionsInputType}.
+
+```ts
+const BookingActionsInput: z.ZodType<BookingActionsInputType>;
+```
+
+### `BookingActionsInputType`
+
+One booking's actions in a bulk write — the action-shaped twin of
+`BookingUpdate`. `status` is derived by the server, never sent.
+
+```ts
+interface BookingActionsInputType {
+  uid: string;
+  version: number;
+  actions: BookingActionType[];
+}
+```
+
+### `CUSTODY_FLAG_REASONS`
+
+The flag reasons a custody ACTION may name: the in-place reasons a booking
+keeps reading as `returned`. `damaged` is not one of them, because a damaged
+unit is its own breakdown key (owner ruling R2, 2026-09-29).
+
+```ts
+const CUSTODY_FLAG_REASONS: "cleaning" | "maintenance"[];
+```
+
+### `CUSTODY_RULES`
+
+The table. Order is display order within a stage; nothing reads position as
+meaning.
+
+⚠️ **There is no row for `quoted`/`reserved`/`prepped → lost/damaged`, and
+that is gap G1 closing rather than a hole.** A unit that never left the
+building is not lost at a customer; the fulfillment offers `unprep` plus a
+shelf out-of-service record instead (owner ruling, 2026-09-29).
+
+⚠️ **Multi-hop moves are SEQUENCES of rows** — `reserved → out` is
+`[prep, check_out]` — so the table never needs a skip-ahead row.
+
+```ts
+const CUSTODY_RULES: readonly CustodyRule[];
+```
+
+### `CUSTODY_RULE_IDS`
+
+Every custody rule id. A literal list with its union derived from it, the
+same spelling as `MOVEMENT_TYPES`: the wire validates against it at runtime,
+and `tests/custody.test.ts` asserts it equals the table's ids in both
+directions, so a row with no id here and an id with no row both fail.
+
+The manager de-duplicates its menus by these ids, never by a label.
+
+```ts
+const CUSTODY_RULE_IDS: "prep" | "unprep" | "check_out" | "check_out_undo" | "check_in" | "check_in_undo" | "mark_lost" | "mark_lost_undo" | "mark_damaged" | "mark_damaged_undo" | "mark_lost_returned" | "mark_lost_returned_undo" | "flag_damaged_returned" | "flag_damaged_returned_undo" | "flag_returned" | "reclassify_damaged_to_flag" | "reclassify_flag_to_damaged"[];
+```
+
+### `CustodyArm`
+
+What one booking type does under a rule. `movement: null` is LEGAL WITH NO
+MOVEMENT (a sale's `out → lost`); a type that may not take the rule at all has
+no arm (`null` on the row).
+
+```ts
+interface CustodyArm {
+  movement: MovementTypeType | null;
+}
+```
+
+### `CustodyFlagReasonEnum`
+
+Zod schema for {@link CustodyFlagReasonType}.
+
+```ts
+const CustodyFlagReasonEnum: z.ZodType<CustodyFlagReasonType>;
+```
+
+### `CustodyFlagReasonType`
+
+A flag reason a custody action may name.
+
+```ts
+type CustodyFlagReasonType = indexedAccess;
+```
+
+### `CustodyRule`
+
+One legal custody step.
+
+`from === to` is a step that changes no breakdown key (only `flag_returned`):
+its movement carries no custody and names its booking in `sources[]`, not in
+`uid_booking`. Every other row's movement carries `{from, to}` as its custody
+pair and sets `uid_booking`.
+
+```ts
+interface CustodyRule {
+  id: CustodyRuleId;
+  from: BookingBreakdownKeyType;
+  to: BookingBreakdownKeyType;
+  rental: CustodyArm | null;
+  sale: CustodyArm | null;
+  service: CustodyServiceShape | null;
+  direction: "forward" | "undo";
+  stage: "prep" | "checkout" | "return" | "service";
+  inverse: CustodyRuleId | null;
+  billable: boolean;
+  description: string;
+  enforced_by: EnforcementRef[];
+}
+```
+
+### `CustodyRuleId`
+
+One custody rule id.
+
+```ts
+type CustodyRuleId = indexedAccess;
+```
+
+### `CustodyRuleIdEnum`
+
+Zod schema for {@link CustodyRuleId}.
+
+```ts
+const CustodyRuleIdEnum: z.ZodType<CustodyRuleId>;
+```
+
+### `CustodyServiceShape`
+
+A flag row's service axis, in terms the action fills in.
+
+```ts
+interface CustodyServiceShape {
+  from: CustodyServiceSide;
+  to: CustodyServiceSide;
+}
+```
+
+### `CustodyServiceSide`
+
+One side of a flag row's service axis.
+
+- `none` — in service on that side;
+- `damaged` — the `damaged` flag;
+- `reason` — the cleaning/maintenance reason the ACTION names.
+
+```ts
+type CustodyServiceSide = "none" | "damaged" | "reason";
+```
+
+### `custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale", reason?: string): string | null`
+
+The movement-id slot an action occupies in one save, or `null` when it writes
+no movement for that booking type.
+
+A movement's id is `{session}|{type}|{booking}`, so two actions of one type
+against one booking in one save collide. The exception is a flag with no
+custody (`flag_returned`), whose id carries its reason, so cleaning and
+maintenance in one save are two slots.
+
+### `custodyRule(id: CustodyRuleId): CustodyRule`
+
+The rule with `id`. Total over {@link CustodyRuleId}; the table test proves it.
+
+### `duplicateCustodySlots(actions: readonly Pick<BookingActionType, "rule" | "reason">[]): string[]`
+
+Where two actions in one list would write the same movement id. Shared by the
+wire refine and by `applyCustodyActions`, so the two cannot disagree.
+
+The slot is read off the RENTAL arm: a sale's arms are a subset whose
+movements are distinct per rule, so the rental reading is the stricter one.
+
+### `isLossUndo(id: CustodyRuleId): boolean`
+
+The loss-mark undos, which the lever applies before anything else in a save:
+an undo returns units to wherever THAT mark took them from, a fact about the
+record rather than the breakdown, so the ladder steps must read the breakdown
+the undos leave.
 
 ## `@cfs/core/schemas/cache-geocodes`
 
@@ -24268,7 +24749,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_destination_override_dropped" | "invoice_sync_organization_kept" | "destination_pair_unjoined"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "custody_delta_unmatched" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_destination_override_dropped" | "invoice_sync_organization_kept" | "destination_pair_unjoined"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -26542,6 +27023,335 @@ along the *product* axis) but aggregated along the *order* axis. Used to
 seed `order.bookings_breakdown` at create/update time and to recompute it
 client-side from cached bookings when the order doc isn't authoritative
 yet.
+
+## `@cfs/core/utils/custody`
+
+The custody ruleset, applied: what a booking may do next, what a list of
+actions does to it, and how an absolute breakdown delta decomposes into the
+same actions.
+
+The table itself is `CUSTODY_RULES` in `schemas/custody.ts` (the wire
+validates against it, and schemas never import utils). Everything here is
+pure and platform-free: the manager's optimistic update and the api's apply
+are the same {@link applyCustodyActions}.
+
+## Stays server-only, deliberately
+
+Shelf allocation, the undo origin (read off the consumed record's mark
+movement), write-off cost, idempotency and `checkMovementService` all need
+Firestore state or the journal. This module decides WHICH step is legal and
+WHAT the booking reads afterwards; the api decides where the units go.
+
+## Kept apart on purpose
+
+`getStageForBookings`, `qtyOnStageSide` and `custodyMovedQuantity`
+(`utils/fulfillment-stage.ts`) answer rendering and freeze questions, not
+legality ones, and must not be folded in here.
+
+### `CustodyApplication`
+
+What a list of actions does to a booking.
+
+```ts
+interface CustodyApplication {
+  breakdown: BookingBreakdown;
+  status: indexedAccess;
+  transitions: CustodyTransition[];
+}
+```
+
+### `CustodyApplyContext`
+
+Server knowledge the pure booking cannot carry.
+
+```ts
+interface CustodyApplyContext {
+  unflaggedReturned?: number;
+}
+```
+
+### `CustodyBooking`
+
+A booking as the ruleset reads it.
+
+```ts
+type CustodyBooking = Pick<Booking, "type" | "breakdown" | "quantity" | "status">;
+```
+
+### `CustodyDecomposition`
+
+What a breakdown delta is, in rules.
+
+```ts
+interface CustodyDecomposition {
+  matched: boolean;
+  steps: CustodyStep[];
+  transitions: CustodyTransition[];
+  residue: typeLiteral;
+}
+```
+
+### `CustodyLossUndo`
+
+A loss key a delta may lower, and where its mark took the units from.
+
+```ts
+interface CustodyLossUndo {
+  reason: "lost" | "damaged";
+  origin: BookingBreakdownKeyType;
+  quantity: number;
+}
+```
+
+### `CustodyOffer`
+
+One action the UI may offer on a booking row.
+
+`key` is what a menu de-duplicates on — the rule id, plus the reason for the
+two `flag_returned` offers. Expand an offer into the actions to send with
+{@link expandCustodyOffer}; a `check_out` over reserved units is two steps.
+
+```ts
+interface CustodyOffer {
+  key: string;
+  rule: CustodyRuleId;
+  reason?: CustodyFlagReasonType;
+  max: number;
+  natural: boolean;
+  direction: indexedAccess;
+  stage: indexedAccess;
+}
+```
+
+### `CustodyOfferContext`
+
+What an offer list needs that the booking alone does not carry.
+
+```ts
+interface CustodyOfferContext {
+  canPrepCheckout: boolean;
+  unflaggedReturned?: number;
+  undoable?: Partial<Record<"mark_lost_undo" | "mark_damaged_undo" | "mark_lost_returned_undo" | "flag_damaged_returned_undo", number>>;
+}
+```
+
+### `CustodyRefusal`
+
+_(class — see source)_
+
+### `CustodyStep`
+
+One step of a decomposition: a rule and its quantity.
+
+```ts
+interface CustodyStep {
+  rule: CustodyRuleId;
+  quantity: number;
+}
+```
+
+### `CustodyTransition`
+
+One movement's worth of custody change, as the journal will record it.
+
+```ts
+interface CustodyTransition {
+  rule: CustodyRuleId;
+  type: MovementTypeType;
+  from: BookingBreakdownKeyType;
+  to: BookingBreakdownKeyType;
+  quantity: number;
+  service: typeLiteral | null;
+}
+```
+
+### `ServiceBucketBounds`
+
+The range an editor may put one of a record's buckets in. `max: null` is unbounded.
+
+```ts
+interface ServiceBucketBounds {
+  min: number;
+  max: number | null;
+}
+```
+
+### `ServiceBucketMove`
+
+One move of `quantity` units between two of a record's buckets.
+
+```ts
+interface ServiceBucketMove {
+  from: ServicePlace;
+  to: ServicePlace;
+  quantity: number;
+}
+```
+
+### `ServiceMovePlan`
+
+The moves a record breakdown change makes, or why it cannot be made.
+
+```ts
+type ServiceMovePlan = typeLiteral | typeLiteral;
+```
+
+### `ServicePlace`
+
+A bucket a record's units can move between. `unplaced` is quantity − Σ breakdown.
+
+```ts
+type ServicePlace = "unplaced" | OOSBreakdownKeyType;
+```
+
+### `applyCustodyActions(booking: CustodyBooking, actions: readonly BookingActionType[], _: unknown): CustodyApplication`
+
+Apply `actions`, in order, to the booking's CURRENT state.
+
+Throws {@link CustodyRefusal} on an unknown rule, a rule the booking type may
+not take, a short source bucket, a missing or stray reason, two actions that
+would write one movement id, or a loss-mark undo after a forward step. Never
+clamps: a short bucket after a concurrent write is a refusal, not an
+overwrite — the lost-update bug the absolute-breakdown wire had.
+
+### `canEditServiceBreakdown(record: Pick<OutOfService, "status" | "breakdown">): boolean`
+
+Whether a record's breakdown can be edited at all. A closed record with nothing written off cannot.
+
+### `canonicalLossUndos(prev: BookingBreakdown, next: BookingBreakdown): CustodyLossUndo[]`
+
+Every fallen loss unit read as marked off `out` — for PLANNING, where no
+record is at hand. The server reads the real origin off each consumed
+record's mark movement.
+
+### `custodyActionsFor(booking: CustodyBooking, ctx: CustodyOfferContext): CustodyOffer[]`
+
+Every action the UI may offer on this booking, natural next first, then
+forward in ladder order, then undos.
+
+Replaces `actionAlternatesForBooking`, `regressionAlternatesForBooking`,
+`sourceBucketSizeForBooking` and `actionableQtyTowardTarget`. Two behaviours
+change, both by owner ruling (2026-09-29):
+
+- **No pre-departure loss.** `reserved`/`prepped` units are never offered
+  Lost or Damaged (gap G1). The fulfillment offers `unprep` plus a shelf
+  out-of-service record instead.
+- **Returned units get their own losses and flags** (gap G5): Lost, Damaged,
+  Flag Cleaning and Flag Maintenance off `returned`, so `‹ Out` is no longer
+  the only way to reach them.
+
+### `custodyRuleForMovement(type: MovementTypeType, custody: typeLiteral | null, service: typeLiteral | null | undefined, bookingType: "rental" | "sale"): CustodyRule | null`
+
+The rule a STORED movement's `(type, custody, service)` is an instance of, or
+`null` — the population assertion's lookup (`audit-custody-rules` in the api
+replays every stored custody movement through it).
+
+A flag's reason side reads as `reason` when it is cleaning or maintenance.
+
+### `decomposeCustodyDelta(prev: BookingBreakdown, next: BookingBreakdown, bookingType: indexedAccess, _: unknown): CustodyDecomposition`
+
+The rules an ABSOLUTE breakdown change represents — the successor to the
+api's `deriveCustodyTransitions` / `deriveWithLossUndos`, for repair scripts,
+the parity sweeps and the transition window while the delta wire is still
+accepted.
+
+`undos` are the loss marks the caller is undoing, with the origin read off
+each consumed record. They apply first, and the ladder then decomposes the
+breakdown in between. A fall of `lost`/`damaged` with no undo for it is
+residue: the pure delta cannot say where the units go back to.
+
+## Pairing order, carried over unchanged
+
+Rises are paired in order of how CONSTRAINED they are, not by direction:
+`reserved` can only be fed by `prepped`, so that pairing is resolved first,
+and only then the contested `prepped`/`out` rises. Take
+`{returned: 2, prepped: 2}` → `{out: 2, reserved: 2}`: forward-first pairs
+`prepped → out` and strands `returned → reserved`, while the forced reading
+is `unprep` + `check_in_undo`.
+
+A forward multi-hop (`reserved → out`) is `[prep, check_out]` with the
+implicit prep counted once; a rewind is matched at every depth
+(`returned → reserved` is `check_in_undo`, `check_out_undo`, `unprep`).
+
+⚠️ **What stays residue is a DECISION, not a gap in this function.**
+`prepped → returned` is a forward multi-hop past `out`, which would record
+units going out and coming back that nobody saw (api-cloudrun#1053); a
+pre-departure key into `lost`/`damaged` has no row at all (gap G1); and a sale
+rewind is refused (api-cloudrun#1054). A service or surcharge booking holds no
+stock, so its delta is always matched with no steps.
+
+### `deriveCustodyStatus(breakdown: BookingBreakdown, quantity: number, current: indexedAccess): indexedAccess`
+
+A booking's status, read off its breakdown. ONE rule for every custody
+write; the manager had two (a forward one and a regression one), and this is
+the regression one, because it is a function of the state alone.
+
+| breakdown                        | status          |
+|----------------------------------|-----------------|
+| returned + lost + damaged = qty  | `complete`      |
+| out > 0                          | `active`        |
+| prepped = qty                    | `prepped`       |
+| prepped > 0 and reserved > 0     | `part-prepped`  |
+| reserved = qty                   | `reserved`      |
+| anything else                    | unchanged       |
+
+⚠️ A sale fully `out` reads `active`, not `complete`, exactly as the manager's
+check-out has always sent it. Whether a sale's `out` closes the booking is
+`isBookingClosed`'s question (`utils/bookings.ts`), and it answers per order,
+at finalize.
+
+### `expandCustodyOffer(booking: CustodyBooking, offer: Pick<CustodyOffer, "rule" | "reason">, quantity: number): BookingActionType[]`
+
+The actions an offer sends for `quantity` units.
+
+Every offer is one action except `check_out` over units still `reserved`:
+those are prepped on the way, so the offer sends `[prep, check_out]`. It
+draws the already-prepped units FIRST — the ones on the prep shelf are the
+ones going out — and preps only the shortfall.
+
+### `getCustodyRulesMarkdown(): string`
+
+The rule table as a markdown rung table — the source for the api's
+`fulfillment-ladder` skill and the booking-action input's `/openapi.json`
+description, so neither restates the table by hand.
+
+### `serviceBreakdownViolation(record: BoundsRecord, next: OOSBreakdown): string | null`
+
+The first rule `next` breaks, as the sentence the operator reads: a bucket
+outside its bounds first, then the sum against the record. `null` when
+`next` is within bounds (the planner may still refuse the MOVE).
+
+### `serviceBucketBounds(record: Pick<BoundsRecord, "status" | "reason" | "breakdown">, key: OOSBreakdownKeyType): ServiceBucketBounds`
+
+The bounds the api enforces on one bucket, so an editor shows the limit at
+the input rather than a failed save. Lifted from
+`manager/src/utils/oosBreakdownBounds.ts`.
+
+- `returned_to_service` never goes down, on any record.
+- A `lost` record flags nothing: its `flagged` bucket is pinned at 0.
+- A complete/canceled record admits ONE edit: units LEAVING `written_off`
+  ("found after write-off"), into any other bucket. The api re-opens it.
+
+### `serviceMovesFor(record: Pick<OutOfService, "quantity" | "reason" | "breakdown">, next: OOSBreakdown): ServiceMovePlan`
+
+The moves that take an out-of-service record from its stored breakdown to
+`next` — lifted from the api's `planBucketMoves`, which was already a
+table-driven, refusing planner. The record PUT stays target-shaped because
+this is deterministic: there is nothing to infer.
+
+Each INCREASE is fed from the buckets that DECREASED, in a fixed preference:
+
+| into                  | drawn from, in order   |
+|-----------------------|------------------------|
+| `written_off`         | `away`, `flagged`, then `unplaced` |
+| `returned_to_service` | `away`, `flagged`, then `unplaced` |
+| `away`                | `flagged`, then `unplaced` |
+| `flagged`             | `away`, then `unplaced` |
+
+Refused: leaving `returned_to_service` (out of service again is a NEW
+record); leaving `written_off` (resolve found units into a reversal first);
+going back to `unplaced` (an effect that happened cannot un-happen); a `lost`
+record's units into `flagged` (lost is a place, not a flag — R3).
 
 ## `@cfs/core/utils/cards`
 

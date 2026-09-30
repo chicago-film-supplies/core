@@ -132,6 +132,16 @@ export const DOMAIN_EVENT_MSGS = [
   // one line per over-billed record. Emitted from
   // `api-cloudrun/src/lib/replacementBilling.ts`.
   "oos_overbilled",
+  // A booking PUT on an operator route sent an absolute breakdown whose delta
+  // `decomposeCustodyDelta` (`@cfs/core/utils/custody`) could not pair into
+  // custody rules — a change the journal records nothing for. **SHADOW, not a
+  // refusal** (custody-actions plan P2): the write still lands, and this line
+  // settles by measurement whether any live path sends one before the api starts
+  // refusing them. `{ route, uid_booking, order_uid, booking_type, prev, next,
+  // residue }`, at `warn`, where `prev`/`next` are the five fulfillment keys and
+  // `residue` is the falls and rises no rule paired. Emitted from api-cloudrun's
+  // booking lever.
+  "custody_delta_unmatched",
   // Fulfillment picker accepted a quantity edit on a `custom-*` line
   // item. Custom uids regenerate on the next CRMS opportunity sync, so
   // the override is lossy — this is the explicit warning trail. Emitted

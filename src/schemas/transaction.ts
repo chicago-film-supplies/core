@@ -390,13 +390,13 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
   // reachable rather than after.
   //
   // ⚠️ **`from` is `bookings` alone, and a shelf-discovered damage is NOT a
-  // narrower version of this movement — it is not a movement at all.** An
-  // operator noticing a broken unit on a shelf has no order and no booking, so
-  // there is no breakdown key to move and nothing changes place; the lever is an
-  // out-of-service record naming the shelf through its own `stores[].locations[]`,
-  // which that schema already carries. Widening `from` to `locations` would also
-  // flip `allocationSide` to `"both"` and demand a SOURCE shelf on a return whose
-  // source is the booking.
+  // narrower version of this movement — it is a `flag`.** A unit found broken
+  // on a shelf changes no place, so it is flagged where it stands: `{null →
+  // damaged}`, carrying custody `returned → damaged` when it is a booking's
+  // returned unit (`flag_damaged_returned` in `schemas/custody.ts`) and none
+  // when an operator opens a standalone record. Widening `from` to `locations`
+  // would also flip `allocationSide` to `"both"` and demand a SOURCE shelf on a
+  // return whose source is the booking.
   mark_damaged: {
     custody: "required",
     cost: "forbidden",
@@ -440,12 +440,12 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
   },
   // 🔴 **Mirrored EXACTLY, including the widening on `mark_lost`'s origin.** A
   // loss may come off the booking (`out → lost`) or off a shelf
-  // (`returned → lost`, api-cloudrun#1118), so its undo must be able to put the
-  // unit back at either. Typing it `→ bookings` alone because that is the only
-  // loss the ladder emits today would cost a second publish and a second
-  // manager-first ordering the day the shelf rung lands. The writer is to take
-  // the destination from the consumed record's own mark lines — never re-derive
-  // it from the breakdown — so the kind always matches the one the loss left.
+  // (`returned → lost`, api-cloudrun#1118 — the shelf rung shipped in
+  // api-cloudrun `5e50a9e5`), so its undo puts the unit back at either:
+  // `mark_lost_undo` and `mark_lost_returned_undo` in `schemas/custody.ts`. The
+  // writer takes the destination from the consumed record's own mark lines —
+  // never re-derived from the breakdown — so the kind always matches the one the
+  // loss left.
   mark_lost_undo: {
     custody: "required",
     cost: "forbidden",

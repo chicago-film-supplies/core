@@ -550,6 +550,25 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // sees its exports.
   // The record's status rule and breakdown sums. A rendered record carries its
   // stored `status` already; deriving it again at render time answers nothing.
+  // `utils/custody.ts` is the booking lever's ruleset (custody-actions plan):
+  // which custody step is legal, what a list of actions does to a booking, and
+  // what a record breakdown edit moves. Each export answers a question about a
+  // WRITE — a template renders a document whose custody already moved, and
+  // "which action may the operator take next" has no reader on paper.
+  custody: [
+    "applyCustodyActions",
+    "canEditServiceBreakdown",
+    "canonicalLossUndos",
+    "custodyActionsFor",
+    "custodyRuleForMovement",
+    "decomposeCustodyDelta",
+    "deriveCustodyStatus",
+    "expandCustodyOffer",
+    "getCustodyRulesMarkdown",
+    "serviceBreakdownViolation",
+    "serviceBucketBounds",
+    "serviceMovesFor",
+  ],
   "out-of-service": [
     "deriveOOSStatus",
     "emptyOOSBreakdown",

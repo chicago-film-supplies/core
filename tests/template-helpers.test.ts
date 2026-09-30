@@ -66,6 +66,7 @@ import * as taxClassUtils from "../src/utils/tax-classes.ts";
 import * as priceDocumentUtils from "../src/utils/price-document.ts";
 import * as replacementUtils from "../src/utils/replacements.ts";
 import * as outOfServiceUtils from "../src/utils/out-of-service.ts";
+import * as custodyUtils from "../src/utils/custody.ts";
 
 import { templateHelpers } from "../src/schemas/template-helpers.generated.ts";
 import {
@@ -118,6 +119,11 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // write-path derivations shared by the API writers and the manager's preview.
   // Listed so the drift guard sees its exports.
   "out-of-service": outOfServiceUtils,
+  // `utils/custody.ts` is the booking LEVER's ruleset — which step is legal,
+  // what it does to a breakdown, what a record PUT moves. Every export answers a
+  // question about a write; a template renders one that already happened.
+  // Listed so the drift guard sees its exports.
+  custody: custodyUtils,
   icons: iconUtils,
   fulfillments: fulfillmentUtils,
   // Same exception as `citations` and `template-lint`: `utils/fulfillment-items.ts`

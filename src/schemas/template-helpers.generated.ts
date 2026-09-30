@@ -55,6 +55,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "contentHash": [
 
   ],
+  "custody": [
+
+  ],
   "dates": [
     { name: "billableDays", expr: "it.dates.billableDays(days)", desc: "**The days a set of windows bills: Σ `max(days, 5)`.** Every window carries the one-week minimum, a 0-day window included (charge-windows decision 2).", returns: "number" },
     { name: "chargeEnvelope", expr: "it.dates.chargeEnvelope(dates)", desc: "**The span a pair's windows cover**: the first window's start and the last window's end. `null` when the pair has no windows.", returns: "typeLiteral | null" },
