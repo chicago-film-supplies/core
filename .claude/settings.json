@@ -10,5 +10,11 @@
   },
   "enabledPlugins": {
     "cfs-skills@cfs": true
+  },
+  "permissions": {
+    "allow": [
+      "mcp__cfs-api",
+      "mcp__cfs-api-prod"
+    ]
   }
 }
