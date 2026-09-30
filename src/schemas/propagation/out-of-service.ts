@@ -16,6 +16,13 @@
  * would produce. Per the OOS lifecycle, the booking that originated the loss
  * is NOT updated — the booking already records the loss in its own
  * breakdown.
+ *
+ * `reclassify-out-of-service-record` — the one exception: a REASON edit among
+ * damaged/cleaning/maintenance on a record a booking's mark opened. The
+ * booking's buckets are the condition its units came back in, and the operator
+ * is correcting that, so the booking moves with the record (custody-actions
+ * gap G3). It runs through the booking lever, so the booking, the record and
+ * the flag movement land in one commit.
  */
 import type {
   CollectionRule,
@@ -243,11 +250,69 @@ const updateOutOfServiceRules: CollectionRule[] = [
 const updateOutOfServiceTransaction: TransactionDefinition = {
   id: "update-out-of-service-record",
   description:
-    "Updates an out-of-service record. Every bucket change and in-place reason edit is posted as the movement that makes it true (flag, send_away, return_to_service, write_off, or a reversal), which cascades through the one ledger writer and the stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Any OOS quantity/date/status change — including a cancel, which drops the record from the array entirely.",
+    "Updates an out-of-service record. Every bucket change and in-place reason edit is posted as the movement that makes it true (flag, send_away, return_to_service, write_off, or a reversal), which cascades through the one ledger writer and the stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown — except a reason edit on a booking-raised record, which is `reclassify-out-of-service-record`. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Any OOS quantity/date/status change — including a cancel, which drops the record from the array entirely.",
   steps: [
     ...STOCK_STEPS,
     "update-out-of-service-record:record-to-transactions",
     "update-out-of-service-record:transactions-to-ledger",
+  ],
+};
+
+// ── reclassify-out-of-service-record (custody-actions gap G3) ────────
+
+/**
+ * The delegation, asserted end to end on a real record PUT: the booking's
+ * buckets, the flag movement's custody and service, and the record's reason all
+ * move in the one commit.
+ */
+const RECLASSIFY_MOVES_THE_BOOKING: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/out-of-service/reclassify.test.ts::PUT /out-of-service — reclassifying a booking-raised damaged record to cleaning moves the booking damaged → cleaning in one commit",
+  clause:
+    "the booking reads damaged − q, cleaning + q; ONE flag movement carries custody {damaged → cleaning}, service {damaged → cleaning} and uid_booking, in place on the record's flagged shelves; the record's reason and version move; the ledger's out-of-service total does not",
+  gates: true,
+};
+
+const reclassifyOutOfServiceRules: CollectionRule[] = [
+  {
+    id: "reclassify-out-of-service-record:record-to-booking",
+    source: "out-of-service",
+    target: "bookings",
+    mode: "co-write",
+    invariant:
+      "A reason edit among damaged/cleaning/maintenance on a record whose mark movement carries custody on a booking moves that booking's bucket by the record's WHOLE quantity (breakdown[old] − q, breakdown[new] + q), written through the booking lever in the same commit as the record and ONE flag {old → new} that carries custody {old → new} and uid_booking. Refused (400) unless every unit is still flagged on a shelf: a cleared, written-off or away unit could only be re-described by a movement that did not happen. A record the booking's mark did not open (legacy auto-id, or one POSTed with the booking in sources) never moves the booking.",
+    enforced_by: [RECLASSIFY_MOVES_THE_BOOKING],
+    transaction: "reclassify-out-of-service-record",
+    fields: [
+      {
+        source: ["reason"],
+        target: ["breakdown"],
+        transform: "breakdown[old reason] − record.quantity, breakdown[new reason] + record.quantity",
+      },
+      {
+        source: ["reason"],
+        target: ["version"],
+        transform: "the booking lever bumps it, as for any custody change",
+      },
+    ],
+  },
+];
+
+const reclassifyOutOfServiceTransaction: TransactionDefinition = {
+  id: "reclassify-out-of-service-record",
+  description:
+    "A reason edit on a booking-raised out-of-service record, delegated from `PUT /out-of-service/{uid}` to the booking lever so the booking's bucket, the record's reason and the flag movement commit together; finalize then recomputes the order roll-up, the fulfillment mirror and the cards. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: a reason change among damaged/cleaning/maintenance on a record a booking's mark opened.",
+  steps: [
+    "reclassify-out-of-service-record:record-to-booking",
+    "update-booking:booking-to-self",
+    ...STOCK_STEPS,
+    "update-booking:booking-to-transactions",
+    "update-booking:transactions-to-ledger",
+    "update-booking:transactions-to-locations",
+    "update-booking:booking-to-order",
+    "update-order:order-to-fulfillment",
+    "update-booking:booking-to-cards",
   ],
 };
 
@@ -257,9 +322,11 @@ export const outOfService: PropagationModule = {
   rules: [
     ...createOutOfServiceRules,
     ...updateOutOfServiceRules,
+    ...reclassifyOutOfServiceRules,
   ],
   transactions: [
     createOutOfServiceTransaction,
     updateOutOfServiceTransaction,
+    reclassifyOutOfServiceTransaction,
   ],
 };

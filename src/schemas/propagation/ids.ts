@@ -61,6 +61,7 @@ export type TransactionId =
   // out-of-service.ts
   | "create-out-of-service-record"
   | "update-out-of-service-record"
+  | "reclassify-out-of-service-record"
   // transactions.ts
   | "create-transaction"
   | "reverse-transaction"
@@ -194,6 +195,7 @@ export type RuleId =
   | "create-out-of-service-record:transactions-to-ledger"
   | "update-out-of-service-record:record-to-transactions"
   | "update-out-of-service-record:transactions-to-ledger"
+  | "reclassify-out-of-service-record:record-to-booking"
   // transactions.ts
   | "create-transaction:transaction-to-ledger"
   | "create-transaction:transaction-to-locations"

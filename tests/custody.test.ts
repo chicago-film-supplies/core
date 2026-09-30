@@ -620,6 +620,24 @@ Deno.test("custody - BookingActions refuses one movement id twice and a loss und
     { rule: "flag_returned", quantity: 1, reason: "cleaning" },
     { rule: "flag_returned", quantity: 1, reason: "cleaning" },
   ]).success);
+  // A cleaning or maintenance flag is on its reason's own id, so it shares a
+  // save with a damaged flag, and with its deprecated R2 spelling it does not.
+  assert(BookingActions.safeParse([
+    { rule: "flag_cleaning_returned", quantity: 1 },
+    { rule: "flag_damaged_returned", quantity: 1 },
+  ]).success);
+  assert(BookingActions.safeParse([
+    { rule: "flag_cleaning_returned", quantity: 1 },
+    { rule: "flag_maintenance_returned", quantity: 1 },
+  ]).success);
+  assert(!BookingActions.safeParse([
+    { rule: "flag_cleaning_returned", quantity: 1 },
+    { rule: "flag_returned", quantity: 1, reason: "cleaning" },
+  ]).success);
+  assert(!BookingActions.safeParse([
+    { rule: "flag_damaged_returned_undo", quantity: 1 },
+    { rule: "flag_damaged_returned", quantity: 1 },
+  ]).success, "a damaged flag and its own clearing flag are one id");
   assert(!BookingActions.safeParse([{ rule: "check_in", quantity: 1 }, { rule: "mark_lost_undo", quantity: 1 }]).success);
   assert(BookingActions.safeParse([{ rule: "mark_lost_undo", quantity: 1 }, { rule: "check_in", quantity: 1 }]).success);
   assert(!BookingActions.safeParse([]).success);

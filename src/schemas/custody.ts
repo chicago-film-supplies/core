@@ -638,9 +638,12 @@ export function custodyRule(id: CustodyRuleId): CustodyRule {
  * no movement for that booking type.
  *
  * A movement's id is `{session}|{type}|{booking}`, so two actions of one type
- * against one booking in one save collide. The exception is a flag with no
- * custody (`flag_returned`), whose id carries its reason, so cleaning and
- * maintenance in one save are two slots.
+ * against one booking in one save collide. The exception is a `flag` into or
+ * out of `cleaning`/`maintenance`, whose id is its reason's own (the api's
+ * `transitionMovementId`), so `flag_cleaning_returned` and
+ * `flag_damaged_returned` in one save are two slots. The deprecated no-custody
+ * `flag_returned` names its reason on the action instead, and lands on the
+ * same slot as the P2b row it is read as.
  */
 export function custodyMovementSlot(
   rule: CustodyRule,
@@ -650,8 +653,15 @@ export function custodyMovementSlot(
   const arm = bookingType === "rental" ? rule.rental : rule.sale;
   const movement = arm?.movement ?? null;
   if (movement === null) return null;
-  return rule.from === rule.to ? `${movement}:${reason ?? ""}` : movement;
+  if (movement !== "flag") return movement;
+  const own = rule.from === rule.to
+    ? reason
+    : FLAG_SLOT_REASONS.find((r) => rule.from === r || rule.to === r);
+  return own === undefined ? movement : `${movement}:${own}`;
 }
+
+/** The reasons whose `flag` takes its own movement id — see {@link custodyMovementSlot}. */
+const FLAG_SLOT_REASONS = ["cleaning", "maintenance"] as const;
 
 // ── The wire ─────────────────────────────────────────────────────────
 
