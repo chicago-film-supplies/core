@@ -70,9 +70,26 @@ export const CUSTODY_RULE_IDS = [
   "mark_lost_returned_undo",
   "flag_damaged_returned",
   "flag_damaged_returned_undo",
-  // cleaning / maintenance on units already returned (gap G2)
+  // cleaning / maintenance as booking buckets (P2b, owner 2026-09-30) — the
+  // `mark_damaged` / `flag_damaged_returned` rows, once per reason
+  "mark_cleaning",
+  "mark_cleaning_undo",
+  "mark_maintenance",
+  "mark_maintenance_undo",
+  "flag_cleaning_returned",
+  "flag_cleaning_returned_undo",
+  "flag_maintenance_returned",
+  "flag_maintenance_returned_undo",
+  // a record reclassified among the three flag reasons: a bucket move (gap G3)
+  "reclassify_damaged_to_cleaning",
+  "reclassify_damaged_to_maintenance",
+  "reclassify_cleaning_to_damaged",
+  "reclassify_cleaning_to_maintenance",
+  "reclassify_maintenance_to_damaged",
+  "reclassify_maintenance_to_cleaning",
+  // ⚠️ DEPRECATED — R2's no-custody form, retired by P2b. Kept while the api's
+  // delta wire still translates `return_flags`; removed with the keys' `feat!`.
   "flag_returned",
-  // a booking-sourced record reclassified between damaged and a flag (gap G3)
   "reclassify_damaged_to_flag",
   "reclassify_flag_to_damaged",
 ] as const;
@@ -83,6 +100,10 @@ export type CustodyRuleId = typeof CUSTODY_RULE_IDS[number];
 export const CustodyRuleIdEnum: z.ZodType<CustodyRuleId> = z.enum(CUSTODY_RULE_IDS);
 
 /**
+ * @deprecated R2's flag reasons, named by the retiring `flag_returned` and
+ * `reclassify_*_flag` rows' `reason`. Under P2b every reason is its own
+ * breakdown key and its own rule, so no action names a reason.
+ *
  * The flag reasons a custody ACTION may name: the in-place reasons a booking
  * keeps reading as `returned`. `damaged` is not one of them, because a damaged
  * unit is its own breakdown key (owner ruling R2, 2026-09-29).
@@ -108,10 +129,10 @@ export interface CustodyArm {
  * One side of a flag row's service axis.
  *
  * - `none` — in service on that side;
- * - `damaged` — the `damaged` flag;
- * - `reason` — the cleaning/maintenance reason the ACTION names.
+ * - `damaged` / `cleaning` / `maintenance` — that flag;
+ * - `reason` — (deprecated, R2 rows only) the reason the ACTION names.
  */
-export type CustodyServiceSide = "none" | "damaged" | "reason";
+export type CustodyServiceSide = "none" | "damaged" | "cleaning" | "maintenance" | "reason";
 
 /** A flag row's service axis, in terms the action fills in. */
 export interface CustodyServiceShape {
@@ -122,7 +143,8 @@ export interface CustodyServiceShape {
 /**
  * One legal custody step.
  *
- * `from === to` is a step that changes no breakdown key (only `flag_returned`):
+ * `from === to` is a step that changes no breakdown key (only the deprecated
+ * `flag_returned`):
  * its movement carries no custody and names its booking in `sources[]`, not in
  * `uid_booking`. Every other row's movement carries `{from, to}` as its custody
  * pair and sets `uid_booking`.
@@ -370,7 +392,195 @@ export const CUSTODY_RULES: readonly CustodyRule[] = [
     description: "The shelf damage never happened: a clearing flag, and the unit stays where it is.",
     enforced_by: [TABLE_TEST],
   },
-  // ── cleaning / maintenance (gap G2) ──
+  // ── cleaning and maintenance: the `damaged` rows, once per reason (P2b) ──
+  {
+    id: "mark_cleaning",
+    from: "out",
+    to: "cleaning",
+    ...RENTAL_ONLY("mark_cleaning"),
+    service: null,
+    direction: "forward",
+    stage: "return",
+    inverse: "mark_cleaning_undo",
+    billable: false,
+    description: "Units come back needing cleaning: a return onto the arrival location, flagged cleaning by its custody.",
+    enforced_by: [TABLE_TEST],
+  },
+  {
+    id: "mark_cleaning_undo",
+    from: "cleaning",
+    to: "out",
+    ...RENTAL_ONLY("mark_cleaning_undo"),
+    service: null,
+    direction: "undo",
+    stage: "return",
+    inverse: "mark_cleaning",
+    billable: false,
+    description: "The cleaning never happened: the units are back at the customer.",
+    enforced_by: [TABLE_TEST],
+  },
+  {
+    id: "flag_cleaning_returned",
+    from: "returned",
+    to: "cleaning",
+    ...RENTAL_ONLY("flag"),
+    service: { from: "none", to: "cleaning" },
+    direction: "forward",
+    stage: "return",
+    inverse: "flag_cleaning_returned_undo",
+    billable: false,
+    description: "A returned unit is found needing cleaning. Flagged where it stands; it never leaves the shelf.",
+    enforced_by: [TABLE_TEST],
+  },
+  {
+    id: "flag_cleaning_returned_undo",
+    from: "cleaning",
+    to: "returned",
+    ...RENTAL_ONLY("flag"),
+    service: { from: "cleaning", to: "none" },
+    direction: "undo",
+    stage: "return",
+    inverse: "flag_cleaning_returned",
+    billable: false,
+    description: "The shelf cleaning flag never happened: a clearing flag, and the unit stays where it is.",
+    enforced_by: [TABLE_TEST],
+  },
+  {
+    id: "mark_maintenance",
+    from: "out",
+    to: "maintenance",
+    ...RENTAL_ONLY("mark_maintenance"),
+    service: null,
+    direction: "forward",
+    stage: "return",
+    inverse: "mark_maintenance_undo",
+    billable: false,
+    description: "Units come back needing maintenance: a return onto the arrival location, flagged maintenance by its custody.",
+    enforced_by: [TABLE_TEST],
+  },
+  {
+    id: "mark_maintenance_undo",
+    from: "maintenance",
+    to: "out",
+    ...RENTAL_ONLY("mark_maintenance_undo"),
+    service: null,
+    direction: "undo",
+    stage: "return",
+    inverse: "mark_maintenance",
+    billable: false,
+    description: "The maintenance never happened: the units are back at the customer.",
+    enforced_by: [TABLE_TEST],
+  },
+  {
+    id: "flag_maintenance_returned",
+    from: "returned",
+    to: "maintenance",
+    ...RENTAL_ONLY("flag"),
+    service: { from: "none", to: "maintenance" },
+    direction: "forward",
+    stage: "return",
+    inverse: "flag_maintenance_returned_undo",
+    billable: false,
+    description: "A returned unit is found needing maintenance. Flagged where it stands; it never leaves the shelf.",
+    enforced_by: [TABLE_TEST],
+  },
+  {
+    id: "flag_maintenance_returned_undo",
+    from: "maintenance",
+    to: "returned",
+    ...RENTAL_ONLY("flag"),
+    service: { from: "maintenance", to: "none" },
+    direction: "undo",
+    stage: "return",
+    inverse: "flag_maintenance_returned",
+    billable: false,
+    description: "The shelf maintenance flag never happened: a clearing flag, and the unit stays where it is.",
+    enforced_by: [TABLE_TEST],
+  },
+  // ── a record reclassified among the three flag reasons (gap G3) ──
+  // A CORRECTION, so the booking moves with the record: the buckets are the
+  // condition a unit came back in, and the operator is saying it was wrong.
+  {
+    id: "reclassify_damaged_to_cleaning",
+    from: "damaged",
+    to: "cleaning",
+    ...RENTAL_ONLY("flag"),
+    service: { from: "damaged", to: "cleaning" },
+    direction: "forward",
+    stage: "service",
+    inverse: "reclassify_cleaning_to_damaged",
+    billable: false,
+    description: "A damaged record is reclassified to cleaning: the booking moves damaged → cleaning in the same write.",
+    enforced_by: [TABLE_TEST],
+  },
+  {
+    id: "reclassify_damaged_to_maintenance",
+    from: "damaged",
+    to: "maintenance",
+    ...RENTAL_ONLY("flag"),
+    service: { from: "damaged", to: "maintenance" },
+    direction: "forward",
+    stage: "service",
+    inverse: "reclassify_maintenance_to_damaged",
+    billable: false,
+    description: "A damaged record is reclassified to maintenance: the booking moves damaged → maintenance in the same write.",
+    enforced_by: [TABLE_TEST],
+  },
+  {
+    id: "reclassify_cleaning_to_damaged",
+    from: "cleaning",
+    to: "damaged",
+    ...RENTAL_ONLY("flag"),
+    service: { from: "cleaning", to: "damaged" },
+    direction: "forward",
+    stage: "service",
+    inverse: "reclassify_damaged_to_cleaning",
+    // As the damaged rows: a record reclassified TO damaged may be billed.
+    billable: true,
+    description: "A cleaning record is reclassified to damaged: the booking moves cleaning → damaged in the same write.",
+    enforced_by: [TABLE_TEST],
+  },
+  {
+    id: "reclassify_cleaning_to_maintenance",
+    from: "cleaning",
+    to: "maintenance",
+    ...RENTAL_ONLY("flag"),
+    service: { from: "cleaning", to: "maintenance" },
+    direction: "forward",
+    stage: "service",
+    inverse: "reclassify_maintenance_to_cleaning",
+    billable: false,
+    description: "A cleaning record is reclassified to maintenance: the booking moves cleaning → maintenance in the same write.",
+    enforced_by: [TABLE_TEST],
+  },
+  {
+    id: "reclassify_maintenance_to_damaged",
+    from: "maintenance",
+    to: "damaged",
+    ...RENTAL_ONLY("flag"),
+    service: { from: "maintenance", to: "damaged" },
+    direction: "forward",
+    stage: "service",
+    inverse: "reclassify_damaged_to_maintenance",
+    // As the damaged rows: a record reclassified TO damaged may be billed.
+    billable: true,
+    description: "A maintenance record is reclassified to damaged: the booking moves maintenance → damaged in the same write.",
+    enforced_by: [TABLE_TEST],
+  },
+  {
+    id: "reclassify_maintenance_to_cleaning",
+    from: "maintenance",
+    to: "cleaning",
+    ...RENTAL_ONLY("flag"),
+    service: { from: "maintenance", to: "cleaning" },
+    direction: "forward",
+    stage: "service",
+    inverse: "reclassify_cleaning_to_maintenance",
+    billable: false,
+    description: "A maintenance record is reclassified to cleaning: the booking moves maintenance → cleaning in the same write.",
+    enforced_by: [TABLE_TEST],
+  },
+  // ── ⚠️ DEPRECATED: R2's no-custody cleaning/maintenance (gap G2) ──
   {
     id: "flag_returned",
     from: "returned",
@@ -385,7 +595,7 @@ export const CUSTODY_RULES: readonly CustodyRule[] = [
       "Flag returned units for cleaning or maintenance where they stand, at check-in or after it. The booking still reads returned, and it is never billed.",
     enforced_by: [TABLE_TEST],
   },
-  // ── a booking-sourced record reclassified (gap G3) ──
+  // ── ⚠️ DEPRECATED: R2's damaged ↔ flag reclassification (gap G3) ──
   {
     id: "reclassify_damaged_to_flag",
     from: "damaged",
@@ -531,15 +741,21 @@ export const BookingActions: z.ZodType<BookingActionType[]> = z.array(BookingAct
 );
 
 /**
- * The loss-mark undos, which the lever applies before anything else in a save:
- * an undo returns units to wherever THAT mark took them from, a fact about the
- * record rather than the breakdown, so the ladder steps must read the breakdown
- * the undos leave.
+ * The out-of-service-mark undos — every undo OUT OF `lost`, `damaged`,
+ * `cleaning` or `maintenance` — which the lever applies before anything else in
+ * a save: an undo returns units to wherever THAT mark took them from, a fact
+ * about the record rather than the breakdown, so the ladder steps must read the
+ * breakdown the undos leave.
+ *
+ * Read off the table rather than listed, so the P2b rows joined without an edit
+ * here; the name predates them.
  */
 export function isLossUndo(id: CustodyRuleId): boolean {
-  return id === "mark_lost_undo" || id === "mark_damaged_undo" || id === "mark_lost_returned_undo" ||
-    id === "flag_damaged_returned_undo";
+  const rule = CUSTODY_RULES.find((r) => r.id === id);
+  return rule !== undefined && rule.direction === "undo" && OUT_OF_SERVICE_FROM.has(rule.from);
 }
+
+const OUT_OF_SERVICE_FROM: ReadonlySet<BookingBreakdownKeyType> = new Set(["lost", "damaged", "cleaning", "maintenance"]);
 
 /**
  * One booking's actions in a bulk write — the action-shaped twin of

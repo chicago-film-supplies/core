@@ -43,7 +43,10 @@ function take(
   return taken;
 }
 
-const BREAKDOWN_KEYS: readonly BookingBreakdownKeyType[] = [
+// The SEVEN keys, deliberately not `BOOKING_BREAKDOWN_KEYS`: this is the api's
+// behaviour frozen before `cleaning`/`maintenance` existed, and the sweep only
+// ever draws breakdowns over these seven.
+const BREAKDOWN_KEYS = [
   "quoted",
   "reserved",
   "prepped",
@@ -51,7 +54,7 @@ const BREAKDOWN_KEYS: readonly BookingBreakdownKeyType[] = [
   "returned",
   "lost",
   "damaged",
-];
+] as const;
 
 export function deriveCustodyTransitions(
   prev: BookingBreakdown,

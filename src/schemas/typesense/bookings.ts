@@ -38,6 +38,9 @@ export const bookings: TypesenseCollectionConfig = {
       { name: "breakdown.reserved", type: "int32", sort: true, index: true, facet: false },
       { name: "breakdown.lost", type: "int32", sort: true, index: true, facet: false },
       { name: "breakdown.damaged", type: "int32", sort: true, index: true, facet: false },
+      // Optional until the P2b backfill states them on every booking.
+      { name: "breakdown.cleaning", type: "int32", sort: true, index: true, facet: false, optional: true },
+      { name: "breakdown.maintenance", type: "int32", sort: true, index: true, facet: false, optional: true },
       { name: "quantity", type: "int32", sort: true, index: true, facet: false },
       { name: "shortage", type: "int32", sort: true, index: true, facet: false, optional: true },
       { name: "dates", type: "object" },

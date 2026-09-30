@@ -498,7 +498,7 @@ export interface PickSheetDestination {
   due_at: string | null;
   /** Units across this leg's bookings — the section's summary number. */
   quantity: number;
-  /** Those bookings' breakdowns, summed. The seven buckets, not a stage label. */
+  /** Those bookings' breakdowns, summed. Every bucket, not a stage label. */
   breakdown: BookingBreakdown;
   bookings: PickSheetBooking[];
   items: PickSheetItem[];

@@ -4,17 +4,26 @@ import {
   calculateBookingBreakdown,
   emptyBookingsBreakdown,
   grainKeep,
+  hasCustodyHistory,
   isBookingClosed,
   isOrderBookingsClosed,
   liveCustody,
   mergeBookingBreakdown,
   sumBookingBreakdown,
   sumBookingsBreakdown,
+  sumBreakdownKeys,
+  terminalQuantity,
 } from "../src/utils/bookings.ts";
 import type { Booking, OrderStatusType } from "../src/schemas/mod.ts";
 
 const sample = (overrides: Partial<Booking["breakdown"]> = {}): Booking["breakdown"] => ({
   quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0,
+  ...overrides,
+});
+
+/** What a WRITER states: every key, `cleaning`/`maintenance` included. */
+const full = (overrides: Partial<Booking["breakdown"]> = {}): Booking["breakdown"] => ({
+  ...emptyBookingsBreakdown(),
   ...overrides,
 });
 
@@ -28,16 +37,22 @@ const booking = (
 
 Deno.test("emptyBookingsBreakdown returns all-zero shape", () => {
   assertEquals(emptyBookingsBreakdown(), {
-    quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0,
+    quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0, cleaning: 0, maintenance: 0,
   });
 });
 
-Deno.test("sumBookingBreakdown sums seven values", () => {
+Deno.test("sumBookingBreakdown sums every key, an absent optional one as 0", () => {
   assertEquals(sumBookingBreakdown(sample({ out: 3, returned: 2 })), 5);
   assertEquals(sumBookingBreakdown(sample()), 0);
   assertEquals(
     sumBookingBreakdown({ quoted: 1, reserved: 1, prepped: 1, out: 1, returned: 1, lost: 1, damaged: 1 }),
     7,
+  );
+  assertEquals(
+    sumBookingBreakdown({
+      quoted: 1, reserved: 1, prepped: 1, out: 1, returned: 1, lost: 1, damaged: 1, cleaning: 1, maintenance: 1,
+    }),
+    9,
   );
 });
 
@@ -64,7 +79,7 @@ Deno.test("sumBookingsBreakdown rolls up across bookings", () => {
     { breakdown: sample({ damaged: 1 }) },
   ];
   assertEquals(sumBookingsBreakdown(bookings), {
-    quoted: 0, reserved: 0, prepped: 0, out: 5, returned: 1, lost: 0, damaged: 1,
+    quoted: 0, reserved: 0, prepped: 0, out: 5, returned: 1, lost: 0, damaged: 1, cleaning: 0, maintenance: 0,
   });
 });
 
@@ -164,21 +179,21 @@ Deno.test("calculateBookingBreakdown: draft/canceled → all zeros", () => {
 Deno.test("calculateBookingBreakdown: quoted from fresh", () => {
   assertEquals(
     calculateBookingBreakdown("quoted", "rental", 10),
-    sample({ quoted: 10 }),
+    full({ quoted: 10 }),
   );
 });
 
 Deno.test("calculateBookingBreakdown: reserved from fresh", () => {
   assertEquals(
     calculateBookingBreakdown("reserved", "rental", 10),
-    sample({ reserved: 10 }),
+    full({ reserved: 10 }),
   );
 });
 
 Deno.test("calculateBookingBreakdown: active behaves like reserved", () => {
   assertEquals(
     calculateBookingBreakdown("active", "rental", 10),
-    sample({ reserved: 10 }),
+    full({ reserved: 10 }),
   );
 });
 
@@ -186,21 +201,21 @@ Deno.test("calculateBookingBreakdown: quoted → reserved drops the previous quo
   // The bug fix — previously quoted=10 would persist into the reserved-state breakdown.
   const prev = sample({ quoted: 10 });
   const next = calculateBookingBreakdown("reserved", "rental", 10, prev);
-  assertEquals(next, sample({ reserved: 10 }));
+  assertEquals(next, full({ reserved: 10 }));
   assertEquals(sumBookingBreakdown(next), 10);
 });
 
 Deno.test("calculateBookingBreakdown: reserved → quoted drops the previous reserved bucket", () => {
   const prev = sample({ reserved: 10 });
   const next = calculateBookingBreakdown("quoted", "rental", 10, prev);
-  assertEquals(next, sample({ quoted: 10 }));
+  assertEquals(next, full({ quoted: 10 }));
 });
 
 Deno.test("calculateBookingBreakdown: reserved preserves in-flight progress", () => {
   const prev = sample({ reserved: 0, prepped: 3, out: 2, returned: 1, lost: 1, damaged: 1 });
   const next = calculateBookingBreakdown("reserved", "rental", 10, prev);
   assertEquals(next, {
-    quoted: 0, reserved: 2, prepped: 3, out: 2, returned: 1, lost: 1, damaged: 1,
+    quoted: 0, reserved: 2, prepped: 3, out: 2, returned: 1, lost: 1, damaged: 1, cleaning: 0, maintenance: 0,
   });
   assertEquals(sumBookingBreakdown(next), 10);
 });
@@ -213,12 +228,12 @@ Deno.test("calculateBookingBreakdown: the open bucket floors at zero — it neve
   // Before the floor this was `{prepped: 5, reserved: -2}` — whose sum is 3, so
   // every `sum(breakdown) === quantity` check passed on it while two physically
   // prepped units came off the shelf's unavailable total.
-  assertEquals(next, sample({ prepped: 5, reserved: 0 }));
+  assertEquals(next, full({ prepped: 5, reserved: 0 }));
   assertEquals(sumBookingBreakdown(next), 5);
 });
 
 Deno.test("calculateBookingBreakdown: the floor covers every carry bucket, not just prepped", () => {
-  for (const key of ["prepped", "out", "returned", "lost", "damaged"] as const) {
+  for (const key of ["prepped", "out", "returned", "lost", "damaged", "cleaning", "maintenance"] as const) {
     const next = calculateBookingBreakdown("reserved", "rental", 1, sample({ [key]: 4 }));
     assertEquals(next.reserved, 0, `${key} must not mint a negative open bucket`);
     assertEquals(sumBookingBreakdown(next), 4, `${key} carry must survive the shrink`);
@@ -227,21 +242,21 @@ Deno.test("calculateBookingBreakdown: the floor covers every carry bucket, not j
 
 Deno.test("calculateBookingBreakdown: a shrink to exactly the carry still empties the open bucket", () => {
   const next = calculateBookingBreakdown("quoted", "rental", 4, sample({ out: 4 }));
-  assertEquals(next, sample({ out: 4 }));
+  assertEquals(next, full({ out: 4 }));
   assertEquals(sumBookingBreakdown(next), 4);
 });
 
-Deno.test("calculateBookingBreakdown: complete rental → returned + lost + damaged sum to quantity", () => {
+Deno.test("calculateBookingBreakdown: complete rental → returned + the out-of-service keys sum to quantity", () => {
   const prev = sample({ out: 8, lost: 1, damaged: 1 });
   const next = calculateBookingBreakdown("complete", "rental", 10, prev);
-  assertEquals(next, sample({ returned: 8, lost: 1, damaged: 1 }));
+  assertEquals(next, full({ returned: 8, lost: 1, damaged: 1 }));
   assertEquals(sumBookingBreakdown(next), 10);
 });
 
 Deno.test("calculateBookingBreakdown: complete sale → all qty in out", () => {
   const prev = sample({ reserved: 5 });
   const next = calculateBookingBreakdown("complete", "sale", 5, prev);
-  assertEquals(next, sample({ out: 5 }));
+  assertEquals(next, full({ out: 5 }));
 });
 
 Deno.test("calculateBookingBreakdown: complete service/surcharge → all zeros, NOT quantity", () => {
@@ -283,7 +298,7 @@ Deno.test("calculateBookingBreakdown: repairs corrupt double-bucket from buggy w
   assertEquals(sumBookingBreakdown(corrupt), 60);
 
   const repaired = calculateBookingBreakdown("reserved", "rental", 30, corrupt);
-  assertEquals(repaired, sample({ reserved: 30 }));
+  assertEquals(repaired, full({ reserved: 30 }));
   assertEquals(sumBookingBreakdown(repaired), 30);
 });
 
@@ -323,4 +338,52 @@ Deno.test("grainKeep — decision 3 cases", async (t) => {
     assertEquals(k.kept, 2);
     assertEquals(k.byRow.size, 0);
   });
+});
+
+// ── cleaning / maintenance (custody-actions P2b) ────────────────────
+
+Deno.test("P2b: a stored breakdown with no cleaning/maintenance key reads them as 0", () => {
+  // Every booking stored before the keys existed; `sample` states only seven.
+  assertEquals(sumBookingBreakdown(sample({ returned: 3 })), 3);
+  assertEquals(isBookingClosed(booking("rental", { returned: 3 })), true);
+});
+
+Deno.test("P2b: calculateBookingBreakdown carries cleaning and maintenance forward, never into returned", () => {
+  const prev = full({ returned: 2, cleaning: 3, maintenance: 1 });
+  // An order edit re-projecting a live booking must keep the condition history.
+  assertEquals(
+    calculateBookingBreakdown("reserved", "rental", 6, prev),
+    full({ returned: 2, cleaning: 3, maintenance: 1 }),
+  );
+  // Completion keeps every out-of-service key and gives `returned` only the rest.
+  assertEquals(
+    calculateBookingBreakdown("complete", "rental", 10, full({ out: 4, cleaning: 3, maintenance: 1, lost: 2 })),
+    full({ returned: 4, cleaning: 3, maintenance: 1, lost: 2 }),
+  );
+});
+
+Deno.test("P2b: a cleaning-only booking has custody history, so an order edit keeps it", () => {
+  assertEquals(hasCustodyHistory({ breakdown: full({ cleaning: 1 }) }), true);
+  assertEquals(hasCustodyHistory({ breakdown: full({ maintenance: 1 }) }), true);
+  assertEquals(hasCustodyHistory({ breakdown: full({ quoted: 2, reserved: 1 }) }), false);
+});
+
+Deno.test("P2b: a rental whose units came back dirty is closed", () => {
+  assertEquals(isBookingClosed(booking("rental", { cleaning: 2, maintenance: 1, returned: 2 })), true);
+});
+
+Deno.test("P2b: sums and deltas reach the new keys, and a no-op leaves an absent key absent", () => {
+  assertEquals(sumBookingsBreakdown([{ breakdown: sample() }, { breakdown: full({ cleaning: 2 }) }]).cleaning, 2);
+  const legacyRollup = sample({ out: 3 });
+  applyBookingBreakdownDelta(legacyRollup, sample({ out: 3 }), sample({ out: 1, returned: 2 }));
+  assertEquals("cleaning" in legacyRollup, false);
+  applyBookingBreakdownDelta(legacyRollup, sample({ out: 1 }), full({ cleaning: 1 }));
+  assertEquals(legacyRollup.cleaning, 1);
+  assertEquals(mergeBookingBreakdown(sample({ out: 2 }), { maintenance: 2, out: 0 }).maintenance, 2);
+});
+
+Deno.test("P2b: terminalQuantity and sumBreakdownKeys read absent keys as 0", () => {
+  assertEquals(terminalQuantity(sample({ returned: 1, lost: 1, damaged: 1 })), 3);
+  assertEquals(terminalQuantity(full({ returned: 1, cleaning: 2, maintenance: 3 })), 6);
+  assertEquals(sumBreakdownKeys(sample(), ["cleaning", "maintenance"]), 0);
 });

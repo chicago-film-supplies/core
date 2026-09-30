@@ -627,8 +627,8 @@ interface AuthoredProductComponent {
 
 ### `BOOKING_BREAKDOWN_KEYS`
 
-All seven keys of the booking lifecycle breakdown, in lifecycle order (which
-is NOT the schema's alphabetical field order — the UI reads left to right).
+Every key of the booking custody breakdown, in lifecycle order (which is NOT
+the schema's alphabetical field order — the UI reads left to right).
 
 These live beside the schema rather than in `utils/bookings.ts` because
 schema modules cannot import utils (the dependency runs strictly one way) and
@@ -636,7 +636,7 @@ the movement journal needs the key union to type a custody transition.
 `utils/bookings.ts` re-exports them, so existing importers are unaffected.
 
 ```ts
-const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged"[];
+const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged" | "cleaning" | "maintenance"[];
 ```
 
 ### `BOOKING_BREAKDOWN_LABELS`
@@ -658,8 +658,8 @@ the drift is resolved the other way round from how it was first resolved.**
 every state here reads as the past participle of an action there (`prep` →
 `Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer
 follows that pattern, and that is the cost of the change rather than an
-oversight: it is the longest heading on an eleven-column pick sheet, where the
-shorter word buys real width and "Out" reads as a state on its own.
+oversight: it is the longest heading on the pick sheet, where the shorter
+word buys real width and "Out" reads as a state on its own.
 
 ⚠️ **What does NOT change is that there is one declaration.** The lesson of
 the deleted copy was never which word to use — it was that two places spelling
@@ -678,10 +678,11 @@ const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string>;
 
 ### `BOOKING_BREAKDOWN_TERMINAL_KEYS`
 
-Keys representing items that have reached a terminal state.
+Keys representing units that have reached a terminal state: back, or out of
+service with a reason. A booking is `complete` when these hold all its units.
 
 ```ts
-const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged"[];
+const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged" | "cleaning" | "maintenance"[];
 ```
 
 ### `BOOKING_STATUSES`
@@ -862,6 +863,12 @@ entries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this
 breakdown down to a single `quantity` — so the breakdown reaches availability
 as a number and never as a structure.
 
+🔴 **Never add its keys up by name.** A sum spelled `returned + lost +
+damaged` compiled through the arrival of `cleaning` and `maintenance` and
+silently stopped counting them; that pattern is what made the P2b inventory
+long. Sum through `sumBreakdownKeys` (`utils/bookings.ts`), which
+`tests/breakdown-sums.test.ts` enforces.
+
 ```ts
 interface BookingBreakdown {
   damaged: number;
@@ -871,12 +878,14 @@ interface BookingBreakdown {
   quoted: number;
   reserved: number;
   returned: number;
+  cleaning?: number;
+  maintenance?: number;
 }
 ```
 
 ### `BookingBreakdownKeyEnum`
 
-Zod enum over the seven breakdown keys — the custody axis of a movement.
+Zod enum over the breakdown keys — the custody axis of a movement.
 
 ```ts
 const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType>;
@@ -893,6 +902,10 @@ type BookingBreakdownKeyType = indexedAccess;
 ### `BookingBreakdownSchema`
 
 Zod schema for BookingBreakdown.
+
+⚠️ The keys stay in alphabetical order, NOT lifecycle order: a schema's key
+order is its Firestore-surface column order (`core/CLAUDE.md`), so reordering
+the seven would move every existing breakdown column in the picker.
 
 ```ts
 const BookingBreakdownSchema: z.ZodType<BookingBreakdown>;
@@ -948,16 +961,6 @@ const BookingReturnFlags: z.ZodType<BookingReturnFlagsType>;
 ```
 
 ### `BookingReturnFlagsType`
-
-Of the units a save brings to `returned`, how many are FLAGGED at check-in —
-R2 (owner, 2026-09-24): dirty-on-return is a `cleaning` flag and wear-and-tear
-a `maintenance` flag. The booking still closes as `returned`; no breakdown
-bucket is added, and neither is billable.
-
-The server writes one `flag` movement per reason on the shelves the
-`check_in` landed the units on, and opens one out-of-service record per
-reason from it. Σ must not exceed the units this save returns — a 400
-otherwise.
 
 ```ts
 interface BookingReturnFlagsType {
@@ -1272,10 +1275,6 @@ const CREDIT_NOTE_REASONS: readonly SettlementReasonType[];
 
 ### `CUSTODY_FLAG_REASONS`
 
-The flag reasons a custody ACTION may name: the in-place reasons a booking
-keeps reading as `returned`. `damaged` is not one of them, because a damaged
-unit is its own breakdown key (owner ruling R2, 2026-09-29).
-
 ```ts
 const CUSTODY_FLAG_REASONS: "cleaning" | "maintenance"[];
 ```
@@ -1335,7 +1334,7 @@ directions, so a row with no id here and an id with no row both fail.
 The manager de-duplicates its menus by these ids, never by a label.
 
 ```ts
-const CUSTODY_RULE_IDS: "prep" | "unprep" | "check_out" | "check_out_undo" | "check_in" | "check_in_undo" | "mark_lost" | "mark_lost_undo" | "mark_damaged" | "mark_damaged_undo" | "mark_lost_returned" | "mark_lost_returned_undo" | "flag_damaged_returned" | "flag_damaged_returned_undo" | "flag_returned" | "reclassify_damaged_to_flag" | "reclassify_flag_to_damaged"[];
+const CUSTODY_RULE_IDS: "prep" | "unprep" | "check_out" | "check_out_undo" | "check_in" | "check_in_undo" | "mark_lost" | "mark_lost_undo" | "mark_damaged" | "mark_damaged_undo" | "mark_lost_returned" | "mark_lost_returned_undo" | "flag_damaged_returned" | "flag_damaged_returned_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "flag_cleaning_returned" | "flag_cleaning_returned_undo" | "flag_maintenance_returned" | "flag_maintenance_returned_undo" | "reclassify_damaged_to_cleaning" | "reclassify_damaged_to_maintenance" | "reclassify_cleaning_to_damaged" | "reclassify_cleaning_to_maintenance" | "reclassify_maintenance_to_damaged" | "reclassify_maintenance_to_cleaning" | "flag_returned" | "reclassify_damaged_to_flag" | "reclassify_flag_to_damaged"[];
 ```
 
 ### `CacheGeocodes`
@@ -3274,7 +3273,8 @@ type CustodyFlagReasonType = indexedAccess;
 
 One legal custody step.
 
-`from === to` is a step that changes no breakdown key (only `flag_returned`):
+`from === to` is a step that changes no breakdown key (only the deprecated
+`flag_returned`):
 its movement carries no custody and names its booking in `sources[]`, not in
 `uid_booking`. Every other row's movement carries `{from, to}` as its custody
 pair and sets `uid_booking`.
@@ -3328,11 +3328,11 @@ interface CustodyServiceShape {
 One side of a flag row's service axis.
 
 - `none` — in service on that side;
-- `damaged` — the `damaged` flag;
-- `reason` — the cleaning/maintenance reason the ACTION names.
+- `damaged` / `cleaning` / `maintenance` — that flag;
+- `reason` — (deprecated, R2 rows only) the reason the ACTION names.
 
 ```ts
-type CustodyServiceSide = "none" | "damaged" | "reason";
+type CustodyServiceSide = "none" | "damaged" | "cleaning" | "maintenance" | "reason";
 ```
 
 ### `DESTINATION_LEVELS`
@@ -5929,7 +5929,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service" | "flag" | "send_away"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service" | "flag" | "send_away"[];
 ```
 
 ### `MSG_SCHEMA_REGISTRY`
@@ -6869,7 +6869,7 @@ interface Order {
   query_by_items: string[];
   query_by_contacts: string[];
   query_by_dates: string[];
-  bookings_breakdown: typeLiteral;
+  bookings_breakdown: BookingBreakdown;
   crms_id: number | null;
   crms_status?: string;
   subject: string;
@@ -11001,7 +11001,7 @@ Input for updating a single booking via `PUT /bookings/{uid}`.
 
 Status and breakdown are independently optional — most warehouse PUTs only
 change the breakdown. When `breakdown` is supplied it must be the complete
-next state (all 7 keys); the service requires `sum(breakdown) === quantity`
+next state (every key); the service requires `sum(breakdown) === quantity`
 and treats the value as an absolute write, not a partial patch. Version is
 required for optimistic concurrency.
 
@@ -12912,10 +12912,14 @@ A value outside {@link ITEM_TYPES} has no contract and answers `false`.
 
 ### `isLossUndo(id: CustodyRuleId): boolean`
 
-The loss-mark undos, which the lever applies before anything else in a save:
-an undo returns units to wherever THAT mark took them from, a fact about the
-record rather than the breakdown, so the ladder steps must read the breakdown
-the undos leave.
+The out-of-service-mark undos — every undo OUT OF `lost`, `damaged`,
+`cleaning` or `maintenance` — which the lever applies before anything else in
+a save: an undo returns units to wherever THAT mark took them from, a fact
+about the record rather than the breakdown, so the ladder steps must read the
+breakdown the undos leave.
+
+Read off the table rather than listed, so the P2b rows joined without an edit
+here; the name predates them.
 
 ### `isProductShapedUid(uid: string): boolean`
 
@@ -15522,8 +15526,8 @@ scoped to what it bills, so neither grain attaches {@link checkZeroQuantityCompo
 
 ### `BOOKING_BREAKDOWN_KEYS`
 
-All seven keys of the booking lifecycle breakdown, in lifecycle order (which
-is NOT the schema's alphabetical field order — the UI reads left to right).
+Every key of the booking custody breakdown, in lifecycle order (which is NOT
+the schema's alphabetical field order — the UI reads left to right).
 
 These live beside the schema rather than in `utils/bookings.ts` because
 schema modules cannot import utils (the dependency runs strictly one way) and
@@ -15531,7 +15535,7 @@ the movement journal needs the key union to type a custody transition.
 `utils/bookings.ts` re-exports them, so existing importers are unaffected.
 
 ```ts
-const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged"[];
+const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged" | "cleaning" | "maintenance"[];
 ```
 
 ### `BOOKING_BREAKDOWN_LABELS`
@@ -15553,8 +15557,8 @@ the drift is resolved the other way round from how it was first resolved.**
 every state here reads as the past participle of an action there (`prep` →
 `Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer
 follows that pattern, and that is the cost of the change rather than an
-oversight: it is the longest heading on an eleven-column pick sheet, where the
-shorter word buys real width and "Out" reads as a state on its own.
+oversight: it is the longest heading on the pick sheet, where the shorter
+word buys real width and "Out" reads as a state on its own.
 
 ⚠️ **What does NOT change is that there is one declaration.** The lesson of
 the deleted copy was never which word to use — it was that two places spelling
@@ -15573,10 +15577,11 @@ const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string>;
 
 ### `BOOKING_BREAKDOWN_TERMINAL_KEYS`
 
-Keys representing items that have reached a terminal state.
+Keys representing units that have reached a terminal state: back, or out of
+service with a reason. A booking is `complete` when these hold all its units.
 
 ```ts
-const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged"[];
+const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged" | "cleaning" | "maintenance"[];
 ```
 
 ### `BOOKING_STATUSES`
@@ -15655,6 +15660,12 @@ entries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this
 breakdown down to a single `quantity` — so the breakdown reaches availability
 as a number and never as a structure.
 
+🔴 **Never add its keys up by name.** A sum spelled `returned + lost +
+damaged` compiled through the arrival of `cleaning` and `maintenance` and
+silently stopped counting them; that pattern is what made the P2b inventory
+long. Sum through `sumBreakdownKeys` (`utils/bookings.ts`), which
+`tests/breakdown-sums.test.ts` enforces.
+
 ```ts
 interface BookingBreakdown {
   damaged: number;
@@ -15664,12 +15675,14 @@ interface BookingBreakdown {
   quoted: number;
   reserved: number;
   returned: number;
+  cleaning?: number;
+  maintenance?: number;
 }
 ```
 
 ### `BookingBreakdownKeyEnum`
 
-Zod enum over the seven breakdown keys — the custody axis of a movement.
+Zod enum over the breakdown keys — the custody axis of a movement.
 
 ```ts
 const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType>;
@@ -15686,6 +15699,10 @@ type BookingBreakdownKeyType = indexedAccess;
 ### `BookingBreakdownSchema`
 
 Zod schema for BookingBreakdown.
+
+⚠️ The keys stay in alphabetical order, NOT lifecycle order: a schema's key
+order is its Firestore-surface column order (`core/CLAUDE.md`), so reordering
+the seven would move every existing breakdown column in the picker.
 
 ```ts
 const BookingBreakdownSchema: z.ZodType<BookingBreakdown>;
@@ -15719,16 +15736,6 @@ const BookingReturnFlags: z.ZodType<BookingReturnFlagsType>;
 ```
 
 ### `BookingReturnFlagsType`
-
-Of the units a save brings to `returned`, how many are FLAGGED at check-in —
-R2 (owner, 2026-09-24): dirty-on-return is a `cleaning` flag and wear-and-tear
-a `maintenance` flag. The booking still closes as `returned`; no breakdown
-bucket is added, and neither is billable.
-
-The server writes one `flag` movement per reason on the shelves the
-`check_in` landed the units on, and opens one out-of-service record per
-reason from it. Σ must not exceed the units this save returns — a 400
-otherwise.
 
 ```ts
 interface BookingReturnFlagsType {
@@ -15890,7 +15897,7 @@ Input for updating a single booking via `PUT /bookings/{uid}`.
 
 Status and breakdown are independently optional — most warehouse PUTs only
 change the breakdown. When `breakdown` is supplied it must be the complete
-next state (all 7 keys); the service requires `sum(breakdown) === quantity`
+next state (every key); the service requires `sum(breakdown) === quantity`
 and treats the value as an absolute write, not a partial patch. Version is
 required for optimistic concurrency.
 
@@ -16029,10 +16036,6 @@ interface BookingActionsInputType {
 
 ### `CUSTODY_FLAG_REASONS`
 
-The flag reasons a custody ACTION may name: the in-place reasons a booking
-keeps reading as `returned`. `damaged` is not one of them, because a damaged
-unit is its own breakdown key (owner ruling R2, 2026-09-29).
-
 ```ts
 const CUSTODY_FLAG_REASONS: "cleaning" | "maintenance"[];
 ```
@@ -16064,7 +16067,7 @@ directions, so a row with no id here and an id with no row both fail.
 The manager de-duplicates its menus by these ids, never by a label.
 
 ```ts
-const CUSTODY_RULE_IDS: "prep" | "unprep" | "check_out" | "check_out_undo" | "check_in" | "check_in_undo" | "mark_lost" | "mark_lost_undo" | "mark_damaged" | "mark_damaged_undo" | "mark_lost_returned" | "mark_lost_returned_undo" | "flag_damaged_returned" | "flag_damaged_returned_undo" | "flag_returned" | "reclassify_damaged_to_flag" | "reclassify_flag_to_damaged"[];
+const CUSTODY_RULE_IDS: "prep" | "unprep" | "check_out" | "check_out_undo" | "check_in" | "check_in_undo" | "mark_lost" | "mark_lost_undo" | "mark_damaged" | "mark_damaged_undo" | "mark_lost_returned" | "mark_lost_returned_undo" | "flag_damaged_returned" | "flag_damaged_returned_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "flag_cleaning_returned" | "flag_cleaning_returned_undo" | "flag_maintenance_returned" | "flag_maintenance_returned_undo" | "reclassify_damaged_to_cleaning" | "reclassify_damaged_to_maintenance" | "reclassify_cleaning_to_damaged" | "reclassify_cleaning_to_maintenance" | "reclassify_maintenance_to_damaged" | "reclassify_maintenance_to_cleaning" | "flag_returned" | "reclassify_damaged_to_flag" | "reclassify_flag_to_damaged"[];
 ```
 
 ### `CustodyArm`
@@ -16099,7 +16102,8 @@ type CustodyFlagReasonType = indexedAccess;
 
 One legal custody step.
 
-`from === to` is a step that changes no breakdown key (only `flag_returned`):
+`from === to` is a step that changes no breakdown key (only the deprecated
+`flag_returned`):
 its movement carries no custody and names its booking in `sources[]`, not in
 `uid_booking`. Every other row's movement carries `{from, to}` as its custody
 pair and sets `uid_booking`.
@@ -16153,11 +16157,11 @@ interface CustodyServiceShape {
 One side of a flag row's service axis.
 
 - `none` — in service on that side;
-- `damaged` — the `damaged` flag;
-- `reason` — the cleaning/maintenance reason the ACTION names.
+- `damaged` / `cleaning` / `maintenance` — that flag;
+- `reason` — (deprecated, R2 rows only) the reason the ACTION names.
 
 ```ts
-type CustodyServiceSide = "none" | "damaged" | "reason";
+type CustodyServiceSide = "none" | "damaged" | "cleaning" | "maintenance" | "reason";
 ```
 
 ### `custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale", reason?: string): string | null`
@@ -16184,10 +16188,14 @@ movements are distinct per rule, so the rental reading is the stricter one.
 
 ### `isLossUndo(id: CustodyRuleId): boolean`
 
-The loss-mark undos, which the lever applies before anything else in a save:
-an undo returns units to wherever THAT mark took them from, a fact about the
-record rather than the breakdown, so the ladder steps must read the breakdown
-the undos leave.
+The out-of-service-mark undos — every undo OUT OF `lost`, `damaged`,
+`cleaning` or `maintenance` — which the lever applies before anything else in
+a save: an undo returns units to wherever THAT mark took them from, a fact
+about the record rather than the breakdown, so the ladder steps must read the
+breakdown the undos leave.
+
+Read off the table rather than listed, so the P2b rows joined without an edit
+here; the name predates them.
 
 ## `@cfs/core/schemas/cache-geocodes`
 
@@ -18736,7 +18744,7 @@ interface Order {
   query_by_items: string[];
   query_by_contacts: string[];
   query_by_dates: string[];
-  bookings_breakdown: typeLiteral;
+  bookings_breakdown: BookingBreakdown;
   crms_id: number | null;
   crms_status?: string;
   subject: string;
@@ -21626,7 +21634,7 @@ Each answers an independent question about the same physical unit:
 
 | Axis       | Question                              | Lands on                                  |
 |------------|---------------------------------------|-------------------------------------------|
-| `custody`  | How far through this order is it?     | `booking.breakdown` — the seven keys      |
+| `custody`  | How far through this order is it?     | `booking.breakdown` — `BOOKING_BREAKDOWN_KEYS` |
 | `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |
 | `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |
 | `service`  | Is it out of service, and why?        | `out_of_service_breakdown`; per-shelf OOS |
@@ -21821,7 +21829,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service" | "flag" | "send_away"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service" | "flag" | "send_away"[];
 ```
 
 ### `Movement`
@@ -26729,8 +26737,8 @@ import {
 
 ### `BOOKING_BREAKDOWN_KEYS`
 
-All seven keys of the booking lifecycle breakdown, in lifecycle order (which
-is NOT the schema's alphabetical field order — the UI reads left to right).
+Every key of the booking custody breakdown, in lifecycle order (which is NOT
+the schema's alphabetical field order — the UI reads left to right).
 
 These live beside the schema rather than in `utils/bookings.ts` because
 schema modules cannot import utils (the dependency runs strictly one way) and
@@ -26738,7 +26746,7 @@ the movement journal needs the key union to type a custody transition.
 `utils/bookings.ts` re-exports them, so existing importers are unaffected.
 
 ```ts
-const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged"[];
+const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged" | "cleaning" | "maintenance"[];
 ```
 
 ### `BOOKING_BREAKDOWN_LABELS`
@@ -26760,8 +26768,8 @@ the drift is resolved the other way round from how it was first resolved.**
 every state here reads as the past participle of an action there (`prep` →
 `Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer
 follows that pattern, and that is the cost of the change rather than an
-oversight: it is the longest heading on an eleven-column pick sheet, where the
-shorter word buys real width and "Out" reads as a state on its own.
+oversight: it is the longest heading on the pick sheet, where the shorter
+word buys real width and "Out" reads as a state on its own.
 
 ⚠️ **What does NOT change is that there is one declaration.** The lesson of
 the deleted copy was never which word to use — it was that two places spelling
@@ -26780,15 +26788,16 @@ const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string>;
 
 ### `BOOKING_BREAKDOWN_TERMINAL_KEYS`
 
-Keys representing items that have reached a terminal state.
+Keys representing units that have reached a terminal state: back, or out of
+service with a reason. A booking is `complete` when these hold all its units.
 
 ```ts
-const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged"[];
+const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged" | "cleaning" | "maintenance"[];
 ```
 
 ### `BookingBreakdownKeyEnum`
 
-Zod enum over the seven breakdown keys — the custody axis of a movement.
+Zod enum over the breakdown keys — the custody axis of a movement.
 
 ```ts
 const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType>;
@@ -26822,6 +26831,14 @@ interface BookingCollectionPair {
   delivery: typeLiteral;
   collection: typeLiteral | null;
 }
+```
+
+### `FullBookingBreakdown`
+
+A breakdown with every key stated — what arithmetic on one reads.
+
+```ts
+type FullBookingBreakdown = Required<BookingBreakdown>;
 ```
 
 ### `GrainKeep`
@@ -26896,6 +26913,15 @@ takes the DELIVERY address, because `Booking.destinations.collection.uid` is a
 required id; that was every writer's rule before this function existed, and
 it is now confined to the one case that needs it.
 
+### `breakdownQuantity(b: Partial<BookingBreakdown>, key: BookingBreakdownKeyType): number`
+
+The units in one bucket. An absent key reads 0: `cleaning` and `maintenance`
+are optional until their backfill (`schemas/_breakdown.ts`), so a stored
+breakdown may lack them.
+
+⭐ **Read a bucket through this, never `b.cleaning ?? 0` at the call site.**
+One reader is what lets the keys' tightening delete the fallback in one place.
+
 ### `calculateBookingBreakdown(status: OrderStatusType, type: ComponentTypeType, quantity: number, existingBreakdown?: indexedAccess): indexedAccess`
 
 Project a booking's breakdown for a given **order** status, item type, and
@@ -26912,19 +26938,27 @@ Status rules:
   draft / canceled  → all zeros (cleared on cancel/draft)
   quoted            → quoted = quantity − carry; preserves prepped/out/terminals
   reserved / active → reserved = quantity − carry; preserves prepped/out/terminals
-  complete + rental → returned = quantity − (lost + damaged); zero everything else
+  complete + rental → keeps every out-of-service key; returned = quantity − their sum
   complete + sale   → out = quantity; zero everything else
   complete + service / surcharge → all zeros
 
-### `emptyBookingsBreakdown(): indexedAccess`
+### `emptyBookingsBreakdown(): FullBookingBreakdown`
 
-The empty breakdown shape — all seven keys at zero.
+The empty breakdown shape — every key at zero.
 
 Use as the seed for new orders and as the target shape for fresh bookings.
+⚠️ It STATES `cleaning` and `maintenance`, so a writer seeding from it
+authors both keys — which a reader on a core older than the keys' beta
+refuses (`z.strictObject`). The api pins this only after the manager's
+reader release is in prod (custody-actions P2b step 2).
 
 ```ts
 const order = { ...orderInput, bookings_breakdown: emptyBookingsBreakdown() };
 ```
+
+### `fullBookingBreakdown(b: Partial<BookingBreakdown>): FullBookingBreakdown`
+
+`b` with every key stated, an absent one as 0.
 
 ### `grainKeep(live: number, rows: readonly GrainRow[]): GrainKeep`
 
@@ -26949,8 +26983,8 @@ grainKeep(3, [{ key: "a", before: 5, after: 1 }]); // { kept: 2, byRow: a→2 }
 
 ### `hasCustodyHistory(b: Pick<Booking, "breakdown">): boolean`
 
-Whether custody ever moved on a booking: any of `prepped`, `out`, `returned`,
-`lost` or `damaged`. Such a booking is part of what happened, and an order
+Whether custody ever moved on a booking: any of `prepped`, `out` or a terminal
+key. Such a booking is part of what happened, and an order
 edit must not delete it (api-cloudrun#1147, Q4); only a plan-only booking
 (`quoted`/`reserved`) goes with its line.
 
@@ -27006,15 +27040,15 @@ inherited from `current`. Useful for the optimistic UI path: a picker
 types "returned: 1, out: 2" and the manager renders the merged result
 before the API confirms.
 
-### `sumBookingBreakdown(b: indexedAccess): number`
+### `sumBookingBreakdown(b: Partial<BookingBreakdown>): number`
 
-Sum the seven values of a single booking's breakdown.
+Sum every value of a single booking's breakdown.
 
 The booking-level invariant is `sumBookingBreakdown(booking.breakdown) === booking.quantity`.
 Use this to verify that a proposed breakdown change preserves the invariant
 before submitting it through `PUT /bookings/{uid}`.
 
-### `sumBookingsBreakdown(bookings: Array<typeLiteral>): indexedAccess`
+### `sumBookingsBreakdown(bookings: ReadonlyArray<typeLiteral>): FullBookingBreakdown`
 
 Sum a list of booking breakdowns into the order's roll-up shape.
 
@@ -27023,6 +27057,21 @@ along the *product* axis) but aggregated along the *order* axis. Used to
 seed `order.bookings_breakdown` at create/update time and to recompute it
 client-side from cached bookings when the order doc isn't authoritative
 yet.
+
+### `sumBreakdownKeys(b: Partial<BookingBreakdown>, keys: readonly BookingBreakdownKeyType[]): number`
+
+Σ of the named buckets — **the ONE place a breakdown is summed.**
+
+🔴 A sum spelled key by key (`b.returned + b.lost + b.damaged`) compiled
+straight through the arrival of `cleaning` and `maintenance` and stopped
+counting them, in about a dozen places across three repos. Name the KEYS,
+from `BOOKING_BREAKDOWN_KEYS` / `BOOKING_BREAKDOWN_TERMINAL_KEYS` where one
+fits, and let this add them. `tests/breakdown-sums.test.ts` refuses a
+named-key sum anywhere else in `src/`.
+
+### `terminalQuantity(b: Partial<BookingBreakdown>): number`
+
+Units that reached a terminal key: back, or out of service with a reason.
 
 ## `@cfs/core/utils/custody`
 
@@ -27048,13 +27097,21 @@ WHAT the booking reads afterwards; the api decides where the units go.
 (`utils/fulfillment-stage.ts`) answer rendering and freeze questions, not
 legality ones, and must not be folded in here.
 
+### `CUSTODY_LOSS_KEYS`
+
+Every {@link CustodyLossKey}, in breakdown order.
+
+```ts
+const CUSTODY_LOSS_KEYS: readonly CustodyLossKey[];
+```
+
 ### `CustodyApplication`
 
 What a list of actions does to a booking.
 
 ```ts
 interface CustodyApplication {
-  breakdown: BookingBreakdown;
+  breakdown: FullBookingBreakdown;
   status: indexedAccess;
   transitions: CustodyTransition[];
 }
@@ -27091,13 +27148,21 @@ interface CustodyDecomposition {
 }
 ```
 
+### `CustodyLossKey`
+
+The breakdown keys a mark puts units in, and an undo takes them out of.
+
+```ts
+type CustodyLossKey = "lost" | "damaged" | "cleaning" | "maintenance";
+```
+
 ### `CustodyLossUndo`
 
-A loss key a delta may lower, and where its mark took the units from.
+An out-of-service key a delta may lower, and where its mark took the units from.
 
 ```ts
 interface CustodyLossUndo {
-  reason: "lost" | "damaged";
+  reason: CustodyLossKey;
   origin: BookingBreakdownKeyType;
   quantity: number;
 }
@@ -27107,8 +27172,8 @@ interface CustodyLossUndo {
 
 One action the UI may offer on a booking row.
 
-`key` is what a menu de-duplicates on — the rule id, plus the reason for the
-two `flag_returned` offers. Expand an offer into the actions to send with
+`key` is what a menu de-duplicates on — the rule id. (It carried a reason for
+R2's two `flag_returned` offers, which are no longer made.) Expand an offer into the actions to send with
 {@link expandCustodyOffer}; a `check_out` over reserved units is two steps.
 
 ```ts
@@ -27131,7 +27196,7 @@ What an offer list needs that the booking alone does not carry.
 interface CustodyOfferContext {
   canPrepCheckout: boolean;
   unflaggedReturned?: number;
-  undoable?: Partial<Record<"mark_lost_undo" | "mark_damaged_undo" | "mark_lost_returned_undo" | "flag_damaged_returned_undo", number>>;
+  undoable?: Partial<Record<CustodyRuleId, number>>;
 }
 ```
 
@@ -27237,8 +27302,9 @@ change, both by owner ruling (2026-09-29):
   Lost or Damaged (gap G1). The fulfillment offers `unprep` plus a shelf
   out-of-service record instead.
 - **Returned units get their own losses and flags** (gap G5): Lost, Damaged,
-  Flag Cleaning and Flag Maintenance off `returned`, so `‹ Out` is no longer
-  the only way to reach them.
+  Cleaning and Maintenance off `returned`, so `‹ Out` is no longer the only
+  way to reach them. Since P2b those are the `flag_*_returned` rows, and the
+  deprecated `flag_returned` is never offered.
 
 ### `custodyRuleForMovement(type: MovementTypeType, custody: typeLiteral | null, service: typeLiteral | null | undefined, bookingType: "rental" | "sale"): CustodyRule | null`
 
@@ -27246,7 +27312,8 @@ The rule a STORED movement's `(type, custody, service)` is an instance of, or
 `null` — the population assertion's lookup (`audit-custody-rules` in the api
 replays every stored custody movement through it).
 
-A flag's reason side reads as `reason` when it is cleaning or maintenance.
+A row's `reason` side (the deprecated R2 rows) matches cleaning or
+maintenance; every other side matches itself.
 
 ### `decomposeCustodyDelta(prev: BookingBreakdown, next: BookingBreakdown, bookingType: indexedAccess, _: unknown): CustodyDecomposition`
 
@@ -27276,8 +27343,9 @@ implicit prep counted once; a rewind is matched at every depth
 ⚠️ **What stays residue is a DECISION, not a gap in this function.**
 `prepped → returned` is a forward multi-hop past `out`, which would record
 units going out and coming back that nobody saw (api-cloudrun#1053); a
-pre-departure key into `lost`/`damaged` has no row at all (gap G1); and a sale
-rewind is refused (api-cloudrun#1054). A service or surcharge booking holds no
+pre-departure key into `lost`/`damaged` has no row at all (gap G1); a sale
+rewind is refused (api-cloudrun#1054); and a sale never takes `cleaning` or
+`maintenance` (P2b ruling 4). A service or surcharge booking holds no
 stock, so its delta is always matched with no steps.
 
 ### `deriveCustodyStatus(breakdown: BookingBreakdown, quantity: number, current: indexedAccess): indexedAccess`
@@ -27288,7 +27356,7 @@ the regression one, because it is a function of the state alone.
 
 | breakdown                        | status          |
 |----------------------------------|-----------------|
-| returned + lost + damaged = qty  | `complete`      |
+| every terminal key sums to qty   | `complete`      |
 | out > 0                          | `active`        |
 | prepped = qty                    | `prepped`       |
 | prepped > 0 and reserved > 0     | `part-prepped`  |
@@ -27508,11 +27576,11 @@ Otherwise, applies per-side roll-up rules:
     rarely returned, and then via the fulfillment flow, never via the card);
   - **service** / **surcharge** lines have no return event at all, so their
     `breakdown.out` is always 0 and they never reach a terminal
-    `returned`/`lost`/`damaged` count.
+    terminal-key (`BOOKING_BREAKDOWN_TERMINAL_KEYS`) counts.
   Counting any of their `quantity` toward `total` would leave
   `terminal < total` forever and pin the end card `active` after the rentals
   are all back.
-  - `terminal  = Σ (returned + lost + damaged)`
+  - `terminal  = Σ terminalQuantity(breakdown)` (returned, lost, damaged, cleaning, maintenance)
   - `total     = Σ booking.quantity`
   - `still_out = Σ breakdown.out`
   - if `terminal === total`              → `complete` (everything collected/written-off)
@@ -31895,14 +31963,14 @@ Used by target-side "current state" rows to undo over-eager transitions
 (e.g. accidentally checked out, or marked returned in error).
 
 Bucket flow (one step back, terminals reversible):
-  returned/lost/damaged → out
+  returned/lost/damaged/cleaning/maintenance → out
   out                   → prepped
   prepped               → reserved
 
 ```ts
 interface FulfillmentRegressionAlternate {
   kind: "regression";
-  fromBucket: "prepped" | "out" | "returned" | "lost" | "damaged";
+  fromBucket: "prepped" | "out" | "returned" | "lost" | "damaged" | "cleaning" | "maintenance";
   toBucket: "reserved" | "prepped" | "out";
   label: string;
 }
@@ -33584,8 +33652,10 @@ anything but `null`.
 carriers answer, one per place kind:**
 - at a record: `fallback`, the RECORD's reason, which only the caller can
   read (a `mark_lost`'s `lost`, a record-driven write-off's `oos.reason`);
-- at a shelf: `custody.to/from === "damaged"` — a `mark_damaged` lands its
-  unit on a shelf, flagged, and its undo takes the flag back off.
+- at a shelf: a custody key of `damaged`, `cleaning` or `maintenance` — a
+  `mark_damaged` (or, since P2b, `mark_cleaning` / `mark_maintenance`) lands
+  its unit on a shelf, flagged, and its undo takes the flag back off. Those
+  types forbid `service`, so the custody key is their ONLY carrier.
 
 🔴 **The legacy carriers are disjoint by place kind, and that is what keeps
 the 8 pre-model `mark_damaged` rows counted ONCE.** Those rows are
@@ -37141,7 +37211,7 @@ booking. Summing it per line overstates the leg.
 
 For a leg's own totals a template never needs to ask at all:
 {@link PickSheetDestination.quantity} is that leg's total and
-{@link PickSheetDestination.breakdown} its seven buckets, both computed once in
+{@link PickSheetDestination.breakdown} its buckets, both computed once in
 the fold over the whole membership slice. Read the section total; do not
 re-derive it.
 
@@ -37171,8 +37241,8 @@ rather than dropped.
 
 ### `BOOKING_BREAKDOWN_KEYS`
 
-All seven keys of the booking lifecycle breakdown, in lifecycle order (which
-is NOT the schema's alphabetical field order — the UI reads left to right).
+Every key of the booking custody breakdown, in lifecycle order (which is NOT
+the schema's alphabetical field order — the UI reads left to right).
 
 These live beside the schema rather than in `utils/bookings.ts` because
 schema modules cannot import utils (the dependency runs strictly one way) and
@@ -37180,7 +37250,7 @@ the movement journal needs the key union to type a custody transition.
 `utils/bookings.ts` re-exports them, so existing importers are unaffected.
 
 ```ts
-const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged"[];
+const BOOKING_BREAKDOWN_KEYS: "quoted" | "reserved" | "prepped" | "out" | "returned" | "lost" | "damaged" | "cleaning" | "maintenance"[];
 ```
 
 ### `BOOKING_BREAKDOWN_LABELS`
@@ -37202,8 +37272,8 @@ the drift is resolved the other way round from how it was first resolved.**
 every state here reads as the past participle of an action there (`prep` →
 `Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer
 follows that pattern, and that is the cost of the change rather than an
-oversight: it is the longest heading on an eleven-column pick sheet, where the
-shorter word buys real width and "Out" reads as a state on its own.
+oversight: it is the longest heading on the pick sheet, where the shorter
+word buys real width and "Out" reads as a state on its own.
 
 ⚠️ **What does NOT change is that there is one declaration.** The lesson of
 the deleted copy was never which word to use — it was that two places spelling

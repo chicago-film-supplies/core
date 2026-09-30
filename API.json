@@ -261,20 +261,20 @@
         {
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_KEYS",
-          "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\"[];",
-          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports them, so existing importers are unaffected."
+          "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "Every key of the booking custody breakdown, in lifecycle order (which is NOT\nthe schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports them, so existing importers are unaffected."
         },
         {
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_LABELS",
           "declaration": "const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string>;",
-          "doc": "Display label per breakdown bucket — the ONE declaration, read both by the\n`.meta({ column: true, label })` annotations below (which drive every\ncollection-table heading) and by the warehouse picker's column headers.\n\n⚠️ **It is declared as a table rather than inline on each `.meta()` because\nthe picker had its own copy.** The now-deleted\n`manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`\nrestating all seven — which is exactly the drift the repo's *\"columns are\ndeclared, not generated\"* rule exists to stop, and the two had diverged on\n`out`: the copy said \"Out\" and this declaration said \"Checked Out\".\n\n⭐ **The copy's word is now the canonical one — owner's call, 2026-09-09 — so\nthe drift is resolved the other way round from how it was first resolved.**\n\"Checked Out\" was kept because it pairs with `FULFILLMENT_STAGE_LABELS`, where\nevery state here reads as the past participle of an action there (`prep` →\n`Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer\nfollows that pattern, and that is the cost of the change rather than an\noversight: it is the longest heading on an eleven-column pick sheet, where the\nshorter word buys real width and \"Out\" reads as a state on its own.\n\n⚠️ **What does NOT change is that there is one declaration.** The lesson of\nthe deleted copy was never which word to use — it was that two places spelling\nit is how they diverge. `tests/fulfillment-stage.test.ts` pins this string, so\na reappearing copy still goes red.\n\n⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could\nread these back off the schema, but `BookingBreakdownSchema` is annotated\n`z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the\nresult is typed `unknown`. A shared literal in the one file that owns the\ndeclaration is the same guarantee with none of that."
+          "doc": "Display label per breakdown bucket — the ONE declaration, read both by the\n`.meta({ column: true, label })` annotations below (which drive every\ncollection-table heading) and by the warehouse picker's column headers.\n\n⚠️ **It is declared as a table rather than inline on each `.meta()` because\nthe picker had its own copy.** The now-deleted\n`manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`\nrestating all seven — which is exactly the drift the repo's *\"columns are\ndeclared, not generated\"* rule exists to stop, and the two had diverged on\n`out`: the copy said \"Out\" and this declaration said \"Checked Out\".\n\n⭐ **The copy's word is now the canonical one — owner's call, 2026-09-09 — so\nthe drift is resolved the other way round from how it was first resolved.**\n\"Checked Out\" was kept because it pairs with `FULFILLMENT_STAGE_LABELS`, where\nevery state here reads as the past participle of an action there (`prep` →\n`Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer\nfollows that pattern, and that is the cost of the change rather than an\noversight: it is the longest heading on the pick sheet, where the shorter\nword buys real width and \"Out\" reads as a state on its own.\n\n⚠️ **What does NOT change is that there is one declaration.** The lesson of\nthe deleted copy was never which word to use — it was that two places spelling\nit is how they diverge. `tests/fulfillment-stage.test.ts` pins this string, so\na reappearing copy still goes red.\n\n⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could\nread these back off the schema, but `BookingBreakdownSchema` is annotated\n`z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the\nresult is typed `unknown`. A shared literal in the one file that owns the\ndeclaration is the same guarantee with none of that."
         },
         {
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_TERMINAL_KEYS",
-          "declaration": "const BOOKING_BREAKDOWN_TERMINAL_KEYS: \"returned\" | \"lost\" | \"damaged\"[];",
-          "doc": "Keys representing items that have reached a terminal state."
+          "declaration": "const BOOKING_BREAKDOWN_TERMINAL_KEYS: \"returned\" | \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "Keys representing units that have reached a terminal state: back, or out of\nservice with a reason. A booking is `complete` when these hold all its units."
         },
         {
           "kind": "variable",
@@ -339,14 +339,14 @@
         {
           "kind": "interface",
           "name": "BookingBreakdown",
-          "declaration": "interface BookingBreakdown {\n  damaged: number;\n  lost: number;\n  out: number;\n  prepped: number;\n  quoted: number;\n  reserved: number;\n  returned: number;\n}",
-          "doc": "Per-status quantity breakdown for a booking.\n\n⚠️ It is no longer embedded anywhere in the stock projection. `stock/{P}`'s\nentries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this\nbreakdown down to a single `quantity` — so the breakdown reaches availability\nas a number and never as a structure."
+          "declaration": "interface BookingBreakdown {\n  damaged: number;\n  lost: number;\n  out: number;\n  prepped: number;\n  quoted: number;\n  reserved: number;\n  returned: number;\n  cleaning?: number;\n  maintenance?: number;\n}",
+          "doc": "Per-status quantity breakdown for a booking.\n\n⚠️ It is no longer embedded anywhere in the stock projection. `stock/{P}`'s\nentries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this\nbreakdown down to a single `quantity` — so the breakdown reaches availability\nas a number and never as a structure.\n\n🔴 **Never add its keys up by name.** A sum spelled `returned + lost +\ndamaged` compiled through the arrival of `cleaning` and `maintenance` and\nsilently stopped counting them; that pattern is what made the P2b inventory\nlong. Sum through `sumBreakdownKeys` (`utils/bookings.ts`), which\n`tests/breakdown-sums.test.ts` enforces."
         },
         {
           "kind": "variable",
           "name": "BookingBreakdownKeyEnum",
           "declaration": "const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType>;",
-          "doc": "Zod enum over the seven breakdown keys — the custody axis of a movement."
+          "doc": "Zod enum over the breakdown keys — the custody axis of a movement."
         },
         {
           "kind": "typeAlias",
@@ -358,7 +358,7 @@
           "kind": "variable",
           "name": "BookingBreakdownSchema",
           "declaration": "const BookingBreakdownSchema: z.ZodType<BookingBreakdown>;",
-          "doc": "Zod schema for BookingBreakdown."
+          "doc": "Zod schema for BookingBreakdown.\n\n⚠️ The keys stay in alphabetical order, NOT lifecycle order: a schema's key\norder is its Firestore-surface column order (`core/CLAUDE.md`), so reordering\nthe seven would move every existing breakdown column in the picker."
         },
         {
           "kind": "typeAlias",
@@ -394,7 +394,7 @@
           "kind": "interface",
           "name": "BookingReturnFlagsType",
           "declaration": "interface BookingReturnFlagsType {\n  cleaning: number;\n  maintenance: number;\n}",
-          "doc": "Of the units a save brings to `returned`, how many are FLAGGED at check-in —\nR2 (owner, 2026-09-24): dirty-on-return is a `cleaning` flag and wear-and-tear\na `maintenance` flag. The booking still closes as `returned`; no breakdown\nbucket is added, and neither is billable.\n\nThe server writes one `flag` movement per reason on the shelves the\n`check_in` landed the units on, and opens one out-of-service record per\nreason from it. Σ must not exceed the units this save returns — a 400\notherwise."
+          "doc": ""
         },
         {
           "kind": "variable",
@@ -562,7 +562,7 @@
           "kind": "variable",
           "name": "CUSTODY_FLAG_REASONS",
           "declaration": "const CUSTODY_FLAG_REASONS: \"cleaning\" | \"maintenance\"[];",
-          "doc": "The flag reasons a custody ACTION may name: the in-place reasons a booking\nkeeps reading as `returned`. `damaged` is not one of them, because a damaged\nunit is its own breakdown key (owner ruling R2, 2026-09-29)."
+          "doc": ""
         },
         {
           "kind": "variable",
@@ -579,7 +579,7 @@
         {
           "kind": "variable",
           "name": "CUSTODY_RULE_IDS",
-          "declaration": "const CUSTODY_RULE_IDS: \"prep\" | \"unprep\" | \"check_out\" | \"check_out_undo\" | \"check_in\" | \"check_in_undo\" | \"mark_lost\" | \"mark_lost_undo\" | \"mark_damaged\" | \"mark_damaged_undo\" | \"mark_lost_returned\" | \"mark_lost_returned_undo\" | \"flag_damaged_returned\" | \"flag_damaged_returned_undo\" | \"flag_returned\" | \"reclassify_damaged_to_flag\" | \"reclassify_flag_to_damaged\"[];",
+          "declaration": "const CUSTODY_RULE_IDS: \"prep\" | \"unprep\" | \"check_out\" | \"check_out_undo\" | \"check_in\" | \"check_in_undo\" | \"mark_lost\" | \"mark_lost_undo\" | \"mark_damaged\" | \"mark_damaged_undo\" | \"mark_lost_returned\" | \"mark_lost_returned_undo\" | \"flag_damaged_returned\" | \"flag_damaged_returned_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"flag_cleaning_returned\" | \"flag_cleaning_returned_undo\" | \"flag_maintenance_returned\" | \"flag_maintenance_returned_undo\" | \"reclassify_damaged_to_cleaning\" | \"reclassify_damaged_to_maintenance\" | \"reclassify_cleaning_to_damaged\" | \"reclassify_cleaning_to_maintenance\" | \"reclassify_maintenance_to_damaged\" | \"reclassify_maintenance_to_cleaning\" | \"flag_returned\" | \"reclassify_damaged_to_flag\" | \"reclassify_flag_to_damaged\"[];",
           "doc": "Every custody rule id. A literal list with its union derived from it, the\nsame spelling as `MOVEMENT_TYPES`: the wire validates against it at runtime,\nand `tests/custody.test.ts` asserts it equals the table's ids in both\ndirections, so a row with no id here and an id with no row both fail.\n\nThe manager de-duplicates its menus by these ids, never by a label."
         },
         {
@@ -1438,7 +1438,7 @@
           "kind": "interface",
           "name": "CustodyRule",
           "declaration": "interface CustodyRule {\n  id: CustodyRuleId;\n  from: BookingBreakdownKeyType;\n  to: BookingBreakdownKeyType;\n  rental: CustodyArm | null;\n  sale: CustodyArm | null;\n  service: CustodyServiceShape | null;\n  direction: \"forward\" | \"undo\";\n  stage: \"prep\" | \"checkout\" | \"return\" | \"service\";\n  inverse: CustodyRuleId | null;\n  billable: boolean;\n  description: string;\n  enforced_by: EnforcementRef[];\n}",
-          "doc": "One legal custody step.\n\n`from === to` is a step that changes no breakdown key (only `flag_returned`):\nits movement carries no custody and names its booking in `sources[]`, not in\n`uid_booking`. Every other row's movement carries `{from, to}` as its custody\npair and sets `uid_booking`."
+          "doc": "One legal custody step.\n\n`from === to` is a step that changes no breakdown key (only the deprecated\n`flag_returned`):\nits movement carries no custody and names its booking in `sources[]`, not in\n`uid_booking`. Every other row's movement carries `{from, to}` as its custody\npair and sets `uid_booking`."
         },
         {
           "kind": "typeAlias",
@@ -1461,8 +1461,8 @@
         {
           "kind": "typeAlias",
           "name": "CustodyServiceSide",
-          "declaration": "type CustodyServiceSide = \"none\" | \"damaged\" | \"reason\";",
-          "doc": "One side of a flag row's service axis.\n\n- `none` — in service on that side;\n- `damaged` — the `damaged` flag;\n- `reason` — the cleaning/maintenance reason the ACTION names."
+          "declaration": "type CustodyServiceSide = \"none\" | \"damaged\" | \"cleaning\" | \"maintenance\" | \"reason\";",
+          "doc": "One side of a flag row's service axis.\n\n- `none` — in service on that side;\n- `damaged` / `cleaning` / `maintenance` — that flag;\n- `reason` — (deprecated, R2 rows only) the reason the ACTION names."
         },
         {
           "kind": "variable",
@@ -2619,7 +2619,7 @@
         {
           "kind": "variable",
           "name": "MOVEMENT_TYPES",
-          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"sale\" | \"sale_return\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\"[];",
+          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"sale\" | \"sale_return\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\"[];",
           "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    🔴 **The movement shape does NOT already exist.** This note claimed it\n    did — *\"`lines: []` + a negative `cost`, the same shape a late\n    landed-cost adjustment uses\"* — and that was wrong in three independent\n    ways, each measured (core#75):\n      1. **No contract permits it.** `places: null` means \"lines must be\n         empty\", and the only entry carrying it is `prep`, whose `cost` is\n         `forbidden`. Every cost-bearing type has `places` set, and\n         `checkMovementContract` then requires at least one line — so\n         `MovementSchema` rejects `lines: []` beside a cost on **every**\n         {@link MOVEMENT_TYPES} member. `places: null` + `cost: \"required\"`\n         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.\n      2. **The fold would ignore it anyway.** `applyMovementToLedger`\n         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside\n         `delta > 0` / `delta < 0`, where `delta` is\n         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at\n         0; the same cost on one `+10` line moves it to 50000.\n      3. **And it could not reach Xero.** `xeroPostingFor`\n         (`utils/movements.ts`) terminals a cost-bearing movement whose lines\n         net to zero as `no_ownership_direction`, deliberately, because a\n         document like that is malformed today.\n    So a cost-only event needs all three gates opened, in one change: a\n    contract entry pairing `places: null` with `cost: \"required\"`, a\n    `delta === 0` arm in the fold — which owes its own decision about\n    `average_unit_cost`, since the basis moves while the quantity does not —\n    and a posting decision that is not derived from an ownership direction\n    there is none of.\n    The \"late landed-cost adjustment\" cited as precedent is not writable\n    today either, by the same mechanism. (1) and (2) are pinned in\n    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the\n    day someone mints the contract entry is the day a pin goes red rather\n    than the day the ledger silently stops moving.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
         },
         {
@@ -3015,7 +3015,7 @@
         {
           "kind": "interface",
           "name": "Order",
-          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id: number | null;\n  crms_status?: string;\n  subject: string;\n  reference: string | null;\n  xero_id: string | null;\n  uid_thread: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  updated_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: BookingBreakdown;\n  crms_id: number | null;\n  crms_status?: string;\n  subject: string;\n  reference: string | null;\n  xero_id: string | null;\n  uid_thread: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  updated_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full order document schema (Firestore document shape).\nUsed for validation before writing to Firestore."
         },
         {
@@ -4792,7 +4792,7 @@
           "kind": "interface",
           "name": "UpdateBookingInputType",
           "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  return_flags?: BookingReturnFlagsType;\n  actions?: BookingActionType[];\n  version: number;\n  uuid_session: string;\n}",
-          "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
+          "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (every key); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
         },
         {
           "kind": "variable",
@@ -5705,7 +5705,7 @@
           "kind": "function",
           "name": "isLossUndo",
           "signature": "isLossUndo(id: CustodyRuleId): boolean",
-          "doc": "The loss-mark undos, which the lever applies before anything else in a save:\nan undo returns units to wherever THAT mark took them from, a fact about the\nrecord rather than the breakdown, so the ladder steps must read the breakdown\nthe undos leave.",
+          "doc": "The out-of-service-mark undos — every undo OUT OF `lost`, `damaged`,\n`cleaning` or `maintenance` — which the lever applies before anything else in\na save: an undo returns units to wherever THAT mark took them from, a fact\nabout the record rather than the breakdown, so the ladder steps must read the\nbreakdown the undos leave.\n\nRead off the table rather than listed, so the P2b rows joined without an edit\nhere; the name predates them.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -6945,20 +6945,20 @@
         {
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_KEYS",
-          "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\"[];",
-          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports them, so existing importers are unaffected."
+          "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "Every key of the booking custody breakdown, in lifecycle order (which is NOT\nthe schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports them, so existing importers are unaffected."
         },
         {
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_LABELS",
           "declaration": "const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string>;",
-          "doc": "Display label per breakdown bucket — the ONE declaration, read both by the\n`.meta({ column: true, label })` annotations below (which drive every\ncollection-table heading) and by the warehouse picker's column headers.\n\n⚠️ **It is declared as a table rather than inline on each `.meta()` because\nthe picker had its own copy.** The now-deleted\n`manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`\nrestating all seven — which is exactly the drift the repo's *\"columns are\ndeclared, not generated\"* rule exists to stop, and the two had diverged on\n`out`: the copy said \"Out\" and this declaration said \"Checked Out\".\n\n⭐ **The copy's word is now the canonical one — owner's call, 2026-09-09 — so\nthe drift is resolved the other way round from how it was first resolved.**\n\"Checked Out\" was kept because it pairs with `FULFILLMENT_STAGE_LABELS`, where\nevery state here reads as the past participle of an action there (`prep` →\n`Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer\nfollows that pattern, and that is the cost of the change rather than an\noversight: it is the longest heading on an eleven-column pick sheet, where the\nshorter word buys real width and \"Out\" reads as a state on its own.\n\n⚠️ **What does NOT change is that there is one declaration.** The lesson of\nthe deleted copy was never which word to use — it was that two places spelling\nit is how they diverge. `tests/fulfillment-stage.test.ts` pins this string, so\na reappearing copy still goes red.\n\n⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could\nread these back off the schema, but `BookingBreakdownSchema` is annotated\n`z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the\nresult is typed `unknown`. A shared literal in the one file that owns the\ndeclaration is the same guarantee with none of that."
+          "doc": "Display label per breakdown bucket — the ONE declaration, read both by the\n`.meta({ column: true, label })` annotations below (which drive every\ncollection-table heading) and by the warehouse picker's column headers.\n\n⚠️ **It is declared as a table rather than inline on each `.meta()` because\nthe picker had its own copy.** The now-deleted\n`manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`\nrestating all seven — which is exactly the drift the repo's *\"columns are\ndeclared, not generated\"* rule exists to stop, and the two had diverged on\n`out`: the copy said \"Out\" and this declaration said \"Checked Out\".\n\n⭐ **The copy's word is now the canonical one — owner's call, 2026-09-09 — so\nthe drift is resolved the other way round from how it was first resolved.**\n\"Checked Out\" was kept because it pairs with `FULFILLMENT_STAGE_LABELS`, where\nevery state here reads as the past participle of an action there (`prep` →\n`Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer\nfollows that pattern, and that is the cost of the change rather than an\noversight: it is the longest heading on the pick sheet, where the shorter\nword buys real width and \"Out\" reads as a state on its own.\n\n⚠️ **What does NOT change is that there is one declaration.** The lesson of\nthe deleted copy was never which word to use — it was that two places spelling\nit is how they diverge. `tests/fulfillment-stage.test.ts` pins this string, so\na reappearing copy still goes red.\n\n⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could\nread these back off the schema, but `BookingBreakdownSchema` is annotated\n`z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the\nresult is typed `unknown`. A shared literal in the one file that owns the\ndeclaration is the same guarantee with none of that."
         },
         {
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_TERMINAL_KEYS",
-          "declaration": "const BOOKING_BREAKDOWN_TERMINAL_KEYS: \"returned\" | \"lost\" | \"damaged\"[];",
-          "doc": "Keys representing items that have reached a terminal state."
+          "declaration": "const BOOKING_BREAKDOWN_TERMINAL_KEYS: \"returned\" | \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "Keys representing units that have reached a terminal state: back, or out of\nservice with a reason. A booking is `complete` when these hold all its units."
         },
         {
           "kind": "variable",
@@ -6975,14 +6975,14 @@
         {
           "kind": "interface",
           "name": "BookingBreakdown",
-          "declaration": "interface BookingBreakdown {\n  damaged: number;\n  lost: number;\n  out: number;\n  prepped: number;\n  quoted: number;\n  reserved: number;\n  returned: number;\n}",
-          "doc": "Per-status quantity breakdown for a booking.\n\n⚠️ It is no longer embedded anywhere in the stock projection. `stock/{P}`'s\nentries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this\nbreakdown down to a single `quantity` — so the breakdown reaches availability\nas a number and never as a structure."
+          "declaration": "interface BookingBreakdown {\n  damaged: number;\n  lost: number;\n  out: number;\n  prepped: number;\n  quoted: number;\n  reserved: number;\n  returned: number;\n  cleaning?: number;\n  maintenance?: number;\n}",
+          "doc": "Per-status quantity breakdown for a booking.\n\n⚠️ It is no longer embedded anywhere in the stock projection. `stock/{P}`'s\nentries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this\nbreakdown down to a single `quantity` — so the breakdown reaches availability\nas a number and never as a structure.\n\n🔴 **Never add its keys up by name.** A sum spelled `returned + lost +\ndamaged` compiled through the arrival of `cleaning` and `maintenance` and\nsilently stopped counting them; that pattern is what made the P2b inventory\nlong. Sum through `sumBreakdownKeys` (`utils/bookings.ts`), which\n`tests/breakdown-sums.test.ts` enforces."
         },
         {
           "kind": "variable",
           "name": "BookingBreakdownKeyEnum",
           "declaration": "const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType>;",
-          "doc": "Zod enum over the seven breakdown keys — the custody axis of a movement."
+          "doc": "Zod enum over the breakdown keys — the custody axis of a movement."
         },
         {
           "kind": "typeAlias",
@@ -6994,7 +6994,7 @@
           "kind": "variable",
           "name": "BookingBreakdownSchema",
           "declaration": "const BookingBreakdownSchema: z.ZodType<BookingBreakdown>;",
-          "doc": "Zod schema for BookingBreakdown."
+          "doc": "Zod schema for BookingBreakdown.\n\n⚠️ The keys stay in alphabetical order, NOT lifecycle order: a schema's key\norder is its Firestore-surface column order (`core/CLAUDE.md`), so reordering\nthe seven would move every existing breakdown column in the picker."
         },
         {
           "kind": "interface",
@@ -7018,7 +7018,7 @@
           "kind": "interface",
           "name": "BookingReturnFlagsType",
           "declaration": "interface BookingReturnFlagsType {\n  cleaning: number;\n  maintenance: number;\n}",
-          "doc": "Of the units a save brings to `returned`, how many are FLAGGED at check-in —\nR2 (owner, 2026-09-24): dirty-on-return is a `cleaning` flag and wear-and-tear\na `maintenance` flag. The booking still closes as `returned`; no breakdown\nbucket is added, and neither is billable.\n\nThe server writes one `flag` movement per reason on the shelves the\n`check_in` landed the units on, and opens one out-of-service record per\nreason from it. Σ must not exceed the units this save returns — a 400\notherwise."
+          "doc": ""
         },
         {
           "kind": "variable",
@@ -7096,7 +7096,7 @@
           "kind": "interface",
           "name": "UpdateBookingInputType",
           "declaration": "interface UpdateBookingInputType {\n  status?: BookingStatusType;\n  breakdown?: indexedAccess;\n  return_flags?: BookingReturnFlagsType;\n  actions?: BookingActionType[];\n  version: number;\n  uuid_session: string;\n}",
-          "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (all 7 keys); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
+          "doc": "Input for updating a single booking via `PUT /bookings/{uid}`.\n\nStatus and breakdown are independently optional — most warehouse PUTs only\nchange the breakdown. When `breakdown` is supplied it must be the complete\nnext state (every key); the service requires `sum(breakdown) === quantity`\nand treats the value as an absolute write, not a partial patch. Version is\nrequired for optimistic concurrency.\n\n{@link UpdateBookingInputType.uuid_session} is what makes this endpoint safe to\nretry once a breakdown change also appends to the movement journal — see the\nfield's own note."
         },
         {
           "kind": "variable",
@@ -7150,7 +7150,7 @@
           "kind": "variable",
           "name": "CUSTODY_FLAG_REASONS",
           "declaration": "const CUSTODY_FLAG_REASONS: \"cleaning\" | \"maintenance\"[];",
-          "doc": "The flag reasons a custody ACTION may name: the in-place reasons a booking\nkeeps reading as `returned`. `damaged` is not one of them, because a damaged\nunit is its own breakdown key (owner ruling R2, 2026-09-29)."
+          "doc": ""
         },
         {
           "kind": "variable",
@@ -7161,7 +7161,7 @@
         {
           "kind": "variable",
           "name": "CUSTODY_RULE_IDS",
-          "declaration": "const CUSTODY_RULE_IDS: \"prep\" | \"unprep\" | \"check_out\" | \"check_out_undo\" | \"check_in\" | \"check_in_undo\" | \"mark_lost\" | \"mark_lost_undo\" | \"mark_damaged\" | \"mark_damaged_undo\" | \"mark_lost_returned\" | \"mark_lost_returned_undo\" | \"flag_damaged_returned\" | \"flag_damaged_returned_undo\" | \"flag_returned\" | \"reclassify_damaged_to_flag\" | \"reclassify_flag_to_damaged\"[];",
+          "declaration": "const CUSTODY_RULE_IDS: \"prep\" | \"unprep\" | \"check_out\" | \"check_out_undo\" | \"check_in\" | \"check_in_undo\" | \"mark_lost\" | \"mark_lost_undo\" | \"mark_damaged\" | \"mark_damaged_undo\" | \"mark_lost_returned\" | \"mark_lost_returned_undo\" | \"flag_damaged_returned\" | \"flag_damaged_returned_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"flag_cleaning_returned\" | \"flag_cleaning_returned_undo\" | \"flag_maintenance_returned\" | \"flag_maintenance_returned_undo\" | \"reclassify_damaged_to_cleaning\" | \"reclassify_damaged_to_maintenance\" | \"reclassify_cleaning_to_damaged\" | \"reclassify_cleaning_to_maintenance\" | \"reclassify_maintenance_to_damaged\" | \"reclassify_maintenance_to_cleaning\" | \"flag_returned\" | \"reclassify_damaged_to_flag\" | \"reclassify_flag_to_damaged\"[];",
           "doc": "Every custody rule id. A literal list with its union derived from it, the\nsame spelling as `MOVEMENT_TYPES`: the wire validates against it at runtime,\nand `tests/custody.test.ts` asserts it equals the table's ids in both\ndirections, so a row with no id here and an id with no row both fail.\n\nThe manager de-duplicates its menus by these ids, never by a label."
         },
         {
@@ -7186,7 +7186,7 @@
           "kind": "interface",
           "name": "CustodyRule",
           "declaration": "interface CustodyRule {\n  id: CustodyRuleId;\n  from: BookingBreakdownKeyType;\n  to: BookingBreakdownKeyType;\n  rental: CustodyArm | null;\n  sale: CustodyArm | null;\n  service: CustodyServiceShape | null;\n  direction: \"forward\" | \"undo\";\n  stage: \"prep\" | \"checkout\" | \"return\" | \"service\";\n  inverse: CustodyRuleId | null;\n  billable: boolean;\n  description: string;\n  enforced_by: EnforcementRef[];\n}",
-          "doc": "One legal custody step.\n\n`from === to` is a step that changes no breakdown key (only `flag_returned`):\nits movement carries no custody and names its booking in `sources[]`, not in\n`uid_booking`. Every other row's movement carries `{from, to}` as its custody\npair and sets `uid_booking`."
+          "doc": "One legal custody step.\n\n`from === to` is a step that changes no breakdown key (only the deprecated\n`flag_returned`):\nits movement carries no custody and names its booking in `sources[]`, not in\n`uid_booking`. Every other row's movement carries `{from, to}` as its custody\npair and sets `uid_booking`."
         },
         {
           "kind": "typeAlias",
@@ -7209,8 +7209,8 @@
         {
           "kind": "typeAlias",
           "name": "CustodyServiceSide",
-          "declaration": "type CustodyServiceSide = \"none\" | \"damaged\" | \"reason\";",
-          "doc": "One side of a flag row's service axis.\n\n- `none` — in service on that side;\n- `damaged` — the `damaged` flag;\n- `reason` — the cleaning/maintenance reason the ACTION names."
+          "declaration": "type CustodyServiceSide = \"none\" | \"damaged\" | \"cleaning\" | \"maintenance\" | \"reason\";",
+          "doc": "One side of a flag row's service axis.\n\n- `none` — in service on that side;\n- `damaged` / `cleaning` / `maintenance` — that flag;\n- `reason` — (deprecated, R2 rows only) the reason the ACTION names."
         },
         {
           "kind": "function",
@@ -7240,7 +7240,7 @@
           "kind": "function",
           "name": "isLossUndo",
           "signature": "isLossUndo(id: CustodyRuleId): boolean",
-          "doc": "The loss-mark undos, which the lever applies before anything else in a save:\nan undo returns units to wherever THAT mark took them from, a fact about the\nrecord rather than the breakdown, so the ladder steps must read the breakdown\nthe undos leave.",
+          "doc": "The out-of-service-mark undos — every undo OUT OF `lost`, `damaged`,\n`cleaning` or `maintenance` — which the lever applies before anything else in\na save: an undo returns units to wherever THAT mark took them from, a fact\nabout the record rather than the breakdown, so the ladder steps must read the\nbreakdown the undos leave.\n\nRead off the table rather than listed, so the P2b rows joined without an edit\nhere; the name predates them.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -8433,7 +8433,7 @@
         {
           "kind": "interface",
           "name": "Order",
-          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: typeLiteral;\n  crms_id: number | null;\n  crms_status?: string;\n  subject: string;\n  reference: string | null;\n  xero_id: string | null;\n  uid_thread: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  updated_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Order {\n  uid: string;\n  number: number;\n  status: OrderStatusType;\n  organization: DocumentOrganizationSnapshotType;\n  destinations: DocDestinationType[];\n  items: OrderDocItemType[];\n  tax_exempt?: boolean | null;\n  uid_store?: string | null;\n  totals: OrderDocTotalsType;\n  invoices: Array<typeLiteral>;\n  query_by_invoices: string[];\n  query_by_items: string[];\n  query_by_contacts: string[];\n  query_by_dates: string[];\n  bookings_breakdown: BookingBreakdown;\n  crms_id: number | null;\n  crms_status?: string;\n  subject: string;\n  reference: string | null;\n  xero_id: string | null;\n  uid_thread: string;\n  version: number;\n  created_by?: ActorRefType | null;\n  updated_by?: ActorRefType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full order document schema (Firestore document shape).\nUsed for validation before writing to Firestore."
         },
         {
@@ -9685,7 +9685,7 @@
     },
     {
       "entrypoint": "@cfs/core/schemas/transaction",
-      "moduleDoc": "Movement document schema — Firestore collection: `transactions`\n\nAn append-only journal of inventory movement. Every event is **one subject**\n(a booking for custody events, a product for ownership events) plus a set of\nsigned lines, grouped with its siblings by a client-minted `uuid_session`.\n\nThe collection keeps its name — the journal was migrated in place — but the\ndocument is a `Movement`, not the old current-state `Transaction`.\n\n## Four axes\n\nEach answers an independent question about the same physical unit:\n\n| Axis       | Question                              | Lands on                                  |\n|------------|---------------------------------------|-------------------------------------------|\n| `custody`  | How far through this order is it?     | `booking.breakdown` — the seven keys      |\n| `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |\n| `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |\n| `service`  | Is it out of service, and why?        | `out_of_service_breakdown`; per-shelf OOS |\n\n`service` is the newest and the only optional one: movements written before\nit existed carry no key, and read as \"no service change\" — see\n{@link MovementServiceType}.\n\n`cost` is **cost only, never revenue** — customer-facing money lives in Xero;\nthe only money here is inventory's carrying value.\n\n`custody` and `lines` are correlated but not derivable from each other:\ncustody implies the *kind* of place a unit is in ({@link CUSTODY_PLACE_KINDS})\nbut not *which* location, because where a returning unit goes back to is an\noperator's choice.\n\n## Conservation is structural, not checked\n\nA line's contribution to `quantity_held` is\n`(location.to ? +q : 0) + (location.from ? −q : 0)` — no cross-line\nsummation. `{from: null, to: L3}` reads \"entered ownership at L3\";\n`{from: L3, to: null}` reads \"left ownership from L3\"; both non-null is a\nmove that leaves ownership untouched. A half-move is inexpressible.\n\n`lines: []` means **nothing physically moved** — today only a `prep`, where\nreserved and prepped units sit on the same shelf. ⚠️ It *reads* like the shape\nfor a cost-only adjustment too, and that is the trap: no contract pairs\n`lines: []` with a cost, and `applyMovementToLedger` would fold one to nothing\nif one did. See the depreciation note on {@link MOVEMENT_TYPES} (core#75).",
+      "moduleDoc": "Movement document schema — Firestore collection: `transactions`\n\nAn append-only journal of inventory movement. Every event is **one subject**\n(a booking for custody events, a product for ownership events) plus a set of\nsigned lines, grouped with its siblings by a client-minted `uuid_session`.\n\nThe collection keeps its name — the journal was migrated in place — but the\ndocument is a `Movement`, not the old current-state `Transaction`.\n\n## Four axes\n\nEach answers an independent question about the same physical unit:\n\n| Axis       | Question                              | Lands on                                  |\n|------------|---------------------------------------|-------------------------------------------|\n| `custody`  | How far through this order is it?     | `booking.breakdown` — `BOOKING_BREAKDOWN_KEYS` |\n| `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |\n| `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |\n| `service`  | Is it out of service, and why?        | `out_of_service_breakdown`; per-shelf OOS |\n\n`service` is the newest and the only optional one: movements written before\nit existed carry no key, and read as \"no service change\" — see\n{@link MovementServiceType}.\n\n`cost` is **cost only, never revenue** — customer-facing money lives in Xero;\nthe only money here is inventory's carrying value.\n\n`custody` and `lines` are correlated but not derivable from each other:\ncustody implies the *kind* of place a unit is in ({@link CUSTODY_PLACE_KINDS})\nbut not *which* location, because where a returning unit goes back to is an\noperator's choice.\n\n## Conservation is structural, not checked\n\nA line's contribution to `quantity_held` is\n`(location.to ? +q : 0) + (location.from ? −q : 0)` — no cross-line\nsummation. `{from: null, to: L3}` reads \"entered ownership at L3\";\n`{from: L3, to: null}` reads \"left ownership from L3\"; both non-null is a\nmove that leaves ownership untouched. A half-move is inexpressible.\n\n`lines: []` means **nothing physically moved** — today only a `prep`, where\nreserved and prepped units sit on the same shelf. ⚠️ It *reads* like the shape\nfor a cost-only adjustment too, and that is the trap: no contract pairs\n`lines: []` with a cost, and `applyMovementToLedger` would fold one to nothing\nif one did. See the depreciation note on {@link MOVEMENT_TYPES} (core#75).",
       "symbols": [
         {
           "kind": "variable",
@@ -9726,7 +9726,7 @@
         {
           "kind": "variable",
           "name": "MOVEMENT_TYPES",
-          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"sale\" | \"sale_return\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\"[];",
+          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"sale\" | \"sale_return\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\"[];",
           "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    🔴 **The movement shape does NOT already exist.** This note claimed it\n    did — *\"`lines: []` + a negative `cost`, the same shape a late\n    landed-cost adjustment uses\"* — and that was wrong in three independent\n    ways, each measured (core#75):\n      1. **No contract permits it.** `places: null` means \"lines must be\n         empty\", and the only entry carrying it is `prep`, whose `cost` is\n         `forbidden`. Every cost-bearing type has `places` set, and\n         `checkMovementContract` then requires at least one line — so\n         `MovementSchema` rejects `lines: []` beside a cost on **every**\n         {@link MOVEMENT_TYPES} member. `places: null` + `cost: \"required\"`\n         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.\n      2. **The fold would ignore it anyway.** `applyMovementToLedger`\n         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside\n         `delta > 0` / `delta < 0`, where `delta` is\n         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at\n         0; the same cost on one `+10` line moves it to 50000.\n      3. **And it could not reach Xero.** `xeroPostingFor`\n         (`utils/movements.ts`) terminals a cost-bearing movement whose lines\n         net to zero as `no_ownership_direction`, deliberately, because a\n         document like that is malformed today.\n    So a cost-only event needs all three gates opened, in one change: a\n    contract entry pairing `places: null` with `cost: \"required\"`, a\n    `delta === 0` arm in the fold — which owes its own decision about\n    `average_unit_cost`, since the basis moves while the quantity does not —\n    and a posting decision that is not derived from an ownership direction\n    there is none of.\n    The \"late landed-cost adjustment\" cited as precedent is not writable\n    today either, by the same mechanism. (1) and (2) are pinned in\n    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the\n    day someone mints the contract entry is the day a pin goes red rather\n    than the day the ledger silently stops moving.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
         },
         {
@@ -11841,26 +11841,26 @@
         {
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_KEYS",
-          "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\"[];",
-          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports them, so existing importers are unaffected."
+          "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "Every key of the booking custody breakdown, in lifecycle order (which is NOT\nthe schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports them, so existing importers are unaffected."
         },
         {
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_LABELS",
           "declaration": "const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string>;",
-          "doc": "Display label per breakdown bucket — the ONE declaration, read both by the\n`.meta({ column: true, label })` annotations below (which drive every\ncollection-table heading) and by the warehouse picker's column headers.\n\n⚠️ **It is declared as a table rather than inline on each `.meta()` because\nthe picker had its own copy.** The now-deleted\n`manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`\nrestating all seven — which is exactly the drift the repo's *\"columns are\ndeclared, not generated\"* rule exists to stop, and the two had diverged on\n`out`: the copy said \"Out\" and this declaration said \"Checked Out\".\n\n⭐ **The copy's word is now the canonical one — owner's call, 2026-09-09 — so\nthe drift is resolved the other way round from how it was first resolved.**\n\"Checked Out\" was kept because it pairs with `FULFILLMENT_STAGE_LABELS`, where\nevery state here reads as the past participle of an action there (`prep` →\n`Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer\nfollows that pattern, and that is the cost of the change rather than an\noversight: it is the longest heading on an eleven-column pick sheet, where the\nshorter word buys real width and \"Out\" reads as a state on its own.\n\n⚠️ **What does NOT change is that there is one declaration.** The lesson of\nthe deleted copy was never which word to use — it was that two places spelling\nit is how they diverge. `tests/fulfillment-stage.test.ts` pins this string, so\na reappearing copy still goes red.\n\n⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could\nread these back off the schema, but `BookingBreakdownSchema` is annotated\n`z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the\nresult is typed `unknown`. A shared literal in the one file that owns the\ndeclaration is the same guarantee with none of that."
+          "doc": "Display label per breakdown bucket — the ONE declaration, read both by the\n`.meta({ column: true, label })` annotations below (which drive every\ncollection-table heading) and by the warehouse picker's column headers.\n\n⚠️ **It is declared as a table rather than inline on each `.meta()` because\nthe picker had its own copy.** The now-deleted\n`manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`\nrestating all seven — which is exactly the drift the repo's *\"columns are\ndeclared, not generated\"* rule exists to stop, and the two had diverged on\n`out`: the copy said \"Out\" and this declaration said \"Checked Out\".\n\n⭐ **The copy's word is now the canonical one — owner's call, 2026-09-09 — so\nthe drift is resolved the other way round from how it was first resolved.**\n\"Checked Out\" was kept because it pairs with `FULFILLMENT_STAGE_LABELS`, where\nevery state here reads as the past participle of an action there (`prep` →\n`Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer\nfollows that pattern, and that is the cost of the change rather than an\noversight: it is the longest heading on the pick sheet, where the shorter\nword buys real width and \"Out\" reads as a state on its own.\n\n⚠️ **What does NOT change is that there is one declaration.** The lesson of\nthe deleted copy was never which word to use — it was that two places spelling\nit is how they diverge. `tests/fulfillment-stage.test.ts` pins this string, so\na reappearing copy still goes red.\n\n⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could\nread these back off the schema, but `BookingBreakdownSchema` is annotated\n`z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the\nresult is typed `unknown`. A shared literal in the one file that owns the\ndeclaration is the same guarantee with none of that."
         },
         {
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_TERMINAL_KEYS",
-          "declaration": "const BOOKING_BREAKDOWN_TERMINAL_KEYS: \"returned\" | \"lost\" | \"damaged\"[];",
-          "doc": "Keys representing items that have reached a terminal state."
+          "declaration": "const BOOKING_BREAKDOWN_TERMINAL_KEYS: \"returned\" | \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "Keys representing units that have reached a terminal state: back, or out of\nservice with a reason. A booking is `complete` when these hold all its units."
         },
         {
           "kind": "variable",
           "name": "BookingBreakdownKeyEnum",
           "declaration": "const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType>;",
-          "doc": "Zod enum over the seven breakdown keys — the custody axis of a movement."
+          "doc": "Zod enum over the breakdown keys — the custody axis of a movement."
         },
         {
           "kind": "typeAlias",
@@ -11879,6 +11879,12 @@
           "name": "BookingCollectionPair",
           "declaration": "interface BookingCollectionPair {\n  delivery: typeLiteral;\n  collection: typeLiteral | null;\n}",
           "doc": "A destination pair as far as {@link bookingCollectionFor} reads it."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "FullBookingBreakdown",
+          "declaration": "type FullBookingBreakdown = Required<BookingBreakdown>;",
+          "doc": "A breakdown with every key stated — what arithmetic on one reads."
         },
         {
           "kind": "interface",
@@ -11910,17 +11916,33 @@
         },
         {
           "kind": "function",
+          "name": "breakdownQuantity",
+          "signature": "breakdownQuantity(b: Partial<BookingBreakdown>, key: BookingBreakdownKeyType): number",
+          "doc": "The units in one bucket. An absent key reads 0: `cleaning` and `maintenance`\nare optional until their backfill (`schemas/_breakdown.ts`), so a stored\nbreakdown may lack them.\n\n⭐ **Read a bucket through this, never `b.cleaning ?? 0` at the call site.**\nOne reader is what lets the keys' tightening delete the fallback in one place.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "calculateBookingBreakdown",
           "signature": "calculateBookingBreakdown(status: OrderStatusType, type: ComponentTypeType, quantity: number, existingBreakdown?: indexedAccess): indexedAccess",
-          "doc": "Project a booking's breakdown for a given **order** status, item type, and\ntotal quantity. Pure sync — no I/O.\n\n⚠️ `status` is an `OrderStatusType`, **not** a `BookingStatusType`. The two\nvocabularies overlap but are not the same set: an order can be `canceled`\n(a booking cannot) and a booking can be `part-prepped`/`prepped` (an order\ncannot). The projection is driven by the parent order, so a caller holding a\n`booking.status` must read through to the order rather than pass it here —\nthat mismatch is what the narrowing exists to make a compile error.\n\nStatus rules:\n  draft / canceled  → all zeros (cleared on cancel/draft)\n  quoted            → quoted = quantity − carry; preserves prepped/out/terminals\n  reserved / active → reserved = quantity − carry; preserves prepped/out/terminals\n  complete + rental → returned = quantity − (lost + damaged); zero everything else\n  complete + sale   → out = quantity; zero everything else\n  complete + service / surcharge → all zeros",
+          "doc": "Project a booking's breakdown for a given **order** status, item type, and\ntotal quantity. Pure sync — no I/O.\n\n⚠️ `status` is an `OrderStatusType`, **not** a `BookingStatusType`. The two\nvocabularies overlap but are not the same set: an order can be `canceled`\n(a booking cannot) and a booking can be `part-prepped`/`prepped` (an order\ncannot). The projection is driven by the parent order, so a caller holding a\n`booking.status` must read through to the order rather than pass it here —\nthat mismatch is what the narrowing exists to make a compile error.\n\nStatus rules:\n  draft / canceled  → all zeros (cleared on cancel/draft)\n  quoted            → quoted = quantity − carry; preserves prepped/out/terminals\n  reserved / active → reserved = quantity − carry; preserves prepped/out/terminals\n  complete + rental → keeps every out-of-service key; returned = quantity − their sum\n  complete + sale   → out = quantity; zero everything else\n  complete + service / surcharge → all zeros",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
           "name": "emptyBookingsBreakdown",
-          "signature": "emptyBookingsBreakdown(): indexedAccess",
-          "doc": "The empty breakdown shape — all seven keys at zero.\n\nUse as the seed for new orders and as the target shape for fresh bookings.\n\n```ts\nconst order = { ...orderInput, bookings_breakdown: emptyBookingsBreakdown() };\n```",
+          "signature": "emptyBookingsBreakdown(): FullBookingBreakdown",
+          "doc": "The empty breakdown shape — every key at zero.\n\nUse as the seed for new orders and as the target shape for fresh bookings.\n⚠️ It STATES `cleaning` and `maintenance`, so a writer seeding from it\nauthors both keys — which a reader on a core older than the keys' beta\nrefuses (`z.strictObject`). The api pins this only after the manager's\nreader release is in prod (custody-actions P2b step 2).\n\n```ts\nconst order = { ...orderInput, bookings_breakdown: emptyBookingsBreakdown() };\n```",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "fullBookingBreakdown",
+          "signature": "fullBookingBreakdown(b: Partial<BookingBreakdown>): FullBookingBreakdown",
+          "doc": "`b` with every key stated, an absent one as 0.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11936,7 +11958,7 @@
           "kind": "function",
           "name": "hasCustodyHistory",
           "signature": "hasCustodyHistory(b: Pick<Booking, \"breakdown\">): boolean",
-          "doc": "Whether custody ever moved on a booking: any of `prepped`, `out`, `returned`,\n`lost` or `damaged`. Such a booking is part of what happened, and an order\nedit must not delete it (api-cloudrun#1147, Q4); only a plan-only booking\n(`quoted`/`reserved`) goes with its line.\n\n⚠️ Deliberately wider than {@link liveCustody}: a booking is KEPT on history,\na fulfillment row on live custody, so a removed line whose units all came\nback keeps its booking and loses its row.",
+          "doc": "Whether custody ever moved on a booking: any of `prepped`, `out` or a terminal\nkey. Such a booking is part of what happened, and an order\nedit must not delete it (api-cloudrun#1147, Q4); only a plan-only booking\n(`quoted`/`reserved`) goes with its line.\n\n⚠️ Deliberately wider than {@link liveCustody}: a booking is KEPT on history,\na fulfillment row on live custody, so a removed line whose units all came\nback keeps its booking and loses its row.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11975,16 +11997,32 @@
         {
           "kind": "function",
           "name": "sumBookingBreakdown",
-          "signature": "sumBookingBreakdown(b: indexedAccess): number",
-          "doc": "Sum the seven values of a single booking's breakdown.\n\nThe booking-level invariant is `sumBookingBreakdown(booking.breakdown) === booking.quantity`.\nUse this to verify that a proposed breakdown change preserves the invariant\nbefore submitting it through `PUT /bookings/{uid}`.",
+          "signature": "sumBookingBreakdown(b: Partial<BookingBreakdown>): number",
+          "doc": "Sum every value of a single booking's breakdown.\n\nThe booking-level invariant is `sumBookingBreakdown(booking.breakdown) === booking.quantity`.\nUse this to verify that a proposed breakdown change preserves the invariant\nbefore submitting it through `PUT /bookings/{uid}`.",
           "paramTags": [],
           "returnsTag": null
         },
         {
           "kind": "function",
           "name": "sumBookingsBreakdown",
-          "signature": "sumBookingsBreakdown(bookings: Array<typeLiteral>): indexedAccess",
+          "signature": "sumBookingsBreakdown(bookings: ReadonlyArray<typeLiteral>): FullBookingBreakdown",
           "doc": "Sum a list of booking breakdowns into the order's roll-up shape.\n\nMirrors the per-status keys of a booking's own `breakdown` (which aggregates\nalong the *product* axis) but aggregated along the *order* axis. Used to\nseed `order.bookings_breakdown` at create/update time and to recompute it\nclient-side from cached bookings when the order doc isn't authoritative\nyet.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "sumBreakdownKeys",
+          "signature": "sumBreakdownKeys(b: Partial<BookingBreakdown>, keys: readonly BookingBreakdownKeyType[]): number",
+          "doc": "Σ of the named buckets — **the ONE place a breakdown is summed.**\n\n🔴 A sum spelled key by key (`b.returned + b.lost + b.damaged`) compiled\nstraight through the arrival of `cleaning` and `maintenance` and stopped\ncounting them, in about a dozen places across three repos. Name the KEYS,\nfrom `BOOKING_BREAKDOWN_KEYS` / `BOOKING_BREAKDOWN_TERMINAL_KEYS` where one\nfits, and let this add them. `tests/breakdown-sums.test.ts` refuses a\nnamed-key sum anywhere else in `src/`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "terminalQuantity",
+          "signature": "terminalQuantity(b: Partial<BookingBreakdown>): number",
+          "doc": "Units that reached a terminal key: back, or out of service with a reason.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -11995,9 +12033,15 @@
       "moduleDoc": "The custody ruleset, applied: what a booking may do next, what a list of\nactions does to it, and how an absolute breakdown delta decomposes into the\nsame actions.\n\nThe table itself is `CUSTODY_RULES` in `schemas/custody.ts` (the wire\nvalidates against it, and schemas never import utils). Everything here is\npure and platform-free: the manager's optimistic update and the api's apply\nare the same {@link applyCustodyActions}.\n\n## Stays server-only, deliberately\n\nShelf allocation, the undo origin (read off the consumed record's mark\nmovement), write-off cost, idempotency and `checkMovementService` all need\nFirestore state or the journal. This module decides WHICH step is legal and\nWHAT the booking reads afterwards; the api decides where the units go.\n\n## Kept apart on purpose\n\n`getStageForBookings`, `qtyOnStageSide` and `custodyMovedQuantity`\n(`utils/fulfillment-stage.ts`) answer rendering and freeze questions, not\nlegality ones, and must not be folded in here.",
       "symbols": [
         {
+          "kind": "variable",
+          "name": "CUSTODY_LOSS_KEYS",
+          "declaration": "const CUSTODY_LOSS_KEYS: readonly CustodyLossKey[];",
+          "doc": "Every {@link CustodyLossKey}, in breakdown order."
+        },
+        {
           "kind": "interface",
           "name": "CustodyApplication",
-          "declaration": "interface CustodyApplication {\n  breakdown: BookingBreakdown;\n  status: indexedAccess;\n  transitions: CustodyTransition[];\n}",
+          "declaration": "interface CustodyApplication {\n  breakdown: FullBookingBreakdown;\n  status: indexedAccess;\n  transitions: CustodyTransition[];\n}",
           "doc": "What a list of actions does to a booking."
         },
         {
@@ -12019,21 +12063,27 @@
           "doc": "What a breakdown delta is, in rules."
         },
         {
+          "kind": "typeAlias",
+          "name": "CustodyLossKey",
+          "declaration": "type CustodyLossKey = \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\";",
+          "doc": "The breakdown keys a mark puts units in, and an undo takes them out of."
+        },
+        {
           "kind": "interface",
           "name": "CustodyLossUndo",
-          "declaration": "interface CustodyLossUndo {\n  reason: \"lost\" | \"damaged\";\n  origin: BookingBreakdownKeyType;\n  quantity: number;\n}",
-          "doc": "A loss key a delta may lower, and where its mark took the units from."
+          "declaration": "interface CustodyLossUndo {\n  reason: CustodyLossKey;\n  origin: BookingBreakdownKeyType;\n  quantity: number;\n}",
+          "doc": "An out-of-service key a delta may lower, and where its mark took the units from."
         },
         {
           "kind": "interface",
           "name": "CustodyOffer",
           "declaration": "interface CustodyOffer {\n  key: string;\n  rule: CustodyRuleId;\n  reason?: CustodyFlagReasonType;\n  max: number;\n  natural: boolean;\n  direction: indexedAccess;\n  stage: indexedAccess;\n}",
-          "doc": "One action the UI may offer on a booking row.\n\n`key` is what a menu de-duplicates on — the rule id, plus the reason for the\ntwo `flag_returned` offers. Expand an offer into the actions to send with\n{@link expandCustodyOffer}; a `check_out` over reserved units is two steps."
+          "doc": "One action the UI may offer on a booking row.\n\n`key` is what a menu de-duplicates on — the rule id. (It carried a reason for\nR2's two `flag_returned` offers, which are no longer made.) Expand an offer into the actions to send with\n{@link expandCustodyOffer}; a `check_out` over reserved units is two steps."
         },
         {
           "kind": "interface",
           "name": "CustodyOfferContext",
-          "declaration": "interface CustodyOfferContext {\n  canPrepCheckout: boolean;\n  unflaggedReturned?: number;\n  undoable?: Partial<Record<\"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_lost_returned_undo\" | \"flag_damaged_returned_undo\", number>>;\n}",
+          "declaration": "interface CustodyOfferContext {\n  canPrepCheckout: boolean;\n  unflaggedReturned?: number;\n  undoable?: Partial<Record<CustodyRuleId, number>>;\n}",
           "doc": "What an offer list needs that the booking alone does not carry."
         },
         {
@@ -12106,7 +12156,7 @@
           "kind": "function",
           "name": "custodyActionsFor",
           "signature": "custodyActionsFor(booking: CustodyBooking, ctx: CustodyOfferContext): CustodyOffer[]",
-          "doc": "Every action the UI may offer on this booking, natural next first, then\nforward in ladder order, then undos.\n\nReplaces `actionAlternatesForBooking`, `regressionAlternatesForBooking`,\n`sourceBucketSizeForBooking` and `actionableQtyTowardTarget`. Two behaviours\nchange, both by owner ruling (2026-09-29):\n\n- **No pre-departure loss.** `reserved`/`prepped` units are never offered\n  Lost or Damaged (gap G1). The fulfillment offers `unprep` plus a shelf\n  out-of-service record instead.\n- **Returned units get their own losses and flags** (gap G5): Lost, Damaged,\n  Flag Cleaning and Flag Maintenance off `returned`, so `‹ Out` is no longer\n  the only way to reach them.",
+          "doc": "Every action the UI may offer on this booking, natural next first, then\nforward in ladder order, then undos.\n\nReplaces `actionAlternatesForBooking`, `regressionAlternatesForBooking`,\n`sourceBucketSizeForBooking` and `actionableQtyTowardTarget`. Two behaviours\nchange, both by owner ruling (2026-09-29):\n\n- **No pre-departure loss.** `reserved`/`prepped` units are never offered\n  Lost or Damaged (gap G1). The fulfillment offers `unprep` plus a shelf\n  out-of-service record instead.\n- **Returned units get their own losses and flags** (gap G5): Lost, Damaged,\n  Cleaning and Maintenance off `returned`, so `‹ Out` is no longer the only\n  way to reach them. Since P2b those are the `flag_*_returned` rows, and the\n  deprecated `flag_returned` is never offered.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12114,7 +12164,7 @@
           "kind": "function",
           "name": "custodyRuleForMovement",
           "signature": "custodyRuleForMovement(type: MovementTypeType, custody: typeLiteral | null, service: typeLiteral | null | undefined, bookingType: \"rental\" | \"sale\"): CustodyRule | null",
-          "doc": "The rule a STORED movement's `(type, custody, service)` is an instance of, or\n`null` — the population assertion's lookup (`audit-custody-rules` in the api\nreplays every stored custody movement through it).\n\nA flag's reason side reads as `reason` when it is cleaning or maintenance.",
+          "doc": "The rule a STORED movement's `(type, custody, service)` is an instance of, or\n`null` — the population assertion's lookup (`audit-custody-rules` in the api\nreplays every stored custody movement through it).\n\nA row's `reason` side (the deprecated R2 rows) matches cleaning or\nmaintenance; every other side matches itself.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12122,7 +12172,7 @@
           "kind": "function",
           "name": "decomposeCustodyDelta",
           "signature": "decomposeCustodyDelta(prev: BookingBreakdown, next: BookingBreakdown, bookingType: indexedAccess, _: unknown): CustodyDecomposition",
-          "doc": "The rules an ABSOLUTE breakdown change represents — the successor to the\napi's `deriveCustodyTransitions` / `deriveWithLossUndos`, for repair scripts,\nthe parity sweeps and the transition window while the delta wire is still\naccepted.\n\n`undos` are the loss marks the caller is undoing, with the origin read off\neach consumed record. They apply first, and the ladder then decomposes the\nbreakdown in between. A fall of `lost`/`damaged` with no undo for it is\nresidue: the pure delta cannot say where the units go back to.\n\n## Pairing order, carried over unchanged\n\nRises are paired in order of how CONSTRAINED they are, not by direction:\n`reserved` can only be fed by `prepped`, so that pairing is resolved first,\nand only then the contested `prepped`/`out` rises. Take\n`{returned: 2, prepped: 2}` → `{out: 2, reserved: 2}`: forward-first pairs\n`prepped → out` and strands `returned → reserved`, while the forced reading\nis `unprep` + `check_in_undo`.\n\nA forward multi-hop (`reserved → out`) is `[prep, check_out]` with the\nimplicit prep counted once; a rewind is matched at every depth\n(`returned → reserved` is `check_in_undo`, `check_out_undo`, `unprep`).\n\n⚠️ **What stays residue is a DECISION, not a gap in this function.**\n`prepped → returned` is a forward multi-hop past `out`, which would record\nunits going out and coming back that nobody saw (api-cloudrun#1053); a\npre-departure key into `lost`/`damaged` has no row at all (gap G1); and a sale\nrewind is refused (api-cloudrun#1054). A service or surcharge booking holds no\nstock, so its delta is always matched with no steps.",
+          "doc": "The rules an ABSOLUTE breakdown change represents — the successor to the\napi's `deriveCustodyTransitions` / `deriveWithLossUndos`, for repair scripts,\nthe parity sweeps and the transition window while the delta wire is still\naccepted.\n\n`undos` are the loss marks the caller is undoing, with the origin read off\neach consumed record. They apply first, and the ladder then decomposes the\nbreakdown in between. A fall of `lost`/`damaged` with no undo for it is\nresidue: the pure delta cannot say where the units go back to.\n\n## Pairing order, carried over unchanged\n\nRises are paired in order of how CONSTRAINED they are, not by direction:\n`reserved` can only be fed by `prepped`, so that pairing is resolved first,\nand only then the contested `prepped`/`out` rises. Take\n`{returned: 2, prepped: 2}` → `{out: 2, reserved: 2}`: forward-first pairs\n`prepped → out` and strands `returned → reserved`, while the forced reading\nis `unprep` + `check_in_undo`.\n\nA forward multi-hop (`reserved → out`) is `[prep, check_out]` with the\nimplicit prep counted once; a rewind is matched at every depth\n(`returned → reserved` is `check_in_undo`, `check_out_undo`, `unprep`).\n\n⚠️ **What stays residue is a DECISION, not a gap in this function.**\n`prepped → returned` is a forward multi-hop past `out`, which would record\nunits going out and coming back that nobody saw (api-cloudrun#1053); a\npre-departure key into `lost`/`damaged` has no row at all (gap G1); a sale\nrewind is refused (api-cloudrun#1054); and a sale never takes `cleaning` or\n`maintenance` (P2b ruling 4). A service or surcharge booking holds no\nstock, so its delta is always matched with no steps.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12130,7 +12180,7 @@
           "kind": "function",
           "name": "deriveCustodyStatus",
           "signature": "deriveCustodyStatus(breakdown: BookingBreakdown, quantity: number, current: indexedAccess): indexedAccess",
-          "doc": "A booking's status, read off its breakdown. ONE rule for every custody\nwrite; the manager had two (a forward one and a regression one), and this is\nthe regression one, because it is a function of the state alone.\n\n| breakdown                        | status          |\n|----------------------------------|-----------------|\n| returned + lost + damaged = qty  | `complete`      |\n| out > 0                          | `active`        |\n| prepped = qty                    | `prepped`       |\n| prepped > 0 and reserved > 0     | `part-prepped`  |\n| reserved = qty                   | `reserved`      |\n| anything else                    | unchanged       |\n\n⚠️ A sale fully `out` reads `active`, not `complete`, exactly as the manager's\ncheck-out has always sent it. Whether a sale's `out` closes the booking is\n`isBookingClosed`'s question (`utils/bookings.ts`), and it answers per order,\nat finalize.",
+          "doc": "A booking's status, read off its breakdown. ONE rule for every custody\nwrite; the manager had two (a forward one and a regression one), and this is\nthe regression one, because it is a function of the state alone.\n\n| breakdown                        | status          |\n|----------------------------------|-----------------|\n| every terminal key sums to qty   | `complete`      |\n| out > 0                          | `active`        |\n| prepped = qty                    | `prepped`       |\n| prepped > 0 and reserved > 0     | `part-prepped`  |\n| reserved = qty                   | `reserved`      |\n| anything else                    | unchanged       |\n\n⚠️ A sale fully `out` reads `active`, not `complete`, exactly as the manager's\ncheck-out has always sent it. Whether a sale's `out` closes the booking is\n`isBookingClosed`'s question (`utils/bookings.ts`), and it answers per order,\nat finalize.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12237,7 +12287,7 @@
           "kind": "function",
           "name": "computeCardStatusFromBookings",
           "signature": "computeCardStatusFromBookings(side: CardSide, siblings: CardSiblingBooking[], current: CardStatus): CardStatus",
-          "doc": "Recompute an event card's `status` from its sibling bookings on the\ndestination it belongs to. Pure function — no Firestore reads.\n\nPreserves manual overrides and the one source-driven status:\n- `\"blocked\"` — manually set on the card; sticks until either the parent\n  order transitions to canceled (handled in update-order) or a future\n  \"Clear block\" affordance writes a new auto value through the same path.\n- `\"canceled\"` — terminal; sourced from order.status only.\n- `\"draft\"` — a QUOTED order's card (the api-cloudrun\n  cards-from-fulfillments plan). A quote's bookings sit at\n  `quoted`, so the start roll-up would read them as `planned` and promote a\n  quote's card into the work queue. The writer leaves `draft` when the order\n  leaves `quoted`, and the roll-up takes over from there.\n\nOtherwise, applies per-side roll-up rules:\n\n**Start card (delivery)** — the leg's bookings:\n  - `pre_delivery = Σ (quoted + reserved + prepped)` — still in the warehouse.\n  - `out          = Σ breakdown.out` — delivery in flight.\n  - if `pre_delivery === 0`            → `complete` (everything has at least left)\n  - else if `out > 0`                  → `active`   (delivery in progress)\n  - else                                → `planned`  (nothing has moved yet)\n\n  Known limitation: `pre_delivery === 0 → complete` would read `complete` for\n  a hypothetical phased order where every unit has *at least* left the\n  warehouse but some legs are still mid-cycle. No live incidence today;\n  tracked as a low-priority follow-up, not a code change.\n\n**End card (collection)** — the leg's bookings, filtered to **rentals only** (`b.type === \"rental\"`). Only a rental has a\n  collection event — checked out (`breakdown.out > 0`) and later returned —\n  so only a rental can drive the card to `complete`. Sale, service, and\n  surcharge lines are all excluded:\n  - a kept **sale** sits permanently at `out = quantity` (a sale is only\n    rarely returned, and then via the fulfillment flow, never via the card);\n  - **service** / **surcharge** lines have no return event at all, so their\n    `breakdown.out` is always 0 and they never reach a terminal\n    `returned`/`lost`/`damaged` count.\n  Counting any of their `quantity` toward `total` would leave\n  `terminal < total` forever and pin the end card `active` after the rentals\n  are all back.\n  - `terminal  = Σ (returned + lost + damaged)`\n  - `total     = Σ booking.quantity`\n  - `still_out = Σ breakdown.out`\n  - if `terminal === total`              → `complete` (everything collected/written-off)\n  - else if `terminal > 0 || still_out > 0` → `active`   (collection in progress)\n  - else                                  → `planned`  (nothing has come back yet)\n\nIf the end-side roll-up has no rental siblings (e.g. a sale/service-only\ndestination), the card resolves to `complete` — there is nothing to collect.",
+          "doc": "Recompute an event card's `status` from its sibling bookings on the\ndestination it belongs to. Pure function — no Firestore reads.\n\nPreserves manual overrides and the one source-driven status:\n- `\"blocked\"` — manually set on the card; sticks until either the parent\n  order transitions to canceled (handled in update-order) or a future\n  \"Clear block\" affordance writes a new auto value through the same path.\n- `\"canceled\"` — terminal; sourced from order.status only.\n- `\"draft\"` — a QUOTED order's card (the api-cloudrun\n  cards-from-fulfillments plan). A quote's bookings sit at\n  `quoted`, so the start roll-up would read them as `planned` and promote a\n  quote's card into the work queue. The writer leaves `draft` when the order\n  leaves `quoted`, and the roll-up takes over from there.\n\nOtherwise, applies per-side roll-up rules:\n\n**Start card (delivery)** — the leg's bookings:\n  - `pre_delivery = Σ (quoted + reserved + prepped)` — still in the warehouse.\n  - `out          = Σ breakdown.out` — delivery in flight.\n  - if `pre_delivery === 0`            → `complete` (everything has at least left)\n  - else if `out > 0`                  → `active`   (delivery in progress)\n  - else                                → `planned`  (nothing has moved yet)\n\n  Known limitation: `pre_delivery === 0 → complete` would read `complete` for\n  a hypothetical phased order where every unit has *at least* left the\n  warehouse but some legs are still mid-cycle. No live incidence today;\n  tracked as a low-priority follow-up, not a code change.\n\n**End card (collection)** — the leg's bookings, filtered to **rentals only** (`b.type === \"rental\"`). Only a rental has a\n  collection event — checked out (`breakdown.out > 0`) and later returned —\n  so only a rental can drive the card to `complete`. Sale, service, and\n  surcharge lines are all excluded:\n  - a kept **sale** sits permanently at `out = quantity` (a sale is only\n    rarely returned, and then via the fulfillment flow, never via the card);\n  - **service** / **surcharge** lines have no return event at all, so their\n    `breakdown.out` is always 0 and they never reach a terminal\n    terminal-key (`BOOKING_BREAKDOWN_TERMINAL_KEYS`) counts.\n  Counting any of their `quantity` toward `total` would leave\n  `terminal < total` forever and pin the end card `active` after the rentals\n  are all back.\n  - `terminal  = Σ terminalQuantity(breakdown)` (returned, lost, damaged, cleaning, maintenance)\n  - `total     = Σ booking.quantity`\n  - `still_out = Σ breakdown.out`\n  - if `terminal === total`              → `complete` (everything collected/written-off)\n  - else if `terminal > 0 || still_out > 0` → `active`   (collection in progress)\n  - else                                  → `planned`  (nothing has come back yet)\n\nIf the end-side roll-up has no rental siblings (e.g. a sale/service-only\ndestination), the card resolves to `complete` — there is nothing to collect.",
           "paramTags": [
             {
               "name": "side",
@@ -14467,8 +14517,8 @@
         {
           "kind": "interface",
           "name": "FulfillmentRegressionAlternate",
-          "declaration": "interface FulfillmentRegressionAlternate {\n  kind: \"regression\";\n  fromBucket: \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\";\n  toBucket: \"reserved\" | \"prepped\" | \"out\";\n  label: string;\n}",
-          "doc": "Regression alternate — moves qty one step back from a later bucket.\nUsed by target-side \"current state\" rows to undo over-eager transitions\n(e.g. accidentally checked out, or marked returned in error).\n\nBucket flow (one step back, terminals reversible):\n  returned/lost/damaged → out\n  out                   → prepped\n  prepped               → reserved"
+          "declaration": "interface FulfillmentRegressionAlternate {\n  kind: \"regression\";\n  fromBucket: \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\";\n  toBucket: \"reserved\" | \"prepped\" | \"out\";\n  label: string;\n}",
+          "doc": "Regression alternate — moves qty one step back from a later bucket.\nUsed by target-side \"current state\" rows to undo over-eager transitions\n(e.g. accidentally checked out, or marked returned in error).\n\nBucket flow (one step back, terminals reversible):\n  returned/lost/damaged/cleaning/maintenance → out\n  out                   → prepped\n  prepped               → reserved"
         },
         {
           "kind": "typeAlias",
@@ -15368,7 +15418,7 @@
           "kind": "function",
           "name": "endpointServiceReason",
           "signature": "endpointServiceReason(movement: Pick<Movement, \"custody\" | \"service\">, side: \"from\" | \"to\", kind: \"locations\" | \"out-of-service\", fallback: keyof indexedAccess | null): keyof indexedAccess | null",
-          "doc": "The out-of-service reason a line endpoint's units carry on one side of a\nmovement, or `null` for \"in service there\".\n\n⭐ **With a `service` axis the axis answers, whatever the place.** At an\nout-of-service record it is the bucket the units are counted under while\nthey stand there; at a shelf it is the flag they carry on it; at a booking or\noutside ownership `checkMovementContract` rule 4 has already refused\nanything but `null`.\n\n**Without one — every movement written before the axis — the two legacy\ncarriers answer, one per place kind:**\n- at a record: `fallback`, the RECORD's reason, which only the caller can\n  read (a `mark_lost`'s `lost`, a record-driven write-off's `oos.reason`);\n- at a shelf: `custody.to/from === \"damaged\"` — a `mark_damaged` lands its\n  unit on a shelf, flagged, and its undo takes the flag back off.\n\n🔴 **The legacy carriers are disjoint by place kind, and that is what keeps\nthe 8 pre-model `mark_damaged` rows counted ONCE.** Those rows are\n`bookings → out-of-service` with `custody.to === \"damaged\"` (measured\n2026-09-19, 4 prod + 4 dev). They name no shelf, so the custody carrier never\nfires for them and the record carrier counts them, exactly as it did when\nthey were written. The old two-term fold needed an explicit guard for this;\nkeying on the endpoint's place kind makes it structural.",
+          "doc": "The out-of-service reason a line endpoint's units carry on one side of a\nmovement, or `null` for \"in service there\".\n\n⭐ **With a `service` axis the axis answers, whatever the place.** At an\nout-of-service record it is the bucket the units are counted under while\nthey stand there; at a shelf it is the flag they carry on it; at a booking or\noutside ownership `checkMovementContract` rule 4 has already refused\nanything but `null`.\n\n**Without one — every movement written before the axis — the two legacy\ncarriers answer, one per place kind:**\n- at a record: `fallback`, the RECORD's reason, which only the caller can\n  read (a `mark_lost`'s `lost`, a record-driven write-off's `oos.reason`);\n- at a shelf: a custody key of `damaged`, `cleaning` or `maintenance` — a\n  `mark_damaged` (or, since P2b, `mark_cleaning` / `mark_maintenance`) lands\n  its unit on a shelf, flagged, and its undo takes the flag back off. Those\n  types forbid `service`, so the custody key is their ONLY carrier.\n\n🔴 **The legacy carriers are disjoint by place kind, and that is what keeps\nthe 8 pre-model `mark_damaged` rows counted ONCE.** Those rows are\n`bookings → out-of-service` with `custody.to === \"damaged\"` (measured\n2026-09-19, 4 prod + 4 dev). They name no shelf, so the custody carrier never\nfires for them and the record carrier counts them, exactly as it did when\nthey were written. The old two-term fold needed an explicit guard for this;\nkeying on the endpoint's place kind makes it structural.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -17065,19 +17115,19 @@
     },
     {
       "entrypoint": "@cfs/core/utils/pickSheets",
-      "moduleDoc": "Pure helpers over a PICK SHEET — the document a multi-order packing list\nrenders.\n\n```ts\nimport { buildPackingList } from \"@cfs/core/utils/pickSheets\";\n```\n\nA pick sheet is every open line at one destination, or with one organization,\n**across orders** (`schemas/pick-sheet.ts`). This namespace is what\n`it.pickSheets` resolves to for a `pick-sheets`-sourced template.\n\n⚠️ **This entrypoint is camelCase where every sibling is kebab, and it is\nforced rather than a style choice.** The generated helper catalogue keys on\nthe entrypoint BASENAME, while injection keys on the\n{@link TEMPLATE_COLLECTION_UTILS} value, which must be a valid `it.<ns>`\nidentifier. Those two coincide for every existing namespace only because none\nwas ever multi-word — `movement-sessions` maps to the single word `sessions`.\n`pick-sheets` is the first that is, and `it.pick-sheets` does not parse, so a\nkebab entrypoint would satisfy one guard and fail the other. Renaming the\nFILE is what keeps both true with no third mapping to drift.\n\n## Why this namespace exists\n\nA template's `it.*` namespaces are resolved from its collections\n(`availableUtilNamespaces`), so a pick-sheets-sourced family gets\n`it.pickSheets` and **no `it.orders`**. Without this module it would get no\ndocument helpers at all.\n\n⚠️ **Re-exports, never reimplementations** — the same rule\n`utils/fulfillments.ts` states. Mapping `pick-sheets` to the string\n`\"orders\"` in `TEMPLATE_COLLECTION_UTILS` would put `it.orders` on a document\nthat is not an order, and a hand-written copy would drift;\n`tests/template-helpers.test.ts` asserts these are the SAME function objects\nas the orders bindings, so a copy fails rather than diverges.\n\n## What is deliberately NOT here\n\n⭐ **No \"units for this line\" helper, because that question's obvious answer\nis N× wrong.** {@link PickSheetItem.uid_booking} legitimately repeats across\nlines — a booking is aggregate per `(order, product, destination)`, so a\npriced principal beside its zero-priced accessories, a `splitItem`, or a\nproduct appearing both standalone and as a kit component all name the same\nbooking. Summing it per line overstates the leg.\n\nFor a leg's own totals a template never needs to ask at all:\n{@link PickSheetDestination.quantity} is that leg's total and\n{@link PickSheetDestination.breakdown} its seven buckets, both computed once in\nthe fold over the whole membership slice. Read the section total; do not\nre-derive it.\n\n⭐ **What IS here is {@link pickSheetLineBooking}, and it is the same rule\nrather than an exception to it.** A packing list with a state column per\nbucket needs per-ROW numbers, which the section totals cannot supply — so the\nfold designates one owner occurrence per booking\n({@link PickSheetItem.owner_path}) and this helper hands back a booking only\nfor that row. Every other occurrence gets `null`. The arithmetic with a wrong\nobvious form is not offered more safely; it is made unrepresentable, because a\nnon-owner has nothing to sum.\n\n## 🔴 The hazard a caller must handle — this document is PAGED\n\n{@link PickSheet.orders} is *the orders on THIS PAGE*; `order_count`,\n`destination_count`, `quantity` and `organizations` describe the whole SCOPE.\nThat split is right for a screen and is a trap for a printed document: a\npacking list rendered from a default page is **silently short**, showing a\npage of orders under a scope-wide total that disagrees with them.\n\n⚠️ **So a render caller must assemble every page before it renders, and must\nnot paper over it by rendering the counts alone.** Nothing in this namespace\ncan enforce that — by the time a template runs, a short document is\nindistinguishable from a small one. It belongs to whatever builds the `doc`,\nwhich is the same place `PickSheet.missing_order_uids` has to be surfaced\nrather than dropped.",
+      "moduleDoc": "Pure helpers over a PICK SHEET — the document a multi-order packing list\nrenders.\n\n```ts\nimport { buildPackingList } from \"@cfs/core/utils/pickSheets\";\n```\n\nA pick sheet is every open line at one destination, or with one organization,\n**across orders** (`schemas/pick-sheet.ts`). This namespace is what\n`it.pickSheets` resolves to for a `pick-sheets`-sourced template.\n\n⚠️ **This entrypoint is camelCase where every sibling is kebab, and it is\nforced rather than a style choice.** The generated helper catalogue keys on\nthe entrypoint BASENAME, while injection keys on the\n{@link TEMPLATE_COLLECTION_UTILS} value, which must be a valid `it.<ns>`\nidentifier. Those two coincide for every existing namespace only because none\nwas ever multi-word — `movement-sessions` maps to the single word `sessions`.\n`pick-sheets` is the first that is, and `it.pick-sheets` does not parse, so a\nkebab entrypoint would satisfy one guard and fail the other. Renaming the\nFILE is what keeps both true with no third mapping to drift.\n\n## Why this namespace exists\n\nA template's `it.*` namespaces are resolved from its collections\n(`availableUtilNamespaces`), so a pick-sheets-sourced family gets\n`it.pickSheets` and **no `it.orders`**. Without this module it would get no\ndocument helpers at all.\n\n⚠️ **Re-exports, never reimplementations** — the same rule\n`utils/fulfillments.ts` states. Mapping `pick-sheets` to the string\n`\"orders\"` in `TEMPLATE_COLLECTION_UTILS` would put `it.orders` on a document\nthat is not an order, and a hand-written copy would drift;\n`tests/template-helpers.test.ts` asserts these are the SAME function objects\nas the orders bindings, so a copy fails rather than diverges.\n\n## What is deliberately NOT here\n\n⭐ **No \"units for this line\" helper, because that question's obvious answer\nis N× wrong.** {@link PickSheetItem.uid_booking} legitimately repeats across\nlines — a booking is aggregate per `(order, product, destination)`, so a\npriced principal beside its zero-priced accessories, a `splitItem`, or a\nproduct appearing both standalone and as a kit component all name the same\nbooking. Summing it per line overstates the leg.\n\nFor a leg's own totals a template never needs to ask at all:\n{@link PickSheetDestination.quantity} is that leg's total and\n{@link PickSheetDestination.breakdown} its buckets, both computed once in\nthe fold over the whole membership slice. Read the section total; do not\nre-derive it.\n\n⭐ **What IS here is {@link pickSheetLineBooking}, and it is the same rule\nrather than an exception to it.** A packing list with a state column per\nbucket needs per-ROW numbers, which the section totals cannot supply — so the\nfold designates one owner occurrence per booking\n({@link PickSheetItem.owner_path}) and this helper hands back a booking only\nfor that row. Every other occurrence gets `null`. The arithmetic with a wrong\nobvious form is not offered more safely; it is made unrepresentable, because a\nnon-owner has nothing to sum.\n\n## 🔴 The hazard a caller must handle — this document is PAGED\n\n{@link PickSheet.orders} is *the orders on THIS PAGE*; `order_count`,\n`destination_count`, `quantity` and `organizations` describe the whole SCOPE.\nThat split is right for a screen and is a trap for a printed document: a\npacking list rendered from a default page is **silently short**, showing a\npage of orders under a scope-wide total that disagrees with them.\n\n⚠️ **So a render caller must assemble every page before it renders, and must\nnot paper over it by rendering the counts alone.** Nothing in this namespace\ncan enforce that — by the time a template runs, a short document is\nindistinguishable from a small one. It belongs to whatever builds the `doc`,\nwhich is the same place `PickSheet.missing_order_uids` has to be surfaced\nrather than dropped.",
       "symbols": [
         {
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_KEYS",
-          "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\"[];",
-          "doc": "All seven keys of the booking lifecycle breakdown, in lifecycle order (which\nis NOT the schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports them, so existing importers are unaffected."
+          "declaration": "const BOOKING_BREAKDOWN_KEYS: \"quoted\" | \"reserved\" | \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "Every key of the booking custody breakdown, in lifecycle order (which is NOT\nthe schema's alphabetical field order — the UI reads left to right).\n\nThese live beside the schema rather than in `utils/bookings.ts` because\nschema modules cannot import utils (the dependency runs strictly one way) and\nthe movement journal needs the key union to type a custody transition.\n`utils/bookings.ts` re-exports them, so existing importers are unaffected."
         },
         {
           "kind": "variable",
           "name": "BOOKING_BREAKDOWN_LABELS",
           "declaration": "const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string>;",
-          "doc": "Display label per breakdown bucket — the ONE declaration, read both by the\n`.meta({ column: true, label })` annotations below (which drive every\ncollection-table heading) and by the warehouse picker's column headers.\n\n⚠️ **It is declared as a table rather than inline on each `.meta()` because\nthe picker had its own copy.** The now-deleted\n`manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`\nrestating all seven — which is exactly the drift the repo's *\"columns are\ndeclared, not generated\"* rule exists to stop, and the two had diverged on\n`out`: the copy said \"Out\" and this declaration said \"Checked Out\".\n\n⭐ **The copy's word is now the canonical one — owner's call, 2026-09-09 — so\nthe drift is resolved the other way round from how it was first resolved.**\n\"Checked Out\" was kept because it pairs with `FULFILLMENT_STAGE_LABELS`, where\nevery state here reads as the past participle of an action there (`prep` →\n`Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer\nfollows that pattern, and that is the cost of the change rather than an\noversight: it is the longest heading on an eleven-column pick sheet, where the\nshorter word buys real width and \"Out\" reads as a state on its own.\n\n⚠️ **What does NOT change is that there is one declaration.** The lesson of\nthe deleted copy was never which word to use — it was that two places spelling\nit is how they diverge. `tests/fulfillment-stage.test.ts` pins this string, so\na reappearing copy still goes red.\n\n⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could\nread these back off the schema, but `BookingBreakdownSchema` is annotated\n`z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the\nresult is typed `unknown`. A shared literal in the one file that owns the\ndeclaration is the same guarantee with none of that."
+          "doc": "Display label per breakdown bucket — the ONE declaration, read both by the\n`.meta({ column: true, label })` annotations below (which drive every\ncollection-table heading) and by the warehouse picker's column headers.\n\n⚠️ **It is declared as a table rather than inline on each `.meta()` because\nthe picker had its own copy.** The now-deleted\n`manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`\nrestating all seven — which is exactly the drift the repo's *\"columns are\ndeclared, not generated\"* rule exists to stop, and the two had diverged on\n`out`: the copy said \"Out\" and this declaration said \"Checked Out\".\n\n⭐ **The copy's word is now the canonical one — owner's call, 2026-09-09 — so\nthe drift is resolved the other way round from how it was first resolved.**\n\"Checked Out\" was kept because it pairs with `FULFILLMENT_STAGE_LABELS`, where\nevery state here reads as the past participle of an action there (`prep` →\n`Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer\nfollows that pattern, and that is the cost of the change rather than an\noversight: it is the longest heading on the pick sheet, where the shorter\nword buys real width and \"Out\" reads as a state on its own.\n\n⚠️ **What does NOT change is that there is one declaration.** The lesson of\nthe deleted copy was never which word to use — it was that two places spelling\nit is how they diverge. `tests/fulfillment-stage.test.ts` pins this string, so\na reappearing copy still goes red.\n\n⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could\nread these back off the schema, but `BookingBreakdownSchema` is annotated\n`z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the\nresult is typed `unknown`. A shared literal in the one file that owns the\ndeclaration is the same guarantee with none of that."
         },
         {
           "kind": "typeAlias",

@@ -24,6 +24,7 @@
  * @module
  */
 import {
+  BOOKING_BREAKDOWN_KEYS,
   type Booking,
   type BookingActionType,
   type BookingBreakdown,
@@ -33,6 +34,7 @@ import {
   type CustodyFlagReasonType,
   type CustodyRule,
   type CustodyRuleId,
+  type CustodyServiceSide,
   custodyRule,
   duplicateCustodySlots,
   isLossUndo,
@@ -43,17 +45,7 @@ import {
   type OOSReasonType,
   type OutOfService,
 } from "../schemas/mod.ts";
-
-/** The breakdown keys, ladder order. */
-const KEYS: readonly BookingBreakdownKeyType[] = [
-  "quoted",
-  "reserved",
-  "prepped",
-  "out",
-  "returned",
-  "lost",
-  "damaged",
-];
+import { breakdownQuantity, type FullBookingBreakdown, fullBookingBreakdown, sumBreakdownKeys, terminalQuantity } from "./bookings.ts";
 
 /** A booking as the ruleset reads it. */
 export type CustodyBooking = Pick<Booking, "type" | "breakdown" | "quantity" | "status">;
@@ -89,8 +81,8 @@ function armFor(rule: CustodyRule, type: Booking["type"]) {
 
 function serviceFor(rule: CustodyRule, reason: CustodyFlagReasonType | undefined): CustodyTransition["service"] {
   if (rule.service === null) return null;
-  const side = (s: "none" | "damaged" | "reason"): OOSReasonType | null =>
-    s === "none" ? null : s === "damaged" ? "damaged" : (reason ?? null);
+  const side = (s: CustodyServiceSide): OOSReasonType | null =>
+    s === "none" ? null : s === "reason" ? (reason ?? null) : s;
   return { from: side(rule.service.from), to: side(rule.service.to) };
 }
 
@@ -103,7 +95,7 @@ function serviceFor(rule: CustodyRule, reason: CustodyFlagReasonType | undefined
  *
  * | breakdown                        | status          |
  * |----------------------------------|-----------------|
- * | returned + lost + damaged = qty  | `complete`      |
+ * | every terminal key sums to qty   | `complete`      |
  * | out > 0                          | `active`        |
  * | prepped = qty                    | `prepped`       |
  * | prepped > 0 and reserved > 0     | `part-prepped`  |
@@ -120,8 +112,7 @@ export function deriveCustodyStatus(
   quantity: number,
   current: Booking["status"],
 ): Booking["status"] {
-  const terminal = breakdown.returned + breakdown.lost + breakdown.damaged;
-  if (terminal === quantity) return "complete";
+  if (terminalQuantity(breakdown) === quantity) return "complete";
   if (breakdown.out > 0) return "active";
   if (breakdown.prepped === quantity) return "prepped";
   if (breakdown.prepped > 0 && breakdown.reserved > 0) return "part-prepped";
@@ -133,7 +124,8 @@ export function deriveCustodyStatus(
 
 /** What a list of actions does to a booking. */
 export interface CustodyApplication {
-  breakdown: BookingBreakdown;
+  /** Every key stated, so a writer taking it authors `cleaning`/`maintenance` too. */
+  breakdown: FullBookingBreakdown;
   status: Booking["status"];
   /** One per action that writes a movement, in action order. */
   transitions: CustodyTransition[];
@@ -143,9 +135,10 @@ export interface CustodyApplication {
 export interface CustodyApplyContext {
   /**
    * Returned units carrying no flag, before this save. Bounds the flags a save
-   * may add (`flag_returned`, `flag_damaged_returned`). Defaults to
-   * `breakdown.returned`, which is right for a caller that cannot see the shelf
-   * and is re-checked by the server against the shelves.
+   * may add off `returned` (every `flag_*_returned`, and the deprecated
+   * `flag_returned`). Defaults to `breakdown.returned`, which is exact once no
+   * R2 no-custody flag remains on a booking's `returned` units, and is
+   * re-checked by the server against the shelves.
    */
   unflaggedReturned?: number;
 }
@@ -173,8 +166,8 @@ export function applyCustodyActions(
       `two actions would write the same "${dup[0].split(":")[0]}" movement; make them two separate saves`,
     );
   }
-  const breakdown: BookingBreakdown = { ...booking.breakdown };
-  let unflagged = ctx.unflaggedReturned ?? breakdown.returned;
+  const breakdown = fullBookingBreakdown(booking.breakdown);
+  let unflagged = Math.min(ctx.unflaggedReturned ?? breakdown.returned, breakdown.returned);
   let seenForward = false;
   const transitions: CustodyTransition[] = [];
 
@@ -206,7 +199,7 @@ export function applyCustodyActions(
       );
     }
     // A new flag lands on units that carry none.
-    if (rule.id === "flag_returned" || rule.id === "flag_damaged_returned") {
+    if (addsFlag(rule)) {
       if (unflagged < action.quantity) {
         throw new CustodyRefusal(
           `"${rule.id}" flags ${action.quantity}, but only ${unflagged} returned unit(s) are unflagged`,
@@ -217,7 +210,12 @@ export function applyCustodyActions(
     }
     breakdown[rule.from] -= action.quantity;
     breakdown[rule.to] += action.quantity;
-    if (rule.id === "check_in") unflagged += action.quantity;
+    // Units landing on `returned` with no flag: a check-in, a flag cleared, a
+    // shelf loss undone. Units leaving it take their unflagged share with them.
+    if (rule.to === "returned" && rule.from !== "returned" && (rule.service === null || rule.service.to === "none")) {
+      unflagged += action.quantity;
+    }
+    unflagged = Math.min(unflagged, breakdown.returned);
 
     if (arm.movement !== null) {
       transitions.push({
@@ -237,13 +235,18 @@ export function applyCustodyActions(
   };
 }
 
+/** A row that puts a flag on units carrying none: every `flag_*_returned`, and the deprecated `flag_returned`. */
+function addsFlag(rule: CustodyRule): boolean {
+  return rule.from === "returned" && rule.service !== null && rule.service.from === "none";
+}
+
 // ── offers ───────────────────────────────────────────────────────────
 
 /**
  * One action the UI may offer on a booking row.
  *
- * `key` is what a menu de-duplicates on — the rule id, plus the reason for the
- * two `flag_returned` offers. Expand an offer into the actions to send with
+ * `key` is what a menu de-duplicates on — the rule id. (It carried a reason for
+ * R2's two `flag_returned` offers, which are no longer made.) Expand an offer into the actions to send with
  * {@link expandCustodyOffer}; a `check_out` over reserved units is two steps.
  */
 export interface CustodyOffer {
@@ -273,11 +276,11 @@ export interface CustodyOfferContext {
    * records, split by the origin their mark movement names, net of any that are
    * billed, written off or returned to service.
    *
-   * Absent, every `lost`/`damaged` unit is read as marked off `out` and
-   * undoable, which is the reading the delta form always planned with
+   * Absent, every `lost`/`damaged`/`cleaning`/`maintenance` unit is read as
+   * marked off `out` and undoable, which is the reading the delta form always planned with
    * (`canonicalLossUndos`); the server re-checks against the records.
    */
-  undoable?: Partial<Record<"mark_lost_undo" | "mark_damaged_undo" | "mark_lost_returned_undo" | "flag_damaged_returned_undo", number>>;
+  undoable?: Partial<Record<CustodyRuleId, number>>;
 }
 
 /**
@@ -292,14 +295,20 @@ export interface CustodyOfferContext {
  *   Lost or Damaged (gap G1). The fulfillment offers `unprep` plus a shelf
  *   out-of-service record instead.
  * - **Returned units get their own losses and flags** (gap G5): Lost, Damaged,
- *   Flag Cleaning and Flag Maintenance off `returned`, so `‹ Out` is no longer
- *   the only way to reach them.
+ *   Cleaning and Maintenance off `returned`, so `‹ Out` is no longer the only
+ *   way to reach them. Since P2b those are the `flag_*_returned` rows, and the
+ *   deprecated `flag_returned` is never offered.
  */
 export function custodyActionsFor(booking: CustodyBooking, ctx: CustodyOfferContext): CustodyOffer[] {
   if (booking.type !== "rental" && booking.type !== "sale") return [];
-  const b = booking.breakdown;
+  const b = fullBookingBreakdown(booking.breakdown);
   const unflagged = Math.min(ctx.unflaggedReturned ?? b.returned, b.returned);
-  const undoable = ctx.undoable ?? { mark_lost_undo: b.lost, mark_damaged_undo: b.damaged };
+  const undoable: Partial<Record<CustodyRuleId, number>> = ctx.undoable ?? {
+    mark_lost_undo: b.lost,
+    mark_damaged_undo: b.damaged,
+    mark_cleaning_undo: b.cleaning,
+    mark_maintenance_undo: b.maintenance,
+  };
   const natural: CustodyRuleId | null = b.reserved > 0
     ? "prep"
     : b.prepped > 0
@@ -313,22 +322,19 @@ export function custodyActionsFor(booking: CustodyBooking, ctx: CustodyOfferCont
       case "prep":
         return ctx.canPrepCheckout ? b.reserved : 0;
       case "check_out":
-        return ctx.canPrepCheckout ? b.reserved + b.prepped : 0;
+        return ctx.canPrepCheckout ? sumBreakdownKeys(b, ["reserved", "prepped"]) : 0;
+      // Deprecated R2 rows: legal on the wire during the transition, never offered.
       case "flag_returned":
-      case "flag_damaged_returned":
-        return unflagged;
-      case "mark_lost_undo":
-      case "mark_damaged_undo":
-      case "mark_lost_returned_undo":
-      case "flag_damaged_returned_undo":
-        return Math.min(undoable[id] ?? 0, b[custodyRule(id).from]);
-      // Record-page actions, never a booking-row offer.
       case "reclassify_damaged_to_flag":
       case "reclassify_flag_to_damaged":
         return 0;
-      default:
-        return b[custodyRule(id).from];
     }
+    const rule = custodyRule(id);
+    if (addsFlag(rule)) return unflagged;
+    if (isLossUndo(id)) return Math.min(undoable[id] ?? 0, b[rule.from]);
+    // A reclassification is a record-page action, never a booking-row offer.
+    if (rule.stage === "service") return 0;
+    return b[rule.from];
   };
 
   const offers: CustodyOffer[] = [];
@@ -336,18 +342,14 @@ export function custodyActionsFor(booking: CustodyBooking, ctx: CustodyOfferCont
     if (armFor(rule, booking.type) === null) continue;
     const max = maxFor(rule.id);
     if (max <= 0) continue;
-    const reasons: (CustodyFlagReasonType | undefined)[] = rule.id === "flag_returned" ? [...CUSTODY_FLAG_REASONS] : [undefined];
-    for (const reason of reasons) {
-      offers.push({
-        key: reason ? `${rule.id}:${reason}` : rule.id,
-        rule: rule.id,
-        ...(reason ? { reason } : {}),
-        max,
-        natural: rule.id === natural,
-        direction: rule.direction,
-        stage: rule.stage,
-      });
-    }
+    offers.push({
+      key: rule.id,
+      rule: rule.id,
+      max,
+      natural: rule.id === natural,
+      direction: rule.direction,
+      stage: rule.stage,
+    });
   }
   const rank = (o: CustodyOffer) => (o.natural ? 0 : o.direction === "forward" ? 1 : 2);
   return offers.sort((x, y) => rank(x) - rank(y));
@@ -378,12 +380,18 @@ export function expandCustodyOffer(
 
 // ── decomposing a delta ──────────────────────────────────────────────
 
-/** A loss key a delta may lower, and where its mark took the units from. */
+/** An out-of-service key a delta may lower, and where its mark took the units from. */
 export interface CustodyLossUndo {
-  reason: "lost" | "damaged";
+  reason: CustodyLossKey;
   origin: BookingBreakdownKeyType;
   quantity: number;
 }
+
+/** The breakdown keys a mark puts units in, and an undo takes them out of. */
+export type CustodyLossKey = "lost" | "damaged" | "cleaning" | "maintenance";
+
+/** Every {@link CustodyLossKey}, in breakdown order. */
+export const CUSTODY_LOSS_KEYS: readonly CustodyLossKey[] = ["lost", "damaged", "cleaning", "maintenance"];
 
 /** One step of a decomposition: a rule and its quantity. */
 export interface CustodyStep {
@@ -404,9 +412,9 @@ export interface CustodyDecomposition {
 }
 
 /** The undo rule for a loss mark of `reason` taken from `origin`. */
-function undoRuleFor(reason: "lost" | "damaged", origin: BookingBreakdownKeyType): CustodyRuleId {
-  if (origin === "out") return reason === "lost" ? "mark_lost_undo" : "mark_damaged_undo";
-  if (origin === "returned") return reason === "lost" ? "mark_lost_returned_undo" : "flag_damaged_returned_undo";
+function undoRuleFor(reason: CustodyLossKey, origin: BookingBreakdownKeyType): CustodyRuleId {
+  if (origin === "out") return `mark_${reason}_undo`;
+  if (origin === "returned") return reason === "lost" ? "mark_lost_returned_undo" : `flag_${reason}_returned_undo`;
   throw new Error(`a ${reason} mark cannot have come from "${origin}"`);
 }
 
@@ -417,8 +425,8 @@ function undoRuleFor(reason: "lost" | "damaged", origin: BookingBreakdownKeyType
  */
 export function canonicalLossUndos(prev: BookingBreakdown, next: BookingBreakdown): CustodyLossUndo[] {
   const undos: CustodyLossUndo[] = [];
-  for (const reason of ["lost", "damaged"] as const) {
-    const fall = prev[reason] - next[reason];
+  for (const reason of CUSTODY_LOSS_KEYS) {
+    const fall = breakdownQuantity(prev, reason) - breakdownQuantity(next, reason);
     if (fall > 0) undos.push({ reason, origin: "out", quantity: fall });
   }
   return undos;
@@ -451,8 +459,9 @@ export function canonicalLossUndos(prev: BookingBreakdown, next: BookingBreakdow
  * ⚠️ **What stays residue is a DECISION, not a gap in this function.**
  * `prepped → returned` is a forward multi-hop past `out`, which would record
  * units going out and coming back that nobody saw (api-cloudrun#1053); a
- * pre-departure key into `lost`/`damaged` has no row at all (gap G1); and a sale
- * rewind is refused (api-cloudrun#1054). A service or surcharge booking holds no
+ * pre-departure key into `lost`/`damaged` has no row at all (gap G1); a sale
+ * rewind is refused (api-cloudrun#1054); and a sale never takes `cleaning` or
+ * `maintenance` (P2b ruling 4). A service or surcharge booking holds no
  * stock, so its delta is always matched with no steps.
  */
 export function decomposeCustodyDelta(
@@ -471,7 +480,7 @@ export function decomposeCustodyDelta(
   };
 
   // ── the undone marks first, grouped per rule in input order ──
-  const mid: BookingBreakdown = { ...prev };
+  const mid = fullBookingBreakdown(prev);
   if (!isSale) {
     const grouped = new Map<CustodyRuleId, number>();
     for (const u of undos) {
@@ -485,8 +494,8 @@ export function decomposeCustodyDelta(
 
   const falls = new Map<BookingBreakdownKeyType, number>();
   const rises = new Map<BookingBreakdownKeyType, number>();
-  for (const key of KEYS) {
-    const delta = next[key] - mid[key];
+  for (const key of BOOKING_BREAKDOWN_KEYS) {
+    const delta = breakdownQuantity(next, key) - mid[key];
     if (delta < 0) falls.set(key, -delta);
     else if (delta > 0) rises.set(key, delta);
   }
@@ -516,6 +525,17 @@ export function decomposeCustodyDelta(
     add("mark_lost", take("out", "lost"));
     add("mark_lost_returned", take("returned", "lost"));
     add("flag_damaged_returned", take("returned", "damaged"));
+    for (const r of ["cleaning", "maintenance"] as const) {
+      add(`mark_${r}`, take("out", r));
+      add(`flag_${r}_returned`, take("returned", r));
+    }
+    // A fall of one flag reason against a rise of another is a correction on
+    // the record, and the booking moves with it (P2b ruling 1).
+    for (const rule of CUSTODY_RULES) {
+      if (rule.stage === "service" && rule.from !== "returned" && rule.to !== "returned") {
+        add(rule.id, take(rule.from, rule.to));
+      }
+    }
 
     const outFromReturned = take("returned", "out");
     const preppedFromOut = take("out", "prepped");
@@ -555,7 +575,8 @@ export function decomposeCustodyDelta(
  * `null` — the population assertion's lookup (`audit-custody-rules` in the api
  * replays every stored custody movement through it).
  *
- * A flag's reason side reads as `reason` when it is cleaning or maintenance.
+ * A row's `reason` side (the deprecated R2 rows) matches cleaning or
+ * maintenance; every other side matches itself.
  */
 export function custodyRuleForMovement(
   type: MovementTypeType,
@@ -563,7 +584,8 @@ export function custodyRuleForMovement(
   service: { from: OOSReasonType | null; to: OOSReasonType | null } | null | undefined,
   bookingType: "rental" | "sale",
 ): CustodyRule | null {
-  const sideOf = (r: OOSReasonType | null) => (r === null ? "none" : r === "damaged" ? "damaged" : "reason");
+  const matches = (side: CustodyServiceSide, r: OOSReasonType | null) =>
+    side === "none" ? r === null : side === "reason" ? r === "cleaning" || r === "maintenance" : r === side;
   return CUSTODY_RULES.find((rule) => {
     const arm = bookingType === "rental" ? rule.rental : rule.sale;
     if (arm?.movement !== type) return false;
@@ -573,7 +595,7 @@ export function custodyRuleForMovement(
     } else if (custody === null || custody.from !== rule.from || custody.to !== rule.to) return false;
     if (rule.service === null) return true;
     if (!service) return false;
-    return sideOf(service.from) === rule.service.from && sideOf(service.to) === rule.service.to;
+    return matches(rule.service.from, service.from) && matches(rule.service.to, service.to);
   }) ?? null;
 }
 

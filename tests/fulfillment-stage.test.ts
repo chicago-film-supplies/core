@@ -75,7 +75,7 @@ Deno.test("STAGE_SOURCE / STAGE_TARGET pairs match the lifecycle", () => {
 
 Deno.test("the bucket labels the picker renders come from the schema declaration", () => {
   // The now-deleted `manager/src/utils/fulfillmentStage.ts` carried its own
-  // `BUCKET_LABEL` map restating all seven, and the two had diverged on `out`.
+  // `BUCKET_LABEL` map restating all seven then-buckets, and the two had diverged on `out`.
   // This is the arm that would go red if a copy reappeared and drifted.
   //
   // ⚠️ `out` is "Out" and NOT "Checked Out" as of 2026-09-09 — the owner settled
@@ -84,7 +84,10 @@ Deno.test("the bucket labels the picker renders come from the schema declaration
   // which the other two actionable stages still do. Deliberate, not drift.
   assertEquals(BOOKING_BREAKDOWN_LABELS.out, "Out");
   assertEquals(BOOKING_BREAKDOWN_LABELS.quoted, "Quoted");
-  assertEquals(Object.keys(BOOKING_BREAKDOWN_LABELS).length, 7);
+  // Nine since custody-actions P2b: every out-of-service reason is a bucket.
+  assertEquals(BOOKING_BREAKDOWN_LABELS.cleaning, "Cleaning");
+  assertEquals(BOOKING_BREAKDOWN_LABELS.maintenance, "Maintenance");
+  assertEquals(Object.keys(BOOKING_BREAKDOWN_LABELS).length, 9);
 });
 
 // ── getStageForBookings ──────────────────────────────────────────────────────

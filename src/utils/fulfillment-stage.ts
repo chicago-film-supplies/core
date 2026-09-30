@@ -47,7 +47,7 @@ import {
   type BookingBreakdownKeyType,
   type Fulfillment,
 } from "../schemas/mod.ts";
-import { isOrderBookingsClosed } from "./bookings.ts";
+import { breakdownQuantity, isOrderBookingsClosed, sumBreakdownKeys } from "./bookings.ts";
 
 /**
  * Workflow stages for the fulfillment route, in lifecycle order. Each
@@ -172,7 +172,7 @@ export function returnableQuantity(b: Pick<Booking, "type" | "breakdown">): numb
  * before this existed.
  */
 export function checkoutUnits(b: Pick<Booking, "breakdown">): number {
-  return b.breakdown.reserved + b.breakdown.prepped;
+  return sumBreakdownKeys(b.breakdown, ["reserved", "prepped"]);
 }
 
 /**
@@ -279,13 +279,13 @@ export interface FulfillmentForwardAlternate {
  * (e.g. accidentally checked out, or marked returned in error).
  *
  * Bucket flow (one step back, terminals reversible):
- *   returned/lost/damaged → out
+ *   returned/lost/damaged/cleaning/maintenance → out
  *   out                   → prepped
  *   prepped               → reserved
  */
 export interface FulfillmentRegressionAlternate {
   kind: "regression";
-  fromBucket: "prepped" | "out" | "returned" | "lost" | "damaged";
+  fromBucket: "prepped" | "out" | "returned" | "lost" | "damaged" | "cleaning" | "maintenance";
   toBucket: "reserved" | "prepped" | "out";
   label: string;
 }
@@ -360,6 +360,17 @@ export function regressionAlternatesForBooking(
   if (b.breakdown.damaged > 0) {
     out.push({ kind: "regression", fromBucket: "damaged", toBucket: "out", label: "Revert Damaged to Out" });
   }
+  // P2b: offered only once a booking HOLDS the key, which only the api's P2b
+  // writer can produce — so a manager on this beta gains no new write before the
+  // api accepts it. The forward "Mark Cleaning/Maintenance" is deliberately NOT
+  // added to the terminal alternates: that menu retires in P3 for
+  // `custodyActionsFor`, which already offers them.
+  if (breakdownQuantity(b.breakdown, "cleaning") > 0) {
+    out.push({ kind: "regression", fromBucket: "cleaning", toBucket: "out", label: "Revert Cleaning to Out" });
+  }
+  if (breakdownQuantity(b.breakdown, "maintenance") > 0) {
+    out.push({ kind: "regression", fromBucket: "maintenance", toBucket: "out", label: "Revert Maintenance to Out" });
+  }
   if (b.breakdown.out > 0) {
     out.push({ kind: "regression", fromBucket: "out", toBucket: "prepped", label: "Revert Out to Prepped" });
   }
@@ -377,7 +388,7 @@ export function regressionAlternatesForBooking(
 export function sourceBucketSizeForBooking(b: Pick<Booking, "type" | "breakdown">): number {
   const action = naturalNextActionForBooking(b);
   if (action === "complete" || action === "quoted") return 0;
-  return b.breakdown[STAGE_SOURCE[action]];
+  return breakdownQuantity(b.breakdown, STAGE_SOURCE[action]);
 }
 
 /**
@@ -417,11 +428,16 @@ export function actionableQtyTowardTarget(
  * most-pending, pre-reserve bucket). The `target` side ("target state") is
  * everything past the source.
  *
- *   quoted    →  source=[quoted]                          target=[returned, lost, damaged]
- *   prep      →  source=[quoted, reserved]                target=[prepped, out, returned, lost, damaged]
- *   checkout  →  source=[quoted, reserved, prepped]       target=[out, returned, lost, damaged]
- *   return    →  source=[quoted, reserved, prepped, out]  target=[returned, lost, damaged]
- *   complete  →  source=[]                                target=[returned, lost, damaged]
+ *   quoted    →  source=[quoted]                          target=[…terminal]
+ *   prep      →  source=[quoted, reserved]                target=[prepped, out, …terminal]
+ *   checkout  →  source=[quoted, reserved, prepped]       target=[out, …terminal]
+ *   return    →  source=[quoted, reserved, prepped, out]  target=[…terminal]
+ *   complete  →  source=[]                                target=[…terminal]
+ *
+ * `…terminal` is `BOOKING_BREAKDOWN_TERMINAL_KEYS` — returned, lost, damaged,
+ * cleaning, maintenance. 🔴 Derived, never listed: the api#880 freeze reads the
+ * `prep` target side, so a terminal key missing here would let an order edit
+ * rewrite units that are physically back.
  *
  * These are the type-agnostic base sets; {@link bucketsForBookingSide} applies
  * the per-type override (non-rental `out` → done side).
@@ -483,9 +499,7 @@ export function qtyOnStageSide(
   stage: FulfillmentStage,
   side: StageSide,
 ): number {
-  let sum = 0;
-  for (const k of bucketsForBookingSide(b, stage, side)) sum += b.breakdown[k];
-  return sum;
+  return sumBreakdownKeys(b.breakdown, bucketsForBookingSide(b, stage, side));
 }
 
 /**

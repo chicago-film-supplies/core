@@ -14,7 +14,7 @@
  *
  * | Axis       | Question                              | Lands on                                  |
  * |------------|---------------------------------------|-------------------------------------------|
- * | `custody`  | How far through this order is it?     | `booking.breakdown` — the seven keys      |
+ * | `custody`  | How far through this order is it?     | `booking.breakdown` — `BOOKING_BREAKDOWN_KEYS` |
  * | `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |
  * | `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |
  * | `service`  | Is it out of service, and why?        | `out_of_service_breakdown`; per-shelf OOS |
@@ -200,6 +200,23 @@ export const MOVEMENT_TYPES = [
   "check_in_undo",
   "mark_lost_undo",
   "mark_damaged_undo",
+  // ── cleaning and maintenance, mirroring `mark_damaged` exactly ──
+  //
+  // Owner, 2026-09-30 (custody-actions P2b, reversing R2): every out-of-service
+  // reason is a booking bucket, so a dirty or worn return is its OWN event — an
+  // arrival onto the arrival shelf, flagged there by its custody key — rather
+  // than a `check_in` with a no-custody `flag` beside it. One type per reason,
+  // rather than one generalised `mark_damaged`, so the journal says what came
+  // back and a check-in carrying damaged, cleaning and maintenance units writes
+  // three movements with three distinct ids (a movement id is
+  // `{session}|{type}|{booking}`). Owner choice, 2026-09-30.
+  //
+  // `returned → cleaning` on a unit already back is a `flag`, as
+  // `returned → damaged` is; these four are the at-check-in pair and its undo.
+  "mark_cleaning",
+  "mark_cleaning_undo",
+  "mark_maintenance",
+  "mark_maintenance_undo",
   // Custody + ownership + cost.
   "sale",
   "sale_return",
@@ -323,6 +340,9 @@ export const CUSTODY_PLACE_KINDS: Readonly<
   returned: ["locations"],
   lost: ["out-of-service"],
   damaged: ["locations"],
+  // States on a shelf, like `damaged`: a dirty or worn unit is in the building.
+  cleaning: ["locations"],
+  maintenance: ["locations"],
 };
 
 // ── The per-kind contract ───────────────────────────────────────────
@@ -454,6 +474,37 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     service: "forbidden",
   },
   mark_damaged_undo: {
+    custody: "required",
+    cost: "forbidden",
+    places: { from: ["locations"], to: ["bookings"] },
+    booking: "required",
+    service: "forbidden",
+  },
+  // `mark_damaged` and its undo, for the two other in-building reasons. The
+  // custody key carries the flag (`custody.to === "cleaning"`), so `service` is
+  // forbidden for the reason `MovementContract.service` gives.
+  mark_cleaning: {
+    custody: "required",
+    cost: "forbidden",
+    places: { from: ["bookings"], to: ["locations"] },
+    booking: "required",
+    service: "forbidden",
+  },
+  mark_cleaning_undo: {
+    custody: "required",
+    cost: "forbidden",
+    places: { from: ["locations"], to: ["bookings"] },
+    booking: "required",
+    service: "forbidden",
+  },
+  mark_maintenance: {
+    custody: "required",
+    cost: "forbidden",
+    places: { from: ["bookings"], to: ["locations"] },
+    booking: "required",
+    service: "forbidden",
+  },
+  mark_maintenance_undo: {
     custody: "required",
     cost: "forbidden",
     places: { from: ["locations"], to: ["bookings"] },

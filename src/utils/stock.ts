@@ -99,6 +99,7 @@ import type {
   StockUnavailableEntry,
 } from "../schemas/mod.ts";
 import { toChicagoEndOfDay, toChicagoStartOfDay } from "./dates.ts";
+import { sumBreakdownKeys } from "./bookings.ts";
 
 /** Just enough of a booking to answer either consumption question. */
 export interface StockConsumingBooking {
@@ -124,8 +125,10 @@ export interface StockConsumingBooking {
  * {@link unitsClaimedOnShelves}. It should not.
  */
 export function heldByBooking(b: StockConsumingBooking): number {
-  const base = b.breakdown.reserved + b.breakdown.prepped;
-  return b.type === "sale" ? base : base + b.breakdown.out;
+  // `cleaning`/`maintenance` are NOT held here, as `damaged` is not: the
+  // out-of-service record's flag already holds those units out of stock, so
+  // counting them again would subtract them twice (P2b ruling 5).
+  return sumBreakdownKeys(b.breakdown, b.type === "sale" ? ["reserved", "prepped"] : ["reserved", "prepped", "out"]);
 }
 
 /**

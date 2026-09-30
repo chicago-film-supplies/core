@@ -59,7 +59,7 @@ import {
 } from "../schemas/mod.ts";
 import type { OrgPathNodeType } from "../schemas/mod.ts";
 import { buildBookingId } from "./booking-id.ts";
-import { emptyBookingsBreakdown } from "./bookings.ts";
+import { sumBookingsBreakdown } from "./bookings.ts";
 import { getItemSubtreeRange } from "./orders.ts";
 
 /** What {@link foldPickSheet} produces before any page is clipped. */
@@ -140,17 +140,7 @@ function toSheetBooking(b: Booking): PickSheetBooking {
 
 /** Sum N breakdowns into one. Integer addition, so no rounding decision exists. */
 function sumBreakdowns(bookings: readonly PickSheetBooking[]): Booking["breakdown"] {
-  const total = emptyBookingsBreakdown();
-  for (const b of bookings) {
-    total.quoted += b.breakdown.quoted;
-    total.reserved += b.breakdown.reserved;
-    total.prepped += b.breakdown.prepped;
-    total.out += b.breakdown.out;
-    total.returned += b.breakdown.returned;
-    total.lost += b.breakdown.lost;
-    total.damaged += b.breakdown.damaged;
-  }
-  return total;
+  return sumBookingsBreakdown(bookings);
 }
 
 /**

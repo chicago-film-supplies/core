@@ -17,12 +17,14 @@
 import type {
   AddressType,
   Booking,
+  BookingBreakdown,
+  BookingBreakdownKeyType,
   BookingDestinationRef,
   ComponentTypeType,
   Order,
   OrderStatusType,
 } from "../schemas/mod.ts";
-import { isCollectionLineType } from "../schemas/mod.ts";
+import { BOOKING_BREAKDOWN_KEYS, BOOKING_BREAKDOWN_TERMINAL_KEYS, isCollectionLineType } from "../schemas/mod.ts";
 
 /**
  * The breakdown key constants and their display labels live beside
@@ -40,28 +42,78 @@ export {
   type BookingBreakdownKeyType,
 } from "../schemas/mod.ts";
 
+/** A breakdown with every key stated — what arithmetic on one reads. */
+export type FullBookingBreakdown = Required<BookingBreakdown>;
+
 /**
- * The empty breakdown shape — all seven keys at zero.
+ * The units in one bucket. An absent key reads 0: `cleaning` and `maintenance`
+ * are optional until their backfill (`schemas/_breakdown.ts`), so a stored
+ * breakdown may lack them.
+ *
+ * ⭐ **Read a bucket through this, never `b.cleaning ?? 0` at the call site.**
+ * One reader is what lets the keys' tightening delete the fallback in one place.
+ */
+export function breakdownQuantity(b: Partial<BookingBreakdown>, key: BookingBreakdownKeyType): number {
+  return b[key] ?? 0;
+}
+
+/**
+ * Σ of the named buckets — **the ONE place a breakdown is summed.**
+ *
+ * 🔴 A sum spelled key by key (`b.returned + b.lost + b.damaged`) compiled
+ * straight through the arrival of `cleaning` and `maintenance` and stopped
+ * counting them, in about a dozen places across three repos. Name the KEYS,
+ * from `BOOKING_BREAKDOWN_KEYS` / `BOOKING_BREAKDOWN_TERMINAL_KEYS` where one
+ * fits, and let this add them. `tests/breakdown-sums.test.ts` refuses a
+ * named-key sum anywhere else in `src/`.
+ */
+export function sumBreakdownKeys(
+  b: Partial<BookingBreakdown>,
+  keys: readonly BookingBreakdownKeyType[],
+): number {
+  let total = 0;
+  for (const key of keys) total += breakdownQuantity(b, key);
+  return total;
+}
+
+/** Units that reached a terminal key: back, or out of service with a reason. */
+export function terminalQuantity(b: Partial<BookingBreakdown>): number {
+  return sumBreakdownKeys(b, BOOKING_BREAKDOWN_TERMINAL_KEYS);
+}
+
+/** `b` with every key stated, an absent one as 0. */
+export function fullBookingBreakdown(b: Partial<BookingBreakdown>): FullBookingBreakdown {
+  const full = {} as FullBookingBreakdown;
+  for (const key of BOOKING_BREAKDOWN_KEYS) full[key] = breakdownQuantity(b, key);
+  return full;
+}
+
+/**
+ * The empty breakdown shape — every key at zero.
  *
  * Use as the seed for new orders and as the target shape for fresh bookings.
+ * ⚠️ It STATES `cleaning` and `maintenance`, so a writer seeding from it
+ * authors both keys — which a reader on a core older than the keys' beta
+ * refuses (`z.strictObject`). The api pins this only after the manager's
+ * reader release is in prod (custody-actions P2b step 2).
  *
  * ```ts
  * const order = { ...orderInput, bookings_breakdown: emptyBookingsBreakdown() };
  * ```
  */
-export function emptyBookingsBreakdown(): Order["bookings_breakdown"] {
-  return { quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0 };
+export function emptyBookingsBreakdown(): FullBookingBreakdown {
+  return fullBookingBreakdown({});
 }
 
 /**
- * Sum the seven values of a single booking's breakdown.
+ * Sum every value of a single booking's breakdown.
  *
  * The booking-level invariant is `sumBookingBreakdown(booking.breakdown) === booking.quantity`.
  * Use this to verify that a proposed breakdown change preserves the invariant
  * before submitting it through `PUT /bookings/{uid}`.
  */
-export function sumBookingBreakdown(b: Booking["breakdown"]): number {
-  return b.quoted + b.reserved + b.prepped + b.out + b.returned + b.lost + b.damaged;
+export function sumBookingBreakdown(b: Partial<BookingBreakdown>): number {
+  return sumBreakdownKeys(b, BOOKING_BREAKDOWN_KEYS);
 }
 
 /**
@@ -75,15 +127,12 @@ export function mergeBookingBreakdown(
   patch: Partial<Booking["breakdown"]> | undefined,
 ): Booking["breakdown"] {
   if (!patch) return { ...current };
-  return {
-    quoted: patch.quoted ?? current.quoted,
-    reserved: patch.reserved ?? current.reserved,
-    prepped: patch.prepped ?? current.prepped,
-    out: patch.out ?? current.out,
-    returned: patch.returned ?? current.returned,
-    lost: patch.lost ?? current.lost,
-    damaged: patch.damaged ?? current.damaged,
-  };
+  const merged = { ...current };
+  for (const key of BOOKING_BREAKDOWN_KEYS) {
+    const value = patch[key];
+    if (value !== undefined) merged[key] = value;
+  }
+  return merged;
 }
 
 /**
@@ -96,17 +145,11 @@ export function mergeBookingBreakdown(
  * yet.
  */
 export function sumBookingsBreakdown(
-  bookings: Array<{ breakdown: Booking["breakdown"] }>,
-): Order["bookings_breakdown"] {
+  bookings: ReadonlyArray<{ breakdown: Booking["breakdown"] }>,
+): FullBookingBreakdown {
   const total = emptyBookingsBreakdown();
   for (const b of bookings) {
-    total.quoted += b.breakdown.quoted ?? 0;
-    total.reserved += b.breakdown.reserved ?? 0;
-    total.prepped += b.breakdown.prepped ?? 0;
-    total.out += b.breakdown.out ?? 0;
-    total.returned += b.breakdown.returned ?? 0;
-    total.lost += b.breakdown.lost ?? 0;
-    total.damaged += b.breakdown.damaged ?? 0;
+    for (const key of BOOKING_BREAKDOWN_KEYS) total[key] += breakdownQuantity(b.breakdown, key);
   }
   return total;
 }
@@ -145,18 +188,19 @@ export function applyBookingBreakdownDelta(
   prev: Booking["breakdown"],
   next: Booking["breakdown"],
 ): void {
-  orderBreakdown.quoted += next.quoted - prev.quoted;
-  orderBreakdown.reserved += next.reserved - prev.reserved;
-  orderBreakdown.prepped += next.prepped - prev.prepped;
-  orderBreakdown.out += next.out - prev.out;
-  orderBreakdown.returned += next.returned - prev.returned;
-  orderBreakdown.lost += next.lost - prev.lost;
-  orderBreakdown.damaged += next.damaged - prev.damaged;
+  for (const key of BOOKING_BREAKDOWN_KEYS) {
+    const delta = breakdownQuantity(next, key) - breakdownQuantity(prev, key);
+    // Leave an absent optional key absent when nothing moved it, so a roll-up
+    // stored before the keys existed is not rewritten by a no-op.
+    if (delta !== 0 || orderBreakdown[key] !== undefined) {
+      orderBreakdown[key] = breakdownQuantity(orderBreakdown, key) + delta;
+    }
+  }
 }
 
 /**
  * Carry the in-flight and terminal progress forward, and put the remainder in
- * one open bucket. The carry set is `prepped + out + returned + lost + damaged`
+ * one open bucket. The carry set is `prepped + out` plus every terminal key
  * — the previous `quoted` and `reserved` values are intentionally dropped, which
  * is what fixes the "two open buckets after a status flip" data corruption that
  * surfaced in opportunity webhook ingestion.
@@ -182,18 +226,9 @@ function openBucket(
   quantity: number,
   prev: Booking["breakdown"],
 ): Booking["breakdown"] {
-  const carry = prev.prepped + prev.out + prev.returned + prev.lost + prev.damaged;
-  const open = Math.max(0, quantity - carry);
-  return {
-    ...emptyBookingsBreakdown(),
-    prepped: prev.prepped,
-    out: prev.out,
-    returned: prev.returned,
-    lost: prev.lost,
-    damaged: prev.damaged,
-    quoted: key === "quoted" ? open : 0,
-    reserved: key === "reserved" ? open : 0,
-  };
+  const carried = { ...fullBookingBreakdown(prev), quoted: 0, reserved: 0 };
+  const open = Math.max(0, quantity - sumBookingBreakdown(carried));
+  return { ...carried, [key]: open };
 }
 
 /**
@@ -211,15 +246,25 @@ function openBucket(
  * deleted on 2026-08-30. The rule did not move with it — it lives here, and the
  * test below pins it independently of any script.
  */
+/** The terminal keys that are not `returned`: a unit out of service, with its reason. */
+const OUT_OF_SERVICE_KEYS: readonly BookingBreakdownKeyType[] = BOOKING_BREAKDOWN_TERMINAL_KEYS.filter(
+  (k) => k !== "returned",
+);
+
+function pickKeys(b: Partial<BookingBreakdown>, keys: readonly BookingBreakdownKeyType[]): Partial<BookingBreakdown> {
+  const out: Partial<BookingBreakdown> = {};
+  for (const key of keys) out[key] = breakdownQuantity(b, key);
+  return out;
+}
+
 const COMPLETE_BY_TYPE: Readonly<
   Record<ComponentTypeType, (quantity: number, prev: Booking["breakdown"]) => Booking["breakdown"]>
 > = {
-  rental: (quantity, prev) => ({
-    ...emptyBookingsBreakdown(),
-    returned: quantity - (prev.lost + prev.damaged),
-    lost: prev.lost,
-    damaged: prev.damaged,
-  }),
+  // Every out-of-service key is HISTORY and is kept; `returned` takes the rest.
+  rental: (quantity, prev) => {
+    const kept = { ...emptyBookingsBreakdown(), ...pickKeys(prev, OUT_OF_SERVICE_KEYS) };
+    return { ...kept, returned: quantity - sumBookingBreakdown(kept) };
+  },
   sale: (quantity) => ({ ...emptyBookingsBreakdown(), out: quantity }),
   service: () => emptyBookingsBreakdown(),
   surcharge: () => emptyBookingsBreakdown(),
@@ -265,7 +310,7 @@ const BREAKDOWN_PROJECTIONS: Readonly<
  *   draft / canceled  → all zeros (cleared on cancel/draft)
  *   quoted            → quoted = quantity − carry; preserves prepped/out/terminals
  *   reserved / active → reserved = quantity − carry; preserves prepped/out/terminals
- *   complete + rental → returned = quantity − (lost + damaged); zero everything else
+ *   complete + rental → keeps every out-of-service key; returned = quantity − their sum
  *   complete + sale   → out = quantity; zero everything else
  *   complete + service / surcharge → all zeros
  */
@@ -300,9 +345,8 @@ export function calculateBookingBreakdown(
  * they're available, just not required for closure.
  */
 export function isBookingClosed(b: Pick<Booking, "type" | "breakdown">): boolean {
-  const { quoted, reserved, prepped, out } = b.breakdown;
-  if (quoted + reserved + prepped !== 0) return false;
-  if (b.type === "rental" && out !== 0) return false;
+  if (sumBreakdownKeys(b.breakdown, ["quoted", "reserved", "prepped"]) !== 0) return false;
+  if (b.type === "rental" && b.breakdown.out !== 0) return false;
   return true;
 }
 
@@ -336,12 +380,17 @@ export function isOrderBookingsClosed(
  * or shrunk fulfillment row an order edit must KEEP (decision 3).
  */
 export function liveCustody(b: Pick<Booking, "type" | "breakdown">): number {
-  return b.breakdown.prepped + (b.type === "rental" ? b.breakdown.out : 0);
+  return sumBreakdownKeys(b.breakdown, b.type === "rental" ? ["prepped", "out"] : ["prepped"]);
 }
 
+/** Every key but the plan-only `quoted`/`reserved`. */
+const HISTORY_KEYS: readonly BookingBreakdownKeyType[] = BOOKING_BREAKDOWN_KEYS.filter(
+  (k) => k !== "quoted" && k !== "reserved",
+);
+
 /**
- * Whether custody ever moved on a booking: any of `prepped`, `out`, `returned`,
- * `lost` or `damaged`. Such a booking is part of what happened, and an order
+ * Whether custody ever moved on a booking: any of `prepped`, `out` or a terminal
+ * key. Such a booking is part of what happened, and an order
  * edit must not delete it (api-cloudrun#1147, Q4); only a plan-only booking
  * (`quoted`/`reserved`) goes with its line.
  *
@@ -350,8 +399,9 @@ export function liveCustody(b: Pick<Booking, "type" | "breakdown">): number {
  * back keeps its booking and loses its row.
  */
 export function hasCustodyHistory(b: Pick<Booking, "breakdown">): boolean {
-  const { prepped, out, returned, lost, damaged } = b.breakdown;
-  return prepped + out + returned + lost + damaged > 0;
+  // Everything but the plan-only keys. A cleaning-only booking has history, and
+  // an order edit that read it as custody-free would DELETE it.
+  return sumBreakdownKeys(b.breakdown, HISTORY_KEYS) > 0;
 }
 
 /** One order row at a booking grain, before and after an order edit. */

@@ -65,6 +65,8 @@ export interface BookingDocument {
     reserved: number;
     lost: number;
     damaged: number;
+    cleaning?: number;
+    maintenance?: number;
   };
   quantity: number;
   shortage?: number;

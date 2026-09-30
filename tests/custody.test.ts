@@ -27,6 +27,7 @@ import {
   CUSTODY_RULES,
   type CustodyRuleId,
   custodyRule,
+  isLossUndo,
   MOVEMENT_CONTRACTS,
   type MovementTypeType,
   OOS_BREAKDOWN_KEYS,
@@ -51,8 +52,12 @@ import {
 } from "../src/utils/custody.ts";
 import * as oracle from "./helpers/custody-oracle.ts";
 
+/** Every key stated, as `applyCustodyActions` returns it. */
 function bd(partial: Partial<BookingBreakdown>): BookingBreakdown {
-  return { quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0, ...partial };
+  return {
+    quoted: 0, reserved: 0, prepped: 0, out: 0, returned: 0, lost: 0, damaged: 0, cleaning: 0, maintenance: 0,
+    ...partial,
+  };
 }
 
 function booking(
@@ -68,8 +73,10 @@ const shape = (ts: { type: string; from: string; to: string; quantity: number }[
   ts.map((t) => `${t.type}:${t.from}→${t.to}×${t.quantity}`);
 
 /** Every breakdown over the six fulfillment keys summing to `q`. */
-function statesAt(q: number): BookingBreakdown[] {
-  const KEYS = ["reserved", "prepped", "out", "returned", "lost", "damaged"] as const;
+function statesAt(
+  q: number,
+  KEYS: readonly BookingBreakdownKeyType[] = ["reserved", "prepped", "out", "returned", "lost", "damaged"],
+): BookingBreakdown[] {
   const states: BookingBreakdown[] = [];
   const walk = (i: number, left: number, acc: Partial<BookingBreakdown>) => {
     if (i === KEYS.length) {
@@ -198,10 +205,9 @@ Deno.test("custody - the type ↔ custody-pair binding the contracts lack (tests
     for (const bt of ["rental", "sale"] as const) {
       const arm = bt === "rental" ? r.rental : r.sale;
       if (!arm?.movement) continue;
-      const svc = r.service === null ? null : {
-        from: r.service.from === "none" ? null : r.service.from === "damaged" ? "damaged" as const : "cleaning" as const,
-        to: r.service.to === "none" ? null : r.service.to === "damaged" ? "damaged" as const : "cleaning" as const,
-      };
+      const side = (x: "none" | "damaged" | "cleaning" | "maintenance" | "reason"): OOSReasonType | null =>
+        x === "none" ? null : x === "reason" ? "cleaning" : x;
+      const svc = r.service === null ? null : { from: side(r.service.from), to: side(r.service.to) };
       const custody = r.from === r.to ? null : { from: r.from, to: r.to };
       assertEquals(custodyRuleForMovement(arm.movement, custody, svc, bt)?.id, r.id, `${r.id} (${bt})`);
     }
@@ -527,15 +533,19 @@ Deno.test("custody - ONE status rule: a mixed booking reads off its breakdown, n
 
 // ── offers ───────────────────────────────────────────────────────────
 
-Deno.test("custody - offers: returned units get Lost, Damaged and both flags (G5); natural first", () => {
+Deno.test("custody - offers: returned units get Lost, Damaged, Cleaning and Maintenance (G5); natural first", () => {
   const offers = custodyActionsFor(booking(4, { out: 2, returned: 2 }, "active"), { canPrepCheckout: true, unflaggedReturned: 1 });
   assertEquals(offers[0].key, "check_in");
   assertEquals(offers[0].natural, true);
   const byKey = Object.fromEntries(offers.map((o) => [o.key, o.max]));
   assertEquals(byKey["mark_lost_returned"], 2);
   assertEquals(byKey["flag_damaged_returned"], 1);
-  assertEquals(byKey["flag_returned:cleaning"], 1);
-  assertEquals(byKey["flag_returned:maintenance"], 1);
+  // P2b: the buckets' own rows, and never the deprecated no-custody flag.
+  assertEquals(byKey["flag_cleaning_returned"], 1);
+  assertEquals(byKey["flag_maintenance_returned"], 1);
+  assertEquals(byKey["mark_cleaning"], 2);
+  assertEquals(byKey["mark_maintenance"], 2);
+  assert(!offers.some((o) => o.rule === "flag_returned"), "the R2 flag is still offered");
   assertEquals(byKey["check_in_undo"], 2);
   assertEquals(offers.filter((o) => o.natural).length, 1);
   assertEquals(new Set(offers.map((o) => o.key)).size, offers.length, "an offer key repeats");
@@ -696,4 +706,132 @@ Deno.test("custody - every core enforced_by ref names a file that contains its a
     }
   }
   assertEquals(checked, CUSTODY_RULES.length);
+});
+
+// ── 5. cleaning and maintenance as booking buckets (P2b) ─────────────
+
+Deno.test("custody P2b - applying every matched decomposition over ALL nine keys lands on next", () => {
+  const keys: BookingBreakdownKeyType[] = ["reserved", "prepped", "out", "returned", "lost", "damaged", "cleaning", "maintenance"];
+  const states = statesAt(2, keys);
+  let applied = 0;
+  let newRules = 0;
+  for (const prev of states) {
+    for (const next of states) {
+      const d = decomposeCustodyDelta(prev, next, "rental", canonicalLossUndos(prev, next));
+      if (!d.matched || d.steps.length === 0) continue;
+      try {
+        const r = applyCustodyActions(booking(2, prev, "active"), d.steps);
+        assertEquals(r.breakdown, next, `${JSON.stringify(prev)} → ${JSON.stringify(next)}`);
+        assertEquals(shape(r.transitions), shape(d.transitions));
+        applied++;
+        if (d.steps.some((st) => /cleaning|maintenance/.test(st.rule))) newRules++;
+      } catch (e) {
+        assert(e instanceof CustodyRefusal, String(e));
+        assert(/same "[a-z_]+" movement/.test(e.message), e.message);
+      }
+    }
+  }
+  assert(applied > 500, `only ${applied} applied`);
+  // The sweep has to REACH the new rows, or a clean run says nothing about them.
+  assert(newRules > 100, `only ${newRules} decompositions used a cleaning/maintenance rule`);
+});
+
+Deno.test("custody P2b - a dirty return is mark_cleaning, one movement, and the booking completes", () => {
+  const r = applyCustodyActions(booking(3, { out: 3 }, "active"), [
+    { rule: "check_in", quantity: 1 },
+    { rule: "mark_cleaning", quantity: 1 },
+    { rule: "mark_maintenance", quantity: 1 },
+  ]);
+  assertEquals(r.breakdown, bd({ returned: 1, cleaning: 1, maintenance: 1 }));
+  assertEquals(r.status, "complete");
+  assertEquals(r.transitions.map((t) => [t.type, t.from, t.to, t.service]), [
+    ["check_in", "out", "returned", null],
+    ["mark_cleaning", "out", "cleaning", null],
+    ["mark_maintenance", "out", "maintenance", null],
+  ]);
+});
+
+Deno.test("custody P2b - a sale refuses cleaning and maintenance (ruling 4)", () => {
+  for (const rule of ["mark_cleaning", "mark_maintenance"] as const) {
+    assertThrows(
+      () => applyCustodyActions(booking(2, { out: 2 }, "active", "sale"), [{ rule, quantity: 1 }]),
+      CustodyRefusal,
+      "cannot take",
+    );
+  }
+  assertEquals(decomposeCustodyDelta(bd({ out: 2 }), bd({ out: 1, cleaning: 1 }), "sale").matched, false);
+});
+
+Deno.test("custody P2b - a returned unit flagged in place moves the bucket, bounded by unflagged returns", () => {
+  const r = applyCustodyActions(booking(3, { returned: 3 }, "complete"), [{ rule: "flag_cleaning_returned", quantity: 2 }]);
+  assertEquals(r.breakdown, bd({ returned: 1, cleaning: 2 }));
+  assertEquals(r.transitions[0].service, { from: null, to: "cleaning" });
+  assertThrows(
+    () => applyCustodyActions(booking(3, { returned: 3 }, "complete"), [{ rule: "flag_maintenance_returned", quantity: 2 }], { unflaggedReturned: 1 }),
+    CustodyRefusal,
+    "only 1",
+  );
+  // The bound follows `returned` down: units already flagged are not flaggable again.
+  assertThrows(
+    () =>
+      applyCustodyActions(booking(3, { returned: 3 }, "complete"), [
+        { rule: "flag_cleaning_returned", quantity: 2 },
+        { rule: "flag_damaged_returned", quantity: 2 },
+      ]),
+    CustodyRefusal,
+  );
+});
+
+Deno.test("custody P2b - a reclassification among the three reasons is a bucket move (G3)", () => {
+  const r = applyCustodyActions(booking(2, { damaged: 2 }, "complete"), [{ rule: "reclassify_damaged_to_cleaning", quantity: 2 }]);
+  assertEquals(r.breakdown, bd({ cleaning: 2 }));
+  assertEquals(r.status, "complete");
+  assertEquals(r.transitions[0].service, { from: "damaged", to: "cleaning" });
+  const d = decomposeCustodyDelta(bd({ cleaning: 1, maintenance: 1 }), bd({ damaged: 1, cleaning: 1 }), "rental");
+  assertEquals(d.steps, [{ rule: "reclassify_maintenance_to_damaged", quantity: 1 }]);
+  // A reclassification is a record-page action, never a row offer.
+  const offers = custodyActionsFor(booking(2, { damaged: 1, cleaning: 1 }, "complete"), { canPrepCheckout: true });
+  assert(!offers.some((o) => o.rule.startsWith("reclassify_")));
+});
+
+Deno.test("custody P2b - the undos are loss undos, applied first, and read their origin", () => {
+  for (const id of ["mark_cleaning_undo", "mark_maintenance_undo", "flag_cleaning_returned_undo", "flag_maintenance_returned_undo"] as const) {
+    assert(isLossUndo(id), id);
+  }
+  assert(!isLossUndo("reclassify_cleaning_to_damaged"));
+  const out = decomposeCustodyDelta(bd({ cleaning: 2 }), bd({ out: 2 }), "rental", canonicalLossUndos(bd({ cleaning: 2 }), bd({ out: 2 })));
+  assertEquals(out.steps, [{ rule: "mark_cleaning_undo", quantity: 2 }]);
+  const shelf = decomposeCustodyDelta(bd({ maintenance: 1 }), bd({ returned: 1 }), "rental", [
+    { reason: "maintenance", origin: "returned", quantity: 1 },
+  ]);
+  assertEquals(shelf.steps, [{ rule: "flag_maintenance_returned_undo", quantity: 1 }]);
+  // Absent a record, every cleaning unit reads as marked off `out`.
+  const offers = Object.fromEntries(
+    custodyActionsFor(booking(2, { cleaning: 1, maintenance: 1 }, "complete"), { canPrepCheckout: true }).map((o) => [o.key, o.max]),
+  );
+  assertEquals([offers["mark_cleaning_undo"], offers["mark_maintenance_undo"]], [1, 1]);
+});
+
+Deno.test("custody P2b - stored movements find their rows; the R2 no-custody flag still does", () => {
+  assertEquals(custodyRuleForMovement("mark_cleaning", { from: "out", to: "cleaning" }, null, "rental")?.id, "mark_cleaning");
+  assertEquals(custodyRuleForMovement("mark_maintenance_undo", { from: "maintenance", to: "out" }, null, "rental")?.id, "mark_maintenance_undo");
+  assertEquals(
+    custodyRuleForMovement("flag", { from: "returned", to: "cleaning" }, { from: null, to: "cleaning" }, "rental")?.id,
+    "flag_cleaning_returned",
+  );
+  assertEquals(
+    custodyRuleForMovement("flag", { from: "cleaning", to: "maintenance" }, { from: "cleaning", to: "maintenance" }, "rental")?.id,
+    "reclassify_cleaning_to_maintenance",
+  );
+  assertEquals(custodyRuleForMovement("flag", null, { from: null, to: "cleaning" }, "rental")?.id, "flag_returned");
+  // A custody pair and a service axis that disagree are no row.
+  assertEquals(custodyRuleForMovement("flag", { from: "returned", to: "cleaning" }, { from: null, to: "maintenance" }, "rental"), null);
+});
+
+Deno.test("custody P2b - a stored breakdown lacking the keys applies and decomposes as zeros", () => {
+  const legacy = { quoted: 0, reserved: 0, prepped: 0, out: 2, returned: 0, lost: 0, damaged: 0 };
+  const r = applyCustodyActions({ type: "rental", breakdown: legacy, quantity: 2, status: "active" }, [{ rule: "mark_cleaning", quantity: 2 }]);
+  assertEquals(r.breakdown.cleaning, 2);
+  assertEquals(decomposeCustodyDelta(legacy, bd({ cleaning: 2 }), "rental").steps, [{ rule: "mark_cleaning", quantity: 2 }]);
+  assertEquals(deriveCustodyStatus(bd({ cleaning: 2 }), 2, "active"), "complete");
 });

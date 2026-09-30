@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { BookingId, FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
+import { type BookingBreakdown, BookingBreakdownSchema, breakdownObjectSchema } from "./_breakdown.ts";
 import { BookingActions, type BookingActionType } from "./custody.ts";
 import { isCollectionLineType } from "./order.ts";
 import {
@@ -29,108 +30,15 @@ export interface BookingDestinationRef {
   address: AddressType | null;
 }
 
-/**
- * Per-status quantity breakdown for a booking.
- *
- * ⚠️ It is no longer embedded anywhere in the stock projection. `stock/{P}`'s
- * entries are PRE-REDUCED and anonymous — `unavailableFromBooking` folds this
- * breakdown down to a single `quantity` — so the breakdown reaches availability
- * as a number and never as a structure.
- */
-export interface BookingBreakdown {
-  damaged: number;
-  lost: number;
-  out: number;
-  prepped: number;
-  quoted: number;
-  reserved: number;
-  returned: number;
-}
-
-/**
- * Display label per breakdown bucket — the ONE declaration, read both by the
- * `.meta({ column: true, label })` annotations below (which drive every
- * collection-table heading) and by the warehouse picker's column headers.
- *
- * ⚠️ **It is declared as a table rather than inline on each `.meta()` because
- * the picker had its own copy.** The now-deleted
- * `manager/src/utils/fulfillmentStage.ts` carried a hand-written `BUCKET_LABEL`
- * restating all seven — which is exactly the drift the repo's *"columns are
- * declared, not generated"* rule exists to stop, and the two had diverged on
- * `out`: the copy said "Out" and this declaration said "Checked Out".
- *
- * ⭐ **The copy's word is now the canonical one — owner's call, 2026-09-09 — so
- * the drift is resolved the other way round from how it was first resolved.**
- * "Checked Out" was kept because it pairs with `FULFILLMENT_STAGE_LABELS`, where
- * every state here reads as the past participle of an action there (`prep` →
- * `Prepped`, `return` → `Returned`, `checkout` → `Checked Out`). `out` no longer
- * follows that pattern, and that is the cost of the change rather than an
- * oversight: it is the longest heading on an eleven-column pick sheet, where the
- * shorter word buys real width and "Out" reads as a state on its own.
- *
- * ⚠️ **What does NOT change is that there is one declaration.** The lesson of
- * the deleted copy was never which word to use — it was that two places spelling
- * it is how they diverge. `tests/fulfillment-stage.test.ts` pins this string, so
- * a reappearing copy still goes red.
- *
- * ⚠️ Reflection is deliberately NOT the mechanism. `resolveFieldMeta` could
- * read these back off the schema, but `BookingBreakdownSchema` is annotated
- * `z.ZodType<BookingBreakdown>`, so reaching its shape needs a cast and the
- * result is typed `unknown`. A shared literal in the one file that owns the
- * declaration is the same guarantee with none of that.
- */
-export const BOOKING_BREAKDOWN_LABELS: Record<keyof BookingBreakdown, string> = {
-  quoted: "Quoted",
-  reserved: "Reserved",
-  prepped: "Prepped",
-  out: "Out",
-  returned: "Returned",
-  lost: "Lost",
-  damaged: "Damaged",
-};
-
-/** Zod schema for BookingBreakdown. */
-export const BookingBreakdownSchema: z.ZodType<BookingBreakdown> = z.strictObject({
-  damaged: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.damaged }),
-  lost: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.lost }),
-  out: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.out }),
-  prepped: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.prepped }),
-  quoted: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.quoted }),
-  reserved: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.reserved }),
-  returned: z.int().meta({ column: true, label: BOOKING_BREAKDOWN_LABELS.returned }),
-});
-
-/**
- * All seven keys of the booking lifecycle breakdown, in lifecycle order (which
- * is NOT the schema's alphabetical field order — the UI reads left to right).
- *
- * These live beside the schema rather than in `utils/bookings.ts` because
- * schema modules cannot import utils (the dependency runs strictly one way) and
- * the movement journal needs the key union to type a custody transition.
- * `utils/bookings.ts` re-exports them, so existing importers are unaffected.
- */
-export const BOOKING_BREAKDOWN_KEYS = [
-  "quoted", "reserved", "prepped", "out", "returned", "lost", "damaged",
-] as const;
-
-/** Keys representing items that have reached a terminal state. */
-export const BOOKING_BREAKDOWN_TERMINAL_KEYS = ["returned", "lost", "damaged"] as const;
-
-/** One key of the booking lifecycle breakdown. */
-export type BookingBreakdownKeyType = typeof BOOKING_BREAKDOWN_KEYS[number];
-
-/** Zod enum over the seven breakdown keys — the custody axis of a movement. */
-export const BookingBreakdownKeyEnum: z.ZodType<BookingBreakdownKeyType> = z.enum(
+export {
   BOOKING_BREAKDOWN_KEYS,
-);
-
-// Compile-time guard: the key list and the breakdown shape cannot drift apart.
-// Either direction failing is a type error, so adding a key to one without the
-// other does not compile.
-type _KeysCoverBreakdown = BookingBreakdownKeyType extends keyof BookingBreakdown ? true : never;
-type _BreakdownCoversKeys = keyof BookingBreakdown extends BookingBreakdownKeyType ? true : never;
-const _keyParity: [_KeysCoverBreakdown, _BreakdownCoversKeys] = [true, true];
-void _keyParity;
+  BOOKING_BREAKDOWN_LABELS,
+  BOOKING_BREAKDOWN_TERMINAL_KEYS,
+  type BookingBreakdown,
+  BookingBreakdownKeyEnum,
+  type BookingBreakdownKeyType,
+  BookingBreakdownSchema,
+} from "./_breakdown.ts";
 
 /** A specific location within a store allocated for a booking. */
 export interface BookingStoreLocation {
@@ -323,6 +231,12 @@ export const BookingStoreSchema: z.ZodType<BookingStore> = z.strictObject({
 // ── Update input ──────────────────────────────────────────────
 
 /**
+ * @deprecated R2's check-in flags. `cleaning` and `maintenance` are breakdown
+ * buckets now (custody-actions P2b, owner 2026-09-30): a dirty return is the
+ * `mark_cleaning` rule, `out → cleaning`, not a `check_in` with a flag beside
+ * it. Kept only while the api still accepts the delta wire, which translates
+ * these into the new transitions; removed with the keys' tightening `feat!`.
+ *
  * Of the units a save brings to `returned`, how many are FLAGGED at check-in —
  * R2 (owner, 2026-09-24): dirty-on-return is a `cleaning` flag and wear-and-tear
  * a `maintenance` flag. The booking still closes as `returned`; no breakdown
@@ -349,7 +263,7 @@ export const BookingReturnFlags: z.ZodType<BookingReturnFlagsType> = z.object({
  *
  * Status and breakdown are independently optional — most warehouse PUTs only
  * change the breakdown. When `breakdown` is supplied it must be the complete
- * next state (all 7 keys); the service requires `sum(breakdown) === quantity`
+ * next state (every key); the service requires `sum(breakdown) === quantity`
  * and treats the value as an absolute write, not a partial patch. Version is
  * required for optimistic concurrency.
  *
@@ -395,15 +309,9 @@ export interface UpdateBookingInputType {
 /** Zod schema for UpdateBookingInput. */
 export const UpdateBookingInput: z.ZodType<UpdateBookingInputType> = z.object({
   status: BookingStatus.optional(),
-  breakdown: z.object({
-    damaged: z.int().min(0),
-    lost: z.int().min(0),
-    out: z.int().min(0),
-    prepped: z.int().min(0),
-    quoted: z.int().min(0),
-    reserved: z.int().min(0),
-    returned: z.int().min(0),
-  }).optional(),
+  // Derived from the key list: the hand-written copy it replaced was a
+  // non-strict `z.object`, so a new key was STRIPPED off the wire silently.
+  breakdown: breakdownObjectSchema(() => z.int().min(0), "strip").optional(),
   return_flags: BookingReturnFlags.optional(),
   actions: BookingActions.optional(),
   version: z.int().min(0),

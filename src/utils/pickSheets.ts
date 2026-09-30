@@ -45,7 +45,7 @@
  *
  * For a leg's own totals a template never needs to ask at all:
  * {@link PickSheetDestination.quantity} is that leg's total and
- * {@link PickSheetDestination.breakdown} its seven buckets, both computed once in
+ * {@link PickSheetDestination.breakdown} its buckets, both computed once in
  * the fold over the whole membership slice. Read the section total; do not
  * re-derive it.
  *

@@ -460,7 +460,7 @@ const createOrderRules: CollectionRule[] = [
         source: [],
         target: ["breakdown"],
         transform:
-          "calculateBreakdown(status, type, quantity) — distributes quantity into status buckets (quoted/reserved/prepped/out/returned/lost/damaged)",
+          "calculateBreakdown(status, type, quantity) — distributes quantity into status buckets (BOOKING_BREAKDOWN_KEYS)",
       },
     ],
   },
@@ -701,7 +701,7 @@ const updateOrderRules: CollectionRule[] = [
         source: [],
         target: ["breakdown"],
         transform:
-          "calculateBreakdown(status, type, quantity) — preserves existing prepped/out/returned/lost/damaged counts",
+          "calculateBreakdown(status, type, quantity) — preserves existing prepped/out and every terminal-key count",
       },
     ],
   },
@@ -1065,7 +1065,7 @@ const updateBookingRules: CollectionRule[] = [
     target: "cards",
     mode: "co-write",
     invariant:
-      "Per-destination event card status follows pick progress. For each destination touched by a booking write, query sibling bookings for that destination per side (delivery for `:start` cards, collection for `:end` cards) and recompute status: start: pre_delivery=Σ(quoted+reserved+prepped); pre_delivery===0 → complete; out>0 → active; else planned. end: terminal=Σ(returned+lost+damaged); terminal===Σquantity → complete; (terminal>0 || still_out>0) → active; else planned. Manual `blocked` status is preserved (pick-progress writes never overwrite blocked unless the parent order itself transitions to canceled, which lives on update-order). `canceled` status is sourced exclusively from order.status. Sale-only destinations exclude their bookings from the end-side roll-up so the end card stays planned↔complete based on rental siblings only. Card writes bump version and validate via CardSchema; the lock value `status_auto` permits this server-internal write while still rejecting external PATCH attempts to change `status` to anything other than `blocked`.",
+      "Per-destination event card status follows pick progress. For each destination touched by a booking write, query sibling bookings for that destination per side (delivery for `:start` cards, collection for `:end` cards) and recompute status: start: pre_delivery=Σ(quoted+reserved+prepped); pre_delivery===0 → complete; out>0 → active; else planned. end: terminal=Σ terminalQuantity(breakdown) (returned+lost+damaged+cleaning+maintenance); terminal===Σquantity → complete; (terminal>0 || still_out>0) → active; else planned. Manual `blocked` status is preserved (pick-progress writes never overwrite blocked unless the parent order itself transitions to canceled, which lives on update-order). `canceled` status is sourced exclusively from order.status. Sale-only destinations exclude their bookings from the end-side roll-up so the end card stays planned↔complete based on rental siblings only. Card writes bump version and validate via CardSchema; the lock value `status_auto` permits this server-internal write while still rejecting external PATCH attempts to change `status` to anything other than `blocked`.",
     enforced_by: [CARD_STATUS_MATH],
     transaction: "update-booking",
     fields: [

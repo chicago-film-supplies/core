@@ -467,8 +467,10 @@ export function applyMovementToLedger(
  * carriers answer, one per place kind:**
  * - at a record: `fallback`, the RECORD's reason, which only the caller can
  *   read (a `mark_lost`'s `lost`, a record-driven write-off's `oos.reason`);
- * - at a shelf: `custody.to/from === "damaged"` — a `mark_damaged` lands its
- *   unit on a shelf, flagged, and its undo takes the flag back off.
+ * - at a shelf: a custody key of `damaged`, `cleaning` or `maintenance` — a
+ *   `mark_damaged` (or, since P2b, `mark_cleaning` / `mark_maintenance`) lands
+ *   its unit on a shelf, flagged, and its undo takes the flag back off. Those
+ *   types forbid `service`, so the custody key is their ONLY carrier.
  *
  * 🔴 **The legacy carriers are disjoint by place kind, and that is what keeps
  * the 8 pre-model `mark_damaged` rows counted ONCE.** Those rows are
@@ -487,7 +489,8 @@ export function endpointServiceReason(
   const service: MovementServiceType | null = movement.service ?? null;
   if (service !== null) return service[side];
   if (kind === "out-of-service") return fallback;
-  return movement.custody?.[side] === "damaged" ? "damaged" : null;
+  const key = movement.custody?.[side];
+  return key === "damaged" || key === "cleaning" || key === "maintenance" ? key : null;
 }
 
 /**

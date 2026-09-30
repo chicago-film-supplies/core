@@ -6,6 +6,7 @@ import { FirestoreId, isProductShapedUid, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoInstant, toChicagoYmd as toChicagoYmdForSchema } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { LineItemCore, LineTaxCore } from "./_items.ts";
+import { type BookingBreakdown, breakdownObjectSchema } from "./_breakdown.ts";
 import {
   Address,
   DocumentOrganizationSnapshot,
@@ -2290,17 +2291,9 @@ export interface Order {
    * Invariant: sum of all values === sum of `booking.quantity` across the
    * order's bookings. The order is considered complete when
    * `quoted + reserved + prepped + out === 0` (every quantity has reached
-   * a terminal state: returned, lost, or damaged).
+   * a terminal state: `BOOKING_BREAKDOWN_TERMINAL_KEYS`).
    */
-  bookings_breakdown: {
-    quoted: number;
-    reserved: number;
-    prepped: number;
-    out: number;
-    returned: number;
-    lost: number;
-    damaged: number;
-  };
+  bookings_breakdown: BookingBreakdown;
   /**
     * The CRMS opportunity id, or `null` for an order CFS created itself.
     *
@@ -2499,15 +2492,9 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   query_by_items: z.array(z.string()).meta({ derived: true }),
   query_by_contacts: z.array(z.string()).meta({ derived: true }),
   query_by_dates: z.array(z.string()).meta({ derived: true }),
-  bookings_breakdown: z.strictObject({
-    quoted: z.number(),
-    reserved: z.number(),
-    prepped: z.number(),
-    out: z.number(),
-    returned: z.number(),
-    lost: z.number(),
-    damaged: z.number(),
-  }),
+  // Derived from `BOOKING_BREAKDOWN_KEYS`, so a new booking key reaches the
+  // roll-up; no column meta, because the roll-up is not a table column.
+  bookings_breakdown: breakdownObjectSchema(() => z.number(), "strict"),
   crms_id: z.int().nullable().meta({ propagate: false }),
   // NOT tightened — see the interface. 995/995 is a fact about the CRMS
   // webhook, the only writer; `createOrder` stamps no `crms_status` at all.

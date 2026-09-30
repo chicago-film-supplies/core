@@ -11,6 +11,7 @@
  * @module
  */
 import type { Booking, Card, CardAction, CardStatus } from "../schemas/mod.ts";
+import { sumBreakdownKeys, terminalQuantity } from "./bookings.ts";
 
 /**
  * Which side of the order's lifecycle a card represents:
@@ -109,11 +110,11 @@ export type CardSiblingBooking = Pick<Booking, "type" | "quantity" | "breakdown"
  *     rarely returned, and then via the fulfillment flow, never via the card);
  *   - **service** / **surcharge** lines have no return event at all, so their
  *     `breakdown.out` is always 0 and they never reach a terminal
- *     `returned`/`lost`/`damaged` count.
+ *     terminal-key (`BOOKING_BREAKDOWN_TERMINAL_KEYS`) counts.
  *   Counting any of their `quantity` toward `total` would leave
  *   `terminal < total` forever and pin the end card `active` after the rentals
  *   are all back.
- *   - `terminal  = Σ (returned + lost + damaged)`
+ *   - `terminal  = Σ terminalQuantity(breakdown)` (returned, lost, damaged, cleaning, maintenance)
  *   - `total     = Σ booking.quantity`
  *   - `still_out = Σ breakdown.out`
  *   - if `terminal === total`              → `complete` (everything collected/written-off)
@@ -140,7 +141,7 @@ export function computeCardStatusFromBookings(
     let preDelivery = 0;
     let out = 0;
     for (const b of siblings) {
-      preDelivery += b.breakdown.quoted + b.breakdown.reserved + b.breakdown.prepped;
+      preDelivery += sumBreakdownKeys(b.breakdown, ["quoted", "reserved", "prepped"]);
       out += b.breakdown.out;
     }
     if (preDelivery === 0) return "complete";
@@ -156,7 +157,8 @@ export function computeCardStatusFromBookings(
   let total = 0;
   let stillOut = 0;
   for (const b of rentals) {
-    terminal += b.breakdown.returned + b.breakdown.lost + b.breakdown.damaged;
+    // Every terminal key: a collection whose units came back dirty is complete.
+    terminal += terminalQuantity(b.breakdown);
     total += b.quantity;
     stillOut += b.breakdown.out;
   }
