@@ -165,7 +165,7 @@ export const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]> = z.array(
 });
 
 /**
- * One `replaces` entry: a row the swap takes units back from, how many, and
+ * One `exchanged_for` entry (stored as `replaces` until the S8c rename completes): a row the exchange takes units back from, how many, and
  * WHY they come back (api-cloudrun#1116, owner 2026-09-26).
  *
  * ⭐ **`reason` is the out-of-service vocabulary itself, imported rather than
@@ -174,34 +174,34 @@ export const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]> = z.array(
  * booking damaged, `cleaning`/`maintenance` return the units and flag them on
  * the shelf (never billed), and `lost` is recorded at the normal return. A
  * `lost` unit cannot be collected on the swap's own trip, so it is valid only on
- * a `send_now` leg ({@link SwapReplacementEntryType} is checked against its
- * pair by `checkSwapReplacements`).
+ * a `send_now` leg ({@link ExchangedForEntryType} is checked against its
+ * pair by `checkExchangedFor`).
  *
  * It is {@link SubstitutedForEntryType} plus `reason`, so every rule that reads a
  * `{path, quantity}[]` still reads it.
  */
-export interface SwapReplacementEntryType extends SubstitutedForEntryType {
+export interface ExchangedForEntryType extends SubstitutedForEntryType {
   reason: OOSReasonType;
 }
 
-/** @see {@link SwapReplacementEntryType} */
-export const SwapReplacementEntry: z.ZodType<SwapReplacementEntryType> = z.strictObject({
+/** @see {@link ExchangedForEntryType} */
+export const ExchangedForEntry: z.ZodType<ExchangedForEntryType> = z.strictObject({
   path: z.array(ItemUid).min(1),
   quantity: z.int().positive(),
   reason: OOSReasonEnum,
 });
 
 /**
- * The identity of a `replaces` entry: its row AND its reason. One damaged line
+ * The identity of an `exchanged_for` entry: its row AND its reason. One damaged line
  * of 3 may send back 2 dirty units and 1 broken one on the same trip, which is
  * two entries on one path.
  */
-export function swapReplacementKey(entry: { path: readonly string[]; reason: string }): string {
+export function exchangedForKey(entry: { path: readonly string[]; reason: string }): string {
   return `${entry.path.join("/")}\u0000${entry.reason}`;
 }
 
 /**
- * `replaces` on a swap's replacement line: the rows this row is going out
+ * `exchanged_for` on an exchange's replacement line: the rows this row is going out
  * against, with how many units each and why they come back.
  *
  * ⭐ **The shape of {@link SubstitutedForList} plus a `reason`, deliberately,
@@ -230,21 +230,74 @@ export function swapReplacementKey(entry: { path: readonly string[]; reason: str
  * Trip facts (which leg it returns on, whether X comes back on it) stay on the
  * pair; line facts live here.
  */
-export const SwapReplacementList: z.ZodType<SwapReplacementEntryType[]> = z.array(SwapReplacementEntry)
+export const ExchangedForList: z.ZodType<ExchangedForEntryType[]> = z.array(ExchangedForEntry)
   .superRefine((entries, ctx) => {
     const seen = new Set<string>();
     for (const [i, entry] of entries.entries()) {
-      const k = swapReplacementKey(entry);
+      const k = exchangedForKey(entry);
       if (seen.has(k)) {
         ctx.addIssue({
           code: "custom",
           path: [i, "path"],
-          message: "replaces entries must be unique by path and reason; add to the existing entry's quantity",
+          message: "exchanged_for entries must be unique by path and reason; add to the existing entry's quantity",
         });
       }
       seen.add(k);
     }
   });
+
+/**
+ * S8c step 1 (api-cloudrun#1147): the OLD names, kept beside the new until the
+ * four-step removal's last step drops them. Each is the same value as its
+ * `ExchangedFor*` twin, not a copy, so there is one schema instance and one
+ * `z.globalRegistry` entry.
+ *
+ * @deprecated Use {@link ExchangedForEntryType}.
+ */
+export type SwapReplacementEntryType = ExchangedForEntryType;
+/** @deprecated Use {@link ExchangedForEntry}. */
+export const SwapReplacementEntry: z.ZodType<ExchangedForEntryType> = ExchangedForEntry;
+/** @deprecated Use {@link exchangedForKey}. */
+export const swapReplacementKey: typeof exchangedForKey = exchangedForKey;
+/** @deprecated Use {@link ExchangedForList}. */
+export const SwapReplacementList: z.ZodType<ExchangedForEntryType[]> = ExchangedForList;
+
+/**
+ * A row's exchange entries under EITHER stored name: `exchanged_for`, or the
+ * `replaces` it is renamed from. Absent reads as none.
+ *
+ * Every reader of the field goes through this for the length of the migration,
+ * because the stored corpus carries the old name until the backfill and a
+ * writer that has moved on carries the new one. ⚠️ A document never carries
+ * both ({@link checkRenamedKeys}), so which wins is moot on a valid one; the
+ * new name is read first so an invalid one reads as the writer meant it.
+ */
+export function exchangedForOf<E extends { readonly path: readonly string[] }>(
+  row: { readonly exchanged_for?: readonly E[]; readonly replaces?: readonly E[] },
+): readonly E[] {
+  return row.exchanged_for ?? row.replaces ?? [];
+}
+
+/**
+ * The "not both" refine every dual-name stage needs: a row states the old name
+ * or the new one, never both, because two stated values cannot be told apart
+ * from a half-finished migration. Attached to every grain that declares a
+ * renamed key (S8c).
+ *
+ * @param pairs - `[oldKey, newKey]` per rename
+ */
+export function checkRenamedKeys(
+  row: object,
+  ctx: z.RefinementCtx,
+  pairs: ReadonlyArray<readonly [oldKey: string, newKey: string]>,
+): void {
+  const r = row as Record<string, unknown>;
+  for (const [oldKey, newKey] of pairs) {
+    if (r[oldKey] !== undefined && r[newKey] !== undefined) {
+      ctx.addIssue({ code: "custom", path: [newKey], message: `${newKey} replaces ${oldKey}; a row states one, never both` });
+    }
+  }
+}
 
 /**
  * Standard timestamp fields present on most documents.

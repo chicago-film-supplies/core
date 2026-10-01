@@ -40,8 +40,10 @@ import {
   type RateType,
   StockMethodEnum,
   type StockMethodType,
-  type SwapReplacementEntryType,
-  SwapReplacementList,
+  type ExchangedForEntryType,
+  ExchangedForList,
+  exchangedForOf,
+  checkRenamedKeys,
   type InvoiceStatusType,
   InvoiceStatusEnum,
   NameField,
@@ -398,14 +400,32 @@ export const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType> = z.s
 /** What happens to the damaged unit the replacement is going out against. */
 export const EXCHANGE_DISPOSITIONS = ["exchange", "send_now"] as const;
 /**
- * `exchange` — the units taken back come back on the same trip. `send_now` — the
+ * `exchange` — the units taken back come back on the same trip. (Being renamed
+ * `same_trip`: see {@link StoredExchangeDispositionType}.) `send_now` — the
  * replacement goes out now and the units come back at the normal return (or,
  * for a `lost` entry, never). A fact about the TRIP; why each unit comes back is
- * the `replaces` entry's `reason`.
+ * the `exchanged_for` entry's `reason`.
  */
 export type ExchangeDispositionType = typeof EXCHANGE_DISPOSITIONS[number];
 /** Zod schema for {@link ExchangeDispositionType}. */
 export const ExchangeDispositionEnum: z.ZodType<ExchangeDispositionType> = z.enum(EXCHANGE_DISPOSITIONS);
+
+/**
+ * What a STORED pair may carry while `exchange` is renamed `same_trip` (S8c, api-cloudrun#1147).
+ *
+ * 🔴 **A separate tuple, and `EXCHANGE_DISPOSITIONS` above is deliberately unchanged.** That
+ * tuple is the list of values a WRITER may send: manager's pickers iterate it
+ * (`DISPOSITION_LABELS[value].label`, which has no `same_trip` entry) and an api route builds
+ * `z.enum(EXCHANGE_DISPOSITIONS)` from it. Widening it would put `same_trip` in a dropdown and
+ * accept it from a client before any reader handles it. So step 1 widens only what a stored
+ * document PARSES; step 2 moves the writers; step 4 collapses the two tuples into one.
+ * `same_trip` and `exchange` mean the same thing. A reader treats them as one value.
+ */
+export const STORED_EXCHANGE_DISPOSITIONS = ["same_trip", "exchange", "send_now"] as const;
+/** @see {@link STORED_EXCHANGE_DISPOSITIONS} */
+export type StoredExchangeDispositionType = typeof STORED_EXCHANGE_DISPOSITIONS[number];
+/** Zod schema for {@link StoredExchangeDispositionType}. */
+export const StoredExchangeDispositionEnum: z.ZodType<StoredExchangeDispositionType> = z.enum(STORED_EXCHANGE_DISPOSITIONS);
 
 /**
  * A mid-rental swap, stated ON the destination pair that carries it.
@@ -430,10 +450,10 @@ export interface DestinationExchangeType {
    * never itself an exchange pair. Chaining is FLAT (api-cloudrun#1116, owner
    * 2026-09-26): a replacement that is itself swapped later gets a new pair on
    * the SAME parent, whose `replaces` names the earlier swap's row
-   * ({@link checkSwapReplacements}) — never a pair naming a swap.
+   * ({@link checkExchangedFor}) — never a pair naming a swap.
    */
   uid_pair: string;
-  disposition: ExchangeDispositionType;
+  disposition: StoredExchangeDispositionType;
 }
 
 /** Zod schema for {@link DestinationExchangeType}. */
@@ -441,7 +461,7 @@ export const DestinationExchange: z.ZodType<DestinationExchangeType> = z.strictO
   // The parent pair's uid — a destination divider uid, `z.uuid()` exactly as
   // `DestinationPairCore.uid` is.
   uid_pair: z.uuid().meta({ propagate: true }),
-  disposition: ExchangeDispositionEnum.meta({ propagate: true }),
+  disposition: StoredExchangeDispositionEnum.meta({ propagate: true }),
 });
 
 /**
@@ -546,7 +566,7 @@ export function checkStoredEndpoints(
 }
 
 /**
- * A `replaces` entry is a claim about two rows of THIS document, so only the
+ * An `exchanged_for` (or old-named `replaces`) entry is a claim about two rows of THIS document, so only the
  * document can check it:
  *
  * 1. the row carrying it sits under a pair marked `exchange` — a swap's
@@ -580,7 +600,7 @@ export function checkStoredEndpoints(
  * because `fulfillment.ts` already imports this module; the reverse import would
  * be a cycle.
  */
-export function checkSwapReplacements(
+export function checkExchangedFor(
   doc: {
     destinations: ReadonlyArray<{ uid: string; exchange?: DestinationExchangeType | null }>;
     items: ReadonlyArray<{ path: readonly string[] }>;
@@ -592,15 +612,18 @@ export function checkSwapReplacements(
   );
 
   doc.items.forEach((item, i) => {
-    const entries = (item as { replaces?: SwapReplacementEntryType[] }).replaces;
-    if (entries === undefined) return;
+    const row = item as { replaces?: ExchangedForEntryType[]; exchanged_for?: ExchangedForEntryType[] };
+    // The key the row actually states, so an issue names the field the writer sent.
+    const key = row.exchanged_for !== undefined ? "exchanged_for" : "replaces";
+    if (row[key] === undefined) return;
+    const entries = exchangedForOf(row);
     const leg = item.path[0];
     const exchange = leg === undefined ? undefined : exchangeByPair.get(leg);
     if (exchange === undefined) {
       ctx.addIssue({
         code: "custom",
-        path: ["items", i, "replaces"],
-        message: "replaces is valid only on a row under a destination pair marked as an exchange",
+        path: ["items", i, key],
+        message: "exchanged_for is valid only on a row under a destination pair marked as an exchange",
       });
       return;
     }
@@ -614,21 +637,24 @@ export function checkSwapReplacements(
       if (!onFamily) {
         ctx.addIssue({
           code: "custom",
-          path: ["items", i, "replaces", j, "path"],
-          message: `replaces names ${entry.path.join("/")}, which is neither the leg this swap exchanges ` +
+          path: ["items", i, key, j, "path"],
+          message: `${key} names ${entry.path.join("/")}, which is neither the leg this swap exchanges ` +
             `against nor another swap on it`,
         });
       }
       if (entry.reason === "lost" && exchange.disposition !== "send_now") {
         ctx.addIssue({
           code: "custom",
-          path: ["items", i, "replaces", j, "reason"],
+          path: ["items", i, key, j, "reason"],
           message: "a lost unit cannot be collected on the swap's trip — use disposition send_now",
         });
       }
     });
   });
 }
+
+/** @deprecated Use {@link checkExchangedFor}. Kept until the S8c four-step removal's last step. */
+export const checkSwapReplacements: typeof checkExchangedFor = checkExchangedFor;
 
 /** One way the destination dividers and the destination pairs fail to join. */
 export interface DestinationJoinViolation {
@@ -1616,7 +1642,9 @@ export interface OrderItemLineType {
    * `z.object`: an undeclared key is STRIPPED, so without it every order PUT
    * would silently drop a swap's link to the damaged row it goes out against.
    */
-  replaces?: SwapReplacementEntryType[];
+  replaces?: ExchangedForEntryType[];
+  /** The new name for `replaces` (S8c, api-cloudrun#1147). A row states one, never both. */
+  exchanged_for?: ExchangedForEntryType[];
 }
 
 // Un-annotated for `_zod.propValues` — see `_dividers.ts`. `z.object`, not
@@ -1642,8 +1670,9 @@ const OrderItemLineInner = z.object({
   order_number: z.int().optional(),
   uid_order: FirestoreId.optional(),
   uid_tax_class_override: FirestoreId.nullable().optional(),
-  replaces: SwapReplacementList.optional(),
-}).superRefine(checkItemPriceFormula);
+  replaces: ExchangedForList.optional(),
+  exchanged_for: ExchangedForList.optional(),
+}).superRefine(checkItemPriceFormula).superRefine((row, ctx) => checkRenamedKeys(row, ctx, [["replaces", "exchanged_for"]]));
 
 /** Zod schema for a billable order line (input). */
 export const OrderItemLine: z.ZodType<OrderItemLineType> = OrderItemLineInner.superRefine(checkZeroPricedAmount);
@@ -2015,9 +2044,9 @@ export interface OrderDocLineItemType {
   uid_tax_class_override?: string | null;
   /**
    * Set on a mid-rental SWAP's replacement line: the DAMAGED rows this one goes
-   * out against, with how many units each — see `SwapReplacementList`. Only valid
+   * out against, with how many units each — see `ExchangedForList`. Only valid
    * on a row under a pair carrying `exchange`, naming rows on that pair's parent
-   * leg ({@link checkSwapReplacements}).
+   * leg ({@link checkExchangedFor}).
    *
    * ⭐ **Authored on the order so sales can stage a swap** (api-cloudrun#1114): the
    * customer reports the damage, the swap is added here, and it reaches the
@@ -2036,7 +2065,13 @@ export interface OrderDocLineItemType {
    *
    * The invoice does not carry it: `projectOrderItemToInvoiceItem` picks its keys.
    */
-  replaces?: SwapReplacementEntryType[];
+  replaces?: ExchangedForEntryType[];
+  /**
+   * The new name for `replaces` (S8c step 1, api-cloudrun#1147): the same value under
+   * the documents' own word. A row states ONE of the two ({@link checkRenamedKeys}); the
+   * backfill and the four-step removal retire `replaces`. Tagged exactly as it is.
+   */
+  exchanged_for?: ExchangedForEntryType[];
 }
 
 // Un-annotated so `_zod.propValues` survives for `z.discriminatedUnion` below;
@@ -2076,8 +2111,10 @@ const OrderDocLineItemInner = z.strictObject({
   ...LineTaxCore,
   // Plain `.optional()`, matching `substituted_for` and `path_extension_for`:
   // only a swap's replacement line carries it. See the interface docblock.
-  replaces: SwapReplacementList.optional().meta({ shared: "value" }),
-}).superRefine(checkItemContract).superRefine(checkZeroPricedAmount);
+  replaces: ExchangedForList.optional().meta({ shared: "value" }),
+  exchanged_for: ExchangedForList.optional().meta({ shared: "value" }),
+}).superRefine(checkItemContract).superRefine(checkZeroPricedAmount)
+  .superRefine((row, ctx) => checkRenamedKeys(row, ctx, [["replaces", "exchanged_for"]]));
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;
 
@@ -2543,7 +2580,7 @@ export const OrderSchema: z.ZodType<Order> = z.strictObject({
   updated_by: ActorRef.nullable().optional().meta({ column: true, label: "Updated By", propagate: false }),
   created_at: TimestampFields.created_at.meta({ propagate: false }),
   updated_at: TimestampFields.updated_at.meta({ propagate: false }),
-}).superRefine(checkStoredEndpoints).superRefine(checkDestinationJoin).superRefine(checkSwapReplacements)
+}).superRefine(checkStoredEndpoints).superRefine(checkDestinationJoin).superRefine(checkExchangedFor)
   .superRefine(checkLeadingDivider("order")).superRefine(checkCollectionLegs).meta({
   title: "Order",
   collection: "orders",

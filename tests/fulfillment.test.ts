@@ -245,3 +245,64 @@ Deno.test("FulfillmentSchema accepts one row under two reasons, and refuses one 
   ]);
   assertEquals(FulfillmentSchema.safeParse(dup).success, false);
 });
+
+// ── S8c step 1: the new names are accepted beside the old (api-cloudrun#1147) ──
+
+const ENTRY = [{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" }];
+
+/** `swapDoc` with the exchange entries stated under `key` instead of `replaces`. */
+function swapDocUnder(key: "replaces" | "exchanged_for", extra: Record<string, unknown> = {}) {
+  const doc = swapDoc(undefined);
+  const items = doc.items.map((it, i) => (i === 3 ? { ...it, replaces: undefined, [key]: ENTRY, ...extra } : it));
+  return { ...doc, items };
+}
+
+Deno.test("S8c-1: FulfillmentSchema accepts the exchange entries under EITHER name", () => {
+  for (const key of ["replaces", "exchanged_for"] as const) {
+    const parsed = FulfillmentSchema.safeParse(swapDocUnder(key));
+    assertEquals(parsed.success, true, `${key}: ${issuesOf(parsed)}`);
+  }
+});
+
+Deno.test("S8c-1: FulfillmentSchema runs the exchange-pair checks under the NEW name too", () => {
+  // The refine reads both names, or `exchanged_for` would be a free-form pointer that skips it.
+  const offLeg = swapDocUnder("exchanged_for");
+  offLeg.items[3] = { ...offLeg.items[3], exchanged_for: [{ path: [SWAP_LEG, Y_ROW], quantity: 1, reason: "damaged" }] } as never;
+  assertEquals(FulfillmentSchema.safeParse(offLeg).success, false, "an entry naming another leg must still be refused");
+  const notExchange = FulfillmentSchema.safeParse({ ...swapDocUnder("exchanged_for"), destinations: swapDoc(undefined, { markExchange: false }).destinations });
+  assertEquals(notExchange.success, false, "off an exchange pair it must still be refused");
+  assertEquals(notExchange.error?.issues.some((i) => i.path.includes("exchanged_for")), true, issuesOf(notExchange));
+});
+
+Deno.test("S8c-1: a line states `replaces` OR `exchanged_for`, never both", () => {
+  const both = FulfillmentSchema.safeParse(swapDocUnder("replaces", { exchanged_for: ENTRY }));
+  assertEquals(both.success, false);
+  assertEquals(both.error?.issues.some((i) => i.path.at(-1) === "exchanged_for"), true, issuesOf(both));
+});
+
+Deno.test("S8c-1: a line states `quantity_order` OR `quantity_ordered`, never both", () => {
+  const withKey = (extra: Record<string, unknown>) => {
+    const doc = swapDoc(undefined);
+    return { ...doc, items: doc.items.map((it, i) => (i === 1 ? { ...it, ...extra } : it)) };
+  };
+  assertEquals(FulfillmentSchema.safeParse(withKey({ quantity_order: 0 })).success, true);
+  assertEquals(FulfillmentSchema.safeParse(withKey({ quantity_ordered: 0 })).success, true);
+  const both = FulfillmentSchema.safeParse(withKey({ quantity_order: 1, quantity_ordered: 1 }));
+  assertEquals(both.success, false);
+  assertEquals(both.error?.issues.some((i) => i.path.at(-1) === "quantity_ordered"), true, issuesOf(both));
+});
+
+Deno.test("S8c-1: FulfillmentItemInputLine carries the NEW names through a parse (or a picker write strips them)", () => {
+  const parsed = FulfillmentItemInputLine.safeParse({
+    uid: Y_ROW,
+    path: [SWAP_LEG, Y_ROW],
+    quantity: 1,
+    exchanged_for: ENTRY,
+    quantity_ordered: 3,
+  });
+  assertEquals(parsed.success, true, issuesOf(parsed));
+  assertEquals(parsed.success && parsed.data.exchanged_for?.[0].quantity, 1);
+  assertEquals(parsed.success && parsed.data.quantity_ordered, 3, "must survive so the service can refuse it");
+  const both = FulfillmentItemInputLine.safeParse({ uid: Y_ROW, path: [SWAP_LEG, Y_ROW], quantity: 1, replaces: ENTRY, exchanged_for: ENTRY });
+  assertEquals(both.success, false);
+});

@@ -153,7 +153,7 @@ import type {
   OrderDocItemType,
   OutOfService,
 } from "../schemas/mod.ts";
-import { isDividerItemType, isFulfillableItemType, swapReplacementKey } from "../schemas/mod.ts";
+import { exchangedForKey, exchangedForOf, isDividerItemType, isFulfillableItemType } from "../schemas/mod.ts";
 import {
   canonicalizePayload,
   explainInvoiceItemDifferences,
@@ -642,21 +642,25 @@ const classifiedLinePaths = (): readonly string[] => {
 };
 let classifiedLinePathsMemo: readonly string[] | undefined;
 
-/** A line's `replaces`, with absent read as none. */
+/**
+ * A line's exchange entries under EITHER stored name (`exchanged_for`, or the
+ * `replaces` it is renamed from — S8c), with absent read as none. Reading both is
+ * what lets one document state each name and still compare equal.
+ */
 function replacesOf(item: LineItem): ReplacesEntry[] {
-  return [...((item as { replaces?: readonly ReplacesEntry[] }).replaces ?? [])];
+  return [...exchangedForOf(item as { replaces?: readonly ReplacesEntry[]; exchanged_for?: readonly ReplacesEntry[] })];
 }
 
 /**
  * Whether two lines' `replaces` differ as MULTISETS keyed by
- * `swapReplacementKey` — the identity `SwapReplacementList` is unique by — with
+ * `exchangedForKey` — the identity `ExchangedForList` is unique by — with
  * the quantity compared per key. Order is not meaning, and absent equals `[]`.
  */
 function replacesDiffer(a: LineItem, b: LineItem): boolean {
   const tally = (item: LineItem) => {
     const m = new Map<string, number>();
     for (const e of replacesOf(item)) {
-      const k = swapReplacementKey(e);
+      const k = exchangedForKey(e);
       m.set(k, (m.get(k) ?? 0) + e.quantity);
     }
     return m;

@@ -74,7 +74,7 @@
  * @module
  */
 
-import { isLineItemType, type OOSReasonType, swapReplacementKey } from "../schemas/common.ts";
+import { exchangedForKey, exchangedForOf, isLineItemType, type OOSReasonType } from "../schemas/common.ts";
 
 /**
  * A substitution row, reduced to what the predicates need.
@@ -482,6 +482,16 @@ export interface ReplacesEntry {
   readonly reason: OOSReasonType;
 }
 
+/**
+ * A row as the exchange readers see it: its path and its entries under either
+ * stored name (S8c step 1 — `replaces` is renamed `exchanged_for`).
+ */
+export interface ExchangeRow {
+  readonly path: readonly string[];
+  readonly exchanged_for?: readonly ReplacesEntry[];
+  readonly replaces?: readonly ReplacesEntry[];
+}
+
 /** The join key of a path — `\u0000` cannot occur in a uid. */
 function pathKey(p: readonly string[]): string {
   return p.join("\u0000");
@@ -507,7 +517,7 @@ export interface UnresolvedReplacesEntry {
  * The `replaces` entries of ONE document that name a row that document does
  * not carry (manager#537).
  *
- * `checkSwapReplacements` deliberately does not require the named row to exist
+ * `checkExchangedFor` deliberately does not require the named row to exist
  * (api-cloudrun#1114): sales may remove the damaged line from the order while
  * the unit is still out, the picker may substitute it away. That is a
  * difference to SURFACE, and this is the surfacing half — a self-consistency
@@ -518,12 +528,12 @@ export interface UnresolvedReplacesEntry {
  * @returns Every dangling entry, in document order
  */
 export function unresolvedReplaces(
-  rows: ReadonlyArray<{ readonly path: readonly string[]; readonly replaces?: readonly ReplacesEntry[] }>,
+  rows: ReadonlyArray<ExchangeRow>,
 ): UnresolvedReplacesEntry[] {
   const present = presentPaths(rows);
   const out: UnresolvedReplacesEntry[] = [];
   for (const row of rows) {
-    for (const entry of row.replaces ?? []) {
+    for (const entry of exchangedForOf(row)) {
       if (!present.has(pathKey(entry.path))) out.push({ path: [...row.path], entry });
     }
   }
@@ -558,7 +568,7 @@ export interface PathForwardMap {
  * something to infer from which row replaced which.
  *
  * Two entries landing on one row with one reason are MERGED by summing their
- * quantities, because `SwapReplacementList` is unique by (path, reason). The
+ * quantities, because `ExchangedForList` is unique by (path, reason). The
  * reason is carried verbatim: it is why the units come back, not where.
  *
  * @param entries - The row's `replaces`, as stored or as sent
@@ -586,7 +596,7 @@ export function repointReplaces(
         }
       }
     }
-    const k = swapReplacementKey({ path, reason: entry.reason });
+    const k = exchangedForKey({ path, reason: entry.reason });
     const hit = merged.get(k);
     if (hit) hit.quantity += entry.quantity;
     else merged.set(k, { path: [...path], quantity: entry.quantity, reason: entry.reason });
@@ -618,7 +628,7 @@ export interface OverclaimedRow {
  * still bounds what physically moves.
  *
  * A row the document does not carry is skipped: that entry dangles, which
- * `checkSwapReplacements` already allows.
+ * `checkExchangedFor` already allows.
  *
  * Pure, shared by the API's writers and the manager's pre-submit check.
  *
@@ -626,18 +636,14 @@ export interface OverclaimedRow {
  * @param next - The document's rows as they will be stored
  */
 export function overclaimedReplacements(
-  prev: ReadonlyArray<{ readonly path: readonly string[]; readonly replaces?: readonly ReplacesEntry[] }>,
-  next: ReadonlyArray<{
-    readonly path: readonly string[];
-    readonly quantity?: number | null;
-    readonly replaces?: readonly ReplacesEntry[];
-  }>,
+  prev: ReadonlyArray<ExchangeRow>,
+  next: ReadonlyArray<ExchangeRow & { readonly quantity?: number | null }>,
 ): OverclaimedRow[] {
   const key = pathKey;
-  const claims = (rows: ReadonlyArray<{ readonly replaces?: readonly ReplacesEntry[] }>) => {
+  const claims = (rows: ReadonlyArray<Omit<ExchangeRow, "path">>) => {
     const out = new Map<string, number>();
     for (const row of rows) {
-      for (const e of row.replaces ?? []) out.set(key(e.path), (out.get(key(e.path)) ?? 0) + e.quantity);
+      for (const e of exchangedForOf(row)) out.set(key(e.path), (out.get(key(e.path)) ?? 0) + e.quantity);
     }
     return out;
   };

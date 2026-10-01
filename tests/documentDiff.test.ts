@@ -870,6 +870,20 @@ Deno.test("documentDiff: the same replaces on both sides is no entry — and the
   assertEquals(Object.keys(summary(computeDocumentDiffs({ orders: [o], fulfillments: [reclassified] }, { kind: "order", uid: O }, CONTEXT).lines)), [`${D}/${LIGHT}`]);
 });
 
+Deno.test("S8c-1: `replaces` on one side and `exchanged_for` on the other, same entries, is no entry", () => {
+  // The stored corpus carries the old name until the backfill, and a writer that has moved on carries the
+  // new one — so the two documents of one order can legitimately state each name for one fact.
+  const entry = { path: X_PATH, quantity: 1, reason: "damaged" };
+  const o = order();
+  patchLine(o.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.replaces = [entry]; });
+  const f = fulfillment();
+  patchLine(f.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.exchanged_for = [entry]; });
+  assertEquals(computeDocumentDiffs({ orders: [o], fulfillments: [f] }, { kind: "order", uid: O }, CONTEXT).lines.size, 0);
+  // Mutation control: a different quantity under the new name still reports.
+  patchLine(f.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.exchanged_for = [{ ...entry, quantity: 2 }]; });
+  assertEquals(computeDocumentDiffs({ orders: [o], fulfillments: [f] }, { kind: "order", uid: O }, CONTEXT).lines.size, 1);
+});
+
 Deno.test("documentDiff: absent replaces equals an empty list", () => {
   const f = fulfillment();
   patchLine(f.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.replaces = []; });

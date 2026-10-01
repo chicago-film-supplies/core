@@ -13,7 +13,15 @@ import {
   substitutionResync,
   unresolvedReplaces,
 } from "../src/utils/substitutions.ts";
-import { SubstitutedForList } from "../src/schemas/common.ts";
+import {
+  ExchangedForEntry,
+  ExchangedForList,
+  exchangedForKey,
+  SubstitutedForList,
+  SwapReplacementEntry,
+  SwapReplacementList,
+  swapReplacementKey,
+} from "../src/schemas/common.ts";
 import { mapPathsAcrossRebuild } from "../src/utils/item-pairing.ts";
 
 /**
@@ -414,4 +422,25 @@ Deno.test("unresolvedReplaces: a path that names a divider is present — presen
     { path: ["S", "Y"], replaces: [{ path: ["L", "G"], quantity: 1, reason: "damaged" as const }] },
   ];
   assertEquals(unresolvedReplaces(rows), []);
+});
+
+// ── S8c step 1: the exchange readers take either stored name (api-cloudrun#1147) ──
+
+Deno.test("S8c-1: the exchange readers read `exchanged_for` as they read `replaces`", () => {
+  const entry = { path: ["L", "X"], quantity: 2, reason: "damaged" as const };
+  const gone = { path: ["L", "GONE"], quantity: 1, reason: "damaged" as const };
+  const rows = [
+    { path: ["L", "X"], quantity: 1 },
+    { path: ["S", "Y"], quantity: 1, exchanged_for: [entry, gone] },
+    { path: ["S", "Y2"], quantity: 1, replaces: [entry] },
+  ];
+  assertEquals(unresolvedReplaces(rows).map((u) => u.entry.path.join("/")), ["L/GONE"], "the dangling entry is found under the new name");
+  // Both rows claim 2 of X, which holds 1 — over-claimed, whichever name carries it.
+  assertEquals(overclaimedReplacements([], rows).map((r) => r.claimed), [4]);
+});
+
+Deno.test("S8c-1: the old and new names are one schema instance, not two copies", () => {
+  assert(SwapReplacementList === ExchangedForList);
+  assert(SwapReplacementEntry === ExchangedForEntry);
+  assertEquals(swapReplacementKey({ path: ["a"], reason: "lost" }), exchangedForKey({ path: ["a"], reason: "lost" }));
 });

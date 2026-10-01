@@ -150,6 +150,7 @@ Deno.test("classifySharedFields: order → fulfillment, every shared key and its
     // Taken or kept WHOLE — `shared: "value"`, like `charge_windows`: its
     // entries carry no `uid`, so they are not rows (api-cloudrun#1114).
     "propagated items[].replaces",
+    "propagated items[].exchanged_for",
     "derived query_by_items",
     "derived query_by_contacts",
     "derived query_by_dates",

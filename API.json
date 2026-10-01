@@ -1551,7 +1551,7 @@
         {
           "kind": "interface",
           "name": "DestinationExchangeType",
-          "declaration": "interface DestinationExchangeType {\n  uid_pair: string;\n  disposition: ExchangeDispositionType;\n}",
+          "declaration": "interface DestinationExchangeType {\n  uid_pair: string;\n  disposition: StoredExchangeDispositionType;\n}",
           "doc": "A mid-rental swap, stated ON the destination pair that carries it.\n\n🔴 **A swap IS a destination pair — an exchange LEG — not a structure of its\nown.** The replacement unit goes out on its own trip, so it needs its own\ndates, its own booking, its own card and its own section of items; a\ndestination pair is all four already. Making it a pair is what puts a swap\nthrough the three-way merge (`utils/shared-fields.ts`) and the diff\n(`utils/documentDiff.ts`) unchanged: a swap made on the order propagates to\nthe fulfillment and the invoice unless overridden, and a swap made on the\nfulfillment shows as a diff against both.\n\n⚠️ **The parent's collection endpoint and dates are COPIED, not referenced.**\nThe units go back on the parent leg's return trip, which is why an exchange\npair gets no `:end` card (`utils/cards.ts`) and why its collection half must\nagree with its parent's."
         },
         {
@@ -1822,7 +1822,25 @@
           "kind": "typeAlias",
           "name": "ExchangeDispositionType",
           "declaration": "type ExchangeDispositionType = indexedAccess;",
-          "doc": "`exchange` — the units taken back come back on the same trip. `send_now` — the\nreplacement goes out now and the units come back at the normal return (or,\nfor a `lost` entry, never). A fact about the TRIP; why each unit comes back is\nthe `replaces` entry's `reason`."
+          "doc": "`exchange` — the units taken back come back on the same trip. (Being renamed\n`same_trip`: see {@link StoredExchangeDispositionType}.) `send_now` — the\nreplacement goes out now and the units come back at the normal return (or,\nfor a `lost` entry, never). A fact about the TRIP; why each unit comes back is\nthe `exchanged_for` entry's `reason`."
+        },
+        {
+          "kind": "variable",
+          "name": "ExchangedForEntry",
+          "declaration": "const ExchangedForEntry: z.ZodType<ExchangedForEntryType>;",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "ExchangedForEntryType",
+          "declaration": "interface ExchangedForEntryType {\n  reason: OOSReasonType;\n}",
+          "doc": "One `exchanged_for` entry (stored as `replaces` until the S8c rename completes): a row the exchange takes units back from, how many, and\nWHY they come back (api-cloudrun#1116, owner 2026-09-26).\n\n⭐ **`reason` is the out-of-service vocabulary itself, imported rather than\nrestated**, so a new out-of-service reason reaches swaps with no change here.\nThe swap's checkout rider turns it into the unit's state: `damaged` marks the\nbooking damaged, `cleaning`/`maintenance` return the units and flag them on\nthe shelf (never billed), and `lost` is recorded at the normal return. A\n`lost` unit cannot be collected on the swap's own trip, so it is valid only on\na `send_now` leg ({@link ExchangedForEntryType} is checked against its\npair by `checkExchangedFor`).\n\nIt is {@link SubstitutedForEntryType} plus `reason`, so every rule that reads a\n`{path, quantity}[]` still reads it."
+        },
+        {
+          "kind": "variable",
+          "name": "ExchangedForList",
+          "declaration": "const ExchangedForList: z.ZodType<ExchangedForEntryType[]>;",
+          "doc": "`exchanged_for` on an exchange's replacement line: the rows this row is going out\nagainst, with how many units each and why they come back.\n\n⭐ **The shape of {@link SubstitutedForList} plus a `reason`, deliberately,\nand a different meaning.** Both say \"this row stands in relation to those\nrows, by this many units\", so every rule that reads a `{path, quantity}[]`\nreads both — the carry-forward across a rebuild, the row-identity rules, the\ndocument diff. What differs is the physical story, and it is the whole\ndistinction:\n\n| | `substituted_for` | `replaces` |\n|---|---|---|\n| X went out | no — Y went instead | yes, and it is out NOW |\n| X's booking | cancelled by the netting | kept, and marked by `reason` |\n| why | the picker had no X on the shelf | X broke, got dirty or was lost mid-rental |\n\n🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a\nsubstitution away — X's booking is cancelled and Y's inherits its custody —\nwhich is exactly the wrong answer for a swap, where X is on set and its units\nare what the swap takes back.\n\n⚠️ **It lives on the ROW rather than on the exchange PAIR**, because a swap\nTRIP legitimately carries replacements for several damaged lines at once: one\nleg, one card, one drive. A pair-level field would force one leg per damaged\nline and put three trip cards on the dispatch board for one physical trip —\nand it would state \"what\" a level above the `quantity` that says \"how many\".\nTrip facts (which leg it returns on, whether X comes back on it) stay on the\npair; line facts live here."
         },
         {
           "kind": "variable",
@@ -1965,7 +1983,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentItemInputLineType",
-          "declaration": "interface FulfillmentItemInputLineType {\n  uid: string;\n  path: string[];\n  quantity: number;\n  substituted_for?: SubstitutedForEntryType[];\n  replaces?: SwapReplacementEntryType[];\n  quantity_order?: number;\n}",
+          "declaration": "interface FulfillmentItemInputLineType {\n  uid: string;\n  path: string[];\n  quantity: number;\n  substituted_for?: SubstitutedForEntryType[];\n  replaces?: ExchangedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  quantity_order?: number;\n  quantity_ordered?: number;\n}",
           "doc": "One picker-editable line in a `PUT /fulfillments/{uid}/items` body.\n\n⚠️ **`quantity_order` is declared here even though the API always refuses it,\nand that is load-bearing rather than sloppy.** It is the divergence marker\nbetween the picker's count and the order's — `mergeLineItem` stamps the\nORDER's quantity onto it when the two disagree — so a client structurally\ncannot compute it, and `updateFulfillmentItems` throws\n*\"quantity_order is server-managed\"* for any body carrying it.\n\n🔴 **Omitting it here would DELETE that 400.** A `z.object` strips an\nundeclared key, so the service would never see the field and would answer 200\nwhile silently ignoring what the client asserted — the exact silent-acceptance\nclass this whole block exists to close. Declaring it keeps the key intact\nthrough the parse so the service's check still fires.\n\n⚠️ **The refusal deliberately stays in the SERVICE rather than moving to a\n`z.never()` here**, though the boundary is where a constraint would normally\nlive. Two reasons, and the second is the stronger one: the service's message\nnames the field and says *why*, where Zod's would not; and `never` is a\nconstruct nothing in this package walks — `collectLeafPaths`\n(`schemas/zod-walk.ts`) reports it as uninterpretable and `tests/pii.test.ts`\nfails rather than skipping it, correctly. Introducing the package's only\n`never` node to save one runtime check would mean teaching a SHARED walker a\nnew arm, which is a worse trade than one owner in the service.\n\n⚠️ **`path` is REQUIRED here, and the two existing input schemas disagree\nabout that** — `OrderItemLineInner` has `path: z.array(ItemUid)` while\n`InvoiceItemInputLineInner` has `.optional()`. This grain follows the order,\nfor a reason rather than by majority: `updateFulfillmentItems` map-keys the\nsubmission on `pathKey(li.path)` and `rebuildFulfillmentItems` treats it as a\nSET keyed on `path`, so an absent one is not a defaulted value but a row that\naddresses nothing. Requiring it turns a confusing failure deep in the rebuild\ninto a 400 that names the field.\n\n⚠️ It is a refinement of the boundary — the DOCUMENT schema standing in as\nthe request contract accepted an absent `path` via `LineItemCore.path`'s\n`.default([])` — but no writer can produce one: the manager sends stored\nlines, and `computeItemPaths` authors `path` on every stored line."
         },
         {
@@ -1983,7 +2001,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineItemType",
-          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  substituted_for?: SubstitutedForEntryType[];\n  replaces?: SwapReplacementEntryType[];\n}",
+          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  quantity_ordered?: number;\n  substituted_for?: SubstitutedForEntryType[];\n  replaces?: ExchangedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "Line item in the fulfillment order view — no price, no financial flags."
         },
         {
@@ -3153,7 +3171,7 @@
         {
           "kind": "interface",
           "name": "OrderDocLineItemType",
-          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  replaces?: SwapReplacementEntryType[];\n}",
+          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  replaces?: ExchangedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "Line item in the full order document.\n\n`price` and `stock_method` are REQUIRED, and that is a statement about the\nwriters rather than a convenience: every one of the 9,303 line items in prod\n(and in dev) carries both, because `buildOrderLineItem` resolves them off the\nbacking product doc — or off the `custom-` line's own payload — before it can\nbuild anything at all. While they were optional, three call sites downstream\nhad to compensate for a shape no writer has ever produced: two `item.price!`\nassertions, and a `\"stock_method\" in item` duck-type that answered \"not a line\nitem\" for a line item that merely omitted the field.\n\n`uid_delivery` / `uid_collection` are absent, matching the input arm. They\nbelong to the destination divider — 0 of 9,303 stored lines carry either key,\nno writer has ever set one on a line, and both readers in\n`@cfs/core/utils/orders` gate on `type === \"destination\"` before looking. The\nFULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit\n`null` there, so removing it would be a backfill, not a tightening."
         },
         {
@@ -3213,7 +3231,7 @@
         {
           "kind": "interface",
           "name": "OrderItemLineType",
-          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  order_number?: number;\n  uid_order?: string;\n  uid_tax_class_override?: string | null;\n  replaces?: SwapReplacementEntryType[];\n}",
+          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  order_number?: number;\n  uid_order?: string;\n  uid_tax_class_override?: string | null;\n  replaces?: ExchangedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A billable order line as a client sends it — the input mirror of\n`OrderDocLineItem`.\n\nDeliberately permissive about what may be OMITTED: the server fills `name`,\n`stock_method` and the whole price from the backing product doc, and a custom\nline supplies them itself. What it is no longer permissive about is what a\nline may CLAIM — see {@link OrderItem} for why the arms exist.\n\n`uid_delivery` / `uid_collection` are absent here on purpose. The flat schema\nthis replaces accepted both on any item, and `buildOrderLineItem` has never\npropagated them to a line — prod agrees: 0 of 9,303 order line items carry\neither key. They belong to the destination divider, which is where they now\nlive exclusively."
         },
         {
@@ -4022,6 +4040,12 @@
         },
         {
           "kind": "variable",
+          "name": "STORED_EXCHANGE_DISPOSITIONS",
+          "declaration": "const STORED_EXCHANGE_DISPOSITIONS: \"same_trip\" | \"exchange\" | \"send_now\"[];",
+          "doc": "What a STORED pair may carry while `exchange` is renamed `same_trip` (S8c, api-cloudrun#1147).\n\n🔴 **A separate tuple, and `EXCHANGE_DISPOSITIONS` above is deliberately unchanged.** That\ntuple is the list of values a WRITER may send: manager's pickers iterate it\n(`DISPOSITION_LABELS[value].label`, which has no `same_trip` entry) and an api route builds\n`z.enum(EXCHANGE_DISPOSITIONS)` from it. Widening it would put `same_trip` in a dropdown and\naccept it from a client before any reader handles it. So step 1 widens only what a stored\ndocument PARSES; step 2 moves the writers; step 4 collapses the two tuples into one.\n`same_trip` and `exchange` mean the same thing. A reader treats them as one value."
+        },
+        {
+          "kind": "variable",
           "name": "SaveQuoteVersionInput",
           "declaration": "const SaveQuoteVersionInput: z.ZodType<SaveQuoteVersionInputType>;",
           "doc": "Zod schema for SaveQuoteVersionInput."
@@ -4280,6 +4304,18 @@
         },
         {
           "kind": "variable",
+          "name": "StoredExchangeDispositionEnum",
+          "declaration": "const StoredExchangeDispositionEnum: z.ZodType<StoredExchangeDispositionType>;",
+          "doc": "Zod schema for {@link StoredExchangeDispositionType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "StoredExchangeDispositionType",
+          "declaration": "type StoredExchangeDispositionType = indexedAccess;",
+          "doc": ""
+        },
+        {
+          "kind": "variable",
           "name": "SubstitutedForEntry",
           "declaration": "const SubstitutedForEntry: z.ZodType<SubstitutedForEntryType>;",
           "doc": ""
@@ -4311,20 +4347,20 @@
         {
           "kind": "variable",
           "name": "SwapReplacementEntry",
-          "declaration": "const SwapReplacementEntry: z.ZodType<SwapReplacementEntryType>;",
+          "declaration": "const SwapReplacementEntry: z.ZodType<ExchangedForEntryType>;",
           "doc": ""
         },
         {
-          "kind": "interface",
+          "kind": "typeAlias",
           "name": "SwapReplacementEntryType",
-          "declaration": "interface SwapReplacementEntryType {\n  reason: OOSReasonType;\n}",
-          "doc": "One `replaces` entry: a row the swap takes units back from, how many, and\nWHY they come back (api-cloudrun#1116, owner 2026-09-26).\n\n⭐ **`reason` is the out-of-service vocabulary itself, imported rather than\nrestated**, so a new out-of-service reason reaches swaps with no change here.\nThe swap's checkout rider turns it into the unit's state: `damaged` marks the\nbooking damaged, `cleaning`/`maintenance` return the units and flag them on\nthe shelf (never billed), and `lost` is recorded at the normal return. A\n`lost` unit cannot be collected on the swap's own trip, so it is valid only on\na `send_now` leg ({@link SwapReplacementEntryType} is checked against its\npair by `checkSwapReplacements`).\n\nIt is {@link SubstitutedForEntryType} plus `reason`, so every rule that reads a\n`{path, quantity}[]` still reads it."
+          "declaration": "type SwapReplacementEntryType = ExchangedForEntryType;",
+          "doc": "S8c step 1 (api-cloudrun#1147): the OLD names, kept beside the new until the\nfour-step removal's last step drops them. Each is the same value as its\n`ExchangedFor*` twin, not a copy, so there is one schema instance and one\n`z.globalRegistry` entry."
         },
         {
           "kind": "variable",
           "name": "SwapReplacementList",
-          "declaration": "const SwapReplacementList: z.ZodType<SwapReplacementEntryType[]>;",
-          "doc": "`replaces` on a swap's replacement line: the rows this row is going out\nagainst, with how many units each and why they come back.\n\n⭐ **The shape of {@link SubstitutedForList} plus a `reason`, deliberately,\nand a different meaning.** Both say \"this row stands in relation to those\nrows, by this many units\", so every rule that reads a `{path, quantity}[]`\nreads both — the carry-forward across a rebuild, the row-identity rules, the\ndocument diff. What differs is the physical story, and it is the whole\ndistinction:\n\n| | `substituted_for` | `replaces` |\n|---|---|---|\n| X went out | no — Y went instead | yes, and it is out NOW |\n| X's booking | cancelled by the netting | kept, and marked by `reason` |\n| why | the picker had no X on the shelf | X broke, got dirty or was lost mid-rental |\n\n🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a\nsubstitution away — X's booking is cancelled and Y's inherits its custody —\nwhich is exactly the wrong answer for a swap, where X is on set and its units\nare what the swap takes back.\n\n⚠️ **It lives on the ROW rather than on the exchange PAIR**, because a swap\nTRIP legitimately carries replacements for several damaged lines at once: one\nleg, one card, one drive. A pair-level field would force one leg per damaged\nline and put three trip cards on the dispatch board for one physical trip —\nand it would state \"what\" a level above the `quantity` that says \"how many\".\nTrip facts (which leg it returns on, whether X comes back on it) stay on the\npair; line facts live here."
+          "declaration": "const SwapReplacementList: z.ZodType<ExchangedForEntryType[]>;",
+          "doc": ""
         },
         {
           "kind": "interface",
@@ -5449,6 +5485,19 @@
         },
         {
           "kind": "function",
+          "name": "checkRenamedKeys",
+          "signature": "checkRenamedKeys(row: object, ctx: z.RefinementCtx, pairs: ReadonlyArray<readonly [string, string]>): void",
+          "doc": "The \"not both\" refine every dual-name stage needs: a row states the old name\nor the new one, never both, because two stated values cannot be told apart\nfrom a half-finished migration. Attached to every grain that declares a\nrenamed key (S8c).",
+          "paramTags": [
+            {
+              "name": "pairs",
+              "doc": "`[oldKey, newKey]` per rename"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "checkZeroPricedComponents",
           "signature": "checkZeroPricedComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void",
           "doc": "The ARRAY-level `zero_priced` refinement, holding **both directions in one\nplace** — a flagged line is a component, and a component states the flag.\n\n🔴 **It cannot be per-item and it cannot be split.** Deciding componenthood\nneeds the sibling array, so a per-item refinement would red the test sites that\nparse a line item in isolation for having no siblings — failures with nothing\nto do with `zero_priced`. And splitting the two directions across a schema\nrefinement and a write-boundary check gives one fact two homes: `core#100`\nasked for both here because `validateCollection` re-parses every stored\ndocument through its Zod schema, so a schema-level rule audits the whole corpus\nfor free where a boundary-only rule is invisible to it.\n\n⚠️ **This runs STRICTLY BEFORE `api-cloudrun/src/lib/validate.ts`'s arm**, which\n`validateBeforeWrite` reaches only after `safeParse` has succeeded — so that\narm's invariant-(2) check is unreachable once this lands, and is dead code\nrather than a second opinion.\n\nInvariant (1) — *a flagged line carries no charge* — stays per-item in\n{@link checkZeroPricedAmount}, because it needs only the item it is given.",
@@ -5540,6 +5589,22 @@
           "name": "enumValues",
           "signature": "enumValues(schema: z.ZodType<T>): T[]",
           "doc": "Return the values of a `ZodEnum` in declaration order. Throws when passed a\nnon-enum schema — callers should pass the enum directly (e.g.\n`enumValues(CardStatusEnum)`), not a wrapped schema.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "exchangedForKey",
+          "signature": "exchangedForKey(entry: typeLiteral): string",
+          "doc": "The identity of an `exchanged_for` entry: its row AND its reason. One damaged line\nof 3 may send back 2 dirty units and 1 broken one on the same trip, which is\ntwo entries on one path.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "exchangedForOf",
+          "signature": "exchangedForOf(row: typeLiteral): readonly E[]",
+          "doc": "A row's exchange entries under EITHER stored name: `exchanged_for`, or the\n`replaces` it is renamed from. Absent reads as none.\n\nEvery reader of the field goes through this for the length of the migration,\nbecause the stored corpus carries the old name until the backfill and a\nwriter that has moved on carries the new one. ⚠️ A document never carries\nboth ({@link checkRenamedKeys}), so which wins is moot on a valid one; the\nnew name is read first so an invalid one reads as the writer meant it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -5881,12 +5946,10 @@
           "returnsTag": null
         },
         {
-          "kind": "function",
+          "kind": "variable",
           "name": "swapReplacementKey",
-          "signature": "swapReplacementKey(entry: typeLiteral): string",
-          "doc": "The identity of a `replaces` entry: its row AND its reason. One damaged line\nof 3 may send back 2 dirty units and 1 broken one on the same trip, which is\ntwo entries on one path.",
-          "paramTags": [],
-          "returnsTag": null
+          "declaration": "const swapReplacementKey: exchangedForKey;",
+          "doc": ""
         },
         {
           "kind": "variable",
@@ -6303,6 +6366,24 @@
           "name": "EventCardId",
           "declaration": "const EventCardId: z.ZodType<string>;",
           "doc": "`cards` event-card composite id — `{uid_order}:{uid_pair}:start|end`, one per\norder LEG. See `api-cloudrun src/lib/eventCards.ts` (`EventPosition =\n\"start\" | \"end\"`, and `eventCardSlots`, the one author).\n\n🔴 **Segment 2 is the destination PAIR's uid — a `z.uuid()`, the destination\nDIVIDER's `items[].uid` — and it is emphatically NOT a `destinations/{uid}`\ndocument id.** It was that document id until 2026-09-19, and both halves of\nthat were wrong:\n\n- **It named the wrong document on every `:end` card.** Both sides were built\n  from the pair's DELIVERY endpoint, so an `:end` card whose collection\n  address differs from its delivery address carried an id naming an address\n  it does not visit. 7 prod orders measured.\n- **It was not unique per leg.** `findOrCreateDestination` is a global\n  address-book dedupe, so two pairs on one document delivering to one address\n  legitimately SHARE a `delivery.uid` — and therefore shared a card id. This\n  is the same construction `DocDestinationType.uid` records: *\"`delivery.uid`\n  cannot be this identity, by construction.\"*\n\nThe pair uid is the LEG's identity and has neither defect.\n\n⚠️ **This accepted BOTH forms between 2026-09-19 and the migration**, because\na tightened id rejected 1,175 of 1,175 cards in each corpus — the transitional\narm and the one-shot migrator that emptied it are both DELETED now, the\nmigrator having been applied to prod and dev (1,175 and 1,173 cards). The\nstanding detector is `api-cloudrun/scripts/audit-cards.ts`, which reports the\nold-form count and is what licensed the tightening."
+        },
+        {
+          "kind": "variable",
+          "name": "ExchangedForEntry",
+          "declaration": "const ExchangedForEntry: z.ZodType<ExchangedForEntryType>;",
+          "doc": ""
+        },
+        {
+          "kind": "interface",
+          "name": "ExchangedForEntryType",
+          "declaration": "interface ExchangedForEntryType {\n  reason: OOSReasonType;\n}",
+          "doc": "One `exchanged_for` entry (stored as `replaces` until the S8c rename completes): a row the exchange takes units back from, how many, and\nWHY they come back (api-cloudrun#1116, owner 2026-09-26).\n\n⭐ **`reason` is the out-of-service vocabulary itself, imported rather than\nrestated**, so a new out-of-service reason reaches swaps with no change here.\nThe swap's checkout rider turns it into the unit's state: `damaged` marks the\nbooking damaged, `cleaning`/`maintenance` return the units and flag them on\nthe shelf (never billed), and `lost` is recorded at the normal return. A\n`lost` unit cannot be collected on the swap's own trip, so it is valid only on\na `send_now` leg ({@link ExchangedForEntryType} is checked against its\npair by `checkExchangedFor`).\n\nIt is {@link SubstitutedForEntryType} plus `reason`, so every rule that reads a\n`{path, quantity}[]` still reads it."
+        },
+        {
+          "kind": "variable",
+          "name": "ExchangedForList",
+          "declaration": "const ExchangedForList: z.ZodType<ExchangedForEntryType[]>;",
+          "doc": "`exchanged_for` on an exchange's replacement line: the rows this row is going out\nagainst, with how many units each and why they come back.\n\n⭐ **The shape of {@link SubstitutedForList} plus a `reason`, deliberately,\nand a different meaning.** Both say \"this row stands in relation to those\nrows, by this many units\", so every rule that reads a `{path, quantity}[]`\nreads both — the carry-forward across a rebuild, the row-identity rules, the\ndocument diff. What differs is the physical story, and it is the whole\ndistinction:\n\n| | `substituted_for` | `replaces` |\n|---|---|---|\n| X went out | no — Y went instead | yes, and it is out NOW |\n| X's booking | cancelled by the netting | kept, and marked by `reason` |\n| why | the picker had no X on the shelf | X broke, got dirty or was lost mid-rental |\n\n🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a\nsubstitution away — X's booking is cancelled and Y's inherits its custody —\nwhich is exactly the wrong answer for a swap, where X is on set and its units\nare what the swap takes back.\n\n⚠️ **It lives on the ROW rather than on the exchange PAIR**, because a swap\nTRIP legitimately carries replacements for several damaged lines at once: one\nleg, one card, one drive. A pair-level field would force one leg per damaged\nline and put three trip cards on the dispatch board for one physical trip —\nand it would state \"what\" a level above the `quantity` that says \"how many\".\nTrip facts (which leg it returns on, whether X comes back on it) stay on the\npair; line facts live here."
         },
         {
           "kind": "variable",
@@ -6739,20 +6820,20 @@
         {
           "kind": "variable",
           "name": "SwapReplacementEntry",
-          "declaration": "const SwapReplacementEntry: z.ZodType<SwapReplacementEntryType>;",
+          "declaration": "const SwapReplacementEntry: z.ZodType<ExchangedForEntryType>;",
           "doc": ""
         },
         {
-          "kind": "interface",
+          "kind": "typeAlias",
           "name": "SwapReplacementEntryType",
-          "declaration": "interface SwapReplacementEntryType {\n  reason: OOSReasonType;\n}",
-          "doc": "One `replaces` entry: a row the swap takes units back from, how many, and\nWHY they come back (api-cloudrun#1116, owner 2026-09-26).\n\n⭐ **`reason` is the out-of-service vocabulary itself, imported rather than\nrestated**, so a new out-of-service reason reaches swaps with no change here.\nThe swap's checkout rider turns it into the unit's state: `damaged` marks the\nbooking damaged, `cleaning`/`maintenance` return the units and flag them on\nthe shelf (never billed), and `lost` is recorded at the normal return. A\n`lost` unit cannot be collected on the swap's own trip, so it is valid only on\na `send_now` leg ({@link SwapReplacementEntryType} is checked against its\npair by `checkSwapReplacements`).\n\nIt is {@link SubstitutedForEntryType} plus `reason`, so every rule that reads a\n`{path, quantity}[]` still reads it."
+          "declaration": "type SwapReplacementEntryType = ExchangedForEntryType;",
+          "doc": "S8c step 1 (api-cloudrun#1147): the OLD names, kept beside the new until the\nfour-step removal's last step drops them. Each is the same value as its\n`ExchangedFor*` twin, not a copy, so there is one schema instance and one\n`z.globalRegistry` entry."
         },
         {
           "kind": "variable",
           "name": "SwapReplacementList",
-          "declaration": "const SwapReplacementList: z.ZodType<SwapReplacementEntryType[]>;",
-          "doc": "`replaces` on a swap's replacement line: the rows this row is going out\nagainst, with how many units each and why they come back.\n\n⭐ **The shape of {@link SubstitutedForList} plus a `reason`, deliberately,\nand a different meaning.** Both say \"this row stands in relation to those\nrows, by this many units\", so every rule that reads a `{path, quantity}[]`\nreads both — the carry-forward across a rebuild, the row-identity rules, the\ndocument diff. What differs is the physical story, and it is the whole\ndistinction:\n\n| | `substituted_for` | `replaces` |\n|---|---|---|\n| X went out | no — Y went instead | yes, and it is out NOW |\n| X's booking | cancelled by the netting | kept, and marked by `reason` |\n| why | the picker had no X on the shelf | X broke, got dirty or was lost mid-rental |\n\n🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a\nsubstitution away — X's booking is cancelled and Y's inherits its custody —\nwhich is exactly the wrong answer for a swap, where X is on set and its units\nare what the swap takes back.\n\n⚠️ **It lives on the ROW rather than on the exchange PAIR**, because a swap\nTRIP legitimately carries replacements for several damaged lines at once: one\nleg, one card, one drive. A pair-level field would force one leg per damaged\nline and put three trip cards on the dispatch board for one physical trip —\nand it would state \"what\" a level above the `quantity` that says \"how many\".\nTrip facts (which leg it returns on, whether X comes back on it) stay on the\npair; line facts live here."
+          "declaration": "const SwapReplacementList: z.ZodType<ExchangedForEntryType[]>;",
+          "doc": ""
         },
         {
           "kind": "variable",
@@ -6834,6 +6915,19 @@
         },
         {
           "kind": "function",
+          "name": "checkRenamedKeys",
+          "signature": "checkRenamedKeys(row: object, ctx: z.RefinementCtx, pairs: ReadonlyArray<readonly [string, string]>): void",
+          "doc": "The \"not both\" refine every dual-name stage needs: a row states the old name\nor the new one, never both, because two stated values cannot be told apart\nfrom a half-finished migration. Attached to every grain that declares a\nrenamed key (S8c).",
+          "paramTags": [
+            {
+              "name": "pairs",
+              "doc": "`[oldKey, newKey]` per rename"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "checkZeroPricedAmount",
           "signature": "checkZeroPricedAmount(item: typeLiteral, ctx: z.RefinementCtx): void",
           "doc": "**Invariant (1) of the `zero_priced` campaign: a line flagged `zero_priced`\ncarries no charge.** Owner ruling, 2026-09-07: *\"zero priced should prevent a\ncharge\"*, restated 2026-09-08 to cover the catalog grain too — the rule holds\nat EVERY grain, with no exceptions.\n\n🔴 **Nothing used to tie the flag to the amount, and that is precisely how the\ncorpus drifted.** `zero_priced` is applied to a price in exactly one place —\n`core/src/utils/order-lines.ts`, `base_cents: comp.zero_priced ? 0 : (…)` —\nwhich runs client-side, ONCE, at line construction, and the resulting `0` is\nthen stored. Every pricer downstream reads the stored `base_cents` and never\nconsults the flag, so once a non-zero amount arrives by any route nothing\nre-zeroes it. Measured before this refinement existed: **53 order lines across\n35 documents** and **65 catalog component entries across 37 products**, both\nenvironments, including nine lines carrying $15,318 of charge on an ACTIVE\norder while its Xero quote correctly excluded them.\n\n⚠️ **PER-ITEM on purpose, unlike invariants (2) and (3).** This rule needs only\nthe item it is given — a flag and an amount on one object — so it is safe on\nthe 29 test sites that parse a line item in isolation. The other two (*a\nflagged line is a COMPONENT*, *a component STATES the flag*) cannot be\nexpressed here at all, because deciding componenthood requires the sibling\narray; both live in {@link checkZeroPricedComponents}, the array-level\nrefinement on each grain's `items`.\n\n⚠️ **A flagged line with NO price is fine** and is not reported: absence cannot\ncharge anything, and dividers reach this check with `price: null`.",
@@ -6861,6 +6955,22 @@
           "name": "deriveName",
           "signature": "deriveName(parts: NamePartsLike): string",
           "doc": "Canonical join rule for deriving a single display string from name parts.\nJoins `[first_name, middle_name, last_name]` with single spaces (missing\nparts are dropped, never produce empty padding) and appends ` (pronunciation)`\nwhen set. This is the single source of truth — every `name` field on a\nstored document and `ActorRef.name` is computed by passing through here.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "exchangedForKey",
+          "signature": "exchangedForKey(entry: typeLiteral): string",
+          "doc": "The identity of an `exchanged_for` entry: its row AND its reason. One damaged line\nof 3 may send back 2 dirty units and 1 broken one on the same trip, which is\ntwo entries on one path.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "exchangedForOf",
+          "signature": "exchangedForOf(row: typeLiteral): readonly E[]",
+          "doc": "A row's exchange entries under EITHER stored name: `exchanged_for`, or the\n`replaces` it is renamed from. Absent reads as none.\n\nEvery reader of the field goes through this for the length of the migration,\nbecause the stored corpus carries the old name until the backfill and a\nwriter that has moved on carries the new one. ⚠️ A document never carries\nboth ({@link checkRenamedKeys}), so which wins is moot on a valid one; the\nnew name is read first so an invalid one reads as the writer meant it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -6929,12 +7039,10 @@
           "returnsTag": null
         },
         {
-          "kind": "function",
+          "kind": "variable",
           "name": "swapReplacementKey",
-          "signature": "swapReplacementKey(entry: typeLiteral): string",
-          "doc": "The identity of a `replaces` entry: its row AND its reason. One damaged line\nof 3 may send back 2 dirty units and 1 broken one on the same trip, which is\ntwo entries on one path.",
-          "paramTags": [],
-          "returnsTag": null
+          "declaration": "const swapReplacementKey: exchangedForKey;",
+          "doc": ""
         },
         {
           "kind": "function",
@@ -8295,7 +8403,7 @@
         {
           "kind": "interface",
           "name": "DestinationExchangeType",
-          "declaration": "interface DestinationExchangeType {\n  uid_pair: string;\n  disposition: ExchangeDispositionType;\n}",
+          "declaration": "interface DestinationExchangeType {\n  uid_pair: string;\n  disposition: StoredExchangeDispositionType;\n}",
           "doc": "A mid-rental swap, stated ON the destination pair that carries it.\n\n🔴 **A swap IS a destination pair — an exchange LEG — not a structure of its\nown.** The replacement unit goes out on its own trip, so it needs its own\ndates, its own booking, its own card and its own section of items; a\ndestination pair is all four already. Making it a pair is what puts a swap\nthrough the three-way merge (`utils/shared-fields.ts`) and the diff\n(`utils/documentDiff.ts`) unchanged: a swap made on the order propagates to\nthe fulfillment and the invoice unless overridden, and a swap made on the\nfulfillment shows as a diff against both.\n\n⚠️ **The parent's collection endpoint and dates are COPIED, not referenced.**\nThe units go back on the parent leg's return trip, which is why an exchange\npair gets no `:end` card (`utils/cards.ts`) and why its collection half must\nagree with its parent's."
         },
         {
@@ -8392,7 +8500,7 @@
           "kind": "typeAlias",
           "name": "ExchangeDispositionType",
           "declaration": "type ExchangeDispositionType = indexedAccess;",
-          "doc": "`exchange` — the units taken back come back on the same trip. `send_now` — the\nreplacement goes out now and the units come back at the normal return (or,\nfor a `lost` entry, never). A fact about the TRIP; why each unit comes back is\nthe `replaces` entry's `reason`."
+          "doc": "`exchange` — the units taken back come back on the same trip. (Being renamed\n`same_trip`: see {@link StoredExchangeDispositionType}.) `send_now` — the\nreplacement goes out now and the units come back at the normal return (or,\nfor a `lost` entry, never). A fact about the TRIP; why each unit comes back is\nthe `exchanged_for` entry's `reason`."
         },
         {
           "kind": "interface",
@@ -8541,7 +8649,7 @@
         {
           "kind": "interface",
           "name": "OrderDocLineItemType",
-          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  replaces?: SwapReplacementEntryType[];\n}",
+          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  replaces?: ExchangedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "Line item in the full order document.\n\n`price` and `stock_method` are REQUIRED, and that is a statement about the\nwriters rather than a convenience: every one of the 9,303 line items in prod\n(and in dev) carries both, because `buildOrderLineItem` resolves them off the\nbacking product doc — or off the `custom-` line's own payload — before it can\nbuild anything at all. While they were optional, three call sites downstream\nhad to compensate for a shape no writer has ever produced: two `item.price!`\nassertions, and a `\"stock_method\" in item` duck-type that answered \"not a line\nitem\" for a line item that merely omitted the field.\n\n`uid_delivery` / `uid_collection` are absent, matching the input arm. They\nbelong to the destination divider — 0 of 9,303 stored lines carry either key,\nno writer has ever set one on a line, and both readers in\n`@cfs/core/utils/orders` gate on `type === \"destination\"` before looking. The\nFULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit\n`null` there, so removing it would be a backfill, not a tightening."
         },
         {
@@ -8589,7 +8697,7 @@
         {
           "kind": "interface",
           "name": "OrderItemLineType",
-          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  order_number?: number;\n  uid_order?: string;\n  uid_tax_class_override?: string | null;\n  replaces?: SwapReplacementEntryType[];\n}",
+          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  order_number?: number;\n  uid_order?: string;\n  uid_tax_class_override?: string | null;\n  replaces?: ExchangedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A billable order line as a client sends it — the input mirror of\n`OrderDocLineItem`.\n\nDeliberately permissive about what may be OMITTED: the server fills `name`,\n`stock_method` and the whole price from the backing product doc, and a custom\nline supplies them itself. What it is no longer permissive about is what a\nline may CLAIM — see {@link OrderItem} for why the arms exist.\n\n`uid_delivery` / `uid_collection` are absent here on purpose. The flat schema\nthis replaces accepted both on any item, and `buildOrderLineItem` has never\npropagated them to a line — prod agrees: 0 of 9,303 order line items carry\neither key. They belong to the destination divider, which is where they now\nlive exclusively."
         },
         {
@@ -8633,6 +8741,24 @@
           "name": "PriceModifierType",
           "declaration": "interface PriceModifierType {\n  uid: string;\n  name: string;\n  rate: number;\n  type: RateType;\n  amount_cents: number;\n}",
           "doc": "A rate-based charge applied to an item or order (tax or transaction fee).\nuid references a tax doc (for taxes) or a product doc (for transaction fees)."
+        },
+        {
+          "kind": "variable",
+          "name": "STORED_EXCHANGE_DISPOSITIONS",
+          "declaration": "const STORED_EXCHANGE_DISPOSITIONS: \"same_trip\" | \"exchange\" | \"send_now\"[];",
+          "doc": "What a STORED pair may carry while `exchange` is renamed `same_trip` (S8c, api-cloudrun#1147).\n\n🔴 **A separate tuple, and `EXCHANGE_DISPOSITIONS` above is deliberately unchanged.** That\ntuple is the list of values a WRITER may send: manager's pickers iterate it\n(`DISPOSITION_LABELS[value].label`, which has no `same_trip` entry) and an api route builds\n`z.enum(EXCHANGE_DISPOSITIONS)` from it. Widening it would put `same_trip` in a dropdown and\naccept it from a client before any reader handles it. So step 1 widens only what a stored\ndocument PARSES; step 2 moves the writers; step 4 collapses the two tuples into one.\n`same_trip` and `exchange` mean the same thing. A reader treats them as one value."
+        },
+        {
+          "kind": "variable",
+          "name": "StoredExchangeDispositionEnum",
+          "declaration": "const StoredExchangeDispositionEnum: z.ZodType<StoredExchangeDispositionType>;",
+          "doc": "Zod schema for {@link StoredExchangeDispositionType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "StoredExchangeDispositionType",
+          "declaration": "type StoredExchangeDispositionType = indexedAccess;",
+          "doc": ""
         },
         {
           "kind": "variable",
@@ -8696,6 +8822,14 @@
         },
         {
           "kind": "function",
+          "name": "checkExchangedFor",
+          "signature": "checkExchangedFor(doc: typeLiteral, ctx: z.RefinementCtx): void",
+          "doc": "An `exchanged_for` (or old-named `replaces`) entry is a claim about two rows of THIS document, so only the\ndocument can check it:\n\n1. the row carrying it sits under a pair marked `exchange` — a swap's\n   replacement line, not an ordinary one;\n2. every path it names is on that pair's PARENT leg, or on ANOTHER swap leg of\n   the same parent (`path[0]`) — the units taken back are ones the family of\n   legs sent out. The second arm is FLAT chaining (api-cloudrun#1116, owner\n   2026-09-26): a replacement that breaks or gets dirty in turn is taken back\n   by a new swap on the ORIGINAL leg naming the earlier swap's row, so\n   `exchange.uid_pair` is never a swap and `:end` stays one level deep;\n3. a `lost` entry sits on a `send_now` leg — a lost unit cannot come back on\n   the swap's own trip.\n\n⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without\nit a swap could name a row on an unrelated leg, and the checkout rider would\nmove units on a trip that never carried them.\n\n🔴 **It deliberately does NOT require the named row to EXIST** (api-cloudrun#1114,\nowner 2026-09-22). The order, the fulfillment and the invoice legitimately\ndiffer, and a difference is surfaced for an operator to realign — never\nresolved by a write. A pointer at a row this document no longer carries is\nsuch a difference: sales removes the damaged line from the order while the\nunit is still out on set; the warehouse substitutes it away on the\nfulfillment. Requiring existence forced every writer to choose between\nREFUSING the edit and DROPPING the pointer, and both decide the operator's\nquestion for them. A dangling entry marks nothing — the rider finds no booking\n— and the manager surfaces it.\n\nShared by the order and fulfillment documents, attached exactly as\n{@link checkStoredEndpoints} is. Lives HERE rather than in `fulfillment.ts`\nbecause `fulfillment.ts` already imports this module; the reverse import would\nbe a cycle.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "checkLeadingDivider",
           "signature": "checkLeadingDivider(grain: LeadingDividerGrain): fnOrConstructor",
           "doc": "{@link leadingDividerViolations} as a document-level refinement, for one\ngrain. Attached to `OrderSchema`, `FulfillmentSchema` and `InvoiceSchema`; the\ninvoice's `linked` is `query_by_orders.length > 0`.\n\n⚠️ **A REFINE, so under `z.strictObject` a stored violator becomes unwritable\nthe moment a consumer pins it.** The corpus read 0 in both projects before it\nshipped (2026-09-28: every order and fulfillment leads with a `destination`,\nevery one of 1,035 order-linked invoices with an `order`).",
@@ -8719,12 +8853,10 @@
           "returnsTag": null
         },
         {
-          "kind": "function",
+          "kind": "variable",
           "name": "checkSwapReplacements",
-          "signature": "checkSwapReplacements(doc: typeLiteral, ctx: z.RefinementCtx): void",
-          "doc": "A `replaces` entry is a claim about two rows of THIS document, so only the\ndocument can check it:\n\n1. the row carrying it sits under a pair marked `exchange` — a swap's\n   replacement line, not an ordinary one;\n2. every path it names is on that pair's PARENT leg, or on ANOTHER swap leg of\n   the same parent (`path[0]`) — the units taken back are ones the family of\n   legs sent out. The second arm is FLAT chaining (api-cloudrun#1116, owner\n   2026-09-26): a replacement that breaks or gets dirty in turn is taken back\n   by a new swap on the ORIGINAL leg naming the earlier swap's row, so\n   `exchange.uid_pair` is never a swap and `:end` stays one level deep;\n3. a `lost` entry sits on a `send_now` leg — a lost unit cannot come back on\n   the swap's own trip.\n\n⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without\nit a swap could name a row on an unrelated leg, and the checkout rider would\nmove units on a trip that never carried them.\n\n🔴 **It deliberately does NOT require the named row to EXIST** (api-cloudrun#1114,\nowner 2026-09-22). The order, the fulfillment and the invoice legitimately\ndiffer, and a difference is surfaced for an operator to realign — never\nresolved by a write. A pointer at a row this document no longer carries is\nsuch a difference: sales removes the damaged line from the order while the\nunit is still out on set; the warehouse substitutes it away on the\nfulfillment. Requiring existence forced every writer to choose between\nREFUSING the edit and DROPPING the pointer, and both decide the operator's\nquestion for them. A dangling entry marks nothing — the rider finds no booking\n— and the manager surfaces it.\n\nShared by the order and fulfillment documents, attached exactly as\n{@link checkStoredEndpoints} is. Lives HERE rather than in `fulfillment.ts`\nbecause `fulfillment.ts` already imports this module; the reverse import would\nbe a cycle.",
-          "paramTags": [],
-          "returnsTag": null
+          "declaration": "const checkSwapReplacements: checkExchangedFor;",
+          "doc": ""
         },
         {
           "kind": "function",
@@ -8862,7 +8994,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentItemInputLineType",
-          "declaration": "interface FulfillmentItemInputLineType {\n  uid: string;\n  path: string[];\n  quantity: number;\n  substituted_for?: SubstitutedForEntryType[];\n  replaces?: SwapReplacementEntryType[];\n  quantity_order?: number;\n}",
+          "declaration": "interface FulfillmentItemInputLineType {\n  uid: string;\n  path: string[];\n  quantity: number;\n  substituted_for?: SubstitutedForEntryType[];\n  replaces?: ExchangedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n  quantity_order?: number;\n  quantity_ordered?: number;\n}",
           "doc": "One picker-editable line in a `PUT /fulfillments/{uid}/items` body.\n\n⚠️ **`quantity_order` is declared here even though the API always refuses it,\nand that is load-bearing rather than sloppy.** It is the divergence marker\nbetween the picker's count and the order's — `mergeLineItem` stamps the\nORDER's quantity onto it when the two disagree — so a client structurally\ncannot compute it, and `updateFulfillmentItems` throws\n*\"quantity_order is server-managed\"* for any body carrying it.\n\n🔴 **Omitting it here would DELETE that 400.** A `z.object` strips an\nundeclared key, so the service would never see the field and would answer 200\nwhile silently ignoring what the client asserted — the exact silent-acceptance\nclass this whole block exists to close. Declaring it keeps the key intact\nthrough the parse so the service's check still fires.\n\n⚠️ **The refusal deliberately stays in the SERVICE rather than moving to a\n`z.never()` here**, though the boundary is where a constraint would normally\nlive. Two reasons, and the second is the stronger one: the service's message\nnames the field and says *why*, where Zod's would not; and `never` is a\nconstruct nothing in this package walks — `collectLeafPaths`\n(`schemas/zod-walk.ts`) reports it as uninterpretable and `tests/pii.test.ts`\nfails rather than skipping it, correctly. Introducing the package's only\n`never` node to save one runtime check would mean teaching a SHARED walker a\nnew arm, which is a worse trade than one owner in the service.\n\n⚠️ **`path` is REQUIRED here, and the two existing input schemas disagree\nabout that** — `OrderItemLineInner` has `path: z.array(ItemUid)` while\n`InvoiceItemInputLineInner` has `.optional()`. This grain follows the order,\nfor a reason rather than by majority: `updateFulfillmentItems` map-keys the\nsubmission on `pathKey(li.path)` and `rebuildFulfillmentItems` treats it as a\nSET keyed on `path`, so an absent one is not a defaulted value but a row that\naddresses nothing. Requiring it turns a confusing failure deep in the rebuild\ninto a 400 that names the field.\n\n⚠️ It is a refinement of the boundary — the DOCUMENT schema standing in as\nthe request contract accepted an absent `path` via `LineItemCore.path`'s\n`.default([])` — but no writer can produce one: the manager sends stored\nlines, and `computeItemPaths` authors `path` on every stored line."
         },
         {
@@ -8880,7 +9012,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineItemType",
-          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  substituted_for?: SubstitutedForEntryType[];\n  replaces?: SwapReplacementEntryType[];\n}",
+          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_order?: number;\n  quantity_ordered?: number;\n  substituted_for?: SubstitutedForEntryType[];\n  replaces?: ExchangedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "Line item in the fulfillment order view — no price, no financial flags."
         },
         {
@@ -15043,6 +15175,12 @@
         },
         {
           "kind": "interface",
+          "name": "ExchangeRow",
+          "declaration": "interface ExchangeRow {\n  readonly path: readonly string[];\n  readonly exchanged_for?: readonly ReplacesEntry[];\n  readonly replaces?: readonly ReplacesEntry[];\n}",
+          "doc": "A row as the exchange readers see it: its path and its entries under either\nstored name (S8c step 1 — `replaces` is renamed `exchanged_for`)."
+        },
+        {
+          "kind": "interface",
           "name": "MaybeSubstitutedForEntry",
           "declaration": "interface MaybeSubstitutedForEntry {\n  readonly path: readonly string[];\n  readonly quantity: number;\n}",
           "doc": "One `substituted_for` entry, as a row carries it."
@@ -15207,8 +15345,8 @@
         {
           "kind": "function",
           "name": "overclaimedReplacements",
-          "signature": "overclaimedReplacements(prev: ReadonlyArray<typeLiteral>, next: ReadonlyArray<typeLiteral>): OverclaimedRow[]",
-          "doc": "The rows THIS write pushes past their quantity by what swaps take back from\nthem (api-cloudrun#1116, owner 2026-09-26: the cap is checked at AUTHORING).\n\n🔴 **Deliberately NOT a stored refinement.** A warehouse-staged swap lives on\nthe fulfillment alone, so a sales edit that lowers X on the order would make\nthe merged fulfillment over-claim and fail its write — refused because of a\ndocument the sender never saw, the trap api-cloudrun#1114 ruled out for\nexistence. So a row is reported only when its claimed total GREW in this\nwrite and now exceeds its quantity; a row the write merely shrank is a\ndifference to surface, not refuse, and the checkout rider's `min(…, out)`\nstill bounds what physically moves.\n\nA row the document does not carry is skipped: that entry dangles, which\n`checkSwapReplacements` already allows.\n\nPure, shared by the API's writers and the manager's pre-submit check.",
+          "signature": "overclaimedReplacements(prev: ReadonlyArray<ExchangeRow>, next: ReadonlyArray<ExchangeRow & typeLiteral>): OverclaimedRow[]",
+          "doc": "The rows THIS write pushes past their quantity by what swaps take back from\nthem (api-cloudrun#1116, owner 2026-09-26: the cap is checked at AUTHORING).\n\n🔴 **Deliberately NOT a stored refinement.** A warehouse-staged swap lives on\nthe fulfillment alone, so a sales edit that lowers X on the order would make\nthe merged fulfillment over-claim and fail its write — refused because of a\ndocument the sender never saw, the trap api-cloudrun#1114 ruled out for\nexistence. So a row is reported only when its claimed total GREW in this\nwrite and now exceeds its quantity; a row the write merely shrank is a\ndifference to surface, not refuse, and the checkout rider's `min(…, out)`\nstill bounds what physically moves.\n\nA row the document does not carry is skipped: that entry dangles, which\n`checkExchangedFor` already allows.\n\nPure, shared by the API's writers and the manager's pre-submit check.",
           "paramTags": [
             {
               "name": "prev",
@@ -15225,7 +15363,7 @@
           "kind": "function",
           "name": "repointReplaces",
           "signature": "repointReplaces(entries: readonly ReplacesEntry[], rows: ReadonlyArray<typeLiteral>, _: unknown): Array<typeLiteral>",
-          "doc": "Re-point a swap row's `replaces` entries at the rows a document carries NOW\n(api-cloudrun#1114).\n\n`replaces` names the damaged row X by PATH, and a path is only as stable as\nthe dividers above it — exactly the defect `substituted_for` had until\napi-cloudrun#897 (see the module docstring). So a rebuild that can move X\ncarries each entry forward: if the entry does not name a row of `rows` and a\n`maps` entry takes it to a path that does, it is re-pointed there. That is\nIDENTITY, not a decision — the same row, at its new position.\n\n🔴 **Everything else is kept VERBATIM, and that is the rule, not a gap.** An\nentry naming a row the document no longer carries is a DIFFERENCE between the\norder and its projections — sales removed the damaged line, the picker\nsubstituted it away — and a difference is surfaced for an operator to\nrealign, never resolved by a write. This deliberately does NOT follow X onto a\nsubstitution stand-in: which physical unit broke is the operator's fact, not\nsomething to infer from which row replaced which.\n\nTwo entries landing on one row with one reason are MERGED by summing their\nquantities, because `SwapReplacementList` is unique by (path, reason). The\nreason is carried verbatim: it is why the units come back, not where.",
+          "doc": "Re-point a swap row's `replaces` entries at the rows a document carries NOW\n(api-cloudrun#1114).\n\n`replaces` names the damaged row X by PATH, and a path is only as stable as\nthe dividers above it — exactly the defect `substituted_for` had until\napi-cloudrun#897 (see the module docstring). So a rebuild that can move X\ncarries each entry forward: if the entry does not name a row of `rows` and a\n`maps` entry takes it to a path that does, it is re-pointed there. That is\nIDENTITY, not a decision — the same row, at its new position.\n\n🔴 **Everything else is kept VERBATIM, and that is the rule, not a gap.** An\nentry naming a row the document no longer carries is a DIFFERENCE between the\norder and its projections — sales removed the damaged line, the picker\nsubstituted it away — and a difference is surfaced for an operator to\nrealign, never resolved by a write. This deliberately does NOT follow X onto a\nsubstitution stand-in: which physical unit broke is the operator's fact, not\nsomething to infer from which row replaced which.\n\nTwo entries landing on one row with one reason are MERGED by summing their\nquantities, because `ExchangedForList` is unique by (path, reason). The\nreason is carried verbatim: it is why the units come back, not where.",
           "paramTags": [
             {
               "name": "entries",
@@ -15304,8 +15442,8 @@
         {
           "kind": "function",
           "name": "unresolvedReplaces",
-          "signature": "unresolvedReplaces(rows: ReadonlyArray<typeLiteral>): UnresolvedReplacesEntry[]",
-          "doc": "The `replaces` entries of ONE document that name a row that document does\nnot carry (manager#537).\n\n`checkSwapReplacements` deliberately does not require the named row to exist\n(api-cloudrun#1114): sales may remove the damaged line from the order while\nthe unit is still out, the picker may substitute it away. That is a\ndifference to SURFACE, and this is the surfacing half — a self-consistency\ncheck over one document's rows, not a comparison of two documents, so it is\nnot part of `computeDocumentDiffs`.",
+          "signature": "unresolvedReplaces(rows: ReadonlyArray<ExchangeRow>): UnresolvedReplacesEntry[]",
+          "doc": "The `replaces` entries of ONE document that name a row that document does\nnot carry (manager#537).\n\n`checkExchangedFor` deliberately does not require the named row to exist\n(api-cloudrun#1114): sales may remove the damaged line from the order while\nthe unit is still out, the picker may substitute it away. That is a\ndifference to SURFACE, and this is the surfacing half — a self-consistency\ncheck over one document's rows, not a comparison of two documents, so it is\nnot part of `computeDocumentDiffs`.",
           "paramTags": [
             {
               "name": "rows",

@@ -38,9 +38,10 @@ import {
   StockMethodEnum,
   type StockMethodType,
   SubstitutedForList,
-  SwapReplacementList,
+  ExchangedForList,
   type SubstitutedForEntryType,
-  type SwapReplacementEntryType,
+  type ExchangedForEntryType,
+  checkRenamedKeys,
   TimestampFields,
 } from "./common.ts";
 import {
@@ -48,7 +49,7 @@ import {
   checkLeadingDivider,
   checkExchangePairs,
   checkStoredEndpoints,
-  checkSwapReplacements,
+  checkExchangedFor,
   DocDestination,
   type DocDestinationType,
   ORDER_STATUSES,
@@ -152,13 +153,20 @@ export interface FulfillmentLineItemType {
    */
   quantity_order?: number;
   /**
+   * The new name for `quantity_order` (S8c step 1, api-cloudrun#1147): the ORDER's quantity
+   * for this row, as the booking's `quantity_ordered` carries it. A row states one name,
+   * never both ({@link checkRenamedKeys}). Step 3 writes it on every line; until then it is
+   * accepted and nothing writes it.
+   */
+  quantity_ordered?: number;
+  /**
    * Picker-set on substitution line items: the substitutions this row stands in
    * for, with how many units each — see `SubstitutedForList` (manager#414).
    */
   substituted_for?: SubstitutedForEntryType[];
   /**
-   * Set on a mid-rental SWAP's replacement line: the DAMAGED rows this one is
-   * going out against, with how many units each — see `SwapReplacementList`.
+   * Set on a mid-rental exchange's replacement line: the DAMAGED rows this one is
+   * going out against, with how many units each — see `ExchangedForList`.
    *
    * ⚠️ **Not `substituted_for`, and the difference is physical**: a substitution
    * means X never left the warehouse, so the netting cancels its booking; a swap
@@ -168,7 +176,9 @@ export interface FulfillmentLineItemType {
    * Only valid on a row under a pair carrying `exchange` — asserted at the
    * document level, because a row cannot see its own pair.
    */
-  replaces?: SwapReplacementEntryType[];
+  replaces?: ExchangedForEntryType[];
+  /** The new name for `replaces` (S8c step 1, api-cloudrun#1147). A row states one, never both. */
+  exchanged_for?: ExchangedForEntryType[];
 }
 
 // Un-annotated so `_zod.propValues` survives for the discriminated union below
@@ -194,8 +204,10 @@ const FulfillmentLineItemInner = z.strictObject({
   order_number: z.int().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
   quantity_order: z.number().int().min(0).optional(),
+  quantity_ordered: z.number().int().min(0).optional(),
   substituted_for: SubstitutedForList.optional(),
-  replaces: SwapReplacementList.optional(),
+  replaces: ExchangedForList.optional(),
+  exchanged_for: ExchangedForList.optional(),
   // 🔴 Attached to the **Inner** const so `FulfillmentItem`'s discriminated union
   // below enforces it, matching `order.ts` and (since 2026-09-09) `invoice.ts`.
   // ⚠️ It is VACUOUS at this grain and that is deliberate rather than an
@@ -203,7 +215,9 @@ const FulfillmentLineItemInner = z.strictObject({
   // returns early (`schemas/common.ts`). It is attached anyway so all three
   // grains read identically — a reader comparing them should not have to work
   // out whether the absence here is a decision or a gap.
-}).superRefine(checkZeroPricedAmount);
+}).superRefine(checkZeroPricedAmount).superRefine((row, ctx) =>
+  checkRenamedKeys(row, ctx, [["quantity_order", "quantity_ordered"], ["replaces", "exchanged_for"]])
+);
 
 export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> =
   FulfillmentLineItemInner;
@@ -327,14 +341,18 @@ export interface FulfillmentItemInputLineType {
    */
   substituted_for?: SubstitutedForEntryType[];
   /**
-   * The damaged rows a swap's replacement line goes out against — see the
+   * The damaged rows an exchange's replacement line goes out against — see the
    * stored line's `replaces`. It needs an input channel for the reason this file
    * records above: a plain `z.object` STRIPS an undeclared key, so without it a
    * picker write would silently drop the swap's link to what it replaces.
    */
-  replaces?: SwapReplacementEntryType[];
+  replaces?: ExchangedForEntryType[];
+  /** The new name for `replaces` — declared for the same reason, or a picker write strips it. */
+  exchanged_for?: ExchangedForEntryType[];
   /** Declared so the service can REFUSE it — see the note above. */
   quantity_order?: number;
+  /** The new name for `quantity_order`, declared so the service can refuse it under either name. */
+  quantity_ordered?: number;
 }
 
 const FulfillmentItemInputLineInner = z.object({
@@ -342,11 +360,15 @@ const FulfillmentItemInputLineInner = z.object({
   path: z.array(ItemUid),
   quantity: z.number().int().min(0),
   substituted_for: SubstitutedForList.optional(),
-  replaces: SwapReplacementList.optional(),
+  replaces: ExchangedForList.optional(),
+  exchanged_for: ExchangedForList.optional(),
   // Same declaration as the stored line's, so a body carrying it survives the
   // parse and reaches `updateFulfillmentItems`' explicit refusal.
   quantity_order: z.number().int().min(0).optional(),
-});
+  quantity_ordered: z.number().int().min(0).optional(),
+}).superRefine((row, ctx) =>
+  checkRenamedKeys(row, ctx, [["quantity_order", "quantity_ordered"], ["replaces", "exchanged_for"]])
+);
 
 export const FulfillmentItemInputLine: z.ZodType<FulfillmentItemInputLineType> =
   FulfillmentItemInputLineInner;
@@ -560,7 +582,7 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   created_by: ActorRef.nullable().meta({ column: true, label: "Created By", propagate: false }),
   updated_by: ActorRef.nullable().meta({ column: true, label: "Updated By", propagate: false }),
   ...TimestampFields,
-}).superRefine(checkStoredEndpoints).superRefine(checkDestinationJoin).superRefine(checkSwapReplacements)
+}).superRefine(checkStoredEndpoints).superRefine(checkDestinationJoin).superRefine(checkExchangedFor)
   .superRefine(checkLeadingDivider("fulfillment")).meta({
   title: "Fulfillment",
   collection: "fulfillments",
