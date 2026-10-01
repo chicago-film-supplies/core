@@ -124,7 +124,7 @@ void _flagReasonParity;
  *
  * `path` is the REPLACED KIT's ORDER path, never a component's: X's and Y's
  * components do not correspond one to one. `quantity` is how many units of this
- * row stand in for X, recorded when the swap is made and never re-derived from
+ * row stand in for X, recorded when the substitution is made and never re-derived from
  * the catalog (optional and variable components make that wrong).
  */
 export interface SubstitutedForEntryType {
@@ -150,7 +150,7 @@ export const SubstitutedForEntry: z.ZodType<SubstitutedForEntryType> = z.strictO
  * the same row adds to the existing entry rather than appending a second one.
  *
  * Replaced `path_substituted_for` (removed in S4), which named X but not how much of it — so a
- * merge into an existing sibling could not be told from an in-place swap, and
+ * merge into an existing sibling could not be told from an in-place substitution, and
  * could not be reversed.
  */
 export const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]> = z.array(SubstitutedForEntry).superRefine((entries, ctx) => {
@@ -165,15 +165,15 @@ export const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]> = z.array(
 });
 
 /**
- * One `exchanged_for` entry (stored as `replaces` until the S8c rename completes): a row the exchange takes units back from, how many, and
+ * One `exchanged_for` entry: a row the exchange takes units back from, how many, and
  * WHY they come back (api-cloudrun#1116, owner 2026-09-26).
  *
  * ⭐ **`reason` is the out-of-service vocabulary itself, imported rather than
- * restated**, so a new out-of-service reason reaches swaps with no change here.
- * The swap's checkout rider turns it into the unit's state: `damaged` marks the
+ * restated**, so a new out-of-service reason reaches exchanges with no change here.
+ * The exchange's checkout rider turns it into the unit's state: `damaged` marks the
  * booking damaged, `cleaning`/`maintenance` return the units and flag them on
  * the shelf (never billed), and `lost` is recorded at the normal return. A
- * `lost` unit cannot be collected on the swap's own trip, so it is valid only on
+ * `lost` unit cannot be collected on the exchange's own trip, so it is valid only on
  * a `send_now` leg ({@link ExchangedForEntryType} is checked against its
  * pair by `checkExchangedFor`).
  *
@@ -211,7 +211,7 @@ export function exchangedForKey(entry: { path: readonly string[]; reason: string
  * document diff. What differs is the physical story, and it is the whole
  * distinction:
  *
- * | | `substituted_for` | `replaces` |
+ * | | `substituted_for` | `exchanged_for` |
  * |---|---|---|
  * | X went out | no — Y went instead | yes, and it is out NOW |
  * | X's booking | cancelled by the netting | kept, and marked by `reason` |
@@ -219,10 +219,10 @@ export function exchangedForKey(entry: { path: readonly string[]; reason: string
  *
  * 🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a
  * substitution away — X's booking is cancelled and Y's inherits its custody —
- * which is exactly the wrong answer for a swap, where X is on set and its units
- * are what the swap takes back.
+ * which is exactly the wrong answer for an exchange, where X is on set and its units
+ * are what the exchange takes back.
  *
- * ⚠️ **It lives on the ROW rather than on the exchange PAIR**, because a swap
+ * ⚠️ **It lives on the ROW rather than on the exchange PAIR**, because an exchange
  * TRIP legitimately carries replacements for several damaged lines at once: one
  * leg, one card, one drive. A pair-level field would force one leg per damaged
  * line and put three trip cards on the dispatch board for one physical trip —
@@ -247,56 +247,12 @@ export const ExchangedForList: z.ZodType<ExchangedForEntryType[]> = z.array(Exch
   });
 
 /**
- * S8c step 1 (api-cloudrun#1147): the OLD names, kept beside the new until the
- * four-step removal's last step drops them. Each is the same value as its
- * `ExchangedFor*` twin, not a copy, so there is one schema instance and one
- * `z.globalRegistry` entry.
- *
- * @deprecated Use {@link ExchangedForEntryType}.
- */
-export type SwapReplacementEntryType = ExchangedForEntryType;
-/** @deprecated Use {@link ExchangedForEntry}. */
-export const SwapReplacementEntry: z.ZodType<ExchangedForEntryType> = ExchangedForEntry;
-/** @deprecated Use {@link exchangedForKey}. */
-export const swapReplacementKey: typeof exchangedForKey = exchangedForKey;
-/** @deprecated Use {@link ExchangedForList}. */
-export const SwapReplacementList: z.ZodType<ExchangedForEntryType[]> = ExchangedForList;
-
-/**
- * A row's exchange entries under EITHER stored name: `exchanged_for`, or the
- * `replaces` it is renamed from. Absent reads as none.
- *
- * Every reader of the field goes through this for the length of the migration,
- * because the stored corpus carries the old name until the backfill and a
- * writer that has moved on carries the new one. ⚠️ A document never carries
- * both ({@link checkRenamedKeys}), so which wins is moot on a valid one; the
- * new name is read first so an invalid one reads as the writer meant it.
+ * A row's `exchanged_for` entries, with absent read as none.
  */
 export function exchangedForOf<E extends { readonly path: readonly string[] }>(
-  row: { readonly exchanged_for?: readonly E[]; readonly replaces?: readonly E[] },
+  row: { readonly exchanged_for?: readonly E[] },
 ): readonly E[] {
-  return row.exchanged_for ?? row.replaces ?? [];
-}
-
-/**
- * The "not both" refine every dual-name stage needs: a row states the old name
- * or the new one, never both, because two stated values cannot be told apart
- * from a half-finished migration. Attached to every grain that declares a
- * renamed key (S8c).
- *
- * @param pairs - `[oldKey, newKey]` per rename
- */
-export function checkRenamedKeys(
-  row: object,
-  ctx: z.RefinementCtx,
-  pairs: ReadonlyArray<readonly [oldKey: string, newKey: string]>,
-): void {
-  const r = row as Record<string, unknown>;
-  for (const [oldKey, newKey] of pairs) {
-    if (r[oldKey] !== undefined && r[newKey] !== undefined) {
-      ctx.addIssue({ code: "custom", path: [newKey], message: `${newKey} replaces ${oldKey}; a row states one, never both` });
-    }
-  }
+  return row.exchanged_for ?? [];
 }
 
 /**

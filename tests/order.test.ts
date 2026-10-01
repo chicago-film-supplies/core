@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { CreateOrderInput, Discount, DiscountInput, DocDestination, EXCHANGE_DISPOSITIONS, STORED_EXCHANGE_DISPOSITIONS, isLineItem, OrderDocDates, OrderDocItem, type OrderDocItemType, OrderDocItemPrice, OrderItem, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
+import { CreateOrderInput, Discount, DiscountInput, DocDestination, EXCHANGE_DISPOSITIONS, isLineItem, OrderDocDates, OrderDocItem, type OrderDocItemType, OrderDocItemPrice, OrderItem, OrderSchema, UpdateOrderInput } from "../src/schemas/order.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 // `uid_thread` is a branded `ThreadId`; the schema walk seeds string leaves as
@@ -1349,72 +1349,72 @@ Deno.test("OrderDocItem: a stored line that omits zero_priced is refused — the
   );
 });
 
-// ── Exchange pairs — a swap is a destination pair ────────────────
+// ── Exchange pairs — an exchange is a destination pair ────────────────
 
 const PARENT_PAIR = "11111111-1111-4111-8111-111111111111";
-const SWAP_PAIR = "22222222-2222-4222-8222-222222222222";
+const EXCHANGE_PAIR = "22222222-2222-4222-8222-222222222222";
 
-/** The minimal document with a parent leg and a swap leg against it. */
-function docWithSwap(exchange: unknown, swapUid = SWAP_PAIR) {
-  // Each pair is answered by its divider (`checkDestinationJoin`); the swap
+/** The minimal document with a parent leg and an exchange leg against it. */
+function docWithExchange(exchange: unknown, exchangeUid = EXCHANGE_PAIR) {
+  // Each pair is answered by its divider (`checkDestinationJoin`); the exchange
   // uid is a parameter so a test can point a pair at a divider that exists.
   const divider = (uid: string) => ({ uid, type: "destination", name: "Site", description: "", path: [uid] });
   return {
     ...minimalDoc,
-    items: [divider(PARENT_PAIR), divider(swapUid)],
+    items: [divider(PARENT_PAIR), divider(exchangeUid)],
     destinations: [
       validDocDestination,
-      { ...validDocDestination, uid: swapUid, exchange },
+      { ...validDocDestination, uid: exchangeUid, exchange },
     ],
   };
 }
 
-Deno.test("OrderSchema accepts a swap leg naming an ordinary leg of the same document", () => {
-  const parsed = OrderSchema.safeParse(docWithSwap({ uid_pair: PARENT_PAIR, disposition: "exchange" }));
+Deno.test("OrderSchema accepts an exchange leg naming an ordinary leg of the same document", () => {
+  const parsed = OrderSchema.safeParse(docWithExchange({ uid_pair: PARENT_PAIR, disposition: "same_trip" }));
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
-  assertEquals(OrderSchema.safeParse(docWithSwap({ uid_pair: PARENT_PAIR, disposition: "send_now" })).success, true);
+  assertEquals(OrderSchema.safeParse(docWithExchange({ uid_pair: PARENT_PAIR, disposition: "send_now" })).success, true);
 });
 
 Deno.test("OrderSchema accepts a pair with no exchange — null and absent alike", () => {
-  assertEquals(OrderSchema.safeParse(docWithSwap(null)).success, true);
+  assertEquals(OrderSchema.safeParse(docWithExchange(null)).success, true);
   assertEquals(OrderSchema.safeParse(minimalDoc).success, true);
 });
 
-Deno.test("OrderSchema refuses a swap naming no pair, itself, or another swap", () => {
+Deno.test("OrderSchema refuses an exchange naming no pair, itself, or another exchange", () => {
   const orphan = OrderSchema.safeParse(
-    docWithSwap({ uid_pair: "33333333-3333-4333-8333-333333333333", disposition: "exchange" }),
+    docWithExchange({ uid_pair: "33333333-3333-4333-8333-333333333333", disposition: "same_trip" }),
   );
   assertEquals(orphan.success, false, "a parent pair that is not on the document");
 
-  const itself = OrderSchema.safeParse(docWithSwap({ uid_pair: SWAP_PAIR, disposition: "exchange" }));
+  const itself = OrderSchema.safeParse(docWithExchange({ uid_pair: EXCHANGE_PAIR, disposition: "same_trip" }));
   assertEquals(itself.success, false, "a pair naming itself");
 
-  // A chain: swap B against swap A. Two swaps on one leg are two pairs naming
+  // A chain: exchange B against exchange A. Two exchanges on one leg are two pairs naming
   // the SAME parent, never a chain.
   const chained = OrderSchema.safeParse({
     ...minimalDoc,
     destinations: [
       validDocDestination,
-      { ...validDocDestination, uid: SWAP_PAIR, exchange: { uid_pair: PARENT_PAIR, disposition: "exchange" } },
+      { ...validDocDestination, uid: EXCHANGE_PAIR, exchange: { uid_pair: PARENT_PAIR, disposition: "same_trip" } },
       {
         ...validDocDestination,
         uid: "44444444-4444-4444-8444-444444444444",
-        exchange: { uid_pair: SWAP_PAIR, disposition: "exchange" },
+        exchange: { uid_pair: EXCHANGE_PAIR, disposition: "same_trip" },
       },
     ],
   });
-  assertEquals(chained.success, false, "a swap against a swap");
+  assertEquals(chained.success, false, "an exchange against an exchange");
 });
 
 Deno.test("OrderSchema refuses an unknown disposition and an extra exchange key", () => {
-  assertEquals(OrderSchema.safeParse(docWithSwap({ uid_pair: PARENT_PAIR, disposition: "later" })).success, false);
+  assertEquals(OrderSchema.safeParse(docWithExchange({ uid_pair: PARENT_PAIR, disposition: "later" })).success, false);
   assertEquals(
-    OrderSchema.safeParse(docWithSwap({ uid_pair: PARENT_PAIR, disposition: "exchange", note: "x" })).success,
+    OrderSchema.safeParse(docWithExchange({ uid_pair: PARENT_PAIR, disposition: "same_trip", note: "x" })).success,
     false,
   );
 });
 
-// ── A swap's replacement line may say what it replaces (api-cloudrun#1114) ──
+// ── An exchange's replacement line may say what it replaces (api-cloudrun#1114) ──
 
 const X_LINE = "testprod100000000000";
 const Y_LINE = "testprod200000000000";
@@ -1445,109 +1445,78 @@ function orderLine(uid: string, path: string[], extra: Record<string, unknown> =
   };
 }
 
-/** A swap leg against the parent, X on the parent, and Y on the swap naming `replaces`. */
-function docWithSwapLine(replaces: unknown, exchange: unknown = { uid_pair: PARENT_PAIR, disposition: "exchange" }) {
+/** An exchange leg against the parent, X on the parent, and Y on the exchange naming `exchanged_for`. */
+function docWithExchangeLine(exchangedFor: unknown, exchange: unknown = { uid_pair: PARENT_PAIR, disposition: "same_trip" }) {
   return {
-    ...docWithSwap(exchange),
+    ...docWithExchange(exchange),
     items: [
       { uid: PARENT_PAIR, type: "destination", name: "Set", description: "", path: [PARENT_PAIR] },
       orderLine(X_LINE, [PARENT_PAIR, X_LINE]),
-      { uid: SWAP_PAIR, type: "destination", name: "Exchange", description: "", path: [SWAP_PAIR] },
-      orderLine(Y_LINE, [SWAP_PAIR, Y_LINE], { replaces }),
+      { uid: EXCHANGE_PAIR, type: "destination", name: "Exchange", description: "", path: [EXCHANGE_PAIR] },
+      orderLine(Y_LINE, [EXCHANGE_PAIR, Y_LINE], { exchanged_for: exchangedFor }),
     ],
   };
 }
 
-Deno.test("OrderSchema accepts `replaces` naming a row on the leg the swap exchanges against", () => {
-  const parsed = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "damaged" }]));
+Deno.test("OrderSchema accepts `exchanged_for` naming a row on the leg the exchange is against", () => {
+  const parsed = OrderSchema.safeParse(docWithExchangeLine([{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "damaged" }]));
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
 });
 
-Deno.test("OrderSchema refuses `replaces` on a row that is not under an exchange pair", () => {
-  const parsed = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "damaged" }], null));
+Deno.test("OrderSchema refuses `exchanged_for` on a row that is not under an exchange pair", () => {
+  const parsed = OrderSchema.safeParse(docWithExchangeLine([{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "damaged" }], null));
   assertEquals(parsed.success, false);
-  assertEquals(parsed.error?.issues.some((i) => i.path.join(".") === "items.3.replaces"), true);
+  assertEquals(parsed.error?.issues.some((i) => i.path.join(".") === "items.3.exchanged_for"), true);
 });
 
-Deno.test("OrderSchema refuses `replaces` naming a row on some OTHER leg", () => {
+Deno.test("OrderSchema refuses `exchanged_for` naming a row on some OTHER leg", () => {
   // The same shared refine the fulfillment runs — one author, so the order
   // cannot accept a pointer its own projection would then fail to store.
-  const otherLeg = OrderSchema.safeParse(docWithSwapLine([{ path: [SWAP_PAIR, Y_LINE], quantity: 1, reason: "damaged" }]));
+  const otherLeg = OrderSchema.safeParse(docWithExchangeLine([{ path: [EXCHANGE_PAIR, Y_LINE], quantity: 1, reason: "damaged" }]));
   assertEquals(otherLeg.success, false);
 });
 
-Deno.test("🔴 OrderSchema ACCEPTS `replaces` naming a parent-leg row the order no longer carries", () => {
+Deno.test("🔴 OrderSchema ACCEPTS `exchanged_for` naming a parent-leg row the order no longer carries", () => {
   // Sales removed the damaged line (the unit is still out on set). That is a
   // difference to surface for an operator, not a document to refuse — requiring
   // the row to exist forced writers to refuse the edit or drop the pointer.
-  const gone = OrderSchema.safeParse(docWithSwapLine([{ path: [PARENT_PAIR, "testprodgone00000000"], quantity: 1, reason: "damaged" }]));
+  const gone = OrderSchema.safeParse(docWithExchangeLine([{ path: [PARENT_PAIR, "testprodgone00000000"], quantity: 1, reason: "damaged" }]));
   assertEquals(gone.success, true, JSON.stringify(gone.success ? {} : gone.error.issues));
 });
 
-Deno.test("OrderItem (input) carries `replaces` through a parse", () => {
+Deno.test("OrderItem (input) carries `exchanged_for` through a parse", () => {
   // 🔴 The input is a `z.object`, so an undeclared key is STRIPPED: without the
-  // declaration every order PUT would succeed and drop the swap's link.
+  // declaration every order PUT would succeed and drop the exchange's link.
   const parsed = OrderItem.safeParse({
     uid: Y_LINE,
     type: "rental",
-    path: [SWAP_PAIR, Y_LINE],
-    replaces: [{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "damaged" }],
+    path: [EXCHANGE_PAIR, Y_LINE],
+    exchanged_for: [{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "damaged" }],
   });
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
-  assertEquals((parsed.success ? parsed.data as { replaces?: unknown[] } : {}).replaces?.length, 1);
+  assertEquals((parsed.success ? parsed.data as { exchanged_for?: unknown[] } : {}).exchanged_for?.length, 1);
 });
 
-// ── S8c step 1: the new names are accepted beside the old (api-cloudrun#1147) ──
+// ── S8c step 4: the old names are gone (api-cloudrun#1147) ────────────
 
 const EXCHANGE_ENTRY = [{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "damaged" }];
 
-/** `docWithSwapLine` with the entries under `exchanged_for` (and any extra keys on the row). */
-function docWithExchangedFor(extra: Record<string, unknown> = {}, exchange: unknown = { uid_pair: PARENT_PAIR, disposition: "same_trip" }) {
-  const doc = docWithSwapLine(undefined, exchange);
-  const items = doc.items.map((it, i) => (i === 3 ? { ...it, replaces: undefined, exchanged_for: EXCHANGE_ENTRY, ...extra } : it));
-  return { ...doc, items };
-}
+Deno.test("S8c-5: the stored disposition is `same_trip | send_now` — the old `exchange` value is refused", () => {
+  assertEquals([...EXCHANGE_DISPOSITIONS], ["same_trip", "send_now"]);
+  assertEquals(OrderSchema.safeParse(docWithExchangeLine(EXCHANGE_ENTRY)).success, true);
+  assertEquals(OrderSchema.safeParse(docWithExchangeLine(EXCHANGE_ENTRY, { uid_pair: PARENT_PAIR, disposition: "exchange" })).success, false);
+});
 
-Deno.test("S8c-1: OrderSchema accepts `exchanged_for` and the `same_trip` disposition", () => {
-  const parsed = OrderSchema.safeParse(docWithExchangedFor());
+Deno.test("S8c-5: a stored order line carrying the old `exchanged_for` is refused", () => {
+  const doc = docWithExchangeLine(undefined);
+  const items = doc.items.map((it, i) => (i === 3 ? { ...it, replaces: EXCHANGE_ENTRY } : it));
+  assertEquals(OrderSchema.safeParse({ ...doc, items }).success, false);
+});
+
+Deno.test("S8c-5: OrderItem (input) STRIPS an old-named `exchanged_for` — it is no longer an input channel", () => {
+  // The input is a `z.object` (the house rule), so an old name is dropped
+  // rather than refused. Every writer moved to `exchanged_for` in S8c step 2.
+  const parsed = OrderItem.safeParse({ uid: Y_LINE, type: "rental", path: [EXCHANGE_PAIR, Y_LINE], replaces: EXCHANGE_ENTRY });
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
-  // The old disposition value keeps parsing until the backfill has rewritten it.
-  assertEquals(OrderSchema.safeParse(docWithExchangedFor({}, { uid_pair: PARENT_PAIR, disposition: "exchange" })).success, true);
-  assertEquals(OrderSchema.safeParse(docWithExchangedFor({}, { uid_pair: PARENT_PAIR, disposition: "swap" })).success, false);
-});
-
-Deno.test("S8c-1: the exchange-pair checks run under the NEW name — off a pair, off the leg, `lost` on a trip", () => {
-  const issues = (r: { success: boolean; error?: { issues: Array<{ path: PropertyKey[] }> } }) => JSON.stringify(r.success ? {} : r.error?.issues);
-  const notExchange = OrderSchema.safeParse(docWithExchangedFor({}, null));
-  assertEquals(notExchange.success, false);
-  assertEquals(notExchange.error?.issues.some((i) => i.path.join(".") === "items.3.exchanged_for"), true, issues(notExchange));
-  const otherLeg = OrderSchema.safeParse(docWithExchangedFor({ exchanged_for: [{ path: [SWAP_PAIR, Y_LINE], quantity: 1, reason: "damaged" }] }));
-  assertEquals(otherLeg.success, false, issues(otherLeg));
-  const lostSameTrip = OrderSchema.safeParse(docWithExchangedFor({ exchanged_for: [{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "lost" }] }));
-  assertEquals(lostSameTrip.success, false, "a lost unit cannot come back on the trip, under either disposition spelling");
-  const lostSendNow = OrderSchema.safeParse(
-    docWithExchangedFor({ exchanged_for: [{ path: [PARENT_PAIR, X_LINE], quantity: 1, reason: "lost" }] }, { uid_pair: PARENT_PAIR, disposition: "send_now" }),
-  );
-  assertEquals(lostSendNow.success, true, issues(lostSendNow));
-});
-
-Deno.test("S8c-1: an order line states `replaces` OR `exchanged_for`, never both", () => {
-  const both = OrderSchema.safeParse(docWithExchangedFor({ replaces: EXCHANGE_ENTRY }));
-  assertEquals(both.success, false);
-  assertEquals(both.error?.issues.some((i) => i.path.at(-1) === "exchanged_for"), true);
-});
-
-Deno.test("S8c-1: OrderItem (input) carries `exchanged_for` through a parse, and refuses both names", () => {
-  const base = { uid: Y_LINE, type: "rental", path: [SWAP_PAIR, Y_LINE] };
-  const parsed = OrderItem.safeParse({ ...base, exchanged_for: EXCHANGE_ENTRY });
-  assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
-  assertEquals((parsed.success ? parsed.data as { exchanged_for?: unknown[] } : {}).exchanged_for?.length, 1);
-  assertEquals(OrderItem.safeParse({ ...base, replaces: EXCHANGE_ENTRY, exchanged_for: EXCHANGE_ENTRY }).success, false);
-});
-
-Deno.test("S8c-1: the WRITER tuple stays old-only while the STORED one also parses `same_trip`", () => {
-  // Manager's pickers iterate EXCHANGE_DISPOSITIONS and an api route builds z.enum() from it, so
-  // `same_trip` must not appear there until the writers move (step 2).
-  assertEquals([...EXCHANGE_DISPOSITIONS], ["exchange", "send_now"]);
-  assertEquals([...STORED_EXCHANGE_DISPOSITIONS], ["same_trip", "exchange", "send_now"]);
+  assertEquals("replaces" in (parsed.success ? parsed.data : {}), false);
 });

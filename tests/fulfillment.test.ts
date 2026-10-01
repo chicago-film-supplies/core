@@ -32,7 +32,7 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
  * `api-cloudrun`, so the claim *"these four are what `updateFulfillmentItems`
  * reads"* is evidenced there, not here. What this file can hold is the half that
  * a core-side edit could break on its own: each authored field survives a parse,
- * and `quantity_order` is refused rather than silently dropped.
+ * and `quantity_ordered` is refused rather than silently dropped.
  */
 Deno.test("FulfillmentItemInputLine carries every picker-authored field through a parse", () => {
   const body = {
@@ -63,11 +63,10 @@ Deno.test("FulfillmentItemInputLine refuses a substituted_for naming one X twice
   assertEquals(res.success, false);
 });
 
-Deno.test("FulfillmentItemInputLine PRESERVES quantity_order so the service can refuse it", () => {
-  // 🔴 This arm looks backwards and is not. `quantity_order` is the divergence
-  // marker between the picker's count and the order's — `mergeLineItem` stamps
-  // the ORDER's quantity onto it when the two disagree — so a client
-  // structurally cannot compute it, and `updateFulfillmentItems` answers 400 for
+Deno.test("FulfillmentItemInputLine PRESERVES quantity_ordered so the service can refuse it", () => {
+  // 🔴 This arm looks backwards and is not. `quantity_ordered` is the ORDER's
+  // quantity for the row, stamped by the order sync, so a client structurally
+  // cannot compute it, and `updateFulfillmentItems` answers 400 for
   // any body carrying it.
   //
   // ⚠️ **A `z.object` STRIPS an undeclared key, so omitting it here would delete
@@ -80,16 +79,16 @@ Deno.test("FulfillmentItemInputLine PRESERVES quantity_order so the service can 
     uid: "Item0000000000000001",
     path: ["Item0000000000000001"],
     quantity: 3,
-    quantity_order: 5,
+    quantity_ordered: 5,
   });
   assertEquals(res.success, true);
   const out = res.success ? res.data as unknown as Record<string, unknown> : {};
-  assertEquals(out.quantity_order, 5, "the key must survive the parse or the service's refusal becomes unreachable");
+  assertEquals(out.quantity_ordered, 5, "the key must survive the parse or the service's refusal becomes unreachable");
 });
 
 Deno.test("FulfillmentItemInputLine strips a server-owned descriptive field", () => {
   // The other half of the `z.object` choice, and the reason it is right: the
-  // manager sends the whole stored line (minus `quantity_order`, which it
+  // manager sends the whole stored line (minus `quantity_ordered`, which it
   // deletes), and every descriptive field on it is re-derived server-side. A
   // `z.strictObject` here would 400 that payload — which is what the DOCUMENT
   // schema standing in as the request contract used to do.
@@ -101,7 +100,7 @@ Deno.test("FulfillmentItemInputLine strips a server-owned descriptive field", ()
     type: "rental",
     description: "server-owned",
   });
-  assertEquals(res.success, true, "a stored line minus quantity_order must still parse");
+  assertEquals(res.success, true, "a stored line minus quantity_ordered must still parse");
   const out = res.success ? res.data as unknown as Record<string, unknown> : {};
   assertEquals("name" in out, false, "a server-owned field must be stripped, not stored from the body");
 });
@@ -112,29 +111,29 @@ Deno.test("UpdateFulfillmentItemsInput requires a version and defaults lineItems
   assertEquals(UpdateFulfillmentItemsInput.safeParse({ version: 1.5 }).success, false);
 });
 
-// ── A swap's replacement line, and what it may replace ───────────────
+// ── An exchange's replacement line, and what it may replace ───────────────
 
-Deno.test("FulfillmentItemInputLine carries `replaces` through a parse", () => {
-  // Same claim as the `substituted_for` arm above, for the swap's own field: a
+Deno.test("FulfillmentItemInputLine carries `exchanged_for` through a parse", () => {
+  // Same claim as the `substituted_for` arm above, for the exchange's own field: a
   // plain `z.object` strips an undeclared key, so without this declaration the
   // request would succeed and the link to the damaged row would be gone.
   const parsed = FulfillmentItemInputLine.safeParse({
     uid: "Item0000000000000009",
     path: ["Destination000000002", "Item0000000000000009"],
     quantity: 1,
-    replaces: [{ path: ["Destination000000001", "Item0000000000000001"], quantity: 1, reason: "damaged" }],
+    exchanged_for: [{ path: ["Destination000000001", "Item0000000000000001"], quantity: 1, reason: "damaged" }],
   });
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
-  assertEquals(parsed.success && parsed.data.replaces?.[0].quantity, 1);
+  assertEquals(parsed.success && parsed.data.exchanged_for?.[0].quantity, 1);
 });
 
 const PARENT_LEG = "11111111-1111-4111-8111-111111111111";
-const SWAP_LEG = "22222222-2222-4222-8222-222222222222";
+const EXCHANGE_LEG = "22222222-2222-4222-8222-222222222222";
 const X_ROW = "Item0000000000000001";
 const Y_ROW = "Item0000000000000009";
 
-/** A fulfillment with a parent leg, a swap leg against it, and a row on each. */
-function swapDoc(replaces: unknown, opts: { markExchange?: boolean } = {}) {
+/** A fulfillment with a parent leg, an exchange leg against it, and a row on each. */
+function exchangeDoc(exchangedFor: unknown, opts: { markExchange?: boolean } = {}) {
   const base = getTestDoc(FulfillmentSchema, {
     uid: "testfulfillment00001",
     created_at: mockTimestamp,
@@ -142,65 +141,66 @@ function swapDoc(replaces: unknown, opts: { markExchange?: boolean } = {}) {
   }, { now: mockTimestamp });
   const pair = base.destinations[0] as unknown as Record<string, unknown>;
   // The rows are stated here — the minimum a `FulfillmentLineItem` needs to parse.
-  const line = { type: "rental", name: "Light", description: "", quantity: 2, zero_priced: null };
+  // X is an order line; Y, the exchange unit, is on no order line (`null`).
+  const line = { type: "rental", name: "Light", description: "", quantity: 2, zero_priced: null, quantity_ordered: 2 };
   return {
     ...base,
     destinations: [
       { ...pair, uid: PARENT_LEG },
       {
         ...pair,
-        uid: SWAP_LEG,
-        ...(opts.markExchange === false ? {} : { exchange: { uid_pair: PARENT_LEG, disposition: "exchange" } }),
+        uid: EXCHANGE_LEG,
+        ...(opts.markExchange === false ? {} : { exchange: { uid_pair: PARENT_LEG, disposition: "same_trip" } }),
       },
     ],
     items: [
       { uid: PARENT_LEG, type: "destination", name: "Set", description: "", path: [PARENT_LEG] },
       { ...line, uid: X_ROW, path: [PARENT_LEG, X_ROW] },
-      { uid: SWAP_LEG, type: "destination", name: "Exchange", description: "", path: [SWAP_LEG] },
-      { ...line, uid: Y_ROW, quantity: 1, path: [SWAP_LEG, Y_ROW], replaces },
+      { uid: EXCHANGE_LEG, type: "destination", name: "Exchange", description: "", path: [EXCHANGE_LEG] },
+      { ...line, uid: Y_ROW, quantity: 1, quantity_ordered: null, path: [EXCHANGE_LEG, Y_ROW], exchanged_for: exchangedFor },
     ],
   };
 }
 
-Deno.test("FulfillmentSchema accepts `replaces` naming a row on the leg the swap exchanges against", () => {
-  const parsed = FulfillmentSchema.safeParse(swapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" }]));
+Deno.test("FulfillmentSchema accepts `exchanged_for` naming a row on the leg the exchange is against", () => {
+  const parsed = FulfillmentSchema.safeParse(exchangeDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" }]));
   assertEquals(parsed.success, true, JSON.stringify(parsed.success ? {} : parsed.error.issues));
 });
 
-Deno.test("FulfillmentSchema refuses `replaces` on a row that is not under an exchange pair", () => {
+Deno.test("FulfillmentSchema refuses `exchanged_for` on a row that is not under an exchange pair", () => {
   // 🔴 The field says "this row goes out against a damaged one", which is only
-  // meaningful on a swap's trip. Off a swap it would be a free-form pointer.
+  // meaningful on an exchange's trip. Off an exchange it would be a free-form pointer.
   const parsed = FulfillmentSchema.safeParse(
-    swapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" }], { markExchange: false }),
+    exchangeDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" }], { markExchange: false }),
   );
   assertEquals(parsed.success, false);
 });
 
-Deno.test("FulfillmentSchema refuses `replaces` naming a row on some OTHER leg", () => {
-  // The damaged units are on the leg being swapped against, by definition —
+Deno.test("FulfillmentSchema refuses `exchanged_for` naming a row on some OTHER leg", () => {
+  // The damaged units are on the leg being exchanged against, by definition —
   // otherwise the checkout rider marks units damaged on a trip that never
   // carried them.
-  const parsed = FulfillmentSchema.safeParse(swapDoc([{ path: [SWAP_LEG, Y_ROW], quantity: 1, reason: "damaged" }]));
+  const parsed = FulfillmentSchema.safeParse(exchangeDoc([{ path: [EXCHANGE_LEG, Y_ROW], quantity: 1, reason: "damaged" }]));
   assertEquals(parsed.success, false);
 });
 
 // ── Flat chaining and the entry's reason (api-cloudrun#1116) ─────────
 
-const SWAP_LEG_2 = "33333333-3333-4333-8333-333333333333";
+const EXCHANGE_LEG_2 = "33333333-3333-4333-8333-333333333333";
 const Y2_ROW = "Item0000000000000010";
 
-/** `swapDoc` plus a SECOND swap leg on the same parent, whose row carries `replaces`. */
-function chainedSwapDoc(replaces: unknown, disposition = "exchange") {
-  const doc = swapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" }]);
+/** `exchangeDoc` plus a SECOND exchange leg on the same parent, whose row carries `exchanged_for`. */
+function chainedExchangeDoc(exchangedFor: unknown, disposition = "same_trip") {
+  const doc = exchangeDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" }]);
   const pair = doc.destinations[1] as Record<string, unknown>;
   const line = doc.items[3] as Record<string, unknown>;
   return {
     ...doc,
-    destinations: [...doc.destinations, { ...pair, uid: SWAP_LEG_2, exchange: { uid_pair: PARENT_LEG, disposition } }],
+    destinations: [...doc.destinations, { ...pair, uid: EXCHANGE_LEG_2, exchange: { uid_pair: PARENT_LEG, disposition } }],
     items: [
       ...doc.items,
-      { uid: SWAP_LEG_2, type: "destination", name: "Exchange", description: "", path: [SWAP_LEG_2] },
-      { ...line, uid: Y2_ROW, path: [SWAP_LEG_2, Y2_ROW], replaces },
+      { uid: EXCHANGE_LEG_2, type: "destination", name: "Exchange", description: "", path: [EXCHANGE_LEG_2] },
+      { ...line, uid: Y2_ROW, path: [EXCHANGE_LEG_2, Y2_ROW], exchanged_for: exchangedFor },
     ],
   };
 }
@@ -208,101 +208,92 @@ function chainedSwapDoc(replaces: unknown, disposition = "exchange") {
 const issuesOf = (r: { success: boolean; error?: { issues: Array<{ path: PropertyKey[] }> } }) =>
   JSON.stringify(r.success ? {} : r.error?.issues);
 
-Deno.test("⭐ FulfillmentSchema accepts a swap naming a row on a SIBLING swap leg of the same parent (flat chaining)", () => {
-  const parsed = FulfillmentSchema.safeParse(chainedSwapDoc([{ path: [SWAP_LEG, Y_ROW], quantity: 1, reason: "cleaning" }]));
+Deno.test("⭐ FulfillmentSchema accepts an exchange naming a row on a SIBLING exchange leg of the same parent (flat chaining)", () => {
+  const parsed = FulfillmentSchema.safeParse(chainedExchangeDoc([{ path: [EXCHANGE_LEG, Y_ROW], quantity: 1, reason: "cleaning" }]));
   assertEquals(parsed.success, true, issuesOf(parsed));
 });
 
-Deno.test("FulfillmentSchema refuses a swap leg naming ANOTHER swap as its parent — chaining is flat", () => {
-  const doc = chainedSwapDoc([{ path: [SWAP_LEG, Y_ROW], quantity: 1, reason: "damaged" }]);
-  (doc.destinations[2] as Record<string, unknown>).exchange = { uid_pair: SWAP_LEG, disposition: "exchange" };
+Deno.test("FulfillmentSchema refuses an exchange leg naming ANOTHER exchange as its parent — chaining is flat", () => {
+  const doc = chainedExchangeDoc([{ path: [EXCHANGE_LEG, Y_ROW], quantity: 1, reason: "damaged" }]);
+  (doc.destinations[2] as Record<string, unknown>).exchange = { uid_pair: EXCHANGE_LEG, disposition: "same_trip" };
   assertEquals(FulfillmentSchema.safeParse(doc).success, false);
 });
 
-Deno.test("FulfillmentSchema refuses a `replaces` entry with no reason", () => {
-  assertEquals(FulfillmentSchema.safeParse(swapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1 }])).success, false);
+Deno.test("FulfillmentSchema refuses an `exchanged_for` entry with no reason", () => {
+  assertEquals(FulfillmentSchema.safeParse(exchangeDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1 }])).success, false);
 });
 
-Deno.test("🔴 FulfillmentSchema refuses `lost` on an `exchange` leg — a lost unit cannot come back on the trip", () => {
-  const exchange = FulfillmentSchema.safeParse(chainedSwapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "lost" }]));
+Deno.test("🔴 FulfillmentSchema refuses `lost` on a `same_trip` leg — a lost unit cannot come back on the trip", () => {
+  const exchange = FulfillmentSchema.safeParse(chainedExchangeDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "lost" }]));
   assertEquals(exchange.success, false);
   assertEquals(exchange.error?.issues.some((i) => i.path.at(-1) === "reason"), true, issuesOf(exchange));
   const sendNow = FulfillmentSchema.safeParse(
-    chainedSwapDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "lost" }], "send_now"),
+    chainedExchangeDoc([{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "lost" }], "send_now"),
   );
   assertEquals(sendNow.success, true, issuesOf(sendNow));
 });
 
 Deno.test("FulfillmentSchema accepts one row under two reasons, and refuses one row under the same reason twice", () => {
-  const two = chainedSwapDoc([
+  const two = chainedExchangeDoc([
     { path: [PARENT_LEG, X_ROW], quantity: 1, reason: "cleaning" },
     { path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" },
   ]);
   assertEquals(FulfillmentSchema.safeParse(two).success, true, issuesOf(FulfillmentSchema.safeParse(two)));
-  const dup = chainedSwapDoc([
+  const dup = chainedExchangeDoc([
     { path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" },
     { path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" },
   ]);
   assertEquals(FulfillmentSchema.safeParse(dup).success, false);
 });
 
-// ── S8c step 1: the new names are accepted beside the old (api-cloudrun#1147) ──
+// ── S8c step 4: the old names are gone (api-cloudrun#1147) ────────────
 
 const ENTRY = [{ path: [PARENT_LEG, X_ROW], quantity: 1, reason: "damaged" }];
 
-/** `swapDoc` with the exchange entries stated under `key` instead of `replaces`. */
-function swapDocUnder(key: "replaces" | "exchanged_for", extra: Record<string, unknown> = {}) {
-  const doc = swapDoc(undefined);
-  const items = doc.items.map((it, i) => (i === 3 ? { ...it, replaces: undefined, [key]: ENTRY, ...extra } : it));
-  return { ...doc, items };
-}
-
-Deno.test("S8c-1: FulfillmentSchema accepts the exchange entries under EITHER name", () => {
-  for (const key of ["replaces", "exchanged_for"] as const) {
-    const parsed = FulfillmentSchema.safeParse(swapDocUnder(key));
-    assertEquals(parsed.success, true, `${key}: ${issuesOf(parsed)}`);
-  }
-});
-
-Deno.test("S8c-1: FulfillmentSchema runs the exchange-pair checks under the NEW name too", () => {
-  // The refine reads both names, or `exchanged_for` would be a free-form pointer that skips it.
-  const offLeg = swapDocUnder("exchanged_for");
-  offLeg.items[3] = { ...offLeg.items[3], exchanged_for: [{ path: [SWAP_LEG, Y_ROW], quantity: 1, reason: "damaged" }] } as never;
-  assertEquals(FulfillmentSchema.safeParse(offLeg).success, false, "an entry naming another leg must still be refused");
-  const notExchange = FulfillmentSchema.safeParse({ ...swapDocUnder("exchanged_for"), destinations: swapDoc(undefined, { markExchange: false }).destinations });
-  assertEquals(notExchange.success, false, "off an exchange pair it must still be refused");
-  assertEquals(notExchange.error?.issues.some((i) => i.path.includes("exchanged_for")), true, issuesOf(notExchange));
-});
-
-Deno.test("S8c-1: a line states `replaces` OR `exchanged_for`, never both", () => {
-  const both = FulfillmentSchema.safeParse(swapDocUnder("replaces", { exchanged_for: ENTRY }));
-  assertEquals(both.success, false);
-  assertEquals(both.error?.issues.some((i) => i.path.at(-1) === "exchanged_for"), true, issuesOf(both));
-});
-
-Deno.test("S8c-1: a line states `quantity_order` OR `quantity_ordered`, never both", () => {
-  const withKey = (extra: Record<string, unknown>) => {
-    const doc = swapDoc(undefined);
-    return { ...doc, items: doc.items.map((it, i) => (i === 1 ? { ...it, ...extra } : it)) };
+Deno.test("S8c-5: FulfillmentSchema refuses the old names `replaces` and `quantity_order`", () => {
+  // `z.strictObject`: an old-named key is an unknown key, so a writer that
+  // regressed to it fails loudly rather than storing a field no reader reads.
+  const withRow = (i: number, extra: Record<string, unknown>) => {
+    const doc = exchangeDoc(undefined);
+    return { ...doc, items: doc.items.map((it, j) => (j === i ? { ...it, ...extra } : it)) };
   };
-  assertEquals(FulfillmentSchema.safeParse(withKey({ quantity_order: 0 })).success, true);
-  assertEquals(FulfillmentSchema.safeParse(withKey({ quantity_ordered: 0 })).success, true);
-  const both = FulfillmentSchema.safeParse(withKey({ quantity_order: 1, quantity_ordered: 1 }));
-  assertEquals(both.success, false);
-  assertEquals(both.error?.issues.some((i) => i.path.at(-1) === "quantity_ordered"), true, issuesOf(both));
+  for (const [i, extra] of [[3, { replaces: ENTRY }], [1, { quantity_order: 2 }]] as const) {
+    const parsed = FulfillmentSchema.safeParse(withRow(i, extra));
+    assertEquals(parsed.success, false, `${Object.keys(extra)[0]} must be refused`);
+  }
+  // Mutation control: the same document under the new names parses.
+  assertEquals(FulfillmentSchema.safeParse(withRow(3, { exchanged_for: ENTRY })).success, true);
 });
 
-Deno.test("S8c-1: FulfillmentItemInputLine carries the NEW names through a parse (or a picker write strips them)", () => {
+Deno.test("S8c-5: a stored line's `quantity_ordered` is REQUIRED-NULLABLE — a number, or null for no order line", () => {
+  const withX = (extra: Record<string, unknown>, drop = false) => {
+    const doc = exchangeDoc(undefined);
+    const items = doc.items.map((it, i) => {
+      if (i !== 1) return it;
+      const row: Record<string, unknown> = { ...it, ...extra };
+      if (drop) delete row.quantity_ordered;
+      return row;
+    });
+    return { ...doc, items };
+  };
+  assertEquals(FulfillmentSchema.safeParse(withX({ quantity_ordered: 0 })).success, true, "0 is a kept row");
+  assertEquals(FulfillmentSchema.safeParse(withX({ quantity_ordered: null })).success, true, "null is a row the order never had");
+  const absent = FulfillmentSchema.safeParse(withX({}, true));
+  assertEquals(absent.success, false, "absent is no longer a way to say either");
+  assertEquals(absent.error?.issues.some((i) => i.path.join(".") === "items.1.quantity_ordered"), true, issuesOf(absent));
+  assertEquals(FulfillmentSchema.safeParse(withX({ quantity_ordered: -1 })).success, false);
+  assertEquals(FulfillmentSchema.safeParse(withX({ quantity_ordered: 1.5 })).success, false);
+});
+
+Deno.test("S8c-5: FulfillmentItemInputLine carries `exchanged_for` and `quantity_ordered` through a parse", () => {
   const parsed = FulfillmentItemInputLine.safeParse({
     uid: Y_ROW,
-    path: [SWAP_LEG, Y_ROW],
+    path: [EXCHANGE_LEG, Y_ROW],
     quantity: 1,
     exchanged_for: ENTRY,
-    quantity_ordered: 3,
+    quantity_ordered: null,
   });
   assertEquals(parsed.success, true, issuesOf(parsed));
   assertEquals(parsed.success && parsed.data.exchanged_for?.[0].quantity, 1);
-  assertEquals(parsed.success && parsed.data.quantity_ordered, 3, "must survive so the service can refuse it");
-  const both = FulfillmentItemInputLine.safeParse({ uid: Y_ROW, path: [SWAP_LEG, Y_ROW], quantity: 1, replaces: ENTRY, exchanged_for: ENTRY });
-  assertEquals(both.success, false);
+  assertEquals(parsed.success && "quantity_ordered" in parsed.data, true, "must survive so the service can refuse it");
 });

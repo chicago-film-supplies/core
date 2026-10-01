@@ -148,7 +148,7 @@ export interface Booking {
    * ordered" — which is why the two-operand split exists here rather than a
    * single mutable number. The same split already exists one document over:
    * `FulfillmentLineItem` carries `quantity` (picker-owned, physical) beside
-   * `quantity_order` (server-stamped when they diverge).
+   * `quantity_ordered` (the order's quantity, stamped on every line).
    */
   quantity_ordered?: number;
   shortage: number;

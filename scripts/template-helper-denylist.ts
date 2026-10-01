@@ -693,13 +693,15 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "isStrictlyBelow",
     "isSubstitutionRow",
     // A write-path re-pointer (api-cloudrun#1114) — a template renders the
-    // stored `replaces`, never re-derives it.
-    "repointReplaces",
-    // The authoring cap on swap claims (api-cloudrun#1116) — a writer's
+    // stored `exchanged_for`, never re-derives it.
+    "repointExchangedFor",
+    // The authoring cap on exchange claims (api-cloudrun#1116) — a writer's
     // refusal, not something a document renders.
-    "overclaimedReplacements",
+    "overclaimedExchanges",
     // The manager's dangling-pointer warning (manager#537) — an operator
     // surface, not something a customer document renders.
+    "unresolvedExchangedFor",
+    // Its deprecated alias, kept for manager's pin bump (api-cloudrun#1147).
     "unresolvedReplaces",
     "standInUnits",
     "substitutionCredit",

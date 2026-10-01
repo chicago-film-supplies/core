@@ -123,7 +123,7 @@ Deno.test("documentDiff: three documents in step produce no entries from any vie
 
 Deno.test("documentDiff: a picker quantity override shows on the order view and the fulfillment view, keyed by path", () => {
   const f = fulfillment();
-  patchLine(f.items as unknown as LineItem[], `${D}/${G}/${LIGHT}`, (it) => { it.quantity = 1; it.quantity_order = 2; });
+  patchLine(f.items as unknown as LineItem[], `${D}/${G}/${LIGHT}`, (it) => { it.quantity = 1; it.quantity_ordered = 2; });
   const sources = { orders: [order()], fulfillments: [f] };
 
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
@@ -838,65 +838,60 @@ Deno.test("documentDiff: an invoice merge is substituted at the substitute on th
   assertEquals(summary(diff.lines), { [`${D}/${G}/${LIGHT}`]: [`invoice#2241:substituted(${D}/${G}/${TRIPOD}→${D}/${G}/${LIGHT})`] });
 });
 
-// ── a swap's `replaces`, re-aimed on the fulfillment (manager#537) ─────────
+// ── an exchange's `exchanged_for`, re-aimed on the fulfillment (manager#537) ─────────
 
 const X_PATH = [D, G, TRIPOD];
 
-Deno.test("documentDiff: a fulfillment whose replaces differs from the order's reports one replaces field", () => {
+Deno.test("documentDiff: a fulfillment whose exchanged_for differs from the order's reports one exchanged_for field", () => {
   const o = order();
-  patchLine(o.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.replaces = [{ path: X_PATH, quantity: 1, reason: "damaged" }]; });
+  patchLine(o.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.exchanged_for = [{ path: X_PATH, quantity: 1, reason: "damaged" }]; });
   const f = fulfillment();
-  patchLine(f.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.replaces = [{ path: X_PATH, quantity: 2, reason: "damaged" }]; });
+  patchLine(f.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.exchanged_for = [{ path: X_PATH, quantity: 2, reason: "damaged" }]; });
   const sources = { orders: [o], fulfillments: [f] };
   const orderEntry = [{ path: X_PATH, quantity: 1, reason: "damaged" }];
   const fulfillmentEntry = [{ path: X_PATH, quantity: 2, reason: "damaged" }];
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
-    [`${D}/${LIGHT}`]: [`fulfillment#1001:differs(replaces=${JSON.stringify(orderEntry)}→${JSON.stringify(fulfillmentEntry)})`],
+    [`${D}/${LIGHT}`]: [`fulfillment#1001:differs(exchanged_for=${JSON.stringify(orderEntry)}→${JSON.stringify(fulfillmentEntry)})`],
   });
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
-    [`${D}/${LIGHT}`]: [`order#1001:differs(replaces=${JSON.stringify(fulfillmentEntry)}→${JSON.stringify(orderEntry)})`],
+    [`${D}/${LIGHT}`]: [`order#1001:differs(exchanged_for=${JSON.stringify(fulfillmentEntry)}→${JSON.stringify(orderEntry)})`],
   });
 });
 
-Deno.test("documentDiff: the same replaces on both sides is no entry — and the reason is part of the identity", () => {
+Deno.test("documentDiff: the same exchanged_for on both sides is no entry — and the reason is part of the identity", () => {
   const o = order();
-  patchLine(o.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.replaces = [{ path: X_PATH, quantity: 1, reason: "damaged" }]; });
+  patchLine(o.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.exchanged_for = [{ path: X_PATH, quantity: 1, reason: "damaged" }]; });
   const same = fulfillment();
-  patchLine(same.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.replaces = [{ path: X_PATH, quantity: 1, reason: "damaged" }]; });
+  patchLine(same.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.exchanged_for = [{ path: X_PATH, quantity: 1, reason: "damaged" }]; });
   assertEquals(computeDocumentDiffs({ orders: [o], fulfillments: [same] }, { kind: "order", uid: O }, CONTEXT).lines.size, 0);
 
   const reclassified = fulfillment();
-  patchLine(reclassified.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.replaces = [{ path: X_PATH, quantity: 1, reason: "cleaning" }]; });
+  patchLine(reclassified.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.exchanged_for = [{ path: X_PATH, quantity: 1, reason: "cleaning" }]; });
   assertEquals(Object.keys(summary(computeDocumentDiffs({ orders: [o], fulfillments: [reclassified] }, { kind: "order", uid: O }, CONTEXT).lines)), [`${D}/${LIGHT}`]);
 });
 
-Deno.test("S8c-1: `replaces` on one side and `exchanged_for` on the other, same entries, is no entry", () => {
-  // The stored corpus carries the old name until the backfill, and a writer that has moved on carries the
-  // new one — so the two documents of one order can legitimately state each name for one fact.
+Deno.test("S8c-5: an old-named `replaces` is not read — it compares as no exchange entries", () => {
   const entry = { path: X_PATH, quantity: 1, reason: "damaged" };
   const o = order();
   patchLine(o.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.replaces = [entry]; });
   const f = fulfillment();
   patchLine(f.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.exchanged_for = [entry]; });
-  assertEquals(computeDocumentDiffs({ orders: [o], fulfillments: [f] }, { kind: "order", uid: O }, CONTEXT).lines.size, 0);
-  // Mutation control: a different quantity under the new name still reports.
-  patchLine(f.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.exchanged_for = [{ ...entry, quantity: 2 }]; });
   assertEquals(computeDocumentDiffs({ orders: [o], fulfillments: [f] }, { kind: "order", uid: O }, CONTEXT).lines.size, 1);
 });
 
-Deno.test("documentDiff: absent replaces equals an empty list", () => {
+Deno.test("documentDiff: absent exchanged_for equals an empty list", () => {
   const f = fulfillment();
-  patchLine(f.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.replaces = []; });
+  patchLine(f.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.exchanged_for = []; });
   assertEquals(computeDocumentDiffs({ orders: [order()], fulfillments: [f] }, { kind: "order", uid: O }, CONTEXT).lines.size, 0);
 });
 
-Deno.test("documentDiff: replaces entries in a different order are equal — it is a multiset, not a list", () => {
+Deno.test("documentDiff: exchanged_for entries in a different order are equal — it is a multiset, not a list", () => {
   const a = { path: X_PATH, quantity: 1, reason: "damaged" };
   const b = { path: [D, G, LIGHT], quantity: 1, reason: "cleaning" };
   const o = order();
-  patchLine(o.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.replaces = [a, b]; });
+  patchLine(o.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.exchanged_for = [a, b]; });
   const f = fulfillment();
-  patchLine(f.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.replaces = [b, a]; });
+  patchLine(f.items as unknown as LineItem[], `${D}/${LIGHT}`, (it) => { it.exchanged_for = [b, a]; });
   assertEquals(computeDocumentDiffs({ orders: [o], fulfillments: [f] }, { kind: "order", uid: O }, CONTEXT).lines.size, 0);
 });
 
@@ -966,11 +961,11 @@ Deno.test("documentDiff: a kit parent on one side only reports ONCE — its comp
 Deno.test("documentDiff: a KEPT kit (the order removed it, units still out) — presence once, quantity per row", () => {
   // api-cloudrun#1147's shape: the order dropped the kit; the fulfillment keeps
   // the component at its live custody and its product ancestor at 0, both
-  // stamped `quantity_order: 0`.
+  // stamped `quantity_ordered: 0`.
   const f = fulfillment();
   (f.items as unknown as LineItem[]).push(
-    { uid: KIT, type: "rental", name: KIT, description: "", quantity: 0, quantity_order: 0, path: [D, KIT] } as unknown as LineItem,
-    { uid: COMP, type: "rental", name: COMP, description: "", quantity: 2, quantity_order: 0, path: [D, KIT, COMP] } as unknown as LineItem,
+    { uid: KIT, type: "rental", name: KIT, description: "", quantity: 0, quantity_ordered: 0, path: [D, KIT] } as unknown as LineItem,
+    { uid: COMP, type: "rental", name: COMP, description: "", quantity: 2, quantity_ordered: 0, path: [D, KIT, COMP] } as unknown as LineItem,
   );
   const sources = { orders: [order()], fulfillments: [f], invoices: [invoice("inv-1", [{ order: O, items: orderItems() }])] };
   assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
@@ -985,13 +980,13 @@ Deno.test("documentDiff: a KEPT kit (the order removed it, units still out) — 
 });
 
 Deno.test("documentDiff: an exchange unit is shown, never owed — no quantity entry against invoices (decision 8)", () => {
-  const exchange = { replaces: [{ path: [D, G, TRIPOD], quantity: 1, reason: "damaged" }] };
+  const exchange = { exchanged_for: [{ path: [D, G, TRIPOD], quantity: 1, reason: "damaged" }] };
   const items = [...orderItems(), line("prod-tripod-x", [D, "prod-tripod-x"], 1, 0, exchange)];
   const sources = { orders: [order(items)], fulfillments: [fulfillment(items)], invoices: [invoice("inv-1", [{ order: O, items: orderItems() }])] };
   for (const viewing of [{ kind: "order", uid: O }, { kind: "fulfillment", uid: O }, { kind: "invoice", uid: "inv-1" }] as const) {
     assertEquals(summary(computeDocumentDiffs(sources, viewing, CONTEXT).lines), {}, viewing.kind);
   }
-  // Mutation control: the same line without `replaces` IS owed.
+  // Mutation control: the same line without `exchanged_for` IS owed.
   const plain = [...orderItems(), line("prod-tripod-x", [D, "prod-tripod-x"], 1, 0)];
   assertEquals(
     Object.keys(summary(computeDocumentDiffs({ ...sources, orders: [order(plain)], fulfillments: [fulfillment(plain)] }, { kind: "order", uid: O }, CONTEXT).lines)),

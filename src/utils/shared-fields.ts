@@ -431,7 +431,7 @@ function withoutKeys(value: unknown, keys: readonly string[]): unknown {
  *   derivation afterwards (`priceDocument`, the day count), which is what stops an
  *   invoice's own tax context reading as an override (G2).
  * - `homonym` fields, and every key the classification does not name (the
- *   downstream document's own fields: `xero_id`, `quantity_order`, …).
+ *   downstream document's own fields: `xero_id`, `quantity_ordered`, …).
  *
  * `atom` fields (another document's snapshot) are taken or kept WHOLE.
  *
@@ -688,7 +688,7 @@ const COLLECTION_DATE_KEYS = [
  *
  * 1. **KEEP** — the merge nulled the leg (or the windows) but the projection's
  *    OWN items still hold a rental: a fulfillment row still out on custody at
- *    `quantity_order: 0`, an invoice line the order dropped. The projection
+ *    `quantity_ordered: 0`, an invoice line the order dropped. The projection
  *    keeps its stored leg, flag, collection dates and windows. The same shape as
  *    the fulfillment's custody keep, and for the same reason: the projection
  *    records what HAPPENED / what is BILLED, and a sales edit to the quote does

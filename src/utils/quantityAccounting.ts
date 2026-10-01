@@ -25,9 +25,9 @@
  * - **X's components are credited through the ORDER's own stored ratio** —
  *   `credit × component quantity ÷ kit quantity`, walked down the order's path
  *   tree, rounded half-up once per level. Never the catalog: optional and
- *   variable components make catalog derivation wrong (D1). A full swap credits
+ *   variable components make catalog derivation wrong (D1). A full substitution credits
  *   every component exactly its order quantity, so the rounding only ever bites
- *   a partial swap.
+ *   a partial substitution.
  * - **Every row of the subtree bills its own path by
  *   `row quantity − Σ live entry quantities`** — which is how a merge into a Y
  *   the order already carries bills both lines.

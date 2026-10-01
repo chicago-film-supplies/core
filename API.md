@@ -3514,15 +3514,15 @@ const DestinationExchange: z.ZodType<DestinationExchangeType>;
 
 ### `DestinationExchangeType`
 
-A mid-rental swap, stated ON the destination pair that carries it.
+A mid-rental exchange, stated ON the destination pair that carries it.
 
-🔴 **A swap IS a destination pair — an exchange LEG — not a structure of its
-own.** The replacement unit goes out on its own trip, so it needs its own
+🔴 **An exchange IS a destination pair — an exchange LEG — not a structure of
+its own.** The replacement unit goes out on its own trip, so it needs its own
 dates, its own booking, its own card and its own section of items; a
-destination pair is all four already. Making it a pair is what puts a swap
+destination pair is all four already. Making it a pair is what puts an exchange
 through the three-way merge (`utils/shared-fields.ts`) and the diff
-(`utils/documentDiff.ts`) unchanged: a swap made on the order propagates to
-the fulfillment and the invoice unless overridden, and a swap made on the
+(`utils/documentDiff.ts`) unchanged: an exchange made on the order propagates to
+the fulfillment and the invoice unless overridden, and an exchange made on the
 fulfillment shows as a diff against both.
 
 ⚠️ **The parent's collection endpoint and dates are COPIED, not referenced.**
@@ -3533,7 +3533,7 @@ agree with its parent's.
 ```ts
 interface DestinationExchangeType {
   uid_pair: string;
-  disposition: StoredExchangeDispositionType;
+  disposition: ExchangeDispositionType;
 }
 ```
 
@@ -3979,7 +3979,7 @@ interface DocumentOrganizationSnapshotType {
 What happens to the damaged unit the replacement is going out against.
 
 ```ts
-const EXCHANGE_DISPOSITIONS: "exchange" | "send_now"[];
+const EXCHANGE_DISPOSITIONS: "same_trip" | "send_now"[];
 ```
 
 ### `Email`
@@ -4151,11 +4151,13 @@ const ExchangeDispositionEnum: z.ZodType<ExchangeDispositionType>;
 
 ### `ExchangeDispositionType`
 
-`exchange` — the units taken back come back on the same trip. (Being renamed
-`same_trip`: see {@link StoredExchangeDispositionType}.) `send_now` — the
-replacement goes out now and the units come back at the normal return (or,
-for a `lost` entry, never). A fact about the TRIP; why each unit comes back is
-the `exchanged_for` entry's `reason`.
+`same_trip` — the units taken back come back on the exchange's own trip.
+`send_now` — the replacement goes out now and the units come back at the
+normal return (or, for a `lost` entry, never). A fact about the TRIP; why each
+unit comes back is the `exchanged_for` entry's `reason`.
+
+`same_trip` was stored as `exchange` until api-cloudrun#1147 renamed it
+(backfilled 2026-10-01; prod and dev held no exchange pair).
 
 ```ts
 type ExchangeDispositionType = indexedAccess;
@@ -4169,15 +4171,15 @@ const ExchangedForEntry: z.ZodType<ExchangedForEntryType>;
 
 ### `ExchangedForEntryType`
 
-One `exchanged_for` entry (stored as `replaces` until the S8c rename completes): a row the exchange takes units back from, how many, and
+One `exchanged_for` entry: a row the exchange takes units back from, how many, and
 WHY they come back (api-cloudrun#1116, owner 2026-09-26).
 
 ⭐ **`reason` is the out-of-service vocabulary itself, imported rather than
-restated**, so a new out-of-service reason reaches swaps with no change here.
-The swap's checkout rider turns it into the unit's state: `damaged` marks the
+restated**, so a new out-of-service reason reaches exchanges with no change here.
+The exchange's checkout rider turns it into the unit's state: `damaged` marks the
 booking damaged, `cleaning`/`maintenance` return the units and flag them on
 the shelf (never billed), and `lost` is recorded at the normal return. A
-`lost` unit cannot be collected on the swap's own trip, so it is valid only on
+`lost` unit cannot be collected on the exchange's own trip, so it is valid only on
 a `send_now` leg ({@link ExchangedForEntryType} is checked against its
 pair by `checkExchangedFor`).
 
@@ -4202,7 +4204,7 @@ reads both — the carry-forward across a rebuild, the row-identity rules, the
 document diff. What differs is the physical story, and it is the whole
 distinction:
 
-| | `substituted_for` | `replaces` |
+| | `substituted_for` | `exchanged_for` |
 |---|---|---|
 | X went out | no — Y went instead | yes, and it is out NOW |
 | X's booking | cancelled by the netting | kept, and marked by `reason` |
@@ -4210,10 +4212,10 @@ distinction:
 
 🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a
 substitution away — X's booking is cancelled and Y's inherits its custody —
-which is exactly the wrong answer for a swap, where X is on set and its units
-are what the swap takes back.
+which is exactly the wrong answer for an exchange, where X is on set and its units
+are what the exchange takes back.
 
-⚠️ **It lives on the ROW rather than on the exchange PAIR**, because a swap
+⚠️ **It lives on the ROW rather than on the exchange PAIR**, because an exchange
 TRIP legitimately carries replacements for several damaged lines at once: one
 leg, one card, one drive. A pair-level field would force one leg per damaged
 line and put three trip cards on the dispatch board for one physical trip —
@@ -4520,12 +4522,11 @@ const FulfillmentItemInputLine: z.ZodType<FulfillmentItemInputLineType>;
 
 One picker-editable line in a `PUT /fulfillments/{uid}/items` body.
 
-⚠️ **`quantity_order` is declared here even though the API always refuses it,
-and that is load-bearing rather than sloppy.** It is the divergence marker
-between the picker's count and the order's — `mergeLineItem` stamps the
-ORDER's quantity onto it when the two disagree — so a client structurally
-cannot compute it, and `updateFulfillmentItems` throws
-*"quantity_order is server-managed"* for any body carrying it.
+⚠️ **`quantity_ordered` is declared here even though the API always refuses it,
+and that is load-bearing rather than sloppy.** It is the ORDER's quantity for
+the row, stamped by the order sync, so a client structurally cannot compute
+it, and `updateFulfillmentItems` refuses any body carrying it as
+server-managed.
 
 🔴 **Omitting it here would DELETE that 400.** A `z.object` strips an
 undeclared key, so the service would never see the field and would answer 200
@@ -4563,10 +4564,8 @@ interface FulfillmentItemInputLineType {
   path: string[];
   quantity: number;
   substituted_for?: SubstitutedForEntryType[];
-  replaces?: ExchangedForEntryType[];
   exchanged_for?: ExchangedForEntryType[];
-  quantity_order?: number;
-  quantity_ordered?: number;
+  quantity_ordered?: number | null;
 }
 ```
 
@@ -4600,10 +4599,8 @@ interface FulfillmentLineItemType {
   path: string[];
   order_number?: number;
   uid_order?: string;
-  quantity_order?: number;
-  quantity_ordered?: number;
+  quantity_ordered: number | null;
   substituted_for?: SubstitutedForEntryType[];
-  replaces?: ExchangedForEntryType[];
   exchanged_for?: ExchangedForEntryType[];
 }
 ```
@@ -7285,7 +7282,6 @@ interface OrderDocLineItemType {
   coa_revenue?: COARevenueType | null;
   uid_tax_class: string;
   uid_tax_class_override?: string | null;
-  replaces?: ExchangedForEntryType[];
   exchanged_for?: ExchangedForEntryType[];
 }
 ```
@@ -7440,7 +7436,6 @@ interface OrderItemLineType {
   order_number?: number;
   uid_order?: string;
   uid_tax_class_override?: string | null;
-  replaces?: ExchangedForEntryType[];
   exchanged_for?: ExchangedForEntryType[];
 }
 ```
@@ -9273,22 +9268,6 @@ What made an interval unavailable. The only non-quantitative fact a reader gets.
 const STOCK_UNAVAILABLE_KINDS: "booking" | "oos"[];
 ```
 
-### `STORED_EXCHANGE_DISPOSITIONS`
-
-What a STORED pair may carry while `exchange` is renamed `same_trip` (S8c, api-cloudrun#1147).
-
-🔴 **A separate tuple, and `EXCHANGE_DISPOSITIONS` above is deliberately unchanged.** That
-tuple is the list of values a WRITER may send: manager's pickers iterate it
-(`DISPOSITION_LABELS[value].label`, which has no `same_trip` entry) and an api route builds
-`z.enum(EXCHANGE_DISPOSITIONS)` from it. Widening it would put `same_trip` in a dropdown and
-accept it from a client before any reader handles it. So step 1 widens only what a stored
-document PARSES; step 2 moves the writers; step 4 collapses the two tuples into one.
-`same_trip` and `exchange` mean the same thing. A reader treats them as one value.
-
-```ts
-const STORED_EXCHANGE_DISPOSITIONS: "same_trip" | "exchange" | "send_now"[];
-```
-
 ### `SaveQuoteVersionInput`
 
 Zod schema for SaveQuoteVersionInput.
@@ -9889,20 +9868,6 @@ interface StoreTransferLineInputType {
 type StoreUpdated = EventEnvelope<Store> & typeLiteral;
 ```
 
-### `StoredExchangeDispositionEnum`
-
-Zod schema for {@link StoredExchangeDispositionType}.
-
-```ts
-const StoredExchangeDispositionEnum: z.ZodType<StoredExchangeDispositionType>;
-```
-
-### `StoredExchangeDispositionType`
-
-```ts
-type StoredExchangeDispositionType = indexedAccess;
-```
-
 ### `SubstitutedForEntry`
 
 ```ts
@@ -9915,7 +9880,7 @@ One substitution a downstream row stands in for (manager#414, owner decision D1)
 
 `path` is the REPLACED KIT's ORDER path, never a component's: X's and Y's
 components do not correspond one to one. `quantity` is how many units of this
-row stand in for X, recorded when the swap is made and never re-derived from
+row stand in for X, recorded when the substitution is made and never re-derived from
 the catalog (optional and variable components make that wrong).
 
 ```ts
@@ -9938,7 +9903,7 @@ Entries are unique by `path` and ACCUMULATE: a second merge of the same X into
 the same row adds to the existing entry rather than appending a second one.
 
 Replaced `path_substituted_for` (removed in S4), which named X but not how much of it — so a
-merge into an existing sibling could not be told from an in-place swap, and
+merge into an existing sibling could not be told from an in-place substitution, and
 could not be reversed.
 
 ```ts
@@ -9969,29 +9934,6 @@ Zod schema for Supplier.
 
 ```ts
 const SupplierSchema: z.ZodType<Supplier>;
-```
-
-### `SwapReplacementEntry`
-
-```ts
-const SwapReplacementEntry: z.ZodType<ExchangedForEntryType>;
-```
-
-### `SwapReplacementEntryType`
-
-S8c step 1 (api-cloudrun#1147): the OLD names, kept beside the new until the
-four-step removal's last step drops them. Each is the same value as its
-`ExchangedFor*` twin, not a copy, so there is one schema instance and one
-`z.globalRegistry` entry.
-
-```ts
-type SwapReplacementEntryType = ExchangedForEntryType;
-```
-
-### `SwapReplacementList`
-
-```ts
-const SwapReplacementList: z.ZodType<ExchangedForEntryType[]>;
 ```
 
 ### `SyncErrorLogRecord`
@@ -12503,17 +12445,6 @@ every one of 1,035 order-linked invoices with an `order`).
 
 {@link mixedBookingGrains} as a refinement on the order's `items`.
 
-### `checkRenamedKeys(row: object, ctx: z.RefinementCtx, pairs: ReadonlyArray<readonly [string, string]>): void`
-
-The "not both" refine every dual-name stage needs: a row states the old name
-or the new one, never both, because two stated values cannot be told apart
-from a half-finished migration. Attached to every grain that declares a
-renamed key (S8c).
-
-**Parameters**
-
-- `pairs` — `[oldKey, newKey]` per rename
-
 ### `checkZeroPricedComponents(items: readonly ZeroPricedItemLike[], ctx: z.RefinementCtx): void`
 
 The ARRAY-level `zero_priced` refinement, holding **both directions in one
@@ -12755,14 +12686,7 @@ two entries on one path.
 
 ### `exchangedForOf(row: typeLiteral): readonly E[]`
 
-A row's exchange entries under EITHER stored name: `exchanged_for`, or the
-`replaces` it is renamed from. Absent reads as none.
-
-Every reader of the field goes through this for the length of the migration,
-because the stored corpus carries the old name until the backfill and a
-writer that has moved on carries the new one. ⚠️ A document never carries
-both ({@link checkRenamedKeys}), so which wins is moot on a valid one; the
-new name is read first so an invalid one reads as the writer meant it.
+A row's `exchanged_for` entries, with absent read as none.
 
 ### `firestoreDisplayDefaults`
 
@@ -12931,7 +12855,7 @@ the document needs a collection leg at all.
 🔴 **Document-wide, not per pair** (owner, 2026-09-28). A per-pair rule would
 be a fourth definition of "needs a collection" beside the manager's
 order-wide `showCollectionFor`. Evaluated on EACH document's own items: a
-fulfillment keeps a `quantity_order: 0` rental while custody is out, and an
+fulfillment keeps a `quantity_ordered: 0` rental while custody is out, and an
 invoice keeps lines its order dropped, so the three documents can answer
 differently and each answer is right for its own document.
 
@@ -13006,7 +12930,7 @@ Narrows a fulfillment doc item to a line item (excludes the two dividers).
 the predicate was hand-written four times across three repos and two of those
 copies returned `boolean` and therefore narrowed NOTHING — `isLineItemType`
 tests the `type` STRING, so a caller reaching for it got a truth value and
-still had to cast to touch `quantity_order` or `substituted_for`. The
+still had to cast to touch `quantity_ordered` or `substituted_for`. The
 order and invoice grains have had `isLineItem` / `isInvoiceLineItem` all
 along; this closes the set.
 
@@ -13320,12 +13244,6 @@ const schemas: mapped;
 The contract for a settlement `type`, or `undefined` for a value outside
 {@link SETTLEMENT_TYPES}. Tolerant of a `string` for the same reason
 {@link itemContract} is — callers hold types from loosely-typed sources.
-
-### `swapReplacementKey`
-
-```ts
-const swapReplacementKey: exchangedForKey;
-```
 
 ### `templateHelpers`
 
@@ -14197,15 +14115,15 @@ const ExchangedForEntry: z.ZodType<ExchangedForEntryType>;
 
 ### `ExchangedForEntryType`
 
-One `exchanged_for` entry (stored as `replaces` until the S8c rename completes): a row the exchange takes units back from, how many, and
+One `exchanged_for` entry: a row the exchange takes units back from, how many, and
 WHY they come back (api-cloudrun#1116, owner 2026-09-26).
 
 ⭐ **`reason` is the out-of-service vocabulary itself, imported rather than
-restated**, so a new out-of-service reason reaches swaps with no change here.
-The swap's checkout rider turns it into the unit's state: `damaged` marks the
+restated**, so a new out-of-service reason reaches exchanges with no change here.
+The exchange's checkout rider turns it into the unit's state: `damaged` marks the
 booking damaged, `cleaning`/`maintenance` return the units and flag them on
 the shelf (never billed), and `lost` is recorded at the normal return. A
-`lost` unit cannot be collected on the swap's own trip, so it is valid only on
+`lost` unit cannot be collected on the exchange's own trip, so it is valid only on
 a `send_now` leg ({@link ExchangedForEntryType} is checked against its
 pair by `checkExchangedFor`).
 
@@ -14230,7 +14148,7 @@ reads both — the carry-forward across a rebuild, the row-identity rules, the
 document diff. What differs is the physical story, and it is the whole
 distinction:
 
-| | `substituted_for` | `replaces` |
+| | `substituted_for` | `exchanged_for` |
 |---|---|---|
 | X went out | no — Y went instead | yes, and it is out NOW |
 | X's booking | cancelled by the netting | kept, and marked by `reason` |
@@ -14238,10 +14156,10 @@ distinction:
 
 🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a
 substitution away — X's booking is cancelled and Y's inherits its custody —
-which is exactly the wrong answer for a swap, where X is on set and its units
-are what the swap takes back.
+which is exactly the wrong answer for an exchange, where X is on set and its units
+are what the exchange takes back.
 
-⚠️ **It lives on the ROW rather than on the exchange PAIR**, because a swap
+⚠️ **It lives on the ROW rather than on the exchange PAIR**, because an exchange
 TRIP legitimately carries replacements for several damaged lines at once: one
 leg, one card, one drive. A pair-level field would force one leg per damaged
 line and put three trip cards on the dispatch board for one physical trip —
@@ -15277,7 +15195,7 @@ One substitution a downstream row stands in for (manager#414, owner decision D1)
 
 `path` is the REPLACED KIT's ORDER path, never a component's: X's and Y's
 components do not correspond one to one. `quantity` is how many units of this
-row stand in for X, recorded when the swap is made and never re-derived from
+row stand in for X, recorded when the substitution is made and never re-derived from
 the catalog (optional and variable components make that wrong).
 
 ```ts
@@ -15300,34 +15218,11 @@ Entries are unique by `path` and ACCUMULATE: a second merge of the same X into
 the same row adds to the existing entry rather than appending a second one.
 
 Replaced `path_substituted_for` (removed in S4), which named X but not how much of it — so a
-merge into an existing sibling could not be told from an in-place swap, and
+merge into an existing sibling could not be told from an in-place substitution, and
 could not be reversed.
 
 ```ts
 const SubstitutedForList: z.ZodType<SubstitutedForEntryType[]>;
-```
-
-### `SwapReplacementEntry`
-
-```ts
-const SwapReplacementEntry: z.ZodType<ExchangedForEntryType>;
-```
-
-### `SwapReplacementEntryType`
-
-S8c step 1 (api-cloudrun#1147): the OLD names, kept beside the new until the
-four-step removal's last step drops them. Each is the same value as its
-`ExchangedFor*` twin, not a copy, so there is one schema instance and one
-`z.globalRegistry` entry.
-
-```ts
-type SwapReplacementEntryType = ExchangedForEntryType;
-```
-
-### `SwapReplacementList`
-
-```ts
-const SwapReplacementList: z.ZodType<ExchangedForEntryType[]>;
 ```
 
 ### `TAX_JURISDICTIONS`
@@ -15499,17 +15394,6 @@ deliberately NOT asserted: a flat-amount fee is legitimate, and
 
 ### `checkPriceBaseUnit(price: typeLiteral | null | undefined, ctx: z.RefinementCtx): void`
 
-### `checkRenamedKeys(row: object, ctx: z.RefinementCtx, pairs: ReadonlyArray<readonly [string, string]>): void`
-
-The "not both" refine every dual-name stage needs: a row states the old name
-or the new one, never both, because two stated values cannot be told apart
-from a half-finished migration. Attached to every grain that declares a
-renamed key (S8c).
-
-**Parameters**
-
-- `pairs` — `[oldKey, newKey]` per rename
-
 ### `checkZeroPricedAmount(item: typeLiteral, ctx: z.RefinementCtx): void`
 
 **Invariant (1) of the `zero_priced` campaign: a line flagged `zero_priced`
@@ -15581,14 +15465,7 @@ two entries on one path.
 
 ### `exchangedForOf(row: typeLiteral): readonly E[]`
 
-A row's exchange entries under EITHER stored name: `exchanged_for`, or the
-`replaces` it is renamed from. Absent reads as none.
-
-Every reader of the field goes through this for the length of the migration,
-because the stored corpus carries the old name until the backfill and a
-writer that has moved on carries the new one. ⚠️ A document never carries
-both ({@link checkRenamedKeys}), so which wins is moot on a valid one; the
-new name is read first so an invalid one reads as the writer meant it.
+A row's `exchanged_for` entries, with absent read as none.
 
 ### `getSettlementMultiplier(type: SettlementTypeType): 1 | -1`
 
@@ -15666,12 +15543,6 @@ contract and every derived predicate answers `false` for it.
 The contract for a settlement `type`, or `undefined` for a value outside
 {@link SETTLEMENT_TYPES}. Tolerant of a `string` for the same reason
 {@link itemContract} is — callers hold types from loosely-typed sources.
-
-### `swapReplacementKey`
-
-```ts
-const swapReplacementKey: exchangedForKey;
-```
 
 ### `toRegionCode(input: string): string`
 
@@ -18561,15 +18432,15 @@ const DestinationExchange: z.ZodType<DestinationExchangeType>;
 
 ### `DestinationExchangeType`
 
-A mid-rental swap, stated ON the destination pair that carries it.
+A mid-rental exchange, stated ON the destination pair that carries it.
 
-🔴 **A swap IS a destination pair — an exchange LEG — not a structure of its
-own.** The replacement unit goes out on its own trip, so it needs its own
+🔴 **An exchange IS a destination pair — an exchange LEG — not a structure of
+its own.** The replacement unit goes out on its own trip, so it needs its own
 dates, its own booking, its own card and its own section of items; a
-destination pair is all four already. Making it a pair is what puts a swap
+destination pair is all four already. Making it a pair is what puts an exchange
 through the three-way merge (`utils/shared-fields.ts`) and the diff
-(`utils/documentDiff.ts`) unchanged: a swap made on the order propagates to
-the fulfillment and the invoice unless overridden, and a swap made on the
+(`utils/documentDiff.ts`) unchanged: an exchange made on the order propagates to
+the fulfillment and the invoice unless overridden, and an exchange made on the
 fulfillment shows as a diff against both.
 
 ⚠️ **The parent's collection endpoint and dates are COPIED, not referenced.**
@@ -18580,7 +18451,7 @@ agree with its parent's.
 ```ts
 interface DestinationExchangeType {
   uid_pair: string;
-  disposition: StoredExchangeDispositionType;
+  disposition: ExchangeDispositionType;
 }
 ```
 
@@ -18806,7 +18677,7 @@ interface DocDestinationType {
 What happens to the damaged unit the replacement is going out against.
 
 ```ts
-const EXCHANGE_DISPOSITIONS: "exchange" | "send_now"[];
+const EXCHANGE_DISPOSITIONS: "same_trip" | "send_now"[];
 ```
 
 ### `ExchangeDispositionEnum`
@@ -18819,11 +18690,13 @@ const ExchangeDispositionEnum: z.ZodType<ExchangeDispositionType>;
 
 ### `ExchangeDispositionType`
 
-`exchange` — the units taken back come back on the same trip. (Being renamed
-`same_trip`: see {@link StoredExchangeDispositionType}.) `send_now` — the
-replacement goes out now and the units come back at the normal return (or,
-for a `lost` entry, never). A fact about the TRIP; why each unit comes back is
-the `exchanged_for` entry's `reason`.
+`same_trip` — the units taken back come back on the exchange's own trip.
+`send_now` — the replacement goes out now and the units come back at the
+normal return (or, for a `lost` entry, never). A fact about the TRIP; why each
+unit comes back is the `exchanged_for` entry's `reason`.
+
+`same_trip` was stored as `exchange` until api-cloudrun#1147 renamed it
+(backfilled 2026-10-01; prod and dev held no exchange pair).
 
 ```ts
 type ExchangeDispositionType = indexedAccess;
@@ -19205,7 +19078,6 @@ interface OrderDocLineItemType {
   coa_revenue?: COARevenueType | null;
   uid_tax_class: string;
   uid_tax_class_override?: string | null;
-  replaces?: ExchangedForEntryType[];
   exchanged_for?: ExchangedForEntryType[];
 }
 ```
@@ -19337,7 +19209,6 @@ interface OrderItemLineType {
   order_number?: number;
   uid_order?: string;
   uid_tax_class_override?: string | null;
-  replaces?: ExchangedForEntryType[];
   exchanged_for?: ExchangedForEntryType[];
 }
 ```
@@ -19405,36 +19276,6 @@ interface PriceModifierType {
   type: RateType;
   amount_cents: number;
 }
-```
-
-### `STORED_EXCHANGE_DISPOSITIONS`
-
-What a STORED pair may carry while `exchange` is renamed `same_trip` (S8c, api-cloudrun#1147).
-
-🔴 **A separate tuple, and `EXCHANGE_DISPOSITIONS` above is deliberately unchanged.** That
-tuple is the list of values a WRITER may send: manager's pickers iterate it
-(`DISPOSITION_LABELS[value].label`, which has no `same_trip` entry) and an api route builds
-`z.enum(EXCHANGE_DISPOSITIONS)` from it. Widening it would put `same_trip` in a dropdown and
-accept it from a client before any reader handles it. So step 1 widens only what a stored
-document PARSES; step 2 moves the writers; step 4 collapses the two tuples into one.
-`same_trip` and `exchange` mean the same thing. A reader treats them as one value.
-
-```ts
-const STORED_EXCHANGE_DISPOSITIONS: "same_trip" | "exchange" | "send_now"[];
-```
-
-### `StoredExchangeDispositionEnum`
-
-Zod schema for {@link StoredExchangeDispositionType}.
-
-```ts
-const StoredExchangeDispositionEnum: z.ZodType<StoredExchangeDispositionType>;
-```
-
-### `StoredExchangeDispositionType`
-
-```ts
-type StoredExchangeDispositionType = indexedAccess;
 ```
 
 ### `TaxRef`
@@ -19584,8 +19425,8 @@ the moment a consumer pins it: the corpus has to read 0 first.
 
 Every exchange pair names a parent pair of the same document, and that parent
 is not itself an exchange. Shared by the order and fulfillment destination
-arrays — one statement, so the two grains cannot disagree about what a swap
-is. ⚠️ **The INVOICE array deliberately does not carry it** (see the note at
+arrays — one statement, so the two grains cannot disagree about what an
+exchange is. ⚠️ **The INVOICE array deliberately does not carry it** (see the note at
 `FulfillmentSchema.destinations`): an invoice is scoped to what it bills, so it
 can hold an exchange pair whose parent leg another invoice carries.
 
@@ -19594,22 +19435,22 @@ pair** — a pair alone cannot see its siblings.
 
 ### `checkExchangedFor(doc: typeLiteral, ctx: z.RefinementCtx): void`
 
-An `exchanged_for` (or old-named `replaces`) entry is a claim about two rows of THIS document, so only the
+An `exchanged_for` entry is a claim about two rows of THIS document, so only the
 document can check it:
 
-1. the row carrying it sits under a pair marked `exchange` — a swap's
+1. the row carrying it sits under a pair marked `exchange` — an exchange's
    replacement line, not an ordinary one;
-2. every path it names is on that pair's PARENT leg, or on ANOTHER swap leg of
-   the same parent (`path[0]`) — the units taken back are ones the family of
+2. every path it names is on that pair's PARENT leg, or on ANOTHER exchange leg
+   of the same parent (`path[0]`) — the units taken back are ones the family of
    legs sent out. The second arm is FLAT chaining (api-cloudrun#1116, owner
    2026-09-26): a replacement that breaks or gets dirty in turn is taken back
-   by a new swap on the ORIGINAL leg naming the earlier swap's row, so
-   `exchange.uid_pair` is never a swap and `:end` stays one level deep;
+   by a new exchange on the ORIGINAL leg naming the earlier exchange's row, so
+   `exchange.uid_pair` is never an exchange pair and `:end` stays one level deep;
 3. a `lost` entry sits on a `send_now` leg — a lost unit cannot come back on
-   the swap's own trip.
+   the exchange's own trip.
 
 ⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without
-it a swap could name a row on an unrelated leg, and the checkout rider would
+it an exchange could name a row on an unrelated leg, and the checkout rider would
 move units on a trip that never carried them.
 
 🔴 **It deliberately does NOT require the named row to EXIST** (api-cloudrun#1114,
@@ -19673,12 +19514,6 @@ for exactly that.
 `assertValidPatch` validates each key alone; a writer patching `destinations`
 on a non-draft document is checked only when it supplies the merged document.
 
-### `checkSwapReplacements`
-
-```ts
-const checkSwapReplacements: checkExchangedFor;
-```
-
 ### `destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]`
 
 Where the destination dividers and pairs of one document disagree — the rule
@@ -19717,7 +19552,7 @@ the document needs a collection leg at all.
 🔴 **Document-wide, not per pair** (owner, 2026-09-28). A per-pair rule would
 be a fourth definition of "needs a collection" beside the manager's
 order-wide `showCollectionFor`. Evaluated on EACH document's own items: a
-fulfillment keeps a `quantity_order: 0` rental while custody is out, and an
+fulfillment keeps a `quantity_ordered: 0` rental while custody is out, and an
 invoice keeps lines its order dropped, so the three documents can answer
 differently and each answer is right for its own document.
 
@@ -19916,12 +19751,11 @@ const FulfillmentItemInputLine: z.ZodType<FulfillmentItemInputLineType>;
 
 One picker-editable line in a `PUT /fulfillments/{uid}/items` body.
 
-⚠️ **`quantity_order` is declared here even though the API always refuses it,
-and that is load-bearing rather than sloppy.** It is the divergence marker
-between the picker's count and the order's — `mergeLineItem` stamps the
-ORDER's quantity onto it when the two disagree — so a client structurally
-cannot compute it, and `updateFulfillmentItems` throws
-*"quantity_order is server-managed"* for any body carrying it.
+⚠️ **`quantity_ordered` is declared here even though the API always refuses it,
+and that is load-bearing rather than sloppy.** It is the ORDER's quantity for
+the row, stamped by the order sync, so a client structurally cannot compute
+it, and `updateFulfillmentItems` refuses any body carrying it as
+server-managed.
 
 🔴 **Omitting it here would DELETE that 400.** A `z.object` strips an
 undeclared key, so the service would never see the field and would answer 200
@@ -19959,10 +19793,8 @@ interface FulfillmentItemInputLineType {
   path: string[];
   quantity: number;
   substituted_for?: SubstitutedForEntryType[];
-  replaces?: ExchangedForEntryType[];
   exchanged_for?: ExchangedForEntryType[];
-  quantity_order?: number;
-  quantity_ordered?: number;
+  quantity_ordered?: number | null;
 }
 ```
 
@@ -19996,10 +19828,8 @@ interface FulfillmentLineItemType {
   path: string[];
   order_number?: number;
   uid_order?: string;
-  quantity_order?: number;
-  quantity_ordered?: number;
+  quantity_ordered: number | null;
   substituted_for?: SubstitutedForEntryType[];
-  replaces?: ExchangedForEntryType[];
   exchanged_for?: ExchangedForEntryType[];
 }
 ```
@@ -20046,7 +19876,7 @@ Narrows a fulfillment doc item to a line item (excludes the two dividers).
 the predicate was hand-written four times across three repos and two of those
 copies returned `boolean` and therefore narrowed NOTHING — `isLineItemType`
 tests the `type` STRING, so a caller reaching for it got a truth value and
-still had to cast to touch `quantity_order` or `substituted_for`. The
+still had to cast to touch `quantity_ordered` or `substituted_for`. The
 order and invoice grains have had `isLineItem` / `isInvoiceLineItem` all
 along; this closes the set.
 
@@ -28946,9 +28776,9 @@ each X. So:
 - **X's components are credited through the ORDER's own stored ratio** —
   `credit × component quantity ÷ kit quantity`, walked down the order's path
   tree, rounded half-up once per level. Never the catalog: optional and
-  variable components make catalog derivation wrong (D1). A full swap credits
+  variable components make catalog derivation wrong (D1). A full substitution credits
   every component exactly its order quantity, so the rounding only ever bites
-  a partial swap.
+  a partial substitution.
 - **Every row of the subtree bills its own path by
   `row quantity − Σ live entry quantities`** — which is how a merge into a Y
   the order already carries bills both lines.
@@ -30863,13 +30693,13 @@ Two conversions happen here and both are load-bearing:
    failure is silent: every substitution reads as unexplained drift.
 2. ⭐ **An anchor is SPENT once the order no longer carries X** (owner,
    2026-09-16). A merge is always into a Y the order already has, so Y's
-   presence on the order says nothing about whether the swap still stands.
+   presence on the order says nothing about whether the substitution still stands.
 
 🔴 **`substitutedFor` IS re-derived.** {@link syncOrderToInvoiceSelective}
 re-points every entry at wherever X sits on the CURRENT order
 ({@link substitutionResync}) and writes that value back. The field means *"the
 replaced line's current order path"*, not *"its path at the moment of the
-swap"* — a locked value is what let an order-side reparent resurrect X
+substitution"* — a locked value is what let an order-side reparent resurrect X
 (api-cloudrun#897). The sync is the only place that can do this: it is the one
 caller holding both revisions of the order. Every downstream reader — the wire
 guard, `api-cloudrun/scripts/audit-fulfillment-diff.ts`, {@link computeInvoiceSyncStatus},
@@ -31221,7 +31051,7 @@ multiple positions in the items array. For each item:
   and Y's is emitted in its place — see below
 - **`substituted_for` entries** (manager#414): every row is merged at its
   ORDER-EQUIVALENT quantity (D2) and re-offset against the new order, so a
-  merged Y and a partially swapped X follow order quantity edits. A substitute
+  merged Y and a partially substituted X follow order quantity edits. A substitute
   row the order does not carry is placed after X's subtree. Entries are
   re-pointed when X moves; once the order drops X, the entry and its units go
   with it (owner, 2026-09-16)
@@ -31875,8 +31705,8 @@ const toPick = buildPackingList(fulfillment.items);
 
 `fulfillments` became a template SOURCE collection so a packing list can be
 rendered from what was actually PICKED rather than from what was ordered — a
-fulfillment line carries `quantity` beside `quantity_order`, and
-`substituted_for` when a picker swapped one item for another. None of
+fulfillment line carries `quantity` beside `quantity_ordered`, and
+`substituted_for` when a picker substituted one item for another. None of
 that exists on the order, so an order-sourced packing list can only ever
 describe intent.
 
@@ -33242,7 +33072,7 @@ documents**:
   path is only as stable as the dividers above it, so an admin reparenting X on
   the order left the anchor naming a path nothing resolved — X stopped being
   at-or-below it, {@link isRemovedBySubstitution} went false, and both syncs
-  re-projected the product the operator had swapped away. **The two syncs
+  re-projected the product the operator had substituted away. **The two syncs
   re-point it and write the new value back**, because they are the only callers
   holding both revisions of the order; every reader below sees one order and
   could not resolve a locked value at all.
@@ -33282,16 +33112,26 @@ interface CreditableRow {
 }
 ```
 
+### `ExchangeEntry`
+
+One `exchanged_for` entry, as an exchange's replacement row carries it.
+
+```ts
+interface ExchangeEntry {
+  readonly path: readonly string[];
+  readonly quantity: number;
+  readonly reason: OOSReasonType;
+}
+```
+
 ### `ExchangeRow`
 
-A row as the exchange readers see it: its path and its entries under either
-stored name (S8c step 1 — `replaces` is renamed `exchanged_for`).
+A row as the exchange readers see it: its path and its `exchanged_for` entries.
 
 ```ts
 interface ExchangeRow {
   readonly path: readonly string[];
-  readonly exchanged_for?: readonly ReplacesEntry[];
-  readonly replaces?: readonly ReplacesEntry[];
+  readonly exchanged_for?: readonly ExchangeEntry[];
 }
 ```
 
@@ -33320,7 +33160,7 @@ interface MaybeSubstitution {
 
 ### `OverclaimedRow`
 
-One row a write over-claims: the swaps now take back more than it holds.
+One row a write over-claims: the exchanges now take back more than it holds.
 
 ```ts
 interface OverclaimedRow {
@@ -33343,14 +33183,8 @@ interface PathForwardMap {
 
 ### `ReplacesEntry`
 
-One `replaces` entry, as a swap's replacement row carries it.
-
 ```ts
-interface ReplacesEntry {
-  readonly path: readonly string[];
-  readonly quantity: number;
-  readonly reason: OOSReasonType;
-}
+type ReplacesEntry = ExchangeEntry;
 ```
 
 ### `SubstitutionAnchor`
@@ -33379,14 +33213,14 @@ interface SubstitutionResync {
 }
 ```
 
-### `UnresolvedReplacesEntry`
+### `UnresolvedExchangeEntry`
 
-One `replaces` entry naming a row its own document does not carry.
+One `exchanged_for` entry naming a row its own document does not carry.
 
 ```ts
-interface UnresolvedReplacesEntry {
+interface UnresolvedExchangeEntry {
   path: string[];
-  entry: ReplacesEntry;
+  entry: ExchangeEntry;
 }
 ```
 
@@ -33521,12 +33355,12 @@ wire boundary, use {@link isInSubstitutedSubtree} and check Y separately.
 
 **Returns** — Whether the row is a substitution's own row or one of its components
 
-### `overclaimedReplacements(prev: ReadonlyArray<ExchangeRow>, next: ReadonlyArray<ExchangeRow & typeLiteral>): OverclaimedRow[]`
+### `overclaimedExchanges(prev: ReadonlyArray<ExchangeRow>, next: ReadonlyArray<ExchangeRow & typeLiteral>): OverclaimedRow[]`
 
-The rows THIS write pushes past their quantity by what swaps take back from
+The rows THIS write pushes past their quantity by what exchanges take back from
 them (api-cloudrun#1116, owner 2026-09-26: the cap is checked at AUTHORING).
 
-🔴 **Deliberately NOT a stored refinement.** A warehouse-staged swap lives on
+🔴 **Deliberately NOT a stored refinement.** A warehouse-staged exchange lives on
 the fulfillment alone, so a sales edit that lowers X on the order would make
 the merged fulfillment over-claim and fail its write — refused because of a
 document the sender never saw, the trap api-cloudrun#1114 ruled out for
@@ -33545,12 +33379,12 @@ Pure, shared by the API's writers and the manager's pre-submit check.
 - `prev` — The document's rows before the write (`[]` for a new document)
 - `next` — The document's rows as they will be stored
 
-### `repointReplaces(entries: readonly ReplacesEntry[], rows: ReadonlyArray<typeLiteral>, _: unknown): Array<typeLiteral>`
+### `repointExchangedFor(entries: readonly ExchangeEntry[], rows: ReadonlyArray<typeLiteral>, _: unknown): Array<typeLiteral>`
 
-Re-point a swap row's `replaces` entries at the rows a document carries NOW
-(api-cloudrun#1114).
+Re-point an exchange row's `exchanged_for` entries at the rows a document
+carries NOW (api-cloudrun#1114).
 
-`replaces` names the damaged row X by PATH, and a path is only as stable as
+`exchanged_for` names the damaged row X by PATH, and a path is only as stable as
 the dividers above it — exactly the defect `substituted_for` had until
 api-cloudrun#897 (see the module docstring). So a rebuild that can move X
 carries each entry forward: if the entry does not name a row of `rows` and a
@@ -33571,7 +33405,7 @@ reason is carried verbatim: it is why the units come back, not where.
 
 **Parameters**
 
-- `entries` — The row's `replaces`, as stored or as sent
+- `entries` — The row's `exchanged_for`, as stored or as sent
 - `rows` — The document's rows as they stand after the rebuild
 - `maps` — Path correspondences to try, in order
 
@@ -33618,7 +33452,7 @@ The D2 offset of a downstream document's `substituted_for` entries across one
 order edit — the half an order → downstream sync needs (manager#414).
 
 A sync compares and merges ORDER-EQUIVALENT quantities, then re-offsets what it
-emits, so a merged Y and a partially swapped X follow order quantity edits
+emits, so a merged Y and a partially substituted X follow order quantity edits
 instead of reading as an override. One implementation for the invoice sync
 (`syncOrderToInvoiceSelective`) and api-cloudrun's fulfillment sync, which
 must answer identically.
@@ -33630,9 +33464,9 @@ must answer identically.
 - `nextOrderItems` — The order after it (the same array for a one-order read)
 - `toPath` — Where a previous-order line path sits on the next order, if it moved
 
-### `unresolvedReplaces(rows: ReadonlyArray<ExchangeRow>): UnresolvedReplacesEntry[]`
+### `unresolvedExchangedFor(rows: ReadonlyArray<ExchangeRow>): UnresolvedExchangeEntry[]`
 
-The `replaces` entries of ONE document that name a row that document does
+The `exchanged_for` entries of ONE document that name a row that document does
 not carry (manager#537).
 
 `checkExchangedFor` deliberately does not require the named row to exist
@@ -33647,6 +33481,12 @@ not part of `computeDocumentDiffs`.
 - `rows` — One document's items
 
 **Returns** — Every dangling entry, in document order
+
+### `unresolvedReplaces`
+
+```ts
+const unresolvedReplaces: unresolvedExchangedFor;
+```
 
 ## `@cfs/core/utils/money`
 
@@ -37645,7 +37485,7 @@ lines that still need one. This runs between the merge and
 
 1. **KEEP** — the merge nulled the leg (or the windows) but the projection's
    OWN items still hold a rental: a fulfillment row still out on custody at
-   `quantity_order: 0`, an invoice line the order dropped. The projection
+   `quantity_ordered: 0`, an invoice line the order dropped. The projection
    keeps its stored leg, flag, collection dates and windows. The same shape as
    the fulfillment's custody keep, and for the same reason: the projection
    records what HAPPENED / what is BILLED, and a sales edit to the quote does
@@ -37698,7 +37538,7 @@ What it does NOT touch, by construction:
   derivation afterwards (`priceDocument`, the day count), which is what stops an
   invoice's own tax context reading as an override (G2).
 - `homonym` fields, and every key the classification does not name (the
-  downstream document's own fields: `xero_id`, `quantity_order`, …).
+  downstream document's own fields: `xero_id`, `quantity_ordered`, …).
 
 `atom` fields (another document's snapshot) are taken or kept WHOLE.
 

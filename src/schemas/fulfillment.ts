@@ -15,9 +15,10 @@
  * needs to be withheld from picker clients, that is a decision to take here,
  * not a property to assume from this header.
  *
- * Picker-editable: line items may carry `quantity_order` (server-set when
- * picker quantity diverges from order quantity) and `substituted_for`
- * (picker-set on substitution line items, spent once the order drops X). The doc
+ * Picker-editable: every line item carries `quantity_ordered` (server-set: the
+ * order's quantity for the row, `null` when the order has no line there) and may
+ * carry `substituted_for` (picker-set on substitution line items, spent once the
+ * order drops X). The doc
  * carries its own `version` for optimistic concurrency on picker writes.
  */
 import { z } from "zod";
@@ -41,7 +42,6 @@ import {
   ExchangedForList,
   type SubstitutedForEntryType,
   type ExchangedForEntryType,
-  checkRenamedKeys,
   TimestampFields,
 } from "./common.ts";
 import {
@@ -146,19 +146,25 @@ export interface FulfillmentLineItemType {
   order_number?: number;
   uid_order?: string;
   /**
-   * Server-set when picker quantity diverges from the order's projected
-   * quantity for the same path. Carries admin's intended quantity. Picker
-   * writes that include this field on any line item are rejected (400) —
-   * it is server-managed.
+   * The ORDER's quantity for this row, as the booking's `quantity_ordered` carries
+   * it (api-cloudrun#1147). Server-set on EVERY line; picker writes that include it
+   * are rejected (400).
+   *
+   * - a number: the order's line at this path. `0` is a KEPT row — the order
+   *   removed the line while its units were out — and is unambiguous because a
+   *   zero-quantity component is never stored on an order.
+   * - `null`: the order has no line here (a substitute, or a fulfillment-authored
+   *   exchange unit).
+   *
+   * A conflict is the COMPARISON `quantity !== quantity_ordered`, never the
+   * field's presence. ⚠️ It is not the ownership test: inside an order-edit
+   * transaction the stored value is the PREVIOUS sync's, so the sync decides
+   * picker ownership by comparing the row with the previous order's quantity.
+   *
+   * Required-nullable, not optional: measured 2026-10-01, all 10,348 line rows in
+   * prod and dev carry it after the S8c backfill.
    */
-  quantity_order?: number;
-  /**
-   * The new name for `quantity_order` (S8c step 1, api-cloudrun#1147): the ORDER's quantity
-   * for this row, as the booking's `quantity_ordered` carries it. A row states one name,
-   * never both ({@link checkRenamedKeys}). Step 3 writes it on every line; until then it is
-   * accepted and nothing writes it.
-   */
-  quantity_ordered?: number;
+  quantity_ordered: number | null;
   /**
    * Picker-set on substitution line items: the substitutions this row stands in
    * for, with how many units each — see `SubstitutedForList` (manager#414).
@@ -169,15 +175,13 @@ export interface FulfillmentLineItemType {
    * going out against, with how many units each — see `ExchangedForList`.
    *
    * ⚠️ **Not `substituted_for`, and the difference is physical**: a substitution
-   * means X never left the warehouse, so the netting cancels its booking; a swap
-   * means X is on set and damaged, so its booking is KEPT and its units are what
-   * the operator marks damaged when the swap's trip completes.
+   * means X never left the warehouse, so the netting cancels its booking; an
+   * exchange means X is on set and damaged, so its booking is KEPT and its units
+   * are what the operator marks damaged when the exchange's trip completes.
    *
    * Only valid on a row under a pair carrying `exchange` — asserted at the
    * document level, because a row cannot see its own pair.
    */
-  replaces?: ExchangedForEntryType[];
-  /** The new name for `replaces` (S8c step 1, api-cloudrun#1147). A row states one, never both. */
   exchanged_for?: ExchangedForEntryType[];
 }
 
@@ -203,10 +207,8 @@ const FulfillmentLineItemInner = z.strictObject({
   }),
   order_number: z.int().optional().meta({ column: true, label: "Order #" }),
   uid_order: FirestoreId.optional(),
-  quantity_order: z.number().int().min(0).optional(),
-  quantity_ordered: z.number().int().min(0).optional(),
+  quantity_ordered: z.int().min(0).nullable(),
   substituted_for: SubstitutedForList.optional(),
-  replaces: ExchangedForList.optional(),
   exchanged_for: ExchangedForList.optional(),
   // 🔴 Attached to the **Inner** const so `FulfillmentItem`'s discriminated union
   // below enforces it, matching `order.ts` and (since 2026-09-09) `invoice.ts`.
@@ -215,9 +217,7 @@ const FulfillmentLineItemInner = z.strictObject({
   // returns early (`schemas/common.ts`). It is attached anyway so all three
   // grains read identically — a reader comparing them should not have to work
   // out whether the absence here is a decision or a gap.
-}).superRefine(checkZeroPricedAmount).superRefine((row, ctx) =>
-  checkRenamedKeys(row, ctx, [["quantity_order", "quantity_ordered"], ["replaces", "exchanged_for"]])
-);
+}).superRefine(checkZeroPricedAmount);
 
 export const FulfillmentLineItem: z.ZodType<FulfillmentLineItemType> =
   FulfillmentLineItemInner;
@@ -274,7 +274,7 @@ export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> =
 //
 // ⭐ **The field list is MEASURED from the service, not chosen.** Every body
 // field `updateFulfillmentItems` reads: `uid` (23 sites), `path` (19),
-// `substituted_for`, `quantity` (5), and `quantity_order` (1, only to
+// `substituted_for`, `quantity` (5), and `quantity_ordered` (1, only to
 // refuse it). Everything else on a stored line — `type`, `name`, `description`,
 // `stock_method`, `order_number`, `uid_order`, `zero_priced` — is re-derived
 // server-side from the order item, the replacement product or the catalog
@@ -294,12 +294,11 @@ export const FulfillmentGroupItem: z.ZodType<FulfillmentGroupItemType> =
 /**
  * One picker-editable line in a `PUT /fulfillments/{uid}/items` body.
  *
- * ⚠️ **`quantity_order` is declared here even though the API always refuses it,
- * and that is load-bearing rather than sloppy.** It is the divergence marker
- * between the picker's count and the order's — `mergeLineItem` stamps the
- * ORDER's quantity onto it when the two disagree — so a client structurally
- * cannot compute it, and `updateFulfillmentItems` throws
- * *"quantity_order is server-managed"* for any body carrying it.
+ * ⚠️ **`quantity_ordered` is declared here even though the API always refuses it,
+ * and that is load-bearing rather than sloppy.** It is the ORDER's quantity for
+ * the row, stamped by the order sync, so a client structurally cannot compute
+ * it, and `updateFulfillmentItems` refuses any body carrying it as
+ * server-managed.
  *
  * 🔴 **Omitting it here would DELETE that 400.** A `z.object` strips an
  * undeclared key, so the service would never see the field and would answer 200
@@ -342,17 +341,18 @@ export interface FulfillmentItemInputLineType {
   substituted_for?: SubstitutedForEntryType[];
   /**
    * The damaged rows an exchange's replacement line goes out against — see the
-   * stored line's `replaces`. It needs an input channel for the reason this file
-   * records above: a plain `z.object` STRIPS an undeclared key, so without it a
-   * picker write would silently drop the swap's link to what it replaces.
+   * stored line's `exchanged_for`. It needs an input channel for the reason this
+   * file records above: a plain `z.object` STRIPS an undeclared key, so without
+   * it a picker write would silently drop the exchange's link to the rows it
+   * goes out against.
    */
-  replaces?: ExchangedForEntryType[];
-  /** The new name for `replaces` — declared for the same reason, or a picker write strips it. */
   exchanged_for?: ExchangedForEntryType[];
-  /** Declared so the service can REFUSE it — see the note above. */
-  quantity_order?: number;
-  /** The new name for `quantity_order`, declared so the service can refuse it under either name. */
-  quantity_ordered?: number;
+  /**
+   * Declared so the service can REFUSE it — see the note above. Nullable like the
+   * stored field, so a client echoing a stored line back is refused by the
+   * service's named check rather than by a type error here.
+   */
+  quantity_ordered?: number | null;
 }
 
 const FulfillmentItemInputLineInner = z.object({
@@ -360,15 +360,11 @@ const FulfillmentItemInputLineInner = z.object({
   path: z.array(ItemUid),
   quantity: z.number().int().min(0),
   substituted_for: SubstitutedForList.optional(),
-  replaces: ExchangedForList.optional(),
   exchanged_for: ExchangedForList.optional(),
-  // Same declaration as the stored line's, so a body carrying it survives the
+  // The stored line's declaration, optional, so a body carrying it survives the
   // parse and reaches `updateFulfillmentItems`' explicit refusal.
-  quantity_order: z.number().int().min(0).optional(),
-  quantity_ordered: z.number().int().min(0).optional(),
-}).superRefine((row, ctx) =>
-  checkRenamedKeys(row, ctx, [["quantity_order", "quantity_ordered"], ["replaces", "exchanged_for"]])
-);
+  quantity_ordered: z.int().min(0).nullable().optional(),
+});
 
 export const FulfillmentItemInputLine: z.ZodType<FulfillmentItemInputLineType> =
   FulfillmentItemInputLineInner;
@@ -429,7 +425,7 @@ export const FulfillmentItem: z.ZodType<FulfillmentItemType> = z
  * the predicate was hand-written four times across three repos and two of those
  * copies returned `boolean` and therefore narrowed NOTHING — `isLineItemType`
  * tests the `type` STRING, so a caller reaching for it got a truth value and
- * still had to cast to touch `quantity_order` or `substituted_for`. The
+ * still had to cast to touch `quantity_ordered` or `substituted_for`. The
  * order and invoice grains have had `isLineItem` / `isInvoiceLineItem` all
  * along; this closes the set.
  *
@@ -538,7 +534,7 @@ export const FulfillmentSchema: z.ZodType<Fulfillment> = z.strictObject({
   }),
   status: FulfillmentOrderStatus.meta({ column: true, label: "Status" }),
   organization: FulfillmentOrganization.meta({ label: "Organization" }),
-  // Same swap invariant as the order's array — one statement, in `order.ts`.
+  // Same exchange invariant as the order's array — one statement, in `order.ts`.
   // ⚠️ **The INVOICE array deliberately does not carry it**: an invoice is
   // scoped to what it bills, so it can legitimately hold an exchange pair whose
   // parent leg another invoice carries, and the refusal would be a write

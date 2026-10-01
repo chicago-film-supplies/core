@@ -42,8 +42,6 @@ import {
   type StockMethodType,
   type ExchangedForEntryType,
   ExchangedForList,
-  exchangedForOf,
-  checkRenamedKeys,
   type InvoiceStatusType,
   InvoiceStatusEnum,
   NameField,
@@ -398,45 +396,30 @@ export const DocDestinationEndpoint: z.ZodType<DocDestinationEndpointType> = z.s
 });
 
 /** What happens to the damaged unit the replacement is going out against. */
-export const EXCHANGE_DISPOSITIONS = ["exchange", "send_now"] as const;
+export const EXCHANGE_DISPOSITIONS = ["same_trip", "send_now"] as const;
 /**
- * `exchange` — the units taken back come back on the same trip. (Being renamed
- * `same_trip`: see {@link StoredExchangeDispositionType}.) `send_now` — the
- * replacement goes out now and the units come back at the normal return (or,
- * for a `lost` entry, never). A fact about the TRIP; why each unit comes back is
- * the `exchanged_for` entry's `reason`.
+ * `same_trip` — the units taken back come back on the exchange's own trip.
+ * `send_now` — the replacement goes out now and the units come back at the
+ * normal return (or, for a `lost` entry, never). A fact about the TRIP; why each
+ * unit comes back is the `exchanged_for` entry's `reason`.
+ *
+ * `same_trip` was stored as `exchange` until api-cloudrun#1147 renamed it
+ * (backfilled 2026-10-01; prod and dev held no exchange pair).
  */
 export type ExchangeDispositionType = typeof EXCHANGE_DISPOSITIONS[number];
 /** Zod schema for {@link ExchangeDispositionType}. */
 export const ExchangeDispositionEnum: z.ZodType<ExchangeDispositionType> = z.enum(EXCHANGE_DISPOSITIONS);
 
 /**
- * What a STORED pair may carry while `exchange` is renamed `same_trip` (S8c, api-cloudrun#1147).
+ * A mid-rental exchange, stated ON the destination pair that carries it.
  *
- * 🔴 **A separate tuple, and `EXCHANGE_DISPOSITIONS` above is deliberately unchanged.** That
- * tuple is the list of values a WRITER may send: manager's pickers iterate it
- * (`DISPOSITION_LABELS[value].label`, which has no `same_trip` entry) and an api route builds
- * `z.enum(EXCHANGE_DISPOSITIONS)` from it. Widening it would put `same_trip` in a dropdown and
- * accept it from a client before any reader handles it. So step 1 widens only what a stored
- * document PARSES; step 2 moves the writers; step 4 collapses the two tuples into one.
- * `same_trip` and `exchange` mean the same thing. A reader treats them as one value.
- */
-export const STORED_EXCHANGE_DISPOSITIONS = ["same_trip", "exchange", "send_now"] as const;
-/** @see {@link STORED_EXCHANGE_DISPOSITIONS} */
-export type StoredExchangeDispositionType = typeof STORED_EXCHANGE_DISPOSITIONS[number];
-/** Zod schema for {@link StoredExchangeDispositionType}. */
-export const StoredExchangeDispositionEnum: z.ZodType<StoredExchangeDispositionType> = z.enum(STORED_EXCHANGE_DISPOSITIONS);
-
-/**
- * A mid-rental swap, stated ON the destination pair that carries it.
- *
- * 🔴 **A swap IS a destination pair — an exchange LEG — not a structure of its
- * own.** The replacement unit goes out on its own trip, so it needs its own
+ * 🔴 **An exchange IS a destination pair — an exchange LEG — not a structure of
+ * its own.** The replacement unit goes out on its own trip, so it needs its own
  * dates, its own booking, its own card and its own section of items; a
- * destination pair is all four already. Making it a pair is what puts a swap
+ * destination pair is all four already. Making it a pair is what puts an exchange
  * through the three-way merge (`utils/shared-fields.ts`) and the diff
- * (`utils/documentDiff.ts`) unchanged: a swap made on the order propagates to
- * the fulfillment and the invoice unless overridden, and a swap made on the
+ * (`utils/documentDiff.ts`) unchanged: an exchange made on the order propagates to
+ * the fulfillment and the invoice unless overridden, and an exchange made on the
  * fulfillment shows as a diff against both.
  *
  * ⚠️ **The parent's collection endpoint and dates are COPIED, not referenced.**
@@ -446,14 +429,14 @@ export const StoredExchangeDispositionEnum: z.ZodType<StoredExchangeDispositionT
  */
 export interface DestinationExchangeType {
   /**
-   * The pair this one swaps units on — another pair of the SAME document, and
-   * never itself an exchange pair. Chaining is FLAT (api-cloudrun#1116, owner
-   * 2026-09-26): a replacement that is itself swapped later gets a new pair on
-   * the SAME parent, whose `replaces` names the earlier swap's row
-   * ({@link checkExchangedFor}) — never a pair naming a swap.
+   * The pair this one exchanges units on — another pair of the SAME document,
+   * and never itself an exchange pair. Chaining is FLAT (api-cloudrun#1116, owner
+   * 2026-09-26): a replacement that is itself exchanged later gets a new pair on
+   * the SAME parent, whose `exchanged_for` names the earlier exchange's row
+   * ({@link checkExchangedFor}) — never a pair naming an exchange pair.
    */
   uid_pair: string;
-  disposition: StoredExchangeDispositionType;
+  disposition: ExchangeDispositionType;
 }
 
 /** Zod schema for {@link DestinationExchangeType}. */
@@ -461,14 +444,14 @@ export const DestinationExchange: z.ZodType<DestinationExchangeType> = z.strictO
   // The parent pair's uid — a destination divider uid, `z.uuid()` exactly as
   // `DestinationPairCore.uid` is.
   uid_pair: z.uuid().meta({ propagate: true }),
-  disposition: StoredExchangeDispositionEnum.meta({ propagate: true }),
+  disposition: ExchangeDispositionEnum.meta({ propagate: true }),
 });
 
 /**
  * Every exchange pair names a parent pair of the same document, and that parent
  * is not itself an exchange. Shared by the order and fulfillment destination
- * arrays — one statement, so the two grains cannot disagree about what a swap
- * is. ⚠️ **The INVOICE array deliberately does not carry it** (see the note at
+ * arrays — one statement, so the two grains cannot disagree about what an
+ * exchange is. ⚠️ **The INVOICE array deliberately does not carry it** (see the note at
  * `FulfillmentSchema.destinations`): an invoice is scoped to what it bills, so it
  * can hold an exchange pair whose parent leg another invoice carries.
  *
@@ -504,7 +487,7 @@ export function checkExchangePairs(
       ctx.addIssue({
         code: "custom",
         path: [i, "exchange", "uid_pair"],
-        message: `exchange.uid_pair ${exchange.uid_pair} names another exchange pair — a swap is against an ordinary leg`,
+        message: `exchange.uid_pair ${exchange.uid_pair} names another exchange pair — an exchange is against an ordinary leg`,
       });
     }
   });
@@ -566,22 +549,22 @@ export function checkStoredEndpoints(
 }
 
 /**
- * An `exchanged_for` (or old-named `replaces`) entry is a claim about two rows of THIS document, so only the
+ * An `exchanged_for` entry is a claim about two rows of THIS document, so only the
  * document can check it:
  *
- * 1. the row carrying it sits under a pair marked `exchange` — a swap's
+ * 1. the row carrying it sits under a pair marked `exchange` — an exchange's
  *    replacement line, not an ordinary one;
- * 2. every path it names is on that pair's PARENT leg, or on ANOTHER swap leg of
- *    the same parent (`path[0]`) — the units taken back are ones the family of
+ * 2. every path it names is on that pair's PARENT leg, or on ANOTHER exchange leg
+ *    of the same parent (`path[0]`) — the units taken back are ones the family of
  *    legs sent out. The second arm is FLAT chaining (api-cloudrun#1116, owner
  *    2026-09-26): a replacement that breaks or gets dirty in turn is taken back
- *    by a new swap on the ORIGINAL leg naming the earlier swap's row, so
- *    `exchange.uid_pair` is never a swap and `:end` stays one level deep;
+ *    by a new exchange on the ORIGINAL leg naming the earlier exchange's row, so
+ *    `exchange.uid_pair` is never an exchange pair and `:end` stays one level deep;
  * 3. a `lost` entry sits on a `send_now` leg — a lost unit cannot come back on
- *    the swap's own trip.
+ *    the exchange's own trip.
  *
  * ⚠️ **(2) is what stops the field from becoming a free-form pointer.** Without
- * it a swap could name a row on an unrelated leg, and the checkout rider would
+ * it an exchange could name a row on an unrelated leg, and the checkout rider would
  * move units on a trip that never carried them.
  *
  * 🔴 **It deliberately does NOT require the named row to EXIST** (api-cloudrun#1114,
@@ -612,11 +595,9 @@ export function checkExchangedFor(
   );
 
   doc.items.forEach((item, i) => {
-    const row = item as { replaces?: ExchangedForEntryType[]; exchanged_for?: ExchangedForEntryType[] };
-    // The key the row actually states, so an issue names the field the writer sent.
-    const key = row.exchanged_for !== undefined ? "exchanged_for" : "replaces";
-    if (row[key] === undefined) return;
-    const entries = exchangedForOf(row);
+    const entries = (item as { exchanged_for?: ExchangedForEntryType[] }).exchanged_for;
+    if (entries === undefined) return;
+    const key = "exchanged_for";
     const leg = item.path[0];
     const exchange = leg === undefined ? undefined : exchangeByPair.get(leg);
     if (exchange === undefined) {
@@ -630,31 +611,28 @@ export function checkExchangedFor(
     const parentLeg = exchange.uid_pair;
     entries.forEach((entry, j) => {
       const target = entry.path[0];
-      // Flat chaining (api-cloudrun#1116): the parent leg, or a SIBLING swap on
-      // the same parent — never this row's own leg.
+      // Flat chaining (api-cloudrun#1116): the parent leg, or a SIBLING exchange
+      // on the same parent — never this row's own leg.
       const onFamily = target === parentLeg ||
         (target !== leg && target !== undefined && exchangeByPair.get(target)?.uid_pair === parentLeg);
       if (!onFamily) {
         ctx.addIssue({
           code: "custom",
           path: ["items", i, key, j, "path"],
-          message: `${key} names ${entry.path.join("/")}, which is neither the leg this swap exchanges ` +
-            `against nor another swap on it`,
+          message: `${key} names ${entry.path.join("/")}, which is neither the leg this exchange is ` +
+            `against nor another exchange on it`,
         });
       }
       if (entry.reason === "lost" && exchange.disposition !== "send_now") {
         ctx.addIssue({
           code: "custom",
           path: ["items", i, key, j, "reason"],
-          message: "a lost unit cannot be collected on the swap's trip — use disposition send_now",
+          message: "a lost unit cannot be collected on the exchange's trip — use disposition send_now",
         });
       }
     });
   });
 }
-
-/** @deprecated Use {@link checkExchangedFor}. Kept until the S8c four-step removal's last step. */
-export const checkSwapReplacements: typeof checkExchangedFor = checkExchangedFor;
 
 /** One way the destination dividers and the destination pairs fail to join. */
 export interface DestinationJoinViolation {
@@ -858,7 +836,7 @@ export function isCollectionLineType(type: unknown): boolean {
  * 🔴 **Document-wide, not per pair** (owner, 2026-09-28). A per-pair rule would
  * be a fourth definition of "needs a collection" beside the manager's
  * order-wide `showCollectionFor`. Evaluated on EACH document's own items: a
- * fulfillment keeps a `quantity_order: 0` rental while custody is out, and an
+ * fulfillment keeps a `quantity_ordered: 0` rental while custody is out, and an
  * invoice keeps lines its order dropped, so the three documents can answer
  * differently and each answer is right for its own document.
  */
@@ -1063,7 +1041,7 @@ export interface DocDestinationType {
    * document with a rental needs a placed leg on every pair
    * ({@link checkStoredEndpoints}). Document-wide rather than per pair (owner,
    * 2026-09-28), and judged on EACH document's items: a fulfillment keeping a
-   * `quantity_order: 0` rental, or an invoice keeping a line its order dropped,
+   * `quantity_ordered: 0` rental, or an invoice keeping a line its order dropped,
    * legitimately needs a leg its order no longer does.
    *
    * ⚠️ **Never `{ uid: null, address: null, … }` for "nothing to collect".** That
@@ -1124,13 +1102,13 @@ export interface DocDestinationType {
    */
   jurisdiction?: JurisdictionType | null;
   /**
-   * Set when this pair is a mid-rental SWAP against another leg of the same
+   * Set when this pair is a mid-rental EXCHANGE against another leg of the same
    * document — see {@link DestinationExchangeType}. `null`/absent is an
    * ordinary leg, which is nearly every pair.
    *
    * 🔴 **REQUIRED-NULLABLE** since the api-cloudrun#1107 backfill: `null` is an
    * ordinary leg and the key is always present, so a reader never has to tell
-   * "no swap" from "this document predates swaps". It shipped
+   * "no exchange" from "this document predates exchanges". It shipped
    * `.nullable().optional()` so the readers could deploy ahead of the writers,
    * and tightened once every stored pair carried the key
    * (`api-cloudrun/scripts/audit-destination-exchange.ts` is the census that
@@ -1263,15 +1241,15 @@ export const DestinationPairCore: {
     propagate: true,
   }),
   // Each LEAF of the exchange object carries its own `propagate: true`, which is
-  // what makes a swap a per-field three-way merge like every other pair value —
-  // see {@link DestinationExchangeType}. No `column: true`: a swap is read off
+  // what makes an exchange a per-field three-way merge like every other pair value —
+  // see {@link DestinationExchangeType}. No `column: true`: an exchange is read off
   // the pair's own row in the editor, not tabulated.
   //
   // ⚠️ **Unlabelled on purpose, and that has a second consequence worth knowing**:
   // `meaningfulChangedPaths` filters the activity feed on LABELLED paths, so a
-  // swap writes no activity row. That is not a swap-shaped gap — `fulfillments`
+  // exchange writes no activity row. That is not an exchange-shaped gap — `fulfillments`
   // is in no activity feed at all (chicago-film-supplies/api-cloudrun#1112) —
-  // and labelling this field would only cover order-authored swaps while making
+  // and labelling this field would only cover order-authored exchanges while making
   // any future corpus write emit a row per document.
   exchange: DestinationExchange.nullable(),
 };
@@ -1638,12 +1616,10 @@ export interface OrderItemLineType {
   /** @see `OrderDocLineItemType.uid_tax_class_override` — operator-authored, so it is accepted here. */
   uid_tax_class_override?: string | null;
   /**
-   * @see `OrderDocLineItemType.replaces`. Declared on the INPUT because this is a
-   * `z.object`: an undeclared key is STRIPPED, so without it every order PUT
-   * would silently drop a swap's link to the damaged row it goes out against.
+   * @see `OrderDocLineItemType.exchanged_for`. Declared on the INPUT because this
+   * is a `z.object`: an undeclared key is STRIPPED, so without it every order PUT
+   * would silently drop an exchange's link to the damaged row it goes out against.
    */
-  replaces?: ExchangedForEntryType[];
-  /** The new name for `replaces` (S8c, api-cloudrun#1147). A row states one, never both. */
   exchanged_for?: ExchangedForEntryType[];
 }
 
@@ -1670,9 +1646,8 @@ const OrderItemLineInner = z.object({
   order_number: z.int().optional(),
   uid_order: FirestoreId.optional(),
   uid_tax_class_override: FirestoreId.nullable().optional(),
-  replaces: ExchangedForList.optional(),
   exchanged_for: ExchangedForList.optional(),
-}).superRefine(checkItemPriceFormula).superRefine((row, ctx) => checkRenamedKeys(row, ctx, [["replaces", "exchanged_for"]]));
+}).superRefine(checkItemPriceFormula);
 
 /** Zod schema for a billable order line (input). */
 export const OrderItemLine: z.ZodType<OrderItemLineType> = OrderItemLineInner.superRefine(checkZeroPricedAmount);
@@ -2043,15 +2018,15 @@ export interface OrderDocLineItemType {
    */
   uid_tax_class_override?: string | null;
   /**
-   * Set on a mid-rental SWAP's replacement line: the DAMAGED rows this one goes
+   * Set on a mid-rental EXCHANGE's replacement line: the DAMAGED rows this one goes
    * out against, with how many units each — see `ExchangedForList`. Only valid
    * on a row under a pair carrying `exchange`, naming rows on that pair's parent
    * leg ({@link checkExchangedFor}).
    *
-   * ⭐ **Authored on the order so sales can stage a swap** (api-cloudrun#1114): the
-   * customer reports the damage, the swap is added here, and it reaches the
+   * ⭐ **Authored on the order so sales can stage an exchange** (api-cloudrun#1114):
+   * the customer reports the damage, the exchange is added here, and it reaches the
    * fulfillment like any other line. Before this the field lived on the
-   * fulfillment alone, so an order-authored swap sent its trip but could not say
+   * fulfillment alone, so an order-authored exchange sent its trip but could not say
    * which unit it replaced — the checkout rider marked nothing damaged.
    *
    * ⚠️ **`shared: "value"`, not `propagate: true`** — the entries carry no `uid`,
@@ -2059,17 +2034,14 @@ export interface OrderDocLineItemType {
    * exactly as `charge_windows` is. Merged by hand in api-cloudrun's
    * `mergeLineItem` (three-way, and a custody-frozen row keeps its stored value,
    * because the list decides which UNITS the rider moves). The paths are ORDER
-   * paths, re-pointed across every rebuild by `repointReplaces`
+   * paths, re-pointed across every rebuild by `repointExchangedFor`
    * (`@cfs/core/utils/substitutions`). An entry naming a row the document no
    * longer carries is KEPT — a difference to surface, not a defect to fix.
    *
    * The invoice does not carry it: `projectOrderItemToInvoiceItem` picks its keys.
-   */
-  replaces?: ExchangedForEntryType[];
-  /**
-   * The new name for `replaces` (S8c step 1, api-cloudrun#1147): the same value under
-   * the documents' own word. A row states ONE of the two ({@link checkRenamedKeys}); the
-   * backfill and the four-step removal retire `replaces`. Tagged exactly as it is.
+   *
+   * Stored as `replaces` until api-cloudrun#1147 renamed it (backfilled
+   * 2026-10-01; prod and dev held no exchange row).
    */
   exchanged_for?: ExchangedForEntryType[];
 }
@@ -2110,11 +2082,9 @@ const OrderDocLineItemInner = z.strictObject({
   // shared with the invoice line (`_items.ts`).
   ...LineTaxCore,
   // Plain `.optional()`, matching `substituted_for` and `path_extension_for`:
-  // only a swap's replacement line carries it. See the interface docblock.
-  replaces: ExchangedForList.optional().meta({ shared: "value" }),
+  // only an exchange's replacement line carries it. See the interface docblock.
   exchanged_for: ExchangedForList.optional().meta({ shared: "value" }),
-}).superRefine(checkItemContract).superRefine(checkZeroPricedAmount)
-  .superRefine((row, ctx) => checkRenamedKeys(row, ctx, [["replaces", "exchanged_for"]]));
+}).superRefine(checkItemContract).superRefine(checkZeroPricedAmount);
 
 export const OrderDocLineItem: z.ZodType<OrderDocLineItemType> = OrderDocLineItemInner;
 

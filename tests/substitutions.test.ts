@@ -7,20 +7,15 @@ import {
   isInSubstitutedSubtree,
   isRemovedBySubstitution,
   isStrictlyBelow,
-  overclaimedReplacements,
-  repointReplaces,
+  overclaimedExchanges,
+  repointExchangedFor,
   standInUnits,
   substitutionResync,
+  unresolvedExchangedFor,
   unresolvedReplaces,
 } from "../src/utils/substitutions.ts";
 import {
-  ExchangedForEntry,
-  ExchangedForList,
-  exchangedForKey,
   SubstitutedForList,
-  SwapReplacementEntry,
-  SwapReplacementList,
-  swapReplacementKey,
 } from "../src/schemas/common.ts";
 import { mapPathsAcrossRebuild } from "../src/utils/item-pairing.ts";
 
@@ -303,35 +298,35 @@ Deno.test("substitutionResync: X reparented re-points the entry", () => {
   assertEquals(r.reoffset(Y, entries, 0).substituted_for, [{ path: X2, quantity: 2 }]);
 });
 
-// ── repointReplaces — a swap's pointer follows X (api-cloudrun#1114) ─────
+// ── repointExchangedFor — an exchange's pointer follows X (api-cloudrun#1114) ─────
 
-Deno.test("repointReplaces: an entry naming a row that is there is kept as it is", () => {
-  const r = repointReplaces([{ path: ["L", "X"], quantity: 2, reason: "damaged" }], [{ path: ["L", "X"] }]);
+Deno.test("repointExchangedFor: an entry naming a row that is there is kept as it is", () => {
+  const r = repointExchangedFor([{ path: ["L", "X"], quantity: 2, reason: "damaged" }], [{ path: ["L", "X"] }]);
   assertEquals(r, [{ path: ["L", "X"], quantity: 2, reason: "damaged" }]);
 });
 
-Deno.test("repointReplaces: X regrouped — the map carries the entry to X's new path", () => {
+Deno.test("repointExchangedFor: X regrouped — the map carries the entry to X's new path", () => {
   const prev = [{ uid: "X", path: ["L", "X"] }];
   const next = [{ uid: "G", path: ["L", "G"] }, { uid: "X", path: ["L", "G", "X"] }];
-  const r = repointReplaces([{ path: ["L", "X"], quantity: 1, reason: "damaged" }], next, [mapPathsAcrossRebuild(prev, next)]);
+  const r = repointExchangedFor([{ path: ["L", "X"], quantity: 1, reason: "damaged" }], next, [mapPathsAcrossRebuild(prev, next)]);
   assertEquals(r, [{ path: ["L", "G", "X"], quantity: 1, reason: "damaged" }]);
 });
 
-Deno.test("🔴 repointReplaces: X substituted away — NOT moved onto the stand-in; which unit broke is the operator's fact", () => {
+Deno.test("🔴 repointExchangedFor: X substituted away — NOT moved onto the stand-in; which unit broke is the operator's fact", () => {
   const rows = [{ path: ["L", "Z"], substituted_for: [{ path: ["L", "X"], quantity: 1 }] }];
-  assertEquals(repointReplaces([{ path: ["L", "X"], quantity: 1, reason: "damaged" }], rows), [{ path: ["L", "X"], quantity: 1, reason: "damaged" }]);
+  assertEquals(repointExchangedFor([{ path: ["L", "X"], quantity: 1, reason: "damaged" }], rows), [{ path: ["L", "X"], quantity: 1, reason: "damaged" }]);
 });
 
-Deno.test("🔴 repointReplaces: X gone — the entry is KEPT verbatim, a difference to surface, never dropped", () => {
-  const r = repointReplaces([{ path: ["L", "X"], quantity: 3, reason: "damaged" }], [{ path: ["L", "Y"] }]);
+Deno.test("🔴 repointExchangedFor: X gone — the entry is KEPT verbatim, a difference to surface, never dropped", () => {
+  const r = repointExchangedFor([{ path: ["L", "X"], quantity: 3, reason: "damaged" }], [{ path: ["L", "Y"] }]);
   assertEquals(r, [{ path: ["L", "X"], quantity: 3, reason: "damaged" }]);
 });
 
-Deno.test("repointReplaces: two entries landing on one row MERGE, so the list stays unique by path", () => {
-  // X moved onto the path another entry already names — `SwapReplacementList`
+Deno.test("repointExchangedFor: two entries landing on one row MERGE, so the list stays unique by path", () => {
+  // X moved onto the path another entry already names — `ExchangedForList`
   // refuses a duplicate path, so the result must sum rather than repeat.
   const moved = { toPath: (p: readonly string[] | undefined) => (p?.join("/") === "L/Xold" ? ["L", "X"] : undefined) };
-  const r = repointReplaces(
+  const r = repointExchangedFor(
     [{ path: ["L", "X"], quantity: 1, reason: "damaged" }, { path: ["L", "Xold"], quantity: 2, reason: "damaged" }],
     [{ path: ["L", "X"] }],
     [moved],
@@ -339,8 +334,8 @@ Deno.test("repointReplaces: two entries landing on one row MERGE, so the list st
   assertEquals(r, [{ path: ["L", "X"], quantity: 3, reason: "damaged" }]);
 });
 
-Deno.test("repointReplaces: the reason is carried, and one row under two reasons stays TWO entries", () => {
-  const r = repointReplaces(
+Deno.test("repointExchangedFor: the reason is carried, and one row under two reasons stays TWO entries", () => {
+  const r = repointExchangedFor(
     [{ path: ["L", "X"], quantity: 2, reason: "cleaning" }, { path: ["L", "X"], quantity: 1, reason: "damaged" }],
     [{ path: ["L", "X"] }],
   );
@@ -350,97 +345,95 @@ Deno.test("repointReplaces: the reason is carried, and one row under two reasons
   ]);
 });
 
-// ── overclaimedReplacements — the authoring cap (api-cloudrun#1116) ──────
+// ── overclaimedExchanges — the authoring cap (api-cloudrun#1116) ──────
 
-const row = (path: string[], quantity: number, replaces?: Array<{ path: string[]; quantity: number }>) => ({
+const row = (path: string[], quantity: number, exchangedFor?: Array<{ path: string[]; quantity: number }>) => ({
   path,
   quantity,
-  replaces: replaces?.map((e) => ({ ...e, reason: "damaged" as const })),
+  exchanged_for: exchangedFor?.map((e) => ({ ...e, reason: "damaged" as const })),
 });
 
-Deno.test("overclaimedReplacements: swaps within the row's quantity report nothing", () => {
+Deno.test("overclaimedExchanges: exchanges within the row's quantity report nothing", () => {
   const next = [row(["R", "X"], 5), row(["S1", "Y"], 2, [{ path: ["R", "X"], quantity: 2 }]), row(["S2", "Y"], 3, [{ path: ["R", "X"], quantity: 3 }])];
-  assertEquals(overclaimedReplacements([], next), []);
+  assertEquals(overclaimedExchanges([], next), []);
 });
 
-Deno.test("overclaimedReplacements: a new swap pushing the SUM over the row is reported", () => {
+Deno.test("overclaimedExchanges: a new exchange pushing the SUM over the row is reported", () => {
   const prev = [row(["R", "X"], 5), row(["S1", "Y"], 4, [{ path: ["R", "X"], quantity: 4 }])];
   const next = [...prev, row(["S2", "Y"], 2, [{ path: ["R", "X"], quantity: 2 }])];
-  assertEquals(overclaimedReplacements(prev, next), [{ path: ["R", "X"], quantity: 5, claimed: 6 }]);
+  assertEquals(overclaimedExchanges(prev, next), [{ path: ["R", "X"], quantity: 5, claimed: 6 }]);
 });
 
-Deno.test("🔴 overclaimedReplacements: lowering X under an EXISTING claim is not refused — a difference, not a write error", () => {
+Deno.test("🔴 overclaimedExchanges: lowering X under an EXISTING claim is not refused — a difference, not a write error", () => {
   const prev = [row(["R", "X"], 5), row(["S1", "Y"], 4, [{ path: ["R", "X"], quantity: 4 }])];
   const next = [row(["R", "X"], 3), row(["S1", "Y"], 4, [{ path: ["R", "X"], quantity: 4 }])];
-  assertEquals(overclaimedReplacements(prev, next), []);
+  assertEquals(overclaimedExchanges(prev, next), []);
 });
 
-Deno.test("overclaimedReplacements: a chained claim counts against the earlier swap's row, not the root's", () => {
+Deno.test("overclaimedExchanges: a chained claim counts against the earlier exchange's row, not the root's", () => {
   const next = [
     row(["R", "X"], 1),
     row(["S1", "Y"], 1, [{ path: ["R", "X"], quantity: 1 }]),
     row(["S2", "Y"], 1, [{ path: ["S1", "Y"], quantity: 1 }]),
   ];
-  assertEquals(overclaimedReplacements([], next), []);
+  assertEquals(overclaimedExchanges([], next), []);
 });
 
-Deno.test("overclaimedReplacements: a dangling entry is skipped", () => {
-  assertEquals(overclaimedReplacements([], [row(["S1", "Y"], 9, [{ path: ["R", "gone"], quantity: 9 }])]), []);
+Deno.test("overclaimedExchanges: a dangling entry is skipped", () => {
+  assertEquals(overclaimedExchanges([], [row(["S1", "Y"], 9, [{ path: ["R", "gone"], quantity: 9 }])]), []);
 });
 
-// ── unresolvedReplaces — a dangling pointer is surfaced, not refused (manager#537) ─
+// ── unresolvedExchangedFor — a dangling pointer is surfaced, not refused (manager#537) ─
 
-Deno.test("unresolvedReplaces: an entry naming a row the document carries is resolved", () => {
+Deno.test("unresolvedExchangedFor: an entry naming a row the document carries is resolved", () => {
   const rows = [
     { path: ["L"] },
     { path: ["L", "X"] },
     { path: ["S"] },
-    { path: ["S", "Y"], replaces: [{ path: ["L", "X"], quantity: 1, reason: "damaged" as const }] },
+    { path: ["S", "Y"], exchanged_for: [{ path: ["L", "X"], quantity: 1, reason: "damaged" as const }] },
   ];
-  // Population: the document DOES carry a replaces entry, so an empty answer means resolved, not absent.
-  assertEquals(rows.flatMap((r) => r.replaces ?? []).length, 1);
-  assertEquals(unresolvedReplaces(rows), []);
+  // Population: the document DOES carry an exchanged_for entry, so an empty answer means resolved, not absent.
+  assertEquals(rows.flatMap((r) => r.exchanged_for ?? []).length, 1);
+  assertEquals(unresolvedExchangedFor(rows), []);
 });
 
-Deno.test("🔴 unresolvedReplaces: an entry naming a row the document no longer carries is reported, with the row carrying it", () => {
+Deno.test("🔴 unresolvedExchangedFor: an entry naming a row the document no longer carries is reported, with the row carrying it", () => {
   const rows = [
     { path: ["L"] },
     { path: ["S"] },
-    { path: ["S", "Y"], replaces: [
+    { path: ["S", "Y"], exchanged_for: [
       { path: ["L", "X"], quantity: 2, reason: "damaged" as const },
       { path: ["L", "Z"], quantity: 1, reason: "cleaning" as const },
     ] },
     { path: ["L", "Z"] },
   ];
-  assertEquals(unresolvedReplaces(rows), [{ path: ["S", "Y"], entry: { path: ["L", "X"], quantity: 2, reason: "damaged" } }]);
+  assertEquals(unresolvedExchangedFor(rows), [{ path: ["S", "Y"], entry: { path: ["L", "X"], quantity: 2, reason: "damaged" } }]);
 });
 
-Deno.test("unresolvedReplaces: a path that names a divider is present — presence is by path, not by row type", () => {
+Deno.test("unresolvedExchangedFor: a path that names a divider is present — presence is by path, not by row type", () => {
   const rows = [
     { path: ["L"] },
     { path: ["L", "G"] },
-    { path: ["S", "Y"], replaces: [{ path: ["L", "G"], quantity: 1, reason: "damaged" as const }] },
+    { path: ["S", "Y"], exchanged_for: [{ path: ["L", "G"], quantity: 1, reason: "damaged" as const }] },
   ];
-  assertEquals(unresolvedReplaces(rows), []);
+  assertEquals(unresolvedExchangedFor(rows), []);
 });
 
-// ── S8c step 1: the exchange readers take either stored name (api-cloudrun#1147) ──
+// ── S8c step 4: `replaces` is gone (api-cloudrun#1147) ──────────────────
 
-Deno.test("S8c-1: the exchange readers read `exchanged_for` as they read `replaces`", () => {
+Deno.test("S8c-5: the exchange readers read `exchanged_for` only — an old-named `replaces` claims nothing", () => {
   const entry = { path: ["L", "X"], quantity: 2, reason: "damaged" as const };
   const gone = { path: ["L", "GONE"], quantity: 1, reason: "damaged" as const };
   const rows = [
     { path: ["L", "X"], quantity: 1 },
     { path: ["S", "Y"], quantity: 1, exchanged_for: [entry, gone] },
-    { path: ["S", "Y2"], quantity: 1, replaces: [entry] },
+    { path: ["S", "Y2"], quantity: 1, replaces: [entry, gone] },
   ];
-  assertEquals(unresolvedReplaces(rows).map((u) => u.entry.path.join("/")), ["L/GONE"], "the dangling entry is found under the new name");
-  // Both rows claim 2 of X, which holds 1 — over-claimed, whichever name carries it.
-  assertEquals(overclaimedReplacements([], rows).map((r) => r.claimed), [4]);
+  assertEquals(unresolvedExchangedFor(rows).map((u) => u.path.join("/")), ["S/Y"], "only the new name's dangling entry is found");
+  // Only Y's claim of 2 counts against X, which holds 1.
+  assertEquals(overclaimedExchanges([], rows).map((r) => r.claimed), [2]);
 });
 
-Deno.test("S8c-1: the old and new names are one schema instance, not two copies", () => {
-  assert(SwapReplacementList === ExchangedForList);
-  assert(SwapReplacementEntry === ExchangedForEntry);
-  assertEquals(swapReplacementKey({ path: ["a"], reason: "lost" }), exchangedForKey({ path: ["a"], reason: "lost" }));
+Deno.test("S8c-5: the deprecated utils aliases are the same function, kept for manager's pin bump", () => {
+  assert(unresolvedReplaces === unresolvedExchangedFor);
 });

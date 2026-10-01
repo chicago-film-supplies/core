@@ -444,7 +444,7 @@ const updateFulfillmentDestinationsTransaction: TransactionDefinition = {
  * The positive half — one call stages the leg, its divider and its rows, and a
  * second call against the same version is refused.
  *
- * 🔴 **Half a swap is worse than no swap**, which is why this is one route
+ * 🔴 **Half an exchange is worse than no exchange**, which is why this is one route
  * rather than a `PUT /destinations` for the pair and a `PUT /items` for the
  * row: a pair with no row under it derives a trip card with nothing on it, and
  * a row under a pair that does not exist addresses nothing.
@@ -454,7 +454,7 @@ const EXCHANGE_LEG_IS_ATOMIC: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/fulfillment/fulfillmentExchanges.test.ts::POST /exchanges stages the leg, its divider and its replacement row",
   clause:
-    "the `destinations + items + version` half — the anchored step posts one exchange leg and asserts the stored fulfillment carries the pair (with its `exchange` block and the parent's endpoints), the destination divider keyed on the pair uid, and the replacement row under it carrying `replaces`. The sibling step asserts a stale `version` is a 409.",
+    "the `destinations + items + version` half — the anchored step posts one exchange leg and asserts the stored fulfillment carries the pair (with its `exchange` block and the parent's endpoints), the destination divider keyed on the pair uid, and the replacement row under it carrying `exchanged_for`. The sibling step asserts a stale `version` is a 409.",
   gates: true,
 };
 
@@ -465,13 +465,13 @@ const createFulfillmentExchangeRules: CollectionRule[] = [
     target: "fulfillments",
     mode: "co-write",
     invariant:
-      "A warehouse-staged mid-rental swap is ONE write: the exchange pair, its " +
+      "A warehouse-staged mid-rental exchange is ONE write: the exchange pair, its " +
       "destination divider and its replacement rows land together, with `version` " +
       "bumped and both `query_by_*` arrays re-derived from what is about to be " +
       "stored. 🔴 This is the ONE writer that adds a destination pair a fulfillment's " +
       "order does not have — `update-fulfillment-destinations` explicitly refuses " +
       "membership changes — and it is admissible only because an exchange leg is a " +
-      "fact about what the warehouse DID, which the order never asked for. ⚠️ A swap " +
+      "fact about what the warehouse DID, which the order never asked for. ⚠️ An exchange " +
       "may ALSO be authored on the order (sales staging it, api-cloudrun#1114); that one " +
       "reaches the fulfillment through `update-order`'s projection like any other leg, " +
       "and never through this route.",
@@ -502,7 +502,7 @@ const createFulfillmentExchangeCardRules: CollectionRule[] = [
     target: "cards",
     mode: "co-write",
     invariant:
-      "The swap's trip card is derived in the same transaction that stages the leg. " +
+      "The exchange's trip card is derived in the same transaction that stages the leg. " +
       "⚠️ A `:start` card ONLY — an exchange leg's units come back on the parent's " +
       "return trip, so `eventCardSlots` mints no `:end` for it and the parent's " +
       "`:end` rolls the leg's bookings in.",
@@ -515,11 +515,11 @@ const createFulfillmentExchangeCardRules: CollectionRule[] = [
 const createFulfillmentExchangeTransaction: TransactionDefinition = {
   id: "create-fulfillment-exchange",
   description:
-    "Stage a mid-rental SWAP on a fulfillment: a destination pair carrying " +
+    "Stage a mid-rental EXCHANGE on a fulfillment: a destination pair carrying " +
     "`exchange: { uid_pair, disposition }`, its divider, and the replacement row(s) " +
-    "under it naming — through `replaces` — the rows they go out against, each entry " +
+    "under it naming — through `exchanged_for` — the rows they go out against, each entry " +
     "with its `reason`. Chaining is FLAT: the pair always names the original leg, and " +
-    "a later swap may name a row on an earlier swap leg of it (api-cloudrun#1116). " +
+    "a later exchange may name a row on an earlier exchange leg of it (api-cloudrun#1116). " +
     "Optimistic concurrency via `version`; writes the fulfillment doc and its cards.\n\n" +
     "🔴 The BOOKINGS that follow are not a step of this transaction, for exactly the " +
     "reason `update-fulfillment-destinations` records: `buildBookingDates` has one " +
@@ -527,8 +527,8 @@ const createFulfillmentExchangeTransaction: TransactionDefinition = {
     "INPUT (`api-cloudrun/src/lib/exchangeLegs.ts`, the api-cloudrun#882 pattern), so " +
     "the next order write creates the replacement's booking whether or not the " +
     "best-effort organization echo this route fires wins its version race.\n\n" +
-    "⚠️ The unit taken back, X, is NOT touched here. For `disposition: \"exchange\"` it " +
-    "moves when the swap's own trip is checked out (the rider in " +
+    "⚠️ The unit taken back, X, is NOT touched here. For `disposition: \"same_trip\"` it " +
+    "moves when the exchange's own trip is checked out (the rider in " +
     "`api-cloudrun/src/lib/exchangeCustody.ts`): `out → damaged`, `out → cleaning` or " +
     "`out → maintenance`, the entry's reason being its own breakdown key. For " +
     "`send_now` the operator records it at check-in, because the unit is still on set.",

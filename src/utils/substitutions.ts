@@ -43,7 +43,7 @@
  *   path is only as stable as the dividers above it, so an admin reparenting X on
  *   the order left the anchor naming a path nothing resolved — X stopped being
  *   at-or-below it, {@link isRemovedBySubstitution} went false, and both syncs
- *   re-projected the product the operator had swapped away. **The two syncs
+ *   re-projected the product the operator had substituted away. **The two syncs
  *   re-point it and write the new value back**, because they are the only callers
  *   holding both revisions of the order; every reader below sees one order and
  *   could not resolve a locked value at all.
@@ -74,7 +74,7 @@
  * @module
  */
 
-import { exchangedForKey, exchangedForOf, isLineItemType, type OOSReasonType } from "../schemas/common.ts";
+import { exchangedForKey, isLineItemType, type OOSReasonType } from "../schemas/common.ts";
 
 /**
  * A substitution row, reduced to what the predicates need.
@@ -410,7 +410,7 @@ export interface SubstitutionResync {
  * order edit — the half an order → downstream sync needs (manager#414).
  *
  * A sync compares and merges ORDER-EQUIVALENT quantities, then re-offsets what it
- * emits, so a merged Y and a partially swapped X follow order quantity edits
+ * emits, so a merged Y and a partially substituted X follow order quantity edits
  * instead of reading as an override. One implementation for the invoice sync
  * (`syncOrderToInvoiceSelective`) and api-cloudrun's fulfillment sync, which
  * must answer identically.
@@ -475,21 +475,23 @@ export function substitutionResync(
   };
 }
 
-/** One `replaces` entry, as a swap's replacement row carries it. */
-export interface ReplacesEntry {
+/** One `exchanged_for` entry, as an exchange's replacement row carries it. */
+export interface ExchangeEntry {
   readonly path: readonly string[];
   readonly quantity: number;
   readonly reason: OOSReasonType;
 }
 
 /**
- * A row as the exchange readers see it: its path and its entries under either
- * stored name (S8c step 1 — `replaces` is renamed `exchanged_for`).
+ * @deprecated Use {@link ExchangeEntry}. Kept only so manager's pin bump to the
+ * beta that drops the stored `replaces` needs no code change (api-cloudrun#1147).
  */
+export type ReplacesEntry = ExchangeEntry;
+
+/** A row as the exchange readers see it: its path and its `exchanged_for` entries. */
 export interface ExchangeRow {
   readonly path: readonly string[];
-  readonly exchanged_for?: readonly ReplacesEntry[];
-  readonly replaces?: readonly ReplacesEntry[];
+  readonly exchanged_for?: readonly ExchangeEntry[];
 }
 
 /** The join key of a path — `\u0000` cannot occur in a uid. */
@@ -499,22 +501,22 @@ function pathKey(p: readonly string[]): string {
 
 /**
  * The paths a document carries, keyed by {@link pathKey}. The ONE answer to
- * "does this path still exist here", shared by {@link repointReplaces} and
- * {@link unresolvedReplaces} so the two cannot disagree about a pointer.
+ * "does this path still exist here", shared by {@link repointExchangedFor} and
+ * {@link unresolvedExchangedFor} so the two cannot disagree about a pointer.
  */
 function presentPaths(rows: ReadonlyArray<{ readonly path: readonly string[] }>): Set<string> {
   return new Set(rows.filter((r) => r.path.length > 0).map((r) => pathKey(r.path)));
 }
 
-/** One `replaces` entry naming a row its own document does not carry. */
-export interface UnresolvedReplacesEntry {
-  /** The swap's replacement row — the row carrying the entry. */
+/** One `exchanged_for` entry naming a row its own document does not carry. */
+export interface UnresolvedExchangeEntry {
+  /** The exchange's replacement row — the row carrying the entry. */
   path: string[];
-  entry: ReplacesEntry;
+  entry: ExchangeEntry;
 }
 
 /**
- * The `replaces` entries of ONE document that name a row that document does
+ * The `exchanged_for` entries of ONE document that name a row that document does
  * not carry (manager#537).
  *
  * `checkExchangedFor` deliberately does not require the named row to exist
@@ -527,18 +529,25 @@ export interface UnresolvedReplacesEntry {
  * @param rows - One document's items
  * @returns Every dangling entry, in document order
  */
-export function unresolvedReplaces(
+export function unresolvedExchangedFor(
   rows: ReadonlyArray<ExchangeRow>,
-): UnresolvedReplacesEntry[] {
+): UnresolvedExchangeEntry[] {
   const present = presentPaths(rows);
-  const out: UnresolvedReplacesEntry[] = [];
+  const out: UnresolvedExchangeEntry[] = [];
   for (const row of rows) {
-    for (const entry of exchangedForOf(row)) {
+    for (const entry of row.exchanged_for ?? []) {
       if (!present.has(pathKey(entry.path))) out.push({ path: [...row.path], entry });
     }
   }
   return out;
 }
+
+/**
+ * @deprecated Use {@link unresolvedExchangedFor}. Kept only so manager's pin bump
+ * to the beta that drops the stored `replaces` needs no code change
+ * (api-cloudrun#1147).
+ */
+export const unresolvedReplaces: typeof unresolvedExchangedFor = unresolvedExchangedFor;
 
 /**
  * A path correspondence across one rebuild — the `toPath` half of
@@ -549,10 +558,10 @@ export interface PathForwardMap {
 }
 
 /**
- * Re-point a swap row's `replaces` entries at the rows a document carries NOW
- * (api-cloudrun#1114).
+ * Re-point an exchange row's `exchanged_for` entries at the rows a document
+ * carries NOW (api-cloudrun#1114).
  *
- * `replaces` names the damaged row X by PATH, and a path is only as stable as
+ * `exchanged_for` names the damaged row X by PATH, and a path is only as stable as
  * the dividers above it — exactly the defect `substituted_for` had until
  * api-cloudrun#897 (see the module docstring). So a rebuild that can move X
  * carries each entry forward: if the entry does not name a row of `rows` and a
@@ -571,13 +580,13 @@ export interface PathForwardMap {
  * quantities, because `ExchangedForList` is unique by (path, reason). The
  * reason is carried verbatim: it is why the units come back, not where.
  *
- * @param entries - The row's `replaces`, as stored or as sent
+ * @param entries - The row's `exchanged_for`, as stored or as sent
  * @param rows - The document's rows as they stand after the rebuild
  * @param maps - Path correspondences to try, in order
  * @returns The entries, re-pointed where a map carries them onto a row
  */
-export function repointReplaces(
-  entries: readonly ReplacesEntry[],
+export function repointExchangedFor(
+  entries: readonly ExchangeEntry[],
   rows: ReadonlyArray<{ readonly path: readonly string[] }>,
   maps: readonly PathForwardMap[] = [],
 ): Array<{ path: string[]; quantity: number; reason: OOSReasonType }> {
@@ -604,21 +613,21 @@ export function repointReplaces(
   return [...merged.values()];
 }
 
-/** One row a write over-claims: the swaps now take back more than it holds. */
+/** One row a write over-claims: the exchanges now take back more than it holds. */
 export interface OverclaimedRow {
   /** The row every entry names. */
   path: string[];
   /** The row's own quantity. */
   quantity: number;
-  /** Σ `replaces[].quantity` naming it, over every row of the document, after the write. */
+  /** Σ `exchanged_for[].quantity` naming it, over every row of the document, after the write. */
   claimed: number;
 }
 
 /**
- * The rows THIS write pushes past their quantity by what swaps take back from
+ * The rows THIS write pushes past their quantity by what exchanges take back from
  * them (api-cloudrun#1116, owner 2026-09-26: the cap is checked at AUTHORING).
  *
- * 🔴 **Deliberately NOT a stored refinement.** A warehouse-staged swap lives on
+ * 🔴 **Deliberately NOT a stored refinement.** A warehouse-staged exchange lives on
  * the fulfillment alone, so a sales edit that lowers X on the order would make
  * the merged fulfillment over-claim and fail its write — refused because of a
  * document the sender never saw, the trap api-cloudrun#1114 ruled out for
@@ -635,7 +644,7 @@ export interface OverclaimedRow {
  * @param prev - The document's rows before the write (`[]` for a new document)
  * @param next - The document's rows as they will be stored
  */
-export function overclaimedReplacements(
+export function overclaimedExchanges(
   prev: ReadonlyArray<ExchangeRow>,
   next: ReadonlyArray<ExchangeRow & { readonly quantity?: number | null }>,
 ): OverclaimedRow[] {
@@ -643,7 +652,7 @@ export function overclaimedReplacements(
   const claims = (rows: ReadonlyArray<Omit<ExchangeRow, "path">>) => {
     const out = new Map<string, number>();
     for (const row of rows) {
-      for (const e of exchangedForOf(row)) out.set(key(e.path), (out.get(key(e.path)) ?? 0) + e.quantity);
+      for (const e of row.exchanged_for ?? []) out.set(key(e.path), (out.get(key(e.path)) ?? 0) + e.quantity);
     }
     return out;
   };

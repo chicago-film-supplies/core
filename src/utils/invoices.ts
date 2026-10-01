@@ -1423,13 +1423,13 @@ function explainTaxDifferences(
  *    failure is silent: every substitution reads as unexplained drift.
  * 2. ⭐ **An anchor is SPENT once the order no longer carries X** (owner,
  *    2026-09-16). A merge is always into a Y the order already has, so Y's
- *    presence on the order says nothing about whether the swap still stands.
+ *    presence on the order says nothing about whether the substitution still stands.
  *
  * 🔴 **`substitutedFor` IS re-derived.** {@link syncOrderToInvoiceSelective}
  * re-points every entry at wherever X sits on the CURRENT order
  * ({@link substitutionResync}) and writes that value back. The field means *"the
  * replaced line's current order path"*, not *"its path at the moment of the
- * swap"* — a locked value is what let an order-side reparent resurrect X
+ * substitution"* — a locked value is what let an order-side reparent resurrect X
  * (api-cloudrun#897). The sync is the only place that can do this: it is the one
  * caller holding both revisions of the order. Every downstream reader — the wire
  * guard, `api-cloudrun/scripts/audit-fulfillment-diff.ts`, {@link computeInvoiceSyncStatus},
@@ -1607,7 +1607,7 @@ function mergePair(
  *   and Y's is emitted in its place — see below
  * - **`substituted_for` entries** (manager#414): every row is merged at its
  *   ORDER-EQUIVALENT quantity (D2) and re-offset against the new order, so a
- *   merged Y and a partially swapped X follow order quantity edits. A substitute
+ *   merged Y and a partially substituted X follow order quantity edits. A substitute
  *   row the order does not carry is placed after X's subtree. Entries are
  *   re-pointed when X moves; once the order drops X, the entry and its units go
  *   with it (owner, 2026-09-16)
@@ -1733,7 +1733,7 @@ function syncScopedItems(
   // took from it, plus Σ what it stands in for. Every comparison below reads the
   // ORDER-EQUIVALENT quantity (the offset under the PREVIOUS order removed), and
   // the offset under the NEW order is applied to what is emitted — so an order
-  // quantity change reaches a merged or partially swapped row instead of reading
+  // quantity change reaches a merged or partially substituted row instead of reading
   // as an operator override that freezes it.
   //
   // An entry is live while the order carries its X (owner, 2026-09-16), re-pointed
@@ -2528,7 +2528,7 @@ export function computeInvoiceSyncStatus(
 
   // The substitutions this scope carries, in the order's own path space.
   const anchors = liveInvoiceAnchors(currentInvoiceItems, orderItems, orderDividerUid);
-  // D2 (manager#414): a merged or partially swapped row is compared at its
+  // D2 (manager#414): a merged or partially substituted row is compared at its
   // ORDER-EQUIVALENT quantity, so exactly the substituted units are explained.
   const scopedLines = [...invoiceByRelPath].map(([k, it]) => ({ path: k.split("/"), substituted_for: it.substituted_for }));
   const resync = substitutionResync(scopedLines, orderItems, orderItems);

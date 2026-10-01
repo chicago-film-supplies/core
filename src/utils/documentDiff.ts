@@ -92,7 +92,7 @@
  *   invoice (`only_on_source` on the order/fulfillment view, `not_on_source` on
  *   the invoice view).
  *
- * **Exchange units are shown, never owed.** A line carrying `replaces` goes to
+ * **Exchange units are shown, never owed.** A line carrying `exchanged_for` goes to
  * the customer in place of a lost, damaged or dirty unit and bills at $0 unless
  * an operator prices it, so it never gets a `quantity` entry.
  *
@@ -173,7 +173,7 @@ import {
   isInSubstitutedSubtree,
   isRemovedBySubstitution,
   type MaybeSubstitution,
-  type ReplacesEntry,
+  type ExchangeEntry,
   standInUnits,
   type SubstitutionAnchor,
 } from "./substitutions.ts";
@@ -557,10 +557,10 @@ function lineFields(
     const fields: DocumentDiffField[] = fulfillmentQuantity === expected
       ? []
       : [{ field: "quantity", here: here.quantity ?? null, there: there.quantity ?? null }];
-    // An exchange unit's `replaces` is shared whole with the fulfillment
+    // An exchange unit's `exchanged_for` is shared whole with the fulfillment
     // (`shared: "value"`), so a picker can re-aim it (manager#537).
-    if (replacesDiffer(here, there)) {
-      fields.push({ field: "replaces", here: replacesOf(here), there: replacesOf(there) });
+    if (exchangedForDiffers(here, there)) {
+      fields.push({ field: "exchanged_for", here: exchangedForOfLine(here), there: exchangedForOfLine(there) });
     }
     return fields;
   }
@@ -642,24 +642,20 @@ const classifiedLinePaths = (): readonly string[] => {
 };
 let classifiedLinePathsMemo: readonly string[] | undefined;
 
-/**
- * A line's exchange entries under EITHER stored name (`exchanged_for`, or the
- * `replaces` it is renamed from — S8c), with absent read as none. Reading both is
- * what lets one document state each name and still compare equal.
- */
-function replacesOf(item: LineItem): ReplacesEntry[] {
-  return [...exchangedForOf(item as { replaces?: readonly ReplacesEntry[]; exchanged_for?: readonly ReplacesEntry[] })];
+/** A line's `exchanged_for` entries, with absent read as none. */
+function exchangedForOfLine(item: LineItem): ExchangeEntry[] {
+  return [...exchangedForOf(item as { exchanged_for?: readonly ExchangeEntry[] })];
 }
 
 /**
- * Whether two lines' `replaces` differ as MULTISETS keyed by
+ * Whether two lines' `exchanged_for` differ as MULTISETS keyed by
  * `exchangedForKey` — the identity `ExchangedForList` is unique by — with
  * the quantity compared per key. Order is not meaning, and absent equals `[]`.
  */
-function replacesDiffer(a: LineItem, b: LineItem): boolean {
+function exchangedForDiffers(a: LineItem, b: LineItem): boolean {
   const tally = (item: LineItem) => {
     const m = new Map<string, number>();
-    for (const e of replacesOf(item)) {
+    for (const e of exchangedForOfLine(item)) {
       const k = exchangedForKey(e);
       m.set(k, (m.get(k) ?? 0) + e.quantity);
     }
@@ -752,9 +748,9 @@ function compareDocFields(out: DocumentDiffMap, viewed: Side, source: Side): voi
   if (fields.length > 0) out.doc.push({ kind: "doc_field", source: sourceRef, fields });
 }
 
-/** A line's `replaces` is non-empty: it is an exchange unit, shown but never owed (see {@link computeDocumentDiffs}). */
+/** A line's `exchanged_for` is non-empty: it is an exchange unit, shown but never owed (see {@link computeDocumentDiffs}). */
 function isExchangeUnit(item: LineItem | undefined): boolean {
-  return item !== undefined && replacesOf(item).length > 0;
+  return item !== undefined && exchangedForOfLine(item).length > 0;
 }
 
 /**
@@ -992,7 +988,7 @@ export function computeDocumentDiffs(
    * One `quantity` entry at `viewedKey` for the order-relative line `rel`, when
    * the three documents disagree about it (see {@link DocumentQuantityEntry}).
    *
-   * ⚠️ **An exchange unit (a line carrying `replaces`) is SHOWN, never OWED**
+   * ⚠️ **An exchange unit (a line carrying `exchanged_for`) is SHOWN, never OWED**
    * (decision 8): it goes to the customer in place of a lost, damaged or dirty
    * one, bills at $0 unless an operator prices it, and must not read as
    * uninvoiced. Its presence and its fields are still compared.

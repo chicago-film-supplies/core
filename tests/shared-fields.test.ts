@@ -75,7 +75,7 @@ const DATES = [
   "propagated destinations[].customer_collecting",
   "propagated destinations[].customer_returning",
   "propagated destinations[].jurisdiction",
-  // A swap is a pair like any other, so its two leaves merge per field.
+  // An exchange is a pair like any other, so its two leaves merge per field.
   "propagated destinations[].exchange.uid_pair",
   "propagated destinations[].exchange.disposition",
 ];
@@ -149,7 +149,6 @@ Deno.test("classifySharedFields: order → fulfillment, every shared key and its
     "propagated items[].uid_order",
     // Taken or kept WHOLE — `shared: "value"`, like `charge_windows`: its
     // entries carry no `uid`, so they are not rows (api-cloudrun#1114).
-    "propagated items[].replaces",
     "propagated items[].exchanged_for",
     "derived query_by_items",
     "derived query_by_contacts",

@@ -181,15 +181,12 @@ export {
   type DestinationEndpointType,
   type DestinationContactType,
   type DocDestinationType,
-  // The swap vocabulary. Exported here because two api-cloudrun call sites
+  // The exchange vocabulary. Exported here because two api-cloudrun call sites
   // reached for the `@cfs/core/schemas/order` subpath to get it — a closed
   // vocabulary that is awkward to import is one that gets respelled by hand.
   EXCHANGE_DISPOSITIONS,
   ExchangeDispositionEnum,
   type ExchangeDispositionType,
-  STORED_EXCHANGE_DISPOSITIONS,
-  StoredExchangeDispositionEnum,
-  type StoredExchangeDispositionType,
   DestinationExchange,
   type DestinationExchangeType,
   type DocDestinationEndpointType,
@@ -295,16 +292,11 @@ export {
   SubstitutedForEntry,
   type SubstitutedForEntryType,
   SubstitutedForList,
-  SwapReplacementEntry,
-  type SwapReplacementEntryType,
-  SwapReplacementList,
-  swapReplacementKey,
   ExchangedForEntry,
   type ExchangedForEntryType,
   ExchangedForList,
   exchangedForKey,
   exchangedForOf,
-  checkRenamedKeys,
   UidNameRef,
   OrgPathNode,
   type OrgPathNodeType,

@@ -126,7 +126,7 @@ function line(
   path: string[],
   type: "rental" | "sale" | "service" = "rental",
 ): FulfillmentItemType {
-  return { uid, type, name, description: "", quantity, path, zero_priced: null };
+  return { uid, type, name, description: "", quantity, quantity_ordered: quantity, path, zero_priced: null };
 }
 
 function fulfillment(overrides: Partial<Fulfillment> = {}): Fulfillment {

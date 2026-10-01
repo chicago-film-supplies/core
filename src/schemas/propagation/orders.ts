@@ -532,7 +532,7 @@ const createOrderRules: CollectionRule[] = [
         target: ["items"],
         transform:
           "strips price, inclusion_type, zero_priced, crms_id; drops transaction_fee items entirely; " +
-          "a swap row's `replaces` is carried verbatim (api-cloudrun#1114)",
+          "an exchange row's `exchanged_for` is carried verbatim (api-cloudrun#1114)",
       },
       { source: ["subject"], target: ["subject"] },
       { source: ["reference"], target: ["reference"] },
@@ -760,15 +760,15 @@ const updateOrderRules: CollectionRule[] = [
         source: ["destinations"],
         target: ["destinations"],
         transform:
-          "full DocDestination with per-destination dates + contacts retained; after the per-field merge, deriveProjectionCollection(merged, stored, fulfillment items) KEEPS the stored collection leg, flag, collection dates and windows while the fulfillment's own items still hold a rental (a kept quantity_order: 0 row), and otherwise makes a null leg carry a null flag and no collection dates",
+          "full DocDestination with per-destination dates + contacts retained; after the per-field merge, deriveProjectionCollection(merged, stored, fulfillment items) KEEPS the stored collection leg, flag, collection dates and windows while the fulfillment's own items still hold a rental (a kept quantity_ordered: 0 row), and otherwise makes a null leg carry a null flag and no collection dates",
       },
       {
         source: ["items"],
         target: ["items"],
         transform:
           "strips price, inclusion_type, zero_priced, crms_id; drops transaction_fee items entirely; " +
-          "a swap row's `replaces` merges three-way and WHOLE (a custody-frozen row keeps its stored value), " +
-          "then follows a MOVED damaged row via `repointReplaces`; an entry naming a row the fulfillment no " +
+          "an exchange row's `exchanged_for` merges three-way and WHOLE (a custody-frozen row keeps its stored value), " +
+          "then follows a MOVED damaged row via `repointExchangedFor`; an entry naming a row the fulfillment no " +
           "longer carries is kept as a difference to surface, never dropped (api-cloudrun#1114)",
       },
       { source: ["subject"], target: ["subject"] },
