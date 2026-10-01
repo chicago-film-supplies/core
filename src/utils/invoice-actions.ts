@@ -565,7 +565,9 @@ export interface OrderInvoiceOfferContext {
  *   there is no organization-match rule, because billing a third party is a real
  *   pattern (13 imported invoices). A `draft` order is reserved by the create
  *   route before it is invoiced.
- * - `create_remaining_invoice` — `remainingForOrder` finds a line nothing bills.
+ * - `create_remaining_invoice` — `remainingForOrder` finds a line the remainder
+ *   build would bill (`RemainingLine.bills`). An over-billed line is not one: it
+ *   is `credit_overbilling`'s (core#120).
  * - `create_replacement_invoice` — `replacement_units > 0`.
  * - `credit_overbilling` — `buildOverbillingCredits` offers at least one note,
  *   on any status. The manager's 10-invoice cap stays a display limit.
@@ -586,10 +588,11 @@ export function orderInvoiceActionsFor(order: OfferOrder, ctx: OrderInvoiceOffer
   return offers;
 }
 
-/** Lines nothing bills, or `null` when the invoices are unknown. */
+/** Lines the remainder build would bill, or `null` when the invoices are unknown. */
 function remainingLines(order: OfferOrder, ctx: OrderInvoiceOfferContext): number | null {
   if (!ctx.invoices) return null;
-  return remainingForOrder(order.uid, order.items, ctx.invoices, order.destinations, ctx.creditNotes ?? []).lines.length;
+  return remainingForOrder(order.uid, order.items, ctx.invoices, order.destinations, ctx.creditNotes ?? []).lines
+    .filter((l) => l.bills).length;
 }
 
 function overbilling(order: OfferOrder, ctx: OrderInvoiceOfferContext): OverbillingCredits | null {

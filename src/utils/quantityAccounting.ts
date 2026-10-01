@@ -755,6 +755,18 @@ export interface RemainingLine extends LineAccount {
   item: LineItem;
   /** Nothing on any compared invoice bills this path: the line comes in whole. */
   new: boolean;
+  /**
+   * {@link buildRemainingInvoice} would bill something for this line: positive
+   * units, or at least one billed window the order LENGTHENED. Its own
+   * condition, so an offer that counts these cannot disagree with the build.
+   *
+   * ⚠️ Not `quantity > 0 || extension_cents > 0`: `extension_cents` nets every
+   * window, so one lengthened and one shortened window can sum to ≤ 0 while the
+   * build still bills the lengthened one, and a $0 line's extension prices to 0
+   * while the build still emits it (core#120). An over-billed line stays in
+   * `lines`, for the credit flow, with `bills: false`.
+   */
+  bills: boolean;
 }
 
 /** @see {@link remainingForOrder} */
@@ -788,8 +800,9 @@ export function crmsAuthoredInvoices(invoices: readonly AccountedInvoice[]): str
  * in `crms_authored` — see the module header.
  *
  * Every order LINE is considered, dividers never. A line whose quantity and
- * extension are both zero is omitted; a negative one (over-billing) is returned,
- * for the caller to route to a credit note rather than a remainder.
+ * extension are both zero is omitted unless {@link RemainingLine.bills}; a
+ * negative one (over-billing) is returned with `bills: false`, for the caller to
+ * route to a credit note rather than a remainder.
  *
  * @param orderUid - The order's uid
  * @param orderItems - The order's CURRENT `items`, dividers included
@@ -819,9 +832,13 @@ export function remainingForOrder(
     if (!isLineItemType(item.type)) continue;
     const path = item.path ?? [];
     const at = billed.byPath.get(key(path));
-    const account = accountLine(item, at, orderLineWindow(orderDestinations, path));
-    if (account.quantity === 0 && account.extension_cents === 0) continue;
-    lines.push({ ...account, path, item, new: at === undefined });
+    const window = orderLineWindow(orderDestinations, path);
+    const account = accountLine(item, at, window);
+    const bills = account.quantity > 0 || extensionGroups(item, at, window).some((g) => g.extension_days > 0);
+    // Zero cents is not nothing to bill: a $0 line's added days, or windows
+    // netting to 0¢, are still lines the build emits.
+    if (account.quantity === 0 && account.extension_cents === 0 && !bills) continue;
+    lines.push({ ...account, path, item, new: at === undefined, bills });
   }
   return { lines, compared: billed.compared, unaligned: [], crms_authored: [], credits_unkeyed: billed.credits_unkeyed };
 }

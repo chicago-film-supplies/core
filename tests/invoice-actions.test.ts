@@ -36,6 +36,7 @@ import {
   type OfferSettlement,
   orderInvoiceActionsFor,
 } from "../src/utils/invoice-actions.ts";
+import type { AccountedInvoice } from "../src/utils/quantityAccounting.ts";
 
 const INVOICE_STATUSES = Object.keys(INVOICE_STATUS_CONTRACTS) as InvoiceStatusType[];
 const NOTE_STATUSES = Object.keys(CREDIT_NOTE_STATUS_CONTRACTS) as CreditNoteStatusType[];
@@ -391,6 +392,44 @@ Deno.test("D7: Invoice Remaining reads remainingForOrder once the invoices are k
   assertEquals(has(offers, "create_remaining_invoice"), false);
   assertEquals(has(offers, "credit_overbilling"), false);
   assertEquals(has(offers, "create_replacement_invoice"), false, "absent replacement_units ⇒ 0");
+});
+
+Deno.test("core#120: an order that is ONLY over-billed is offered the credit, not Invoice Remaining", () => {
+  // Ordered 2, billed 3: the one remainder line is −1 unit. The remainder build
+  // has nothing to bill, so offering it sends the operator to a 409.
+  const window = { start: "2026-09-06T00:00:00.000-05:00", end: "2026-09-11T00:00:00.000-05:00", days: 5 };
+  const pair = { uid: "dest", dates: { charge_windows: [window] } };
+  const cam = (path: string[], quantity: number) => ({
+    uid: "cam", type: "rental", name: "cam", description: "", quantity, path,
+    stock_method: "reserve", zero_priced: false, uid_tax_class: "TaxC1assDefau1tAAAAA",
+    price: {
+      base_cents: 1000, chargeable_days: 5, formula: "five_day_week",
+      subtotal_cents: 0, subtotal_discounted_cents: 0, discount: null, taxes: [], total_cents: 0, replacement_cents: 1000,
+    },
+  });
+  const overBilled = {
+    ...order("active"),
+    items: [{ uid: "dest", type: "destination", name: "Venue", description: "", path: ["dest"] }, cam(["dest", "cam"], 2)],
+    destinations: [pair],
+  } as unknown as OfferOrder;
+  const billed = {
+    uid: "inv-a",
+    status: "issued",
+    items: [
+      { uid: "ord", type: "order", name: "Order", description: "", path: ["ord"] },
+      { uid: "dest", type: "destination", name: "Venue", description: "", path: ["ord", "dest"] },
+      cam(["ord", "dest", "cam"], 3),
+    ],
+    destinations: [{ ...pair, uid_order: "ord" }],
+  } as unknown as AccountedInvoice;
+  const offers = orderInvoiceActionsFor(overBilled, { invoices: [billed], creditNotes: [] });
+  assertEquals(has(offers, "credit_overbilling"), true, "the over-billing is real and offered");
+  assertEquals(has(offers, "create_remaining_invoice"), false, "and there is nothing to invoice");
+  assertThrows(
+    () => assertOrderInvoiceAction(overBilled, { invoices: [billed], creditNotes: [] }, { action: "create_remaining_invoice" }),
+    InvoiceActionRefusal,
+    "nothing to do",
+  );
 });
 
 Deno.test("an InvoiceActionRefusal names its action", () => {

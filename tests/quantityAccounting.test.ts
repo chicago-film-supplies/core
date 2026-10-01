@@ -590,6 +590,83 @@ Deno.test("quantityAccounting: a window set re-authored at a different TIME OF D
   assertEquals(remainingForOrder(O, order.items, invoices, order.destinations).lines, []);
 });
 
+// ── The offer's predicate IS the build's (core#120) ─────────────────────
+
+/**
+ * Every shape the remainder builders meet, each as the ORDER source and the
+ * invoices billing it. No credit notes: `buildRemainingInvoice` takes none, so
+ * parity is only defined without them.
+ */
+const parityCases = (): Array<{ name: string; order: ReturnType<typeof orderSource>; invoices: AccountedInvoice[] }> => [
+  { name: "fully billed", order: orderSource(lightOrder(5)), invoices: [invoice("a", lightOrder(3)), invoice("b", lightOrder(2))] },
+  { name: "units left", order: orderSource(lightOrder(6)), invoices: [invoice("a", lightOrder(4))] },
+  { name: "only over-billed", order: orderSource(lightOrder(2)), invoices: [invoice("a", lightOrder(3), "issued")] },
+  { name: "a new line", order: orderSource([...lightOrder(2), line("prod-tripod", [D, "prod-tripod"], 1, 3000)]), invoices: [invoice("a", lightOrder(2))] },
+  { name: "extension owed", order: orderSource(lightOrder(2, 7), 7), invoices: [invoice("a", lightOrder(2, 3))] },
+  { name: "extension netted by a section", order: orderSource(lightOrder(2, 7), 7), invoices: [invoice("a", lightOrder(2, 3)), extensionInvoice("b", 2, 2)] },
+  {
+    name: "over-billed units, extension owed",
+    order: orderSource(lightOrder(2, 7), 7),
+    invoices: [invoice("a", lightOrder(3, 3), "issued")],
+  },
+  {
+    name: "a dropped middle window",
+    order: { uid: O, number: 1012, items: lightOrder(2, 10), destinations: [multiPair(D, [W1, W3])] },
+    invoices: [multiInvoice("a", lightOrder(2, 15), [W1, W2, W3])],
+  },
+  {
+    // Row a (2 units, 15 days) is SHORTENED to 10: 2 × 1000 × −5 ÷ 5 = −2000¢.
+    // Row b (1 unit, 5 days) is LENGTHENED to 10: 1 × 1000 × 5 ÷ 5 = +1000¢.
+    // Net −1000¢, yet the build bills row b's 5 added days.
+    name: "one window shortened, another lengthened, netting negative",
+    order: { uid: O, number: 1012, items: lightOrder(3, 10), destinations: [multiPair(D, [W1, W2])] },
+    invoices: [multiInvoice("a", lightOrder(2, 15), [W1, W2, W3]), multiInvoice("b", lightOrder(1, 5), [W1])],
+  },
+  {
+    // The same at 1 + 1 units: −1000¢ + 1000¢ nets to exactly 0, and the line
+    // used to be dropped before anything asked whether it billed.
+    name: "one window shortened, another lengthened, netting zero",
+    order: { uid: O, number: 1012, items: lightOrder(2, 10), destinations: [multiPair(D, [W1, W2])] },
+    invoices: [multiInvoice("a", lightOrder(1, 15), [W1, W2, W3]), multiInvoice("b", lightOrder(1, 5), [W1])],
+  },
+  {
+    // A $0 line whose window grew: the extension prices to 0¢, the build still emits it.
+    name: "a $0 line extended",
+    order: orderSource([DEST_ITEM, GROUP_ITEM, line(LIGHT, [D, G, LIGHT], 2, 0, 7)], 7),
+    invoices: [invoice("a", [DEST_ITEM, GROUP_ITEM, line(LIGHT, [D, G, LIGHT], 2, 0, 3)])],
+  },
+];
+
+Deno.test("remainingForOrder: a line `bills` exactly when buildRemainingInvoice would bill it (core#120)", () => {
+  for (const { name, order, invoices } of parityCases()) {
+    const offered = remainingForOrder(O, order.items, invoices, order.destinations).lines.some((l) => l.bills);
+    const built = buildRemainingInvoice(order, invoices, mint).items.length > 0;
+    assertEquals(offered, built, name);
+  }
+});
+
+Deno.test("remainingForOrder: the parity cases reach both answers and every arm (core#120)", () => {
+  // Without this the parity sweep could pass over a table that never bills, or
+  // never refuses — and the cents-based predicate it replaced must FAIL it.
+  const results = parityCases().map(({ name, order, invoices }) => {
+    const lines = remainingForOrder(O, order.items, invoices, order.destinations).lines;
+    return {
+      name,
+      built: buildRemainingInvoice(order, invoices, mint).items.length > 0,
+      byCents: lines.some((l) => l.quantity > 0 || l.extension_cents > 0),
+      overbilledOnly: lines.length > 0 && lines.every((l) => !l.bills),
+    };
+  });
+  assertEquals(results.some((r) => r.built), true, "some case bills");
+  assertEquals(results.some((r) => !r.built), true, "some case refuses");
+  assertEquals(results.filter((r) => r.overbilledOnly).map((r) => r.name), ["only over-billed", "a dropped middle window"]);
+  assertEquals(
+    results.filter((r) => r.byCents !== r.built).map((r) => r.name),
+    ["one window shortened, another lengthened, netting negative", "one window shortened, another lengthened, netting zero", "a $0 line extended"],
+    "the cents predicate the issue proposed disagrees with the build exactly here",
+  );
+});
+
 // ── Credit notes net the units they reverse (api-cloudrun#1028 phase 1b) ─────
 
 /** A credit note reversing `quantity` units of invoice `inv` at the light line's path. */

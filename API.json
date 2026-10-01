@@ -13036,7 +13036,7 @@
         {
           "kind": "interface",
           "name": "RemainingLine",
-          "declaration": "interface RemainingLine {\n  path: string[];\n  item: LineItem;\n  new: boolean;\n}",
+          "declaration": "interface RemainingLine {\n  path: string[];\n  item: LineItem;\n  new: boolean;\n  bills: boolean;\n}",
           "doc": "One order line with something left to bill, or billed beyond the order."
         },
         {
@@ -13161,7 +13161,7 @@
           "kind": "function",
           "name": "remainingForOrder",
           "signature": "remainingForOrder(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], orderDestinations: readonly DocDestinationType[], _: unknown): RemainingForOrder",
-          "doc": "What is left to bill on an order: new lines in full, quantity deltas at\nexisting paths, and date-extension money on rows already billed (D4).\n\n🔴 **Fails closed on any unaligned scope** — `lines` comes back empty and the\nuids are in `unaligned`. A remainder built over a partial sum bills again\nwhatever the unaligned invoice already billed.\n\n🔴 **Fails closed on any live CRMS-authored invoice**, the same way, naming it\nin `crms_authored` — see the module header.\n\nEvery order LINE is considered, dividers never. A line whose quantity and\nextension are both zero is omitted; a negative one (over-billing) is returned,\nfor the caller to route to a credit note rather than a remainder.",
+          "doc": "What is left to bill on an order: new lines in full, quantity deltas at\nexisting paths, and date-extension money on rows already billed (D4).\n\n🔴 **Fails closed on any unaligned scope** — `lines` comes back empty and the\nuids are in `unaligned`. A remainder built over a partial sum bills again\nwhatever the unaligned invoice already billed.\n\n🔴 **Fails closed on any live CRMS-authored invoice**, the same way, naming it\nin `crms_authored` — see the module header.\n\nEvery order LINE is considered, dividers never. A line whose quantity and\nextension are both zero is omitted unless {@link RemainingLine.bills}; a\nnegative one (over-billing) is returned with `bills: false`, for the caller to\nroute to a credit note rather than a remainder.",
           "paramTags": [
             {
               "name": "orderUid",
@@ -14326,7 +14326,7 @@
           "kind": "function",
           "name": "orderInvoiceActionsFor",
           "signature": "orderInvoiceActionsFor(order: OfferOrder, _: unknown): InvoiceActionOffer[]",
-          "doc": "Every invoicing action the UI may offer on this order.\n\n- The three CREATE actions (D7) refuse a `canceled` order and nothing else —\n  there is no organization-match rule, because billing a third party is a real\n  pattern (13 imported invoices). A `draft` order is reserved by the create\n  route before it is invoiced.\n- `create_remaining_invoice` — `remainingForOrder` finds a line nothing bills.\n- `create_replacement_invoice` — `replacement_units > 0`.\n- `credit_overbilling` — `buildOverbillingCredits` offers at least one note,\n  on any status. The manager's 10-invoice cap stays a display limit.",
+          "doc": "Every invoicing action the UI may offer on this order.\n\n- The three CREATE actions (D7) refuse a `canceled` order and nothing else —\n  there is no organization-match rule, because billing a third party is a real\n  pattern (13 imported invoices). A `draft` order is reserved by the create\n  route before it is invoiced.\n- `create_remaining_invoice` — `remainingForOrder` finds a line the remainder\n  build would bill (`RemainingLine.bills`). An over-billed line is not one: it\n  is `credit_overbilling`'s (core#120).\n- `create_replacement_invoice` — `replacement_units > 0`.\n- `credit_overbilling` — `buildOverbillingCredits` offers at least one note,\n  on any status. The manager's 10-invoice cap stays a display limit.",
           "paramTags": [],
           "returnsTag": null
         }

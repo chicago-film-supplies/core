@@ -29015,6 +29015,7 @@ interface RemainingLine {
   path: string[];
   item: LineItem;
   new: boolean;
+  bills: boolean;
 }
 ```
 
@@ -29258,8 +29259,9 @@ whatever the unaligned invoice already billed.
 in `crms_authored` — see the module header.
 
 Every order LINE is considered, dividers never. A line whose quantity and
-extension are both zero is omitted; a negative one (over-billing) is returned,
-for the caller to route to a credit note rather than a remainder.
+extension are both zero is omitted unless {@link RemainingLine.bills}; a
+negative one (over-billing) is returned with `bills: false`, for the caller to
+route to a credit note rather than a remainder.
 
 **Parameters**
 
@@ -31507,7 +31509,9 @@ Every invoicing action the UI may offer on this order.
   there is no organization-match rule, because billing a third party is a real
   pattern (13 imported invoices). A `draft` order is reserved by the create
   route before it is invoiced.
-- `create_remaining_invoice` — `remainingForOrder` finds a line nothing bills.
+- `create_remaining_invoice` — `remainingForOrder` finds a line the remainder
+  build would bill (`RemainingLine.bills`). An over-billed line is not one: it
+  is `credit_overbilling`'s (core#120).
 - `create_replacement_invoice` — `replacement_units > 0`.
 - `credit_overbilling` — `buildOverbillingCredits` offers at least one note,
   on any status. The manager's 10-invoice cap stays a display limit.
