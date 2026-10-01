@@ -332,7 +332,7 @@ export interface CreditableRow {
  * ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
  * level — never the catalog, D1/D2).
  *
- * The one walk `billedByPath`, `computeDocumentDiffs`'s D2 quantity check and
+ * The one walk `invoicedByPath`, `computeDocumentDiffs`'s D2 quantity check and
  * the invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.
  *
  * A path named directly that the order does not carry (a dangling anchor) keeps
@@ -482,12 +482,6 @@ export interface ExchangeEntry {
   readonly reason: OOSReasonType;
 }
 
-/**
- * @deprecated Use {@link ExchangeEntry}. Kept only so manager's pin bump to the
- * beta that drops the stored `replaces` needs no code change (api-cloudrun#1147).
- */
-export type ReplacesEntry = ExchangeEntry;
-
 /** A row as the exchange readers see it: its path and its `exchanged_for` entries. */
 export interface ExchangeRow {
   readonly path: readonly string[];
@@ -541,13 +535,6 @@ export function unresolvedExchangedFor(
   }
   return out;
 }
-
-/**
- * @deprecated Use {@link unresolvedExchangedFor}. Kept only so manager's pin bump
- * to the beta that drops the stored `replaces` needs no code change
- * (api-cloudrun#1147).
- */
-export const unresolvedReplaces: typeof unresolvedExchangedFor = unresolvedExchangedFor;
 
 /**
  * A path correspondence across one rebuild — the `toPath` half of

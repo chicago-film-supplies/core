@@ -12,7 +12,6 @@ import {
   standInUnits,
   substitutionResync,
   unresolvedExchangedFor,
-  unresolvedReplaces,
 } from "../src/utils/substitutions.ts";
 import {
   SubstitutedForList,
@@ -432,8 +431,4 @@ Deno.test("S8c-5: the exchange readers read `exchanged_for` only — an old-name
   assertEquals(unresolvedExchangedFor(rows).map((u) => u.path.join("/")), ["S/Y"], "only the new name's dangling entry is found");
   // Only Y's claim of 2 counts against X, which holds 1.
   assertEquals(overclaimedExchanges([], rows).map((r) => r.claimed), [2]);
-});
-
-Deno.test("S8c-5: the deprecated utils aliases are the same function, kept for manager's pin bump", () => {
-  assert(unresolvedReplaces === unresolvedExchangedFor);
 });

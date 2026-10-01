@@ -650,7 +650,7 @@ function stripOrderPrefix(path: string[], orderDividerUid: string): string[] {
  *
  * An extension section bills MONEY on lines another invoice already billed, so
  * every order-relative reader has to decide what to do with it: alignment and
- * `billedByPath` read it as the divider it extends ({@link toOrderRelativePath}),
+ * `invoicedByPath` read it as the divider it extends ({@link toOrderRelativePath}),
  * while the line-drift readers skip it ({@link isInExtensionSection}).
  *
  * @param scopedItems - Items of one order scope, or a whole invoice

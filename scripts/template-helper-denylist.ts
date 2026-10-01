@@ -535,10 +535,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // Listed in UTIL_MODULES only so the drift guard sees its exports.
   quantityAccounting: [
     "accountLine",
-    "billedByPath",
+    "invoicedByPath",
     // Needs the order's CREDIT NOTES, which a render context holds even less
     // often than it holds the sibling invoices — and its whole output is a
-    // key into `billedByPath`'s sum, which is denied directly above.
+    // key into `invoicedByPath`'s sum, which is denied directly above.
     "billingReversals",
     "remainingForOrder",
     "substitutionCredit",
@@ -701,8 +701,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // The manager's dangling-pointer warning (manager#537) — an operator
     // surface, not something a customer document renders.
     "unresolvedExchangedFor",
-    // Its deprecated alias, kept for manager's pin bump (api-cloudrun#1147).
-    "unresolvedReplaces",
     "standInUnits",
     "substitutionCredit",
     "substitutionResync",

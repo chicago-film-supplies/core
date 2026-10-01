@@ -570,7 +570,7 @@ export const InvoiceDocOrderItem: z.ZodType<InvoiceDocOrderItemType> =
  *   from the previously billed end + 1 to the order's current end, and its pair
  *   (`destinations[i].uid === this divider's uid`) states that window.
  * - **The link is by PATH**: the value is the ORDER-relative path of the order
- *   destination divider this section extends. Alignment and `billedByPath`
+ *   destination divider this section extends. Alignment and `invoicedByPath`
  *   read an extension section as that divider, so its lines bill the order's
  *   lines there.
  * - **The no-minimum rule is DERIVED from the section, never stored on the

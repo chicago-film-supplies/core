@@ -81,7 +81,7 @@
  * the difference. A `fixed` row never read its days and extends by nothing.
  *
  * **A bill of the extension nets it out.** A line in an invoice's
- * date-extension section (`path_extension_for`) reaches {@link billedByPath} as
+ * date-extension section (`path_extension_for`) reaches {@link invoicedByPath} as
  * an `extension` row at the path it extends: it adds no units, and
  * {@link accountLine} subtracts its money, priced at its own added days, from
  * what the order's days add to the unit rows.
@@ -106,7 +106,7 @@
  * Both {@link remainingForOrder} and {@link buildRemainingInvoice} fail closed
  * when any LIVE invoice on the order carries a `crms_id`, naming those uids in
  * `crms_authored`, exactly as they do on an unaligned scope. The sum itself
- * ({@link billedByPath}) is unaffected, so a diff still reads them.
+ * ({@link invoicedByPath}) is unaffected, so a diff still reads them.
  *
  * The 2026-09-16 census (`api-cloudrun/scripts/audit-order-invoice-coverage.ts`,
  * prod and dev identical): every one of the 103 orders the button was offered
@@ -221,7 +221,7 @@ export function orderLineWindow(
 }
 
 /** One invoice row that bills an order path. */
-export interface BilledRow {
+export interface InvoicedRow {
   invoiceUid: string;
   item: InvoiceItem;
   /**
@@ -318,17 +318,17 @@ export function billingReversals(creditNotes: readonly AccountedCreditNote[]): B
 }
 
 /** What the invoices bill at one order-relative path. */
-export interface BilledAtPath {
+export interface InvoicedAtPath {
   /** Units billed: direct rows, substitute rows, and ratio credit from a substituted kit above. */
   quantity: number;
   /** The rows that bill this path. Empty for a component credited only through its kit's substitute. */
-  rows: BilledRow[];
+  rows: InvoicedRow[];
 }
 
-/** @see {@link billedByPath} */
-export interface BilledByPath {
+/** @see {@link invoicedByPath} */
+export interface InvoicedByPath {
   /** Keyed by the order-relative `path.join("/")`. A path with nothing billing it has no entry. */
-  byPath: Map<string, BilledAtPath>;
+  byPath: Map<string, InvoicedAtPath>;
   /** Non-void invoices whose scope was summed. */
   compared: string[];
   /** Non-void invoices whose scope is hung on a different divider skeleton, and was NOT summed. */
@@ -384,17 +384,17 @@ const key = (path: readonly string[]): string => path.join("/");
  * @param invoices - Every invoice linked to the order, live or void
  * @param creditNotes - Every credit note on those invoices. Omitted ⇒ nothing nets.
  */
-export function billedByPath(
+export function invoicedByPath(
   orderUid: string,
   orderItems: readonly LineItem[],
   invoices: readonly AccountedInvoice[],
   creditNotes: readonly AccountedCreditNote[] = [],
-): BilledByPath {
-  const byPath = new Map<string, BilledAtPath>();
+): InvoicedByPath {
+  const byPath = new Map<string, InvoicedAtPath>();
   const compared: string[] = [];
   const unaligned: string[] = [];
   const reversals = billingReversals(creditNotes);
-  const at = (k: string): BilledAtPath => {
+  const at = (k: string): InvoicedAtPath => {
     let entry = byPath.get(k);
     if (!entry) byPath.set(k, entry = { quantity: 0, rows: [] });
     return entry;
@@ -477,9 +477,9 @@ export function billedByPath(
 export interface LineAccount {
   /** The order line's quantity. */
   ordered: number;
-  /** Units billed across the invoices (0 when nothing bills the path). */
-  billed: number;
-  /** `ordered − billed`. Negative is over-billing. */
+  /** Units invoiced across the invoices (0 when nothing invoices the path). */
+  invoiced: number;
+  /** `ordered − invoiced`. Negative is over-billing. */
   quantity: number;
   /** Pre-tax cents for `quantity` units at the order line's current terms. Signed with `quantity`. */
   quantity_cents: number;
@@ -497,7 +497,7 @@ export interface LineAccount {
    * checkout → return → complete`) that the number does not carry: it is the
    * same figure before anything is picked and after everything has come back.
    * How many units are physically OUT lives on the booking's breakdown. The
-   * parallel that governs the name is `billed`, which asserts what the
+   * parallel that governs the name is `invoiced`, which asserts what the
    * invoices SAY rather than that money moved — payment is settlements' fact.
    *
    * 🔴 **A THIRD authority, not a better version of `ordered`.** The three
@@ -509,7 +509,7 @@ export interface LineAccount {
    * separately and get different answers.
    */
   fulfilled?: number;
-  /** `fulfilled − billed`. Negative means more was billed than the fulfillment records. */
+  /** `fulfilled − invoiced`. Negative means more was invoiced than the fulfillment records. */
   fulfilled_quantity?: number;
   /** Pre-tax cents for `fulfilled_quantity` units at the order line's current terms. Signed with it. */
   fulfilled_quantity_cents?: number;
@@ -533,13 +533,13 @@ function subtotalCents(item: LineItem, extensionDays?: number): number {
  * Account for one order line against what the invoices bill at its path.
  *
  * @param orderLine - The order line, at its current quantity
- * @param billed - {@link billedByPath}'s entry for the line's path, if any
+ * @param billed - {@link invoicedByPath}'s entry for the line's path, if any
  * @param orderWindow - {@link orderLineWindow} for the line; `null` extends nothing
  * @param fulfilled - the FULFILLMENT row's quantity at this line's path, if one exists
  */
 export function accountLine(
   orderLine: LineItem,
-  billed: BilledAtPath | undefined,
+  billed: InvoicedAtPath | undefined,
   orderWindow: BilledWindow | null,
   fulfilled?: number,
 ): LineAccount {
@@ -574,7 +574,7 @@ export function accountLine(
 
   return {
     ordered,
-    billed: billedUnits,
+    invoiced: billedUnits,
     quantity,
     quantity_cents: quantityCents,
     extension_cents: extensionCents,
@@ -668,7 +668,7 @@ export interface ExtensionGroup {
  */
 export function extensionGroups(
   orderLine: LineItem,
-  billed: BilledAtPath | undefined,
+  billed: InvoicedAtPath | undefined,
   orderWindow: BilledWindow | null,
 ): ExtensionGroup[] {
   // A RENTAL only (api-cloudrun#1154): days are a rental's, and a sale, service
@@ -676,7 +676,7 @@ export function extensionGroups(
   // factor 1 (`daysFromWindows`), so it has nothing to extend or credit.
   if (!isPreTaxItem(orderLine) || orderLine.type !== "rental" || orderWindow === null) return [];
   const groups: Array<Omit<ExtensionGroup, "extension_days">> = [];
-  const extensions: BilledRow[] = [];
+  const extensions: InvoicedRow[] = [];
   for (const row of billed?.rows ?? []) {
     if (!isPreTaxItem(row.item) || row.item.type !== "rental" || row.item.price.formula !== "five_day_week") continue;
     if (row.via === "extension") {
@@ -777,7 +777,7 @@ export interface RemainingForOrder {
   unaligned: string[];
   /** Live CRMS-authored invoices. Non-empty ⇒ `lines` is empty: their paths cannot be trusted to bill the order's. */
   crms_authored: string[];
-  /** @see {@link BilledByPath.credits_unkeyed} — report it beside any credit figure. */
+  /** @see {@link InvoicedByPath.credits_unkeyed} — report it beside any credit figure. */
   credits_unkeyed: string[];
 }
 
@@ -816,7 +816,7 @@ export function remainingForOrder(
   orderDestinations: readonly DocDestinationType[],
   creditNotes: readonly AccountedCreditNote[] = [],
 ): RemainingForOrder {
-  const billed = billedByPath(orderUid, orderItems, invoices, creditNotes);
+  const billed = invoicedByPath(orderUid, orderItems, invoices, creditNotes);
   const crmsAuthored = crmsAuthoredInvoices(invoices);
   if (billed.unaligned.length > 0 || crmsAuthored.length > 0) {
     return {
@@ -885,7 +885,7 @@ export interface OverbillingCredits {
   /** As {@link remainingForOrder} — non-empty ⇒ `notes` is empty. */
   unaligned: string[];
   crms_authored: string[];
-  /** @see {@link BilledByPath.credits_unkeyed} */
+  /** @see {@link InvoicedByPath.credits_unkeyed} */
   credits_unkeyed: string[];
 }
 
@@ -939,7 +939,7 @@ export function buildOverbillingCredits(
   creditNotes: readonly AccountedCreditNote[] = [],
 ): OverbillingCredits {
   const O = order.uid;
-  const billed = billedByPath(O, order.items, invoices, creditNotes);
+  const billed = invoicedByPath(O, order.items, invoices, creditNotes);
   const crmsAuthored = crmsAuthoredInvoices(invoices);
   const empty: OverbillingCredits = {
     notes: [],
@@ -1115,7 +1115,7 @@ export function buildRemainingInvoice(
   mintUid: () => string = () => crypto.randomUUID(),
 ): RemainingInvoice {
   const O = order.uid;
-  const billed = billedByPath(O, order.items, invoices, creditNotes);
+  const billed = invoicedByPath(O, order.items, invoices, creditNotes);
   const crmsAuthored = crmsAuthoredInvoices(invoices);
   const empty = { items: [], destinations: [], overbilled: [], compared: billed.compared, unaligned: billed.unaligned, crms_authored: crmsAuthored };
   if (billed.unaligned.length > 0 || crmsAuthored.length > 0) return empty;

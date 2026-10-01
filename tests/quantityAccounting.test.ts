@@ -1,5 +1,5 @@
 /**
- * `billedByPath` / `accountLine` / `remainingForOrder` (api-cloudrun#680).
+ * `invoicedByPath` / `accountLine` / `remainingForOrder` (api-cloudrun#680).
  * Every expected number is worked out by hand in the comment beside it; none is
  * produced by the code under test.
  */
@@ -18,7 +18,7 @@ import {
   type AccountedCreditNote,
   type AccountedInvoice,
   accountLine,
-  billedByPath,
+  invoicedByPath,
   buildOverbillingCredits,
   buildRemainingInvoice,
   crmsAuthoredInvoices,
@@ -83,7 +83,7 @@ const lightKey = `${D}/${G}/${LIGHT}`;
 Deno.test("quantityAccounting: a split bill — 3 + 2 of 5 — sums to 5 and leaves nothing", () => {
   const order = lightOrder(5);
   const invoices = [invoice("a", lightOrder(3)), invoice("b", lightOrder(2))];
-  const billed = billedByPath(O, order, invoices);
+  const billed = invoicedByPath(O, order, invoices);
   assertEquals(billed.byPath.get(lightKey)?.quantity, 5);
   assertEquals(billed.compared, ["a", "b"]);
   assertEquals(remainingForOrder(O, order, invoices, pairs(5)).lines, []);
@@ -93,7 +93,7 @@ Deno.test("quantityAccounting: a remainder — 4 billed of 6 — is 2 units at t
   const order = lightOrder(6);
   const { lines } = remainingForOrder(O, order, [invoice("a", lightOrder(4))], pairs());
   // 2 × 1000¢ at 5 days (factor 1) = 2000¢.
-  assertEquals(lines.map((l) => [l.path.join("/"), l.ordered, l.billed, l.quantity, l.quantity_cents, l.extension_cents, l.new]), [
+  assertEquals(lines.map((l) => [l.path.join("/"), l.ordered, l.invoiced, l.quantity, l.quantity_cents, l.extension_cents, l.new]), [
     [lightKey, 6, 4, 2, 2000, 0, false],
   ]);
 });
@@ -116,7 +116,7 @@ Deno.test("quantityAccounting: an extension across a split bill prices each bill
   // Order: 5 at 10 days. Row a: 3 at 5 days → 3000¢, at 10 days → 6000¢ (+3000).
   // Row b: 2 at 8 days → 2 × 1000 × 8 ÷ 5 = 3200¢, at 10 days → 4000¢ (+800). Total 3800¢.
   const { lines } = remainingForOrder(O, lightOrder(5, 10), [invoice("a", lightOrder(3, 5)), invoice("b", lightOrder(2, 8))], pairs(10));
-  assertEquals(lines.map((l) => [l.billed, l.quantity, l.extension_cents]), [[5, 0, 3800]]);
+  assertEquals(lines.map((l) => [l.invoiced, l.quantity, l.extension_cents]), [[5, 0, 3800]]);
 });
 
 Deno.test("quantityAccounting: an extension rounds ONCE, as the extension invoice line will (#997 D11)", () => {
@@ -160,7 +160,7 @@ Deno.test("quantityAccounting: over-billing is reported signed, not clamped", ()
 Deno.test("quantityAccounting: a void invoice bills nothing", () => {
   const order = lightOrder(5);
   const invoices = [invoice("live", lightOrder(2)), invoice("dead", lightOrder(3), "void")];
-  const billed = billedByPath(O, order, invoices);
+  const billed = invoicedByPath(O, order, invoices);
   assertEquals([billed.byPath.get(lightKey)?.quantity, billed.compared], [2, ["live"]]);
   assertEquals(remainingForOrder(O, order, invoices, pairs()).lines.map((l) => l.quantity), [3]);
 });
@@ -186,7 +186,7 @@ function substituted(inv: AccountedInvoice, relKey: string, uid: string, quantit
 Deno.test("quantityAccounting: an in-place substitute counts toward the line it replaced, and at its own path not at all", () => {
   const order = lightOrder(4);
   const inv = substituted(invoice("a", lightOrder(4)), lightKey, "prod-monopod", 4);
-  const billed = billedByPath(O, order, [inv]);
+  const billed = invoicedByPath(O, order, [inv]);
   assertEquals(billed.byPath.get(lightKey)?.quantity, 4);
   assertEquals(billed.byPath.get(lightKey)?.rows.map((r) => r.via), ["substitute"]);
   assertEquals(billed.byPath.has(`${D}/${G}/prod-monopod`), false);
@@ -202,7 +202,7 @@ const kitOrder = (): LineItem[] => [
 
 Deno.test("quantityAccounting: substituting a whole kit credits its components their full order quantity", () => {
   const inv = substituted(invoice("a", kitOrder()), `${D}/${KIT}`, "prod-alt-kit", 4);
-  const billed = billedByPath(O, kitOrder(), [inv]);
+  const billed = invoicedByPath(O, kitOrder(), [inv]);
   // 4 of 4 kits → 4 × 8 ÷ 4 = 8 stakes.
   assertEquals([billed.byPath.get(`${D}/${KIT}`)?.quantity, billed.byPath.get(`${D}/${KIT}/${STAKE}`)?.quantity], [4, 8]);
   assertEquals(remainingForOrder(O, kitOrder(), [inv], pairs()).lines, []);
@@ -212,7 +212,7 @@ Deno.test("quantityAccounting: a partial kit swap credits components by the ORDE
   // 1 of 4 kits swapped on invoice a; invoice b bills the other 3 kits and 6 of the 8 stakes.
   const swapped = substituted(invoice("a", kitOrder()), `${D}/${KIT}`, "prod-alt-kit", 1);
   const rest = invoice("b", [DEST_ITEM, line(KIT, [D, KIT], 3, 5000), line(STAKE, [D, KIT, STAKE], 6, 0)]);
-  const billed = billedByPath(O, kitOrder(), [swapped, rest]);
+  const billed = invoicedByPath(O, kitOrder(), [swapped, rest]);
   // Kit: 1 (substitute) + 3 (direct) = 4. Stakes: 6 direct + 1 × 8 ÷ 4 = 2 credited = 8.
   assertEquals([billed.byPath.get(`${D}/${KIT}`)?.quantity, billed.byPath.get(`${D}/${KIT}/${STAKE}`)?.quantity], [4, 8]);
 });
@@ -222,7 +222,7 @@ Deno.test("quantityAccounting: an unaligned scope fails remainingForOrder closed
   const aligned = invoice("a", lightOrder(2));
   // Invoice b hangs the Light directly under the destination: no group divider.
   const unaligned = invoice("b", [DEST_ITEM, line(LIGHT, [D, LIGHT], 3, 1000)]);
-  const billed = billedByPath(O, order, [aligned, unaligned]);
+  const billed = invoicedByPath(O, order, [aligned, unaligned]);
   assertEquals([billed.compared, billed.unaligned], [["a"], ["b"]]);
   assertEquals(remainingForOrder(O, order, [aligned, unaligned], pairs()), { lines: [], compared: ["a"], unaligned: ["b"], crms_authored: [], credits_unkeyed: [] });
 });
@@ -230,7 +230,7 @@ Deno.test("quantityAccounting: an unaligned scope fails remainingForOrder closed
 Deno.test("quantityAccounting: accountLine with nothing billed is the whole line", () => {
   // 3 × 1000¢ × 7 ÷ 5 = 4200¢.
   assertEquals(accountLine(line(LIGHT, [D, LIGHT], 3, 1000, 7), undefined, null), {
-    ordered: 3, billed: 0, quantity: 3, quantity_cents: 4200, extension_cents: 0,
+    ordered: 3, invoiced: 0, quantity: 3, quantity_cents: 4200, extension_cents: 0,
   });
 });
 
@@ -242,7 +242,7 @@ Deno.test("quantityAccounting: the coverage census and the sum agree on which li
     invoice("c", [DEST_ITEM, line("prod-tripod", [D, "prod-tripod"], 1, 3000)], "void"),
   ];
   const unbilledBySum = order
-    .filter((it) => it.type === "rental" && !billedByPath(O, order, invoices).byPath.has(it.path.join("/")))
+    .filter((it) => it.type === "rental" && !invoicedByPath(O, order, invoices).byPath.has(it.path.join("/")))
     .map((it) => it.path.join("/"));
   const uninvoiced = computeOrderInvoiceCoverage(O, order, invoices).uninvoiced.map((it) => it.path.join("/"));
   assertEquals(unbilledBySum, [`${D}/prod-tripod`]);
@@ -271,7 +271,7 @@ Deno.test("quantityAccounting: an extension section bills days, not units, and n
   // days on 2 units: 2 × 1000 × 2 ÷ 5 = 800¢, floor skipped. 800 − 800 = 0.
   const order = lightOrder(2, 7);
   const invoices = [invoice("a", lightOrder(2, 3)), extensionInvoice("b", 2, 2)];
-  const billed = billedByPath(O, order, invoices);
+  const billed = invoicedByPath(O, order, invoices);
   assertEquals(billed.compared, ["a", "b"]);
   assertEquals(billed.unaligned, []);
   assertEquals(billed.byPath.get(lightKey)?.quantity, 2);
@@ -419,7 +419,7 @@ Deno.test("quantityAccounting: a live CRMS-authored invoice fails the remainder 
   const built = buildRemainingInvoice(orderSource(order), billedBy, [], mint);
   assertEquals([built.items, built.destinations, built.overbilled, built.crms_authored], [[], [], [], ["a"]]);
   // The sum is not a remainder: a diff still reads what CRMS billed.
-  assertEquals(billedByPath(O, order, billedBy).byPath.get(lightKey)?.quantity, 5);
+  assertEquals(invoicedByPath(O, order, billedBy).byPath.get(lightKey)?.quantity, 5);
 });
 
 Deno.test("quantityAccounting: the same order billed natively still has a remainder — the refusal is the crms_id, nothing else", () => {
@@ -721,7 +721,7 @@ const overBilled = () => ({ order: lightOrder(2), invoices: [invoice("a", lightO
 Deno.test("quantityAccounting: a credit note that reverses billing NETS its units, and the over-billing clears", () => {
   const { order, invoices } = overBilled();
   // Before: 5 billed against 2 ordered = −3 units, 3 × 1000 = −3000¢.
-  assertEquals(remainingForOrder(O, order, invoices, pairs()).lines.map((l) => [l.billed, l.quantity, l.quantity_cents]), [[5, -3, -3000]]);
+  assertEquals(remainingForOrder(O, order, invoices, pairs()).lines.map((l) => [l.invoiced, l.quantity, l.quantity_cents]), [[5, -3, -3000]]);
   // After a note reversing exactly those 3: billed 2, nothing left either way.
   assertEquals(remainingForOrder(O, order, invoices, pairs(), [reversal("cn1", "a", 3)]).lines, []);
 });
@@ -780,7 +780,7 @@ Deno.test("quantityAccounting: netting is capped at the row — a credit beyond 
   const invoices = [invoice("a", lightOrder(5), "issued")];
   // Reversing 99 of a 5-unit row bills 0, never −94.
   const { lines } = remainingForOrder(O, order, invoices, pairs(), [reversal("cn1", "a", 99)]);
-  assertEquals(lines.map((l) => [l.billed, l.quantity]), [[0, 2]]);
+  assertEquals(lines.map((l) => [l.invoiced, l.quantity]), [[0, 2]]);
 });
 
 // ── The over-billing OFFER (api-cloudrun#1028 phase 1d) ──────────────────────
@@ -862,7 +862,7 @@ Deno.test("buildOverbillingCredits: over-billing across two invoices is two note
 Deno.test("quantityAccounting: a row billed on no known window extends nothing", () => {
   const bare = { ...invoice("a", lightOrder(2, 3)), destinations: undefined };
   assertEquals(remainingForOrder(O, lightOrder(2, 10), [bare], pairs(10)).lines, []);
-  assertEquals(accountLine(line(LIGHT, [D, G, LIGHT], 2, 1000, 10), billedByPath(O, lightOrder(2, 10), [invoice("a", lightOrder(2, 3))]).byPath.get(lightKey), null).extension_cents, 0);
+  assertEquals(accountLine(line(LIGHT, [D, G, LIGHT], 2, 1000, 10), invoicedByPath(O, lightOrder(2, 10), [invoice("a", lightOrder(2, 3))]).byPath.get(lightKey), null).extension_cents, 0);
 });
 
 // ── substituted_for: merges and partial swaps (manager#414, Track S1) ─────────
@@ -891,7 +891,7 @@ const mergeOrder = (tripods = 2): LineItem[] => [
 Deno.test("quantityAccounting: a MERGE bills both lines — the substitute's own path by the rest, the replaced line by the entry", () => {
   // Both tripods merged into the Light row: 4 = 2 (the order's own Light) + 2 standing in.
   const inv = stamped("a", [DEST_ITEM, GROUP_ITEM, line(LIGHT, [D, G, LIGHT], 4, 1000)], { [lightKey]: [{ path: [D, G, TRIPOD], quantity: 2 }] });
-  const billed = billedByPath(O, mergeOrder(), [inv]);
+  const billed = invoicedByPath(O, mergeOrder(), [inv]);
   assertEquals(billed.byPath.get(lightKey)?.quantity, 2);
   assertEquals(billed.byPath.get(lightKey)?.rows.map((r) => [r.via, r.quantity]), [["direct", 2]]);
   assertEquals(billed.byPath.get(tripodKey)?.quantity, 2);
@@ -902,7 +902,7 @@ Deno.test("quantityAccounting: a MERGE bills both lines — the substitute's own
 Deno.test("quantityAccounting: a merge is SPENT once the order no longer carries X — its units count at the row's own path", () => {
   // The operator removed the tripods from the order (owner ruling, 2026-09-16).
   const inv = stamped("a", [DEST_ITEM, GROUP_ITEM, line(LIGHT, [D, G, LIGHT], 4, 1000)], { [lightKey]: [{ path: [D, G, TRIPOD], quantity: 2 }] });
-  const billed = billedByPath(O, mergeOrder(0), [inv]);
+  const billed = invoicedByPath(O, mergeOrder(0), [inv]);
   assertEquals(billed.byPath.get(lightKey)?.quantity, 4);
   assertEquals(billed.byPath.has(tripodKey), false);
   // 4 billed of 2 ordered: over-billed by 2.
@@ -921,7 +921,7 @@ Deno.test("quantityAccounting: a partial kit swap through substituted_for credit
     line(ALT, [D, ALT], 2, 5000),
     line(PEG, [D, ALT, PEG], 6, 0),
   ], { [`${D}/${ALT}`]: [{ path: [D, KIT], quantity: 2 }], [`${D}/${ALT}/${PEG}`]: [{ path: [D, KIT], quantity: 6 }] });
-  const billed = billedByPath(O, kitOrder(), [inv]);
+  const billed = invoicedByPath(O, kitOrder(), [inv]);
   // Kit: 2 direct + 2 standing in = 4. Stakes: 4 direct + 2 × 8 ÷ 4 = 4 credited = 8.
   assertEquals([billed.byPath.get(`${D}/${KIT}`)?.quantity, billed.byPath.get(`${D}/${KIT}/${STAKE}`)?.quantity], [4, 8]);
   // The alternate kit and its pegs stand in entirely, so neither bills its own path.
@@ -937,7 +937,7 @@ Deno.test("quantityAccounting: merging a kit into a kit the order carries bills 
     [`${D}/${YK}`]: [{ path: [D, XK], quantity: 1 }],
     [`${D}/${YK}/${C}`]: [{ path: [D, XK], quantity: 2 }],
   });
-  const billed = billedByPath(O, order, [inv]);
+  const billed = invoicedByPath(O, order, [inv]);
   // YK: 3 − 1 = 2. C: 6 − 2 = 4. XK: 1 standing in. C2: 1 × 2 ÷ 1 = 2 by ratio.
   assertEquals(
     [`${D}/${YK}`, `${D}/${YK}/${C}`, `${D}/${XK}`, `${D}/${XK}/${C2}`].map((k) => billed.byPath.get(k)?.quantity),

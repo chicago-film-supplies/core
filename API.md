@@ -5144,7 +5144,7 @@ Owner decisions, 2026-09-13:
   from the previously billed end + 1 to the order's current end, and its pair
   (`destinations[i].uid === this divider's uid`) states that window.
 - **The link is by PATH**: the value is the ORDER-relative path of the order
-  destination divider this section extends. Alignment and `billedByPath`
+  destination divider this section extends. Alignment and `invoicedByPath`
   read an extension section as that divider, so its lines bill the order's
   lines there.
 - **The no-minimum rule is DERIVED from the section, never stored on the
@@ -17535,7 +17535,7 @@ Owner decisions, 2026-09-13:
   from the previously billed end + 1 to the order's current end, and its pair
   (`destinations[i].uid === this divider's uid`) states that window.
 - **The link is by PATH**: the value is the ORDER-relative path of the order
-  destination divider this section extends. Alignment and `billedByPath`
+  destination divider this section extends. Alignment and `invoicedByPath`
   read an extension section as that divider, so its lines bill the order's
   lines there.
 - **The no-minimum rule is DERIVED from the section, never stored on the
@@ -28832,7 +28832,7 @@ The D7 day count floors each SIDE at the week instead, and skips the floor on
 the difference. A `fixed` row never read its days and extends by nothing.
 
 **A bill of the extension nets it out.** A line in an invoice's
-date-extension section (`path_extension_for`) reaches {@link billedByPath} as
+date-extension section (`path_extension_for`) reaches {@link invoicedByPath} as
 an `extension` row at the path it extends: it adds no units, and
 {@link accountLine} subtracts its money, priced at its own added days, from
 what the order's days add to the unit rows.
@@ -28857,7 +28857,7 @@ reports it rather than clamping it away.
 Both {@link remainingForOrder} and {@link buildRemainingInvoice} fail closed
 when any LIVE invoice on the order carries a `crms_id`, naming those uids in
 `crms_authored`, exactly as they do on an unaligned scope. The sum itself
-({@link billedByPath}) is unaffected, so a diff still reads them.
+({@link invoicedByPath}) is unaffected, so a diff still reads them.
 
 The 2026-09-16 census (`api-cloudrun/scripts/audit-order-invoice-coverage.ts`,
 prod and dev identical): every one of the 103 orders the button was offered
@@ -28911,42 +28911,6 @@ interface AccountedInvoice {
 }
 ```
 
-### `BilledAtPath`
-
-What the invoices bill at one order-relative path.
-
-```ts
-interface BilledAtPath {
-  quantity: number;
-  rows: BilledRow[];
-}
-```
-
-### `BilledByPath`
-
-```ts
-interface BilledByPath {
-  byPath: Map<string, BilledAtPath>;
-  compared: string[];
-  unaligned: string[];
-  credits_unkeyed: string[];
-}
-```
-
-### `BilledRow`
-
-One invoice row that bills an order path.
-
-```ts
-interface BilledRow {
-  invoiceUid: string;
-  item: InvoiceItem;
-  via: "direct" | "substitute" | "extension";
-  quantity: number;
-  window: BilledWindow | null;
-}
-```
-
 ### `BilledWindow`
 
 A pair's charge windows, as an extension compares them: where the last one ends, each one's days, and each one's bounds.
@@ -28986,12 +28950,48 @@ interface ExtensionGroup {
 }
 ```
 
+### `InvoicedAtPath`
+
+What the invoices bill at one order-relative path.
+
+```ts
+interface InvoicedAtPath {
+  quantity: number;
+  rows: InvoicedRow[];
+}
+```
+
+### `InvoicedByPath`
+
+```ts
+interface InvoicedByPath {
+  byPath: Map<string, InvoicedAtPath>;
+  compared: string[];
+  unaligned: string[];
+  credits_unkeyed: string[];
+}
+```
+
+### `InvoicedRow`
+
+One invoice row that bills an order path.
+
+```ts
+interface InvoicedRow {
+  invoiceUid: string;
+  item: InvoiceItem;
+  via: "direct" | "substitute" | "extension";
+  quantity: number;
+  window: BilledWindow | null;
+}
+```
+
 ### `LineAccount`
 
 ```ts
 interface LineAccount {
   ordered: number;
-  billed: number;
+  invoiced: number;
   quantity: number;
   quantity_cents: number;
   extension_cents: number;
@@ -29110,56 +29110,16 @@ interface WindowBounds {
 }
 ```
 
-### `accountLine(orderLine: LineItem, billed: BilledAtPath | undefined, orderWindow: BilledWindow | null, fulfilled?: number): LineAccount`
+### `accountLine(orderLine: LineItem, billed: InvoicedAtPath | undefined, orderWindow: BilledWindow | null, fulfilled?: number): LineAccount`
 
 Account for one order line against what the invoices bill at its path.
 
 **Parameters**
 
 - `orderLine` — The order line, at its current quantity
-- `billed` — {@link billedByPath}'s entry for the line's path, if any
+- `billed` — {@link invoicedByPath}'s entry for the line's path, if any
 - `orderWindow` — {@link orderLineWindow} for the line; `null` extends nothing
 - `fulfilled` — the FULFILLMENT row's quantity at this line's path, if one exists
-
-### `billedByPath(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], _: unknown): BilledByPath`
-
-How much each order path is billed, summed across every non-void, aligned
-invoice (D3).
-
-⚠️ **An unaligned scope is left out of the sum and named in `unaligned`**;
-this does not fail closed on its own, because `computeDocumentDiffs`
-reports an unaligned scope as its own entry and still compares the aligned
-ones. A caller about to ACT on the sum — {@link remainingForOrder} — must
-refuse when `unaligned` is non-empty: an unaligned scope's lines are
-uncounted, so everything it bills reads unbilled.
-
-An invoice line at a path the order does not carry is still keyed here; it is
-the order's absence, not the sum's, that makes it unmatched.
-
-## Credit notes net the units they reverse (api-cloudrun#1028 phase 1b)
-
-A credit note this feature authored subtracts the units it reverses from the
-row that billed them, so taking the over-billing offer CLEARS the offer rather
-than leaving it standing for ever. {@link billingReversals} decides which lines
-qualify; `credits_unkeyed` names the notes it could not key.
-
-⚠️ **The subtraction happens on the ROW, before the substitution ratio walk** —
-not on the path total afterwards. That ordering is what makes a credit against
-a substitute Y reduce the units standing in for each X, and then flow down the
-order's own ratio to X's components. Netting the total afterwards would leave
-every descendant crediting units their parent no longer bills.
-
-⚠️ **Units only. Days are NOT netted here** — a credited shortening is reported
-as a suppressed offer instead. `billed_days` is derived inside
-{@link extensionGroups}, where extension rows split and merge groups, so a
-`(path, quantity, days)` triple cannot say which group loses the days.
-
-**Parameters**
-
-- `orderUid` — The order's uid, which is its divider's uid on every invoice
-- `orderItems` — The order's CURRENT `items`, dividers included
-- `invoices` — Every invoice linked to the order, live or void
-- `creditNotes` — Every credit note on those invoices. Omitted ⇒ nothing nets.
 
 ### `billingReversals(creditNotes: readonly AccountedCreditNote[]): BillingReversals`
 
@@ -29273,7 +29233,7 @@ as {@link remainingForOrder}.
 
 The uids of the LIVE invoices CRMS authored — a remainder refuses when any exist.
 
-### `extensionGroups(orderLine: LineItem, billed: BilledAtPath | undefined, orderWindow: BilledWindow | null): ExtensionGroup[]`
+### `extensionGroups(orderLine: LineItem, billed: InvoicedAtPath | undefined, orderWindow: BilledWindow | null): ExtensionGroup[]`
 
 The extension still owed on an order line, as groups of billed units that
 share their terms and their cumulative billed days (api-cloudrun#680 R1).
@@ -29314,6 +29274,46 @@ credits nothing.
 
 A `fixed` row never read its days, so it forms no group; nor does a row on no
 known window. A group whose extension is zero is dropped.
+
+### `invoicedByPath(orderUid: string, orderItems: readonly LineItem[], invoices: readonly AccountedInvoice[], _: unknown): InvoicedByPath`
+
+How much each order path is billed, summed across every non-void, aligned
+invoice (D3).
+
+⚠️ **An unaligned scope is left out of the sum and named in `unaligned`**;
+this does not fail closed on its own, because `computeDocumentDiffs`
+reports an unaligned scope as its own entry and still compares the aligned
+ones. A caller about to ACT on the sum — {@link remainingForOrder} — must
+refuse when `unaligned` is non-empty: an unaligned scope's lines are
+uncounted, so everything it bills reads unbilled.
+
+An invoice line at a path the order does not carry is still keyed here; it is
+the order's absence, not the sum's, that makes it unmatched.
+
+## Credit notes net the units they reverse (api-cloudrun#1028 phase 1b)
+
+A credit note this feature authored subtracts the units it reverses from the
+row that billed them, so taking the over-billing offer CLEARS the offer rather
+than leaving it standing for ever. {@link billingReversals} decides which lines
+qualify; `credits_unkeyed` names the notes it could not key.
+
+⚠️ **The subtraction happens on the ROW, before the substitution ratio walk** —
+not on the path total afterwards. That ordering is what makes a credit against
+a substitute Y reduce the units standing in for each X, and then flow down the
+order's own ratio to X's components. Netting the total afterwards would leave
+every descendant crediting units their parent no longer bills.
+
+⚠️ **Units only. Days are NOT netted here** — a credited shortening is reported
+as a suppressed offer instead. `billed_days` is derived inside
+{@link extensionGroups}, where extension rows split and merge groups, so a
+`(path, quantity, days)` triple cannot say which group loses the days.
+
+**Parameters**
+
+- `orderUid` — The order's uid, which is its divider's uid on every invoice
+- `orderItems` — The order's CURRENT `items`, dividers included
+- `invoices` — Every invoice linked to the order, live or void
+- `creditNotes` — Every credit note on those invoices. Omitted ⇒ nothing nets.
 
 ### `orderLineWindow(destinations: readonly typeLiteral[], path: readonly string[]): BilledWindow | null`
 
@@ -29363,7 +29363,7 @@ it directly, plus its kit parent's credit scaled by the ORDER's own component
 ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
 level — never the catalog, D1/D2).
 
-The one walk `billedByPath`, `computeDocumentDiffs`'s D2 quantity check and
+The one walk `invoicedByPath`, `computeDocumentDiffs`'s D2 quantity check and
 the invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.
 
 A path named directly that the order does not carry (a dangling anchor) keeps
@@ -30388,7 +30388,7 @@ extends (`path_extension_for`).
 
 An extension section bills MONEY on lines another invoice already billed, so
 every order-relative reader has to decide what to do with it: alignment and
-`billedByPath` read it as the divider it extends ({@link toOrderRelativePath}),
+`invoicedByPath` read it as the divider it extends ({@link toOrderRelativePath}),
 while the line-drift readers skip it ({@link isInExtensionSection}).
 
 **Parameters**
@@ -33181,12 +33181,6 @@ interface PathForwardMap {
 }
 ```
 
-### `ReplacesEntry`
-
-```ts
-type ReplacesEntry = ExchangeEntry;
-```
-
 ### `SubstitutionAnchor`
 
 A substitution row, reduced to what the predicates need.
@@ -33435,7 +33429,7 @@ it directly, plus its kit parent's credit scaled by the ORDER's own component
 ratio (`credit × component quantity ÷ kit quantity`, rounded half-up once per
 level — never the catalog, D1/D2).
 
-The one walk `billedByPath`, `computeDocumentDiffs`'s D2 quantity check and
+The one walk `invoicedByPath`, `computeDocumentDiffs`'s D2 quantity check and
 the invoice sync (`syncOrderToInvoiceSelective`, `computeInvoiceSyncStatus`) read. A path under a credited kit is present even at 0.
 
 A path named directly that the order does not carry (a dangling anchor) keeps
@@ -33481,12 +33475,6 @@ not part of `computeDocumentDiffs`.
 - `rows` — One document's items
 
 **Returns** — Every dangling entry, in document order
-
-### `unresolvedReplaces`
-
-```ts
-const unresolvedReplaces: unresolvedExchangedFor;
-```
 
 ## `@cfs/core/utils/money`
 

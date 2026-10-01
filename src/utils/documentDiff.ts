@@ -81,7 +81,7 @@
  *
  * - **how many units each document states** is ONE `quantity` entry per line —
  *   ordered / fulfilled / invoiced, with the money not yet invoiced for the
- *   missing units and for a date extension — computed by `billedByPath` /
+ *   missing units and for a date extension — computed by `invoicedByPath` /
  *   `accountLine` (`utils/quantityAccounting.ts`). A line no invoice carries is
  *   the same entry with `invoiced: 0`. See {@link DocumentQuantityEntry} for
  *   when it is emitted;
@@ -177,7 +177,7 @@ import {
   standInUnits,
   type SubstitutionAnchor,
 } from "./substitutions.ts";
-import { accountLine, type AccountedInvoice, type BilledByPath, billedByPath, crmsAuthoredInvoices, orderLineWindow, substitutionCredit } from "./quantityAccounting.ts";
+import { accountLine, type AccountedInvoice, type InvoicedByPath, invoicedByPath, crmsAuthoredInvoices, orderLineWindow, substitutionCredit } from "./quantityAccounting.ts";
 import { orderFulfillmentSharedFields, type SharedField } from "./shared-fields.ts";
 import { bookingIdsByPath } from "./order-edit-delta.ts";
 import { parseBookingId } from "./booking-id.ts";
@@ -502,7 +502,7 @@ function scopeInvoice(invoice: Invoice, orderUid: string): ScopedLines {
   const byKey = new Map<string, LineItem>();
   const rel: MaybeSubstitution[] = [];
   // A date-extension section bills days on lines the order has; its money is
-  // the `quantity` entry's (through `billedByPath`), so its lines are no line
+  // the `quantity` entry's (through `invoicedByPath`), so its lines are no line
   // comparison's subject.
   const extensionTargets = extensionSectionTargets(invoice.items as unknown as InvoiceItem[], orderUid);
   for (const it of invoice.items as readonly InvoiceDocItemType[]) {
@@ -679,7 +679,7 @@ function push<K>(map: Map<K, DocumentDiffEntry[]>, k: K, entry: DocumentDiffEntr
  * bills at each order-relative line key, and which invoices were checked.
  */
 interface InvoiceCoverage {
-  invoiced: BilledByPath;
+  invoiced: InvoicedByPath;
   invoices: DocumentRef[];
   /**
    * The invoice DOCUMENTS the sum was taken over — the aligned, non-void ones.
@@ -973,7 +973,7 @@ export function computeDocumentDiffs(
       alignedInvoices.push(invoice);
       refs.push(refOf("invoice", invoice));
     }
-    const invoiced = billedByPath(
+    const invoiced = invoicedByPath(
       orderUid,
       (orderByUid.get(orderUid)?.items ?? []) as unknown as LineItem[],
       alignedInvoices as unknown as AccountedInvoice[],
