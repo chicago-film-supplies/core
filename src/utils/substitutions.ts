@@ -12,7 +12,7 @@
  * |---|---|---|
  * | `api-cloudrun/src/services/fulfillmentEdits.ts` — the omission guard | a STORED row the submission drops | is it at or below some entry's X? |
  * | `api-cloudrun/src/services/fulfillmentEdits.ts` — the counterpart guard | a SUBMITTED row with no order line | is it strictly below some substitution's own path? |
- * | `api-cloudrun/scripts/audit-fulfillment-divergence.ts` | an ORDER line with no fulfillment row | is it at or below some entry's X? |
+ * | `api-cloudrun/scripts/audit-fulfillment-diff.ts` | an ORDER line with no fulfillment row | is it at or below some entry's X? |
  * | {@link syncOrderToInvoiceSelective} | an ORDER line the invoice does not carry | is it at or below some entry's X? |
  * | {@link computeInvoiceSyncStatus} | both sides of a substituted pair | is the divergence tracked rather than drift? |
  * | {@link computeOrderInvoiceCoverage} | an order line with no invoice line | is it at or below some entry's X? |

@@ -1432,7 +1432,7 @@ function explainTaxDifferences(
  * swap"* — a locked value is what let an order-side reparent resurrect X
  * (api-cloudrun#897). The sync is the only place that can do this: it is the one
  * caller holding both revisions of the order. Every downstream reader — the wire
- * guard, `api-cloudrun/scripts/audit-fulfillment-divergence.ts`, {@link computeInvoiceSyncStatus},
+ * guard, `api-cloudrun/scripts/audit-fulfillment-diff.ts`, {@link computeInvoiceSyncStatus},
  * {@link computeOrderInvoiceCoverage} — sees only the current order.
  *
  * @param scopedInvoiceItems - This order divider's invoice items

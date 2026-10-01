@@ -30872,7 +30872,7 @@ replaced line's current order path"*, not *"its path at the moment of the
 swap"* — a locked value is what let an order-side reparent resurrect X
 (api-cloudrun#897). The sync is the only place that can do this: it is the one
 caller holding both revisions of the order. Every downstream reader — the wire
-guard, `api-cloudrun/scripts/audit-fulfillment-divergence.ts`, {@link computeInvoiceSyncStatus},
+guard, `api-cloudrun/scripts/audit-fulfillment-diff.ts`, {@link computeInvoiceSyncStatus},
 {@link computeOrderInvoiceCoverage} — sees only the current order.
 
 **Parameters**
@@ -33211,7 +33211,7 @@ substitution licenses — no more, no less. There are six askers today:
 |---|---|---|
 | `api-cloudrun/src/services/fulfillmentEdits.ts` — the omission guard | a STORED row the submission drops | is it at or below some entry's X? |
 | `api-cloudrun/src/services/fulfillmentEdits.ts` — the counterpart guard | a SUBMITTED row with no order line | is it strictly below some substitution's own path? |
-| `api-cloudrun/scripts/audit-fulfillment-divergence.ts` | an ORDER line with no fulfillment row | is it at or below some entry's X? |
+| `api-cloudrun/scripts/audit-fulfillment-diff.ts` | an ORDER line with no fulfillment row | is it at or below some entry's X? |
 | {@link syncOrderToInvoiceSelective} | an ORDER line the invoice does not carry | is it at or below some entry's X? |
 | {@link computeInvoiceSyncStatus} | both sides of a substituted pair | is the divergence tracked rather than drift? |
 | {@link computeOrderInvoiceCoverage} | an order line with no invoice line | is it at or below some entry's X? |
