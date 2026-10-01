@@ -30,8 +30,30 @@
  * needs the REBUILT lines, so `edit_items` takes its answer as `money_moved`),
  * the organization tombstone and Xero-contact re-address checks, the Xero pushes
  * and `XERO_RETRACTION`, CAS/version checks, idempotency and counter allocation.
- * The server re-checks every limit inside its own transaction; an offer is a
- * snapshot of the documents it was handed.
+ * An offer is a snapshot of the documents it was handed; the server re-checks.
+ *
+ * ## Calling an `assert*` on a write path — what to hand it
+ *
+ * The `api-cloudrun` `firestore-transactions` skill decides this, and two
+ * contexts are easy to get wrong:
+ *
+ * - 🔴 **`reverse_settlement` needs only the TARGET row and any row that NAMES
+ *   it** — never the invoice's whole settlement list. Inside the reversal's
+ *   transaction pass `[target]`, plus the derived reverser when its point-get
+ *   exists. A `uid_invoice` range read there would block every concurrent
+ *   appender (the range-lock family). A pre-read outside the transaction would
+ *   decide on a stale `xero_payment_id`, which `linkSettlementToXero` binds
+ *   null → value after the row is written: the #358 hoist-data-not-ids
+ *   prohibition.
+ * - **`add_payment`'s cap is only as strong as the read it is checked against.**
+ *   The payment path claims its row and then CASes the invoice outside any
+ *   transaction, and a refusal after the claim would strand a committed row.
+ *   So the cap is checked against the read the claim was decided on, and two
+ *   concurrent payments can still overpay between them. The fold keeps that
+ *   visible as a negative `amount_due_cents`; it does not prevent it.
+ * - `close` needs no context at all: assert it against the transaction's own
+ *   invoice snapshot. The total it tests can change under any read outside the
+ *   transaction.
  *
  * @module
  */
