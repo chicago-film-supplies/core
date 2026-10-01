@@ -73,7 +73,7 @@ export interface InvoiceStatusContract {
    * Statuses an **operator** may move to via `PUT /invoices/{uid}`.
    *
    * **Not the legal transition graph**, and the distinction is load-bearing.
-   * `derivePaymentStatus` produces `issued → part_paid → paid`, and both
+   * `deriveInvoiceStatus` produces `issued → part_paid → paid`, and both
    * `markInvoiceVoidedFromXero` and the CRMS void hook force `→ void` from any
    * state; none of those appear here, and all of them are correct. Applying
    * this column to a Xero-authoritative path would break it.
@@ -107,7 +107,7 @@ export interface InvoiceStatusContract {
   /**
    * May an operator record a further payment against it? Deliberately excludes
    * `paid`: without that, a payment against a fully-settled invoice drives
-   * `amount_due` negative, and `derivePaymentStatus` then re-derives `paid`
+   * `amount_due` negative, and `deriveInvoiceStatus` then re-derives `paid`
    * from it and absorbs the overpayment silently.
    */
   accepts_payment: boolean;
@@ -681,6 +681,19 @@ export interface InvoiceDocTotalsType {
    */
   amount_void_cents?: number;
   amount_due_cents: number;
+  /**
+   * How many live `closure` rows the invoice carries — the fold of
+   * `closure` (+1) and `closure_reversal` (−1) through `counts_into`
+   * (api-cloudrun#1169). `> 0` means an operator closed a $0 invoice: it reads
+   * `paid` and freezes. It is NOT money and sits outside the identity refine.
+   *
+   * Optional with no default for the same reason as `amount_void_cents`: it
+   * postdates the corpus and `validateBeforeWrite` persists the RAW doc. Absent
+   * reads as 0. ⚠️ A `z.strictObject`: no reader older than the beta that
+   * declares this can parse an invoice carrying it, so manager AND api must be
+   * in prod before anyone closes an invoice (`cfs-release-order`).
+   */
+  closure_count?: number;
 }
 
 // The six shared fields come from `TotalsCore` (`schemas/order.ts`) as ONE
@@ -717,6 +730,11 @@ const InvoiceDocTotals: z.ZodType<InvoiceDocTotalsType> = z.strictObject({
     column: true,
     label: "Amount Due",
   }),
+  // NOT a column: an operator reads it as the `paid` status it produces, and a
+  // count of zero-cent rows in a money table invites summing it. Non-negative —
+  // a negative count is a reversal with no closure behind it, i.e. a defect,
+  // where a negative `amount_due_cents` is a real over-credit.
+  closure_count: z.int().nonnegative().optional(),
 });
 
 // ── Destinations ────────────────────────────────────────────────
@@ -1167,6 +1185,15 @@ export const InvoiceSchema: z.ZodType<Invoice> = z.strictObject({
     message:
       "amount_paid_cents + amount_credited_cents + amount_void_cents + amount_due_cents must equal total_cents exactly",
     path: ["totals", "amount_due_cents"],
+  },
+).refine(
+  // A closure says "this $0 invoice is done". On an invoice that owes money it
+  // would read `paid` with a balance outstanding — the #2396 shape from the other
+  // side — so it is unrepresentable rather than policed by every writer.
+  (inv) => (inv.totals.closure_count ?? 0) === 0 || inv.totals.total_cents === 0,
+  {
+    message: "closure_count > 0 is legal only on an invoice whose total_cents is 0",
+    path: ["totals", "closure_count"],
   },
 ).meta({
   title: "Invoice",

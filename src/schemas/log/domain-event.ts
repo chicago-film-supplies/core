@@ -142,6 +142,17 @@ export const DOMAIN_EVENT_MSGS = [
   // `residue` is the falls and rises no rule paired. Emitted from api-cloudrun's
   // booking lever.
   "custody_delta_unmatched",
+  // An operator route accepted an invoice, credit-note or order-invoice action
+  // that `@cfs/core/utils/invoice-actions` does not offer — the `assert*`
+  // functions refused it in SHADOW. **SHADOW, not a refusal** (invoice-actions
+  // plan P2): the write still lands, and this line settles by measurement whether
+  // any live path sends one before the api enforces at P4. Retire it at P4, as
+  // `custody_delta_unmatched` should have been. `{ route, invoice_action,
+  // action_subject, action_subject_uid, refusal }`, at `warn`, where
+  // `action_subject` is `invoice` | `credit_note` | `order` and `refusal` is the
+  // `InvoiceActionRefusal` message. Emitted from api-cloudrun's invoice,
+  // settlement and credit-note routes.
+  "invoice_action_unoffered",
   // Fulfillment picker accepted a quantity edit on a `custom-*` line
   // item. Custom uids regenerate on the next CRMS opportunity sync, so
   // the override is lossy — this is the explicit warning trail. Emitted
@@ -346,6 +357,14 @@ export interface DomainEventLogRecord {
    */
   quantity_held?: number;
   quantity_available?: number;
+  /** `invoice_action_unoffered` — the `InvoiceActionId` the route accepted. */
+  invoice_action?: string;
+  /** `invoice_action_unoffered` — which document the action acts on. */
+  action_subject?: "invoice" | "credit_note" | "order";
+  /** `invoice_action_unoffered` — that document's uid. */
+  action_subject_uid?: string;
+  /** `invoice_action_unoffered` — the refusal message the ruleset would have thrown. */
+  refusal?: string;
   [key: string]: unknown;
 }
 
@@ -364,4 +383,8 @@ export const DomainEventLogRecordSchema: z.ZodType<DomainEventLogRecord> = z.obj
   status_to: z.string().nullable().optional(),
   quantity_held: z.int().optional(),
   quantity_available: z.int().optional(),
+  invoice_action: z.string().optional(),
+  action_subject: z.enum(["invoice", "credit_note", "order"]).optional(),
+  action_subject_uid: z.string().optional(),
+  refusal: z.string().optional(),
 }).passthrough().meta({ title: "DomainEventLogRecord" });

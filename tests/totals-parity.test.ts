@@ -101,6 +101,9 @@ Deno.test("totals parity: each grain's own key ORDER is unchanged by the sharing
       "amount_credited_cents",
       "amount_void_cents",
       "amount_due_cents",
+      // Appended LAST and carries no `column` meta, so the picker order is
+      // untouched (api-cloudrun#1169).
+      "closure_count",
     ],
   );
 });

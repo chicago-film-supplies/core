@@ -67,6 +67,7 @@ import * as priceDocumentUtils from "../src/utils/price-document.ts";
 import * as replacementUtils from "../src/utils/replacements.ts";
 import * as outOfServiceUtils from "../src/utils/out-of-service.ts";
 import * as custodyUtils from "../src/utils/custody.ts";
+import * as invoiceActionUtils from "../src/utils/invoice-actions.ts";
 
 import { templateHelpers } from "../src/schemas/template-helpers.generated.ts";
 import {
@@ -124,6 +125,7 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // question about a write; a template renders one that already happened.
   // Listed so the drift guard sees its exports.
   custody: custodyUtils,
+  "invoice-actions": invoiceActionUtils,
   icons: iconUtils,
   fulfillments: fulfillmentUtils,
   // Same exception as `citations` and `template-lint`: `utils/fulfillment-items.ts`

@@ -225,7 +225,7 @@ const allocateCreditNoteRules: CollectionRule[] = [
         source: [],
         target: ["status"],
         transform:
-          "derivePaymentStatus must account for credits: a FULLY credited invoice is settled, not unpaid. Omitting credits here is the #409 bug class.",
+          "deriveInvoiceStatus must account for credits: a FULLY credited invoice is settled, not unpaid. Omitting credits here is the #409 bug class.",
       },
     ],
   },

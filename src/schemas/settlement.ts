@@ -171,6 +171,17 @@ function checkSettlementContract(s: Settlement, ctx: z.RefinementCtx): void {
     }
   }
 
+  // A COUNT type moves no money (api-cloudrun#1169). Any amount on one would be
+  // money that no cents bucket folds — the projection would silently disagree
+  // with the journal, and nothing in the invoice identity could see it.
+  if (contract.counts_into !== null && s.amount_cents !== 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["amount_cents"],
+      message: `a "${s.type}" feeds ${contract.counts_into} and moves no money; amount_cents must be 0`,
+    });
+  }
+
   // Derived from `sums_into` rather than declared as a fifth contract axis: the
   // credit bucket is the ONLY one whose value instrument is a credit note.
   //

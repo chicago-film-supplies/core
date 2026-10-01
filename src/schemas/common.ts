@@ -1757,7 +1757,7 @@ export const InvoiceStatusEnum: z.ZodType<InvoiceStatusType> = z.enum(INVOICE_ST
 // settlement, and authoring it three times invites three answers.
 
 /**
- * SIX members, in three do/undo pairs.
+ * EIGHT members, in four do/undo pairs.
  *
  * The reversal arms are their own **types**, exactly as `MOVEMENT_TYPES` carries
  * `sale` and `sale_return` rather than a second `kind` field. That is what lets
@@ -1777,6 +1777,16 @@ export const InvoiceStatusEnum: z.ZodType<InvoiceStatusType> = z.enum(INVOICE_ST
  * was never zeroed was indistinguishable from one correctly overridden, and 7
  * prod invoices sat that way. As a journal row the fold produces the 0 on its
  * own and every carve-out is deleted.
+ *
+ * **`closure` is the fourth pair, and it moves no money** (api-cloudrun#1169).
+ * A $0 invoice has nothing to pay, so nothing can settle it — yet an operator
+ * still needs to say "this is done" and have the invoice freeze. Deriving that
+ * from Xero's PAID was the defect: Xero marks a $0 invoice PAID the moment it
+ * is issued (probed 2026-10-01 on #2444), so a shrink invoice froze before the
+ * operator had finished editing it (#2396). A closure is the operator's own
+ * record of the fact, folded like every other row: close → reopen → close reads
+ * 1, 0, 1 at every prefix, and a reversal is how it reopens. It feeds a COUNT
+ * (`counts_into`), never a cents bucket — see {@link SettlementContract}.
  */
 const SETTLEMENT_TYPES = [
   "payment",
@@ -1785,6 +1795,8 @@ const SETTLEMENT_TYPES = [
   "credit_reversal",
   "void",
   "void_reversal",
+  "closure",
+  "closure_reversal",
 ] as const;
 /** One settlement event's kind. @see {@link SETTLEMENT_CONTRACTS} */
 export type SettlementTypeType = typeof SETTLEMENT_TYPES[number];
@@ -1835,6 +1847,12 @@ const SETTLEMENT_REASONS = [
   "invoice_voided",
   /** reversal — the originating system no longer reports it (the reap). */
   "source_retracted",
+  /**
+   * closure — the invoice totals $0 and the operator closed it (api-cloudrun#1169).
+   * Says WHY a zero-cent row exists at all; a closure on a non-zero invoice is
+   * refused by the invoice refine, so this member cannot describe one.
+   */
+  "zero_total",
   /** any — an operator fixing their own record. */
   "correction",
   /** backfilled history only — never written by new code. */
@@ -1870,7 +1888,20 @@ export interface SettlementContract {
    * would have failed to compile. Any new reader must handle all three
    * explicitly and fail loudly on an unrecognized one.
    */
-  sums_into: "amount_paid_cents" | "amount_credited_cents" | "amount_void_cents";
+  sums_into: "amount_paid_cents" | "amount_credited_cents" | "amount_void_cents" | null;
+  /**
+   * Which invoice COUNT this type feeds, or `null` for a money type. **Exactly
+   * one of `sums_into` / `counts_into` is non-null** — asserted for every row by
+   * `tests/settlements.test.ts`.
+   *
+   * ⭐ **A second axis rather than a fourth `sums_into` member**, because a
+   * closure carries `amount_cents: 0`: folded through a cents bucket it would
+   * contribute 0 whatever its sign, and "closed" would be unrepresentable. A
+   * count folds the multiplier itself (±1), so close → reopen → close reads 1,
+   * 0, 1. And a `null` `sums_into` is what keeps every cents fold from reading a
+   * closure as money — each consumer's `switch` must name the `null` arm.
+   */
+  counts_into: "closure_count" | null;
   /** Whether `reverses` must or must not be set. */
   reverses: "required" | "forbidden";
 }
@@ -1894,12 +1925,14 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
     reasons: ["payment_received", "correction", "unspecified"],
     xero_id_field: "xero_payment_id",
     sums_into: "amount_paid_cents",
+    counts_into: null,
     reverses: "forbidden",
   },
   payment_reversal: {
     reasons: ["source_retracted", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_paid_cents",
+    counts_into: null,
     reverses: "required",
   },
   credit: {
@@ -1913,12 +1946,14 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
     ],
     xero_id_field: "xero_credit_note_id",
     sums_into: "amount_credited_cents",
+    counts_into: null,
     reverses: "forbidden",
   },
   credit_reversal: {
     reasons: ["source_retracted", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_credited_cents",
+    counts_into: null,
     reverses: "required",
   },
   // A void carries no external id even though Xero is usually where it
@@ -1929,6 +1964,7 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
     reasons: ["invoice_voided", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_void_cents",
+    counts_into: null,
     reverses: "forbidden",
   },
   // Un-voiding is a real operation — a Xero void can be reversed by re-issuing,
@@ -1939,6 +1975,27 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
     reasons: ["source_retracted", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_void_cents",
+    counts_into: null,
+    reverses: "required",
+  },
+  // A closure is a CFS event with no Xero counterpart: Xero already reads a $0
+  // invoice PAID, so there is nothing to push. No `unspecified` — there is no
+  // closure history to backfill, so the member would describe nothing.
+  closure: {
+    reasons: ["zero_total", "correction"],
+    xero_id_field: null,
+    sums_into: null,
+    counts_into: "closure_count",
+    reverses: "forbidden",
+  },
+  // Reopening a closed $0 invoice so it can be edited again (R2). The pair is what
+  // keeps `closure_count` a fold rather than a latch, exactly as `void_reversal`
+  // does for `amount_void_cents`.
+  closure_reversal: {
+    reasons: ["source_retracted", "correction"],
+    xero_id_field: null,
+    sums_into: null,
+    counts_into: "closure_count",
     reverses: "required",
   },
 };

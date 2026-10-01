@@ -774,6 +774,14 @@ export {
   duplicateCustodySlots,
   isLossUndo,
 } from "./custody.ts";
+export {
+  INVOICE_ACTION_IDS,
+  INVOICE_ACTIONS,
+  type InvoiceActionDefinition,
+  type InvoiceActionId,
+  InvoiceActionIdEnum,
+  type InvoiceActionSubject,
+} from "./invoice-action.ts";
 
 export {
   ACCEPTS_PAYMENT_STATUSES,
@@ -924,6 +932,8 @@ export {
   CreditNoteSchema,
   CreditNoteStatusEnum,
   type CreditNoteStatusType,
+  CREDIT_NOTE_STATUS_CONTRACTS,
+  type CreditNoteStatusContract,
   type CreditNoteDocTotals,
 } from "./credit-note.ts";
 

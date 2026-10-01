@@ -120,6 +120,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "has", expr: "it.icons.has(name)", desc: "Whether `name` is a known icon (following aliases).", returns: "boolean" },
     { name: "svg", expr: "it.icons.svg(name, arg2)", desc: "Inline SVG markup for a lucide icon. Emit raw: `<%~ it.icons.svg(\"truck\") %>`.", returns: "string" },
   ],
+  "invoice-actions": [
+
+  ],
   "invoice-xero-sync": [
 
   ],
@@ -130,7 +133,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "calculateItemSubtotal", expr: "it.invoices.calculateItemSubtotal(item, arg2)", desc: "Calculate the pre-discount and post-discount subtotals for a single line item.", returns: "typeLiteral" },
     { name: "calculateItemTax", expr: "it.invoices.calculateItemTax(item, taxes, arg3)", desc: "Calculate tax amounts for a single line item from the Tax[] parameter. Returns a PriceModifier[] with computed amounts.", returns: "PriceModifier[]" },
     { name: "componentDepthOf", expr: "it.invoices.componentDepthOf(items)", desc: "How deep a line sits UNDER ANOTHER LINE — 0 for a top-level line, 1 for a kit component, 2 for a component of a component. What a document indents by.", returns: "fnOrConstructor" },
-    { name: "derivePaymentStatus", expr: "it.invoices.derivePaymentStatus(currentStatus, amountPaidCents, amountDueCents, arg4)", desc: "Derive invoice status from settlement amounts. Pure function — does not mutate the invoice.", returns: "InvoiceStatusType" },
+    { name: "deriveInvoiceStatus", expr: "it.invoices.deriveInvoiceStatus(invoice)", desc: "Derive an invoice's status from its stored status and its settled totals. Pure function — does not mutate the invoice. **Replaced `derivePaymentStatus`** (api-cloudrun#1169), taking the same argument shape as {@link invoiceIsFrozen} so no caller can hand it a partial set of the buckets.", returns: "InvoiceStatusType" },
     { name: "extensionSectionTargets", expr: "it.invoices.extensionSectionTargets(scopedItems, orderDividerUid)", desc: "The date-extension sections in one order scope of an invoice: each extension divider's uid → the ORDER-relative path of the order destination divider it extends (`path_extension_for`).", returns: "Map<string, string[]>" },
     { name: "getDestinationsLegend", expr: "it.invoices.getDestinationsLegend(destinations)", desc: "Pair-derived legend strings for the order's start/end dates.", returns: "typeLiteral" },
     { name: "getOrderScopedItems", expr: "it.invoices.getOrderScopedItems(items, orderDividerUid)", desc: "Get all invoice items scoped to a specific order divider. Returns the order divider itself plus all items whose path starts with the order divider's uid.", returns: "T[]" },

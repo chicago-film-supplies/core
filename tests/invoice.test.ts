@@ -1,9 +1,21 @@
 import { assert, assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
 import { ACCEPTS_PAYMENT_STATUSES, canOperatorTransition, CreateInvoiceInput, INVOICE_STATUS_CONTRACTS, InvoiceDocLineItem, InvoiceDocOrderItem, InvoiceItemInputLine, InvoiceSchema, type InvoiceStatusType, LIVE_IN_XERO_STATUSES, REACHED_XERO_STATUSES, SETTLED_STATUSES, UpdateInvoiceInput } from "../src/schemas/invoice.ts";
-import { derivePaymentStatus } from "../src/utils/invoices.ts";
+import { deriveInvoiceStatus } from "../src/utils/invoices.ts";
 import { unplacedEndpoints } from "../src/schemas/mod.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
+
+/**
+ * The old `derivePaymentStatus(status, paid, due, credited)` argument order over
+ * {@link deriveInvoiceStatus}, so these cases read as they did before the rename.
+ * `total_cents` is reconstructed as `paid + credited + due`, which is the
+ * identity every stored invoice satisfies.
+ */
+const derive = (status: InvoiceStatusType, paid: number, due: number, credited = 0) =>
+  deriveInvoiceStatus({
+    status,
+    totals: { total_cents: paid + credited + due, amount_paid_cents: paid, amount_credited_cents: credited, amount_due_cents: due },
+  });
 
 // `uid_thread` is a branded `ThreadId`; the schema walk seeds string leaves as
 // `""`, which it rejects. Supply a real id, as every prod doc carries one.
@@ -949,7 +961,7 @@ Deno.test("live in Xero implies reached Xero — and the two differ on exactly `
 Deno.test("a settled invoice accepts no further payment", () => {
   // `paid` and `void` are both frozen; the failure this forbids is a payment
   // recorded against a fully-settled invoice, which drives `amount_due`
-  // negative and lets `derivePaymentStatus` re-derive `paid` from it — the
+  // negative and lets `deriveInvoiceStatus` re-derive `paid` from it — the
   // overpayment absorbed silently.
   for (const [status, c] of Object.entries(INVOICE_STATUS_CONTRACTS)) {
     assertEquals(!c.settled || !c.accepts_payment, true, `${status}: settled and still paying`);
@@ -997,16 +1009,16 @@ Deno.test("each derived status list matches its column and none is empty", () =>
   assertEquals([...REACHED_XERO_STATUSES].sort(), ["issued", "paid", "part_paid", "void"]);
 });
 
-Deno.test("derivePaymentStatus never leaves a terminal status, and never invents one", () => {
+Deno.test("deriveInvoiceStatus never leaves a terminal status, and never invents one", () => {
   // The status writer that legitimately moves OUTSIDE `operator_moves` — which
   // is why the column is named for the operator and not for legality. Pinned
   // here so a future reader who applies `operator_moves` to this path finds a
   // red test rather than a broken Xero void.
-  assertEquals(derivePaymentStatus("draft", 500, 0), "draft");
-  assertEquals(derivePaymentStatus("void", 0, 500), "void");
-  assertEquals(derivePaymentStatus("issued", 0, 500), "issued");
-  assertEquals(derivePaymentStatus("issued", 100, 400), "part_paid");
-  assertEquals(derivePaymentStatus("issued", 500, 0), "paid");
+  assertEquals(derive("draft", 500, 0), "draft");
+  assertEquals(derive("void", 0, 500), "void");
+  assertEquals(derive("issued", 0, 500), "issued");
+  assertEquals(derive("issued", 100, 400), "part_paid");
+  assertEquals(derive("issued", 500, 0), "paid");
   // `issued → part_paid` and `issued → paid` are BOTH absent from
   // `operator_moves.issued`, and both are correct here.
   assertEquals(INVOICE_STATUS_CONTRACTS.issued.operator_moves.includes("part_paid"), false);
@@ -1442,4 +1454,24 @@ Deno.test("InvoiceSchema accepts a replacement line billing a movement-keyed out
       .success,
     false,
   );
+});
+
+Deno.test("totals.closure_count: legal only on a $0 invoice, and never negative (api-cloudrun#1169)", () => {
+  const zero = {
+    ...validInvoice,
+    status: "paid",
+    totals: { ...validInvoice.totals, subtotal_cents: 0, subtotal_discounted_cents: 0, total_cents: 0, amount_due_cents: 0 },
+  };
+  assertEquals(InvoiceSchema.safeParse({ ...zero, totals: { ...zero.totals, closure_count: 1 } }).success, true);
+  // Absent and 0 both mean "not closed".
+  assertEquals(InvoiceSchema.safeParse(zero).success, true);
+  assertEquals(InvoiceSchema.safeParse({ ...validInvoice, totals: { ...validInvoice.totals, closure_count: 0 } }).success, true);
+
+  const owing = InvoiceSchema.safeParse({ ...validInvoice, totals: { ...validInvoice.totals, closure_count: 1 } });
+  assertEquals(owing.success, false, "a closed invoice that still owes money is the #2396 shape from the other side");
+  assertEquals(owing.error!.issues.map((i) => i.path.join(".")), ["totals.closure_count"]);
+
+  const negative = InvoiceSchema.safeParse({ ...zero, totals: { ...zero.totals, closure_count: -1 } });
+  assertEquals(negative.success, false);
+  assertEquals(negative.error!.issues.map((i) => i.path.join(".")), ["totals.closure_count"]);
 });

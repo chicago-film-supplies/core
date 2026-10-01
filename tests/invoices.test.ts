@@ -13,7 +13,7 @@ import {
   computeInvoiceItemPaths,
   computeInvoiceSyncStatus,
   computeOrderInvoiceCoverage,
-  derivePaymentStatus,
+  deriveInvoiceStatus,
   flattenForXero,
   getOrderScopedItems,
   getXeroUnitAmountFromCents,
@@ -49,6 +49,18 @@ import type {
   SettlementReasonType,
   SettlementTypeType,
 } from "../src/schemas/mod.ts";
+
+/**
+ * The old `derivePaymentStatus(status, paid, due, credited)` argument order over
+ * {@link deriveInvoiceStatus}, so these cases read as they did before the rename.
+ * `total_cents` is reconstructed as `paid + credited + due`, which is the
+ * identity every stored invoice satisfies.
+ */
+const derive = (status: InvoiceStatusType, paid: number, due: number, credited = 0) =>
+  deriveInvoiceStatus({
+    status,
+    totals: { total_cents: paid + credited + due, amount_paid_cents: paid, amount_credited_cents: credited, amount_due_cents: due },
+  });
 
 /** A settlement row reduced to what the totals fold reads. */
 const S = (
@@ -1094,26 +1106,26 @@ Deno.test("rederiveInvoiceTotalsForAudit with transaction fee", () => {
   assertEquals(result.total_cents, 10300);
 });
 
-// ── derivePaymentStatus ─────────────────────────────────────────
+// ── deriveInvoiceStatus ─────────────────────────────────────────
 
-Deno.test("derivePaymentStatus passes through draft", () => {
-  assertEquals(derivePaymentStatus("draft", 0, 1000), "draft");
+Deno.test("deriveInvoiceStatus passes through draft", () => {
+  assertEquals(derive("draft", 0, 1000), "draft");
 });
 
-Deno.test("derivePaymentStatus passes through void", () => {
-  assertEquals(derivePaymentStatus("void", 500, 500), "void");
+Deno.test("deriveInvoiceStatus passes through void", () => {
+  assertEquals(derive("void", 500, 500), "void");
 });
 
-Deno.test("derivePaymentStatus returns paid when amount_due <= 0", () => {
-  assertEquals(derivePaymentStatus("issued", 1000, 0), "paid");
+Deno.test("deriveInvoiceStatus returns paid when amount_due <= 0", () => {
+  assertEquals(derive("issued", 1000, 0), "paid");
 });
 
-Deno.test("derivePaymentStatus returns part_paid when some paid", () => {
-  assertEquals(derivePaymentStatus("issued", 500, 500), "part_paid");
+Deno.test("deriveInvoiceStatus returns part_paid when some paid", () => {
+  assertEquals(derive("issued", 500, 500), "part_paid");
 });
 
-Deno.test("derivePaymentStatus returns issued when nothing paid", () => {
-  assertEquals(derivePaymentStatus("issued", 0, 1000), "issued");
+Deno.test("deriveInvoiceStatus returns issued when nothing paid", () => {
+  assertEquals(derive("issued", 0, 1000), "issued");
 });
 
 // ── recomputeSettlementTotals ───────────────────────────────────

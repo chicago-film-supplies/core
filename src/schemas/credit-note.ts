@@ -139,6 +139,45 @@ export const CreditNoteStatusEnum: z.ZodType<CreditNoteStatusType> = z.enum(
 );
 
 /**
+ * What one credit-note status admits (api-cloudrun#1169). Until this table the
+ * note's transitions were implicit in its writers, and the manager offered Void
+ * on any non-void note while the API 409'd it whenever an allocation was live.
+ *
+ * Read by `creditNoteActionsFor` (`@cfs/core/utils/invoice-actions`). Each
+ * column is a STATUS gate only: the action also needs its own runtime condition
+ * (no live allocation to void, remaining credit to allocate), which the ruleset
+ * checks and this table cannot state.
+ */
+export interface CreditNoteStatusContract {
+  /**
+   * May an operator void it? Void is the only operator move a note has — it is
+   * created `issued`, and `applied` is derived from its balance. `void` is
+   * terminal.
+   */
+  voidable: boolean;
+  /**
+   * May its credit be allocated to an invoice? `applied` is excluded because it
+   * IS `remaining_credit_cents === 0` (the refine below), so there is nothing to
+   * allocate; `draft` because it has not reached Xero.
+   */
+  accepts_allocation: boolean;
+}
+
+/**
+ * The per-status credit-note contract. `Readonly<Record<CreditNoteStatusType, …>>`
+ * makes a fifth status a type error here, at the declaration — the same
+ * totality `INVOICE_STATUS_CONTRACTS` relies on.
+ */
+export const CREDIT_NOTE_STATUS_CONTRACTS: Readonly<
+  Record<CreditNoteStatusType, CreditNoteStatusContract>
+> = {
+  draft: { voidable: true, accepts_allocation: false },
+  issued: { voidable: true, accepts_allocation: true },
+  applied: { voidable: true, accepts_allocation: false },
+  void: { voidable: false, accepts_allocation: false },
+};
+
+/**
  * Why this credit was issued — the `credit` arm of {@link SETTLEMENT_CONTRACTS},
  * **derived rather than re-listed**, so the document and the settlements it
  * spawns can never offer different reasons.

@@ -333,6 +333,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // whether it had been paid yet. A template that wants to show a payment
     // reads the stored totals.
     "invoiceHasSettlement",
+    "invoiceHasMoneySettlement",
     "invoiceIsFrozen",
     // ── Path + uniqueness machinery (invoice variants of the order ones above) ──
     "computeInvoiceItemPaths", // canonical path computation — write-path only
@@ -550,6 +551,22 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // sees its exports.
   // The record's status rule and breakdown sums. A rendered record carries its
   // stored `status` already; deriving it again at render time answers nothing.
+  // `utils/invoice-actions.ts` is the invoice lever's ruleset (invoice-actions
+  // plan, api-cloudrun#1169): which action an operator may take on an invoice,
+  // a credit note or an order's invoicing, and the route asserts that refuse
+  // the rest. Every export answers a question about a WRITE — a rendered
+  // document has no "next action" — exactly as `custody` below.
+  "invoice-actions": [
+    "assertCreditNoteAction",
+    "assertInvoiceAction",
+    "assertOrderInvoiceAction",
+    "creditNoteActionsFor",
+    "creditNoteOverCredit",
+    "creditableLines",
+    "invoiceActionSubject",
+    "invoiceActionsFor",
+    "orderInvoiceActionsFor",
+  ],
   // `utils/custody.ts` is the booking lever's ruleset (custody-actions plan):
   // which custody step is legal, what a list of actions does to a booking, and
   // what a record breakdown edit moves. Each export answers a question about a

@@ -17,8 +17,21 @@ import {
   type SettlementReasonType,
   type SettlementTypeType,
 } from "../src/schemas/mod.ts";
-import { derivePaymentStatus, recomputeSettlementTotals } from "../src/utils/invoices.ts";
+import { deriveInvoiceStatus, invoiceIsFrozen, recomputeSettlementTotals } from "../src/utils/invoices.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
+import type { InvoiceStatusType } from "../src/schemas/mod.ts";
+
+/**
+ * The old `derivePaymentStatus(status, paid, due, credited)` argument order over
+ * {@link deriveInvoiceStatus}, so these cases read as they did before the rename.
+ * `total_cents` is reconstructed as `paid + credited + due`, which is the
+ * identity every stored invoice satisfies.
+ */
+const derive = (status: InvoiceStatusType, paid: number, due: number, credited = 0) =>
+  deriveInvoiceStatus({
+    status,
+    totals: { total_cents: paid + credited + due, amount_paid_cents: paid, amount_credited_cents: credited, amount_due_cents: due },
+  });
 
 const ORG = "testorg1000000000000";
 const INV = "testinv1000000000000";
@@ -296,7 +309,7 @@ Deno.test("#1322: fully credited with ZERO cash collected", () => {
   assertEquals(r.amount_paid_cents, 0);
   assertEquals(r.amount_credited_cents, 449_562);
   assertEquals(r.amount_due_cents, 0);
-  assertEquals(derivePaymentStatus("issued", r.amount_paid_cents, r.amount_due_cents, r.amount_credited_cents), "paid");
+  assertEquals(derive("issued", r.amount_paid_cents, r.amount_due_cents, r.amount_credited_cents), "paid");
 });
 
 Deno.test("an over-credited invoice stays NEGATIVE — clamping hides the defect", () => {
@@ -370,7 +383,7 @@ Deno.test("a void row does NOT land in the credited bucket — the two-way `else
   assertEquals(r.breakdown.invoice_voided, 247_000);
 });
 
-Deno.test("derivePaymentStatus leaves `void` alone — status is an explicit move", () => {
+Deno.test("deriveInvoiceStatus leaves `void` alone — status is an explicit move", () => {
   // The fold says nothing is due; the status word is still the writer's to set,
   // in both directions. Un-voiding therefore takes TWO acts: append the
   // `void_reversal`, then move `status` off `void`.
@@ -378,7 +391,7 @@ Deno.test("derivePaymentStatus leaves `void` alone — status is an explicit mov
     S({ type: "void", reason: "invoice_voided", amount_cents: 247_000 }),
   ]);
   assertEquals(
-    derivePaymentStatus("void", voided.amount_paid_cents, voided.amount_due_cents, voided.amount_credited_cents),
+    derive("void", voided.amount_paid_cents, voided.amount_due_cents, voided.amount_credited_cents),
     "void",
   );
   const unvoided = recomputeSettlementTotals(247_000, [
@@ -386,12 +399,12 @@ Deno.test("derivePaymentStatus leaves `void` alone — status is an explicit mov
     S({ type: "void_reversal", reason: "correction", amount_cents: 247_000 }),
   ]);
   assertEquals(
-    derivePaymentStatus("void", unvoided.amount_paid_cents, unvoided.amount_due_cents),
+    derive("void", unvoided.amount_paid_cents, unvoided.amount_due_cents),
     "void",
     "the reversal alone does not un-void; the status move is separate and deliberate",
   );
   assertEquals(
-    derivePaymentStatus("issued", unvoided.amount_paid_cents, unvoided.amount_due_cents),
+    derive("issued", unvoided.amount_paid_cents, unvoided.amount_due_cents),
     "issued",
   );
 });
@@ -430,21 +443,122 @@ Deno.test("a reversal subtracts from its reason's breakdown too", () => {
   assertEquals(r.breakdown.source_retracted, -50_000);
 });
 
-// ── derivePaymentStatus ──────────────────────────────────────────
+// ── deriveInvoiceStatus ──────────────────────────────────────────
 
 Deno.test("a fully-credited, never-paid invoice derives paid", () => {
-  assertEquals(derivePaymentStatus("issued", 0, 0, 2_196), "paid");
+  assertEquals(derive("issued", 0, 0, 2_196), "paid");
 });
 
 Deno.test("a partially-credited, never-paid invoice derives part_paid", () => {
-  assertEquals(derivePaymentStatus("issued", 0, 500, 500), "part_paid");
+  assertEquals(derive("issued", 0, 500, 500), "part_paid");
 });
 
 Deno.test("draft and void still pass through regardless of credit", () => {
-  assertEquals(derivePaymentStatus("draft", 0, 0, 1000), "draft");
-  assertEquals(derivePaymentStatus("void", 0, 0, 1000), "void");
+  assertEquals(derive("draft", 0, 0, 1000), "draft");
+  assertEquals(derive("void", 0, 0, 1000), "void");
 });
 
 Deno.test("an untouched issued invoice stays issued", () => {
-  assertEquals(derivePaymentStatus("issued", 0, 1000, 0), "issued");
+  assertEquals(derive("issued", 0, 1000, 0), "issued");
+});
+
+// ── closure (api-cloudrun#1169) ──────────────────────────────────
+
+Deno.test("every settlement type feeds EXACTLY one of a cents bucket and a count", () => {
+  // Built from the vocabulary, not the table: a type with both, or neither,
+  // would be folded twice or not at all.
+  const types = Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[];
+  for (const type of types) {
+    const c = SETTLEMENT_CONTRACTS[type];
+    assertEquals((c.sums_into === null) !== (c.counts_into === null), true, type);
+  }
+  // Non-vacuity: both arms are populated.
+  assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].counts_into !== null).sort(), ["closure", "closure_reversal"]);
+  assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].sums_into !== null).length, 6);
+});
+
+Deno.test("close → reopen → close folds to 1, 0, 1 at every prefix", () => {
+  // R2: closing and reopening are journal rows, folded like every other
+  // settlement — so the count is right after EVERY append, not just at the end.
+  const rows = [
+    S({ type: "closure", reason: "zero_total" }),
+    S({ type: "closure_reversal", reason: "correction" }),
+    S({ type: "closure", reason: "zero_total" }),
+  ];
+  const expected = [1, 0, 1];
+  const statuses = ["paid", "issued", "paid"];
+  for (let n = 1; n <= rows.length; n++) {
+    const r = recomputeSettlementTotals(0, rows.slice(0, n));
+    assertEquals(r.closure_count, expected[n - 1], `prefix ${n}`);
+    // A closure moves no money: every cents bucket stays 0 and no reason is broken down.
+    assertEquals([r.amount_paid_cents, r.amount_credited_cents, r.amount_void_cents, r.amount_due_cents], [0, 0, 0, 0]);
+    assertEquals(r.breakdown, {});
+    const invoice = {
+      status: "issued" as InvoiceStatusType,
+      totals: { total_cents: 0, ...r },
+    };
+    assertEquals(deriveInvoiceStatus(invoice), statuses[n - 1], `prefix ${n}`);
+    // R1: closed ⟺ frozen, with nothing cached — reopening unfreezes.
+    assertEquals(invoiceIsFrozen({ status: statuses[n - 1] as InvoiceStatusType, totals: r }), expected[n - 1] > 0);
+  }
+});
+
+Deno.test("a closure row's amount is ignored by the cents fold — the count reads the multiplier", () => {
+  // The schema refuses a non-zero closure, but the fold must not depend on that:
+  // even a malformed row cannot leak money through the count arm.
+  const r = recomputeSettlementTotals(0, [S({ type: "closure", reason: "zero_total", amount_cents: 500 })]);
+  assertEquals(r.closure_count, 1);
+  assertEquals(r.amount_due_cents, 0);
+});
+
+Deno.test("deriveInvoiceStatus: a $0 invoice is paid ONLY when closed — never from due <= 0 (#2396)", () => {
+  const zero = (closure_count: number, status: InvoiceStatusType = "issued") => ({
+    status,
+    totals: { total_cents: 0, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 0, closure_count },
+  });
+  assertEquals(deriveInvoiceStatus(zero(0)), "issued", "#2396: emptied by an edit, nothing settles it");
+  assertEquals(deriveInvoiceStatus(zero(0, "paid")), "issued", "#2197: Xero said PAID; CFS no longer copies it");
+  assertEquals(deriveInvoiceStatus(zero(1)), "paid");
+  assertEquals(deriveInvoiceStatus(zero(1, "draft")), "draft");
+  assertEquals(deriveInvoiceStatus(zero(0, "void")), "void");
+  // Money on a $0 invoice is still money: an overpayment reads paid, no closure needed.
+  assertEquals(
+    deriveInvoiceStatus({ status: "issued", totals: { total_cents: 0, amount_paid_cents: 100, amount_due_cents: -100 } }),
+    "paid",
+  );
+  // A non-zero invoice ignores the count entirely (the invoice refine forbids it anyway).
+  assertEquals(
+    deriveInvoiceStatus({ status: "issued", totals: { total_cents: 500, amount_paid_cents: 0, amount_due_cents: 500, closure_count: 1 } }),
+    "issued",
+  );
+});
+
+Deno.test("deriveInvoiceStatus derives due from the buckets, not from a stale amount_due_cents", () => {
+  assertEquals(
+    deriveInvoiceStatus({ status: "issued", totals: { total_cents: 1_000, amount_paid_cents: 1_000, amount_due_cents: 1_000 } }),
+    "paid",
+  );
+});
+
+Deno.test("SettlementSchema enforces the closure contract", async (t) => {
+  const closure = { type: "closure", reason: "zero_total", amount_cents: 0 };
+  await t.step("a zero-cent closure is accepted", () => {
+    assertEquals(SettlementSchema.safeParse(makeSettlement(closure)).success, true);
+  });
+  const refusals: Array<[string, Record<string, unknown>, string]> = [
+    ["a closure moving money", { ...closure, amount_cents: 1 }, "amount_cents"],
+    ["a closure naming a credit note", { ...closure, uid_credit_note: "testcn10000000000000" }, "uid_credit_note"],
+    ["a closure carrying a Xero payment id", { ...closure, xero_payment_id: "x" }, "xero_payment_id"],
+    ["a closure that reverses something", { ...closure, reverses: SETTLEMENT }, "reverses"],
+    ["a closure_reversal naming nothing", { type: "closure_reversal", reason: "correction", amount_cents: 0 }, "reverses"],
+    ["a payment claiming zero_total", { type: "payment", reason: "zero_total" }, "reason"],
+    ["a closure with no reason it may carry", { ...closure, reason: "unspecified" }, "reason"],
+  ];
+  for (const [label, overrides, path] of refusals) {
+    await t.step(label, () => {
+      const r = SettlementSchema.safeParse(makeSettlement(overrides));
+      assertEquals(r.success, false);
+      assertEquals(r.error!.issues.map((i) => i.path.join(".")), [path]);
+    });
+  }
 });

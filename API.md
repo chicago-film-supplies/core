@@ -1256,6 +1256,16 @@ it three times invites three answers.
 const CREDIT_NOTE_REASONS: readonly SettlementReasonType[];
 ```
 
+### `CREDIT_NOTE_STATUS_CONTRACTS`
+
+The per-status credit-note contract. `Readonly<Record<CreditNoteStatusType, …>>`
+makes a fifth status a type error here, at the declaration — the same
+totality `INVOICE_STATUS_CONTRACTS` relies on.
+
+```ts
+const CREDIT_NOTE_STATUS_CONTRACTS: Readonly<Record<CreditNoteStatusType, CreditNoteStatusContract>>;
+```
+
 ### `CUSTODY_PLACE_KINDS`
 
 **Location is a total function**: every owned unit is in exactly one kind of
@@ -3202,6 +3212,24 @@ Zod schema for a CreditNote.
 const CreditNoteSchema: z.ZodType<CreditNote>;
 ```
 
+### `CreditNoteStatusContract`
+
+What one credit-note status admits (api-cloudrun#1169). Until this table the
+note's transitions were implicit in its writers, and the manager offered Void
+on any non-void note while the API 409'd it whenever an allocation was live.
+
+Read by `creditNoteActionsFor` (`@cfs/core/utils/invoice-actions`). Each
+column is a STATUS gate only: the action also needs its own runtime condition
+(no live allocation to void, remaining credit to allocate), which the ruleset
+checks and this table cannot state.
+
+```ts
+interface CreditNoteStatusContract {
+  voidable: boolean;
+  accepts_allocation: boolean;
+}
+```
+
 ### `CreditNoteStatusEnum`
 
 Zod schema for CreditNoteStatusType.
@@ -4761,6 +4789,25 @@ interface HorizonMaterializedData {
 }
 ```
 
+### `INVOICE_ACTIONS`
+
+Every action, keyed by id. `Readonly<Record<InvoiceActionId, …>>` makes an id
+with no row a type error; the both-ways test makes a row with no id one.
+
+```ts
+const INVOICE_ACTIONS: Readonly<Record<InvoiceActionId, InvoiceActionDefinition>>;
+```
+
+### `INVOICE_ACTION_IDS`
+
+Every invoice action id. `tests/invoice-actions.test.ts` asserts it equals
+{@link INVOICE_ACTIONS}' keys in both directions, and the manager
+de-duplicates its menus by these ids, never by a label.
+
+```ts
+const INVOICE_ACTION_IDS: "issue" | "void" | "close" | "add_payment" | "reverse_settlement" | "add_credit_note" | "edit_items" | "edit_organization" | "edit_date" | "void_credit_note" | "allocate_credit_note" | "create_invoice" | "create_remaining_invoice" | "create_replacement_invoice" | "credit_overbilling"[];
+```
+
 ### `INVOICE_STATUS_CONTRACTS`
 
 The per-status contract table.
@@ -4914,6 +4961,41 @@ interface Invoice {
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
 }
+```
+
+### `InvoiceActionDefinition`
+
+One row of {@link INVOICE_ACTIONS}.
+
+```ts
+interface InvoiceActionDefinition {
+  subject: InvoiceActionSubject;
+  description: string;
+}
+```
+
+### `InvoiceActionId`
+
+One invoice action id.
+
+```ts
+type InvoiceActionId = indexedAccess;
+```
+
+### `InvoiceActionIdEnum`
+
+Zod schema for {@link InvoiceActionId}.
+
+```ts
+const InvoiceActionIdEnum: z.ZodType<InvoiceActionId>;
+```
+
+### `InvoiceActionSubject`
+
+Which document an action acts on — and so which offer function lists it.
+
+```ts
+type InvoiceActionSubject = "invoice" | "credit_note" | "order";
 ```
 
 ### `InvoiceAging`
@@ -5154,6 +5236,7 @@ interface InvoiceDocTotalsType {
   amount_credited_cents?: number;
   amount_void_cents?: number;
   amount_due_cents: number;
+  closure_count?: number;
 }
 ```
 
@@ -9011,7 +9094,7 @@ deliberately shorter than the transaction name (`create-org:*` under
 `create-organization`). Read the prefix as a namespace, never as a join key.
 
 ```ts
-type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:transactions-to-ledger" | "reclassify-out-of-service-record:record-to-booking" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-store-transfer:transaction-to-out-of-service" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "merge-org:loser-to-orders" | "merge-org:loser-to-invoices" | "merge-org:loser-to-credit-notes" | "merge-org:loser-to-settlements" | "merge-org:loser-to-bookings" | "merge-org:loser-to-fulfillments" | "merge-org:loser-to-cards" | "merge-org:loser-to-out-of-service" | "merge-org:loser-to-contacts" | "merge-org:activity-to-survivor" | "merge-org:merged-from-to-survivor" | "merge-org:delete-loser" | "merge-org:tombstone-loser" | "merge-org:merged-to-to-tombstones" | "merge-org:tombstone-parent" | "merge-org:thread-comments-to-survivor" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "void-invoice-from-cancel:reap-settlements" | "void-invoice-from-cancel:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock";
+type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:transactions-to-ledger" | "reclassify-out-of-service-record:record-to-booking" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-store-transfer:transaction-to-out-of-service" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "merge-org:loser-to-orders" | "merge-org:loser-to-invoices" | "merge-org:loser-to-credit-notes" | "merge-org:loser-to-settlements" | "merge-org:loser-to-bookings" | "merge-org:loser-to-fulfillments" | "merge-org:loser-to-cards" | "merge-org:loser-to-out-of-service" | "merge-org:loser-to-contacts" | "merge-org:activity-to-survivor" | "merge-org:merged-from-to-survivor" | "merge-org:delete-loser" | "merge-org:tombstone-loser" | "merge-org:merged-to-to-tombstones" | "merge-org:tombstone-parent" | "merge-org:thread-comments-to-survivor" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "close-invoice:closure-to-invoice" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "void-invoice-from-cancel:reap-settlements" | "void-invoice-from-cancel:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock";
 ```
 
 ### `SEEDED_ROLE_NAMES`
@@ -9225,7 +9308,8 @@ How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}
 interface SettlementContract {
   reasons: readonly SettlementReasonType[];
   xero_id_field: "xero_payment_id" | "xero_credit_note_id" | null;
-  sums_into: "amount_paid_cents" | "amount_credited_cents" | "amount_void_cents";
+  sums_into: "amount_paid_cents" | "amount_credited_cents" | "amount_void_cents" | null;
+  counts_into: "closure_count" | null;
   reverses: "required" | "forbidden";
 }
 ```
@@ -10763,7 +10847,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `TransactionLogRecord`
@@ -13369,7 +13453,7 @@ deliberately shorter than the transaction name (`create-org:*` under
 `create-organization`). Read the prefix as a namespace, never as a join key.
 
 ```ts
-type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:transactions-to-ledger" | "reclassify-out-of-service-record:record-to-booking" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-store-transfer:transaction-to-out-of-service" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "merge-org:loser-to-orders" | "merge-org:loser-to-invoices" | "merge-org:loser-to-credit-notes" | "merge-org:loser-to-settlements" | "merge-org:loser-to-bookings" | "merge-org:loser-to-fulfillments" | "merge-org:loser-to-cards" | "merge-org:loser-to-out-of-service" | "merge-org:loser-to-contacts" | "merge-org:activity-to-survivor" | "merge-org:merged-from-to-survivor" | "merge-org:delete-loser" | "merge-org:tombstone-loser" | "merge-org:merged-to-to-tombstones" | "merge-org:tombstone-parent" | "merge-org:thread-comments-to-survivor" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "void-invoice-from-cancel:reap-settlements" | "void-invoice-from-cancel:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock";
+type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:transactions-to-ledger" | "reclassify-out-of-service-record:record-to-booking" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-store-transfer:transaction-to-out-of-service" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "merge-org:loser-to-orders" | "merge-org:loser-to-invoices" | "merge-org:loser-to-credit-notes" | "merge-org:loser-to-settlements" | "merge-org:loser-to-bookings" | "merge-org:loser-to-fulfillments" | "merge-org:loser-to-cards" | "merge-org:loser-to-out-of-service" | "merge-org:loser-to-contacts" | "merge-org:activity-to-survivor" | "merge-org:merged-from-to-survivor" | "merge-org:delete-loser" | "merge-org:tombstone-loser" | "merge-org:merged-to-to-tombstones" | "merge-org:tombstone-parent" | "merge-org:thread-comments-to-survivor" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "close-invoice:closure-to-invoice" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "void-invoice-from-cancel:reap-settlements" | "void-invoice-from-cancel:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock";
 ```
 
 ### `TransactionDefinition`
@@ -13393,7 +13477,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `aggregates`
@@ -14846,7 +14930,8 @@ How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}
 interface SettlementContract {
   reasons: readonly SettlementReasonType[];
   xero_id_field: "xero_payment_id" | "xero_credit_note_id" | null;
-  sums_into: "amount_paid_cents" | "amount_credited_cents" | "amount_void_cents";
+  sums_into: "amount_paid_cents" | "amount_credited_cents" | "amount_void_cents" | null;
+  counts_into: "closure_count" | null;
   reverses: "required" | "forbidden";
 }
 ```
@@ -17568,6 +17653,7 @@ interface InvoiceDocTotalsType {
   amount_credited_cents?: number;
   amount_void_cents?: number;
   amount_due_cents: number;
+  closure_count?: number;
 }
 ```
 
@@ -20817,6 +20903,16 @@ it three times invites three answers.
 const CREDIT_NOTE_REASONS: readonly SettlementReasonType[];
 ```
 
+### `CREDIT_NOTE_STATUS_CONTRACTS`
+
+The per-status credit-note contract. `Readonly<Record<CreditNoteStatusType, …>>`
+makes a fifth status a type error here, at the declaration — the same
+totality `INVOICE_STATUS_CONTRACTS` relies on.
+
+```ts
+const CREDIT_NOTE_STATUS_CONTRACTS: Readonly<Record<CreditNoteStatusType, CreditNoteStatusContract>>;
+```
+
 ### `CreditNote`
 
 A credit note issued to an organization.
@@ -20957,6 +21053,24 @@ Zod schema for a CreditNote.
 
 ```ts
 const CreditNoteSchema: z.ZodType<CreditNote>;
+```
+
+### `CreditNoteStatusContract`
+
+What one credit-note status admits (api-cloudrun#1169). Until this table the
+note's transitions were implicit in its writers, and the manager offered Void
+on any non-void note while the API 409'd it whenever an allocation was live.
+
+Read by `creditNoteActionsFor` (`@cfs/core/utils/invoice-actions`). Each
+column is a STATUS gate only: the action also needs its own runtime condition
+(no live allocation to void, remaining credit to allocate), which the ruleset
+checks and this table cannot state.
+
+```ts
+interface CreditNoteStatusContract {
+  voidable: boolean;
+  accepts_allocation: boolean;
+}
 ```
 
 ### `CreditNoteStatusEnum`
@@ -24677,7 +24791,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "custody_delta_unmatched" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_destination_override_dropped" | "invoice_sync_organization_kept" | "destination_pair_unjoined"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "custody_delta_unmatched" | "invoice_action_unoffered" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_destination_override_dropped" | "invoice_sync_organization_kept" | "destination_pair_unjoined"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -24747,6 +24861,10 @@ interface DomainEventLogRecord {
   status_to?: string | null;
   quantity_held?: number;
   quantity_available?: number;
+  invoice_action?: string;
+  action_subject?: "invoice" | "credit_note" | "order";
+  action_subject_uid?: string;
+  refusal?: string;
 }
 ```
 
@@ -29359,6 +29477,21 @@ interface InvoiceItem {
 }
 ```
 
+### `InvoiceSettledTotals`
+
+The settled half of an invoice's totals, as every predicate below reads it.
+
+```ts
+interface InvoiceSettledTotals {
+  total_cents?: number;
+  amount_paid_cents: number;
+  amount_credited_cents?: number;
+  amount_void_cents?: number;
+  amount_due_cents?: number;
+  closure_count?: number;
+}
+```
+
 ### `InvoiceSyncArm`
 
 Which explanation accounted for a difference.
@@ -30133,23 +30266,29 @@ invoice that bills it (Option B; the transitional `uid_order` field is gone).
 alignment predicate reads them.
 - `invoices` — Every invoice linked to the order, live or void.
 
-### `derivePaymentStatus(currentStatus: InvoiceStatusType, amountPaidCents: number, amountDueCents: number, _: unknown): InvoiceStatusType`
+### `deriveInvoiceStatus(invoice: typeLiteral): InvoiceStatusType`
 
-Derive invoice status from settlement amounts.
-Pure function — does not mutate the invoice.
+Derive an invoice's status from its stored status and its settled totals.
+Pure function — does not mutate the invoice. **Replaced `derivePaymentStatus`**
+(api-cloudrun#1169), taking the same argument shape as {@link invoiceIsFrozen}
+so no caller can hand it a partial set of the buckets.
 
-**No new status member is needed for a credited invoice.** `paid` already
-means `amount_due_cents === 0`, not "cash received" — which is exactly what Xero
-says: #1751 and #1322 are both PAID there with `AmountPaid: 0`.
+- `draft` and `void` pass through: leaving either is an explicit move, never a
+  derivation.
+- 🔴 **A $0 invoice with nothing money-settled is `paid` only if an operator
+  CLOSED it** (`closure_count > 0`), and `issued` otherwise — never from
+  `amount_due_cents <= 0`. That comparison is what made #2396 read `paid`: a
+  shrink invoice whose lines were all removed reached $0 due, the Xero webhook
+  re-derived `paid`, and the freeze locked the operator out of their own edit.
+  Xero marks every $0 invoice PAID on issue (probed 2026-10-01), so copying
+  Xero's verdict here would reproduce it on every one.
+- Otherwise: `amount_due_cents <= 0` ⇒ `paid` (`paid` means nothing owed, not
+  "cash received" — #1751 and #1322 are PAID in Xero with `AmountPaid: 0`);
+  any cash or credit ⇒ `part_paid`; else `issued`.
 
-**Parameters**
-
-- `currentStatus` — Current invoice status
-- `amountPaidCents` — Total settled in cash, in integer cents
-- `amountDueCents` — Total still outstanding, in integer cents
-- `amountCreditedCents` — Total settled by credit note, in integer cents
-
-**Returns** — The derived status
+`amount_due_cents` is RE-COMPUTED here from `total − paid − credited − voided`
+when `total_cents` is present rather than read, so a caller holding a stale
+`amount_due_cents` beside fresh buckets cannot derive from the stale one.
 
 ### `explainInvoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem, differences: readonly string[], context: InvoiceSyncContext): InvoiceSyncExplanation`
 
@@ -30312,9 +30451,15 @@ narrowed, so a non-integer cannot throw on the Xero push path.
 
 **Returns** — Per-unit amount for Xero **in dollars**, or 0 if quantity is 0
 
+### `invoiceHasMoneySettlement(invoice: typeLiteral): boolean`
+
+Does this invoice record money having moved — paid, credited or voided? Money
+only: a closure is NOT money. See {@link invoiceHasSettlement}, which counts it.
+
 ### `invoiceHasSettlement(invoice: typeLiteral): boolean`
 
-Does this invoice record money having moved — paid, credited or voided?
+Does this invoice record money having moved — paid, credited or voided — or
+has an operator CLOSED it (a live `closure` row, api-cloudrun#1169)?
 
 ⭐ **Tests the settled VALUE, not a row count**, which is what makes the
 unfreeze work with no stored state anywhere: reversing a payment to zero
@@ -30621,8 +30766,12 @@ about it, instead of a quiet mis-route at every site that reads the result.
 
 - `totalCents` — Invoice total, in integer cents, from `items[]`
 - `settlements` — Every settlement against the invoice, reversals included
+**`closure_count` folds the MULTIPLIER, not the amount** (api-cloudrun#1169):
+a closure carries `amount_cents: 0`, so it is dispatched on
+`SettlementContract.counts_into` and reaches the cents switch only through its
+`null` arm.
 
-**Returns** — The four projected totals plus a per-reason breakdown, in cents
+**Returns** — The four projected totals, the closure count, and a per-reason cents breakdown
 
 ### `rederiveInvoiceTotalsForAudit(items: InvoiceItem[], taxes: Tax[], settlements: readonly typeLiteral[]): InvoiceTotals`
 
@@ -31059,6 +31208,287 @@ Returns `[]` when uniqueness holds.
 
 NOTE: assumes the self-INCLUDED `path` convention. Product `components`
 exclude self from `path` — use {@link validateComponentUniqueness} for them.
+
+## `@cfs/core/utils/invoice-actions`
+
+The invoice action ruleset — ONE answer, for the manager and the API alike, to
+"what may an operator do to this invoice, this credit note, or this order's
+invoicing?" (api-cloudrun#1169, R3).
+
+Three offer functions, each returning only ids from `INVOICE_ACTION_IDS`:
+
+- {@link invoiceActionsFor} — on an invoice;
+- {@link creditNoteActionsFor} — on a credit note;
+- {@link orderInvoiceActionsFor} — creating invoices or credits from an order.
+
+and an `assert*` per function, throwing {@link InvoiceActionRefusal}, that the
+API runs on its OPERATOR routes. The shape is custody's (`utils/custody.ts`):
+the UI renders the offers, the server asserts the same rules, so a button
+cannot be offered that the server refuses.
+
+## Two rules every caller must keep
+
+1. 🔴 **Operator policy is not legality.** The `assert*` functions belong on
+   operator routes only — never on the Xero webhook, the reap, void-from-cancel
+   or {@link deriveInvoiceStatus}. Xero is the authority on payments: an
+   overpayment that arrives from Xero is a fact to record, not a request to
+   refuse. `add_payment`'s cap applies to the operator, never to the ledger.
+2. **Fail closed.** An action this module does not offer is refused, and an
+   unknown status offers nothing rather than throwing.
+
+## What stays server-only
+
+Referenced by the ruleset, never duplicated into it: `lineMoneyAgrees` (it
+needs the REBUILT lines, so `edit_items` takes its answer as `money_moved`),
+the organization tombstone and Xero-contact re-address checks, the Xero pushes
+and `XERO_RETRACTION`, CAS/version checks, idempotency and counter allocation.
+The server re-checks every limit inside its own transaction; an offer is a
+snapshot of the documents it was handed.
+
+### `CappedCreditLine`
+
+A prior credit-note line, as the credit cap reads it.
+
+```ts
+interface CappedCreditLine {
+  name: string;
+  quantity: number;
+  uid_invoice_item: string | null;
+  path_invoice_item?: readonly string[];
+  price: typeLiteral;
+}
+```
+
+### `CappedNote`
+
+A prior credit note, as the credit cap reads it. Void notes are skipped.
+
+```ts
+interface CappedNote {
+  status: string;
+  items: readonly CappedCreditLine[];
+}
+```
+
+### `CreditNoteActionRequest`
+
+What an operator route asks to do to a credit note.
+
+```ts
+type CreditNoteActionRequest = typeLiteral | typeLiteral;
+```
+
+### `CreditNoteOfferContext`
+
+What {@link creditNoteActionsFor} needs that the note alone does not carry.
+
+```ts
+interface CreditNoteOfferContext {
+  allocations: readonly Pick<Settlement, "uid" | "type" | "reverses">[];
+  invoice?: OfferAllocationTarget;
+}
+```
+
+### `CreditableLine`
+
+What one billed line may still be credited (D3) — arm B of the credit-note
+cap, as an offer. All three numbers are net of every prior non-void note.
+
+```ts
+interface CreditableLine {
+  path: string[];
+  uid: string;
+  billed: number;
+  billed_days: number;
+  unit_days: number;
+  units: number;
+}
+```
+
+### `InvoiceActionOffer`
+
+One action the UI may offer. `key` is what a menu de-duplicates on: the action
+id, or `reverse_settlement:<uid>` for a per-row reversal.
+
+```ts
+interface InvoiceActionOffer {
+  key: string;
+  action: InvoiceActionId;
+  max_cents?: number;
+  uid_settlement?: string;
+  lines?: CreditableLine[];
+  money_frozen?: boolean;
+}
+```
+
+### `InvoiceActionRefusal`
+
+_(class — see source)_
+
+### `InvoiceActionRequest`
+
+What an operator route asks to do to an invoice.
+
+```ts
+type InvoiceActionRequest = typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral;
+```
+
+### `InvoiceOfferContext`
+
+What {@link invoiceActionsFor} needs that the invoice alone does not carry.
+
+```ts
+interface InvoiceOfferContext {
+  settlements?: readonly OfferSettlement[];
+  creditNotes?: readonly CappedNote[];
+}
+```
+
+### `OfferAllocationTarget`
+
+An invoice a credit note might be allocated to.
+
+```ts
+interface OfferAllocationTarget {
+  status: InvoiceStatusType;
+  totals: typeLiteral;
+  organization: typeLiteral;
+}
+```
+
+### `OfferCreditNote`
+
+A credit note as the ruleset reads it.
+
+```ts
+type OfferCreditNote = Pick<CreditNote, "status" | "remaining_credit_cents"> & typeLiteral;
+```
+
+### `OfferInvoice`
+
+An invoice as the ruleset reads it.
+
+```ts
+interface OfferInvoice {
+  status: InvoiceStatusType;
+  totals: InvoiceSettledTotals & typeLiteral;
+  items?: readonly InvoiceDocItemType[];
+}
+```
+
+### `OfferOrder`
+
+An order as the ruleset reads it.
+
+```ts
+type OfferOrder = Pick<Order, "uid" | "number" | "status" | "items" | "destinations">;
+```
+
+### `OfferSettlement`
+
+A settlement row as `reverse_settlement` reads it.
+
+```ts
+type OfferSettlement = Pick<Settlement, "uid" | "type" | "reverses" | "xero_payment_id">;
+```
+
+### `OrderInvoiceActionRequest`
+
+What an operator route asks to do from an order.
+
+```ts
+interface OrderInvoiceActionRequest {
+  action: "create_invoice" | "create_remaining_invoice" | "create_replacement_invoice" | "credit_overbilling";
+}
+```
+
+### `OrderInvoiceOfferContext`
+
+What {@link orderInvoiceActionsFor} needs that the order alone does not carry.
+
+```ts
+interface OrderInvoiceOfferContext {
+  invoices?: readonly AccountedInvoice[];
+  creditNotes?: readonly AccountedCreditNote[];
+  replacement_units?: number;
+}
+```
+
+### `assertCreditNoteAction(note: OfferCreditNote, ctx: CreditNoteOfferContext, request: CreditNoteActionRequest): void`
+
+Refuse a credit-note action the ruleset does not offer. Operator routes only.
+
+### `assertInvoiceAction(invoice: OfferInvoice, ctx: InvoiceOfferContext, request: InvoiceActionRequest): void`
+
+Refuse an invoice action the ruleset does not offer, or one that exceeds its
+offer's limits. Operator routes only — see the module doc.
+
+### `assertOrderInvoiceAction(order: OfferOrder, ctx: OrderInvoiceOfferContext, request: OrderInvoiceActionRequest): void`
+
+Refuse an order-invoicing action the ruleset does not offer. Operator routes only.
+
+### `creditNoteActionsFor(note: OfferCreditNote, ctx: CreditNoteOfferContext): InvoiceActionOffer[]`
+
+Every action the UI may offer on this credit note.
+
+- `void_credit_note` (D4) — the status is voidable and no allocation is live.
+- `allocate_credit_note` (D5, D6) — credit left, and with an invoice in the
+  context, an invoice that `accepts_payment`, owes something, and sits on the
+  same Xero contact. `max_cents` is the remaining credit, capped by the
+  invoice's amount due when one is given.
+
+### `creditNoteOverCredit(invoiceNumber: number, items: readonly InvoiceDocItemType[], requested: readonly CappedCreditLine[], priorNotes: readonly CappedNote[]): string | null`
+
+Why crediting `requested` would exceed what the invoice billed, or `null` when
+it would not. **The api's whole credit-note cap**, both arms, with its
+messages unchanged but one (a null-day line now names the days it spends) — arm A (one line may not claim more units than the row
+billed) checked first, then arm B (the cumulative unit-day budget).
+
+`invoiceNumber` is for the message only.
+
+### `creditableLines(items: readonly InvoiceDocItemType[], priorNotes: readonly CappedNote[]): CreditableLine[]`
+
+Credit left on every billed line, net of `priorNotes` (D3). **Arm B of the
+api's credit-note cap, lifted here** (`api-cloudrun/src/lib/creditNoteCap.ts`)
+so the manager offers exactly what the server will accept.
+
+ONE budget, in unit-days. A null `chargeable_days` on a prior note line means
+"whole units at the row's own terms", NOT one day — every note stored before
+api-cloudrun#1028 has it null, and reading those as one day would leave room
+to credit units the note already gave back. A line with no `chargeable_days`
+of its own counts as 1 day, which makes the budget exactly the unit count.
+
+### `invoiceActionSubject(action: InvoiceActionId): InvoiceActionSubject`
+
+Which offer function lists `action` — read off {@link INVOICE_ACTIONS}.
+
+### `invoiceActionsFor(invoice: OfferInvoice, _: unknown): InvoiceActionOffer[]`
+
+Every action the UI may offer on this invoice.
+
+- `issue` / `void` — `canOperatorTransition`, the column `updateInvoice` gates on.
+- `close` — a live invoice totalling $0, nothing money-settled, no live
+  closure. ⚠️ Offered on a `paid` $0 invoice too: the ones today's derivation
+  copied PAID from Xero (#2197) are closed by exactly this action.
+- `add_payment` (D1) — the status `accepts_payment` and something is due;
+  `max_cents` is the amount due, a hard cap with no overpay override.
+- `reverse_settlement` (D2) — one offer per reversible row.
+- `add_credit_note` (D3) — a status live in Xero, with credit left on a line.
+- `edit_items` (D8) — always; `money_frozen` says whether line money is.
+- `edit_organization` / `edit_date` — while not {@link invoiceIsFrozen}.
+
+### `orderInvoiceActionsFor(order: OfferOrder, _: unknown): InvoiceActionOffer[]`
+
+Every invoicing action the UI may offer on this order.
+
+- The three CREATE actions (D7) refuse a `canceled` order and nothing else —
+  there is no organization-match rule, because billing a third party is a real
+  pattern (13 imported invoices). A `draft` order is reserved by the create
+  route before it is invoiced.
+- `create_remaining_invoice` — `remainingForOrder` finds a line nothing bills.
+- `create_replacement_invoice` — `replacement_units > 0`.
+- `credit_overbilling` — `buildOverbillingCredits` offers at least one note,
+  on any status. The manager's 10-invoice cap stays a display limit.
 
 ## `@cfs/core/utils/invoice-xero-sync`
 

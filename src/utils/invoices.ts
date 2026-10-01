@@ -226,16 +226,47 @@ export function rederiveInvoiceTotalsForAudit(
   const core = rederiveDocumentTotalsForAudit(flattenForXero(items), taxes);
 
   // Settlement accounting — the projection of the journal onto this document.
-  const { amount_paid_cents, amount_credited_cents, amount_void_cents, amount_due_cents } =
+  const { amount_paid_cents, amount_credited_cents, amount_void_cents, amount_due_cents, closure_count } =
     recomputeSettlementTotals(core.total_cents, settlements);
 
-  return { ...core, amount_paid_cents, amount_credited_cents, amount_void_cents, amount_due_cents };
+  return {
+    ...core,
+    amount_paid_cents,
+    amount_credited_cents,
+    amount_void_cents,
+    amount_due_cents,
+    // Stated only when non-zero: absent reads as 0, and stating a 0 on every
+    // re-derivation would read as a key-set difference against the ~1,070 stored
+    // invoices that predate the field.
+    ...(closure_count !== 0 ? { closure_count } : {}),
+  };
 }
 
 // ── Payment helpers ─────────────────────────────────────────────
 
+/** The settled half of an invoice's totals, as every predicate below reads it. */
+export interface InvoiceSettledTotals {
+  total_cents?: number;
+  amount_paid_cents: number;
+  amount_credited_cents?: number;
+  amount_void_cents?: number;
+  amount_due_cents?: number;
+  closure_count?: number;
+}
+
 /**
- * Does this invoice record money having moved — paid, credited or voided?
+ * Does this invoice record money having moved — paid, credited or voided? Money
+ * only: a closure is NOT money. See {@link invoiceHasSettlement}, which counts it.
+ */
+export function invoiceHasMoneySettlement(invoice: { totals: InvoiceSettledTotals }): boolean {
+  return invoice.totals.amount_paid_cents !== 0 ||
+    (invoice.totals.amount_credited_cents ?? 0) !== 0 ||
+    (invoice.totals.amount_void_cents ?? 0) !== 0;
+}
+
+/**
+ * Does this invoice record money having moved — paid, credited or voided — or
+ * has an operator CLOSED it (a live `closure` row, api-cloudrun#1169)?
  *
  * ⭐ **Tests the settled VALUE, not a row count**, which is what makes the
  * unfreeze work with no stored state anywhere: reversing a payment to zero
@@ -251,12 +282,11 @@ export function rederiveInvoiceTotalsForAudit(
  * re-exports it: it is a pure predicate over three numbers, three repos want it,
  * and {@link invoiceIsFrozen} below needs it.
  */
-export function invoiceHasSettlement(
-  invoice: { totals: { amount_paid_cents: number; amount_credited_cents?: number; amount_void_cents?: number } },
-): boolean {
-  return invoice.totals.amount_paid_cents !== 0 ||
-    (invoice.totals.amount_credited_cents ?? 0) !== 0 ||
-    (invoice.totals.amount_void_cents ?? 0) !== 0;
+export function invoiceHasSettlement(invoice: { totals: InvoiceSettledTotals }): boolean {
+  // R1: a closed $0 invoice is frozen exactly as a paid one is, and reversing the
+  // closure unfreezes it the same way reversing a payment does — `closure_count`
+  // is a fold, so nothing caches "was closed" either.
+  return invoiceHasMoneySettlement(invoice) || (invoice.totals.closure_count ?? 0) > 0;
 }
 
 /**
@@ -284,42 +314,51 @@ export function invoiceHasSettlement(
  * the operator's to change at all?* Both exist, and neither subsumes the other.
  */
 export function invoiceIsFrozen(
-  invoice: {
-    status: InvoiceStatusType;
-    totals: { amount_paid_cents: number; amount_credited_cents?: number; amount_void_cents?: number };
-  },
+  invoice: { status: InvoiceStatusType; totals: InvoiceSettledTotals },
 ): boolean {
   return invoiceHasSettlement(invoice) || invoice.status === "paid" || invoice.status === "void";
 }
 
 /**
- * Derive invoice status from settlement amounts.
- * Pure function — does not mutate the invoice.
+ * Derive an invoice's status from its stored status and its settled totals.
+ * Pure function — does not mutate the invoice. **Replaced `derivePaymentStatus`**
+ * (api-cloudrun#1169), taking the same argument shape as {@link invoiceIsFrozen}
+ * so no caller can hand it a partial set of the buckets.
  *
- * **No new status member is needed for a credited invoice.** `paid` already
- * means `amount_due_cents === 0`, not "cash received" — which is exactly what Xero
- * says: #1751 and #1322 are both PAID there with `AmountPaid: 0`.
+ * - `draft` and `void` pass through: leaving either is an explicit move, never a
+ *   derivation.
+ * - 🔴 **A $0 invoice with nothing money-settled is `paid` only if an operator
+ *   CLOSED it** (`closure_count > 0`), and `issued` otherwise — never from
+ *   `amount_due_cents <= 0`. That comparison is what made #2396 read `paid`: a
+ *   shrink invoice whose lines were all removed reached $0 due, the Xero webhook
+ *   re-derived `paid`, and the freeze locked the operator out of their own edit.
+ *   Xero marks every $0 invoice PAID on issue (probed 2026-10-01), so copying
+ *   Xero's verdict here would reproduce it on every one.
+ * - Otherwise: `amount_due_cents <= 0` ⇒ `paid` (`paid` means nothing owed, not
+ *   "cash received" — #1751 and #1322 are PAID in Xero with `AmountPaid: 0`);
+ *   any cash or credit ⇒ `part_paid`; else `issued`.
  *
- * @param currentStatus - Current invoice status
- * @param amountPaidCents - Total settled in cash, in integer cents
- * @param amountDueCents - Total still outstanding, in integer cents
- * @param amountCreditedCents - Total settled by credit note, in integer cents
- * @returns The derived status
+ * `amount_due_cents` is RE-COMPUTED here from `total − paid − credited − voided`
+ * when `total_cents` is present rather than read, so a caller holding a stale
+ * `amount_due_cents` beside fresh buckets cannot derive from the stale one.
  */
-export function derivePaymentStatus(
-  currentStatus: InvoiceStatusType,
-  amountPaidCents: number,
-  amountDueCents: number,
-  amountCreditedCents = 0,
+export function deriveInvoiceStatus(
+  invoice: { status: InvoiceStatusType; totals: InvoiceSettledTotals & { total_cents: number } },
 ): InvoiceStatusType {
-  if (currentStatus === "draft" || currentStatus === "void") return currentStatus;
-  // Bare integer comparisons. The `currency(x).value` wrappers this replaced
-  // were quantizing a float before comparing it to zero; an exact cent count
-  // needs neither step.
-  if (amountDueCents <= 0) return "paid";
+  const { status, totals } = invoice;
+  if (status === "draft" || status === "void") return status;
+  const paid = totals.amount_paid_cents;
+  const credited = totals.amount_credited_cents ?? 0;
+  const voided = totals.amount_void_cents ?? 0;
+  if (totals.total_cents === 0 && !invoiceHasMoneySettlement(invoice)) {
+    return (totals.closure_count ?? 0) > 0 ? "paid" : "issued";
+  }
+  // Bare integer comparisons: every operand is an exact count of cents.
+  const due = totals.total_cents - paid - credited - voided;
+  if (due <= 0) return "paid";
   // A partially-credited invoice is as much "part paid" as a partially-paid one
   // — the operator's question is "has anything settled this yet?"
-  if (amountPaidCents > 0 || amountCreditedCents > 0) return "part_paid";
+  if (paid > 0 || credited > 0) return "part_paid";
   return "issued";
 }
 
@@ -368,7 +407,12 @@ export function derivePaymentStatus(
  *
  * @param totalCents - Invoice total, in integer cents, from `items[]`
  * @param settlements - Every settlement against the invoice, reversals included
- * @returns The four projected totals plus a per-reason breakdown, in cents
+ * **`closure_count` folds the MULTIPLIER, not the amount** (api-cloudrun#1169):
+ * a closure carries `amount_cents: 0`, so it is dispatched on
+ * `SettlementContract.counts_into` and reaches the cents switch only through its
+ * `null` arm.
+ *
+ * @returns The four projected totals, the closure count, and a per-reason cents breakdown
  */
 export function recomputeSettlementTotals(
   totalCents: number,
@@ -382,16 +426,24 @@ export function recomputeSettlementTotals(
   amount_credited_cents: number;
   amount_void_cents: number;
   amount_due_cents: number;
+  closure_count: number;
   breakdown: Partial<Record<SettlementReasonType, number>>;
 } {
   let paidCents = 0;
   let creditedCents = 0;
   let voidedCents = 0;
+  let closureCount = 0;
   const breakdownCents: Partial<Record<SettlementReasonType, number>> = {};
 
   for (const s of settlements) {
-    const signed = s.amount_cents * getSettlementMultiplier(s.type);
-    const bucket = SETTLEMENT_CONTRACTS[s.type].sums_into;
+    const multiplier = getSettlementMultiplier(s.type);
+    const contract = SETTLEMENT_CONTRACTS[s.type];
+    // A COUNT row folds its multiplier, never its (zero) amount — see
+    // `SettlementContract.counts_into`. Checked before the cents switch so the
+    // switch's `null` arm is the only place a count row can reach.
+    if (contract.counts_into === "closure_count") closureCount += multiplier;
+    const signed = s.amount_cents * multiplier;
+    const bucket = contract.sums_into;
     switch (bucket) {
       case "amount_paid_cents":
         paidCents += signed;
@@ -402,6 +454,10 @@ export function recomputeSettlementTotals(
       case "amount_void_cents":
         voidedCents += signed;
         break;
+      case null:
+        // A count type (`closure`): no money, and no breakdown entry — a
+        // per-reason breakdown is a breakdown of CENTS.
+        continue;
       default: {
         // Exhaustiveness, checked by the compiler: a new `sums_into` member
         // makes `bucket` non-`never` here and this line stops type-checking.
@@ -421,6 +477,7 @@ export function recomputeSettlementTotals(
     // met two converted figures here; with every operand in the same unit there
     // is nothing left for a decimal type to reconcile.
     amount_due_cents: totalCents - paidCents - creditedCents - voidedCents,
+    closure_count: closureCount,
     breakdown: breakdownCents,
   };
 }

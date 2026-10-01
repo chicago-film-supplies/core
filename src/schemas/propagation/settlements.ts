@@ -102,7 +102,7 @@ const createSettlementRules: CollectionRule[] = [
         source: [],
         target: ["status"],
         transform:
-          "derivePaymentStatus over the folded totals — and it must account for credits, because a fully CREDITED invoice is settled rather than unpaid (#409)",
+          "deriveInvoiceStatus over the folded totals — and it must account for credits, because a fully CREDITED invoice is settled rather than unpaid (#409)",
       },
       {
         source: [],
@@ -177,9 +177,15 @@ const reverseSettlementRules: CollectionRule[] = [
       },
       {
         source: [],
+        target: ["totals", "closure_count"],
+        transform:
+          "−1 when the reverser is a `closure_reversal` (it folds the contract multiplier through `counts_into`, never `amount_cents`, which is 0); untouched for a money row",
+      },
+      {
+        source: [],
         target: ["status"],
         transform:
-          "derivePaymentStatus over the folded totals — typically paid → part_paid or issued",
+          "deriveInvoiceStatus over the folded totals — typically paid → part_paid or issued; a reopened $0 invoice reads `issued`",
       },
       {
         source: [],
@@ -222,6 +228,62 @@ const reverseSettlementTransaction: TransactionDefinition = {
   steps: [
     "reverse-settlement:reverser-to-invoice",
     "reverse-settlement:release-to-credit-note",
+    "update-invoice:status-to-orders",
+  ],
+};
+
+// ── close-invoice ───────────────────────────────────────────────────
+
+/**
+ * The fold is exercised in core, not by the api's audit: `audit-settlement-totals`
+ * compares the CENTS buckets and does not read `closure_count` until the api
+ * learns it (invoice-actions P2). Naming the audit here would claim a check of
+ * the count that nothing runs yet.
+ */
+const CLOSURE_FOLD: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/settlements.test.ts::close → reopen → close folds to 1, 0, 1 at every prefix",
+  clause:
+    "the projection clause only — a closure folds +1 into `closure_count`, its reversal −1, and the status reads `paid` exactly while the count is positive. Says nothing about the write path or the order mirror.",
+  gates: true,
+};
+
+const closeInvoiceRules: CollectionRule[] = [
+  {
+    id: "close-invoice:closure-to-invoice",
+    source: "settlements",
+    target: "invoices",
+    mode: "co-write",
+    invariant:
+      "An operator closes a $0 invoice by appending a `closure` row (api-cloudrun#1169). It moves NO money — `amount_cents` is 0 by contract — so it reaches the invoice through `closure_count`, never through a cents bucket, and the invoice reads `paid` and freezes for as long as the count is positive. It has its own transaction rather than riding `create-settlement`, because the two steps are not identical: that rule maps `amount_cents → amount_paid_cents`, and a closure maps nothing in cents. Legal only on a live invoice whose total is 0 with nothing money-settled and no live closure — the `close` action in `@cfs/core/utils/invoice-actions`.",
+    enforced_by: [CLOSURE_FOLD],
+    transaction: "close-invoice",
+    fields: [
+      {
+        source: [],
+        target: ["totals", "closure_count"],
+        transform: "+1 — the contract multiplier folded through `counts_into`",
+      },
+      {
+        source: [],
+        target: ["status"],
+        transform: "deriveInvoiceStatus over the folded totals — `issued` → `paid`",
+      },
+      {
+        source: [],
+        target: ["version"],
+        transform: "+1 — see create-settlement",
+      },
+    ],
+  },
+];
+
+const closeInvoiceTransaction: TransactionDefinition = {
+  id: "close-invoice",
+  description:
+    "Mark Paid on a $0 invoice: appends a `closure` settlement row, folds `closure_count` and the status onto the invoice, and co-writes the status to each linked order. Reopening is `reverse-settlement` on that row, which appends a `closure_reversal`. Pushes nothing to Xero — Xero already reads a $0 invoice PAID.",
+  steps: [
+    "close-invoice:closure-to-invoice",
     "update-invoice:status-to-orders",
   ],
 };
@@ -287,7 +349,7 @@ const syncXeroSettlementRules: CollectionRule[] = [
       {
         source: [],
         target: ["status"],
-        transform: "derivePaymentStatus over the folded totals",
+        transform: "deriveInvoiceStatus over the folded totals",
       },
       {
         source: [],
@@ -537,6 +599,7 @@ export const settlements: PropagationModule = {
   rules: [
     ...createSettlementRules,
     ...reverseSettlementRules,
+    ...closeInvoiceRules,
     ...syncXeroSettlementRules,
     ...voidInvoiceRules,
     ...voidInvoiceFromXeroRules,
@@ -545,6 +608,7 @@ export const settlements: PropagationModule = {
   transactions: [
     createSettlementTransaction,
     reverseSettlementTransaction,
+    closeInvoiceTransaction,
     syncXeroSettlementTransaction,
     voidInvoiceTransaction,
     voidInvoiceFromXeroTransaction,

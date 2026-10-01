@@ -108,6 +108,7 @@ export type TransactionId =
   // settlements.ts
   | "create-settlement"
   | "reverse-settlement"
+  | "close-invoice"
   | "sync-xero-settlement"
   | "void-invoice"
   | "void-invoice-from-xero"
@@ -287,6 +288,7 @@ export type RuleId =
   | "create-settlement:settlement-to-invoice"
   | "reverse-settlement:reverser-to-invoice"
   | "reverse-settlement:release-to-credit-note"
+  | "close-invoice:closure-to-invoice"
   | "sync-xero-settlement:xero-to-settlements"
   | "sync-xero-settlement:settlements-to-invoice"
   | "void-invoice:reap-settlements"
