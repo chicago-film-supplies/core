@@ -2127,7 +2127,7 @@
         {
           "kind": "variable",
           "name": "INVOICE_ACTION_IDS",
-          "declaration": "const INVOICE_ACTION_IDS: \"issue\" | \"void\" | \"close\" | \"add_payment\" | \"reverse_settlement\" | \"add_credit_note\" | \"edit_items\" | \"edit_organization\" | \"edit_date\" | \"void_credit_note\" | \"allocate_credit_note\" | \"create_invoice\" | \"create_remaining_invoice\" | \"create_replacement_invoice\" | \"credit_overbilling\"[];",
+          "declaration": "const INVOICE_ACTION_IDS: \"issue\" | \"void\" | \"close\" | \"add_payment\" | \"reverse_settlement\" | \"add_credit_note\" | \"edit_items\" | \"edit_organization\" | \"edit_date\" | \"void_credit_note\" | \"allocate_credit_note\" | \"create_invoice\" | \"create_remaining_invoice\" | \"create_replacement_invoice\" | \"create_service_charge_invoice\" | \"credit_overbilling\"[];",
           "doc": "Every invoice action id. `tests/invoice-actions.test.ts` asserts it equals\n{@link INVOICE_ACTIONS}' keys in both directions, and the manager\nde-duplicates its menus by these ids, never by a label."
         },
         {
@@ -14284,13 +14284,13 @@
         {
           "kind": "interface",
           "name": "OrderInvoiceActionRequest",
-          "declaration": "interface OrderInvoiceActionRequest {\n  action: \"create_invoice\" | \"create_remaining_invoice\" | \"create_replacement_invoice\" | \"credit_overbilling\";\n}",
+          "declaration": "interface OrderInvoiceActionRequest {\n  action: \"create_invoice\" | \"create_remaining_invoice\" | \"create_replacement_invoice\" | \"create_service_charge_invoice\" | \"credit_overbilling\";\n}",
           "doc": "What an operator route asks to do from an order."
         },
         {
           "kind": "interface",
           "name": "OrderInvoiceOfferContext",
-          "declaration": "interface OrderInvoiceOfferContext {\n  invoices?: readonly AccountedInvoice[];\n  creditNotes?: readonly AccountedCreditNote[];\n  replacement_units?: number;\n}",
+          "declaration": "interface OrderInvoiceOfferContext {\n  invoices?: readonly AccountedInvoice[];\n  creditNotes?: readonly AccountedCreditNote[];\n  replacement_units?: number;\n  on_request_units?: number;\n}",
           "doc": "What {@link orderInvoiceActionsFor} needs that the order alone does not carry."
         },
         {
@@ -14361,7 +14361,7 @@
           "kind": "function",
           "name": "orderInvoiceActionsFor",
           "signature": "orderInvoiceActionsFor(order: OfferOrder, _: unknown): InvoiceActionOffer[]",
-          "doc": "Every invoicing action the UI may offer on this order.\n\n- The three CREATE actions (D7) refuse a `canceled` order and nothing else —\n  there is no organization-match rule, because billing a third party is a real\n  pattern (13 imported invoices). A `draft` order is reserved by the create\n  route before it is invoiced.\n- `create_remaining_invoice` — `remainingForOrder` finds a line the remainder\n  build would bill (`RemainingLine.bills`). An over-billed line is not one: it\n  is `credit_overbilling`'s (core#120).\n- `create_replacement_invoice` — `replacement_units > 0`.\n- `credit_overbilling` — `buildOverbillingCredits` offers at least one note,\n  on any status. The manager's 10-invoice cap stays a display limit.",
+          "doc": "Every invoicing action the UI may offer on this order.\n\n- The three CREATE actions (D7) refuse a `canceled` order and nothing else —\n  there is no organization-match rule, because billing a third party is a real\n  pattern (13 imported invoices). A `draft` order is reserved by the create\n  route before it is invoiced.\n- `create_remaining_invoice` — `remainingForOrder` finds a line the remainder\n  build would bill (`RemainingLine.bills`). An over-billed line is not one: it\n  is `credit_overbilling`'s (core#120).\n- `create_replacement_invoice` — `replacement_units > 0`.\n- `create_service_charge_invoice` — `on_request_units > 0`: cleaning and\n  maintenance, billed as `service` lines on request (api-cloudrun#1163).\n- `credit_overbilling` — `buildOverbillingCredits` offers at least one note,\n  on any status. The manager's 10-invoice cap stays a display limit.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -16931,6 +16931,18 @@
         },
         {
           "kind": "interface",
+          "name": "OnRequestChargeProducts",
+          "declaration": "interface OnRequestChargeProducts {\n  cleaning: string | null;\n  maintenance: string | null;\n}",
+          "doc": "The reason → charge-product map (`BillingSettings.oos_charge_products`)."
+        },
+        {
+          "kind": "interface",
+          "name": "OnRequestLineSeed",
+          "declaration": "interface OnRequestLineSeed {\n  uid_out_of_service: string;\n  uid_product: string;\n  name: string;\n  rental_name: string;\n  quantity: number;\n  base_cents: 0;\n  uid_pair: string | null;\n  reason: string;\n}",
+          "doc": "One cleaning/maintenance service line to offer, before it is placed on an invoice."
+        },
+        {
+          "kind": "interface",
           "name": "OosBillingPolicy",
           "declaration": "interface OosBillingPolicy {\n  line_type: \"replacement\" | \"service\";\n  offer: \"default\" | \"on_request\";\n}",
           "doc": "How one out-of-service reason is billed."
@@ -17025,6 +17037,14 @@
               "doc": "Every OTHER invoice naming those records (complete)."
             }
           ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "seedOnRequestLines",
+          "signature": "seedOnRequestLines(order: ReplacementSourceOrder, records: readonly ReplacementSourceRecord[], invoices: readonly ReplacementBillingInvoice[], charge: OnRequestChargeProducts, products: ReadonlyMap<string, ReplacementSourceProduct>): OnRequestLineSeed[]",
+          "doc": "The cleaning/maintenance service lines to offer for one order: one per\non-request record sourced from it with units left to bill, whose reason has a\nresolvable charge product.\n\n⚠️ **A reason whose product is unset (`null`), or set to a product missing\nfrom `products`, yields NO seed** — the action hides rather than failing an\ninvoice (api-cloudrun#1163). That differs from {@link seedReplacementLines},\nwhich offers a custom line when a twin is missing: a lost unit is always\nowed, a cleaning charge is only ever offered.\n\nPure — same inputs as {@link seedReplacementLines} plus the settings map. The\ncaller supplies the charge products and each record's rental in `products`.",
+          "paramTags": [],
           "returnsTag": null
         },
         {

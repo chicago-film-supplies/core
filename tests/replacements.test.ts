@@ -10,6 +10,7 @@ import {
   type ReplacementBillingInvoice,
   type ReplacementSourceProduct,
   type ReplacementSourceRecord,
+  seedOnRequestLines,
   seedReplacementLines,
 } from "../src/utils/replacements.ts";
 
@@ -146,4 +147,74 @@ Deno.test("a service line billing a cleaning record is counted by billedOutOfSer
     { uid: "inv2", status: "void", items: [{ type: "service", quantity: 5, uid_out_of_service: "oos-clean" }] },
   ]);
   assertEquals(billed.get("oos-clean"), 2);
+});
+
+// ── seedOnRequestLines (api-cloudrun#1163) ───────────────────────────
+
+const CLEANING = "cleaning-product";
+const MAINTENANCE = "maintenance-product";
+const chargeProducts = new Map<string, ReplacementSourceProduct>([
+  ...products,
+  [CLEANING, { uid: CLEANING, name: "Cleaning" }],
+  [MAINTENANCE, { uid: MAINTENANCE, name: "Maintenance" }],
+]);
+const both = { cleaning: CLEANING, maintenance: MAINTENANCE };
+const cleaned = record("oosClean", "vest", VEST_LINE, 3, { reason: "cleaning" });
+const serviced = record("oosMaint", "cone", CONE_LINE, 1, { reason: "maintenance" });
+
+function serviceInvoice(uid: string, status: string, lines: Array<[string, number]>): ReplacementBillingInvoice {
+  return { uid, status, items: lines.map(([u, q]) => ({ type: "service", quantity: q, uid_out_of_service: u })) };
+}
+
+Deno.test("on-request seed: one $0 service line per cleaning/maintenance record, under its leg", () => {
+  const seeds = seedOnRequestLines(order, [cleaned, serviced], [], both, chargeProducts);
+  assertEquals(
+    seeds.map((s) => [s.uid_out_of_service, s.uid_product, s.name, s.rental_name, s.quantity, s.base_cents, s.uid_pair]),
+    [
+      ["oosClean", CLEANING, "Cleaning", "Safety Vest", 3, 0, PAIR],
+      ["oosMaint", MAINTENANCE, "Maintenance", "Traffic Cone", 1, 0, PAIR],
+    ],
+  );
+});
+
+Deno.test("on-request seed: an unset or unknown product hides that reason, and only that reason", () => {
+  assertEquals(
+    seedOnRequestLines(order, [cleaned, serviced], [], { cleaning: null, maintenance: MAINTENANCE }, chargeProducts)
+      .map((s) => s.uid_out_of_service),
+    ["oosMaint"],
+  );
+  // A uid that resolves to no product is the same as unset — never an invoice failure.
+  assertEquals(
+    seedOnRequestLines(order, [cleaned, serviced], [], { cleaning: "deleted-product", maintenance: null }, chargeProducts),
+    [],
+  );
+  assertEquals(seedOnRequestLines(order, [cleaned, serviced], [], { cleaning: null, maintenance: null }, chargeProducts), []);
+});
+
+Deno.test("on-request seed: never offers lost/damaged, canceled or other orders' records", () => {
+  const lost = record("a", "vest", VEST_LINE, 1);
+  const damaged = record("b", "vest", VEST_LINE, 1, { reason: "damaged" });
+  const canceled = record("c", "vest", VEST_LINE, 1, { reason: "cleaning", status: "canceled" });
+  const elsewhere = record("d", "vest", VEST_LINE, 1, { reason: "cleaning", query_by_sources: ["orders:Order000000000000009"] });
+  assertEquals(seedOnRequestLines(order, [lost, damaged, canceled, elsewhere], [], both, chargeProducts), []);
+  // ...and the default seed never offers the on-request ones: the two partition the reasons.
+  assertEquals(seedReplacementLines(order, [cleaned, serviced], [], products), []);
+});
+
+Deno.test("on-request seed: billed units are subtracted across service lines, and a void bills nothing", () => {
+  const partly = serviceInvoice("inv1", "issued", [["oosClean", 2]]);
+  const voided = serviceInvoice("inv2", "void", [["oosClean", 1], ["oosMaint", 1]]);
+  assertEquals(
+    seedOnRequestLines(order, [cleaned, serviced], [partly, voided], both, chargeProducts).map((s) => [s.uid_out_of_service, s.quantity]),
+    [["oosClean", 1], ["oosMaint", 1]],
+  );
+  const fully = serviceInvoice("inv3", "draft", [["oosClean", 1], ["oosMaint", 1]]);
+  assertEquals(seedOnRequestLines(order, [cleaned, serviced], [partly, voided, fully], both, chargeProducts), []);
+});
+
+Deno.test("on-request seed: a record with no booking sits at the order level, and the product name falls back to the uid", () => {
+  const attached = record("oosAttached", "ghost", VEST_LINE, 1, { reason: "cleaning", query_by_sources: [`orders:${ORDER}`] });
+  const [seed] = seedOnRequestLines(order, [attached], [], both, chargeProducts);
+  assertEquals(seed.uid_pair, null);
+  assertEquals(seed.rental_name, "ghost");
 });

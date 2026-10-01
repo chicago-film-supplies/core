@@ -556,6 +556,12 @@ export interface OrderInvoiceOfferContext {
    * 0**: an unknown count offers nothing rather than an empty invoice.
    */
   replacement_units?: number;
+  /**
+   * Cleaning and maintenance units not yet billed (`seedOnRequestLines`).
+   * **Absent ⇒ 0.** The manager passes 0 while `settings/billing` leaves the
+   * reason's product unset, so an unmapped reason offers nothing.
+   */
+  on_request_units?: number;
 }
 
 /**
@@ -569,6 +575,8 @@ export interface OrderInvoiceOfferContext {
  *   build would bill (`RemainingLine.bills`). An over-billed line is not one: it
  *   is `credit_overbilling`'s (core#120).
  * - `create_replacement_invoice` — `replacement_units > 0`.
+ * - `create_service_charge_invoice` — `on_request_units > 0`: cleaning and
+ *   maintenance, billed as `service` lines on request (api-cloudrun#1163).
  * - `credit_overbilling` — `buildOverbillingCredits` offers at least one note,
  *   on any status. The manager's 10-invoice cap stays a display limit.
  */
@@ -581,6 +589,9 @@ export function orderInvoiceActionsFor(order: OfferOrder, ctx: OrderInvoiceOffer
   }
   if (open && (ctx.replacement_units ?? 0) > 0) {
     offers.push({ key: "create_replacement_invoice", action: "create_replacement_invoice" });
+  }
+  if (open && (ctx.on_request_units ?? 0) > 0) {
+    offers.push({ key: "create_service_charge_invoice", action: "create_service_charge_invoice" });
   }
   if ((overbilling(order, ctx)?.notes.length ?? 0) > 0) {
     offers.push({ key: "credit_overbilling", action: "credit_overbilling" });
@@ -602,7 +613,12 @@ function overbilling(order: OfferOrder, ctx: OrderInvoiceOfferContext): Overbill
 
 /** What an operator route asks to do from an order. */
 export interface OrderInvoiceActionRequest {
-  action: "create_invoice" | "create_remaining_invoice" | "create_replacement_invoice" | "credit_overbilling";
+  action:
+    | "create_invoice"
+    | "create_remaining_invoice"
+    | "create_replacement_invoice"
+    | "create_service_charge_invoice"
+    | "credit_overbilling";
 }
 
 /** Refuse an order-invoicing action the ruleset does not offer. Operator routes only. */

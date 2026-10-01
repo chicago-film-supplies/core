@@ -373,11 +373,12 @@ const order = (status: OfferOrder["status"]): OfferOrder => ({ uid: "ord", numbe
 Deno.test("D7: the three create actions refuse a canceled order, and only that", () => {
   const statuses: OfferOrder["status"][] = ["draft", "quoted", "reserved", "active", "complete", "canceled"];
   for (const status of statuses) {
-    const offers = orderInvoiceActionsFor(order(status), { replacement_units: 2 });
+    const offers = orderInvoiceActionsFor(order(status), { replacement_units: 2, on_request_units: 1 });
     const open = status !== "canceled";
     assertEquals(has(offers, "create_invoice"), open, status);
     assertEquals(has(offers, "create_remaining_invoice"), open, `${status}: invoices unknown ⇒ offered`);
     assertEquals(has(offers, "create_replacement_invoice"), open, status);
+    assertEquals(has(offers, "create_service_charge_invoice"), open, status);
   }
   assertThrows(
     () => assertOrderInvoiceAction(order("canceled"), {}, { action: "create_invoice" }),
@@ -386,12 +387,24 @@ Deno.test("D7: the three create actions refuse a canceled order, and only that",
   );
 });
 
+Deno.test("api-cloudrun#1163: lost/damaged and cleaning/maintenance are offered independently", () => {
+  const ids = (ctx: { replacement_units?: number; on_request_units?: number }) =>
+    orderInvoiceActionsFor(order("active"), ctx).map((o) => o.action).filter((a) =>
+      a === "create_replacement_invoice" || a === "create_service_charge_invoice"
+    );
+  assertEquals(ids({ replacement_units: 1 }), ["create_replacement_invoice"]);
+  assertEquals(ids({ on_request_units: 1 }), ["create_service_charge_invoice"]);
+  assertEquals(ids({ replacement_units: 1, on_request_units: 1 }), ["create_replacement_invoice", "create_service_charge_invoice"]);
+  assertEquals(ids({ replacement_units: 0, on_request_units: 0 }), []);
+});
+
 Deno.test("D7: Invoice Remaining reads remainingForOrder once the invoices are known", () => {
   // No lines, invoices known ⇒ nothing remains ⇒ not offered.
   const offers = orderInvoiceActionsFor(order("active"), { invoices: [] });
   assertEquals(has(offers, "create_remaining_invoice"), false);
   assertEquals(has(offers, "credit_overbilling"), false);
   assertEquals(has(offers, "create_replacement_invoice"), false, "absent replacement_units ⇒ 0");
+  assertEquals(has(offers, "create_service_charge_invoice"), false, "absent on_request_units ⇒ 0");
 });
 
 Deno.test("core#120: an order that is ONLY over-billed is offered the credit, not Invoice Remaining", () => {

@@ -218,6 +218,31 @@ export function overbilledOutOfService(
 }
 
 /**
+ * The leg a record's unit went out on, and the replacement value the order
+ * quoted for its line — both read off the record's FIRST booking source for
+ * this order. `uid_pair` is `null` for a record attached to the order with no
+ * booking; `quoted` is `null` when the line quoted no replacement value.
+ */
+function bookingSourceOf(
+  order: ReplacementSourceOrder,
+  record: Pick<ReplacementSourceRecord, "query_by_sources">,
+): { uid_pair: string | null; quoted: number | null } {
+  let uid_pair: string | null = null;
+  let quoted: number | null = null;
+  for (const source of record.query_by_sources) {
+    if (!source.startsWith("bookings:")) continue;
+    const parsed = parseBookingId(source.slice("bookings:".length));
+    if (!parsed || parsed.orderUid !== order.uid) continue;
+    uid_pair = parsed.destUid;
+    const line = order.items.find((i) => i.uid === parsed.itemUid && i.path[0] === parsed.destUid);
+    const cents = line?.price?.replacement_cents;
+    if (typeof cents === "number" && cents > 0) quoted = cents;
+    break;
+  }
+  return { uid_pair, quoted };
+}
+
+/**
  * The replacement lines to offer for one order: one per billable record sourced
  * from it with units left to bill.
  *
@@ -241,19 +266,7 @@ export function seedReplacementLines(
     const quantity = record.quantity - (billed.get(record.uid) ?? 0);
     if (quantity <= 0) continue;
 
-    // The booking source names the order line and the leg the unit went out on.
-    let uid_pair: string | null = null;
-    let quoted: number | null = null;
-    for (const source of record.query_by_sources) {
-      if (!source.startsWith("bookings:")) continue;
-      const parsed = parseBookingId(source.slice("bookings:".length));
-      if (!parsed || parsed.orderUid !== order.uid) continue;
-      uid_pair = parsed.destUid;
-      const line = order.items.find((i) => i.uid === parsed.itemUid && i.path[0] === parsed.destUid);
-      const cents = line?.price?.replacement_cents;
-      if (typeof cents === "number" && cents > 0) quoted = cents;
-      break;
-    }
+    const { uid_pair, quoted } = bookingSourceOf(order, record);
 
     const rental = products.get(record.uid_product);
     const twinUid = rental?.uid_linked_replacement ?? null;
@@ -272,6 +285,83 @@ export function seedReplacementLines(
       uid_pair,
       reason: record.reason,
       warning: twin ? null : `${rentalName} has no linked replacement product; billed as a custom line`,
+    });
+  }
+  return seeds;
+}
+
+/** The reason → charge-product map (`BillingSettings.oos_charge_products`). */
+export interface OnRequestChargeProducts {
+  cleaning: string | null;
+  maintenance: string | null;
+}
+
+/** One cleaning/maintenance service line to offer, before it is placed on an invoice. */
+export interface OnRequestLineSeed {
+  /** The record this line bills — both its provenance and its double-bill key. */
+  uid_out_of_service: string;
+  /** The `service` product that bills this reason (`settings/billing`). */
+  uid_product: string;
+  /** That product's name — "Cleaning" or "Maintenance". */
+  name: string;
+  /** The unit that was cleaned or maintained, for the line's description. */
+  rental_name: string;
+  /** Units still to bill: the record's quantity less what non-void invoices bill. */
+  quantity: number;
+  /** Always `0`: the product is `$0` and the operator prices the line. */
+  base_cents: 0;
+  /** The leg the unit went out on; `null` for a record with no booking. */
+  uid_pair: string | null;
+  reason: string;
+}
+
+/**
+ * The cleaning/maintenance service lines to offer for one order: one per
+ * on-request record sourced from it with units left to bill, whose reason has a
+ * resolvable charge product.
+ *
+ * ⚠️ **A reason whose product is unset (`null`), or set to a product missing
+ * from `products`, yields NO seed** — the action hides rather than failing an
+ * invoice (api-cloudrun#1163). That differs from {@link seedReplacementLines},
+ * which offers a custom line when a twin is missing: a lost unit is always
+ * owed, a cleaning charge is only ever offered.
+ *
+ * Pure — same inputs as {@link seedReplacementLines} plus the settings map. The
+ * caller supplies the charge products and each record's rental in `products`.
+ */
+export function seedOnRequestLines(
+  order: ReplacementSourceOrder,
+  records: readonly ReplacementSourceRecord[],
+  invoices: readonly ReplacementBillingInvoice[],
+  charge: OnRequestChargeProducts,
+  products: ReadonlyMap<string, ReplacementSourceProduct>,
+): OnRequestLineSeed[] {
+  const billed = billedOutOfService(invoices);
+  const orderKey = `orders:${order.uid}`;
+  const seeds: OnRequestLineSeed[] = [];
+
+  for (const record of records) {
+    if (!isOnRequestBillableOutOfService(record) || !record.query_by_sources.includes(orderKey)) continue;
+    const productUid = record.reason === "cleaning"
+      ? charge.cleaning
+      : record.reason === "maintenance"
+      ? charge.maintenance
+      : null;
+    const product = productUid ? products.get(productUid) : undefined;
+    if (!productUid || !product) continue;
+
+    const quantity = record.quantity - (billed.get(record.uid) ?? 0);
+    if (quantity <= 0) continue;
+
+    seeds.push({
+      uid_out_of_service: record.uid,
+      uid_product: productUid,
+      name: product.name,
+      rental_name: products.get(record.uid_product)?.name ?? record.uid_product,
+      quantity,
+      base_cents: 0,
+      uid_pair: bookingSourceOf(order, record).uid_pair,
+      reason: record.reason,
     });
   }
   return seeds;

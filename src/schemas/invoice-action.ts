@@ -45,6 +45,7 @@ export const INVOICE_ACTION_IDS = [
   "create_invoice",
   "create_remaining_invoice",
   "create_replacement_invoice",
+  "create_service_charge_invoice",
   "credit_overbilling",
 ] as const;
 
@@ -82,5 +83,6 @@ export const INVOICE_ACTIONS: Readonly<Record<InvoiceActionId, InvoiceActionDefi
   create_invoice: { subject: "order", description: "Invoice the order." },
   create_remaining_invoice: { subject: "order", description: "Invoice the lines nothing bills yet." },
   create_replacement_invoice: { subject: "order", description: "Bill lost and damaged units." },
+  create_service_charge_invoice: { subject: "order", description: "Bill cleaning and maintenance units, on request." },
   credit_overbilling: { subject: "order", description: "Credit what the order's invoices over-billed." },
 };

@@ -4830,7 +4830,7 @@ Every invoice action id. `tests/invoice-actions.test.ts` asserts it equals
 de-duplicates its menus by these ids, never by a label.
 
 ```ts
-const INVOICE_ACTION_IDS: "issue" | "void" | "close" | "add_payment" | "reverse_settlement" | "add_credit_note" | "edit_items" | "edit_organization" | "edit_date" | "void_credit_note" | "allocate_credit_note" | "create_invoice" | "create_remaining_invoice" | "create_replacement_invoice" | "credit_overbilling"[];
+const INVOICE_ACTION_IDS: "issue" | "void" | "close" | "add_payment" | "reverse_settlement" | "add_credit_note" | "edit_items" | "edit_organization" | "edit_date" | "void_credit_note" | "allocate_credit_note" | "create_invoice" | "create_remaining_invoice" | "create_replacement_invoice" | "create_service_charge_invoice" | "credit_overbilling"[];
 ```
 
 ### `INVOICE_STATUS_CONTRACTS`
@@ -31487,7 +31487,7 @@ What an operator route asks to do from an order.
 
 ```ts
 interface OrderInvoiceActionRequest {
-  action: "create_invoice" | "create_remaining_invoice" | "create_replacement_invoice" | "credit_overbilling";
+  action: "create_invoice" | "create_remaining_invoice" | "create_replacement_invoice" | "create_service_charge_invoice" | "credit_overbilling";
 }
 ```
 
@@ -31500,6 +31500,7 @@ interface OrderInvoiceOfferContext {
   invoices?: readonly AccountedInvoice[];
   creditNotes?: readonly AccountedCreditNote[];
   replacement_units?: number;
+  on_request_units?: number;
 }
 ```
 
@@ -31578,6 +31579,8 @@ Every invoicing action the UI may offer on this order.
   build would bill (`RemainingLine.bills`). An over-billed line is not one: it
   is `credit_overbilling`'s (core#120).
 - `create_replacement_invoice` — `replacement_units > 0`.
+- `create_service_charge_invoice` — `on_request_units > 0`: cleaning and
+  maintenance, billed as `service` lines on request (api-cloudrun#1163).
 - `credit_overbilling` — `buildOverbillingCredits` offers at least one note,
   on any status. The manager's 10-invoice cap stays a display limit.
 
@@ -36891,6 +36894,34 @@ widening it would flag every cleaning record as unbilled.
 const OOS_BILLING_POLICY: Record<OOSReasonType, OosBillingPolicy>;
 ```
 
+### `OnRequestChargeProducts`
+
+The reason → charge-product map (`BillingSettings.oos_charge_products`).
+
+```ts
+interface OnRequestChargeProducts {
+  cleaning: string | null;
+  maintenance: string | null;
+}
+```
+
+### `OnRequestLineSeed`
+
+One cleaning/maintenance service line to offer, before it is placed on an invoice.
+
+```ts
+interface OnRequestLineSeed {
+  uid_out_of_service: string;
+  uid_product: string;
+  name: string;
+  rental_name: string;
+  quantity: number;
+  base_cents: 0;
+  uid_pair: string | null;
+  reason: string;
+}
+```
+
 ### `OosBillingPolicy`
 
 How one out-of-service reason is billed.
@@ -37005,6 +37036,21 @@ means nothing to warn about. It never refuses a write (api-cloudrun#1147).
 - `lines` — The invoice's lines as they will be written.
 - `records` — Every record those lines name.
 - `otherInvoices` — Every OTHER invoice naming those records (complete).
+
+### `seedOnRequestLines(order: ReplacementSourceOrder, records: readonly ReplacementSourceRecord[], invoices: readonly ReplacementBillingInvoice[], charge: OnRequestChargeProducts, products: ReadonlyMap<string, ReplacementSourceProduct>): OnRequestLineSeed[]`
+
+The cleaning/maintenance service lines to offer for one order: one per
+on-request record sourced from it with units left to bill, whose reason has a
+resolvable charge product.
+
+⚠️ **A reason whose product is unset (`null`), or set to a product missing
+from `products`, yields NO seed** — the action hides rather than failing an
+invoice (api-cloudrun#1163). That differs from {@link seedReplacementLines},
+which offers a custom line when a twin is missing: a lost unit is always
+owed, a cleaning charge is only ever offered.
+
+Pure — same inputs as {@link seedReplacementLines} plus the settings map. The
+caller supplies the charge products and each record's rental in `products`.
 
 ### `seedReplacementLines(order: ReplacementSourceOrder, records: readonly ReplacementSourceRecord[], invoices: readonly ReplacementBillingInvoice[], products: ReadonlyMap<string, ReplacementSourceProduct>): ReplacementLineSeed[]`
 
