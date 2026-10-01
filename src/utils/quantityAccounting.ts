@@ -1093,10 +1093,17 @@ export interface RemainingInvoice {
  *   that ends before the order's, so the section never starts after it ends.
  * - **Over-billing is never netted in.** A negative quantity or extension is
  *   returned in `overbilled`, for the credit-note flow.
+ * - **Credit notes net exactly as in {@link remainingForOrder}** (core#121,
+ *   owner 2026-10-01). A `reverses_billing` line means "billed beyond the
+ *   order" — its only writer is the over-billing offer — so units it gave back
+ *   are unbilled, and an order that grows to need them again bills them again.
+ *   🔴 Required, not defaulted: a caller that forgot them would build against a
+ *   different `billed` than the offer counted, the defect this closes.
  *
  * 🔴 Fails closed on an unaligned scope or a live CRMS-authored invoice, exactly
  * as {@link remainingForOrder}.
  *
+ * @param creditNotes - EVERY credit note against the invoices — all of them, never a page
  * @throws Error when an extension is owed on a unit a SUBSTITUTE billed: the
  *   extension line would price the substitute at the replaced line's path, and
  *   substitution merges (manager#414) have not settled what that row is.
@@ -1104,10 +1111,11 @@ export interface RemainingInvoice {
 export function buildRemainingInvoice(
   order: RemainingOrderSource,
   invoices: readonly RemainingInvoiceSource[],
+  creditNotes: readonly AccountedCreditNote[],
   mintUid: () => string = () => crypto.randomUUID(),
 ): RemainingInvoice {
   const O = order.uid;
-  const billed = billedByPath(O, order.items, invoices);
+  const billed = billedByPath(O, order.items, invoices, creditNotes);
   const crmsAuthored = crmsAuthoredInvoices(invoices);
   const empty = { items: [], destinations: [], overbilled: [], compared: billed.compared, unaligned: billed.unaligned, crms_authored: crmsAuthored };
   if (billed.unaligned.length > 0 || crmsAuthored.length > 0) return empty;

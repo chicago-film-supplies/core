@@ -29159,7 +29159,7 @@ live CRMS-authored invoice — **plus**, per path:
 terms, while `priceCreditNote` prices the stored INVOICE line — and where the
 two disagree, the second is what the operator will be asked to approve.
 
-### `buildRemainingInvoice(order: RemainingOrderSource, invoices: readonly RemainingInvoiceSource[], _: unknown): RemainingInvoice`
+### `buildRemainingInvoice(order: RemainingOrderSource, invoices: readonly RemainingInvoiceSource[], creditNotes: readonly AccountedCreditNote[], _: unknown): RemainingInvoice`
 
 Build the invoice that bills what is left on an order: new lines whole,
 quantity increases at their own path, and each extension of dates as a
@@ -29188,9 +29188,19 @@ manager's preview.
   that ends before the order's, so the section never starts after it ends.
 - **Over-billing is never netted in.** A negative quantity or extension is
   returned in `overbilled`, for the credit-note flow.
+- **Credit notes net exactly as in {@link remainingForOrder}** (core#121,
+  owner 2026-10-01). A `reverses_billing` line means "billed beyond the
+  order" — its only writer is the over-billing offer — so units it gave back
+  are unbilled, and an order that grows to need them again bills them again.
+  🔴 Required, not defaulted: a caller that forgot them would build against a
+  different `billed` than the offer counted, the defect this closes.
 
 🔴 Fails closed on an unaligned scope or a live CRMS-authored invoice, exactly
 as {@link remainingForOrder}.
+
+**Parameters**
+
+- `creditNotes` — EVERY credit note against the invoices — all of them, never a page
 
 ### `crmsAuthoredInvoices(invoices: readonly AccountedInvoice[]): string[]`
 
