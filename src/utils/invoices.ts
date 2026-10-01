@@ -1648,8 +1648,8 @@ function mergePair(
  *
  * ## A lost/damaged line is the invoice's own row
  *
- * A `replacement` line carrying `uid_out_of_service` bills a unit the customer
- * lost or damaged. No order ever had it, so "synced and removed from the order"
+ * A line carrying `uid_out_of_service` (`replacement` for a unit the customer
+ * lost or damaged, `service` for one cleaned or maintained) bills a unit. No order ever had it, so "synced and removed from the order"
  * can never be true of it, and the removed-items pass keeps it unconditionally.
  *
  * ## Extension sections are billing, not order structure

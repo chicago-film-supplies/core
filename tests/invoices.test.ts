@@ -3775,6 +3775,31 @@ Deno.test("syncOrderToInvoiceSelective keeps a line carrying uid_out_of_service,
   assertEquals(kept.uid_out_of_service, "Oos00000000000000001");
 });
 
+Deno.test("syncOrderToInvoiceSelective keeps a SERVICE line billing a cleaning/maintenance record (api-cloudrun#1163)", () => {
+  // The keep is keyed on the record uid, never on the line type — the twin of
+  // the replacement test above, so narrowing it to `replacement` goes red.
+  const prevItem = orderShapedLine();
+  const projected = buildOrderScopedItems([prevItem], ORDER_DIV_1)[0];
+  const cleaningLine = {
+    ...projected,
+    uid: ITEM_2,
+    type: "service",
+    name: "Cleaning",
+    path: [ORDER_DIV_1, DEST_1, ITEM_2],
+    uid_out_of_service: "Oos00000000000000002",
+  } as InvoiceDocItemType;
+
+  const result = syncOrderToInvoiceSelective(
+    [prevItem],
+    [orderShapedLine({ name: "Light v2" })],
+    [projected, cleaningLine],
+    ORDER_DIV_1,
+  );
+  const kept = result.find((r) => r.uid === ITEM_2) as InvoiceItem | undefined;
+  assertEquals(kept?.uid_out_of_service, "Oos00000000000000002", "the service line is kept");
+  assertEquals(kept?.type, "service");
+});
+
 Deno.test("InvoiceDocLineItem refuses uid_out_of_service on a non-replacement line", () => {
   const projected = buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0];
   const onRental = InvoiceDocLineItem.safeParse({ ...projected, uid_out_of_service: "Oos00000000000000001" });
