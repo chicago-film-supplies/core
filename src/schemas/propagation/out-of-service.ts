@@ -22,7 +22,12 @@
  * booking's buckets are the condition its units came back in, and the operator
  * is correcting that, so the booking moves with the record (custody-actions
  * gap G3). It runs through the booking lever, so the booking, the record and
- * the flag movement land in one commit.
+ * the flag movement land in one commit. Only the units still FLAGGED on a shelf
+ * take the new reason: when some are away, written off or returned to service,
+ * the record SPLITS (api-cloudrun#1164) — the original keeps its uid, its old
+ * reason and every non-flagged unit as history, and a sibling holds the
+ * re-described units. That holds for a standalone record too
+ * (`update-out-of-service-record`), where it is the same split by another door.
  */
 import type {
   CollectionRule,
@@ -75,6 +80,19 @@ const OOS_LEDGER_PARTITION: EnforcementRef = {
     "core/tests/movements.test.ts::units at an OOS record leave service without leaving ownership",
   clause:
     "the ledger half — units at an OOS record leave service without leaving ownership, returning to service restores the in-service count, and `in_service`/`out_of_service` always partition `held`",
+  gates: true,
+};
+
+/**
+ * The standalone half of the same split: no booking, so the assertion is the two
+ * records and the one flag that names both.
+ */
+const OOS_SPLIT_STANDALONE: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/out-of-service/outOfService.test.ts::PUT — a reason edit on a standalone record with resolved units SPLITS it: only the flagged units take the new reason",
+  clause:
+    "the original keeps its uid, old reason and the resolved units; a sibling holds the flagged ones under the new reason; ONE flag names [sibling, original]; a save with no flagged unit is refused",
   gates: true,
 };
 
@@ -180,7 +198,7 @@ const updateOutOfServiceRules: CollectionRule[] = [
     target: "transactions",
     mode: "co-write",
     invariant:
-      "Each bucket change is posted in the save that makes it, as the movement that makes it true, read against the record's journal so only the DIFFERENCE is written: into `flagged` a flag {null → reason}; flagged → `away` a send_away; `away` → `returned_to_service` a return_to_service; flagged → `returned_to_service` a clearing flag {reason → null}; into `written_off` a write_off (from the record for away units, from the shelf for flagged ones, clearing their flag); out of `written_off` a reversal. A `reason` edit among damaged/cleaning/maintenance is a flag {old → new}. Every movement names the record in sources[].",
+      "Each bucket change is posted in the save that makes it, as the movement that makes it true, read against the record's journal so only the DIFFERENCE is written: into `flagged` a flag {null → reason}; flagged → `away` a send_away; `away` → `returned_to_service` a return_to_service; flagged → `returned_to_service` a clearing flag {reason → null}; into `written_off` a write_off (from the record for away units, from the shelf for flagged ones, clearing their flag); out of `written_off` a reversal. A `reason` edit among damaged/cleaning/maintenance is a flag {old → new} on the FLAGGED units only; when some units are away, written off or returned to service the record SPLITS (see `update-out-of-service-record:record-to-record`). Every movement names the record in sources[].",
     enforced_by: [OOS_COWRITES_MOVEMENT],
     transaction: "update-out-of-service-record",
     fields: [
@@ -208,12 +226,44 @@ const updateOutOfServiceRules: CollectionRule[] = [
       {
         source: ["reason"],
         target: ["service", "to"],
-        transform: "an in-place reason edit is a flag {old → new}",
+        transform: "an in-place reason edit is a flag {old → new} on the flagged units, splitting the rest onto the original",
       },
       {
         source: ["uid"],
         target: ["sources", "uid"],
         transform: "the movement's sources[] points back at the OOS record",
+      },
+    ],
+  },
+  {
+    id: "update-out-of-service-record:record-to-record",
+    source: "out-of-service",
+    target: "out-of-service",
+    mode: "co-write",
+    invariant:
+      "A `reason` edit on a record with 0 < flagged < quantity SPLITS it: only the units still flagged on a shelf take the new reason, and everything else stays on the ORIGINAL under the old reason as history. The original keeps its uid and its non-flagged units (its quantity falls by the flagged count and its flagged bucket empties); a SIBLING is minted for the flagged units, its uid and number those of the ONE flag movement that re-describes them, and that flag names [sibling, original] in sources[] — the first record receives and the rest give, so a shelf is attributed to the sibling and taken from the original. With flagged equal to quantity the edit stays in place on one record; with none flagged it is refused (no unit is on a shelf to re-describe). A splitting reason edit must come alone in its save.",
+    enforced_by: [OOS_SPLIT_STANDALONE],
+    transaction: "update-out-of-service-record",
+    fields: [
+      {
+        source: ["quantity"],
+        target: ["quantity"],
+        transform: "original.quantity − flagged; the sibling's quantity is the flagged count",
+      },
+      {
+        source: ["breakdown", "flagged"],
+        target: ["breakdown", "flagged"],
+        transform: "the original's flagged bucket empties; the sibling's holds the flagged count",
+      },
+      {
+        source: ["reason"],
+        target: ["reason"],
+        transform: "the sibling takes the new reason; the original keeps the old one",
+      },
+      {
+        source: ["uid"],
+        target: ["sources", "uid"],
+        transform: "the split flag's sources[] names [sibling, original]; the sibling's uid IS that flag's id",
       },
     ],
   },
@@ -250,10 +300,11 @@ const updateOutOfServiceRules: CollectionRule[] = [
 const updateOutOfServiceTransaction: TransactionDefinition = {
   id: "update-out-of-service-record",
   description:
-    "Updates an out-of-service record. Every bucket change and in-place reason edit is posted as the movement that makes it true (flag, send_away, return_to_service, write_off, or a reversal), which cascades through the one ledger writer and the stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown — except a reason edit on a booking-raised record, which is `reclassify-out-of-service-record`. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Any OOS quantity/date/status change — including a cancel, which drops the record from the array entirely.",
+    "Updates an out-of-service record. Every bucket change and in-place reason edit is posted as the movement that makes it true (flag, send_away, return_to_service, write_off, or a reversal), which cascades through the one ledger writer and the stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown — except a reason edit on a booking-raised record, which is `reclassify-out-of-service-record`. A reason edit with units already away, written off or returned splits the record. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Any OOS quantity/date/status change — including a cancel, which drops the record from the array entirely.",
   steps: [
     ...STOCK_STEPS,
     "update-out-of-service-record:record-to-transactions",
+    "update-out-of-service-record:record-to-record",
     "update-out-of-service-record:transactions-to-ledger",
   ],
 };
@@ -274,6 +325,20 @@ const RECLASSIFY_MOVES_THE_BOOKING: EnforcementRef = {
   gates: true,
 };
 
+/**
+ * The split, asserted end to end on a real record PUT: cleared and away units
+ * stay on the original under the old reason, the flagged ones move to a sibling,
+ * and the booking moves by the flagged count only.
+ */
+const RECLASSIFY_SPLITS_THE_RECORD: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/out-of-service/reclassify.test.ts::PUT /out-of-service — reclassifying a booking-raised record with cleared and away units SPLITS it: only the flagged units take the new reason",
+  clause:
+    "the original keeps its uid, old reason and the cleared and away units; a sibling holds the flagged ones under the new reason; ONE flag naming [sibling, original] carries the flagged quantity; the booking moves by the flagged count only",
+  gates: true,
+};
+
 const reclassifyOutOfServiceRules: CollectionRule[] = [
   {
     id: "reclassify-out-of-service-record:record-to-booking",
@@ -281,14 +346,14 @@ const reclassifyOutOfServiceRules: CollectionRule[] = [
     target: "bookings",
     mode: "co-write",
     invariant:
-      "A reason edit among damaged/cleaning/maintenance on a record whose mark movement carries custody on a booking moves that booking's bucket by the record's WHOLE quantity (breakdown[old] − q, breakdown[new] + q), written through the booking lever in the same commit as the record and ONE flag {old → new} that carries custody {old → new} and uid_booking. Refused (400) unless every unit is still flagged on a shelf: a cleared, written-off or away unit could only be re-described by a movement that did not happen. A record the booking's mark did not open (legacy auto-id, or one POSTed with the booking in sources) never moves the booking.",
+      "A reason edit among damaged/cleaning/maintenance on a record whose mark movement carries custody on a booking moves that booking's bucket by the record's FLAGGED count (breakdown[old] − q, breakdown[new] + q), written through the booking lever in the same commit as the record and ONE flag {old → new} that carries custody {old → new} and uid_booking. A cleared, written-off or away unit is not re-described (no movement happened to it): when any exist the record SPLITS (`reclassify-out-of-service-record:record-to-record`) and q is the flagged count; with none flagged the edit is refused (400). A record the booking's mark did not open (legacy auto-id, or one POSTed with the booking in sources) never moves the booking.",
     enforced_by: [RECLASSIFY_MOVES_THE_BOOKING],
     transaction: "reclassify-out-of-service-record",
     fields: [
       {
         source: ["reason"],
         target: ["breakdown"],
-        transform: "breakdown[old reason] − record.quantity, breakdown[new reason] + record.quantity",
+        transform: "breakdown[old reason] − flagged, breakdown[new reason] + flagged — the flagged count, which is record.quantity only when nothing has been resolved",
       },
       {
         source: ["reason"],
@@ -297,14 +362,47 @@ const reclassifyOutOfServiceRules: CollectionRule[] = [
       },
     ],
   },
+  {
+    id: "reclassify-out-of-service-record:record-to-record",
+    source: "out-of-service",
+    target: "out-of-service",
+    mode: "co-write",
+    invariant:
+      "When 0 < flagged < quantity the record SPLITS in the booking lever's commit: the ORIGINAL keeps its uid, its old reason and every non-flagged unit (away, written off, returned to service), so its journal, its found-after-write-off fold and the invoice lines billing it stay true; a SIBLING takes the flagged units under the new reason, its uid and number those of the reclassify flag. That flag names [sibling, original, order, booking] in sources[], and the first record receives while the rest give — one convention, because an in-place flag nets to nothing on a single record. Billing is advised, never refused: an original billed for more than it now holds raises `oos_overbilled` on that invoice's next save.",
+    enforced_by: [RECLASSIFY_SPLITS_THE_RECORD],
+    transaction: "reclassify-out-of-service-record",
+    fields: [
+      {
+        source: ["quantity"],
+        target: ["quantity"],
+        transform: "original.quantity − flagged; the sibling's quantity is the flagged count",
+      },
+      {
+        source: ["breakdown", "flagged"],
+        target: ["breakdown", "flagged"],
+        transform: "the original's flagged bucket empties; the sibling's holds the flagged count",
+      },
+      {
+        source: ["reason"],
+        target: ["reason"],
+        transform: "the sibling takes the new reason; the original keeps the old one",
+      },
+      {
+        source: ["uid"],
+        target: ["sources", "uid"],
+        transform: "the flag's sources[] names [sibling, original, order, booking]; the sibling's uid IS the flag's id",
+      },
+    ],
+  },
 ];
 
 const reclassifyOutOfServiceTransaction: TransactionDefinition = {
   id: "reclassify-out-of-service-record",
   description:
-    "A reason edit on a booking-raised out-of-service record, delegated from `PUT /out-of-service/{uid}` to the booking lever so the booking's bucket, the record's reason and the flag movement commit together; finalize then recomputes the order roll-up, the fulfillment mirror and the cards. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: a reason change among damaged/cleaning/maintenance on a record a booking's mark opened.",
+    "A reason edit on a booking-raised out-of-service record, delegated from `PUT /out-of-service/{uid}` to the booking lever so the booking's bucket, the record's reason and the flag movement commit together (a record with resolved units splits, and the sibling is written in the same commit); finalize then recomputes the order roll-up, the fulfillment mirror and the cards. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: a reason change among damaged/cleaning/maintenance on a record a booking's mark opened.",
   steps: [
     "reclassify-out-of-service-record:record-to-booking",
+    "reclassify-out-of-service-record:record-to-record",
     "update-booking:booking-to-self",
     ...STOCK_STEPS,
     "update-booking:booking-to-transactions",
