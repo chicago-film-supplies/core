@@ -716,6 +716,30 @@ interface BaseLogFields {
 }
 ```
 
+### `BillingSettings`
+
+The billing settings singleton (`settings/billing`).
+
+```ts
+interface BillingSettings {
+  uid: "billing";
+  oos_charge_products: OosChargeProducts;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `BillingSettingsSchema`
+
+Zod schema for BillingSettings.
+
+```ts
+const BillingSettingsSchema: z.ZodType<BillingSettings>;
+```
+
 ### `BlobRef`
 
 A git blob reference recorded for a published version (path → blob sha).
@@ -1998,6 +2022,7 @@ interface CollectionDocs {
   holiday-definition: HolidayDefinition;
   holiday-definitions: HolidayDefinition;
   holiday-snapshot: HolidaySnapshot;
+  settings: BillingSettings;
   inventory-ledger: InventoryLedger;
   inventory-ledgers: InventoryLedger;
   invite: Invite;
@@ -6887,6 +6912,17 @@ rather than policed. Same for root, parent and the composed display name.
 const ORG_LEVELS: readonly ["organization", "project", "department"];
 ```
 
+### `OosChargeProducts`
+
+The on-request out-of-service reasons that have a charge product.
+
+```ts
+interface OosChargeProducts {
+  cleaning: string | null;
+  maintenance: string | null;
+}
+```
+
 ### `Order`
 
 Full order document schema (Firestore document shape).
@@ -7643,7 +7679,7 @@ type OutOfServiceUpdated = EventEnvelope<OutOfService> & typeLiteral;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `PICK_SHEET_GATES`
@@ -11025,6 +11061,25 @@ interface UnplacedEndpoint {
   side: "delivery" | "collection";
   field: "uid" | "address" | "endpoint";
 }
+```
+
+### `UpdateBillingSettingsInput`
+
+Body of `PUT /settings/billing`. `version` is the optimistic-lock check.
+
+```ts
+interface UpdateBillingSettingsInput {
+  oos_charge_products: OosChargeProducts;
+  version: number;
+}
+```
+
+### `UpdateBillingSettingsInputSchema`
+
+Zod schema for {@link UpdateBillingSettingsInput}.
+
+```ts
+const UpdateBillingSettingsInputSchema: z.ZodType<UpdateBillingSettingsInput>;
 ```
 
 ### `UpdateBookingInput`
@@ -26395,7 +26450,7 @@ const RoleSummarySchema: z.ZodType<RoleSummary>;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `Permission`
@@ -36775,15 +36830,17 @@ this covers the component itself and every entry nested beneath it.
 
 ## `@cfs/core/utils/replacements`
 
-Billing lost and damaged units — what a lost/damaged `out-of-service` record
-has been billed, what is left to bill, and the lines a replacement invoice is
-seeded with.
+Billing out-of-service units — what an `out-of-service` record has been
+billed, what is left to bill, and the lines a replacement invoice is seeded
+with. A lost or damaged unit bills as a `replacement` line, offered by
+default; a cleaning or maintenance one bills as a `service` line, on request
+({@link OOS_BILLING_POLICY}).
 
 ## Billed is DERIVED, never stored on the record
 
 An invoice line bills a record by carrying its uid
 (`InvoiceDocLineItemType.uid_out_of_service`, valid on `type: "replacement"`
-only). What a record has been billed is the sum of those lines' quantities
+and `type: "service"`). What a record has been billed is the sum of those lines' quantities
 across every invoice that is not `void`:
 
 ```
@@ -36817,6 +36874,32 @@ The `out-of-service` reasons a customer is billed for.
 
 ```ts
 const BILLABLE_OOS_REASONS: readonly ["lost", "damaged"];
+```
+
+### `OOS_BILLING_POLICY`
+
+The billing policy per `out-of-service` reason — total, so a fifth reason is
+a compile error here rather than a record nobody can bill.
+
+⚠️ **The pairing is the API's to enforce, not the schema's**: the invoice
+line refine sees a line's `type` but never its record's `reason`.
+{@link BILLABLE_OOS_REASONS} stays the DEFAULT-offered set — the offer's
+query and the document diff's "fulfilled but not invoiced" flag read it, and
+widening it would flag every cleaning record as unbilled.
+
+```ts
+const OOS_BILLING_POLICY: Record<OOSReasonType, OosBillingPolicy>;
+```
+
+### `OosBillingPolicy`
+
+How one out-of-service reason is billed.
+
+```ts
+interface OosBillingPolicy {
+  line_type: "replacement" | "service";
+  offer: "default" | "on_request";
+}
 ```
 
 ### `ReplacementBillingInvoice`
@@ -36902,6 +36985,14 @@ rewritten, whose NEW lines the caller adds itself.
 ### `isBillableOutOfService(record: Pick<ReplacementSourceRecord, "reason" | "status">): boolean`
 
 Is this record a lost/damaged unit a customer can be billed for?
+
+### `isOnRequestBillableOutOfService(record: Pick<ReplacementSourceRecord, "reason" | "status">): boolean`
+
+Is this record a cleaning/maintenance unit an operator can ask to bill?
+
+### `oosLineTypeFor(reason: OOSReasonType): "replacement" | "service"`
+
+The invoice line `type` that bills a record of this reason.
 
 ### `overbilledOutOfService(lines: ReadonlyArray<typeLiteral>, records: readonly Pick<ReplacementSourceRecord, "uid" | "quantity">[], otherInvoices: readonly ReplacementBillingInvoice[], invoiceUid?: string): Array<typeLiteral>`
 

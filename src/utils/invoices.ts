@@ -163,7 +163,7 @@ export interface InvoiceItem extends LineItem {
    * `crms_opportunity_id` line above records the absence of.
    */
   substituted_for?: SubstitutedForEntryType[];
-  /** @see `InvoiceDocLineItemType.uid_out_of_service` — a `replacement` line's only. */
+  /** @see `InvoiceDocLineItemType.uid_out_of_service` — a `replacement` or `service` line's only. */
   uid_out_of_service?: string | null;
   /** @see `InvoiceDocDestinationItemType.path_extension_for` — a destination divider's only. */
   path_extension_for?: string[];

@@ -416,7 +416,9 @@ export interface InvoiceDocLineItemType {
   substituted_for?: SubstitutedForEntryType[];
   /**
    * The `out-of-service` record this line BILLS — a lost or damaged unit charged
-   * at its replacement value. Valid on `type: "replacement"` only.
+   * at its replacement value (`type: "replacement"`), or a cleaning or
+   * maintenance one charged as a service (`type: "service"`). Valid on those two
+   * types only; the API checks the record's reason fits the type.
    *
    * It is both the provenance and the double-bill key: what a record has been
    * billed is DERIVED — Σ `quantity` of the lines naming it across non-void
@@ -441,11 +443,15 @@ export interface InvoiceDocLineItemType {
 }
 
 /**
- * `uid_out_of_service` bills a lost or damaged unit, so it is valid on a
- * `replacement` line and nowhere else — the tax resolver keys CFS's
+ * `uid_out_of_service` bills an out-of-service unit: a `replacement` line for a
+ * lost or damaged one, a `service` line for a cleaning or maintenance one
+ * (`OOS_BILLING_POLICY`). Nowhere else — the tax resolver keys CFS's
  * replacement treatment (origin jurisdiction, never exempt) on the line TYPE,
- * so an L&D charge on any other type would be taxed as the wrong thing.
- * Shared by the stored line and the input line.
+ * so a charge on any other type would be taxed as the wrong thing.
+ *
+ * ⚠️ This refine cannot see the RECORD, so it cannot check that the type fits
+ * the record's reason; the API's `assertOosLinePairing` does. Shared by the
+ * stored line and the input line.
  */
 function checkOutOfServiceLineType(
   line: { type: string; uid_out_of_service?: string | null },
@@ -453,11 +459,11 @@ function checkOutOfServiceLineType(
 ): void {
   // `null` is "this line bills no record" — the form seed and the ordinary
   // state — so only a stated uid is constrained.
-  if (line.uid_out_of_service != null && line.type !== "replacement") {
+  if (line.uid_out_of_service != null && line.type !== "replacement" && line.type !== "service") {
     ctx.addIssue({
       code: "custom",
       path: ["uid_out_of_service"],
-      message: `uid_out_of_service is valid only on a replacement line, not "${line.type}"`,
+      message: `uid_out_of_service is valid only on a replacement or service line, not "${line.type}"`,
     });
   }
 }

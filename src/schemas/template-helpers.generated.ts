@@ -253,7 +253,8 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "sameWindowDates", expr: "it.quantityAccounting.sameWindowDates(a, b)", desc: "Whether two window lists cover the same Chicago calendar dates, window for window, in order.", returns: "boolean" },
   ],
   "replacements": [
-
+    { name: "isOnRequestBillableOutOfService", expr: "it.replacements.isOnRequestBillableOutOfService(record)", desc: "Is this record a cleaning/maintenance unit an operator can ask to bill?", returns: "boolean" },
+    { name: "oosLineTypeFor", expr: "it.replacements.oosLineTypeFor(reason)", desc: "The invoice line `type` that bills a record of this reason.", returns: "\"replacement\" | \"service\"" },
   ],
   "reporting": [
     { name: "agingAccountRows", expr: "it.reporting.agingAccountRows(report)", desc: "The account × bucket matrix: one row per account, plus a residual row when the accounts do not add up to the report's own totals.", returns: "AgingAccountRow[]" },

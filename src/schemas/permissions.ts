@@ -150,6 +150,11 @@ export const PERMISSIONS = [
   "holidays.update",
   "holidays.delete",
 
+  // Writes `settings/billing`. The read grant in `manager/firestore.rules`
+  // reuses `invoices.update` — only invoice editors consume it — so there is
+  // no `billingSettings.read`.
+  "billingSettings.update",
+
   "templates.create",
   "templates.read",
   "templates.search",

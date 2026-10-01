@@ -1,6 +1,11 @@
 import { assertEquals } from "@std/assert";
 import {
   billedOutOfService,
+  BILLABLE_OOS_REASONS,
+  isBillableOutOfService,
+  isOnRequestBillableOutOfService,
+  OOS_BILLING_POLICY,
+  oosLineTypeFor,
   overbilledOutOfService,
   type ReplacementBillingInvoice,
   type ReplacementSourceProduct,
@@ -102,4 +107,43 @@ Deno.test("overbilled: refuses past the record's quantity, counting other invoic
   assertEquals(overbilledOutOfService([{ quantity: 7, uid_out_of_service: "oosVest" }], [vests], [other], "inv1"), []);
   // A record that does not exist holds 0.
   assertEquals(overbilledOutOfService([{ quantity: 1, uid_out_of_service: "ghost" }], [], [], "x").length, 1);
+});
+
+Deno.test("OOS_BILLING_POLICY: lost/damaged bill as replacement by default, cleaning/maintenance as service on request", () => {
+  assertEquals(OOS_BILLING_POLICY, {
+    lost: { line_type: "replacement", offer: "default" },
+    damaged: { line_type: "replacement", offer: "default" },
+    cleaning: { line_type: "service", offer: "on_request" },
+    maintenance: { line_type: "service", offer: "on_request" },
+  });
+  assertEquals(oosLineTypeFor("damaged"), "replacement");
+  assertEquals(oosLineTypeFor("cleaning"), "service");
+});
+
+Deno.test("the default-offered set is exactly the policy's `default` reasons", () => {
+  // BILLABLE_OOS_REASONS drives the offer and the diff's "not invoiced" flag, so
+  // it must not drift from the policy it is a view of.
+  const defaults = Object.entries(OOS_BILLING_POLICY).filter(([, p]) => p.offer === "default").map(([r]) => r).sort();
+  assertEquals([...BILLABLE_OOS_REASONS].sort(), defaults);
+});
+
+Deno.test("isOnRequestBillableOutOfService: cleaning/maintenance only, never canceled, never the default set", () => {
+  assertEquals(isOnRequestBillableOutOfService({ reason: "cleaning", status: "active" }), true);
+  assertEquals(isOnRequestBillableOutOfService({ reason: "maintenance", status: "active" }), true);
+  assertEquals(isOnRequestBillableOutOfService({ reason: "cleaning", status: "canceled" }), false);
+  assertEquals(isOnRequestBillableOutOfService({ reason: "lost", status: "active" }), false);
+  assertEquals(isOnRequestBillableOutOfService({ reason: "nonsense", status: "active" }), false);
+  // The two predicates partition the reasons: no record is in both.
+  for (const reason of Object.keys(OOS_BILLING_POLICY)) {
+    const r = { reason, status: "active" };
+    assertEquals(isBillableOutOfService(r) && isOnRequestBillableOutOfService(r), false, reason);
+  }
+});
+
+Deno.test("a service line billing a cleaning record is counted by billedOutOfService", () => {
+  const billed = billedOutOfService([
+    { uid: "inv1", status: "issued", items: [{ type: "service", quantity: 2, uid_out_of_service: "oos-clean" }] },
+    { uid: "inv2", status: "void", items: [{ type: "service", quantity: 5, uid_out_of_service: "oos-clean" }] },
+  ]);
+  assertEquals(billed.get("oos-clean"), 2);
 });

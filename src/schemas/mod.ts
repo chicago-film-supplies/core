@@ -615,6 +615,14 @@ export {
 } from "./holiday-snapshot.ts";
 
 export {
+  BillingSettingsSchema,
+  type BillingSettings,
+  type OosChargeProducts,
+  type UpdateBillingSettingsInput,
+  UpdateBillingSettingsInputSchema,
+} from "./billing-settings.ts";
+
+export {
   CacheGeocodesSchema,
   type CacheGeocodes,
   type CacheGeocodesAddress,
@@ -1263,6 +1271,7 @@ import type { Fulfillment } from "./fulfillment.ts";
 import type { HolidayDates } from "./holiday-dates.ts";
 import type { HolidayDefinition } from "./holiday-definition.ts";
 import type { HolidaySnapshot } from "./holiday-snapshot.ts";
+import type { BillingSettings } from "./billing-settings.ts";
 import type { InventoryLedger } from "./inventory-ledger.ts";
 import type { Invite } from "./invite.ts";
 import type { Invoice } from "./invoice.ts";
@@ -1369,6 +1378,7 @@ import { FulfillmentSchema } from "./fulfillment.ts";
 import { HolidayDatesSchema } from "./holiday-dates.ts";
 import { HolidayDefinitionSchema } from "./holiday-definition.ts";
 import { HolidaySnapshotSchema } from "./holiday-snapshot.ts";
+import { BillingSettingsSchema } from "./billing-settings.ts";
 import { InventoryLedgerSchema } from "./inventory-ledger.ts";
 import { InviteSchema } from "./invite.ts";
 import { InvoiceSchema } from "./invoice.ts";
@@ -1484,6 +1494,7 @@ export interface CollectionDocs {
   "holiday-definition": HolidayDefinition;
   "holiday-definitions": HolidayDefinition;
   "holiday-snapshot": HolidaySnapshot;
+  settings: BillingSettings;
   "inventory-ledger": InventoryLedger;
   "inventory-ledgers": InventoryLedger;
   invite: Invite;
@@ -1604,6 +1615,7 @@ const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "dates": HolidayDatesSchema,
   "holiday-definition": HolidayDefinitionSchema, "holiday-definitions": HolidayDefinitionSchema,
   "holiday-snapshot": HolidaySnapshotSchema,
+  "settings": BillingSettingsSchema,
   "inventory-ledger": InventoryLedgerSchema, "inventory-ledgers": InventoryLedgerSchema,
   "invite": InviteSchema, "invites": InviteSchema,
   "invoice": InvoiceSchema, "invoices": InvoiceSchema,

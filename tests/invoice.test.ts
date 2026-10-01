@@ -1456,6 +1456,28 @@ Deno.test("InvoiceSchema accepts a replacement line billing a movement-keyed out
   );
 });
 
+Deno.test("uid_out_of_service is valid on a replacement or service line and no other type", () => {
+  const line: Record<string, unknown> = validLine;
+  const oos = "Oos00000000000000001";
+  const withType = (type: string) => ({ ...line, uid: "item2000000000000000", type, uid_out_of_service: oos });
+  const stored = (type: string) =>
+    InvoiceSchema.safeParse({ ...validInvoice, items: [ORDER_DIVIDER, line, withType(type)], query_by_out_of_service: [oos] });
+  const input = (type: string) =>
+    InvoiceItemInputLine.safeParse({ uid: "item2000000000000000", type, path: ["item2000000000000000"], uid_out_of_service: oos });
+
+  // A cleaning/maintenance charge is a service line (api-cloudrun#1163).
+  const service = stored("service");
+  assertEquals(service.success, true, JSON.stringify(service.success ? {} : service.error.issues));
+  assertEquals(input("service").success, true);
+  assertEquals(input("replacement").success, true);
+
+  // Every other type still refuses — the tax resolver keys on TYPE.
+  for (const type of ["rental", "sale", "transaction_fee"]) {
+    assertEquals(stored(type).success, false, `${type} must not carry uid_out_of_service`);
+    assertEquals(input(type).success, false, `${type} input must not carry uid_out_of_service`);
+  }
+});
+
 Deno.test("totals.closure_count: legal only on a $0 invoice, and never negative (api-cloudrun#1169)", () => {
   const zero = {
     ...validInvoice,

@@ -1,13 +1,15 @@
 /**
- * Billing lost and damaged units — what a lost/damaged `out-of-service` record
- * has been billed, what is left to bill, and the lines a replacement invoice is
- * seeded with.
+ * Billing out-of-service units — what an `out-of-service` record has been
+ * billed, what is left to bill, and the lines a replacement invoice is seeded
+ * with. A lost or damaged unit bills as a `replacement` line, offered by
+ * default; a cleaning or maintenance one bills as a `service` line, on request
+ * ({@link OOS_BILLING_POLICY}).
  *
  * ## Billed is DERIVED, never stored on the record
  *
  * An invoice line bills a record by carrying its uid
  * (`InvoiceDocLineItemType.uid_out_of_service`, valid on `type: "replacement"`
- * only). What a record has been billed is the sum of those lines' quantities
+ * and `type: "service"`). What a record has been billed is the sum of those lines' quantities
  * across every invoice that is not `void`:
  *
  * ```
@@ -38,9 +40,44 @@
  * @module
  */
 import { parseBookingId } from "./booking-id.ts";
+import type { OOSReasonType } from "../schemas/common.ts";
 
 /** The `out-of-service` reasons a customer is billed for. */
 export const BILLABLE_OOS_REASONS: readonly ["lost", "damaged"] = ["lost", "damaged"] as const;
+
+/** How one out-of-service reason is billed. */
+export interface OosBillingPolicy {
+  /** The invoice line `type` that bills a record of this reason. */
+  line_type: "replacement" | "service";
+  /**
+   * `default` — the manager offers the line unasked (a lost or damaged unit is
+   * always charged). `on_request` — nothing is offered or flagged until an
+   * operator asks, because most cleaning and maintenance is not billed.
+   */
+  offer: "default" | "on_request";
+}
+
+/**
+ * The billing policy per `out-of-service` reason — total, so a fifth reason is
+ * a compile error here rather than a record nobody can bill.
+ *
+ * ⚠️ **The pairing is the API's to enforce, not the schema's**: the invoice
+ * line refine sees a line's `type` but never its record's `reason`.
+ * {@link BILLABLE_OOS_REASONS} stays the DEFAULT-offered set — the offer's
+ * query and the document diff's "fulfilled but not invoiced" flag read it, and
+ * widening it would flag every cleaning record as unbilled.
+ */
+export const OOS_BILLING_POLICY: Record<OOSReasonType, OosBillingPolicy> = {
+  lost: { line_type: "replacement", offer: "default" },
+  damaged: { line_type: "replacement", offer: "default" },
+  cleaning: { line_type: "service", offer: "on_request" },
+  maintenance: { line_type: "service", offer: "on_request" },
+};
+
+/** The invoice line `type` that bills a record of this reason. */
+export function oosLineTypeFor(reason: OOSReasonType): "replacement" | "service" {
+  return OOS_BILLING_POLICY[reason].line_type;
+}
 
 /** The fields of an `out-of-service` record the billing arithmetic reads. */
 export interface ReplacementSourceRecord {
@@ -136,6 +173,14 @@ export function billedOutOfService(
 /** Is this record a lost/damaged unit a customer can be billed for? */
 export function isBillableOutOfService(record: Pick<ReplacementSourceRecord, "reason" | "status">): boolean {
   return (BILLABLE_OOS_REASONS as readonly string[]).includes(record.reason) && record.status !== "canceled";
+}
+
+/** Is this record a cleaning/maintenance unit an operator can ask to bill? */
+export function isOnRequestBillableOutOfService(
+  record: Pick<ReplacementSourceRecord, "reason" | "status">,
+): boolean {
+  const policy = (OOS_BILLING_POLICY as Record<string, OosBillingPolicy | undefined>)[record.reason];
+  return policy?.offer === "on_request" && record.status !== "canceled";
 }
 
 /**
