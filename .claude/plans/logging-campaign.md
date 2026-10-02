@@ -1,7 +1,7 @@
 # Structured logging campaign — predictable, discoverable querying
 
-**Status 2026-10-02: the live query defects are fixed. Everything left is PARKED on core#65**
-with a trigger, not scheduled. The history (five corrections, the census, the phase plans)
+**Status 2026-10-02: the live query defects are fixed. Everything left is PARKED on core#65**,
+which closes on a clean corpus audit on 2026-12-31. The history (five corrections, the census, the phase plans)
 is in git: `git log -p -- .claude/plans/logging-campaign.md`. The design sections below
 still say "defect N" and "Phase N"; both are defined in that history (the revision before
 2026-10-02).
@@ -33,8 +33,11 @@ still say "defect N" and "Phase N"; both are defined in that history (the revisi
 
 ## Parked on core#65 — each with its trigger
 
-**Trigger for all of them:** a quarterly `api-cloudrun/scripts/audit-log-corpus.ts` run that
-finds a defect one of them would have prevented, or an incident that does. Not a date.
+**Scheduled 2026-12-31 (owner, 2026-10-02):** run `api-cloudrun/scripts/audit-log-corpus.ts` against
+prod and dev. **If it is clean, close core#65 and drop every item below**: a clean corpus is the
+evidence they are not needed. If it finds a defect, justify only the item that would have
+prevented it. The date matches api-cloudrun#1181, after which no old-spelling record remains in
+retention.
 
 1. **Delete the arms' `[key: string]: unknown` and add `NoExcessProperties`** (Phase 1, churny
    half). That makes an undeclared field NAME a compile error. ⚠️ Three things depend on the
@@ -255,6 +258,6 @@ dynamic values**; never reuse a name for a second meaning.
 
 ## Context recommendation
 
-**Clear.** Nothing here is scheduled. Whoever picks up a parked item starts from core#65, then
+**Clear.** Nothing here is scheduled except the 2026-12-31 audit. Whoever picks up a parked item starts from core#65, then
 this doc's design sections, then the `logging-propagation` skill in api-cloudrun. Re-run the
 corpus audit first, since every number in the design sections is from 2026-08-24.
