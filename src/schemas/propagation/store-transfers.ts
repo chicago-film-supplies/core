@@ -52,12 +52,12 @@ const TRANSFER_NETS_TO_ZERO: EnforcementRef = {
   gates: true,
 };
 
-const TRANSFER_PAIRS_WHOLE_LINES: EnforcementRef = {
+const TRANSFER_LINES_ARE_WHOLE: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/unit/movementApplier.test.ts::a transfer pairs both sides into whole lines and rejects an imbalance",
+    "api-cloudrun/tests/integration/transactions/createStoreTransfer.test.ts::creates ONE transfer movement carrying both endpoints",
   clause:
-    "the `every line carries both endpoints` half — the writer pairs both sides into whole lines and REJECTS an imbalance, which is what makes the net-zero structural rather than incidental. Its end-to-end twin is `api-cloudrun/tests/integration/transactions/createStoreTransfer.test.ts`, steps `creates ONE transfer movement carrying both endpoints` and `rejects a transfer whose two sides disagree on quantity`.",
+    "the `every line carries both endpoints` half — since the explicit-lines input (2026-09-27) each `StoreTransferLineInput` names its own `from` and `to`, so an imbalance between the two sides is unrepresentable rather than refused, and the writer emits one movement line per input line, both endpoints set",
   gates: true,
 };
 
@@ -93,7 +93,7 @@ const createStoreTransferRules: CollectionRule[] = [
       "quantity_held and quantity_in_service net to ZERO by construction — every line carries both endpoints, so a transfer moves stock and can neither create nor destroy it. Only store_breakdown actually moves. assertLedgerNonNegative still runs: a transfer taking more than a source location holds is rejected, because a shelf cannot go to −4 units.",
     enforced_by: [
       TRANSFER_NETS_TO_ZERO,
-      TRANSFER_PAIRS_WHOLE_LINES,
+      TRANSFER_LINES_ARE_WHOLE,
       TRANSFER_NON_NEGATIVE,
     ],
     transaction: "create-store-transfer",
