@@ -1251,7 +1251,7 @@
         {
           "kind": "interface",
           "name": "CreateStoreTransferInputType",
-          "declaration": "interface CreateStoreTransferInputType {\n  uid_product: string;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  lines: StoreTransferLineInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "declaration": "interface CreateStoreTransferInputType {\n  uid_product: string;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  lines: StoreTransferLineInputType[];\n}",
           "doc": "Input for creating a store-to-store transfer."
         },
         {
@@ -1335,7 +1335,7 @@
         {
           "kind": "interface",
           "name": "CreateTransactionInputType",
-          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n  supplier?: typeLiteral | null;\n}",
+          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  supplier?: typeLiteral | null;\n}",
           "doc": "Input for creating a manual movement."
         },
         {
@@ -2733,7 +2733,7 @@
         {
           "kind": "interface",
           "name": "Movement",
-          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  service: MovementServiceType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  serialized_details: typeLiteral | null;\n  xero_id?: string | null;\n  supplier?: UidNameRefType | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  service: MovementServiceType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  units?: MovementUnitType[];\n  query_by_unit_number?: number[];\n  serialized_details?: typeLiteral | null;\n  xero_id?: string | null;\n  supplier?: UidNameRefType | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A movement-journal event."
         },
         {
@@ -2751,7 +2751,7 @@
         {
           "kind": "interface",
           "name": "MovementContract",
-          "declaration": "interface MovementContract {\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n}",
+          "declaration": "interface MovementContract {\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n}",
           "doc": "How the three axes may be filled for one movement type.\n\nFixing this per type is what makes a missing axis a validation error rather\nthan a silent zero, a stray axis a validation error, and reversal a pure\nnegate-every-line transform. It is `hasCosts(type)` generalized to all three\naxes.\n\n`custody: \"with_booking\"` — required exactly when `uid_booking` is set. Sales\nare the only types that legitimately happen both ways: 247 stored rows are\norder-sourced (a booking's units being sold), and the manual transaction form\nlets an operator key an off-the-shelf sale with no order at all."
         },
         {
@@ -2793,7 +2793,7 @@
         {
           "kind": "interface",
           "name": "MovementLineType",
-          "declaration": "interface MovementLineType {\n  quantity: number;\n  location: typeLiteral;\n}",
+          "declaration": "interface MovementLineType {\n  quantity: number;\n  location: typeLiteral;\n  units?: number[];\n}",
           "doc": "One physical movement of `quantity` units between two places.\n\nA `null` side means \"outside CFS ownership\". Both sides non-null is a move\nthat leaves `quantity_held` untouched.\n\nNote `lines[]` is NOT directly queryable — Firestore `array-contains` works on\nscalar arrays, not nested object fields. Query paths come from the flat\n`query_by_*` denorms."
         },
         {
@@ -2823,7 +2823,7 @@
         {
           "kind": "interface",
           "name": "MovementSessionItem",
-          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  owner_path: string[] | null;\n  lines: MovementLineType[];\n  serialized_details: typeLiteral | null;\n  reference: string;\n}",
+          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  owner_path: string[] | null;\n  lines: MovementLineType[];\n  serialized_details?: typeLiteral | null;\n  reference: string;\n}",
           "doc": "One movement, joined to what a receipt has to name.\n\nCalled `items` on the session for the same reason orders, invoices and\nfulfillments call theirs that way: `partials/shared/*.eta` is written against\na document with an `items[]`, and a fourth spelling would make the shared\nmarkup un-shareable."
         },
         {
@@ -2861,6 +2861,18 @@
           "name": "MovementTypeType",
           "declaration": "type MovementTypeType = indexedAccess;",
           "doc": "Union of all movement type string literals."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementUnit",
+          "declaration": "const MovementUnit: z.ZodType<MovementUnitType>;",
+          "doc": "Zod schema for one identified unit on a movement."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementUnitType",
+          "declaration": "interface MovementUnitType {\n  uid_unit: string;\n  number: number;\n  serial_number: string | null;\n}",
+          "doc": "One identified unit a movement moved.\n\n`serial_number` is a SNAPSHOT taken when the movement was written. Which\nserial a unit number carries can change (a replacement takes over a vacant\nnumber), and a remap never rewrites past movements. So the journal says\nwhich serial was in hand at the time, not which serial the number carries\nnow."
         },
         {
           "kind": "variable",
@@ -9748,7 +9760,7 @@
         {
           "kind": "interface",
           "name": "CreateStoreTransferInputType",
-          "declaration": "interface CreateStoreTransferInputType {\n  uid_product: string;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  lines: StoreTransferLineInputType[];\n  serialized_details?: typeLiteral | null;\n}",
+          "declaration": "interface CreateStoreTransferInputType {\n  uid_product: string;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  lines: StoreTransferLineInputType[];\n}",
           "doc": "Input for creating a store-to-store transfer."
         },
         {
@@ -9760,7 +9772,7 @@
         {
           "kind": "interface",
           "name": "CreateTransactionInputType",
-          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  serialized_details?: typeLiteral | null;\n  supplier?: typeLiteral | null;\n}",
+          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  supplier?: typeLiteral | null;\n}",
           "doc": "Input for creating a manual movement."
         },
         {
@@ -9778,7 +9790,7 @@
         {
           "kind": "interface",
           "name": "Movement",
-          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  service: MovementServiceType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  serialized_details: typeLiteral | null;\n  xero_id?: string | null;\n  supplier?: UidNameRefType | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  service: MovementServiceType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  units?: MovementUnitType[];\n  query_by_unit_number?: number[];\n  serialized_details?: typeLiteral | null;\n  xero_id?: string | null;\n  supplier?: UidNameRefType | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A movement-journal event."
         },
         {
@@ -9796,7 +9808,7 @@
         {
           "kind": "interface",
           "name": "MovementContract",
-          "declaration": "interface MovementContract {\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n}",
+          "declaration": "interface MovementContract {\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n}",
           "doc": "How the three axes may be filled for one movement type.\n\nFixing this per type is what makes a missing axis a validation error rather\nthan a silent zero, a stray axis a validation error, and reversal a pure\nnegate-every-line transform. It is `hasCosts(type)` generalized to all three\naxes.\n\n`custody: \"with_booking\"` — required exactly when `uid_booking` is set. Sales\nare the only types that legitimately happen both ways: 247 stored rows are\norder-sourced (a booking's units being sold), and the manual transaction form\nlets an operator key an off-the-shelf sale with no order at all."
         },
         {
@@ -9832,7 +9844,7 @@
         {
           "kind": "interface",
           "name": "MovementLineType",
-          "declaration": "interface MovementLineType {\n  quantity: number;\n  location: typeLiteral;\n}",
+          "declaration": "interface MovementLineType {\n  quantity: number;\n  location: typeLiteral;\n  units?: number[];\n}",
           "doc": "One physical movement of `quantity` units between two places.\n\nA `null` side means \"outside CFS ownership\". Both sides non-null is a move\nthat leaves `quantity_held` untouched.\n\nNote `lines[]` is NOT directly queryable — Firestore `array-contains` works on\nscalar arrays, not nested object fields. Query paths come from the flat\n`query_by_*` denorms."
         },
         {
@@ -9864,6 +9876,18 @@
           "name": "MovementTypeType",
           "declaration": "type MovementTypeType = indexedAccess;",
           "doc": "Union of all movement type string literals."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementUnit",
+          "declaration": "const MovementUnit: z.ZodType<MovementUnitType>;",
+          "doc": "Zod schema for one identified unit on a movement."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementUnitType",
+          "declaration": "interface MovementUnitType {\n  uid_unit: string;\n  number: number;\n  serial_number: string | null;\n}",
+          "doc": "One identified unit a movement moved.\n\n`serial_number` is a SNAPSHOT taken when the movement was written. Which\nserial a unit number carries can change (a replacement takes over a vacant\nnumber), and a remap never rewrites past movements. So the journal says\nwhich serial was in hand at the time, not which serial the number carries\nnow."
         },
         {
           "kind": "variable",
@@ -10654,7 +10678,7 @@
         {
           "kind": "interface",
           "name": "MovementSessionItem",
-          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  owner_path: string[] | null;\n  lines: MovementLineType[];\n  serialized_details: typeLiteral | null;\n  reference: string;\n}",
+          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  owner_path: string[] | null;\n  lines: MovementLineType[];\n  serialized_details?: typeLiteral | null;\n  reference: string;\n}",
           "doc": "One movement, joined to what a receipt has to name.\n\nCalled `items` on the session for the same reason orders, invoices and\nfulfillments call theirs that way: `partials/shared/*.eta` is written against\na document with an `items[]`, and a fourth spelling would make the shared\nmarkup un-shareable."
         },
         {

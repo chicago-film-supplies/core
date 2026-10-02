@@ -486,7 +486,7 @@ Deno.test("no contract pairs `places: null` with a required cost — the fold co
   // predicate that can never return true reports just as cleanly. Plant the
   // depreciation-shaped contract this exists to catch and assert it is caught.
   assertEquals(
-    costOnly({ custody: "forbidden", cost: "required", places: null, booking: "forbidden", service: "forbidden" }),
+    costOnly({ custody: "forbidden", cost: "required", places: null, booking: "forbidden", service: "forbidden", units: "allowed" }),
     true,
     "a planted cost-only contract must be caught",
   );

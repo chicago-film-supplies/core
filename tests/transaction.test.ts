@@ -1000,3 +1000,164 @@ Deno.test("StoreTransferLineInput: every key is required; oos is an answer, null
   assertEquals(ok({ ...line, to: LOC_A }), false, "a line moves units to a DIFFERENT location");
   assertEquals(ok({ ...line, quantity: 0 }), false);
 });
+
+// ── rule 5: which units moved ───────────────────────────────────────
+//
+// Each negative case asserts the PATH of the one issue it expects, so a case
+// cannot pass by failing for some other reason.
+
+const unit = (number: number, serial: string | null = null) => ({
+  uid_unit: `testunit${String(number).padStart(12, "0")}`,
+  number,
+  serial_number: serial,
+});
+
+/** A two-unit check_out naming units 3 and 7 on its one line. */
+function unitsCheckOut(over: Record<string, unknown> = {}) {
+  return movement("check_out", {
+    units: [unit(3, "SN-A"), unit(7)],
+    query_by_unit_number: [3, 7],
+    lines: [{ quantity: 2, location: { from: at(LOC_A), to: atBooking }, units: [3, 7] }],
+    ...over,
+  });
+}
+
+function issuePaths(doc: unknown): string[] {
+  const r = MovementSchema.safeParse(doc);
+  return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+}
+
+Deno.test("rule 5: only the twin reclass forbids units", () => {
+  const forbidden = MOVEMENT_TYPES.filter((t) => MOVEMENT_CONTRACTS[t].units === "forbidden");
+  assertEquals(forbidden, ["reclass_out", "reclass_in"]);
+});
+
+Deno.test("rule 5: every type accepts no unit keys (the stored corpus) and empty ones (the scaffold)", () => {
+  for (const type of MOVEMENT_TYPES) {
+    const legacy = movement(type) as Record<string, unknown>;
+    delete legacy.units;
+    delete legacy.query_by_unit_number;
+    assertEquals(issuePaths(legacy), [], `${type}: written before tracking`);
+    const stamped = movement(type, { units: [], query_by_unit_number: [] });
+    assertEquals(issuePaths(stamped), [], `${type}: names no units`);
+  }
+});
+
+Deno.test("rule 5: a movement naming its units, on one line or split across two", () => {
+  assertEquals(issuePaths(unitsCheckOut()), []);
+  const split = unitsCheckOut({
+    lines: [
+      { quantity: 1, location: { from: at(LOC_A), to: atBooking }, units: [7] },
+      { quantity: 1, location: { from: at(LOC_B), to: atBooking }, units: [3] },
+    ],
+  });
+  assertEquals(issuePaths(split), []);
+});
+
+Deno.test("rule 5: a type with no lines may still name its units", () => {
+  const prep = movement("prep", { units: [unit(3), unit(7)], query_by_unit_number: [3, 7] });
+  assertEquals(issuePaths(prep), []);
+});
+
+Deno.test("rule 5: units and the mirror are written together", () => {
+  assertEquals(issuePaths(unitsCheckOut({ query_by_unit_number: undefined })), ["query_by_unit_number"]);
+  const noUnits = movement("check_out", { query_by_unit_number: [] }) as Record<string, unknown>;
+  delete noUnits.units;
+  assertEquals(issuePaths(noUnits), ["units"]);
+});
+
+Deno.test("rule 5: the mirror is units[].number in order", () => {
+  assertEquals(issuePaths(unitsCheckOut({ query_by_unit_number: [7, 3] })), ["query_by_unit_number"]);
+  assertEquals(issuePaths(unitsCheckOut({ query_by_unit_number: [3] })), ["query_by_unit_number"]);
+});
+
+Deno.test("rule 5: named units number exactly the quantity", () => {
+  // A prep has no lines, so nothing else can fail.
+  const one = movement("prep", { units: [unit(3)], query_by_unit_number: [3] });
+  assertEquals(issuePaths(one), ["units"]);
+});
+
+Deno.test("rule 5: units are strictly ascending, and no unit appears twice", () => {
+  const descending = unitsCheckOut({ units: [unit(7), unit(3)], query_by_unit_number: [7, 3] });
+  assertEquals(issuePaths(descending), ["units.1.number"]);
+  const sameUid = unitsCheckOut({ units: [unit(3), { ...unit(7), uid_unit: unit(3).uid_unit }] });
+  assertEquals(issuePaths(sameUid), ["units"]);
+});
+
+Deno.test("rule 5: a reclass names no units, but may carry the empty keys", () => {
+  const reclass = movement("reclass_out", {
+    units: [unit(3), unit(7)],
+    query_by_unit_number: [3, 7],
+    lines: [{ quantity: 2, location: { from: at(LOC_A), to: null }, units: [3, 7] }],
+  });
+  assertEquals(issuePaths(reclass), ["units"]);
+  assertEquals(issuePaths(movement("reclass_out", { units: [], query_by_unit_number: [] })), []);
+});
+
+Deno.test("rule 5: each line names exactly its quantity of the movement's units", () => {
+  const short = unitsCheckOut({
+    lines: [{ quantity: 2, location: { from: at(LOC_A), to: atBooking }, units: [3] }],
+  });
+  assertEquals(issuePaths(short), ["lines.0.units", "lines"]);
+  const stranger = unitsCheckOut({
+    lines: [{ quantity: 2, location: { from: at(LOC_A), to: atBooking }, units: [3, 9] }],
+  });
+  assertEquals(issuePaths(stranger), ["lines.0.units", "lines"]);
+});
+
+Deno.test("rule 5: the lines name each unit exactly once", () => {
+  const twice = unitsCheckOut({
+    lines: [
+      { quantity: 1, location: { from: at(LOC_A), to: atBooking }, units: [3] },
+      { quantity: 1, location: { from: at(LOC_B), to: atBooking }, units: [3] },
+    ],
+  });
+  assertEquals(issuePaths(twice), ["lines"]);
+  const unplaced = unitsCheckOut({
+    lines: [{ quantity: 2, location: { from: at(LOC_A), to: atBooking } }],
+  });
+  assertEquals(issuePaths(unplaced), ["lines"]);
+});
+
+Deno.test("rule 5: a line names no units when the movement names none", () => {
+  const bad = movement("check_out", {
+    units: [],
+    query_by_unit_number: [],
+    lines: [{ quantity: 2, location: { from: at(LOC_A), to: atBooking }, units: [3, 7] }],
+  });
+  assertEquals(issuePaths(bad), ["lines.0.units"]);
+});
+
+// ── serialized_details is retiring ──────────────────────────────────
+
+Deno.test("serialized_details is optional on a stored movement", () => {
+  const without = movement("check_out") as Record<string, unknown>;
+  delete without.serialized_details;
+  assertEquals(issuePaths(without), []);
+  const legacy = movement("check_out", { serialized_details: { asset_tags: ["W-1"], serial_numbers: ["SN-1"] } });
+  assertEquals(issuePaths(legacy), [], "stored copies still parse until the rebuild purges them");
+});
+
+Deno.test("serialized_details is gone from both inputs — a client sending it has it stripped", () => {
+  const sent = { serialized_details: { asset_tags: ["W-1"], serial_numbers: [] } };
+  const tx = CreateTransactionInput.parse({
+    uid_product: PRODUCT,
+    type: "adjustment_increase",
+    quantity: 1,
+    total_cost_cents: 0,
+    date: "2026-03-01T00:00:00.000-06:00",
+    reference: "",
+    uuid_session: SESSION,
+    ...sent,
+  });
+  assertEquals("serialized_details" in tx, false);
+  const transfer = CreateStoreTransferInput.parse({
+    uid_product: PRODUCT,
+    date: "2026-03-01T00:00:00.000-06:00",
+    reference: "",
+    uuid_session: SESSION,
+    lines: [{ from: LOC_A, to: LOC_B, quantity: 1, oos: null }],
+    ...sent,
+  });
+  assertEquals("serialized_details" in transfer, false);
+});

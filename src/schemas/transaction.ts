@@ -382,18 +382,30 @@ export interface MovementContract {
    * movement is how a unit gets counted twice.
    */
   service: "required" | "forbidden" | "nullable";
+  /**
+   * Whether the movement may name WHICH units moved (`Movement.units`).
+   * `allowed` means the list may be empty or non-empty; `forbidden` means it
+   * must be empty or absent.
+   *
+   * `forbidden` only on the twin reclass. A unit's identity belongs to ONE
+   * product's roster. A reclass ends the units' ownership under this product
+   * and starts it under another, so a `uid_unit` carried across would name a
+   * unit on the wrong product's roster.
+   */
+  units: "forbidden" | "allowed";
 }
 
 /** The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member. */
 export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContract>> = {
   // Reserved and prepped units are both on the shelf, so nothing moves.
-  prep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden" },
+  prep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed" },
   check_out: {
     custody: "required",
     cost: "forbidden",
     places: { from: ["locations"], to: ["bookings"] },
     booking: "required",
     service: "forbidden",
+    units: "allowed",
   },
   check_in: {
     custody: "required",
@@ -401,6 +413,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["bookings"], to: ["locations"] },
     booking: "required",
     service: "forbidden",
+    units: "allowed",
   },
   // A damaged return IS a return that also sets a flag — identical in places to
   // `check_in`, so `allocationSide` answers `"to"` and the return flow picks the
@@ -423,6 +436,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["bookings"], to: ["locations"] },
     booking: "required",
     service: "forbidden",
+    units: "allowed",
   },
   // `locations` is a legitimate origin here and NOT for `mark_damaged`, and the
   // asymmetry is the model rather than an oversight: a unit that should be on a
@@ -436,6 +450,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["bookings", "locations"], to: ["out-of-service"] },
     booking: "required",
     service: "forbidden",
+    units: "allowed",
   },
   // ── the reachable rewinds, mirrored ──
   // Each is its forward twin's `places` swapped end for end. Mirroring here
@@ -443,13 +458,14 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
   // places of the RIGHT KIND, just in the opposite order — the same reasoning
   // `checkMovementContract` applies to a reversal, stated once per type instead
   // of inferred from a `reverses` that a rewind has no business setting.
-  unprep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden" },
+  unprep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed" },
   check_out_undo: {
     custody: "required",
     cost: "forbidden",
     places: { from: ["bookings"], to: ["locations"] },
     booking: "required",
     service: "forbidden",
+    units: "allowed",
   },
   check_in_undo: {
     custody: "required",
@@ -457,6 +473,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["locations"], to: ["bookings"] },
     booking: "required",
     service: "forbidden",
+    units: "allowed",
   },
   // 🔴 **Mirrored EXACTLY, including the widening on `mark_lost`'s origin.** A
   // loss may come off the booking (`out → lost`) or off a shelf
@@ -472,6 +489,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["out-of-service"], to: ["bookings", "locations"] },
     booking: "required",
     service: "forbidden",
+    units: "allowed",
   },
   mark_damaged_undo: {
     custody: "required",
@@ -479,6 +497,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["locations"], to: ["bookings"] },
     booking: "required",
     service: "forbidden",
+    units: "allowed",
   },
   // `mark_damaged` and its undo, for the two other in-building reasons. The
   // custody key carries the flag (`custody.to === "cleaning"`), so `service` is
@@ -489,6 +508,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["bookings"], to: ["locations"] },
     booking: "required",
     service: "forbidden",
+    units: "allowed",
   },
   mark_cleaning_undo: {
     custody: "required",
@@ -496,6 +516,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["locations"], to: ["bookings"] },
     booking: "required",
     service: "forbidden",
+    units: "allowed",
   },
   mark_maintenance: {
     custody: "required",
@@ -503,6 +524,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["bookings"], to: ["locations"] },
     booking: "required",
     service: "forbidden",
+    units: "allowed",
   },
   mark_maintenance_undo: {
     custody: "required",
@@ -510,6 +532,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["locations"], to: ["bookings"] },
     booking: "required",
     service: "forbidden",
+    units: "allowed",
   },
   // A one-sided line: the units leave both the shelf and ownership, and that is
   // what drops `quantity_held`.
@@ -525,6 +548,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["locations", "bookings"], to: ["outside"] },
     booking: "optional",
     service: "forbidden",
+    units: "allowed",
   },
   // A no-refund return is the same event with `cost.amount === 0` — the zero IS
   // the decision, which is why cost is required rather than nullable here.
@@ -534,6 +558,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["outside"], to: ["locations"] },
     booking: "optional",
     service: "forbidden",
+    units: "allowed",
   },
   opening_balance: {
     custody: "forbidden",
@@ -541,6 +566,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
     service: "forbidden",
+    units: "allowed",
   },
   purchase: {
     custody: "forbidden",
@@ -548,6 +574,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
     service: "forbidden",
+    units: "allowed",
   },
   find: {
     custody: "forbidden",
@@ -555,6 +582,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
     service: "forbidden",
+    units: "allowed",
   },
   make: {
     custody: "forbidden",
@@ -562,6 +590,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
     service: "forbidden",
+    units: "allowed",
   },
   adjustment_increase: {
     custody: "forbidden",
@@ -569,6 +598,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
     service: "forbidden",
+    units: "allowed",
   },
   adjustment_decrease: {
     custody: "forbidden",
@@ -576,6 +606,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["locations"], to: ["outside"] },
     booking: "forbidden",
     service: "forbidden",
+    units: "allowed",
   },
   trade_in: {
     custody: "forbidden",
@@ -583,6 +614,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["locations"], to: ["outside"] },
     booking: "forbidden",
     service: "forbidden",
+    units: "allowed",
   },
   // ── the twin reclass ──
   // Mirrors of `adjustment_decrease` / `adjustment_increase`: the units leave
@@ -596,6 +628,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["locations"], to: ["outside"] },
     booking: "forbidden",
     service: "forbidden",
+    units: "forbidden",
   },
   reclass_in: {
     custody: "forbidden",
@@ -603,6 +636,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
     service: "forbidden",
+    units: "forbidden",
   },
   // No custody: the booking keeps `damaged: N` forever — a terminal key and part
   // of its history — so removing it would break `sum(breakdown) === quantity`.
@@ -618,6 +652,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["out-of-service", "locations"], to: ["outside"] },
     booking: "forbidden",
     service: "nullable",
+    units: "allowed",
   },
   // Nets to zero on ownership, so it has no cost object to mis-gate — which is
   // what made #286 (a costed transfer corrupting the basis) possible.
@@ -633,6 +668,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["locations"], to: ["locations"] },
     booking: "forbidden",
     service: "nullable",
+    units: "allowed",
   },
   // The found-and-returned resolution: a unit recorded lost turns up and goes
   // back on a shelf. Until this existed `out-of-service` was a ONE-WAY place —
@@ -658,6 +694,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["out-of-service"], to: ["locations"] },
     booking: "forbidden",
     service: "nullable",
+    units: "allowed",
   },
   // ── out of service ──
   // In place. `with_booking` rather than `forbidden`: a booking `returned →
@@ -676,6 +713,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["locations"], to: ["locations"] },
     booking: "optional",
     service: "required",
+    units: "allowed",
   },
   // Shelf → record. `booking: "forbidden"` for the reason `return_to_service`
   // gives: the trip belongs to the RECORD, not to whichever order happened to
@@ -686,6 +724,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     places: { from: ["locations"], to: ["out-of-service"] },
     booking: "forbidden",
     service: "required",
+    units: "allowed",
   },
 };
 
@@ -770,6 +809,19 @@ export function getDisplayTransactionTypes(increaseOnly?: boolean): MovementType
 export interface MovementLineType {
   quantity: number;
   location: { from: DocSourceType | null; to: DocSourceType | null };
+  /**
+   * The unit numbers this line placed, a subset of the movement's
+   * `units[].number`. Replaying the lines puts each unit at a location.
+   *
+   * Empty or absent when the movement names no units. When it names some,
+   * every line names exactly `quantity` of them, and the lines together
+   * partition the movement's units. That is rule 5 of `checkMovementContract`.
+   *
+   * Optional because no stored movement carries the key yet. The serial plan
+   * (`api-cloudrun/.claude/plans/serial-tracking.md` § *Movements*) makes it
+   * required after counting key presence in both environments.
+   */
+  units?: number[];
 }
 
 /** Zod schema for one movement line. */
@@ -782,6 +834,32 @@ export const MovementLine: z.ZodType<MovementLineType> = z.strictObject({
     (l) => l.from !== null || l.to !== null,
     { message: "A line must move units from somewhere, to somewhere, or both" },
   ),
+  units: z.array(z.int().positive()).optional(),
+});
+
+/**
+ * One identified unit a movement moved.
+ *
+ * `serial_number` is a SNAPSHOT taken when the movement was written. Which
+ * serial a unit number carries can change (a replacement takes over a vacant
+ * number), and a remap never rewrites past movements. So the journal says
+ * which serial was in hand at the time, not which serial the number carries
+ * now.
+ */
+export interface MovementUnitType {
+  /** The unit's document id. */
+  uid_unit: string;
+  /** The unit's number within its product: the asset tag. */
+  number: number;
+  /** The serial the unit carried when this movement was written. */
+  serial_number: string | null;
+}
+
+/** Zod schema for one identified unit on a movement. */
+export const MovementUnit: z.ZodType<MovementUnitType> = z.strictObject({
+  uid_unit: FirestoreId,
+  number: z.int().positive(),
+  serial_number: z.string().min(1).nullable(),
 });
 
 /**
@@ -947,8 +1025,34 @@ export interface Movement {
   query_by_uid_store: string[];
   query_by_uid_location: string[];
 
-  // ── carried over unchanged ────────────────────────────────────────
-  serialized_details: { asset_tags: string[]; serial_numbers: string[] } | null;
+  // ── unit identity ─────────────────────────────────────────────────
+  /**
+   * Which units moved, ascending by `number`. Absent on a movement written
+   * before unit tracking. `[]` means the movement names no units: a bulk or
+   * untracked product, or a tracked one moved without naming them. When
+   * non-empty it lists exactly `quantity` units (rule 5 of
+   * `checkMovementContract`).
+   *
+   * Optional because no stored movement carries the key yet (2026-10-02).
+   * `movementScaffold` stamps `[]` on every write, and the journal rebuild
+   * (api-cloudrun#1088) rewrites every stored movement through it. The serial
+   * plan makes it required after counting key presence in both environments,
+   * so do not index-exempt it: an exemption would hide that count.
+   */
+  units?: MovementUnitType[];
+  /**
+   * `units[].number`, flat, in the same order: the per-unit timeline query
+   * (`array-contains`). Present exactly when `units` is.
+   */
+  query_by_unit_number?: number[];
+
+  // ── retiring ──────────────────────────────────────────────────────
+  /**
+   * Superseded by `units`. Optional now, and gone from both inputs. The rest
+   * of the removal: writers stop (api-cloudrun), the journal rebuild writes no
+   * key (which purges every stored copy), then the schema drops it.
+   */
+  serialized_details?: { asset_tags: string[]; serial_numbers: string[] } | null;
 
   // ── external links ────────────────────────────────────────────────
   /**
@@ -1119,6 +1223,9 @@ function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
     ctx.addIssue({ code: "custom", path: ["cost"], message: `"${m.type}" must not carry a cost` });
   }
 
+  // Rule 5: unit identity. Runs before the lines checks, which return early.
+  checkMovementUnits(m, contract, ctx);
+
   // ── lines ──
   if (contract.places === null) {
     if (m.lines.length > 0) {
@@ -1195,6 +1302,114 @@ function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
 
   // Rule 4: the service axis, and agreement between it and the places.
   checkMovementService(m, contract, ctx);
+}
+
+/**
+ * Rule 5 of {@link checkMovementContract}: which units moved.
+ *
+ * - `units` and `query_by_unit_number` are both present or both absent, and
+ *   the mirror is `units[].number` in order.
+ * - A contract that forbids units allows none.
+ * - Non-empty `units` lists exactly `quantity` units, strictly ascending by
+ *   `number` (so no number repeats), with no `uid_unit` repeated.
+ * - Each line's `units` is empty or absent, or exactly `line.quantity` numbers.
+ *   When the movement names units and has lines, the lines together name each
+ *   unit exactly once. With no units named, no line may name any.
+ */
+function checkMovementUnits(
+  m: Movement,
+  contract: MovementContract,
+  ctx: z.RefinementCtx,
+): void {
+  const units = m.units ?? [];
+  const numbers = units.map((u) => u.number);
+  const mirror = m.query_by_unit_number ?? [];
+  if ((m.units === undefined) !== (m.query_by_unit_number === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      path: [m.units === undefined ? "units" : "query_by_unit_number"],
+      message: "units and query_by_unit_number are written together: both present or both absent",
+    });
+  } else if (mirror.length !== numbers.length || mirror.some((n, i) => n !== numbers[i])) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["query_by_unit_number"],
+      message: `query_by_unit_number must equal units[].number in order (${numbers.join(", ")})`,
+    });
+  }
+
+  if (contract.units === "forbidden" && units.length > 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["units"],
+      message: `"${m.type}" moves units between products' rosters and must not name units`,
+    });
+  }
+
+  if (units.length > 0) {
+    if (units.length !== m.quantity) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["units"],
+        message: `names ${units.length} units but quantity is ${m.quantity}`,
+      });
+    }
+    numbers.forEach((n, i) => {
+      if (i > 0 && n <= numbers[i - 1]) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["units", i, "number"],
+          message: `units must be strictly ascending by number; ${n} follows ${numbers[i - 1]}`,
+        });
+      }
+    });
+    const uids = new Set(units.map((u) => u.uid_unit));
+    if (uids.size !== units.length) {
+      ctx.addIssue({ code: "custom", path: ["units"], message: "a uid_unit appears more than once" });
+    }
+  }
+
+  const named = new Set(numbers);
+  const placed = new Map<number, number>();
+  m.lines.forEach((line, i) => {
+    const lineUnits = line.units ?? [];
+    if (lineUnits.length === 0) return;
+    if (units.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lines", i, "units"],
+        message: "a line names units but the movement names none",
+      });
+      return;
+    }
+    if (lineUnits.length !== line.quantity) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lines", i, "units"],
+        message: `line ${i} names ${lineUnits.length} units but moves ${line.quantity}`,
+      });
+    }
+    for (const n of lineUnits) {
+      if (!named.has(n)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["lines", i, "units"],
+          message: `line ${i} names unit ${n}, which is not in the movement's units`,
+        });
+      }
+      placed.set(n, (placed.get(n) ?? 0) + 1);
+    }
+  });
+  if (units.length > 0 && m.lines.length > 0) {
+    const wrong = numbers.filter((n) => placed.get(n) !== 1);
+    if (wrong.length > 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lines"],
+        message: `the lines must name each unit exactly once; not so for ${wrong.join(", ")}`,
+      });
+    }
+  }
 }
 
 /**
@@ -1375,10 +1590,14 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   query_by_sources: z.array(z.string()),
   query_by_uid_store: z.array(FirestoreId),
   query_by_uid_location: z.array(FirestoreId),
+  // Optional: no stored movement carries either key yet. See the interface.
+  units: z.array(MovementUnit).optional(),
+  query_by_unit_number: z.array(z.int().positive()).optional(),
+  // Optional while it retires; see the interface.
   serialized_details: z.strictObject({
     asset_tags: z.array(z.string()),
     serial_numbers: z.array(z.string()),
-  }).nullable(),
+  }).nullable().optional(),
   // Optional, never required-nullable: 0 of 1,153 prod / 0 of 1,405 dev
   // movements carry the key (2026-08-30). See the interface docblock.
   xero_id: z.uuid().nullable().optional(),
@@ -1503,7 +1722,6 @@ export interface CreateTransactionInputType {
   reference: string;
   uuid_session: string;
   allocations?: MovementAllocationInputType[];
-  serialized_details?: { asset_tags: string[]; serial_numbers: string[] } | null;
   /**
    * Who the stock was bought from, on a `purchase`. `null`/absent everywhere
    * else, and on a `purchase` until an operator picks one.
@@ -1534,10 +1752,6 @@ export const CreateTransactionInput: z.ZodType<CreateTransactionInputType> = z.o
   reference: z.string(),
   uuid_session: z.uuid(),
   allocations: z.array(MovementAllocationInput).min(1).optional(),
-  serialized_details: z.object({
-    asset_tags: z.array(z.string()).default([]),
-    serial_numbers: z.array(z.string()).default([]),
-  }).nullable().optional(),
   // The uid alone; the writer resolves the name. See the interface docblock.
   supplier: z.object({ uid: FirestoreId }).nullable().optional(),
 }).refine(
@@ -1672,7 +1886,6 @@ export interface CreateStoreTransferInputType {
   reference: string;
   uuid_session: string;
   lines: StoreTransferLineInputType[];
-  serialized_details?: { asset_tags: string[]; serial_numbers: string[] } | null;
 }
 
 /**
@@ -1691,10 +1904,6 @@ export const CreateStoreTransferInput: z.ZodType<CreateStoreTransferInputType> =
   reference: z.string(),
   uuid_session: z.uuid(),
   lines: z.array(StoreTransferLineInput).min(1),
-  serialized_details: z.object({
-    asset_tags: z.array(z.string()).default([]),
-    serial_numbers: z.array(z.string()).default([]),
-  }).nullable().optional(),
 });
 
 // Totality of `MOVEMENT_CONTRACTS` over `MOVEMENT_TYPES`, and of

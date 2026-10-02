@@ -233,6 +233,10 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   // Fulfillment actors (api-cloudrun#1112, 2026-09-26). Writers stamp both from
   // the API release carrying this beta; the backfill fills the ~1,046 per env
   // that predate it, and then both tighten to required-nullable.
+  // ── pending-removal — loosened so writers can stop before storage is purged.
+  // Superseded by `units` (api-cloudrun#1088 Phase 0.5). The journal rebuild
+  // writes no key, which purges every stored copy; then the schema drops it.
+  ["transactions.serialized_details", "pending-removal"],
   // ── refused — a written refusal sits beside the declaration, with its corpus
   //    count. See `src/schemas/supplier.ts`.
   ["transactions.supplier", "refused:no-writer-yet"],

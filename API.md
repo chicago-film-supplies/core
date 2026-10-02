@@ -2876,7 +2876,6 @@ interface CreateStoreTransferInputType {
   reference: string;
   uuid_session: string;
   lines: StoreTransferLineInputType[];
-  serialized_details?: typeLiteral | null;
 }
 ```
 
@@ -3046,7 +3045,6 @@ interface CreateTransactionInputType {
   reference: string;
   uuid_session: string;
   allocations?: MovementAllocationInputType[];
-  serialized_details?: typeLiteral | null;
   supplier?: typeLiteral | null;
 }
 ```
@@ -6223,7 +6221,9 @@ interface Movement {
   query_by_sources: string[];
   query_by_uid_store: string[];
   query_by_uid_location: string[];
-  serialized_details: typeLiteral | null;
+  units?: MovementUnitType[];
+  query_by_unit_number?: number[];
+  serialized_details?: typeLiteral | null;
   xero_id?: string | null;
   supplier?: UidNameRefType | null;
   version: number;
@@ -6276,6 +6276,7 @@ interface MovementContract {
   places: typeLiteral | null;
   booking: "required" | "forbidden" | "optional";
   service: "required" | "forbidden" | "nullable";
+  units: "forbidden" | "allowed";
 }
 ```
 
@@ -6395,6 +6396,7 @@ scalar arrays, not nested object fields. Query paths come from the flat
 interface MovementLineType {
   quantity: number;
   location: typeLiteral;
+  units?: number[];
 }
 ```
 
@@ -6494,7 +6496,7 @@ interface MovementSessionItem {
   custody: MovementCustodyType | null;
   owner_path: string[] | null;
   lines: MovementLineType[];
-  serialized_details: typeLiteral | null;
+  serialized_details?: typeLiteral | null;
   reference: string;
 }
 ```
@@ -6548,6 +6550,32 @@ Union of all movement type string literals.
 
 ```ts
 type MovementTypeType = indexedAccess;
+```
+
+### `MovementUnit`
+
+Zod schema for one identified unit on a movement.
+
+```ts
+const MovementUnit: z.ZodType<MovementUnitType>;
+```
+
+### `MovementUnitType`
+
+One identified unit a movement moved.
+
+`serial_number` is a SNAPSHOT taken when the movement was written. Which
+serial a unit number carries can change (a replacement takes over a vacant
+number), and a remap never rewrites past movements. So the journal says
+which serial was in hand at the time, not which serial the number carries
+now.
+
+```ts
+interface MovementUnitType {
+  uid_unit: string;
+  number: number;
+  serial_number: string | null;
+}
 ```
 
 ### `NameField`
@@ -21820,7 +21848,6 @@ interface CreateStoreTransferInputType {
   reference: string;
   uuid_session: string;
   lines: StoreTransferLineInputType[];
-  serialized_details?: typeLiteral | null;
 }
 ```
 
@@ -21850,7 +21877,6 @@ interface CreateTransactionInputType {
   reference: string;
   uuid_session: string;
   allocations?: MovementAllocationInputType[];
-  serialized_details?: typeLiteral | null;
   supplier?: typeLiteral | null;
 }
 ```
@@ -21958,7 +21984,9 @@ interface Movement {
   query_by_sources: string[];
   query_by_uid_store: string[];
   query_by_uid_location: string[];
-  serialized_details: typeLiteral | null;
+  units?: MovementUnitType[];
+  query_by_unit_number?: number[];
+  serialized_details?: typeLiteral | null;
   xero_id?: string | null;
   supplier?: UidNameRefType | null;
   version: number;
@@ -22011,6 +22039,7 @@ interface MovementContract {
   places: typeLiteral | null;
   booking: "required" | "forbidden" | "optional";
   service: "required" | "forbidden" | "nullable";
+  units: "forbidden" | "allowed";
 }
 ```
 
@@ -22097,6 +22126,7 @@ scalar arrays, not nested object fields. Query paths come from the flat
 interface MovementLineType {
   quantity: number;
   location: typeLiteral;
+  units?: number[];
 }
 ```
 
@@ -22164,6 +22194,32 @@ Union of all movement type string literals.
 
 ```ts
 type MovementTypeType = indexedAccess;
+```
+
+### `MovementUnit`
+
+Zod schema for one identified unit on a movement.
+
+```ts
+const MovementUnit: z.ZodType<MovementUnitType>;
+```
+
+### `MovementUnitType`
+
+One identified unit a movement moved.
+
+`serial_number` is a SNAPSHOT taken when the movement was written. Which
+serial a unit number carries can change (a replacement takes over a vacant
+number), and a remap never rewrites past movements. So the journal says
+which serial was in hand at the time, not which serial the number carries
+now.
+
+```ts
+interface MovementUnitType {
+  uid_unit: string;
+  number: number;
+  serial_number: string | null;
+}
 ```
 
 ### `PLACE_KINDS`
@@ -23980,7 +24036,7 @@ interface MovementSessionItem {
   custody: MovementCustodyType | null;
   owner_path: string[] | null;
   lines: MovementLineType[];
-  serialized_details: typeLiteral | null;
+  serialized_details?: typeLiteral | null;
   reference: string;
 }
 ```
