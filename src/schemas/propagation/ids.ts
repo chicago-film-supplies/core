@@ -334,6 +334,7 @@ export type RuleId =
   | "update-location:name-to-inventory-ledgers"
   | "update-location:name-to-bookings"
   | "update-location:name-to-out-of-service"
+  | "update-location:name-to-transactions"
   | "update-location:default-name-to-store"
   | "holiday-definition:materialize-dates"
   | "holiday-dates:rematerialize-snapshot"

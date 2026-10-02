@@ -264,6 +264,35 @@ const updateLocationRules: CollectionRule[] = [
     ],
   },
   {
+    id: "update-location:name-to-transactions",
+    source: "locations",
+    target: "transactions",
+    mode: "fan-out",
+    invariant:
+      "Movement lines carry the location's name as `lines[].location.{from,to}.label` (api-cloudrun#853) — a location rename must cascade to every movement naming that location, so the journal and its receipts read the shelf's current name",
+    trigger:
+      "name change — Eventarc on location write, BulkWriter with lastUpdateTime precondition, over the movements' own `query_by_uid_location` reverse index",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `transactions←locations` — every line endpoint naming a location whose `label` is PRESENT vs locations/{uid}.name. An endpoint with no label was written before the writer stamped one; it is counted out of scope and never fails (the journal rebuild, api-cloudrun#1088, stamps them all)",
+      gates: true,
+    }],
+    fields: [
+      {
+        source: ["name"],
+        target: ["lines", "location", "from", "label"],
+        transform: "sets label on each lines[].location.from whose collection is `locations` and uid matches",
+      },
+      {
+        source: ["name"],
+        target: ["lines", "location", "to", "label"],
+        transform: "sets label on each lines[].location.to whose collection is `locations` and uid matches",
+      },
+    ],
+  },
+  {
     id: "update-location:default-name-to-store",
     source: "locations",
     target: "stores",
