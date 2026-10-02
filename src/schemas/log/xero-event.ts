@@ -201,7 +201,7 @@ export const XERO_EVENT_MSGS = [
   //
   // Deliberately a warn, not a throw. Money resolves or fails; reporting
   // metadata degrades and says so. Carries `xero_tracking_option_id` +
-  // `product_uid` + `item_name`, and whichever of `invoice_uid`/`order_uid`
+  // `uid_product` + `item_name`, and whichever of `invoice_uid`/`uid_order`
   // identifies the document being pushed.
   "xero_tracking_option_unresolved",
   "xero_tracking_option_update_failed",
@@ -245,7 +245,25 @@ export interface XeroEventLogRecord {
   xero_error?: string;
   invoice_number?: number;
   invoice_uid?: string;
+  /** The order a quote push or a tracked line belongs to. */
+  uid_order?: string;
+  /**
+   * @deprecated Use {@link uid_order}. Still declared so the alert bridge can
+   * read both spellings while emitters move; removed (with the bridge) 90 days
+   * after the api release that renames the last emitter.
+   */
   order_uid?: string;
+  /**
+   * The product behind a pushed line (`xero_tracking_option_unresolved` and
+   * the tracking-option family).
+   */
+  uid_product?: string;
+  /**
+   * @deprecated Use {@link uid_product}. Never declared on this arm before,
+   * though most `product_uid` emitters are Xero msgs; declared now only so the
+   * bridge has a typed field, and removed with {@link order_uid}.
+   */
+  product_uid?: string;
   /** Quote-push identity + state. Emitted by the whole quote path (`synced`,
    * `noop`, `locked`, `superseded`); previously carried only by passthrough. */
   xero_quote_id?: string | null;
@@ -314,7 +332,12 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   xero_error: z.string().optional(),
   invoice_number: z.number().optional(),
   invoice_uid: z.string().optional(),
+  uid_order: z.string().optional(),
+  /** @deprecated Use `uid_order`. */
   order_uid: z.string().optional(),
+  uid_product: z.string().optional(),
+  /** @deprecated Use `uid_product`. */
+  product_uid: z.string().optional(),
   xero_quote_id: z.string().nullable().optional(),
   order_number: z.number().optional(),
   current_status: z.string().nullable().optional(),

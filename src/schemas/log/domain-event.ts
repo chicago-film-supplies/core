@@ -85,16 +85,19 @@ export const DOMAIN_EVENT_MSGS = [
   // Emitted from `api-cloudrun/src/lib/cascadeScan.ts` in api-cloudrun.
   "cascade_converged",
   "location_cascade_skip",
-  // updateTransaction / updateStoreTransfer reversing the previous version out
-  // of a location doc found the doc or its product row missing, or repointed a
-  // uid-drifted doc. Pure drift signals the caller can't remediate — logged, not
-  // thrown. `{ location_id, uid_product, reason, expected_decrement }`. Emitted
-  // from `api-cloudrun/src/lib/transactionHelpers.ts` in api-cloudrun.
+  // A resync repointed a uid-drifted location doc. A drift signal, logged and
+  // not thrown. `{ location_id, uid_product, reason, expected_decrement }`; the
+  // one live emitter is `api-cloudrun/src/services/resyncLocationQuantities.ts`,
+  // which sends `reason: "resync_repoint"`, `expected_decrement: 0`, and
+  // `uid_product: "resync_all"` on a whole-catalog resync. (The name records an
+  // older emitter that reversed a transaction's previous version out of a
+  // location doc. That path no longer logs this msg.)
   "location_reversal_skip",
   // A location doc's `products[].quantity` went negative after a reversal —
   // only possible if its stored base was already drifted. Detector for the drift
   // `resyncLocationQuantities` repairs; does not throw. `{ location_id,
-  // uid_product, quantity }`. Emitted from `api-cloudrun/src/lib/transactionHelpers.ts`.
+  // uid_product, quantity }`. Emitted from `api-cloudrun/src/lib/movementApplier.ts`
+  // (`warnOnNegativeLocationQuantities`).
   "location_quantity_negative",
   "stock_recalc_item_added",
   "stock_recalc_item_modified",
@@ -318,8 +321,26 @@ export interface DomainEventLogRecord {
   level: LogLevelType;
   msg: DomainEventMsg;
   ts: string;
+  /**
+   * The order a record is about. The `uid_{descriptor}` spelling is the
+   * convergence target for every log reference (the same rule the stored
+   * schemas follow); `user_id`, `request_id` and `trace_id` are the documented
+   * exceptions.
+   */
+  uid_order?: string;
+  /**
+   * @deprecated Use {@link uid_order}. Still declared so the alert bridge can
+   * read both spellings while emitters move; removed (with the bridge) 90 days
+   * after the api release that renames the last emitter.
+   */
   order_uid?: string;
   invoice_uid?: string;
+  /** The product a record is about. `location_*` and `stock_*` msgs carry it. */
+  uid_product?: string;
+  /**
+   * @deprecated Use {@link uid_product}. Still declared for the alert bridge
+   * (`StockPhysicallyOversold` keys on it); removed with {@link order_uid}.
+   */
   product_uid?: string;
   organization_uid?: string;
   /**
@@ -372,8 +393,12 @@ export interface DomainEventLogRecord {
 export const DomainEventLogRecordSchema: z.ZodType<DomainEventLogRecord> = z.object({
   ...baseLogFields,
   msg: z.enum(DOMAIN_EVENT_MSGS),
+  uid_order: z.string().optional(),
+  /** @deprecated Use `uid_order`. */
   order_uid: z.string().optional(),
   invoice_uid: z.string().optional(),
+  uid_product: z.string().optional(),
+  /** @deprecated Use `uid_product`. */
   product_uid: z.string().optional(),
   organization_uid: z.string().optional(),
   store_uid: z.string().optional(),

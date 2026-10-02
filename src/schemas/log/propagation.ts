@@ -68,6 +68,17 @@ export interface PropagationLogRecord {
   target_doc_id?: string;
   status: PropagationStatusType;
   duration_ms?: number;
+  /**
+   * The failure's message, on a `status: "failed"` record. The same name the
+   * logger supplies on every other arm (`error_name` / `error_message` /
+   * `error_stack` in `baseLogFields`), and it keeps this arm's 2,048 cap.
+   */
+  error_message?: string;
+  /**
+   * @deprecated Use {@link error_message}. The one record that spelled a
+   * failure message `error`; still declared while the emitter moves, removed
+   * with the other deprecated log names.
+   */
   error?: string;
   rules_fired?: string[];
   rules_fired_count?: number;
@@ -97,6 +108,10 @@ export const PropagationLogRecordSchema: z.ZodType<PropagationLogRecord> = z.obj
   source_doc_id: z.string().optional(),
   target_doc_id: z.string().optional(),
   status: z.enum(PROPAGATION_STATUSES),
+  // Overrides `baseLogFields.error_message`'s 500 cap, matching the 2,048 the
+  // old `error` field carried.
+  error_message: z.string().max(2048).optional(),
+  /** @deprecated Use `error_message`. */
   error: z.string().max(2048).optional(),
   rules_fired: z.array(z.string()).optional(),
   rules_fired_count: z.number().optional(),

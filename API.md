@@ -8542,6 +8542,7 @@ interface PropagationLogRecord {
   target_doc_id?: string;
   status: PropagationStatusType;
   duration_ms?: number;
+  error_message?: string;
   error?: string;
   rules_fired?: string[];
   rules_fired_count?: number;
@@ -10949,20 +10950,19 @@ type TransactionUpdated = EventEnvelope<Movement> & typeLiteral;
 ### `TypedLogRecord`
 
 Discriminated union of every typed log record, keyed by the `msg`
-literal. The new `logTyped<R extends TypedLogRecord>` API in
-`api-cloudrun/src/lib/logger.ts` constrains its argument to this
-union — TS narrows to the matching arm based on the supplied `msg`,
-giving compile-time enforcement that every field is correctly named
-and typed.
+literal. `logTyped` in `api-cloudrun/src/lib/logger.ts` takes this union
+(minus `ts`), so TS narrows to the arm matching the supplied `msg`.
 
-Adding a new arm requires:
-  1. Define schema + interface in `./<archetype>.ts`
-  2. Re-export both above
-  3. Add to this union
-  4. Add to {@link MSG_SCHEMA_REGISTRY} below
+⚠️ **That narrowing is weaker than it looks.** It rejects an unknown `msg`
+and a declared field of the wrong type, and nothing else: every arm carries
+`[key: string]: unknown`, so a misspelled or undeclared field name compiles.
+A field earns a declaration for type-safety and discoverability on that one
+name, not for name enforcement.
 
-The `log-records.test.ts` coverage test asserts union ↔ registry
-symmetry so it's impossible to add one without the other.
+The recipe for adding a msg or an arm lives in api-cloudrun's
+`logging-propagation` skill (`api-cloudrun/.claude/skills/logging-propagation/SKILL.md`).
+`tests/log-records.test.ts` asserts that this union, the exported
+`*LogRecordSchema` arms and {@link MSG_SCHEMA_REGISTRY} agree.
 
 ```ts
 type TypedLogRecord = ClientLogRecord | DmarcAggregateLogRecord | EmailSendFailedLogRecord | EmailSentLogRecord | LedgerGroupCommitLogRecord | OAuthRefreshLogRecord | PropagationLogRecord | RequestLogRecord | SyncErrorLogRecord | TransactionLogRecord | ValidationErrorLogRecord | AccessControlEventLogRecord | CalendarEventLogRecord | CloudTaskEventLogRecord | DomainEventLogRecord | IntegrationEventLogRecord | McpEventLogRecord | OAuthEventLogRecord | SystemEventLogRecord | TemplateEventLogRecord | TypesenseEventLogRecord | UserSessionEventLogRecord | XeroEventLogRecord;
@@ -24911,8 +24911,10 @@ interface DomainEventLogRecord {
   level: LogLevelType;
   msg: DomainEventMsg;
   ts: string;
+  uid_order?: string;
   order_uid?: string;
   invoice_uid?: string;
+  uid_product?: string;
   product_uid?: string;
   organization_uid?: string;
   recurrence_uid?: string;
@@ -25376,6 +25378,7 @@ interface PropagationLogRecord {
   target_doc_id?: string;
   status: PropagationStatusType;
   duration_ms?: number;
+  error_message?: string;
   error?: string;
   rules_fired?: string[];
   rules_fired_count?: number;
@@ -25654,20 +25657,19 @@ type TransactionStatusType = indexedAccess;
 ### `TypedLogRecord`
 
 Discriminated union of every typed log record, keyed by the `msg`
-literal. The new `logTyped<R extends TypedLogRecord>` API in
-`api-cloudrun/src/lib/logger.ts` constrains its argument to this
-union — TS narrows to the matching arm based on the supplied `msg`,
-giving compile-time enforcement that every field is correctly named
-and typed.
+literal. `logTyped` in `api-cloudrun/src/lib/logger.ts` takes this union
+(minus `ts`), so TS narrows to the arm matching the supplied `msg`.
 
-Adding a new arm requires:
-  1. Define schema + interface in `./<archetype>.ts`
-  2. Re-export both above
-  3. Add to this union
-  4. Add to {@link MSG_SCHEMA_REGISTRY} below
+⚠️ **That narrowing is weaker than it looks.** It rejects an unknown `msg`
+and a declared field of the wrong type, and nothing else: every arm carries
+`[key: string]: unknown`, so a misspelled or undeclared field name compiles.
+A field earns a declaration for type-safety and discoverability on that one
+name, not for name enforcement.
 
-The `log-records.test.ts` coverage test asserts union ↔ registry
-symmetry so it's impossible to add one without the other.
+The recipe for adding a msg or an arm lives in api-cloudrun's
+`logging-propagation` skill (`api-cloudrun/.claude/skills/logging-propagation/SKILL.md`).
+`tests/log-records.test.ts` asserts that this union, the exported
+`*LogRecordSchema` arms and {@link MSG_SCHEMA_REGISTRY} agree.
 
 ```ts
 type TypedLogRecord = ClientLogRecord | DmarcAggregateLogRecord | EmailSendFailedLogRecord | EmailSentLogRecord | LedgerGroupCommitLogRecord | OAuthRefreshLogRecord | PropagationLogRecord | RequestLogRecord | SyncErrorLogRecord | TransactionLogRecord | ValidationErrorLogRecord | AccessControlEventLogRecord | CalendarEventLogRecord | CloudTaskEventLogRecord | DomainEventLogRecord | IntegrationEventLogRecord | McpEventLogRecord | OAuthEventLogRecord | SystemEventLogRecord | TemplateEventLogRecord | TypesenseEventLogRecord | UserSessionEventLogRecord | XeroEventLogRecord;
@@ -25905,7 +25907,10 @@ interface XeroEventLogRecord {
   xero_error?: string;
   invoice_number?: number;
   invoice_uid?: string;
+  uid_order?: string;
   order_uid?: string;
+  uid_product?: string;
+  product_uid?: string;
   xero_quote_id?: string | null;
   order_number?: number;
   current_status?: string | null;
