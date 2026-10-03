@@ -169,6 +169,7 @@ import {
   invoiceScopeDividersMatch,
   isInExtensionSection,
   orderInvoiceSharedFields,
+  orderLineClaims,
   projectOrderItemToInvoiceItem,
 } from "./invoices.ts";
 import type { LineItem } from "./orders.ts";
@@ -243,6 +244,33 @@ export interface DocumentSubstitutionEntry {
   replaced: string;
   /** Y — the line carried in its place. */
   substitute: string;
+}
+
+/**
+ * An invoice row that bills an order line from ANOTHER position (core#125): an
+ * operator dragged it into another group or destination of its order block, or
+ * split units off into a new group, and the row's `path_order_item` names the
+ * order line it is. One difference, never `not_on_source` at the row plus an
+ * unbilled order line.
+ *
+ * Filed at whichever of the two the viewed document carries — at the row on
+ * the invoice view, at the order line on the order and fulfillment views. Both
+ * keys are in the VIEWED document's path space, like every map key.
+ *
+ * `fields` are the row's TERMS against the order line's, compared exactly as a
+ * same-path line's would be (empty against a fulfillment, which carries no
+ * terms). How many units are billed is the `quantity` entry's, summed over every
+ * row claiming the line — several may, and the line may also stay at its own
+ * path (a split).
+ */
+export interface DocumentMovedEntry {
+  kind: "moved";
+  source: DocumentRef;
+  /** The invoice row, where it sits. */
+  row: string;
+  /** The order line it bills. */
+  order_line: string;
+  fields: DocumentDiffField[];
 }
 
 /**
@@ -337,6 +365,7 @@ export interface DocumentQuantityEntry {
 export type DocumentDiffEntry =
   | DocumentSourceDiffEntry
   | DocumentSubstitutionEntry
+  | DocumentMovedEntry
   | DocumentQuantityEntry;
 
 /**
@@ -484,6 +513,8 @@ function refOf(kind: DocumentKind, doc: { uid: string; number: number; version?:
 interface ScopedLines {
   byKey: Map<string, LineItem>;
   anchors: SubstitutionAnchor[];
+  /** An invoice's moved rows: row key → the order-relative key it bills (`orderLineClaims`). Empty elsewhere. */
+  claims: Map<string, string>;
 }
 
 function scopeOrder(order: Order): ScopedLines {
@@ -492,7 +523,7 @@ function scopeOrder(order: Order): ScopedLines {
     if (isDividerItemType(it.type)) continue;
     byKey.set(key(it.path), it as unknown as LineItem);
   }
-  return { byKey, anchors: [] };
+  return { byKey, anchors: [], claims: new Map() };
 }
 
 function scopeFulfillment(fulfillment: Fulfillment): ScopedLines {
@@ -501,7 +532,7 @@ function scopeFulfillment(fulfillment: Fulfillment): ScopedLines {
     if (isDividerItemType(it.type)) continue;
     byKey.set(key(it.path), it as unknown as LineItem);
   }
-  return { byKey, anchors: collectSubstitutionAnchors(fulfillment.items as readonly FulfillmentItemType[]) };
+  return { byKey, anchors: collectSubstitutionAnchors(fulfillment.items as readonly FulfillmentItemType[]), claims: new Map() };
 }
 
 function scopeInvoice(invoice: Invoice, orderUid: string): ScopedLines {
@@ -523,7 +554,11 @@ function scopeInvoice(invoice: Invoice, orderUid: string): ScopedLines {
     const line = it as InvoiceItem;
     rel.push({ path: relPath, substituted_for: line.substituted_for });
   }
-  return { byKey, anchors: collectSubstitutionAnchors(rel) };
+  const claims = new Map<string, string>();
+  for (const [row, x] of orderLineClaims(invoice.items as unknown as InvoiceItem[], orderUid)) {
+    if (byKey.has(row)) claims.set(row, key(x));
+  }
+  return { byKey, anchors: collectSubstitutionAnchors(rel), claims };
 }
 
 /** The order uids an invoice carries a scope for. */
@@ -785,6 +820,14 @@ function compareScope(
   const substituted = (at: string, replaced: string, substitute: string) =>
     push(out.lines, viewedKey(at), { kind: "substituted", source: sourceRef, replaced: viewedKey(replaced), substitute: viewedKey(substitute) });
   /**
+   * X re-stated at the moved row's position, so a comparison of the two is about
+   * TERMS: the position is the move itself, and the `moved` entry says so.
+   */
+  const placedAt = (line: LineItem, rel: string): LineItem => ({ ...line, path: rel.split("/") });
+  /** A moved row (core#125), filed at `at`. `row` is already a viewed key; `orderLine` is order-relative. */
+  const moved = (at: string, orderLine: string, row: string, fields: DocumentDiffField[]) =>
+    push(out.lines, viewedKey(at), { kind: "moved", source: sourceRef, row, order_line: viewedKey(orderLine), fields });
+  /**
    * Is this line inside a substitution the OTHER side can see — a component of
    * substitute Y (strictly below Y) on `side`, or X or a component of X that a
    * substitute on `side` replaced — where `other` carries the replaced X? Such
@@ -883,6 +926,13 @@ function compareScope(
     if (!comparable(viewed, source, here)) continue;
     const there = source.lines.byKey.get(rel);
     if (there === undefined) {
+      // The viewed invoice carries order line X here, moved (core#125).
+      const claimed = viewed.lines.claims.get(rel);
+      const claimedLine = claimed === undefined ? undefined : source.lines.byKey.get(claimed);
+      if (claimed !== undefined && claimedLine !== undefined) {
+        moved(rel, claimed, viewedKey(rel), lineFields(viewed, source, here, placedAt(claimedLine, rel), orderUid, context));
+        continue;
+      }
       // The viewed document carries a substitute Y where the source carries X.
       const mine = substituteAt(viewed, rel);
       if (mine && source.lines.byKey.has(key(mine.substitutedFor))) {
@@ -917,6 +967,15 @@ function compareScope(
   }
   for (const [rel, there] of source.lines.byKey) {
     if (viewed.lines.byKey.has(rel) || !comparable(source, viewed, there)) continue;
+    // The source invoice carries the viewed line X at another position (core#125).
+    const claimed = source.lines.claims.get(rel);
+    const claimedLine = claimed === undefined ? undefined : viewed.lines.byKey.get(claimed);
+    if (claimed !== undefined && claimedLine !== undefined) {
+      moved(claimed, claimed, viewedKey(rel), lineFields(viewed, source, placedAt(claimedLine, rel), there, orderUid, context));
+      continue;
+    }
+    // A viewed invoice row elsewhere bills this line: its `moved` entry is the answer.
+    if ([...viewed.lines.claims.values()].includes(rel)) continue;
     // A line the viewed document substituted away is explained by the substitute's own entry.
     if (isRemovedBySubstitution(rel.split("/"), viewed.lines.anchors)) continue;
     // A substitute (or its component) the source carries in place of a line the

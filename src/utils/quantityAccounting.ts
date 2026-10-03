@@ -128,6 +128,7 @@ import {
   getOrderScopedItems,
   type InvoiceItem,
   invoiceAuthoredSubtrees,
+  orderLineClaims,
   invoiceScopeDividersMatch,
   isInInvoiceAuthoredSubtree,
   isInExtensionSection,
@@ -416,10 +417,24 @@ export function invoicedByPath(
     const anchors = liveInvoiceAnchors(scoped, orderItems, orderUid);
     const extensionTargets = extensionSectionTargets(scoped, orderUid);
     const authored = invoiceAuthoredSubtrees(scoped, orderItems as LineItem[], orderUid);
+    const claims = orderLineClaims(scoped, orderUid);
     const windowOf = (item: InvoiceItem) =>
       pairWindow(invoice.destinations?.find((pair) => pair.uid === (item.path ?? [])[1] && pair.uid_order === orderUid));
     for (const item of scoped) {
       if (!isLineItemType(item.type)) continue;
+      // A moved line (core#125) IS order line X at another position — inside an
+      // order group or one the invoice authored (a split's new group) alike — so
+      // it bills X directly, at X's terms. Checked before the authored skip below.
+      const claim = claims.get(key((item.path ?? []).slice(1)));
+      if (claim !== undefined) {
+        const reversed = reversals.byRow.get(`${invoice.uid}|${key(item.path ?? [])}`) ?? 0;
+        const left = (item.quantity ?? 0) - Math.min(reversed, Math.max(item.quantity ?? 0, 0));
+        if (left <= 0) continue;
+        const entry = at(key(claim));
+        entry.rows.push({ invoiceUid: invoice.uid, item, via: "direct", quantity: left, window: windowOf(item) });
+        entry.quantity += left;
+        continue;
+      }
       // A line in a group or destination the invoice authored bills no order
       // line (core#124): it credits nothing, rather than a path the order lacks.
       if (isInInvoiceAuthoredSubtree(item.path ?? [], orderUid, authored)) continue;

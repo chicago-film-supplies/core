@@ -897,14 +897,15 @@ Deno.test("documentDiff: exchanged_for entries in a different order are equal �
 
 // ── core#118: one-sided legs and kits, kept rows, exchange units, L&D ────────
 
-Deno.test("documentDiff: the kind set is exactly seven — derived from the entries, so it cannot drift", () => {
+Deno.test("documentDiff: the kind set is exactly eight — derived from the entries, so it cannot drift", () => {
   // Compile-time: a kind added or removed without updating this literal fails
   // `deno check`, in both directions (an extra key is excess, a missing one is required).
+  // `moved` joined with core#125.
   const kinds: Record<DocumentDiffKind, true> = {
     differs: true, not_on_source: true, only_on_source: true, pair_field: true,
-    doc_field: true, substituted: true, quantity: true,
+    doc_field: true, substituted: true, moved: true, quantity: true,
   };
-  assertEquals(Object.keys(kinds).length, 7);
+  assertEquals(Object.keys(kinds).length, 8);
 });
 
 const LEG2 = "0b6c3a51-6c1a-4f0e-9a51-6f1f2b9d0a03";

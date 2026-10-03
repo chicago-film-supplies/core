@@ -365,6 +365,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "invoiceScopeDividersMatch", // structural alignment predicate — audit + endpoint
     "invoiceAuthoredSubtrees", // that predicate's invoice-authored half (core#124) — sync + accounting
     "isInInvoiceAuthoredSubtree", // membership test over those roots — sync + accounting
+    "orderLineClaims", // which rows bill an order line from elsewhere (core#125) — sync + accounting + diff
+    "orderLineClaimIssues", // the write-time check on those pointers (core#125 D3) — api write path
     // Order-first coverage. Not a render helper: it needs every LINKED
     // INVOICE's items, which a render context never holds (a template is
     // handed one document), and its answer is an operator advisory.

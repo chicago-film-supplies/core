@@ -21,6 +21,13 @@ function resolveField(schema: any): unknown {
   // without carrying the parse-time behaviour.
   const meta = getNodeMeta(schema);
   if (meta && meta.initial !== undefined) return meta.initial;
+  // `.meta({ seed: false })` — the form seed OMITS this key. For an optional
+  // field whose type-derived zero is illegal and whose only legal "nothing" is
+  // absence: `path_order_item` is `.min(1)`, so `[]` would make every
+  // form-seeded invoice line unparseable (core#125). Opt-in per field, never a
+  // rule over every `.min(1)` array: `CreateOrderInput.items` is one too, and a
+  // form pushes into its seeded `[]`.
+  if (meta && meta.seed === false) return SKIP;
 
   const def = schema._zod.def;
 

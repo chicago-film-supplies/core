@@ -357,6 +357,7 @@ export const templateSchemaFields: Partial<
     { path: "items[] (type: rental, replacement, ...).substituted_for[].path", type: "union[]" },
     { path: "items[] (type: rental, replacement, ...).substituted_for[].quantity", type: "number" },
     { path: "items[] (type: rental, replacement, ...).uid_out_of_service", type: "union? | null" },
+    { path: "items[] (type: rental, replacement, ...).path_order_item", type: "union[]?" },
     { path: "items[] (type: group).uid", type: "string" },
     { path: "items[] (type: group).type", type: "group" },
     { path: "items[] (type: group).name", type: "string" },

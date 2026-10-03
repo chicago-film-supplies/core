@@ -440,6 +440,34 @@ export interface InvoiceDocLineItemType {
    * an array of maps, which `orderBy` key-presence cannot reach.
    */
   uid_out_of_service?: string | null;
+  /**
+   * The ORDER line this row bills, when the row sits somewhere else (core#125):
+   * an operator dragged it into another group or destination inside its own
+   * order block, or split some of its units into a new group. Order-relative —
+   * no order-divider prefix — and stated on the ROOT row only; a kit's
+   * components follow by suffix (`[...row, c]` bills `[...path_order_item, c]`).
+   *
+   * The row IS that order line, at another position: quantity, labels and
+   * price merge three-way against it, and coverage credits it. That is why this
+   * is not a `substituted_for` entry, which names a DIFFERENT product standing
+   * in for X — placement, quantity, labels and the diff kind would all fork on
+   * a "same product?" test.
+   *
+   * Several rows may claim one order line, and the order line may also stay at
+   * its own path (a split). That is surfaced as a `quantity` diff when the sum
+   * disagrees, never refused (owner, 2026-10-03). When the order removes the
+   * line and the row survives as an override, the sync drops this key and the
+   * row is plainly invoice-authored.
+   *
+   * ⚠️ **NOT an invoice-only override field.** `carryForwardOverrides` matches
+   * by `uid`, which repeats within a document, so carrying it would stamp the
+   * pointer onto another occurrence of the same product. It is excluded from
+   * the comparator's key sets separately (`INVOICE_ROW_POINTER_FIELDS`).
+   *
+   * `.optional()` for `substituted_for`'s reasons (array-member-uncensusable,
+   * meaningful on a handful of rows only).
+   */
+  path_order_item?: string[];
 }
 
 /**
@@ -499,6 +527,10 @@ const InvoiceDocLineItemInner = z.strictObject({
   // exactly — see the interface docblock for why this one is not `.nullable()`.
   substituted_for: SubstitutedForList.optional(),
   uid_out_of_service: OutOfServiceId.nullable().optional(),
+  // See the interface docblock (core#125). The credit note's
+  // `path_invoice_item` is its twin one grain down.
+  // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key.
+  path_order_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula).superRefine(checkZeroPricedAmount)
   .superRefine(checkOutOfServiceLineType);
 
@@ -1281,6 +1313,13 @@ export interface InvoiceItemInputLineType {
    * from typed fields, so a key absent here is dropped on every PUT.
    */
   uid_out_of_service?: string | null;
+  /**
+   * @see `InvoiceDocLineItemType.path_order_item`. Operator-authored (a drop or
+   * a split in the manager), so it needs an input channel for the
+   * `substituted_for` reason. The API checks it names a line of the row's own
+   * order (core#125 D3).
+   */
+  path_order_item?: string[];
 }
 
 // Un-annotated for `_zod.propValues`, `z.object` so unknown keys are stripped
@@ -1326,6 +1365,7 @@ const InvoiceItemInputLineInner = z.object({
   substituted_for: SubstitutedForList.optional(),
   zero_priced: z.boolean().nullable().optional(),
   uid_out_of_service: OutOfServiceId.nullable().optional(),
+  path_order_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula).superRefine(checkOutOfServiceLineType);
 
 /** Zod schema for a billable invoice line (input). */

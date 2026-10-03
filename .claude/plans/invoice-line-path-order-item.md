@@ -5,6 +5,40 @@
 **Related:** core#124, core#127, manager#472, api-cloudrun#538 §2, api-cloudrun#1189, `core/src/utils/substitutions.ts`, `core/src/utils/invoices.ts` (`syncOrderToInvoiceSelective`), `manager/src/utils/invoiceDrop.ts`
 **Closes:** core#125 when Phase 3 lands (core#125 stays the tracker until then).
 
+> ## ⚠️ STATUS UPDATE 2026-10-03 — Phase 0 done (one check open), Phase 1 landed in core
+>
+> **Phase 0.** Uniqueness 400: confirmed (`api-cloudrun/src/lib/firestoreWrite.ts` runs
+> `validateInvoiceItemUniqueness` on every invoice write). `splitInvoiceItem`: the SAME gap — the clone
+> lands in a new invoice-authored "New Group", so Phase 3 stamps there too. Fulfillment regrouping: none
+> (no fulfillment component uses `createReorderable`), so fulfillments stay out of scope. ⚠️ **Still open:
+> the prod/dev candidate count** — ADC needed re-auth. The probe's predicate is Q3's: a root line under an
+> order block, at a path the order lacks, with exactly one same-uid order line not carried at its own path.
+> Re-derive it in Phase 2b's dry-run.
+>
+> **Phase 1 (core) — done, one `feat(invoice)` commit.** Where it departs from the design below:
+> - 🔴 **NOT added to `INVOICE_ONLY_ITEM_FIELDS`.** That tuple drives `carryForwardOverrides`, which keys
+>   on `uid` — so the pointer would be stamped onto another occurrence of the same product. It sits in a
+>   separate `INVOICE_ROW_POINTER_FIELDS`, which only the comparator's key-set exclusion reads.
+> - **One reader:** `orderLineClaims` (row key → claimed order path, components by suffix, self-pointer =
+>   no claim). Sync, coverage, `invoicedByPath` (claims checked BEFORE the authored-subtree skip, so a
+>   split's new group bills X), alignment, the diff and the sync badge all read it.
+> - **Two readers the table below missed:** `invoiceScopeDividersMatch` excuses a claimed line (X's emptied
+>   group gone from the invoice is otherwise "billed elsewhere" → unaligned → coverage fails closed); and
+>   `computeInvoiceSyncStatus` compares a claimant against X at its own position, with no phantom
+>   `out_of_sync` at X.
+> - **D3 lives in core:** `orderLineClaimIssues(items, orderLines, stored)` → `outside_order_block` /
+>   `not_a_line` / `order_unknown`; unchanged stored pointers are grandfathered. Phase 2 calls it.
+> - **Diff kind `moved`** (`DocumentMovedEntry`: `row`, `order_line`, `fields` = terms vs X re-pathed at the
+>   row). Manager has no exhaustive switch, so it renders "Only on …" until Phase 3 gives it copy.
+> - **`.meta({ seed: false })`** (`schemas/initial.ts`): the form seed omits the key — `[]` fails `.min(1)`
+>   and broke every form-seeded invoice line. Opt-in, not a rule over `.min(1)` arrays (that moved
+>   `CreateOrderInput.items` et al.); every exported schema's seed is byte-identical to before.
+>   ⚠️ `credit-note`'s `path_invoice_item` has the same latent `[]` seed and was left alone.
+>
+> **Next:** Phase 1b (skill docs, add the badge/alignment readers and `INVOICE_ROW_POINTER_FIELDS` too), then
+> Phase 2 — `buildInvoiceItems` must carry `path_order_item` (the input schema already does), and the
+> write path calls `orderLineClaimIssues`.
+
 ## START HERE
 
 An operator can drag an invoice LINE into a different group or destination **inside its own order block**

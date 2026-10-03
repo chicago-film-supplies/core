@@ -168,6 +168,8 @@ export interface InvoiceItem extends LineItem {
   uid_out_of_service?: string | null;
   /** @see `InvoiceDocDestinationItemType.path_extension_for` — a destination divider's only. */
   path_extension_for?: string[];
+  /** @see `InvoiceDocLineItemType.path_order_item` — a moved line's root row only (core#125). */
+  path_order_item?: string[];
 }
 
 // ── Invoice totals ──────────────────────────────────────────────
@@ -606,8 +608,24 @@ const INVOICE_ONLY_ITEM_FIELDS = [
   // would widen `@cfs/core/utils/invoices` for a guard.
 ] as const satisfies readonly (keyof InvoiceDocLineItemType)[];
 
-/** Membership form of {@link INVOICE_ONLY_ITEM_FIELDS}, for key filtering. */
-const INVOICE_ONLY_ITEM_FIELD_SET: ReadonlySet<string> = new Set(INVOICE_ONLY_ITEM_FIELDS);
+/**
+ * Invoice-owned keys that state where a row sits relative to the ORDER, and so
+ * are never carried by uid (core#125).
+ *
+ * 🔴 Kept out of {@link INVOICE_ONLY_ITEM_FIELDS} on purpose. That tuple drives
+ * {@link carryForwardOverrides}, which matches by `uid` — and a uid repeats
+ * within one document, so a moved row's `path_order_item` would be stamped
+ * onto the rebuilt row at the order line's own path (a self-claim) or onto a
+ * different occurrence of the same product (a false one). The comparator still
+ * has to ignore it, which is the only thing this list is for.
+ */
+const INVOICE_ROW_POINTER_FIELDS = ["path_order_item"] as const satisfies readonly (keyof InvoiceDocLineItemType)[];
+
+/** Keys {@link invoiceItemDifferences} never compares: the override policy plus the row pointers. */
+const INVOICE_OWNED_ITEM_FIELD_SET: ReadonlySet<string> = new Set<string>([
+  ...INVOICE_ONLY_ITEM_FIELDS,
+  ...INVOICE_ROW_POINTER_FIELDS,
+]);
 
 /**
  * Return the intersection of two key arrays, minus any keys in the exclude set.
@@ -1033,7 +1051,7 @@ function invoicePriceDifferences(expected: unknown, current: unknown): string[] 
 export function invoiceItemDifferences(expected: InvoiceItem, current: InvoiceItem): string[] {
   const comparableKeys = (it: InvoiceItem) => {
     const rec = it as unknown as Record<string, unknown>;
-    return new Set(Object.keys(rec).filter((k) => !INVOICE_ONLY_ITEM_FIELD_SET.has(k) && rec[k] !== undefined));
+    return new Set(Object.keys(rec).filter((k) => !INVOICE_OWNED_ITEM_FIELD_SET.has(k) && rec[k] !== undefined));
   };
   const eKeys = comparableKeys(expected);
   const cKeys = comparableKeys(current);
@@ -1620,6 +1638,10 @@ function mergePair(
  *   row the order does not carry is placed after X's subtree. Entries are
  *   re-pointed when X moves; once the order drops X, the entry and its units go
  *   with it (owner, 2026-09-16)
+ * - **Moved** (`path_order_item`, core#125): a row billing order line X from
+ *   another position is merged against X where it stands, re-pointed when X
+ *   moves, and removed with X unless overridden — then kept with its pointer
+ *   dropped. Each claiming row is decided on its own ({@link orderLineClaims})
  *
  * ## 🔴 Why the substitution arm exists: without it a substitution lasts until
  * the next order save
@@ -1790,6 +1812,47 @@ function syncScopedItems(
   };
   const currentInvoiceItems = storedInvoiceItems.map(normalize);
 
+  // ── `path_order_item` claims (core#125) ──
+  //
+  // A row that bills order line X from another position IS X: merged three-way
+  // against X where it stands, re-pointed when X moves, and removed with X
+  // unless the invoice overrode it — in which case the pointer is dropped and
+  // the row is plainly invoice-authored (owner, 2026-10-03). X itself is never
+  // re-projected because a row claims it: the left-out rule already holds X out.
+  const claims = orderLineClaims(
+    currentInvoiceItems.filter((it) => !isInExtensionSection(it.path, orderDividerUid, extensionTargets)) as InvoiceItem[],
+    orderDividerUid,
+  );
+  const newByPath = new Map<string, LineItem>();
+  for (const item of newOrderItems) newByPath.set(itemPathKey(item.path), item);
+  /** A claimed row as this save leaves it, or `keep: false` when X went with nothing overridden. */
+  const resolveClaim = (row: InvoiceDocItemType, relKey: string): { keep: boolean; row: InvoiceDocItemType } | undefined => {
+    const x = claims.get(relKey);
+    if (x === undefined) return undefined;
+    // Only the root states the pointer; a component follows it by suffix.
+    const isRoot = ((row as InvoiceItem).path_order_item?.length ?? 0) > 0;
+    const pointing = (r: InvoiceDocItemType, to: readonly string[] | undefined): InvoiceDocItemType => {
+      if (!isRoot) return r;
+      const out = { ...r } as InvoiceDocItemType & { path_order_item?: string[] };
+      // A pointer at the row's own path is no claim: moving back clears it.
+      if (to !== undefined && itemPathKey(to) !== relKey) out.path_order_item = [...to];
+      else delete out.path_order_item;
+      return out;
+    };
+    const prevX = prevByPath.get(itemPathKey(x));
+    // X was not on the order this row was claimed against: the row is the
+    // invoice's own, and a root's pointer names nothing.
+    if (prevX === undefined) return { keep: true, row: pointing(row, undefined) };
+    const nextPath = moved.toPath(x) ?? (newByPath.has(itemPathKey(x)) ? x : undefined);
+    const nextX = nextPath === undefined ? undefined : newByPath.get(itemPathKey(nextPath));
+    if (nextX !== undefined) {
+      const merged = { ...mergeLine(prevX, nextX, row, orderDividerUid), path: row.path } as InvoiceDocItemType;
+      return { keep: true, row: pointing(merged, nextPath) };
+    }
+    if (lineOverridden(prevX, row, orderDividerUid)) return { keep: true, row: pointing(row, undefined) };
+    return { keep: false, row };
+  };
+
   // Index current invoice items by order-relative path key
   const invoiceByPath = new Map<string, InvoiceDocItemType>();
   for (const item of currentInvoiceItems) {
@@ -1884,6 +1947,10 @@ function syncScopedItems(
       // if nothing does (core#126).
       if (prevItem) declined.add(projected);
       emit(projected);
+    } else if (claims.has(pathKey) && resolveClaim(invoiceItem, pathKey)?.keep) {
+      // The order now carries a line at the claimant's own position — usually X
+      // itself, moved there, which clears the pointer. Still X's row.
+      emit(resolveClaim(invoiceItem, pathKey)!.row);
     } else if (prevItem) {
       // Each shared field follows the order unless the invoice overrode it.
       emit(mergeLine(prevItem, newItem, invoiceItem, orderDividerUid));
@@ -1898,9 +1965,29 @@ function syncScopedItems(
   // Rows the invoice carries that the new order does not. Each either survives
   // or goes; WHERE a survivor goes is decided below, by its stored neighbours.
   const survivors = new Set<InvoiceDocItemType>();
+  /** A survivor's row as emitted, where the sync changed it (a merged claim). */
+  const survivorAs = new Map<InvoiceDocItemType, InvoiceDocItemType>();
+  /** Claimed roots this save removed with their X; their components go too. */
+  const droppedClaims: string[][] = [];
   for (const [pathKey, invoiceItem] of invoiceByPath) {
     if (processedInvoicePaths.has(pathKey) || emittedSubstituted.has(pathKey)) continue;
     if (invoiceItem.type === "order") continue; // the scope's own divider is the caller's
+
+    // A row billing order line X from elsewhere is decided against X, never by
+    // its own path — which no order carries, so the next arm would keep it
+    // forever as invoice-authored and X's edits would never reach it.
+    const claimed = resolveClaim(invoiceItem, pathKey);
+    if (claimed !== undefined) {
+      const rel = relOf(invoiceItem);
+      if (droppedClaims.some((d) => isStrictlyBelow(rel, d))) continue;
+      if (!claimed.keep) {
+        droppedClaims.push(rel);
+        continue;
+      }
+      survivors.add(invoiceItem);
+      if (claimed.row !== invoiceItem) survivorAs.set(invoiceItem, claimed.row);
+      continue;
+    }
 
     // A line billing a lost/damaged record was never on the order, so the
     // order can never have removed it: it is the invoice's own row, kept the
@@ -1934,6 +2021,7 @@ function syncScopedItems(
   const placed = interleaveStoredOnlyRows(result, {
     stored: currentInvoiceItems.filter((it) => !isInExtensionSection(it.path, orderDividerUid, extensionTargets)),
     survivors,
+    survivorAs,
     isLine: (row) => isLineItemType(row.type),
   });
   result.length = 0;
@@ -2403,6 +2491,7 @@ export function invoiceScopeDividersMatch(
     orderLinePaths.add(itemPathKey(it.path ?? []));
     if (missing.some((m) => isStrictlyBelow(it.path ?? [], m))) uidsUnderMissing.add(it.uid);
   }
+  const claims = orderLineClaims(scopedInvoiceItems, orderDividerUid);
   for (const it of scopedInvoiceItems) {
     if (isDividerItemType(it.type)) continue;
     const path = it.path ?? [];
@@ -2410,9 +2499,12 @@ export function invoiceScopeDividersMatch(
     const rel = stripOrderPrefix([...path], orderDividerUid);
     // A line still pathed under a divider the invoice lacks is malformed, not declined.
     if (missing.some((m) => isStrictlyBelow(rel, m))) return false;
+    // 🔴 A MOVED line (core#125) names the order line it bills, so its divider
+    // being gone is no ambiguity: coverage credits that line, never twice.
+    if (claims.has(itemPathKey(rel))) continue;
     // ⚠️ Invoice-authored subtrees are NOT excused here: an order line billed on
     // a destination the invoice added, while its own order destination is
-    // missing, is the regroup core#125 has no pointer for yet — fail closed.
+    // missing, with NO pointer saying which line it is — fail closed.
     if (uidsUnderMissing.has(it.uid) && !orderLinePaths.has(itemPathKey(rel))) return false;
   }
   return true;
@@ -2436,9 +2528,10 @@ export function invoiceScopeDividersMatch(
  * sections are excluded too: they read as the order divider they extend.
  *
  * ⚠️ **What this does NOT cover is a LINE regrouped on the invoice** under an
- * existing order divider: its path is one the order lacks, so it bills no order
- * line and its order line reads uninvoiced. That is the per-line pointer's job
- * (core#124 Phase 4), not this predicate's.
+ * existing order divider: its path is one the order lacks. Its
+ * `path_order_item` says which order line it bills ({@link orderLineClaims},
+ * core#125), and every reader checks that BEFORE this predicate — a moved line
+ * inside an authored group (a split's new group) still bills its order line.
  *
  * @param scopedInvoiceItems - Items of one order scope (the order divider may be included)
  * @param orderItems - The order's `items`, dividers included
@@ -2462,6 +2555,112 @@ export function invoiceAuthoredSubtrees(
     roots.push(rel);
   }
   return roots;
+}
+
+/**
+ * Every LINE of one order scope that bills an order line from another position
+ * (core#125), keyed by the row's ORDER-relative path, valued by the
+ * order-relative path it bills.
+ *
+ * A root row states `path_order_item`; each line below it — a kit's components
+ * — bills the same suffix under the claimed path, so `[...P, c]` maps to
+ * `[...X, c]`. A pointer naming the row's own path claims nothing and is left
+ * out, so a caller never has to special-case it.
+ *
+ * ⭐ **This is the one reader of the key.** The sync, coverage, the
+ * accounting walk and the diff all read claims through it, so they cannot
+ * disagree about which rows bill which order line — the same reason
+ * {@link invoiceAuthoredSubtrees} exists.
+ *
+ * ⚠️ It does not ask whether X is on the order. A claim on a line the order no
+ * longer carries credits a path nothing reads, and the next order save drops
+ * the pointer (owner, 2026-10-03).
+ *
+ * @param scopedInvoiceItems - Items of one order scope (the order divider may be included)
+ * @param orderDividerUid - The order divider's uid
+ */
+export function orderLineClaims(
+  scopedInvoiceItems: readonly InvoiceItem[],
+  orderDividerUid: string,
+): Map<string, string[]> {
+  const claims = new Map<string, string[]>();
+  const roots: Array<{ rel: string[]; x: readonly string[] }> = [];
+  for (const it of scopedInvoiceItems) {
+    const x = it.path_order_item;
+    const path = it.path ?? [];
+    if (!x?.length || !isLineItemType(it.type) || path[0] !== orderDividerUid) continue;
+    const rel = path.slice(1);
+    if (itemPathKey(rel) === itemPathKey(x)) continue;
+    roots.push({ rel, x });
+  }
+  if (roots.length === 0) return claims;
+  // Deepest first, so a claim inside a claimed kit wins over its parent's.
+  roots.sort((a, b) => b.rel.length - a.rel.length);
+  for (const it of scopedInvoiceItems) {
+    const path = it.path ?? [];
+    if (!isLineItemType(it.type) || path[0] !== orderDividerUid) continue;
+    const rel = path.slice(1);
+    const root = roots.find((r) => isAtOrBelow(rel, r.rel));
+    if (root) claims.set(itemPathKey(rel), [...root.x, ...rel.slice(root.rel.length)]);
+  }
+  return claims;
+}
+
+/** One `path_order_item` a write must refuse — see {@link orderLineClaimIssues}. */
+export interface OrderLineClaimIssue {
+  /** Index of the claiming row in the items array. */
+  index: number;
+  /** The row's own path, as written. */
+  path: string[];
+  /** The order-relative path it claims. */
+  path_order_item: string[];
+  /**
+   * `outside_order_block` — the row hangs under no `order` divider, which
+   * includes every line of a standalone invoice; `not_a_line` — the order this
+   * row's block bills carries no line at the claimed path; `order_unknown` — the
+   * caller could not supply that order's items.
+   */
+  reason: "outside_order_block" | "not_a_line" | "order_unknown";
+}
+
+/**
+ * The write-time check on `path_order_item` (core#125 D3): a pointer is legal
+ * only on a line inside an order block, naming a LINE of that block's order.
+ *
+ * Several rows claiming one line is legal and not reported (owner, 2026-10-03):
+ * it is a split, or an over-bill the diff surfaces. A pointer equal to the
+ * one the same row already stored (same path, same pointer) is not re-checked,
+ * because the order may have moved on since and the sync — not a refusal — is
+ * what answers that (Q2).
+ *
+ * @param items - The invoice's full items array, as it is about to be written
+ * @param orderLines - Each billed order's CURRENT `items` by order uid; `undefined` when unknown
+ * @param stored - The invoice's stored items, if any — unchanged pointers are grandfathered
+ */
+export function orderLineClaimIssues(
+  items: readonly InvoiceItem[],
+  orderLines: (orderUid: string) => readonly LineItem[] | undefined,
+  stored: readonly InvoiceItem[] = [],
+): OrderLineClaimIssue[] {
+  const orderDividers = new Set(items.filter((it) => it.type === "order").map((it) => it.uid));
+  const storedPointer = new Map<string, string>();
+  for (const it of stored) {
+    if (it.path_order_item?.length) storedPointer.set(itemPathKey(it.path ?? []), itemPathKey(it.path_order_item));
+  }
+  const issues: OrderLineClaimIssue[] = [];
+  items.forEach((it, index) => {
+    const x = it.path_order_item;
+    if (!x?.length) return;
+    const path = it.path ?? [];
+    if (storedPointer.get(itemPathKey(path)) === itemPathKey(x)) return;
+    const issue = (reason: OrderLineClaimIssue["reason"]) => issues.push({ index, path: [...path], path_order_item: [...x], reason });
+    if (!isLineItemType(it.type) || !orderDividers.has(path[0])) return issue("outside_order_block");
+    const lines = orderLines(path[0]);
+    if (lines === undefined) return issue("order_unknown");
+    const target = lines.find((l) => itemPathKey(l.path ?? []) === itemPathKey(x));
+    if (target === undefined || !isLineItemType(target.type)) issue("not_a_line");
+  });
+  return issues;
 }
 
 /**
@@ -2732,11 +2931,28 @@ export function computeInvoiceSyncStatus(
   const scopedLines = [...invoiceByRelPath].map(([k, it]) => ({ path: k.split("/"), substituted_for: it.substituted_for }));
   const resync = substitutionResync(scopedLines, orderItems, orderItems);
 
+  // Moved rows (core#125): each claimant of X is compared against X, re-stated
+  // at the claimant's own position, so the move itself is no difference.
+  const claimantsOf = new Map<string, string[]>();
+  for (const [row, x] of orderLineClaims(currentInvoiceItems, orderDividerUid)) {
+    if (!invoiceByRelPath.has(row)) continue;
+    const k = itemPathKey(x);
+    claimantsOf.set(k, [...(claimantsOf.get(k) ?? []), row]);
+  }
+
   const matchedRelKeys = new Set<string>();
   for (const orderItem of orderItems) {
     const relKey = itemPathKey(orderItem.path ?? []);
     matchedRelKeys.add(relKey);
     const fullKey = itemPathKey([orderDividerUid, ...(orderItem.path ?? [])]);
+    const claimants = claimantsOf.get(relKey) ?? [];
+    for (const row of claimants) {
+      matchedRelKeys.add(row);
+      const claimant = invoiceByRelPath.get(row)!;
+      const expected = projectOrderItemToInvoiceItem({ ...orderItem, path: row.split("/") }, orderDividerUid);
+      const unexplained = unexplainedInvoiceItemDifferences(expected, claimant, invoiceItemDifferences(expected, claimant), context);
+      status.set(itemPathKey(claimant.path), unexplained.length === 0 ? "in_sync" : "out_of_sync");
+    }
     const stored = invoiceByRelPath.get(relKey);
     const equivalent = stored === undefined ? undefined : resync.orderEquivalent(orderItem.path ?? [], stored);
     const current = stored === undefined || equivalent === (stored.quantity ?? 0) ? stored : { ...stored, quantity: equivalent };
@@ -2744,6 +2960,8 @@ export function computeInvoiceSyncStatus(
       // Explained: this line was substituted away. No invoice row exists to
       // carry a badge, so emit no entry rather than a phantom `out_of_sync`.
       if (isRemovedBySubstitution(orderItem.path ?? [], anchors)) continue;
+      // Billed from another position: the claimant carries the badge.
+      if (claimants.length > 0) continue;
       status.set(fullKey, "out_of_sync"); // order has a line the invoice lacks
       continue;
     }
@@ -2893,6 +3111,7 @@ export function computeOrderInvoiceCoverage(
     const anchors = liveInvoiceAnchors(scoped, orderItems, orderUid);
     allAnchors.push(...anchors);
     const extensionTargets = extensionSectionTargets(scoped, orderUid);
+    const claims = orderLineClaims(scoped, orderUid);
     for (const item of scoped) {
       if (!isLineItemType(item.type)) continue;
       // An extension line bills days on a line billed elsewhere; it neither
@@ -2900,6 +3119,12 @@ export function computeOrderInvoiceCoverage(
       if (isInExtensionSection(item.path ?? [], orderUid, extensionTargets)) continue;
       const relPath = stripOrderPrefix(item.path ?? [], orderUid);
       const relKey = itemPathKey(relPath);
+      // A moved line (core#125) covers the order line it IS, not its own path.
+      const claim = claims.get(relKey);
+      if (claim !== undefined) {
+        covered.add(itemPathKey(claim));
+        continue;
+      }
       covered.add(relKey);
       if (item.type === "transaction_fee") continue;
       if (orderLineKeys.has(relKey) || unmatchedSeen.has(relKey)) continue;

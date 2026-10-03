@@ -5272,6 +5272,7 @@ interface InvoiceDocLineItemType {
   crms_id?: number | string | null;
   substituted_for?: SubstitutedForEntryType[];
   uid_out_of_service?: string | null;
+  path_order_item?: string[];
 }
 ```
 
@@ -5415,6 +5416,7 @@ interface InvoiceItemInputLineType {
   substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
   uid_out_of_service?: string | null;
+  path_order_item?: string[];
 }
 ```
 
@@ -17693,6 +17695,7 @@ interface InvoiceDocLineItemType {
   crms_id?: number | string | null;
   substituted_for?: SubstitutedForEntryType[];
   uid_out_of_service?: string | null;
+  path_order_item?: string[];
 }
 ```
 
@@ -17830,6 +17833,7 @@ interface InvoiceItemInputLineType {
   substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
   uid_out_of_service?: string | null;
+  path_order_item?: string[];
 }
 ```
 
@@ -28613,7 +28617,7 @@ interface DocumentDiffContext {
 One entry at one key of the viewed document. Discriminated on `kind`.
 
 ```ts
-type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentSubstitutionEntry | DocumentQuantityEntry;
+type DocumentDiffEntry = DocumentSourceDiffEntry | DocumentSubstitutionEntry | DocumentMovedEntry | DocumentQuantityEntry;
 ```
 
 ### `DocumentDiffField`
@@ -28684,6 +28688,34 @@ The three document kinds a diff can be viewed from or sourced from.
 
 ```ts
 type DocumentKind = "order" | "fulfillment" | "invoice";
+```
+
+### `DocumentMovedEntry`
+
+An invoice row that bills an order line from ANOTHER position (core#125): an
+operator dragged it into another group or destination of its order block, or
+split units off into a new group, and the row's `path_order_item` names the
+order line it is. One difference, never `not_on_source` at the row plus an
+unbilled order line.
+
+Filed at whichever of the two the viewed document carries — at the row on
+the invoice view, at the order line on the order and fulfillment views. Both
+keys are in the VIEWED document's path space, like every map key.
+
+`fields` are the row's TERMS against the order line's, compared exactly as a
+same-path line's would be (empty against a fulfillment, which carries no
+terms). How many units are billed is the `quantity` entry's, summed over every
+row claiming the line — several may, and the line may also stay at its own
+path (a split).
+
+```ts
+interface DocumentMovedEntry {
+  kind: "moved";
+  source: DocumentRef;
+  row: string;
+  order_line: string;
+  fields: DocumentDiffField[];
+}
 ```
 
 ### `DocumentQuantityEntry`
@@ -29609,6 +29641,7 @@ interface InvoiceItem {
   substituted_for?: SubstitutedForEntryType[];
   uid_out_of_service?: string | null;
   path_extension_for?: string[];
+  path_order_item?: string[];
 }
 ```
 
@@ -29812,6 +29845,19 @@ interface OrderInvoiceSharedFields {
   line: readonly SharedField[];
   pair: readonly SharedField[];
   doc: readonly SharedField[];
+}
+```
+
+### `OrderLineClaimIssue`
+
+One `path_order_item` a write must refuse — see {@link orderLineClaimIssues}.
+
+```ts
+interface OrderLineClaimIssue {
+  index: number;
+  path: string[];
+  path_order_item: string[];
+  reason: "outside_order_block" | "not_a_line" | "order_unknown";
 }
 ```
 
@@ -30591,9 +30637,10 @@ a real misalignment — and must not be excused as authored. Extension
 sections are excluded too: they read as the order divider they extend.
 
 ⚠️ **What this does NOT cover is a LINE regrouped on the invoice** under an
-existing order divider: its path is one the order lacks, so it bills no order
-line and its order line reads uninvoiced. That is the per-line pointer's job
-(core#124 Phase 4), not this predicate's.
+existing order divider: its path is one the order lacks. Its
+`path_order_item` says which order line it bills ({@link orderLineClaims},
+core#125), and every reader checks that BEFORE this predicate — a moved line
+inside an authored group (a split's new group) still bills its order line.
 
 **Parameters**
 
@@ -30828,6 +30875,48 @@ Check whether any pre-tax line item has taxes applied.
 ### `orderInvoiceSharedFields(): OrderInvoiceSharedFields`
 
 {@link OrderInvoiceSharedFields}, classified once per process.
+
+### `orderLineClaimIssues(items: readonly InvoiceItem[], orderLines: fnOrConstructor, _: unknown): OrderLineClaimIssue[]`
+
+The write-time check on `path_order_item` (core#125 D3): a pointer is legal
+only on a line inside an order block, naming a LINE of that block's order.
+
+Several rows claiming one line is legal and not reported (owner, 2026-10-03):
+it is a split, or an over-bill the diff surfaces. A pointer equal to the
+one the same row already stored (same path, same pointer) is not re-checked,
+because the order may have moved on since and the sync — not a refusal — is
+what answers that (Q2).
+
+**Parameters**
+
+- `items` — The invoice's full items array, as it is about to be written
+- `orderLines` — Each billed order's CURRENT `items` by order uid; `undefined` when unknown
+- `stored` — The invoice's stored items, if any — unchanged pointers are grandfathered
+
+### `orderLineClaims(scopedInvoiceItems: readonly InvoiceItem[], orderDividerUid: string): Map<string, string[]>`
+
+Every LINE of one order scope that bills an order line from another position
+(core#125), keyed by the row's ORDER-relative path, valued by the
+order-relative path it bills.
+
+A root row states `path_order_item`; each line below it — a kit's components
+— bills the same suffix under the claimed path, so `[...P, c]` maps to
+`[...X, c]`. A pointer naming the row's own path claims nothing and is left
+out, so a caller never has to special-case it.
+
+⭐ **This is the one reader of the key.** The sync, coverage, the
+accounting walk and the diff all read claims through it, so they cannot
+disagree about which rows bill which order line — the same reason
+{@link invoiceAuthoredSubtrees} exists.
+
+⚠️ It does not ask whether X is on the order. A claim on a line the order no
+longer carries credits a path nothing reads, and the next order save drops
+the pointer (owner, 2026-10-03).
+
+**Parameters**
+
+- `scopedInvoiceItems` — Items of one order scope (the order divider may be included)
+- `orderDividerUid` — The order divider's uid
 
 ### `pickLineTaxFields(item: typeLiteral): typeLiteral`
 
@@ -31173,6 +31262,10 @@ removed survives exactly while some kept row hangs beneath it.
   row the order does not carry is placed after X's subtree. Entries are
   re-pointed when X moves; once the order drops X, the entry and its units go
   with it (owner, 2026-09-16)
+- **Moved** (`path_order_item`, core#125): a row billing order line X from
+  another position is merged against X where it stands, re-pointed when X
+  moves, and removed with X unless overridden — then kept with its pointer
+  dropped. Each claiming row is decided on its own ({@link orderLineClaims})
 
 ## 🔴 Why the substitution arm exists: without it a substitution lasts until
 the next order save
