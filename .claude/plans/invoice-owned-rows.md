@@ -1,31 +1,32 @@
 # core#124 — An invoice owns rows and pairs no order carries
 
-> ## ⚠️ STATUS UPDATE 2026-10-03 (Phases 1, 2 and 1b-core)
+> ## ⚠️ STATUS UPDATE 2026-10-03 (Phases 1, 2 and 1b DONE — next: Phase 3)
 >
-> **Phase 1 (core) DONE** — `839dfae`, `@cfs/core@10.0.0-beta.588`: rows and pairs on neither order stay;
-> placement is `core/src/utils/stored-only-rows.ts`; alignment reads invoice-authored subtrees. Tests:
-> `core/tests/invoice-owned-rows.test.ts`. ⚠️ Accepted edge: an order that MOVES a group holding an
-> invoice-authored line leaves the stale group behind and reads UNALIGNED (revisit with core#125).
+> **Phase 1 (core) DONE** — `839dfae`, `beta.588`: rows and pairs on neither order stay; placement is
+> `core/src/utils/stored-only-rows.ts`; alignment reads invoice-authored subtrees. ⚠️ Accepted edge: an
+> order that MOVES a group holding an invoice-authored line leaves the stale group behind and reads
+> UNALIGNED (revisit with core#125).
 >
-> **Phase 2 (api-cloudrun) DONE and PUSHED** — `61acf2a1` pin + `destinationSyncReport.ts` retired,
-> `bbda9878` `syncRows` through `placeStoredOnlyRows`, `b4eba964` `reconcileInvoicePairMembership`
-> (`api-cloudrun/src/lib/pairEdit.ts`), `27617239` + `c44c24d9` skills.
+> **Phase 2 (api-cloudrun) DONE** — `61acf2a1`, `bbda9878`, `b4eba964` (`reconcileInvoicePairMembership`
+> in `api-cloudrun/src/lib/pairEdit.ts`), skills `27617239` / `c44c24d9`.
 >
-> **Phase 1b core half DONE** — `1feb510` (`feat(invoice)!`, the beta after `588`). In `syncScopedItems` a
-> divider on both orders the invoice lacks is DECLINED and is dropped unless a non-declined row lands
-> beneath it (re-open). `syncOrderDestinationScope` derives pairs from the surviving destination dividers;
-> the #664 loop, `kept` and `KeptInvoiceDestination` are gone; `DroppedInvoiceDestination.reason` gains
-> `divider_absent`. `syncOrderDestinationsSelective` stays as the PAIR-ONLY path for an invoice with no
-> order divider (api-cloudrun's `else` branch). `invoiceScopeDividersMatch` narrowed: order dividers the
-> invoice holds must sit at the order's path (inside authored subtrees too); a MISSING one is declined
-> unless the invoice still paths a line under it or bills one of its order lines' uids at a path the
-> order lacks (authored subtrees NOT excused — double-billing guard). Tests: § *Phase 1b* in
-> `core/tests/invoice-owned-rows.test.ts`, mutation-controlled.
-> **api-cloudrun#1189 cause established:** #2300/#2413 each bill one group of order #897 and lack the
-> other; #2396 bills only lost/damaged `replacement` lines and lacks all five groups of #979. All three
-> are declined, not broken — they read aligned under 1b. Close #1189 once the API runs this core.
+> **Phase 1b DONE (core#126)** — core `1feb510` = **`beta.589`**; api-cloudrun `daa2095a` (pin + #126
+> integration step, verified to FAIL on `beta.588`) and `1942e5d9` (fulfillment half); claude-plugins
+> `42aed72`. A group/destination divider on both orders that the projection lacks is DECLINED and stays
+> out; a NEW order line beneath it re-opens it (ancestors and pair too). Pairs follow their divider —
+> `syncOrderDestinationScope` (invoice) and the stored-pair filter in `stageOrderFulfillmentSync`
+> (fulfillment; bookings still read the unfiltered `mergePairs` set). `kept` / `KeptInvoiceDestination`
+> are gone. `invoiceScopeDividersMatch`: a missing order divider is declined unless the invoice still
+> paths a line under it or bills one of its order lines' uids at a path the order lacks (authored
+> subtrees not excused — the double-billing guard). Tests: § *Phase 1b* in
+> `core/tests/invoice-owned-rows.test.ts`; `api-cloudrun/tests/unit/orderFulfillmentSync.test.ts`
+> (*"A divider is decided like a line"*); `api-cloudrun/tests/integration/invoices/invoiceOwnedDestinations.test.ts`.
+> **Prod coverage audit with `beta.589` (2026-10-03, local, read-only): 0 unaligned** (was 3 invoices / 2
+> orders — api-cloudrun#1189, all three declined partial invoices); 177 uninvoiced; 251 extra.
+> Census: 0 of 1,052 fulfillments (prod and dev) carry a pair/divider mismatch.
 >
-> **Next: Phase 1b api-cloudrun half** (see § Phase 1b → *Fulfillment half*), then Phase 3 (manager).
+> **Next: Phase 3 (manager)** — pin `beta.589` or later; it must, or manager shows declined invoices
+> as "unaligned".
 
 ## Context
 
@@ -60,7 +61,7 @@ The rule is the fulfillment's (`mergePairs` + `syncRows`, `api-cloudrun/src/lib/
 **absent from BOTH orders ⇒ downstream-authored ⇒ stays**; absent only from next ⇒ admin removal ⇒ the
 override test.
 
-## Phase 1b — one row rule for lines, groups and destinations (core, core#126)
+## Phase 1b — one row rule for lines, groups and destinations (core#126) — DONE (see status)
 
 **Launch from:** `~/cfs/core` (then api-cloudrun for the fulfillment half and the pin)
 **Skills:** cfs-order-projections, cfs-items, cfs-release-order, fulfillment-ladder (api-cloudrun)
@@ -103,30 +104,6 @@ remaining invoice; Phase 2's write side (pair follows divider) is already this r
 **Tests:** prev/next/projection matrix per row kind (line, group, destination) on both projections;
 re-open on a new line; #126's resurrection case now stays out; the fulfillment oracle suites.
 
-### Fulfillment half + pin (api-cloudrun `main`) — NOT STARTED
-
-**Launch from:** `~/cfs/api-cloudrun`. **Skills:** fulfillment-ladder, cfs-order-projections, cfs-items,
-cfs-release-order, cfs-worktrees. Design settled 2026-10-03 (read `api-cloudrun/src/lib/orderFulfillmentSync.ts`):
-
-1. **Pin** to the beta `1feb510` published. Type fallout should be nil (nothing reads `kept` /
-   `KeptInvoiceDestination`); `orderInvoiceSync.ts`'s comment on `syncOrderDestinationScope` (~L355) and
-   `api-cloudrun/tests/integration/invoices/destinationRowSync.test.ts` / `invoiceOwnedDestinations.test.ts`
-   may assert the old re-projection — re-read, update to the declined rule.
-2. **`syncRows`:** a projected DIVIDER with no stored row whose path the PREVIOUS order had (`prevByPath`
-   holds fulfillable lines only — add a divider-path set) is declined: emit it, then drop each declined
-   divider no non-declined emitted row sits strictly below (same post-pass as core's `syncScopedItems`).
-3. **Pairs follow dividers:** keep `mergePairs` / `resolveEffectiveFulfillmentDestinations` as they are —
-   bookings read them via `effectivePairFor` (`api-cloudrun/src/services/orderBookingRecompute.ts`), which falls back to the order pair,
-   so a superset is harmless there. In `stageOrderFulfillmentSync`, filter what is STORED: after the items
-   arm, keep only pairs whose destination divider is in `finalItems` (the write guard
-   `destinationJoinViolations` checks fulfillments too). Census first: prod/dev fulfillments carrying a
-   pair with no divider must be 0, or the filter drops them.
-4. Tests: declined group/leg stays out on the fulfillment; new order line re-opens divider + pair; the
-   custody-keep + fulfillment-sync suites stay green UNEDITED.
-5. Skills: `cfs-order-projections` (claude-plugins) still says "Dividers are still projected when
-   missing" and describes the #664 loop / `kept`; `cfs-invoices` + `write-path-invariants` where they
-   describe pair membership.
-
 ## Phase 2 — api-cloudrun (`main`) — DONE (see status)
 
 **Launch from:** `~/cfs/api-cloudrun`
@@ -168,7 +145,7 @@ cfs-release-order, cfs-worktrees. Design settled 2026-10-03 (read `api-cloudrun/
 **Skills:** order-items (directory-scoped), cfs-order-projections, cfs-items, cfs-release-order
 **Read:** `api-cloudrun/.claude/skills/write-path-invariants/SKILL.md` (pair ⟺ divider join the save must satisfy)
 
-- Pin bump to `10.0.0-beta.588` or later (alignment/diff/coverage read invoice-authored subtrees).
+- Pin bump to `10.0.0-beta.589` or later (alignment/diff/coverage read invoice-authored subtrees AND declined dividers).
 - `addPair` in `manager/src/stores/invoices.ts`, modelled on orders' `addDestinationPair`
   (`manager/src/stores/orders.ts`): `buildDestinationPairWithDivider`, stamp `uid_order` of the target
   order block, seed dates from that block's last pair, insert at the END of the block (reuse `addGroup`'s
@@ -177,6 +154,8 @@ cfs-release-order, cfs-worktrees. Design settled 2026-10-03 (read `api-cloudrun/
 - Pass `onAddDestination` from `InvoiceItems.tsx`; fix `ItemsHeader.tsx` ("Orders only until…") and the
   `stores/invoices.ts` comment ("Row MEMBERSHIP follows the order").
 - Verify the diff notes / coverage advisory render an invoice-authored subtree as extras, not "unaligned".
+- Verify a DECLINED group/leg (core#126) renders as uninvoiced lines, not "unaligned", and that the
+  manager's own invoice edit flows never re-add a removed order destination client-side.
 
 **Release order:** core → api-cloudrun → manager (`requires-manager.yaml` enforces manager's released pin
 ≥ API's). Between API and manager deploy, old-core manager shows an invoice Add Group as "unaligned" —
