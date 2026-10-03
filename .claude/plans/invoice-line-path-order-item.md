@@ -1,6 +1,6 @@
 # Invoice line → order line pointer: `path_order_item` (core#125)
 
-**Date:** 2026-10-03 • **Repo:** core (+ api-cloudrun, manager) • **Status:** in progress — Phases 0–3 built; prod release order + 2b remain
+**Date:** 2026-10-03 • **Repo:** core (+ api-cloudrun, manager) • **Status:** in progress — Phases 0–3 in prod; 2b (backfill) remains
 **Origin:** core#125 (core#124 Phase 4). Sequenced ahead of core#127 (standalone invoices) — see core#127 comment of 2026-10-03.
 **Related:** core#124, core#127, manager#472, api-cloudrun#538 §2, api-cloudrun#1189, `core/src/utils/substitutions.ts`, `core/src/utils/invoices.ts` (`syncOrderToInvoiceSelective`), `manager/src/utils/invoiceDrop.ts`
 **Closes:** core#125 when Phase 3 lands (core#125 stays the tracker until then).
@@ -9,9 +9,8 @@
 >
 > **Shipped.** core `beta.590` (`e98d558`, the field + readers) and `beta.591` (`837733e`, credit-note
 > `path_invoice_item` seed fix). Plugin `cfs-skills` 1.40.0 (Phase 1b). api-cloudrun `e2dfa92d` (pin) +
-> `65b0bed3` (Phase 2) are on local `main`, riding a peer's push. ⚠️ Confirm with
-> that `api-cloudrun/src/lib/invoiceOrderLineClaims.ts` is on `origin/main`. manager `a786b783` (pin `beta.591`)
-> + `fe574d7d` (Phase 3) are pushed to `main` (preview).
+> `65b0bed3` (Phase 2) are on `main` (as `a3c0a175`/`ae9311dc` after the rebase). manager `a786b783` (pin `beta.591`)
+> + `fe574d7d` (Phase 3) are pushed and released (see below).
 >
 > **Phase 3 (manager), as built.** `withOrderLinePointers` (`manager/src/utils/invoiceDrop.ts`) recomputes paths
 > after a move and stamps the moved ROOT line from where it came from (`createReorderable`'s `onReorder` now also
@@ -32,12 +31,12 @@
 > kind `moved`. `.meta({ seed: false })`. api-cloudrun clears self-pointers and 400s on core's issues
 > (`api-cloudrun/src/lib/invoiceOrderLineClaims.ts`).
 >
-> 🔴 **Release order, which is the next step.** api-cloudrun's release PR (pinned ≥ `beta.590`) must reach PROD
-> before manager's next release PR is merged. The stored line is `z.strictObject`, so an older prod API 400s every
-> drop that stamps a pointer. Arm 2 of `requires-manager` checks the other direction and will NOT catch this.
-> Merge the API release first.
+> ✅ **Released to prod, in order (2026-10-03).** api-cloudrun `v0.322.0` (pins `beta.591`, Phase 2) went first.
+> Its prod build succeeded and revision `api-cloudrun-00471-bjt` took 100% of traffic. Then manager `27.27.0` (Phase 3)
+> shipped, with `deploy-prod` green. `requires-manager` arm 2 was red on the API release as predicted (manager released
+> `.589` < `.591`); merged over it, because `.590`/`.591` refine no input manager sends.
 >
-> **Phase 2b (backfill), still open.** Preconditions: the API prod release above; no Xero re-push
+> **Phase 2b (backfill), the one thing left.** Preconditions: the API prod release (✅ done); no Xero re-push
 > (`invoiceXeroProjection` has a fixed field set, ✅ settled); hold `version` and pause the invoice consumer queues;
 > ⚠️ **owner decision still open:** do frozen (settled/paid/void) invoices get the pointer? Derive the prod/dev
 > candidate count (Q3's predicate) in the dry-run, then confirm the coverage audit's "extra invoice lines" drops by the
@@ -50,7 +49,7 @@ An operator can drag an invoice LINE into a different group or destination **ins
 stops matching order line X: X reads uninvoiced, "invoice remaining" re-offers X, and manager#472's
 realign would delete and re-add the line, losing its overrides. This doc decides how a line records
 "I am order line X, moved". D1–D3 and Phase 3 are built as amended in the status block. Next: release the API to
-prod BEFORE manager's next release, then Phase 2b.
+prod before manager's (done 2026-10-03). Next: Phase 2b.
 
 ## The problem in one example
 
