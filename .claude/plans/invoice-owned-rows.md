@@ -1,34 +1,29 @@
 # core#124 — An invoice owns rows and pairs no order carries
 
-> ## ⚠️ STATUS UPDATE 2026-10-03
+> ## ⚠️ STATUS UPDATE 2026-10-03 (Phases 1 and 2)
 >
-> **Phase 1 (core) is DONE** — `839dfae`, published as **`@cfs/core@10.0.0-beta.588`** (one beta;
-> exports verified from the published package). What landed, and where it differs from the draft:
+> **Phase 1 (core) is DONE** — `839dfae`, published as **`@cfs/core@10.0.0-beta.588`**. Rows and pairs
+> on neither order stay; kept rows are placed by `core/src/utils/stored-only-rows.ts`
+> (`placeStoredOnlyRows` / `interleaveStoredOnlyRows`); `DroppedInvoiceDestination.reason` is
+> `"removed_from_order"` alone; `KeptInvoiceDestination.holds_invoice_rows` is new; alignment reads
+> invoice-authored subtrees (`invoiceAuthoredSubtrees`, `isInInvoiceAuthoredSubtree`). Tests:
+> `core/tests/invoice-owned-rows.test.ts`. ⚠️ Accepted edge: an order that MOVES a group holding an
+> invoice-authored line leaves the stale group behind and reads UNALIGNED (revisit with core#125).
 >
-> - Rows: `syncScopedItems` keeps every row on NEITHER order; kept rows are placed by the new shared
->   helper `core/src/utils/stored-only-rows.ts` (`placeStoredOnlyRows` / `interleaveStoredOnlyRows`,
->   exported as `@cfs/core/utils/stored-only-rows`). Overridden removed rows now stay where they stood
->   instead of being appended at the scope's tail.
-> - Pairs: loop 2 keeps a pair on neither order. `DroppedInvoiceDestination.reason` is now
->   `"removed_from_order"` alone; log event `invoice_destination_override_dropped` is deleted.
-> - Scope: a deleted destination with a surviving row beneath its divider keeps both halves;
->   `KeptInvoiceDestination` gained **`holds_invoice_rows: boolean`** (not in the draft — api-cloudrun
->   may want to log it).
-> - Alignment: `invoiceAuthoredSubtrees` + `isInInvoiceAuthoredSubtree` (`core/src/utils/invoices.ts`),
->   read by `invoiceScopeDividersMatch`, `invoicedByPath` and `computeDocumentDiffs` (an authored LEG
->   reports once as a pair entry; an authored group's lines report one by one). Coverage needed no
->   change beyond alignment — authored lines already land in `unmatched`.
-> - Tests: `core/tests/invoice-owned-rows.test.ts` (12, each rule mutation-checked red), plus flips in
->   `core/tests/invoices.test.ts`.
+> **Phase 2 (api-cloudrun) is DONE, committed on local `main`, NOT YET PUSHED** — four commits:
+> `61acf2a1` pin `beta.588` + `src/lib/destinationSyncReport.ts` and its guard deleted (nothing left
+> to report); `bbda9878` `syncRows` places through `placeStoredOnlyRows` (fulfillment oracle green,
+> unedited); `b4eba964` `reconcileInvoicePairMembership` in `api-cloudrun/src/lib/pairEdit.ts` — add a pair
+> joined to an unanswered divider (`uid_order` from the divider's block), 400 an unjoined one, drop a
+> pair with its removed divider (its echo skipped); `27617239` skills. Tests:
+> `api-cloudrun/tests/unit/pairEdit.test.ts`, `api-cloudrun/tests/integration/invoices/invoiceOwnedDestinations.test.ts`.
+> The tax as-of move was already pinned by `api-cloudrun/tests/unit/documentTaxContext.test.ts` (D8).
+> No log of `kept`/`holds_invoice_rows` was added — nothing needed it.
 >
-> ⚠️ **Known edge, accepted:** an order that MOVES a group (same uid, new parent) holding an
-> invoice-authored line keeps the stale group at its old path beside the moved one, so the scope reads
-> UNALIGNED. Visible, not silent; the fulfillment's `syncRows` has the same shape. Revisit with Phase 4
-> (core#125).
+> ⚠️ Filed: **core#126** — removing a destination the ORDER still carries is now writable, and the
+> next order edit re-adds it as an empty section. Owner decision; the manager does not offer removal.
 >
-> Filed: core#125 (Phase 4 pointer), api-cloudrun#1189 (3 unaligned prod invoices); manager#472 commented.
->
-> **Next: Phase 2**, launched from `~/cfs/api-cloudrun`.
+> **Next: push api-cloudrun (dev deploy), then Phase 3**, launched from `~/cfs/manager`.
 
 ## Context
 
@@ -63,7 +58,7 @@ The rule is the fulfillment's (`mergePairs` + `syncRows`, `api-cloudrun/src/lib/
 **absent from BOTH orders ⇒ downstream-authored ⇒ stays**; absent only from next ⇒ admin removal ⇒ the
 override test.
 
-## Phase 2 — api-cloudrun (`main`)
+## Phase 2 — api-cloudrun (`main`) — DONE (see status)
 
 **Launch from:** `~/cfs/api-cloudrun`
 **Skills:** write-path-invariants, cfs-invoices, cfs-tax (directory-scoped, invocable from there), fulfillment-ladder, cfs-order-projections, cfs-release-order, cfs-worktrees
