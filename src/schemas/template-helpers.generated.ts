@@ -276,6 +276,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "stock": [
 
   ],
+  "stored-only-rows": [
+
+  ],
   "substitutions": [
 
   ],

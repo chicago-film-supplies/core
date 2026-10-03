@@ -127,7 +127,9 @@ import {
   extensionSectionTargets,
   getOrderScopedItems,
   type InvoiceItem,
+  invoiceAuthoredSubtrees,
   invoiceScopeDividersMatch,
+  isInInvoiceAuthoredSubtree,
   isInExtensionSection,
   liveInvoiceAnchors,
   projectOrderItemToInvoiceItem,
@@ -413,10 +415,14 @@ export function invoicedByPath(
     compared.push(invoice.uid);
     const anchors = liveInvoiceAnchors(scoped, orderItems, orderUid);
     const extensionTargets = extensionSectionTargets(scoped, orderUid);
+    const authored = invoiceAuthoredSubtrees(scoped, orderItems as LineItem[], orderUid);
     const windowOf = (item: InvoiceItem) =>
       pairWindow(invoice.destinations?.find((pair) => pair.uid === (item.path ?? [])[1] && pair.uid_order === orderUid));
     for (const item of scoped) {
       if (!isLineItemType(item.type)) continue;
+      // A line in a group or destination the invoice authored bills no order
+      // line (core#124): it credits nothing, rather than a path the order lacks.
+      if (isInInvoiceAuthoredSubtree(item.path ?? [], orderUid, authored)) continue;
       const window = windowOf(item);
       if (isInExtensionSection(item.path ?? [], orderUid, extensionTargets)) {
         at(key(toOrderRelativePath(item.path ?? [], orderUid, extensionTargets))).rows.push({

@@ -1589,16 +1589,17 @@ Deno.test("syncOrderDestinationsSelective keeps removed pairs when overridden", 
   assertEquals(result[1].delivery.instructions, "manual edit");
 });
 
-// ── api-cloudrun#663: the loop-2 path where `prev` is MISSING ──────
+// ── The loop-2 path where `prev` is MISSING (api-cloudrun#663, core#124) ──
 //
 // 🔴 **Ten tests exercised this function and every loop-2 test supplied a
 // DEFINED `prev`.** The path below — an invoice pair whose key names no pair on
-// the order, in either version — was untested, which is how it reached
-// production. Prod 2026-08-24: 239 of 989 invoice pairs are in this state.
+// the order, in either version — was untested, which is how its drop reached
+// production (api-cloudrun#663).
 //
-// ⚠️ The point of the pair of tests is the ASYMMETRY, not the drop. `prev ===
-// undefined` means KEEP in loop 1 and DROP in loop 2, so both are asserted
-// here, adjacently, where a future edit to one has to look at the other.
+// ⚠️ These tests used to pin an ASYMMETRY: `prev === undefined` meant KEEP in
+// loop 1 and DROP in loop 2. core#124 removed it — a pair on NEITHER order is
+// the invoice's own and is kept in both loops, the fulfillment's `mergePairs`
+// rule — so both are asserted here, adjacently, as the same answer.
 
 Deno.test("syncOrderDestinationsSelective: prev MISSING + still on the order ⇒ loop 1 KEEPS the invoice pair", () => {
   // The order has this key now but did NOT have it before, so `prev` is
@@ -1614,25 +1615,36 @@ Deno.test("syncOrderDestinationsSelective: prev MISSING + still on the order ⇒
   assertEquals(dropped.length, 0);
 });
 
-Deno.test("syncOrderDestinationsSelective: prev MISSING + NOT on the order ⇒ loop 2 DROPS it, and says so", () => {
-  // Same `prev === undefined`, opposite outcome — the invoice pair names a key
-  // the order carries in neither version, so nothing is ever compared to it.
-  const prev: ReturnType<typeof makePair>[] = [];
-  const next = [makePair("d1", "c1")];
-  const invoice: InvoiceDestinationPair[] = [
-    { uid_order: "o1", ...makePair("d1", "c1") },
-    { uid_order: "o1", ...makePair("d-other", "c-other", { jurisdiction: "rantoul" }) },
-  ];
+Deno.test("🔴 syncOrderDestinationsSelective: prev MISSING + NOT on the order ⇒ loop 2 KEEPS it as the invoice's own (core#124)", () => {
+  // Same `prev === undefined`, same outcome — the invoice pair names a key the
+  // order carries in neither version, so the invoice authored it. It used to be
+  // dropped here, uncompared, as `key_names_no_order_pair`.
+  const prev = [makePair("d1", "c1")];
+  const next = [makePair("d1", "c1", { delivery: { instructions: "order edit" } })];
+  const own = { uid_order: "o1", ...makePair("d-other", "c-other", { jurisdiction: "rantoul" }) };
+  const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...makePair("d1", "c1") }, own];
   const { destinations, dropped } = syncOrderDestinationsSelective(prev, next, invoice, "o1", new Set(), PF);
 
-  assertEquals(destinations.length, 1, "the unmatched invoice pair is gone");
-  assertEquals(destinations[0].delivery.uid, "d1");
+  assertEquals(destinations.map((d) => d.delivery.uid), ["d1", "d-other"]);
+  assertEquals(destinations[0].delivery.instructions, "order edit", "the order's own pair still follows it");
+  assertEquals(destinations[1], own, "the invoice's own pair is kept verbatim");
+  assertEquals(dropped, []);
+});
 
-  assertEquals(dropped.length, 1);
-  assertEquals(dropped[0].reason, "key_names_no_order_pair");
-  assertEquals(dropped[0].delivery_uid, "d-other");
-  assertEquals(dropped[0].jurisdiction, "rantoul", "the value that priced its lines");
-  assertEquals(dropped[0].uid_order, "o1");
+Deno.test("syncOrderDestinationsSelective: an override kept by edit 1 survives edit 2", () => {
+  // Edit 1 deletes a pair the invoice edited: kept as an override. By edit 2 it
+  // is on NEITHER order, so the override test has nothing to compare against —
+  // the rule that keeps it now is "absent from both".
+  const v1 = [makePair("d1", "c1"), makePair("d2", "c2")];
+  const v2 = [makePair("d1", "c1")];
+  const v3 = [makePair("d1", "c1", { delivery: { instructions: "again" } })];
+  const edited = { uid_order: "o1", ...makePair("d2", "c2", { jurisdiction: "rantoul" }) };
+  const first = syncOrderDestinationsSelective(v1, v2, [{ uid_order: "o1", ...makePair("d1", "c1") }, edited], "o1", new Set(), PF);
+  assertEquals(first.destinations.map((d) => d.delivery.uid), ["d1", "d2"]);
+  const second = syncOrderDestinationsSelective(v2, v3, first.destinations, "o1", new Set(), PF);
+  assertEquals(second.destinations.map((d) => d.delivery.uid), ["d1", "d2"]);
+  assertEquals(second.destinations[1].jurisdiction, "rantoul");
+  assertEquals(second.dropped, []);
 });
 
 Deno.test("syncOrderDestinationsSelective: an ORDINARY removal reports a different reason", () => {
@@ -3411,7 +3423,7 @@ Deno.test("syncOrderDestinationScope: a RENAMED divider keeps its unedited pair 
   const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, PF);
   assertJoined(r.scopedItems, r.destinations);
   assertEquals(r.destinations.map((p) => p.uid).sort(), [DEST_1, DEST_2].sort());
-  assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: true, pair_overridden: false }]);
+  assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: true, pair_overridden: false, holds_invoice_rows: false }]);
   assertEquals(r.dropped, []);
 });
 
@@ -3425,7 +3437,7 @@ Deno.test("syncOrderDestinationScope: an EDITED pair keeps its unedited divider 
   const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, PF);
   assertJoined(r.scopedItems, r.destinations);
   assertEquals(r.scopedItems.some((it) => it.type === "destination" && it.uid === DEST_2), true);
-  assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: false, pair_overridden: true }]);
+  assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: false, pair_overridden: true, holds_invoice_rows: false }]);
 });
 
 Deno.test("syncOrderDestinationScope: a jurisdiction-only edit KEEPS a deleted destination — and keeps BOTH halves", () => {
@@ -3442,7 +3454,7 @@ Deno.test("syncOrderDestinationScope: a jurisdiction-only edit KEEPS a deleted d
   assertEquals(r.destinations.map((p) => p.uid), [DEST_1, DEST_2]);
   assertEquals(r.scopedItems.some((it) => it.type === "destination" && it.uid === DEST_2), true);
   assertEquals(r.dropped, [], "nothing was dropped, so nothing should be reported as dropped");
-  assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: false, pair_overridden: true }]);
+  assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: false, pair_overridden: true, holds_invoice_rows: false }]);
 });
 
 Deno.test("syncOrderDestinationScope: a new destination arrives as divider and pair", () => {
@@ -3540,14 +3552,17 @@ Deno.test("syncOrderToInvoiceSelective: an extension section passes through unto
   assertEquals(result.length, 4);
 });
 
-Deno.test("syncOrderDestinationsSelective: an extension section's pair is kept, not dropped as naming no order pair", () => {
+Deno.test("syncOrderDestinationsSelective: an extension section's pair is kept — named or not (core#124)", () => {
+  // It names no order pair by construction. Before core#124 only the
+  // `extensionPairUids` arm kept it and an unaware caller dropped it; a pair on
+  // neither order is now the invoice's own either way, and the arm says why.
   const orderPair = makePair("d1", "c1");
   const extPair = { uid_order: "o1", ...makePair("d1", "c1", { uid: "ext-pair" }) };
   const invoice: InvoiceDestinationPair[] = [{ uid_order: "o1", ...orderPair }, extPair];
   const kept = syncOrderDestinationsSelective([orderPair], [orderPair], invoice, "o1", new Set(["ext-pair"]), PF);
   assertEquals([kept.destinations.map((p) => p.uid), kept.dropped], [[orderPair.uid, "ext-pair"], []]);
   const unaware = syncOrderDestinationsSelective([orderPair], [orderPair], invoice, "o1", new Set(), PF);
-  assertEquals(unaware.dropped.map((d) => [d.uid, d.reason]), [["ext-pair", "key_names_no_order_pair"]]);
+  assertEquals([unaware.destinations.map((p) => p.uid), unaware.dropped], [[orderPair.uid, "ext-pair"], []]);
 });
 
 Deno.test("invoiceScopeDividersMatch: an extension section reads as the divider it extends", () => {
@@ -3744,11 +3759,13 @@ Deno.test("invoiceHasSettlement: absent credited/void keys read as zero, not as 
 
 // ── Lost/damaged lines survive the order → invoice sync ─────────
 //
-// An invoice-only line inside an order's section is dropped by the removal pass
-// as "synced and removed from the order" — true of an order line, never of a
-// line billing a lost/damaged record, which no order ever had.
+// An invoice-only line inside an order's section used to be dropped by the
+// removal pass as "synced and removed from the order" — never true of a line
+// billing a lost/damaged record, which no order ever had, and (core#124) never
+// true of ANY row on neither order. Both arms keep; the L&D arm is the one that
+// states why its row is safe.
 
-Deno.test("syncOrderToInvoiceSelective keeps a line carrying uid_out_of_service, and drops a plain invoice-only line", () => {
+Deno.test("syncOrderToInvoiceSelective keeps a line carrying uid_out_of_service, and a plain invoice-only line too (core#124)", () => {
   const prevItem = orderShapedLine();
   const projected = buildOrderScopedItems([prevItem], ORDER_DIV_1)[0];
   const lostLine = {
@@ -3770,7 +3787,8 @@ Deno.test("syncOrderToInvoiceSelective keeps a line carrying uid_out_of_service,
   );
   const uids = result.map((r) => r.uid);
   assertEquals(uids.includes(ITEM_2), true, "the L&D line is kept");
-  assertEquals(uids.includes(ITEM_3), false, "a plain invoice-only line is still dropped — the net discriminates");
+  assertEquals(uids.includes(ITEM_3), true, "a plain invoice-only line is the invoice's own, and kept");
+  assertEquals(result.map((r) => r.uid), [ITEM_1, ITEM_2, ITEM_3], "each stays where it stood");
   const kept = result.find((r) => r.uid === ITEM_2) as InvoiceItem;
   assertEquals(kept.uid_out_of_service, "Oos00000000000000001");
 });

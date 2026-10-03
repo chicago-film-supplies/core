@@ -238,38 +238,6 @@ export const DOMAIN_EVENT_MSGS = [
   // jurisdiction, item_type, tax_uid, tax_name, rate, expired_at, as_of }`.
   "tax_priced_on_unreviewed_rate",
 
-  // An order→invoice destination sync REMOVED an invoice pair that carried a
-  // `jurisdiction` — i.e. the field that priced that pair's lines is gone, and
-  // the replacement projection resolves whatever the ORDER says.
-  // api-cloudrun#663.
-  //
-  // ⚠️ **Emitted only for `reason: "key_names_no_order_pair"`**, which is the
-  // half nobody chose. With a `prev` the order genuinely deleted a pair the
-  // invoice had not edited, and warning on that would fire on every legitimate
-  // deletion until the record was ignored. Without one, `pairsMatch` never ran:
-  // the invoice's payload was dropped without being compared to anything, so
-  // "the operator's override was preserved" was never even asked.
-  //
-  // `warn`, not `error`: the write succeeds and the invoice still prices — on a
-  // different jurisdiction than the one somebody stated. Measured on prod
-  // 2026-08-24, 14 of 989 invoice pairs are exposed and 4 are reachable.
-  //
-  // ⚠️ **The reason this exists at all is that the loss was previously TOTALLY
-  // silent** — no error, no log, a changed tax rate on an issued invoice. The
-  // fix for the drop itself is the pair re-key (the divider's uid becomes the
-  // join key, so an address change stops moving the key). That landed in
-  // `@cfs/core@10.0.0-beta.261`, and measured across all 988 prod invoice
-  // pairs — dev identical — every one of them joins on the new key against 750
-  // on the old, so this record's population is expected to be **zero** from
-  // that release on. A non-zero count now means a genuinely unjoinable
-  // document, which is a different and worse fact than the drift it was
-  // written to measure.
-  //
-  // `{ invoice_uid, order_uid, jurisdiction, pair_uid, delivery_uid,
-  // collection_uid }` — `pair_uid` is what FINDS the row, the endpoints are
-  // what tell a human where it was going.
-  "invoice_destination_override_dropped",
-
   // An order→invoice sync would have moved an ISSUED, Xero-linked invoice to an
   // organization with a different Xero ContactID, and did not (api-cloudrun#890,
   // G14). Owner ruling 2026-09-15: whether Xero accepts a contact change on an

@@ -55,6 +55,7 @@ import * as pickSheetUtils from "../src/utils/pickSheets.ts";
 import * as pickSheetFoldUtils from "../src/utils/pick-sheet-fold.ts";
 import * as sessionUtils from "../src/utils/sessions.ts";
 import * as sharedFieldUtils from "../src/utils/shared-fields.ts";
+import * as storedOnlyRowUtils from "../src/utils/stored-only-rows.ts";
 import * as taxUtils from "../src/utils/taxes.ts";
 import * as templateUtils from "../src/utils/templates.ts";
 import * as citationUtils from "../src/utils/citations.ts";
@@ -135,6 +136,11 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // Listed so the drift guard sees its exports rather than the generator
   // emitting them into the editor's helper panel.
   "fulfillment-items": fulfillmentItemUtils,
+  // Same exception: `utils/stored-only-rows.ts` places a projection's surviving
+  // rows when an order edit RE-PROJECTS it (core#124) — a question about two
+  // revisions and a write. A template renders one document already written.
+  // Listed so the drift guard sees its exports.
+  "stored-only-rows": storedOnlyRowUtils,
   // Same exception again: `utils/fulfillment-stage.ts` is the CUSTODY model —
   // where a booking's units are, what may move them, which transitions are
   // legal. A template renders a document, not a warehouse decision, and a

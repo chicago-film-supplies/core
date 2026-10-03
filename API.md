@@ -24914,7 +24914,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "custody_delta_unmatched" | "invoice_action_unoffered" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_destination_override_dropped" | "invoice_sync_organization_kept" | "destination_pair_unjoined"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "custody_delta_unmatched" | "invoice_action_unoffered" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_sync_organization_kept" | "destination_pair_unjoined"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -29534,24 +29534,18 @@ type Discount = DiscountType;
 ### `DroppedInvoiceDestination`
 
 One invoice destination pair that {@link syncOrderDestinationsSelective}
-removed, and WHY.
+removed. There is one way left to be removed: the order deleted a pair the
+invoice had not edited (`removed_from_order`), which is the intended
+behaviour and is reported for completeness, not because anything is wrong.
 
-🔴 **The two reasons are not degrees of the same thing, and the difference is
-api-cloudrun#663.**
-
-- `removed_from_order` — the order genuinely deleted this pair, the invoice
-  had not edited it, so dropping it is the intended behaviour. Reported for
-  completeness, not because anything is wrong.
-- `key_names_no_order_pair` — the order carries no pair at this key AT ALL,
-  so `prev` is `undefined` and **the override check never ran**. The pair is
-  dropped without its payload ever being compared to anything. Measured on
-  prod 2026-08-24: 239 of 989 invoice pairs are in this state, 14 of them
-  carrying a `jurisdiction` that prices their lines.
-
-⚠️ **The same condition means the OPPOSITE thing in the two loops.** In the
-first loop `prev === undefined` falls to *"Overridden (or prev missing) —
-keep invoice version"*; in the second it falls through to the drop. That
-asymmetry is the defect, and it is why this type exists rather than a boolean.
+⚠️ **There used to be a second reason, `key_names_no_order_pair`, and core#124
+made it unreachable rather than reported.** It named a pair on NEITHER order —
+`prev` undefined, so the override check never ran and the pair was dropped
+without its payload being compared to anything (api-cloudrun#663 was the
+address re-key that made most of them; the 239-of-989 count measured that
+pre-re-key key). Such a pair is now the invoice's own and is KEPT: the same
+"absent from both orders" rule the rows follow. `reason` stays a field so a
+consumer's narrowing reads as one, and a future second reason is additive.
 
 ```ts
 interface DroppedInvoiceDestination {
@@ -29560,7 +29554,7 @@ interface DroppedInvoiceDestination {
   delivery_uid: string | null;
   collection_uid: string | null;
   jurisdiction: JurisdictionType | null;
-  reason: "removed_from_order" | "key_names_no_order_pair";
+  reason: "removed_from_order";
 }
 ```
 
@@ -29712,6 +29706,7 @@ interface KeptInvoiceDestination {
   uid: string;
   divider_overridden: boolean;
   pair_overridden: boolean;
+  holds_invoice_rows: boolean;
 }
 ```
 
@@ -30591,6 +30586,35 @@ narrowed, so a non-integer cannot throw on the Xero push path.
 
 **Returns** — Per-unit amount for Xero **in dollars**, or 0 if quantity is 0
 
+### `invoiceAuthoredSubtrees(scopedInvoiceItems: readonly InvoiceItem[], orderItems: readonly LineItem[], orderDividerUid: string): string[][]`
+
+The roots of every INVOICE-AUTHORED subtree in one order scope, as
+ORDER-relative paths: each divider whose uid the order carries on no divider
+at all — a group or destination an operator added on the invoice, or one an
+earlier edit kept after the order deleted it (core#124).
+
+Everything at or below a root is the invoice's own. Its lines bill no order
+line, so they credit no order path ({@link invoicedByPath}), count as extras
+in coverage, and are ignored by the alignment predicate
+({@link invoiceScopeDividersMatch}) — one definition, read by all three, so
+they cannot disagree about which rows are the invoice's.
+
+⚠️ **The test is the divider's uid, not its path.** An order divider the
+invoice carries at ANOTHER path is the order's divider in the wrong place —
+a real misalignment — and must not be excused as authored. Extension
+sections are excluded too: they read as the order divider they extend.
+
+⚠️ **What this does NOT cover is a LINE regrouped on the invoice** under an
+existing order divider: its path is one the order lacks, so it bills no order
+line and its order line reads uninvoiced. That is the per-line pointer's job
+(core#124 Phase 4), not this predicate's.
+
+**Parameters**
+
+- `scopedInvoiceItems` — Items of one order scope (the order divider may be included)
+- `orderItems` — The order's `items`, dividers included
+- `orderDividerUid` — The order divider's uid
+
 ### `invoiceHasMoneySettlement(invoice: typeLiteral): boolean`
 
 Does this invoice record money having moved — paid, credited or voided? Money
@@ -30710,9 +30734,24 @@ structural repair unfinishable.
 The invoice's own `order` divider is excluded — it has no order-side
 counterpart by construction (`isDividerItemType("order")` is `true`).
 
+🔴 **So is every invoice-authored subtree** ({@link invoiceAuthoredSubtrees},
+core#124): a group or destination the invoice added is a SUPERSET of the
+order's skeleton, not a disagreement with it, and its lines bill no order
+line. What still fails is a disagreement about a divider the ORDER owns —
+one the invoice lacks, or carries at another path.
+
 ### `isInExtensionSection(path: readonly string[], orderDividerUid: string, targets: ReadonlyMap<string, readonly string[]>): boolean`
 
 Is this invoice item an extension divider, or anywhere beneath one?
+
+### `isInInvoiceAuthoredSubtree(path: readonly string[], orderDividerUid: string, roots: readonly parenthesized[]): boolean`
+
+Is this invoice item inside one of {@link invoiceAuthoredSubtrees}' roots —
+the root divider itself included?
+
+**Parameters**
+
+- `path` — The item's full invoice path (order divider first)
 
 ### `isPreTaxItem(item: LineItem): item is PreTaxLineItem`
 
@@ -30994,11 +31033,16 @@ inside the ORDER's transaction, the order edit fails with it.
 So after both run, every destination the order deleted in this edit is
 re-decided as one row via {@link destinationRowOverridden}: overridden ⇒ both
 halves kept (the missing one restored from the stored invoice), otherwise both
-dropped. Destinations still on the order are untouched — a consistent order
-already adds and keeps both halves together.
+dropped — **unless a row the invoice authored or kept still hangs beneath the
+divider** (core#124), in which case the destination is that section's and
+both halves stay (`holds_invoice_rows`). Destinations still on the order are
+untouched — a consistent order already adds and keeps both halves together,
+and a destination on NEITHER order is the invoice's own and is kept by both
+helpers' "absent from both" arms.
 
-⚠️ A restored divider is appended at the tail of the scope, which is where
-{@link syncOrderToInvoiceSelective} already places a kept removed row.
+⚠️ A divider restored here only for its overridden PAIR is appended at the
+tail of the scope. Every other kept row stays where it stood
+({@link interleaveStoredOnlyRows}).
 
 **Parameters**
 
@@ -31034,8 +31078,14 @@ Policy per pair:
   and the customer flags each follow the order unless the invoice's value
   differs from the order's previous one.
 - In invoice but the order has no `prev` → keep the invoice version.
-- In invoice but not in new order: dropped, unless some shared field was
-  overridden, in which case it is kept.
+- In invoice, on the previous order, not on the new one: an order REMOVAL —
+  dropped, unless some shared field was overridden, in which case it is kept.
+- In invoice and on NEITHER order: the invoice's own pair (an operator added
+  the destination on the invoice, or an earlier edit kept it) — kept
+  (core#124). This is the fulfillment's `mergePairs` rule, keyed here on
+  `(uid_order, uid)` where that one keys on `uid`; the predicate is one line
+  on each side and deliberately not shared. ⚠️ So `prev === undefined` now
+  means KEEP in both loops — the asymmetry api-cloudrun#663 found is gone.
 
 ⚠️ **An override is per FIELD, so it is not a whole-pair freeze.** The rest of
 the pair (address, contact, instructions, `customer_collecting`/`returning`)
@@ -31061,8 +31111,8 @@ campaign's single rule, and it is the behaviour prod has had since
 - `uidOrder` — The order uid this sync is scoped to
 - `extensionPairUids` — Pairs of this order's date-extension sections
 ({@link extensionSectionTargets}'s keys). They name no order pair by
-construction, so they are kept verbatim rather than dropped as
-`key_names_no_order_pair`. Empty when the invoice has no order divider,
+construction and are kept verbatim — the invoice-authored arm would keep
+them too; this one says why. Empty when the invoice has no order divider,
 because no section can hang under one.
 - `mode` — The merge context ({@link OrderInvoiceFieldSync}); its
 `holidays` settle a merged window's derived day counts in {@link mergePair}.
@@ -31106,8 +31156,14 @@ multiple positions in the items array. For each item:
 - **New** (in new order, not in prev): added under the order divider
 - **Left out** (a LINE in prev and new, never on the invoice): stays out
 - **Removed** (in prev order, not in new): removed only if synced, kept if overridden
+- **Invoice-authored** (on NEITHER order — a line, group or destination an
+  operator added on the invoice, or a row an earlier edit kept): kept (core#124)
 - **Extension sections** ({@link extensionSectionTargets}): passed through
   verbatim, at the tail of the scope
+
+A kept row stays where it stood — after the stored row it followed, under its
+own dividers — via {@link interleaveStoredOnlyRows}. A divider the order
+removed survives exactly while some kept row hangs beneath it.
 - **Substituted** ({@link liveInvoiceAnchors}): X's whole subtree is suppressed
   and Y's is emitted in its place — see below
 - **`substituted_for` entries** (manager#414): every row is merged at its
@@ -31150,6 +31206,18 @@ remaining" invoice re-billed lines another invoice had already billed. A line
 counts as new only when the previous order had no line at its path and no line
 that moved there. Dividers are still projected when missing: they are the
 skeleton alignment reads, not something an operator bills.
+
+## 🔴 A row on NEITHER order is the invoice's own (core#124)
+
+The removed-items pass used to keep a row only when it was OVERRIDDEN, which
+needs a previous order row to compare against. A row the invoice authored has
+none, so it was dropped as "synced and removed from the order" — a plain
+invoice-only line on the first order edit, and an override kept by edit N on
+edit N + 1, because by then it is on neither order either. The discriminator
+is the fulfillment's (`mergePairs` in api-cloudrun): **absent from BOTH orders
+⇒ downstream-authored ⇒ stays**; absent only from the next order ⇒ an order
+removal ⇒ the override test. Its alignment half is
+{@link invoiceAuthoredSubtrees}.
 
 ## A lost/damaged line is the invoice's own row
 
@@ -37663,6 +37731,91 @@ window it cannot count.
 ### `sameSharedValue(a: unknown, b: unknown): boolean`
 
 Do two values state the same thing? Absent and `null` are the same statement.
+
+## `@cfs/core/utils/stored-only-rows`
+
+Where a projection's STORED-ONLY rows go when an order edit re-projects it.
+
+Both projections of an order — the fulfillment and the invoice — keep rows
+the order does not carry: a picker addition, a substitution, a row kept
+because its units are still out, a line or a whole section an operator added
+on the invoice. Each sync decides WHICH stored rows survive by its own rule
+(custody and kits on the fulfillment, "absent from both orders" on the
+invoice), and that rule stays with its sync. What is the same on both sides
+is the PLACEMENT, and this module is it.
+
+🔴 **The placement is not cosmetic.** `computeItemPaths` reads the divider
+stack off the ARRAY, so a surviving row emitted at the wrong index is
+re-parented under whatever divider precedes it — into a group the operator
+never put it in, silently, with a path that is now a fixed point of the
+recompute and therefore passes the write guard. Three rules prevent it:
+
+1. **A survivor follows the stored row it followed.** Each block is keyed on
+   the last stored row that is ALSO in the projection — its anchor — rather
+   than on an index, which a concurrent insert would shift.
+2. **A stored-only divider is emitted only when a survivor hangs beneath
+   it**, element-wise (`isStrictlyBelow`), never by a joined-string prefix.
+   A divider the order removed with nothing of the projection's own left
+   under it goes with the order.
+3. **And it is emitted IMMEDIATELY BEFORE its first survivor**, not at its
+   stored index. A kept divider separated from its subtree by a projected
+   line would capture that line.
+
+A survivor may itself be a divider (an invoice divider an operator renamed
+before the order deleted it, or one the invoice authored). It is placed like
+any survivor and drags its own kept ancestors in front of itself.
+
+Extracted from `syncRows` in `api-cloudrun/src/lib/orderFulfillmentSync.ts`,
+which solved it first (api-cloudrun#897, #1147); the invoice sync adopted it
+with core#124.
+
+### `PathedRow`
+
+Anything carrying a self-inclusive item path.
+
+```ts
+interface PathedRow {
+  path: readonly string[];
+}
+```
+
+### `StoredOnlyPlacement`
+
+Where every surviving stored row goes, relative to the projection.
+
+```ts
+interface StoredOnlyPlacement {
+  leading: readonly T[];
+  following(path: readonly string[]): readonly T[];
+}
+```
+
+### `StoredOnlyRowsInput`
+
+What {@link placeStoredOnlyRows} needs.
+
+```ts
+interface StoredOnlyRowsInput {
+  stored: readonly T[];
+  projectedPaths: Iterable<readonly string[]>;
+  survivors: ReadonlySet<T>;
+  survivorAs?: ReadonlyMap<T, T>;
+  isLine: fnOrConstructor;
+}
+```
+
+### `interleaveStoredOnlyRows(projection: readonly T[], input: Omit<StoredOnlyRowsInput<T>, "projectedPaths">): T[]`
+
+{@link placeStoredOnlyRows} over a projection that is already a plain array:
+the projection's own rows, in order, with each survivor block after its anchor.
+
+### `placeStoredOnlyRows(input: StoredOnlyRowsInput<T>): StoredOnlyPlacement<T>`
+
+Place a projection's surviving stored-only rows — see the module doc.
+
+The caller walks its projection and, after emitting the row at each projected
+path, emits `following(path)`; `leading` goes first. Use
+{@link interleaveStoredOnlyRows} when the projection is already a plain array.
 
 ## `@cfs/core/utils/pickSheets`
 

@@ -69,9 +69,13 @@
  * listed again. The same holds one level down: a kit parent on one side only
  * reports once and its components are suppressed. An exchange leg is simply such a
  * pair — a reader tells it apart by the pair's own `exchange`, so there is no
- * dedicated kind. Between an order and an INVOICE a leg is not compared for
- * presence: an invoice scope missing a leg fails the divider-skeleton match and
- * is reported once, in `unaligned`.
+ * dedicated kind. Between an order and an INVOICE, a leg the order owns is not
+ * compared for presence: an invoice scope missing it fails the divider-skeleton
+ * match and is reported once, in `unaligned`. A leg the INVOICE authored
+ * (`invoiceAuthoredSubtrees`, core#124) is the one exception — the skeleton
+ * match ignores it, so it reports here, once, like any one-sided leg. A group
+ * the invoice authored reports its lines one by one (`not_on_source` /
+ * `only_on_source`), the way any invoice-only line does.
  *
  * ## Quantity against invoices is judged on the SUM of invoices
  *
@@ -160,6 +164,7 @@ import {
   extensionSectionTargets,
   type InvoiceItem,
   invoiceItemDifferences,
+  invoiceAuthoredSubtrees,
   invoiceScopeDividersMatch,
   isInExtensionSection,
   orderInvoiceSharedFields,
@@ -767,6 +772,7 @@ function compareScope(
   coverage: InvoiceCoverage,
   context: DocumentDiffContext,
   notInvoiced: (rel: string, viewedKey: string) => void,
+  invoiceLegs: ReadonlySet<string> = new Set(),
 ): void {
   const sourceRef = refOf(source.kind, source.doc);
   compareDocFields(out, viewed, source);
@@ -804,13 +810,24 @@ function compareScope(
   const sourcePairs = pairsOf(source);
   const involvesInvoice = viewed.kind === "invoice" || source.kind === "invoice";
   /**
-   * Legs on only one side (decision 7). Asked between the order and the
-   * fulfillment only: an invoice is compared at all only when its scope carries
-   * the order's divider skeleton (`invoiceScopeDividersMatch`), so against an
-   * invoice a one-sided leg is an `unaligned` scope and is reported as one.
+   * Legs on only one side (decision 7). Between the order and the fulfillment,
+   * any leg. Against an invoice, only a leg the INVOICE authored
+   * (`invoiceLegs`, core#124): an invoice is compared at all only when its
+   * scope carries the order's divider skeleton (`invoiceScopeDividersMatch`),
+   * so a leg the order owns and the invoice lacks is an `unaligned` scope and is
+   * reported as one — while a leg the invoice ADDED is a superset of that
+   * skeleton, reported once here with its rows suppressed.
    */
   const oneSidedLegs = new Set<string>();
-  if (!involvesInvoice) {
+  if (involvesInvoice) {
+    const invoiceIsViewed = viewed.kind === "invoice";
+    const [mine, theirs] = invoiceIsViewed ? [viewedPairs, sourcePairs] : [sourcePairs, viewedPairs];
+    for (const uid of invoiceLegs) {
+      if (!mine.has(uid) || theirs.has(uid)) continue;
+      oneSidedLegs.add(uid);
+      push(out.pairs, viewedKey(uid), { source: sourceRef, kind: invoiceIsViewed ? "not_on_source" : "only_on_source", fields: [] });
+    }
+  } else {
     for (const uid of viewedPairs.keys()) {
       if (!sourcePairs.has(uid)) {
         oneSidedLegs.add(uid);
@@ -962,6 +979,16 @@ export function computeDocumentDiffs(
     if (order === undefined) return false;
     const scoped = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.path[0] === orderUid);
     return invoiceScopeDividersMatch(scoped as unknown as InvoiceItem[], order.items as unknown as LineItem[], orderUid);
+  };
+
+  /** The destination legs an invoice's scope for `orderUid` authored itself (core#124). */
+  const invoiceLegsOf = (invoice: Invoice, orderUid: string): Set<string> => {
+    const order = orderByUid.get(orderUid);
+    if (order === undefined) return new Set();
+    const scoped = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.path[0] === orderUid);
+    const roots = invoiceAuthoredSubtrees(scoped as unknown as InvoiceItem[], order.items as unknown as LineItem[], orderUid);
+    const types = new Map(scoped.map((it) => [key(it.path.slice(1)), it.type]));
+    return new Set(roots.filter((r) => r.length === 1 && types.get(key(r)) === "destination").map((r) => r[0]));
   };
 
   /** Every aligned invoice passed for `orderUid`, with what they bill summed per line. */
@@ -1118,7 +1145,16 @@ export function computeDocumentDiffs(
         out.unaligned.push({ scope: orderUid, source: refOf("invoice", invoice) });
         continue;
       }
-      compareScope(out, viewed, { kind: "invoice", doc: invoice, lines: scopeInvoice(invoice, orderUid) }, orderUid, coverage, context, () => {});
+      compareScope(
+        out,
+        viewed,
+        { kind: "invoice", doc: invoice, lines: scopeInvoice(invoice, orderUid) },
+        orderUid,
+        coverage,
+        context,
+        () => {},
+        invoiceLegsOf(invoice, orderUid),
+      );
     }
     if (coverage.alignedInvoices.length === 0) return;
     for (const [rel, item] of viewed.lines.byKey) {
@@ -1175,7 +1211,8 @@ export function computeDocumentDiffs(
     const coverage = coverageOf(orderUid);
     const viewedKey = (rel: string) => (rel === "" ? orderUid : `${orderUid}/${rel}`);
     const notInvoiced = (rel: string, k: string) => quantityEntry(orderUid, coverage, rel, k);
-    compareScope(out, viewed, { kind: "order", doc: order, lines: scopeOrder(order) }, orderUid, coverage, context, notInvoiced);
+    const invoiceLegs = invoiceLegsOf(invoice, orderUid);
+    compareScope(out, viewed, { kind: "order", doc: order, lines: scopeOrder(order) }, orderUid, coverage, context, notInvoiced, invoiceLegs);
     // Each row this invoice carries reports the sum for the order line it bills —
     // its own path, or the line a substitute replaced.
     for (const [rel, at] of coverage.invoiced.byPath) {
@@ -1185,7 +1222,16 @@ export function computeDocumentDiffs(
     }
     // Invoice ↔ fulfillment goes through the order's path space, so it needs the same alignment.
     if (fulfillment !== undefined) {
-      compareScope(out, viewed, { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) }, orderUid, coverage, context, notInvoiced);
+      compareScope(
+        out,
+        viewed,
+        { kind: "fulfillment", doc: fulfillment, lines: scopeFulfillment(fulfillment) },
+        orderUid,
+        coverage,
+        context,
+        notInvoiced,
+        invoiceLegs,
+      );
     }
     outOfServiceEntries(orderUid, coverage, viewedKey);
   }

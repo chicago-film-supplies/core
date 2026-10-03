@@ -1572,26 +1572,35 @@ export interface UpdateInvoiceInputType {
   uid_store?: string | null;
   items?: InvoiceItemInputType[];
   /**
-   * The JURISDICTION axis, per destination pair — **and only that.** The
-   * consumer reads `destinations[i].jurisdiction` off each pair, matched by
-   * `(uid_order, uid)`, and ignores every other field: the rest of a pair is
-   * projected from its source order and is not the invoice's to state.
+   * The invoice's OWN values for its destination pairs, matched by
+   * `(uid_order, uid)`. Every field the order → invoice shared-field
+   * classification calls `propagated` or `atom` is writable — dates, both
+   * endpoints, the customer flags and `jurisdiction` (api-cloudrun#890; it was
+   * `jurisdiction` alone before that). Derived fields (`_fs` mirrors, day
+   * counts) are recomputed, never read. The editable set is derived, not
+   * listed: see `api-cloudrun/src/lib/pairEdit.ts`.
    *
-   * ⚠️ **`uid` is therefore REQUIRED on every pair a caller sends, and it is the
-   * pair's own identity — its destination divider's uid, not `delivery.uid`.**
-   * The match was on the two ENDPOINT uids until api-cloudrun#663, which made
-   * this arm unusable for its main purpose: correcting a pair's address changed
-   * the very key the correction was addressed by, so the edit landed on nothing.
-   * A caller echoing the stored pair back gets this right for free.
+   * ⚠️ **`uid` is REQUIRED on every pair a caller sends, and it is the pair's
+   * own identity — its destination divider's uid, not `delivery.uid`.** The
+   * match was on the two ENDPOINT uids until api-cloudrun#663, so correcting an
+   * address changed the very key the correction was addressed by. A caller
+   * echoing the stored pair back gets this right for free.
    *
-   * ⚠️ **Present-vs-absent and `null` are different verbs.** An absent
-   * `jurisdiction` key preserves the stored one; an explicit `null` CLEARS the
-   * override so the pair falls back to the customer's claim and then the
-   * derivation. Same shape as `due_date` below, for the same reason.
+   * ⚠️ **Present-vs-absent and `null` are different verbs.** An absent key
+   * preserves the stored value; an explicit `null` writes it — for
+   * `jurisdiction`, CLEARING the override so the pair falls back to the
+   * customer's claim and then the derivation.
    *
-   * ⚠️ This field was declared and **silently discarded** by
-   * `api-cloudrun/src/services/invoices.ts` until api-cloudrun#630 — a wrong
-   * jurisdiction on an invoice could not be corrected by any call.
+   * ⚠️ **A pair is joined to a destination DIVIDER in `items`, both ways.** An
+   * invoice may own a pair no order carries (core#124: the order → invoice sync
+   * keeps a pair on neither order as the invoice's own), but only together with
+   * its divider — a pair with none is refused by the write guard. Which pairs a
+   * write may ADD or remove is the API's to state (core#124 Phase 2,
+   * `api-cloudrun/src/services/invoices.ts`).
+   *
+   * ⚠️ This field was declared and **silently discarded** by the API until
+   * api-cloudrun#630 — a wrong jurisdiction on an invoice could not be
+   * corrected by any call.
    */
   destinations?: InvoiceDocDestinationType[];
   date?: string;

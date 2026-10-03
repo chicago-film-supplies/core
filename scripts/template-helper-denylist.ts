@@ -363,6 +363,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "projectOrderItemToInvoiceItem",
     "adoptOrderDividerStructure", // re-hangs an invoice on the order's dividers (write-path)
     "invoiceScopeDividersMatch", // structural alignment predicate — audit + endpoint
+    "invoiceAuthoredSubtrees", // that predicate's invoice-authored half (core#124) — sync + accounting
+    "isInInvoiceAuthoredSubtree", // membership test over those roots — sync + accounting
     // Order-first coverage. Not a render helper: it needs every LINKED
     // INVOICE's items, which a render context never holds (a template is
     // handed one document), and its answer is an operator advisory.
@@ -605,6 +607,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // `citations` and `template-lint` are.
   "fulfillment-items": [
     "rebuildFulfillmentItems",
+  ],
+  // `utils/stored-only-rows.ts` is WRITE-PATH sync machinery shared by the
+  // order → fulfillment and order → invoice syncs (core#124): where a surviving
+  // stored row goes when the order is re-projected. A template renders one
+  // document already written, with no second revision to place anything in.
+  "stored-only-rows": [
+    "interleaveStoredOnlyRows",
+    "placeStoredOnlyRows",
   ],
   // `utils/tax-classes.ts` is CATALOG machinery (api-cloudrun#993): it validates
   // and resolves `taxes-codes` / `taxes-rates` / `taxes-classes`. No render context
