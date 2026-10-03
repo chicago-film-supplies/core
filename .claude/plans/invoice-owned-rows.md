@@ -2,8 +2,8 @@
 
 > ## ⚠️ STATUS UPDATE 2026-10-03
 >
-> **Phase 1 (core) is DONE** in the commit that promoted this doc (`feat(invoice)!:`, one beta). What
-> landed, and where it differs from the draft:
+> **Phase 1 (core) is DONE** — `839dfae`, published as **`@cfs/core@10.0.0-beta.588`** (one beta;
+> exports verified from the published package). What landed, and where it differs from the draft:
 >
 > - Rows: `syncScopedItems` keeps every row on NEITHER order; kept rows are placed by the new shared
 >   helper `core/src/utils/stored-only-rows.ts` (`placeStoredOnlyRows` / `interleaveStoredOnlyRows`,
@@ -23,7 +23,10 @@
 >
 > ⚠️ **Known edge, accepted:** an order that MOVES a group (same uid, new parent) holding an
 > invoice-authored line keeps the stale group at its old path beside the moved one, so the scope reads
-> UNALIGNED. Visible, not silent; the fulfillment's `syncRows` has the same shape. Revisit with Phase 4.
+> UNALIGNED. Visible, not silent; the fulfillment's `syncRows` has the same shape. Revisit with Phase 4
+> (core#125).
+>
+> Filed: core#125 (Phase 4 pointer), api-cloudrun#1189 (3 unaligned prod invoices); manager#472 commented.
 >
 > **Next: Phase 2**, launched from `~/cfs/api-cloudrun`.
 
@@ -66,7 +69,7 @@ override test.
 **Skills:** write-path-invariants, cfs-invoices, cfs-tax (directory-scoped, invocable from there), fulfillment-ladder, cfs-order-projections, cfs-release-order, cfs-worktrees
 **Read:** this doc; `core/CLAUDE.md` only if a core follow-up is needed.
 
-- **Pin bump** to the Phase 1 beta. It is type-breaking: delete the `key_names_no_order_pair` arm and the
+- **Pin bump** to `10.0.0-beta.588`. It is type-breaking: delete the `key_names_no_order_pair` arm and the
   `invoice_destination_override_dropped` emit in `api-cloudrun/src/lib/destinationSyncReport.ts` (the
   module may go entirely — `dropped` now only ever carries intended drops; keep the
   `destinationSyncCoverage` guard's intent or retire it deliberately). Check
@@ -101,7 +104,7 @@ override test.
 **Skills:** order-items (directory-scoped), cfs-order-projections, cfs-items, cfs-release-order
 **Read:** `api-cloudrun/.claude/skills/write-path-invariants/SKILL.md` (pair ⟺ divider join the save must satisfy)
 
-- Pin bump to the Phase 1 beta (alignment/diff/coverage read invoice-authored subtrees).
+- Pin bump to `10.0.0-beta.588` or later (alignment/diff/coverage read invoice-authored subtrees).
 - `addPair` in `manager/src/stores/invoices.ts`, modelled on orders' `addDestinationPair`
   (`manager/src/stores/orders.ts`): `buildDestinationPairWithDivider`, stamp `uid_order` of the target
   order block, seed dates from that block's last pair, insert at the END of the block (reuse `addGroup`'s
@@ -117,7 +120,7 @@ display only, and already true today. Write this order into each PR/commit body.
 
 ## Phase 4 — per-line "bills order path" pointer (design session, then its own campaign)
 
-Tracked in its own core issue (filed with Phase 1). Launch from `~/cfs/core`; skills cfs-order-projections,
+Tracked in core#125. Launch from `~/cfs/core`; skills cfs-order-projections,
 cfs-items, cfs-plan-docs. The gap: a line dragged on the invoice into another group/destination gets a path
 the order lacks, so it bills no order line and its order line reads uninvoiced; manager#472's realign would
 delete + re-add it. First evaluate reusing `substituted_for` before minting a field.
@@ -125,8 +128,8 @@ delete + re-add it. First evaluate reusing `substituted_for` before minting a fi
 ## Issues
 
 - Delete this doc in the commit landing Phase 3; close core#124 there.
-- Filed with Phase 1: core — per-line pointer (Phase 4); api-cloudrun — the 3 unaligned prod invoices that
-  lack an order divider. Comment on manager#472: realign semantics for invoice-authored subtrees.
+- Filed with Phase 1: core#125 (per-line pointer, Phase 4); api-cloudrun#1189 (the 3 unaligned prod
+  invoices that lack an order divider). manager#472 has the realign semantics for invoice-authored subtrees.
 
 ## Verification
 
