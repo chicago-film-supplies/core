@@ -358,7 +358,8 @@ const CreditNoteDocLineItemInner = z.strictObject({
   xero_id: z.uuid().nullable(),
   xero_tracking_option_id: z.uuid().nullable(),
   uid_invoice_item: ItemUid.nullable(),
-  path_invoice_item: z.array(ItemUid).min(1).optional(),
+  // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key (core#125).
+  path_invoice_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   reverses_billing: z.boolean(),
 }).superRefine(checkItemPriceFormula);
 

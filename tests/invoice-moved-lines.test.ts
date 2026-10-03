@@ -11,7 +11,8 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import type { DocDestinationType, Invoice, InvoiceDocItemType, Order } from "../src/schemas/mod.ts";
-import { InvoiceDocLineItem, InvoiceItemInputLine } from "../src/schemas/mod.ts";
+import { CreditNoteDocLineItem, InvoiceDocLineItem, InvoiceItemInputLine } from "../src/schemas/mod.ts";
+import { getInitialValues } from "../src/schemas/initial.ts";
 import {
   buildOrderScopedItems,
   carryForwardOverrides,
@@ -333,4 +334,10 @@ Deno.test("field: the stored line requires a non-empty path when present; the in
   assertEquals(InvoiceDocLineItem.safeParse({ ...stored, path_order_item: [] }).success, false);
   const input = InvoiceItemInputLine.parse({ uid: CSTAND, type: "rental", path: [O, ...AT], path_order_item: X });
   assertEquals(input.path_order_item, X);
+});
+
+Deno.test("seed: `.meta({ seed: false })` omits a .min(1) pointer from the form seed — both grains", () => {
+  assertEquals("path_order_item" in (getInitialValues(InvoiceDocLineItem) as object), false);
+  assertEquals("path_order_item" in (getInitialValues(InvoiceItemInputLine) as object), false);
+  assertEquals("path_invoice_item" in (getInitialValues(CreditNoteDocLineItem) as object), false);
 });
