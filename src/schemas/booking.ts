@@ -4,7 +4,13 @@
 import { z } from "zod";
 import { BookingId, FirestoreId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
-import { type BookingBreakdown, BookingBreakdownSchema } from "./_breakdown.ts";
+import {
+  BOOKING_UNIT_BUCKETS,
+  type BookingBreakdown,
+  BookingBreakdownSchema,
+  type BookingUnitSetsType,
+  BookingUnitSetsSchema,
+} from "./_breakdown.ts";
 import { BookingActions, type BookingActionType } from "./custody.ts";
 import { isCollectionLineType } from "./order.ts";
 import {
@@ -38,6 +44,11 @@ export {
   BookingBreakdownKeyEnum,
   type BookingBreakdownKeyType,
   BookingBreakdownSchema,
+  BOOKING_UNIT_BUCKETS,
+  type BookingUnitBucketType,
+  type BookingUnitSetsType,
+  BookingUnitSetsSchema,
+  emptyBookingUnitSets,
 } from "./_breakdown.ts";
 
 /** A specific location within a store allocated for a booking. */
@@ -156,6 +167,27 @@ export interface Booking {
   crms_id?: number | null;
   crms_product_id?: number | null;
   breakdown: BookingBreakdown;
+  /**
+   * Which units sit in each unit-holding bucket — `null` when this booking is
+   * not unit-tracked (a bulk product, or a serialized one whose roster is not
+   * seeded yet). See {@link BookingUnitSetsType}.
+   *
+   * Written by the booking chunk beside `breakdown`, from the units each
+   * custody action names (`BookingAction.units`). `units[k].length ≤
+   * breakdown[k]`; the difference is the bucket's untracked count, left by a
+   * bulk → serialized conversion and derived rather than stored
+   * (`untrackedUnitCount`, `@cfs/core/utils/bookings`).
+   *
+   * ⚠️ **Optional only while it is mid-expand** (`api-cloudrun/.claude/plans/serial-tracking.md`
+   * D2): added optional (this beta), then every writer
+   * stamps `null` and `reconcileOrderBookings` carries it forward, then a
+   * backfill stamps `null` on every stored booking, then a `feat!` makes it
+   * REQUIRED-nullable. Required rather than optional is the end state because a
+   * `?` is exactly what lets a writer that builds a literal `Booking` drop the
+   * field silently; required turns that into a compile error. 0 stored bookings
+   * carry the key today.
+   */
+  units?: BookingUnitSetsType | null;
   dates: {
     start: string | null;
     start_fs: FirestoreTimestampType | null;
@@ -469,6 +501,28 @@ function checkBookingCollection(
   }
 }
 
+/**
+ * A bucket can name at most as many units as it holds: `units[k].length ≤
+ * breakdown[k]`. Fewer is the untracked count a conversion left; more is a
+ * unit the breakdown does not account for. Disjointness is the unit-sets
+ * schema's own refine.
+ */
+function checkBookingUnits(
+  doc: { breakdown: BookingBreakdown; units?: BookingUnitSetsType | null },
+  ctx: z.RefinementCtx,
+): void {
+  if (doc.units == null) return;
+  for (const key of BOOKING_UNIT_BUCKETS) {
+    if (doc.units[key].length > doc.breakdown[key]) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["units", key],
+        message: `"${key}" names ${doc.units[key].length} units but holds ${doc.breakdown[key]}`,
+      });
+    }
+  }
+}
+
 /** Zod schema for Booking. */
 export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   uid: BookingId,
@@ -494,6 +548,8 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   crms_id: z.int().nullable().optional(),
   crms_product_id: z.int().nullable().optional(),
   breakdown: BookingBreakdownSchema,
+  // Mid-expand — see the interface field's own note. `null` is "not unit-tracked".
+  units: BookingUnitSetsSchema.nullable().optional(),
   dates: z.strictObject({
     start: chicagoInstant().meta({ serverSortVia: "dates.start_fs", column: true, label: "Start" }).nullable(),
     start_fs: FirestoreTimestamp.nullable(),
@@ -517,7 +573,7 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   version: z.int().min(0).default(0),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
   updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
-}).superRefine(checkBookingCollection).meta({
+}).superRefine(checkBookingCollection).superRefine(checkBookingUnits).meta({
   title: "Booking",
   collection: "bookings",
   displayDefaults: {

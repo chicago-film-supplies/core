@@ -691,6 +691,22 @@ const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged" | "cleani
 const BOOKING_STATUSES: "draft" | "quoted" | "reserved" | "part-prepped" | "prepped" | "active" | "complete"[];
 ```
 
+### `BOOKING_UNIT_BUCKETS`
+
+The breakdown buckets that hold NAMED units on a serialized product's
+booking (`api-cloudrun/.claude/plans/serial-tracking.md` D2). Alphabetical,
+because key order is column order.
+
+`quoted` and `reserved` are absent on purpose: a reserved unit is a count
+against the shelf, not a particular radio. Units are named from `prep` on.
+
+Every TERMINAL bucket carries a set too, because a shrinking `out` set alone
+cannot say which units came back and which were lost.
+
+```ts
+const BOOKING_UNIT_BUCKETS: "cleaning" | "damaged" | "lost" | "maintenance" | "out" | "prepped" | "returned"[];
+```
+
 ### `BaseLogFields`
 
 TypeScript shape of {@link baseLogFields} — for use in archetype
@@ -806,6 +822,7 @@ interface Booking {
   crms_id?: number | null;
   crms_product_id?: number | null;
   breakdown: BookingBreakdown;
+  units?: BookingUnitSetsType | null;
   dates: typeLiteral;
   destinations: typeLiteral;
   organization: typeLiteral;
@@ -844,6 +861,7 @@ interface BookingActionType {
   rule: CustodyRuleId;
   quantity: number;
   uid_out_of_service?: string;
+  units?: number[];
 }
 ```
 
@@ -1033,6 +1051,36 @@ be a copy to keep in step for no gain.
 
 ```ts
 const BookingStoreSchema: z.ZodType<BookingStore>;
+```
+
+### `BookingUnitBucketType`
+
+One bucket that holds named units.
+
+```ts
+type BookingUnitBucketType = indexedAccess;
+```
+
+### `BookingUnitSetsSchema`
+
+Zod schema for {@link BookingUnitSetsType}, built the way {@link breakdownObjectSchema} is.
+
+```ts
+const BookingUnitSetsSchema: z.ZodType<BookingUnitSetsType>;
+```
+
+### `BookingUnitSetsType`
+
+Which units sit in each bucket of a booking. Each set is a canonical
+`UnitSet` (ascending, unique), and the sets are pairwise disjoint.
+
+`units[k].length` may be LESS than `breakdown[k]`: the difference is the
+bucket's UNTRACKED count, units a bulk → serialized conversion found already
+prepped or out and could not name. It is derived, never stored —
+`untrackedUnitCount` (`@cfs/core/utils/bookings`).
+
+```ts
+type BookingUnitSetsType = Record<BookingUnitBucketType, number[]>;
 ```
 
 ### `BookingUpdate`
@@ -2085,6 +2133,10 @@ interface CollectionDocs {
   tracking-categories: TrackingCategory;
   transaction: Movement;
   transactions: Movement;
+  unit: UnitType;
+  units: UnitType;
+  unit-roster: UnitRoster;
+  unit-rosters: UnitRoster;
   user: User;
   users: User;
   webhook-event: WebhookEvent;
@@ -2761,6 +2813,7 @@ interface CreateOutOfServiceInputType {
   allocations?: MovementAllocationInputType[];
   destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
+  units?: number[];
 }
 ```
 
@@ -3045,8 +3098,39 @@ interface CreateTransactionInputType {
   reference: string;
   uuid_session: string;
   allocations?: MovementAllocationInputType[];
+  units?: MovementUnitInputType[];
   supplier?: typeLiteral | null;
 }
+```
+
+### `CreateUnitsInput`
+
+Zod schema for {@link CreateUnitsInputType}.
+
+```ts
+const CreateUnitsInput: z.ZodType<CreateUnitsInputType>;
+```
+
+### `CreateUnitsInputType`
+
+Body of `POST /products/{uid}/units`: mint `vacant` numbers for a product.
+
+- `count` — the next `count` numbers in the product's block, assigned by the
+  server (`max + 1 …`).
+- `explicit` — exactly these numbers.
+
+⚠️ **No serial, in either arm.** A created number is `vacant`, and a vacant
+number carries no serial (`UnitSchema`'s refine), so a serial here would
+have 500'd inside the create. A serial arrives with ACTIVATION — on the
+ownership movement that brings the unit in (`CreateTransactionInput.units`),
+or afterwards through `PUT /units/{uid}` with reason `initial`.
+
+`uuid_session` is the create's idempotency key, as on
+`CreateOutOfServiceInput`: a retried count-mode create replays the batch
+rather than minting a second run of numbers.
+
+```ts
+type CreateUnitsInputType = typeLiteral | typeLiteral;
 ```
 
 ### `CreateUserInput`
@@ -5984,6 +6068,25 @@ interface LoginInputType {
 }
 ```
 
+### `MAX_UNITS_PER_CREATE`
+
+The most units one create may mint, in either mode.
+
+```ts
+const MAX_UNITS_PER_CREATE: 400;
+```
+
+### `MAX_UNITS_PER_ROSTER`
+
+The most units one product's roster may hold before it has to be split by
+number block. It also caps every {@link UnitSet}, so no single set can name
+more units than one roster document is sized for (about 120 B per `out`
+entry, so 5,000 is roughly 600 KB against Firestore's 1 MiB).
+
+```ts
+const MAX_UNITS_PER_ROSTER: 5000;
+```
+
 ### `MOVEMENT_CONTRACTS`
 
 The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member.
@@ -6253,6 +6356,7 @@ One requested placement of `quantity` units. Direction-agnostic on purpose:
 interface MovementAllocationInputType {
   uid_location: string;
   quantity: number;
+  units?: number[];
 }
 ```
 
@@ -6558,6 +6662,27 @@ Zod schema for one identified unit on a movement.
 
 ```ts
 const MovementUnit: z.ZodType<MovementUnitType>;
+```
+
+### `MovementUnitInput`
+
+Zod schema for {@link MovementUnitInputType}.
+
+```ts
+const MovementUnitInput: z.ZodType<MovementUnitInputType>;
+```
+
+### `MovementUnitInputType`
+
+One unit a manual movement names. `serial_number` only on an in-type
+({@link UNIT_SERIAL_IN_TYPES}): the serial the unit arrives with, which
+opens its serial history.
+
+```ts
+interface MovementUnitInputType {
+  number: number;
+  serial_number?: string;
+}
 ```
 
 ### `MovementUnitType`
@@ -6910,6 +7035,33 @@ interface OOSStoreLocation {
   transactionQuantity: number;
   default: boolean;
   max?: number | null;
+}
+```
+
+### `OOSUnitsSchema`
+
+Zod schema for {@link OOSUnitsType}.
+
+```ts
+const OOSUnitsSchema: z.ZodType<OOSUnitsType>;
+```
+
+### `OOSUnitsType`
+
+Which units sit in each bucket of a record, on a serialized product
+(`api-cloudrun/.claude/plans/serial-tracking.md` D6). Each set is a
+canonical `UnitSet`, and the sets are pairwise disjoint.
+
+`units[k].length ≤ breakdown[k]`, not `===`: a historic record (24 walkie
+losses on Replacement lines among them) names no unit at all, and writes off
+without vacating anything.
+
+```ts
+interface OOSUnitsType {
+  away: number[];
+  flagged: number[];
+  returned_to_service: number[];
+  written_off: number[];
 }
 ```
 
@@ -7691,6 +7843,7 @@ interface OutOfService {
   status: OOSStatusType;
   quantity: number;
   breakdown: OOSBreakdown;
+  units?: OOSUnitsType | null;
   canceled_at: FirestoreTimestampType | null;
   organization: typeLiteral | null;
   dates: OOSDates;
@@ -7773,7 +7926,7 @@ type OutOfServiceUpdated = EventEnvelope<OutOfService> & typeLiteral;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "units.create" | "units.read" | "units.update" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `PICK_SHEET_GATES`
@@ -9225,7 +9378,7 @@ deliberately shorter than the transaction name (`create-org:*` under
 `create-organization`). Read the prefix as a namespace, never as a join key.
 
 ```ts
-type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:record-to-record" | "update-out-of-service-record:transactions-to-ledger" | "reclassify-out-of-service-record:record-to-booking" | "reclassify-out-of-service-record:record-to-record" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-store-transfer:transaction-to-out-of-service" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "merge-org:loser-to-orders" | "merge-org:loser-to-invoices" | "merge-org:loser-to-credit-notes" | "merge-org:loser-to-settlements" | "merge-org:loser-to-bookings" | "merge-org:loser-to-fulfillments" | "merge-org:loser-to-cards" | "merge-org:loser-to-out-of-service" | "merge-org:loser-to-contacts" | "merge-org:activity-to-survivor" | "merge-org:merged-from-to-survivor" | "merge-org:delete-loser" | "merge-org:tombstone-loser" | "merge-org:merged-to-to-tombstones" | "merge-org:tombstone-parent" | "merge-org:thread-comments-to-survivor" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "close-invoice:closure-to-invoice" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "void-invoice-from-cancel:reap-settlements" | "void-invoice-from-cancel:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:name-to-transactions" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock";
+type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:record-to-record" | "update-out-of-service-record:transactions-to-ledger" | "reclassify-out-of-service-record:record-to-booking" | "reclassify-out-of-service-record:record-to-record" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-store-transfer:transaction-to-out-of-service" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "merge-org:loser-to-orders" | "merge-org:loser-to-invoices" | "merge-org:loser-to-credit-notes" | "merge-org:loser-to-settlements" | "merge-org:loser-to-bookings" | "merge-org:loser-to-fulfillments" | "merge-org:loser-to-cards" | "merge-org:loser-to-out-of-service" | "merge-org:loser-to-contacts" | "merge-org:activity-to-survivor" | "merge-org:merged-from-to-survivor" | "merge-org:delete-loser" | "merge-org:tombstone-loser" | "merge-org:merged-to-to-tombstones" | "merge-org:tombstone-parent" | "merge-org:thread-comments-to-survivor" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "close-invoice:closure-to-invoice" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "void-invoice-from-cancel:reap-settlements" | "void-invoice-from-cancel:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:name-to-transactions" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock" | "units:transactions-to-roster" | "units:transactions-to-units" | "units:product-to-roster" | "units:product-to-units" | "units:product-to-bookings" | "create-units:product-to-units";
 ```
 
 ### `SEEDED_ROLE_NAMES`
@@ -9239,6 +9392,19 @@ checked rather than free strings.
 
 ```ts
 const SEEDED_ROLE_NAMES: "admin" | "authenticated" | "customer" | "template-editor" | "template-maintainer" | "warehouse"[];
+```
+
+### `SERIAL_CHANGE_REASONS`
+
+Why a serial was set on a number.
+
+- `initial` — the first serial recorded for the number (a create, a
+  conversion, or a later bulk paste).
+- `replaced` — a different physical unit took over the number.
+- `corrected` — the previous entry was mis-typed; the unit did not change.
+
+```ts
+const SERIAL_CHANGE_REASONS: "initial" | "replaced" | "corrected"[];
 ```
 
 ### `SETTLED_STATUSES`
@@ -9373,6 +9539,22 @@ One of the six git-declared roles. @see {@link SEEDED_ROLE_NAMES}
 
 ```ts
 type SeededRoleName = indexedAccess;
+```
+
+### `SerialChangeReasonEnum`
+
+Zod schema for {@link SerialChangeReasonType}.
+
+```ts
+const SerialChangeReasonEnum: z.ZodType<SerialChangeReasonType>;
+```
+
+### `SerialChangeReasonType`
+
+One serial-change reason. See {@link SERIAL_CHANGE_REASONS}.
+
+```ts
+type SerialChangeReasonType = indexedAccess;
 ```
 
 ### `SerialNumber`
@@ -9897,6 +10079,7 @@ interface StoreTransferLineInputType {
   to: string;
   quantity: number;
   oos: typeLiteral | null;
+  units?: number[];
 }
 ```
 
@@ -10923,7 +11106,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "create-store-transfer" | "create-units" | "update-unit" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `TransactionLogRecord`
@@ -11071,6 +11254,59 @@ One collection's outcome in a sync pass.
 type TypesenseSyncOutcome = indexedAccess;
 ```
 
+### `UNIT_ROSTER_STATES`
+
+The states a rostered unit can be in. See {@link UnitRosterEntryType}.
+
+```ts
+const UNIT_ROSTER_STATES: "shelf" | "prepped" | "out" | "away" | "unattributed_out"[];
+```
+
+### `UNIT_SERIAL_IN_TYPES`
+
+The manual types that bring a unit IN to CFS ownership, so may carry the
+serial it arrives with. Every other type names units by number only: a serial
+changes on an existing number through `PUT /units/{uid}`, never by moving it.
+
+```ts
+const UNIT_SERIAL_IN_TYPES: "purchase" | "find" | "make" | "opening_balance" | "adjustment_increase"[];
+```
+
+### `UNIT_STATUSES`
+
+Whether a number is in use.
+
+- `active` — owned, and on the product's roster.
+- `vacant` — not owned right now (sold, written off, never activated). The
+  number can take a replacement unit with a new serial. EVERY departure
+  leaves a number vacant (owner, 2026-10-03); nothing retires one implicitly.
+- `retired` — never to be reused. Only an operator retires a number, and only
+  from `vacant`.
+
+```ts
+const UNIT_STATUSES: "active" | "vacant" | "retired"[];
+```
+
+### `UNIT_USER_SERIAL_REASONS`
+
+The reasons `PUT /units/{uid}` may send. Today every reason; kept as its own
+list, the `OOS_USER_STATUSES` pattern, so narrowing what an operator may send
+does not narrow what storage may hold.
+
+```ts
+const UNIT_USER_SERIAL_REASONS: "initial" | "replaced" | "corrected"[];
+```
+
+### `UNIT_USER_STATUSES`
+
+The statuses `PUT /units/{uid}` may ask for: only `retired`, and the server
+honours it only from `vacant`. `active` and `vacant` are reached by ownership
+movements, never set by hand.
+
+```ts
+const UNIT_USER_STATUSES: "retired"[];
+```
+
 ### `UidNameRef`
 
 Zod schema for a uid + name reference.
@@ -11117,6 +11353,210 @@ unit's identity (owner ruling 2026-09-21). Globally unique across products.
 
 ```ts
 const UnitNumber: z.ZodType<number>;
+```
+
+### `UnitRoster`
+
+One serialized product's roster. See the module docblock.
+
+```ts
+interface UnitRoster {
+  uid: string;
+  uid_product: string;
+  units: Record<string, UnitRosterEntryType>;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `UnitRosterEntry`
+
+Zod schema for {@link UnitRosterEntryType}.
+
+```ts
+const UnitRosterEntry: z.ZodType<UnitRosterEntryType>;
+```
+
+### `UnitRosterEntryType`
+
+Where one unit is.
+
+- `shelf` — on a CFS shelf. `flag` is the out-of-service reason it carries
+  there (damaged, cleaning, maintenance), with the record that flagged it;
+  both `null` for a unit in service. A flagged unit is never offered for
+  prep or check-out.
+- `prepped` — picked onto a booking's prep shelf; still physically at
+  `uid_location`.
+- `out` — at a customer, on `uid_booking`.
+- `away` — standing AT an out-of-service record: lost, or at the record's
+  destination (a vendor). Never offered.
+- `unattributed_out` — written only by the bulk → serialized conversion: a
+  unit that is out on some booking, but which booking's number it is was
+  never recorded. The physical count resolves these as ordinary custody.
+
+The id fields are typed per state rather than a polymorphic `DocSource`,
+because the discriminant already fixes which collection each names.
+`OutOfServiceId`, not `FirestoreId`: a loss record's id is its opening
+movement's (`MovementId`-shaped), so `FirestoreId` would refuse every
+`mark_lost` unit.
+
+```ts
+type UnitRosterEntryType = typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral;
+```
+
+### `UnitRosterKey`
+
+A roster key: a unit number as Firestore spells a map key — decimal, no
+leading zero, never `0`. The same spelling as `UnitId`'s number segment.
+
+```ts
+const UnitRosterKey: z.ZodType<string>;
+```
+
+### `UnitRosterSchema`
+
+Zod schema for {@link UnitRoster}.
+
+```ts
+const UnitRosterSchema: z.ZodType<UnitRoster>;
+```
+
+### `UnitRosterStateType`
+
+One roster state.
+
+```ts
+type UnitRosterStateType = indexedAccess;
+```
+
+### `UnitSchema`
+
+Zod schema for {@link UnitType}.
+
+```ts
+const UnitSchema: z.ZodType<UnitType>;
+```
+
+### `UnitSerialChangeInputType`
+
+A serial change sent to `PUT /units/{uid}`.
+
+```ts
+interface UnitSerialChangeInputType {
+  serial_number: string | null;
+  reason: UnitUserSerialReasonType;
+  notes: string;
+}
+```
+
+### `UnitSerialHistoryEntry`
+
+Zod schema for {@link UnitSerialHistoryEntryType}.
+
+```ts
+const UnitSerialHistoryEntry: z.ZodType<UnitSerialHistoryEntryType>;
+```
+
+### `UnitSerialHistoryEntryType`
+
+One serial a number has carried, and over which span.
+
+The acquisition reference lives HERE, per entry, rather than once per unit: a
+replacement re-points the number at a new physical unit, and a single
+unit-level field would lose the original acquisition. The unit's CURRENT
+acquisition is the open entry's `uid_movement`.
+
+```ts
+interface UnitSerialHistoryEntryType {
+  serial_number: string;
+  start: string;
+  end: string | null;
+  reason: SerialChangeReasonType;
+  uid_movement: string | null;
+  notes: string;
+  changed_by: ActorRefType;
+}
+```
+
+### `UnitSet`
+
+A canonical set of unit numbers: strictly ascending, no duplicates.
+
+Unsorted input and duplicates are REFUSED, never normalized. A client that
+holds a set in some other order canonicalizes it with `normalizeUnitSet`
+(`@cfs/core/utils/units`) before sending; a server that silently sorted would
+hide a client building the set wrong.
+
+```ts
+const UnitSet: z.ZodType<number[]>;
+```
+
+### `UnitStatusEnum`
+
+Zod schema for {@link UnitStatusType}.
+
+```ts
+const UnitStatusEnum: z.ZodType<UnitStatusType>;
+```
+
+### `UnitStatusType`
+
+One unit status. See {@link UNIT_STATUSES}.
+
+```ts
+type UnitStatusType = indexedAccess;
+```
+
+### `UnitType`
+
+A unit number, its current serial and its history.
+
+```ts
+interface UnitType {
+  uid: string;
+  uid_product: string;
+  number: number;
+  serial_number: string | null;
+  serial_history: UnitSerialHistoryEntryType[];
+  status: UnitStatusType;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `UnitUserSerialReasonEnum`
+
+Zod schema for {@link UnitUserSerialReasonType}.
+
+```ts
+const UnitUserSerialReasonEnum: z.ZodType<UnitUserSerialReasonType>;
+```
+
+### `UnitUserSerialReasonType`
+
+One reason an operator may send.
+
+```ts
+type UnitUserSerialReasonType = indexedAccess;
+```
+
+### `UnitUserStatusEnum`
+
+Zod schema for {@link UnitUserStatusType}.
+
+```ts
+const UnitUserStatusEnum: z.ZodType<UnitUserStatusType>;
+```
+
+### `UnitUserStatusType`
+
+One status an operator may ask for.
+
+```ts
+type UnitUserStatusType = indexedAccess;
 ```
 
 ### `UnplacedEndpoint`
@@ -11581,6 +12021,7 @@ interface UpdateOutOfServiceInputType {
   status?: indexedAccess;
   reason?: OOSFlagReasonType;
   breakdown?: OOSBreakdown;
+  units?: OOSUnitsType;
   dates?: typeLiteral;
   destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
@@ -11883,6 +12324,29 @@ mutable table. Only `reference` still edits in place.
 interface UpdateTransactionInputType {
   reference: string;
   version: number;
+}
+```
+
+### `UpdateUnitInput`
+
+Zod schema for {@link UpdateUnitInputType}.
+
+```ts
+const UpdateUnitInput: z.ZodType<UpdateUnitInputType>;
+```
+
+### `UpdateUnitInputType`
+
+Body of `PUT /units/{uid}`: change the serial, retire the number, or both.
+
+A serial remap does NOT cascade into past movements — `MovementUnit` keeps
+the serial as a snapshot of the moment it moved.
+
+```ts
+interface UpdateUnitInputType {
+  version: number;
+  serial?: UnitSerialChangeInputType;
+  status?: UnitUserStatusType;
 }
 ```
 
@@ -12371,6 +12835,15 @@ both halves so they cannot disagree.
 ⚠️ **Total by construction** — the first and last buckets are unbounded, so
 every integer lands somewhere and there is no fallthrough to explain.
 
+### `allocationUnitsIssue(numbers: readonly number[] | undefined, allocations: readonly MovementAllocationInputType[] | undefined): string | null`
+
+What is wrong with how an input's allocations name its units, or `null`.
+
+Either no allocation names units, or every one does and together they name
+exactly `numbers` — the input's own list — each unit once. Shared by
+`CreateTransactionInput` and `CreateOutOfServiceInput`, so the two inputs
+that place units on shelves cannot disagree about it.
+
 ### `availableUtilNamespaces(sources: readonly TemplateCollectionType[], targets: readonly TemplateCollectionType[]): string[]`
 
 Resolve the `@cfs/core/utils` namespaces available to a template, as the union
@@ -12737,6 +13210,10 @@ wire refine and by `applyCustodyActions`, so the two cannot disagree.
 
 The slot is read off the RENTAL arm: a sale's arms are a subset whose
 movements are distinct per rule, so the rental reading is the stricter one.
+
+### `emptyBookingUnitSets(): BookingUnitSetsType`
+
+Empty sets in every unit bucket: a seeded booking that names no unit yet.
 
 ### `enumValues(schema: z.ZodType<T>): T[]`
 
@@ -13580,7 +14057,7 @@ deliberately shorter than the transaction name (`create-org:*` under
 `create-organization`). Read the prefix as a namespace, never as a join key.
 
 ```ts
-type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:record-to-record" | "update-out-of-service-record:transactions-to-ledger" | "reclassify-out-of-service-record:record-to-booking" | "reclassify-out-of-service-record:record-to-record" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-store-transfer:transaction-to-out-of-service" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "merge-org:loser-to-orders" | "merge-org:loser-to-invoices" | "merge-org:loser-to-credit-notes" | "merge-org:loser-to-settlements" | "merge-org:loser-to-bookings" | "merge-org:loser-to-fulfillments" | "merge-org:loser-to-cards" | "merge-org:loser-to-out-of-service" | "merge-org:loser-to-contacts" | "merge-org:activity-to-survivor" | "merge-org:merged-from-to-survivor" | "merge-org:delete-loser" | "merge-org:tombstone-loser" | "merge-org:merged-to-to-tombstones" | "merge-org:tombstone-parent" | "merge-org:thread-comments-to-survivor" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "close-invoice:closure-to-invoice" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "void-invoice-from-cancel:reap-settlements" | "void-invoice-from-cancel:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:name-to-transactions" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock";
+type RuleId = "create-order:org-to-order" | "create-order:products-to-order-items" | "create-order:order-self-derive" | "create-order:order-to-bookings" | "create-order:ledger-to-bookings" | "create-order:fulfillment-to-cards" | "create-order:order-to-fulfillment" | "update-order:org-to-order" | "update-order:order-self-derive" | "update-order:order-to-bookings" | "update-order:ledger-to-bookings" | "update-order:fulfillment-to-cards" | "update-order:order-to-fulfillment" | "update-booking:booking-to-self" | "update-booking:booking-to-out-of-service" | "update-booking:booking-to-transactions" | "update-booking:transactions-to-ledger" | "update-booking:transactions-to-locations" | "update-booking:booking-to-order" | "update-booking:booking-to-cards" | "create-out-of-service-record:sources-to-record" | "create-out-of-service-record:record-to-transactions" | "create-out-of-service-record:transactions-to-ledger" | "update-out-of-service-record:record-to-transactions" | "update-out-of-service-record:record-to-record" | "update-out-of-service-record:transactions-to-ledger" | "reclassify-out-of-service-record:record-to-booking" | "reclassify-out-of-service-record:record-to-record" | "create-transaction:transaction-to-ledger" | "create-transaction:transaction-to-locations" | "reverse-transaction:transaction-to-ledger" | "reverse-transaction:transaction-to-locations" | "reclass-stock:transaction-to-ledger" | "reclass-stock:transaction-to-locations" | "create-store-transfer:transaction-to-ledger" | "create-store-transfer:transaction-to-locations" | "create-store-transfer:transaction-to-out-of-service" | "create-product:product-to-tags" | "create-product:product-to-tracking-categories" | "create-product:product-to-components" | "create-product:product-to-ledger" | "create-product:product-to-opening-movement" | "create-product:product-to-webshop" | "update-product:catalog-to-components" | "update-product:components-to-components" | "update-product:component-entry-to-parents" | "update-product:name-to-locations" | "update-product:name-to-tags" | "update-product:name-to-tracking-categories" | "update-product:to-webshop" | "update-product:tags-to-tags" | "update-product:tracking-category-change" | "update-product:stock-method-change" | "update-product:type-change" | "update-product:price-to-components" | "update-product:price-to-webshop-components" | "update-product:product-to-draft-orders" | "create-org:org-to-contacts" | "create-org:node-to-tree" | "create-org:mint-derived-project" | "merge-org:loser-to-orders" | "merge-org:loser-to-invoices" | "merge-org:loser-to-credit-notes" | "merge-org:loser-to-settlements" | "merge-org:loser-to-bookings" | "merge-org:loser-to-fulfillments" | "merge-org:loser-to-cards" | "merge-org:loser-to-out-of-service" | "merge-org:loser-to-contacts" | "merge-org:activity-to-survivor" | "merge-org:merged-from-to-survivor" | "merge-org:delete-loser" | "merge-org:tombstone-loser" | "merge-org:merged-to-to-tombstones" | "merge-org:tombstone-parent" | "merge-org:thread-comments-to-survivor" | "update-department-type:name-to-departments" | "update-org:name-to-orders" | "update-org:billing-to-orders" | "update-org:name-to-invoices" | "update-org:name-to-bookings" | "update-org:name-to-fulfillments" | "update-org:name-to-cards" | "update-org:billing-to-invoices" | "update-org:tax-axes-to-orders" | "update-org:contacts-change" | "update-org:name-to-descendants" | "reparent-destination:tree-to-node" | "reparent-destination:place-name-to-units" | "reparent-org:tree-to-descendants" | "reparent-org:activity-to-new-ancestors" | "stamp-org-activity:orders-to-organizations" | "stamp-org-activity:invoices-to-organizations" | "create-contact:contact-to-orgs" | "create-contact:link-to-user" | "update-contact:name-to-orgs" | "update-contact:name-to-orders" | "update-contact:phones-to-orders" | "update-contact:orgs-change" | "update-contact:name-to-user" | "create-user:link-to-contact" | "update-user:name-to-contact" | "update-user:name-to-actor-refs" | "delete-user:unlink-contact" | "create-invoice:invoice-to-orders" | "update-invoice:status-to-orders" | "update-order:items-to-invoices" | "update-order:status-to-invoices" | "create-settlement:settlement-to-invoice" | "reverse-settlement:reverser-to-invoice" | "reverse-settlement:release-to-credit-note" | "close-invoice:closure-to-invoice" | "sync-xero-settlement:xero-to-settlements" | "sync-xero-settlement:settlements-to-invoice" | "void-invoice:reap-settlements" | "void-invoice:append-void-settlement" | "void-invoice-from-xero:reap-settlements" | "void-invoice-from-xero:append-void-settlement" | "void-invoice-from-cancel:reap-settlements" | "void-invoice-from-cancel:append-void-settlement" | "create-credit-note:number-from-counter" | "create-credit-note:posting-account" | "allocate-credit-note:note-to-settlements" | "allocate-credit-note:settlements-to-invoices" | "allocate-credit-note:remaining-credit" | "void-credit-note:status" | "update-fulfillment-items:items-self" | "update-fulfillment-items:fulfillment-to-cards" | "update-fulfillment-destinations:pairs-self" | "update-fulfillment-destinations:fulfillment-to-cards" | "create-fulfillment-exchange:leg-self" | "create-fulfillment-exchange:fulfillment-to-cards" | "reset-fulfillment:rebuild-from-order" | "reset-fulfillment:fulfillment-to-cards" | "reconcile-fulfillment-cards:fulfillment-to-cards" | "create-tax-rate:recompute-live-orders" | "create-tax-rate:recompute-live-invoices" | "update-tax-class:name-to-products" | "update-tax-class:name-to-webshop-products" | "update-tax-class:codes-recompute-live-orders" | "update-tax-class:codes-recompute-live-invoices" | "update-product:tax-class-to-live-orders" | "update-product:tax-class-to-components" | "update-product:tax-class-to-webshop-components" | "update-tag:name-to-products" | "delete-tag:remove-from-products" | "update-tracking-category:name-to-products" | "update-location-type:capacities-to-locations" | "update-location:name-to-inventory-ledgers" | "update-location:name-to-bookings" | "update-location:name-to-out-of-service" | "update-location:name-to-transactions" | "update-location:default-name-to-store" | "holiday-definition:materialize-dates" | "holiday-dates:rematerialize-snapshot" | "holiday-change:recompute-draft-orders" | "holiday-change:recompute-draft-invoices" | "create-store:unset-sibling-defaults" | "update-store:unset-sibling-defaults" | "update-store:deactivate-locations" | "create-location:default-location-to-store" | "update-location:set-default-to-store" | "update-location:unset-previous-default" | "cowrite-thread:orders-to-thread" | "cowrite-thread:thread-to-orders" | "cowrite-thread:invoices-to-thread" | "cowrite-thread:thread-to-invoices" | "cowrite-thread:contacts-to-thread" | "cowrite-thread:thread-to-contacts" | "cowrite-thread:organizations-to-thread" | "cowrite-thread:thread-to-organizations" | "cowrite-thread:products-to-thread" | "cowrite-thread:thread-to-products" | "cowrite-thread:roles-to-thread" | "cowrite-thread:thread-to-roles" | "cowrite-thread:out-of-service-to-thread" | "cowrite-thread:thread-to-out-of-service" | "cowrite-thread:credit-notes-to-thread" | "cowrite-thread:thread-to-credit-notes" | "create-comment:thread-to-comment" | "create-comment:comment-to-thread" | "delete-comment:comment-to-thread" | "cowrite-thread:cards-to-thread" | "cowrite-thread:thread-to-cards" | "delete-card:cascade-thread" | "delete-card:cascade-comments" | "create-template:thread" | "create-template:thread-to-family" | "manage-draft:family-rollup" | "manage-draft:component-family-rollup" | "manage-draft:version-to-thread" | "manage-draft:thread-to-version" | "publish-template:seq" | "publish-template:version-flip" | "publish-template:family-rollup" | "publish-template:component-family-rollup" | "create-recurrence:fan-out-cards" | "materialize-horizon:fan-out-cards" | "update-recurrence:fan-out-prototype" | "update-recurrence:rematerialize-future" | "delete-recurrence:fan-out-cards" | "update-card-scope-following:cascade-future-siblings" | "update-card-scope-all:update-recurrence-prototype" | "update-card-scope-all:cascade-siblings" | "delete-card-scope-this:append-exception-date" | "delete-card-scope-following:cascade-future-siblings" | "delete-card-scope-following:truncate-recurrence" | "delete-card-scope-all:cascade-siblings" | "delete-card-scope-all:delete-recurrence" | "generate-invoice-pdf:upload-to-worklist" | "generate-quote-pdf:upload-to-worklist" | "generate-statement-pdf:upload-to-worklist" | "stock:ledger-to-stock" | "stock:bookings-to-stock" | "stock:oos-to-stock" | "stock:seed-ledger-to-stock" | "units:transactions-to-roster" | "units:transactions-to-units" | "units:product-to-roster" | "units:product-to-units" | "units:product-to-bookings" | "create-units:product-to-units";
 ```
 
 ### `TransactionDefinition`
@@ -13604,7 +14081,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "create-store-transfer" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "create-store-transfer" | "create-units" | "update-unit" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `aggregates`
@@ -15786,6 +16263,22 @@ const BOOKING_BREAKDOWN_TERMINAL_KEYS: "returned" | "lost" | "damaged" | "cleani
 const BOOKING_STATUSES: "draft" | "quoted" | "reserved" | "part-prepped" | "prepped" | "active" | "complete"[];
 ```
 
+### `BOOKING_UNIT_BUCKETS`
+
+The breakdown buckets that hold NAMED units on a serialized product's
+booking (`api-cloudrun/.claude/plans/serial-tracking.md` D2). Alphabetical,
+because key order is column order.
+
+`quoted` and `reserved` are absent on purpose: a reserved unit is a count
+against the shelf, not a particular radio. Units are named from `prep` on.
+
+Every TERMINAL bucket carries a set too, because a shrinking `out` set alone
+cannot say which units came back and which were lost.
+
+```ts
+const BOOKING_UNIT_BUCKETS: "cleaning" | "damaged" | "lost" | "maintenance" | "out" | "prepped" | "returned"[];
+```
+
 ### `Booking`
 
 Full Firestore document for a booking — an AGGREGATE per
@@ -15833,6 +16326,7 @@ interface Booking {
   crms_id?: number | null;
   crms_product_id?: number | null;
   breakdown: BookingBreakdown;
+  units?: BookingUnitSetsType | null;
   dates: typeLiteral;
   destinations: typeLiteral;
   organization: typeLiteral;
@@ -15974,6 +16468,36 @@ be a copy to keep in step for no gain.
 
 ```ts
 const BookingStoreSchema: z.ZodType<BookingStore>;
+```
+
+### `BookingUnitBucketType`
+
+One bucket that holds named units.
+
+```ts
+type BookingUnitBucketType = indexedAccess;
+```
+
+### `BookingUnitSetsSchema`
+
+Zod schema for {@link BookingUnitSetsType}, built the way {@link breakdownObjectSchema} is.
+
+```ts
+const BookingUnitSetsSchema: z.ZodType<BookingUnitSetsType>;
+```
+
+### `BookingUnitSetsType`
+
+Which units sit in each bucket of a booking. Each set is a canonical
+`UnitSet` (ascending, unique), and the sets are pairwise disjoint.
+
+`units[k].length` may be LESS than `breakdown[k]`: the difference is the
+bucket's UNTRACKED count, units a bulk → serialized conversion found already
+prepped or out and could not name. It is derived, never stored —
+`untrackedUnitCount` (`@cfs/core/utils/bookings`).
+
+```ts
+type BookingUnitSetsType = Record<BookingUnitBucketType, number[]>;
 ```
 
 ### `BookingUpdate`
@@ -16121,6 +16645,10 @@ interface UpdateBookingResponseType {
 }
 ```
 
+### `emptyBookingUnitSets(): BookingUnitSetsType`
+
+Empty sets in every unit bucket: a seeded booking that names no unit yet.
+
 ## `@cfs/core/schemas/custody`
 
 The custody ruleset: which change to a booking's breakdown is LEGAL, and
@@ -16182,6 +16710,7 @@ interface BookingActionType {
   rule: CustodyRuleId;
   quantity: number;
   uid_out_of_service?: string;
+  units?: number[];
 }
 ```
 
@@ -20168,6 +20697,7 @@ interface CreateOutOfServiceInputType {
   allocations?: MovementAllocationInputType[];
   destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
+  units?: number[];
 }
 ```
 
@@ -20294,6 +20824,33 @@ interface OOSStoreLocation {
 }
 ```
 
+### `OOSUnitsSchema`
+
+Zod schema for {@link OOSUnitsType}.
+
+```ts
+const OOSUnitsSchema: z.ZodType<OOSUnitsType>;
+```
+
+### `OOSUnitsType`
+
+Which units sit in each bucket of a record, on a serialized product
+(`api-cloudrun/.claude/plans/serial-tracking.md` D6). Each set is a
+canonical `UnitSet`, and the sets are pairwise disjoint.
+
+`units[k].length ≤ breakdown[k]`, not `===`: a historic record (24 walkie
+losses on Replacement lines among them) names no unit at all, and writes off
+without vacating anything.
+
+```ts
+interface OOSUnitsType {
+  away: number[];
+  flagged: number[];
+  returned_to_service: number[];
+  written_off: number[];
+}
+```
+
 ### `OOS_BREAKDOWN_KEYS`
 
 Where a record's units are — see the module docblock's table.
@@ -20344,6 +20901,7 @@ interface OutOfService {
   status: OOSStatusType;
   quantity: number;
   breakdown: OOSBreakdown;
+  units?: OOSUnitsType | null;
   canceled_at: FirestoreTimestampType | null;
   organization: typeLiteral | null;
   dates: OOSDates;
@@ -20403,6 +20961,7 @@ interface UpdateOutOfServiceInputType {
   status?: indexedAccess;
   reason?: OOSFlagReasonType;
   breakdown?: OOSBreakdown;
+  units?: OOSUnitsType;
   dates?: typeLiteral;
   destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
@@ -21937,6 +22496,7 @@ interface CreateTransactionInputType {
   reference: string;
   uuid_session: string;
   allocations?: MovementAllocationInputType[];
+  units?: MovementUnitInputType[];
   supplier?: typeLiteral | null;
 }
 ```
@@ -22074,6 +22634,7 @@ One requested placement of `quantity` units. Direction-agnostic on purpose:
 interface MovementAllocationInputType {
   uid_location: string;
   quantity: number;
+  units?: number[];
 }
 ```
 
@@ -22263,6 +22824,27 @@ Zod schema for one identified unit on a movement.
 const MovementUnit: z.ZodType<MovementUnitType>;
 ```
 
+### `MovementUnitInput`
+
+Zod schema for {@link MovementUnitInputType}.
+
+```ts
+const MovementUnitInput: z.ZodType<MovementUnitInputType>;
+```
+
+### `MovementUnitInputType`
+
+One unit a manual movement names. `serial_number` only on an in-type
+({@link UNIT_SERIAL_IN_TYPES}): the serial the unit arrives with, which
+opens its serial history.
+
+```ts
+interface MovementUnitInputType {
+  number: number;
+  serial_number?: string;
+}
+```
+
 ### `MovementUnitType`
 
 One identified unit a movement moved.
@@ -22348,7 +22930,18 @@ interface StoreTransferLineInputType {
   to: string;
   quantity: number;
   oos: typeLiteral | null;
+  units?: number[];
 }
+```
+
+### `UNIT_SERIAL_IN_TYPES`
+
+The manual types that bring a unit IN to CFS ownership, so may carry the
+serial it arrives with. Every other type names units by number only: a serial
+changes on an existing number through `PUT /units/{uid}`, never by moving it.
+
+```ts
+const UNIT_SERIAL_IN_TYPES: "purchase" | "find" | "make" | "opening_balance" | "adjustment_increase"[];
 ```
 
 ### `UpdateTransactionInput`
@@ -22374,6 +22967,15 @@ interface UpdateTransactionInputType {
   version: number;
 }
 ```
+
+### `allocationUnitsIssue(numbers: readonly number[] | undefined, allocations: readonly MovementAllocationInputType[] | undefined): string | null`
+
+What is wrong with how an input's allocations name its units, or `null`.
+
+Either no allocation names units, or every one does and together they name
+exactly `numbers` — the input's own list — each unit once. Shared by
+`CreateTransactionInput` and `CreateOutOfServiceInput`, so the two inputs
+that place units on shelves cannot disagree about it.
 
 ### `getDisplayTransactionTypes(increaseOnly?: boolean): MovementTypeType[]`
 
@@ -22429,18 +23031,113 @@ Whether a movement type carries a cost object. Derived from the contract.
 
 ## `@cfs/core/schemas/unit`
 
-Serialized units — the primitives a unit number and its serial are checked
-against wherever they appear.
+Serialized units — Firestore collection: `units`.
 
-Today this module holds only the two scalars that movements already carry
-(`MovementUnit` in `src/schemas/transaction.ts`). The `units` document, its
-roster and their inputs land here next
-(`api-cloudrun/.claude/plans/serial-tracking.md` § *Schemas (core)*, phase P2). The
-dependency runs one way: `src/schemas/transaction.ts` imports from here, never the
-reverse, so the unit document can later name movements without a cycle.
+One document per unit NUMBER, the asset tag the operator reads off the unit.
+The number is the identity; the serial is a changeable attribute (owner
+ruling 2026-09-21): a replaced radio keeps its number and takes a new serial,
+and a tent has a number and no serial at all.
+
+Where a unit IS right now is not on this document. That is the roster
+(`unit-roster.ts`, one document per product), which only the ledger writer
+writes. This document holds what the roster cannot: the serial, its history,
+and whether the number is in use (`status`). The four places and their one
+job each are in `api-cloudrun/.claude/plans/serial-tracking.md` §
+*Architecture*.
+
+The dependency runs one way: `src/schemas/transaction.ts` imports from here,
+never the reverse, so this module may not import it. A movement id is named
+through `MovementId` in `_uid.ts`, which both modules share.
 
 The id, `UnitId` (`unit-{number}`), lives with every other id shape in
-`_uid.ts`.
+`_uid.ts`. That `uid === unit-${number}` holds is checked on the API's write
+path rather than refined here: a refine would leave `getTestDoc` unable to
+build the document without an `OVERRIDES` entry (`tests/testing.test.ts`).
+
+⚠️ **Not an activity-feed collection, deliberately.** It carries actors, but
+a bulk serial paste is hundreds of rows of noise in the feed, and the feed's
+distinct permissions sit 5 under Firestore's `in` cap of 30
+(`ACTIVITY_READ_PERMISSION_BY_COLLECTION`, `schemas/activity.ts`). A unit's
+history is already two queries: `serial_history` here, and the movements
+whose `query_by_unit_number` contains it.
+
+### `CreateUnitsInput`
+
+Zod schema for {@link CreateUnitsInputType}.
+
+```ts
+const CreateUnitsInput: z.ZodType<CreateUnitsInputType>;
+```
+
+### `CreateUnitsInputType`
+
+Body of `POST /products/{uid}/units`: mint `vacant` numbers for a product.
+
+- `count` — the next `count` numbers in the product's block, assigned by the
+  server (`max + 1 …`).
+- `explicit` — exactly these numbers.
+
+⚠️ **No serial, in either arm.** A created number is `vacant`, and a vacant
+number carries no serial (`UnitSchema`'s refine), so a serial here would
+have 500'd inside the create. A serial arrives with ACTIVATION — on the
+ownership movement that brings the unit in (`CreateTransactionInput.units`),
+or afterwards through `PUT /units/{uid}` with reason `initial`.
+
+`uuid_session` is the create's idempotency key, as on
+`CreateOutOfServiceInput`: a retried count-mode create replays the batch
+rather than minting a second run of numbers.
+
+```ts
+type CreateUnitsInputType = typeLiteral | typeLiteral;
+```
+
+### `MAX_UNITS_PER_CREATE`
+
+The most units one create may mint, in either mode.
+
+```ts
+const MAX_UNITS_PER_CREATE: 400;
+```
+
+### `MAX_UNITS_PER_ROSTER`
+
+The most units one product's roster may hold before it has to be split by
+number block. It also caps every {@link UnitSet}, so no single set can name
+more units than one roster document is sized for (about 120 B per `out`
+entry, so 5,000 is roughly 600 KB against Firestore's 1 MiB).
+
+```ts
+const MAX_UNITS_PER_ROSTER: 5000;
+```
+
+### `SERIAL_CHANGE_REASONS`
+
+Why a serial was set on a number.
+
+- `initial` — the first serial recorded for the number (a create, a
+  conversion, or a later bulk paste).
+- `replaced` — a different physical unit took over the number.
+- `corrected` — the previous entry was mis-typed; the unit did not change.
+
+```ts
+const SERIAL_CHANGE_REASONS: "initial" | "replaced" | "corrected"[];
+```
+
+### `SerialChangeReasonEnum`
+
+Zod schema for {@link SerialChangeReasonType}.
+
+```ts
+const SerialChangeReasonEnum: z.ZodType<SerialChangeReasonType>;
+```
+
+### `SerialChangeReasonType`
+
+One serial-change reason. See {@link SERIAL_CHANGE_REASONS}.
+
+```ts
+type SerialChangeReasonType = indexedAccess;
+```
 
 ### `SerialNumber`
 
@@ -22451,6 +23148,41 @@ identity: a replaced radio keeps its number and takes a new serial.
 const SerialNumber: z.ZodType<string>;
 ```
 
+### `UNIT_STATUSES`
+
+Whether a number is in use.
+
+- `active` — owned, and on the product's roster.
+- `vacant` — not owned right now (sold, written off, never activated). The
+  number can take a replacement unit with a new serial. EVERY departure
+  leaves a number vacant (owner, 2026-10-03); nothing retires one implicitly.
+- `retired` — never to be reused. Only an operator retires a number, and only
+  from `vacant`.
+
+```ts
+const UNIT_STATUSES: "active" | "vacant" | "retired"[];
+```
+
+### `UNIT_USER_SERIAL_REASONS`
+
+The reasons `PUT /units/{uid}` may send. Today every reason; kept as its own
+list, the `OOS_USER_STATUSES` pattern, so narrowing what an operator may send
+does not narrow what storage may hold.
+
+```ts
+const UNIT_USER_SERIAL_REASONS: "initial" | "replaced" | "corrected"[];
+```
+
+### `UNIT_USER_STATUSES`
+
+The statuses `PUT /units/{uid}` may ask for: only `retired`, and the server
+honours it only from `vacant`. `active` and `vacant` are reached by ownership
+movements, never set by hand.
+
+```ts
+const UNIT_USER_STATUSES: "retired"[];
+```
+
 ### `UnitNumber`
 
 A unit's number: the asset tag the operator reads off the unit, and the
@@ -22458,6 +23190,275 @@ unit's identity (owner ruling 2026-09-21). Globally unique across products.
 
 ```ts
 const UnitNumber: z.ZodType<number>;
+```
+
+### `UnitSchema`
+
+Zod schema for {@link UnitType}.
+
+```ts
+const UnitSchema: z.ZodType<UnitType>;
+```
+
+### `UnitSerialChangeInputType`
+
+A serial change sent to `PUT /units/{uid}`.
+
+```ts
+interface UnitSerialChangeInputType {
+  serial_number: string | null;
+  reason: UnitUserSerialReasonType;
+  notes: string;
+}
+```
+
+### `UnitSerialHistoryEntry`
+
+Zod schema for {@link UnitSerialHistoryEntryType}.
+
+```ts
+const UnitSerialHistoryEntry: z.ZodType<UnitSerialHistoryEntryType>;
+```
+
+### `UnitSerialHistoryEntryType`
+
+One serial a number has carried, and over which span.
+
+The acquisition reference lives HERE, per entry, rather than once per unit: a
+replacement re-points the number at a new physical unit, and a single
+unit-level field would lose the original acquisition. The unit's CURRENT
+acquisition is the open entry's `uid_movement`.
+
+```ts
+interface UnitSerialHistoryEntryType {
+  serial_number: string;
+  start: string;
+  end: string | null;
+  reason: SerialChangeReasonType;
+  uid_movement: string | null;
+  notes: string;
+  changed_by: ActorRefType;
+}
+```
+
+### `UnitSet`
+
+A canonical set of unit numbers: strictly ascending, no duplicates.
+
+Unsorted input and duplicates are REFUSED, never normalized. A client that
+holds a set in some other order canonicalizes it with `normalizeUnitSet`
+(`@cfs/core/utils/units`) before sending; a server that silently sorted would
+hide a client building the set wrong.
+
+```ts
+const UnitSet: z.ZodType<number[]>;
+```
+
+### `UnitStatusEnum`
+
+Zod schema for {@link UnitStatusType}.
+
+```ts
+const UnitStatusEnum: z.ZodType<UnitStatusType>;
+```
+
+### `UnitStatusType`
+
+One unit status. See {@link UNIT_STATUSES}.
+
+```ts
+type UnitStatusType = indexedAccess;
+```
+
+### `UnitType`
+
+A unit number, its current serial and its history.
+
+```ts
+interface UnitType {
+  uid: string;
+  uid_product: string;
+  number: number;
+  serial_number: string | null;
+  serial_history: UnitSerialHistoryEntryType[];
+  status: UnitStatusType;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `UnitUserSerialReasonEnum`
+
+Zod schema for {@link UnitUserSerialReasonType}.
+
+```ts
+const UnitUserSerialReasonEnum: z.ZodType<UnitUserSerialReasonType>;
+```
+
+### `UnitUserSerialReasonType`
+
+One reason an operator may send.
+
+```ts
+type UnitUserSerialReasonType = indexedAccess;
+```
+
+### `UnitUserStatusEnum`
+
+Zod schema for {@link UnitUserStatusType}.
+
+```ts
+const UnitUserStatusEnum: z.ZodType<UnitUserStatusType>;
+```
+
+### `UnitUserStatusType`
+
+One status an operator may ask for.
+
+```ts
+type UnitUserStatusType = indexedAccess;
+```
+
+### `UpdateUnitInput`
+
+Zod schema for {@link UpdateUnitInputType}.
+
+```ts
+const UpdateUnitInput: z.ZodType<UpdateUnitInputType>;
+```
+
+### `UpdateUnitInputType`
+
+Body of `PUT /units/{uid}`: change the serial, retire the number, or both.
+
+A serial remap does NOT cascade into past movements — `MovementUnit` keeps
+the serial as a snapshot of the moment it moved.
+
+```ts
+interface UpdateUnitInputType {
+  version: number;
+  serial?: UnitSerialChangeInputType;
+  status?: UnitUserStatusType;
+}
+```
+
+## `@cfs/core/schemas/unit-roster`
+
+UnitRoster document schema — Firestore collection: `unit-rosters`.
+
+The cross-booking index of a serialized product: where each of its units is
+right now. One document per product, id = the product uid (the `stock-locks`
+pattern in `schemas/stock.ts`).
+
+## One author: the ledger writer
+
+The roster is a FOLD of the movement journal — `foldRosterUnits`
+(`@cfs/core/utils/units`) over every movement's `units` / `lines[].units` —
+and only api-cloudrun's ledger writer (`commitLedgerMovements`) writes it,
+once per serialized product per batch, under its `updateTime` precondition.
+Booking, out-of-service, store-transfer, unit-admin and conversion writers
+never touch it; they put units on their movements and that is all. The one
+lifecycle writer (seed and delete, on a `stock_method` change or a create) is
+`api-cloudrun/src/services/products.ts`, as it already is for the ledger.
+`api-cloudrun/.claude/plans/serial-tracking.md` D5 has the reasoning.
+
+## Why one document per product
+
+A 200-radio check-out against one document per unit is 200 writes inside
+two 450-write budgets, and a product cannot be split across chunks. The
+roster costs one. Its keys are the product's ACTIVE numbers exactly, so
+`count(keys) === inventory-ledgers/{P}.quantity_held` on a seeded product.
+
+⚠️ **`units` needs a single-field index EXEMPTION** (api-cloudrun Terraform).
+Without it every subfield is re-indexed on every write, against Firestore's
+40,000 index entries per document.
+
+Availability never reads this. `stock/{P}` stays anonymous counts, and no
+unit identity reaches it.
+
+### `UNIT_ROSTER_STATES`
+
+The states a rostered unit can be in. See {@link UnitRosterEntryType}.
+
+```ts
+const UNIT_ROSTER_STATES: "shelf" | "prepped" | "out" | "away" | "unattributed_out"[];
+```
+
+### `UnitRoster`
+
+One serialized product's roster. See the module docblock.
+
+```ts
+interface UnitRoster {
+  uid: string;
+  uid_product: string;
+  units: Record<string, UnitRosterEntryType>;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `UnitRosterEntry`
+
+Zod schema for {@link UnitRosterEntryType}.
+
+```ts
+const UnitRosterEntry: z.ZodType<UnitRosterEntryType>;
+```
+
+### `UnitRosterEntryType`
+
+Where one unit is.
+
+- `shelf` — on a CFS shelf. `flag` is the out-of-service reason it carries
+  there (damaged, cleaning, maintenance), with the record that flagged it;
+  both `null` for a unit in service. A flagged unit is never offered for
+  prep or check-out.
+- `prepped` — picked onto a booking's prep shelf; still physically at
+  `uid_location`.
+- `out` — at a customer, on `uid_booking`.
+- `away` — standing AT an out-of-service record: lost, or at the record's
+  destination (a vendor). Never offered.
+- `unattributed_out` — written only by the bulk → serialized conversion: a
+  unit that is out on some booking, but which booking's number it is was
+  never recorded. The physical count resolves these as ordinary custody.
+
+The id fields are typed per state rather than a polymorphic `DocSource`,
+because the discriminant already fixes which collection each names.
+`OutOfServiceId`, not `FirestoreId`: a loss record's id is its opening
+movement's (`MovementId`-shaped), so `FirestoreId` would refuse every
+`mark_lost` unit.
+
+```ts
+type UnitRosterEntryType = typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral;
+```
+
+### `UnitRosterKey`
+
+A roster key: a unit number as Firestore spells a map key — decimal, no
+leading zero, never `0`. The same spelling as `UnitId`'s number segment.
+
+```ts
+const UnitRosterKey: z.ZodType<string>;
+```
+
+### `UnitRosterSchema`
+
+Zod schema for {@link UnitRoster}.
+
+```ts
+const UnitRosterSchema: z.ZodType<UnitRoster>;
+```
+
+### `UnitRosterStateType`
+
+One roster state.
+
+```ts
+type UnitRosterStateType = indexedAccess;
 ```
 
 ## `@cfs/core/schemas/user`
@@ -26614,7 +27615,7 @@ const RoleSummarySchema: z.ZodType<RoleSummary>;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "stockSummaries.read" | "typesenseSync.read" | "units.create" | "units.read" | "units.update" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `Permission`
@@ -27323,6 +28324,18 @@ named-key sum anywhere else in `src/`.
 
 Units that reached a terminal key: back, or out of service with a reason.
 
+### `untrackedUnitCount(booking: Pick<Booking, "breakdown" | "units">, key: BookingUnitBucketType): number`
+
+How many of a bucket's units are UNTRACKED on a unit-tracked booking:
+`breakdown[k] − units[k].length`. Units a bulk → serialized conversion found
+already prepped or out and could not name (`api-cloudrun/.claude/plans/serial-tracking.md`
+D1, D9).
+
+Derived, never stored: given the booking refine `units[k].length ≤
+breakdown[k]`, a stored copy could only restate this, so it could only drift.
+`0` on a booking that is not unit-tracked (`units` `null` or absent), where
+the question does not arise.
+
 ## `@cfs/core/utils/custody`
 
 The custody ruleset, applied: what a booking may do next, what a list of
@@ -27364,6 +28377,7 @@ interface CustodyApplication {
   breakdown: FullBookingBreakdown;
   status: indexedAccess;
   transitions: CustodyTransition[];
+  units: BookingUnitSetsType | null;
 }
 ```
 
@@ -27379,10 +28393,12 @@ interface CustodyApplyContext {
 
 ### `CustodyBooking`
 
-A booking as the ruleset reads it.
+A booking as the ruleset reads it. `units` is read when present: `null` or
+absent means the booking is not unit-tracked, and its actions may name no
+units.
 
 ```ts
-type CustodyBooking = Pick<Booking, "type" | "breakdown" | "quantity" | "status">;
+type CustodyBooking = Pick<Booking, "type" | "breakdown" | "quantity" | "status" | "units">;
 ```
 
 ### `CustodyDecomposition`
@@ -27476,6 +28492,7 @@ interface CustodyTransition {
   to: BookingBreakdownKeyType;
   quantity: number;
   service: typeLiteral | null;
+  units: number[];
 }
 ```
 
@@ -39497,6 +40514,174 @@ closed registration (paxton) still has codes and rates, and a class listing
 two percent codes there is still a contradiction for the frozen documents
 that resolve it — so every code jurisdiction is checked, not only
 `COLLECTING_JURISDICTIONS`.
+
+## `@cfs/core/utils/units`
+
+Serialized units, applied: the range text operators type, the canonical
+set every wire carries, the picker's suggestion, and the ONE fold that turns
+movements into a product's roster.
+
+```ts
+import { formatUnitRanges, parseUnitRanges, suggestUnits } from "@cfs/core/utils/units";
+```
+
+Everything here is pure and platform-free. The manager's picker and the
+api's validation read the same parser; the api's ledger writer and the
+`audit-unit-replay` script run the same {@link foldRosterUnits}.
+
+### `FormatUnitRangesOptions`
+
+Options for {@link formatUnitRanges}.
+
+```ts
+interface FormatUnitRangesOptions {
+  separator?: string;
+  dash?: string;
+}
+```
+
+### `ParseUnitRangesOptions`
+
+Options for {@link parseUnitRanges}.
+
+```ts
+interface ParseUnitRangesOptions {
+  max?: number;
+}
+```
+
+### `ParseUnitRangesResult`
+
+The outcome of {@link parseUnitRanges}.
+
+```ts
+type ParseUnitRangesResult = typeLiteral | typeLiteral;
+```
+
+### `RosterFoldError`
+
+_(class — see source)_
+
+### `RosterMovement`
+
+The movement fields the fold reads.
+
+```ts
+type RosterMovement = Pick<Movement, "uid" | "type" | "uid_booking" | "custody" | "service" | "lines" | "units" | "sources">;
+```
+
+### `RosterUnits`
+
+A roster's `units` map: unit number (as a key) → where it is.
+
+```ts
+type RosterUnits = Record<string, UnitRosterEntryType>;
+```
+
+### `UnitRange`
+
+One inclusive run of consecutive unit numbers.
+
+```ts
+interface UnitRange {
+  start: number;
+  end: number;
+}
+```
+
+### `UnitRangeError`
+
+One refused piece of range text.
+
+```ts
+interface UnitRangeError {
+  kind: UnitRangeErrorKind;
+  token: string;
+}
+```
+
+### `UnitRangeErrorKind`
+
+Why one piece of range text was refused.
+
+```ts
+type UnitRangeErrorKind = "syntax" | "reversed" | "overlap" | "too_many";
+```
+
+### `foldRosterUnits(roster: RosterUnits, m: RosterMovement): RosterUnits`
+
+Fold one movement's units into a product's roster, returning the NEW map
+(the input is not mutated, so a rejected group member's fold rolls back by
+dropping the result).
+
+The one author of roster state: api-cloudrun's ledger writer runs it for
+every movement it applies, and `audit-unit-replay` runs it over the whole
+journal and diffs against the stored roster
+(`api-cloudrun/.claude/plans/serial-tracking.md` D5). A movement naming no
+units leaves the roster untouched.
+
+Driven by each line's places, so it needs no knowledge of the movement type
+and a reversal (lines negated, type kept) folds correctly:
+
+| line `to`             | the unit becomes                                       |
+|-----------------------|--------------------------------------------------------|
+| `null` (outside)      | removed — the number is no longer active               |
+| `bookings/B`          | `out` on B                                             |
+| `out-of-service/R`    | `away` at R                                            |
+| `locations/L`         | `prepped` on the booking if custody lands in `prepped`; else `shelf` at L, flagged by the arrival's flag and the record in `sources[]` |
+
+`prep` and `unprep` move nothing physically and have no lines: a prep turns
+an unflagged shelf unit `prepped` where it stands, and an unprep puts it
+back.
+
+Every unit must be where the line's `from` side says — absent for a unit
+coming in, `out` on the booking (or `unattributed_out`) for one coming back,
+on the shelf with the expected flag, and so on. Anything else throws
+{@link RosterFoldError}.
+
+### `formatUnitRanges(numbers: Iterable<number>, _: unknown): string`
+
+Unit numbers as the fewest runs a reader can scan: `"1001–1040, 1045"`.
+The form printed on packing lists and invoices, which customers read
+(owner, 2026-09-21). An empty set is `""`.
+
+### `normalizeUnitSet(numbers: Iterable<number>): number[]`
+
+The one client-side canonicalizer: ascending, each number once.
+
+The wire REFUSES a set in any other order (`UnitSet`), so a client that
+accumulates picks in click order runs them through this before sending.
+
+### `parseUnitRanges(text: string, _: unknown): ParseUnitRangesResult`
+
+Parse what an operator types — `"1001-1040, 1045 1050–1052"` — into a
+canonical set.
+
+Pieces are separated by commas, semicolons or whitespace; a run is
+`start-end` with a hyphen, en dash or em dash, spaces allowed around it. A
+piece that is not a number or a run, a reversed run, a number named twice,
+and more than `max` units are each REFUSED, never repaired: the picker shows
+the error beside the text rather than guessing what was meant. Every error is
+reported, not just the first.
+
+### `suggestUnits(available: Iterable<number>, count: number): number[] | null`
+
+The units a picker pre-fills when `count` are needed from `available`, or
+`null` when there are not enough.
+
+Ranges are the operator's main gesture (owner, 2026-09-21), so the
+suggestion is the FEWEST runs: a single run long enough wins, the lowest such
+run first. Failing that, the `k` longest runs for the smallest `k` that
+covers `count` (longer first, then lower start), filled in ascending order and
+trimmed at the high end. Deterministic for a given input, so two clients
+suggest the same units.
+
+`available` is whatever the caller may offer — unflagged shelf units for a
+prep — and need not be sorted.
+
+### `toUnitRanges(numbers: Iterable<number>): UnitRange[]`
+
+The fewest inclusive runs covering `numbers`, ascending.
 
 ## `@cfs/core/utils/templates`
 

@@ -283,6 +283,12 @@
           "doc": ""
         },
         {
+          "kind": "variable",
+          "name": "BOOKING_UNIT_BUCKETS",
+          "declaration": "const BOOKING_UNIT_BUCKETS: \"cleaning\" | \"damaged\" | \"lost\" | \"maintenance\" | \"out\" | \"prepped\" | \"returned\"[];",
+          "doc": "The breakdown buckets that hold NAMED units on a serialized product's\nbooking (`api-cloudrun/.claude/plans/serial-tracking.md` D2). Alphabetical,\nbecause key order is column order.\n\n`quoted` and `reserved` are absent on purpose: a reserved unit is a count\nagainst the shelf, not a particular radio. Units are named from `prep` on.\n\nEvery TERMINAL bucket carries a set too, because a shrinking `out` set alone\ncannot say which units came back and which were lost."
+        },
+        {
           "kind": "interface",
           "name": "BaseLogFields",
           "declaration": "interface BaseLogFields {\n  level: LogLevelType;\n  ts: string;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  subject?: string;\n  trace_id?: string;\n  span_id?: string;\n  duration_ms?: number;\n  dry_run?: boolean;\n  error_name?: string;\n  error_message?: string;\n  error_stack?: string;\n}",
@@ -315,7 +321,7 @@
         {
           "kind": "interface",
           "name": "Booking",
-          "declaration": "interface Booking {\n  uid: string;\n  uid_order: string;\n  uid_product: string;\n  component_signature_hash: string | null;\n  name: string;\n  number: number;\n  type: ComponentTypeType;\n  status: BookingStatusType;\n  quantity: number;\n  quantity_ordered?: number;\n  shortage: number;\n  subject: string;\n  crms_id?: number | null;\n  crms_product_id?: number | null;\n  breakdown: BookingBreakdown;\n  dates: typeLiteral;\n  destinations: typeLiteral;\n  organization: typeLiteral;\n  stores: BookingStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_destination_delivery: string;\n  uid_destination_collection: string | null;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Booking {\n  uid: string;\n  uid_order: string;\n  uid_product: string;\n  component_signature_hash: string | null;\n  name: string;\n  number: number;\n  type: ComponentTypeType;\n  status: BookingStatusType;\n  quantity: number;\n  quantity_ordered?: number;\n  shortage: number;\n  subject: string;\n  crms_id?: number | null;\n  crms_product_id?: number | null;\n  breakdown: BookingBreakdown;\n  units?: BookingUnitSetsType | null;\n  dates: typeLiteral;\n  destinations: typeLiteral;\n  organization: typeLiteral;\n  stores: BookingStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_destination_delivery: string;\n  uid_destination_collection: string | null;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a booking — an AGGREGATE per\n`(order, product, LEG, component_signature_hash)`, **not a line**.\n\n🔴 **The leg is the destination PAIR (`destinations[i].uid`), not the\naddress it ships to.** An order may carry two legs to one address; keyed on\nthe address they collapse to one row and every per-leg total then states its\nwhole quantity once per leg (api-cloudrun#933). `uid_destination_delivery` /\n`uid_destination_collection` remain the ADDRESSES and are what every\naddress-filtered query reads; the LEG is recovered from `uid` via\n`parseBookingId`.\n\nThe same product may repeat within one leg in ways that ARE\nfungible (a priced principal plus its own zero-priced accessories, a\n`splitItem` clone of the same subtree) and every such occurrence resolves\nto this ONE row.\n\n⚠️ **It is NOT one row per `(order, product, leg)` alone** — a\nstandalone unit of a product and an occurrence of the same product nested\ninside a kit are genuinely different bookings, disambiguated by\n`component_signature_hash` / `uid`'s 4th segment\n(`@cfs/core/utils/booking-id`). Reading a shared `(order, product,\nleg)` as one booking is the prod-961 defect class this field\nexists to close; reading a shared `(…, component_signature_hash)` row as a\nline is the OTHER standing defect — it renders one booking's quantities N\ntimes, every unit total N× wrong. Stated the same way in\n`api-cloudrun/src/lib/orderProjection.ts`, the manager's since-deleted `orderBookingJoin`,\n`core/src/schemas/pick-sheet.ts` and `manager/src/utils/pickSheet.ts`."
         },
         {
@@ -327,7 +333,7 @@
         {
           "kind": "interface",
           "name": "BookingActionType",
-          "declaration": "interface BookingActionType {\n  rule: CustodyRuleId;\n  quantity: number;\n  uid_out_of_service?: string;\n}",
+          "declaration": "interface BookingActionType {\n  rule: CustodyRuleId;\n  quantity: number;\n  uid_out_of_service?: string;\n  units?: number[];\n}",
           "doc": "One step an operator takes on a booking.\n\n- `uid_out_of_service` — names the record a reclassification or an undo acts\n  on. Optional: an undo without one consumes the booking's open loss records\n  newest first, as the delta form always has.\n\nNo action names a reason: since P2b every reason is its own breakdown key and\nits own rule (`mark_cleaning`, `flag_maintenance_returned`, …)."
         },
         {
@@ -431,6 +437,24 @@
           "name": "BookingStoreSchema",
           "declaration": "const BookingStoreSchema: z.ZodType<BookingStore>;",
           "doc": "Zod schema for a booking's store allocation.\n\nExported because the pick sheet carries it verbatim — *\"where do I walk\"* is\nthe question that surface exists for, and a narrowed twin of this shape would\nbe a copy to keep in step for no gain."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "BookingUnitBucketType",
+          "declaration": "type BookingUnitBucketType = indexedAccess;",
+          "doc": "One bucket that holds named units."
+        },
+        {
+          "kind": "variable",
+          "name": "BookingUnitSetsSchema",
+          "declaration": "const BookingUnitSetsSchema: z.ZodType<BookingUnitSetsType>;",
+          "doc": "Zod schema for {@link BookingUnitSetsType}, built the way {@link breakdownObjectSchema} is."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "BookingUnitSetsType",
+          "declaration": "type BookingUnitSetsType = Record<BookingUnitBucketType, number[]>;",
+          "doc": "Which units sit in each bucket of a booking. Each set is a canonical\n`UnitSet` (ascending, unique), and the sets are pairwise disjoint.\n\n`units[k].length` may be LESS than `breakdown[k]`: the difference is the\nbucket's UNTRACKED count, units a bulk → serialized conversion found already\nprepped or out and could not name. It is derived, never stored —\n`untrackedUnitCount` (`@cfs/core/utils/bookings`)."
         },
         {
           "kind": "variable",
@@ -855,7 +879,7 @@
         {
           "kind": "interface",
           "name": "CollectionDocs",
-          "declaration": "interface CollectionDocs {\n  activity: Activity;\n  activities: Activity;\n  booking: Booking;\n  bookings: Booking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  settings: BillingSettings;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  department-type: DepartmentType;\n  department-types: DepartmentType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  statement-documents: StatementDocument;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  supplier: Supplier;\n  suppliers: Supplier;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  taxes-codes: TaxCode;\n  taxes-rates: TaxRate;\n  taxes-classes: TaxClass;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
+          "declaration": "interface CollectionDocs {\n  activity: Activity;\n  activities: Activity;\n  booking: Booking;\n  bookings: Booking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  settings: BillingSettings;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  department-type: DepartmentType;\n  department-types: DepartmentType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  statement-documents: StatementDocument;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  supplier: Supplier;\n  suppliers: Supplier;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  taxes-codes: TaxCode;\n  taxes-rates: TaxRate;\n  taxes-classes: TaxClass;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  unit: UnitType;\n  units: UnitType;\n  unit-roster: UnitRoster;\n  unit-rosters: UnitRoster;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
           "doc": "The ONE place a collection name is bound to its document type.\n\n`schemas` below is annotated by a mapped type over this interface, so the two\ncannot drift: a key here with no entry there is an error at the object\nliteral, and an entry there with no key here is an excess property. That is\nthe compiler enforcing the parity — not a test that can go stale, and not the\n\"parity assertion between two hand-maintained lists\" the workspace rules warn\nabout. It fails at `deno task check`.\n\n⚠️ **Both halves are written out explicitly, and that is deliberate.** JSR's\nnpm declaration emit is SYNTACTIC — it writes declarations without running\ninference — so a type it has to COMPUTE from an initializer can publish\nwrongly to npm consumers while Deno consumers, this suite, `deno task check`\nand `deno publish --dry-run` all agree with the source. That is core#43: nine\n`as const` members emitted as one, and 57 phantom type errors on manager's\nnext pin bump. An interface and a written mapped-type annotation are text the\nemitter copies verbatim, so neither needs expanding.\n\n⚠️ Measured 2026-08-14, because the obvious reasoning is wrong: the\ninference-requiring form (`= {…} satisfies Record<string, z.ZodType>` plus\n`keyof typeof`) **also passes** `deno publish --dry-run`'s slow-types check.\nPassing that check is NOT evidence the emit is right. The explicit form is\nchosen because it needs no expansion at all, which is a reasoned preference\nrather than a measured one.\n\n⚠️ The line above used to add *\"core#44 closed as 'no post-publish declaration\ngate', so nothing here can see a wrong published declaration.\"* **That is no\nlonger true**: core#44 reopened on a second divergence and\n`deno task check:declarations` now runs `isolatedDeclarations` over all of\n`src/`. It is still not a check of JSR's *emitter* — it is a conservative\nover-approximation of it — so \"passing does not prove the emit is right\"\nsurvives; what does not survive is \"nothing can see it\".\n\nSingular and plural both appear because the registry has always carried both.\n⚠️ The singular half may be vestigial — there are zero literal `schemas[\"order\"]`\n-style lookups across api-cloudrun, manager and templates, and every call site\nfound passes a plural or the literal `\"events\"`. Removing them would halve this\nfile's hand-written surface, but it is a breaking change to a published API and\nwants the dynamic callers' domain established first. Not folded in here."
         },
         {
@@ -1203,7 +1227,7 @@
         {
           "kind": "interface",
           "name": "CreateOutOfServiceInputType",
-          "declaration": "interface CreateOutOfServiceInputType {\n  uid_product: string;\n  reason: OOSReasonType;\n  quantity: number;\n  dates: typeLiteral;\n  sources?: DocSourceType[];\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n}",
+          "declaration": "interface CreateOutOfServiceInputType {\n  uid_product: string;\n  reason: OOSReasonType;\n  quantity: number;\n  dates: typeLiteral;\n  sources?: DocSourceType[];\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  units?: number[];\n}",
           "doc": "Input for creating an out-of-service record."
         },
         {
@@ -1335,8 +1359,20 @@
         {
           "kind": "interface",
           "name": "CreateTransactionInputType",
-          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  supplier?: typeLiteral | null;\n}",
+          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n  supplier?: typeLiteral | null;\n}",
           "doc": "Input for creating a manual movement."
+        },
+        {
+          "kind": "variable",
+          "name": "CreateUnitsInput",
+          "declaration": "const CreateUnitsInput: z.ZodType<CreateUnitsInputType>;",
+          "doc": "Zod schema for {@link CreateUnitsInputType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CreateUnitsInputType",
+          "declaration": "type CreateUnitsInputType = typeLiteral | typeLiteral;",
+          "doc": "Body of `POST /products/{uid}/units`: mint `vacant` numbers for a product.\n\n- `count` — the next `count` numbers in the product's block, assigned by the\n  server (`max + 1 …`).\n- `explicit` — exactly these numbers.\n\n⚠️ **No serial, in either arm.** A created number is `vacant`, and a vacant\nnumber carries no serial (`UnitSchema`'s refine), so a serial here would\nhave 500'd inside the create. A serial arrives with ACTIVATION — on the\nownership movement that brings the unit in (`CreateTransactionInput.units`),\nor afterwards through `PUT /units/{uid}` with reason `initial`.\n\n`uuid_session` is the create's idempotency key, as on\n`CreateOutOfServiceInput`: a retried count-mode create replays the batch\nrather than minting a second run of numbers."
         },
         {
           "kind": "variable",
@@ -2660,6 +2696,18 @@
         },
         {
           "kind": "variable",
+          "name": "MAX_UNITS_PER_CREATE",
+          "declaration": "const MAX_UNITS_PER_CREATE: 400;",
+          "doc": "The most units one create may mint, in either mode."
+        },
+        {
+          "kind": "variable",
+          "name": "MAX_UNITS_PER_ROSTER",
+          "declaration": "const MAX_UNITS_PER_ROSTER: 5000;",
+          "doc": "The most units one product's roster may hold before it has to be split by\nnumber block. It also caps every {@link UnitSet}, so no single set can name\nmore units than one roster document is sized for (about 120 B per `out`\nentry, so 5,000 is roughly 600 KB against Firestore's 1 MiB)."
+        },
+        {
+          "kind": "variable",
           "name": "MOVEMENT_CONTRACTS",
           "declaration": "const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContract>>;",
           "doc": "The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member."
@@ -2745,7 +2793,7 @@
         {
           "kind": "interface",
           "name": "MovementAllocationInputType",
-          "declaration": "interface MovementAllocationInputType {\n  uid_location: string;\n  quantity: number;\n}",
+          "declaration": "interface MovementAllocationInputType {\n  uid_location: string;\n  quantity: number;\n  units?: number[];\n}",
           "doc": "One requested placement of `quantity` units. Direction-agnostic on purpose:\n{@link MOVEMENT_CONTRACTS} decides whether it lands on `location.from` or\n`location.to`, so the client never has to know which way a type moves."
         },
         {
@@ -2867,6 +2915,18 @@
           "name": "MovementUnit",
           "declaration": "const MovementUnit: z.ZodType<MovementUnitType>;",
           "doc": "Zod schema for one identified unit on a movement."
+        },
+        {
+          "kind": "variable",
+          "name": "MovementUnitInput",
+          "declaration": "const MovementUnitInput: z.ZodType<MovementUnitInputType>;",
+          "doc": "Zod schema for {@link MovementUnitInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementUnitInputType",
+          "declaration": "interface MovementUnitInputType {\n  number: number;\n  serial_number?: string;\n}",
+          "doc": "One unit a manual movement names. `serial_number` only on an in-type\n({@link UNIT_SERIAL_IN_TYPES}): the serial the unit arrives with, which\nopens its serial history."
         },
         {
           "kind": "interface",
@@ -3017,6 +3077,18 @@
           "name": "OOSStoreLocation",
           "declaration": "interface OOSStoreLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  transactionQuantity: number;\n  default: boolean;\n  max?: number | null;\n}",
           "doc": "A location within a store affected by an out-of-service record."
+        },
+        {
+          "kind": "variable",
+          "name": "OOSUnitsSchema",
+          "declaration": "const OOSUnitsSchema: z.ZodType<OOSUnitsType>;",
+          "doc": "Zod schema for {@link OOSUnitsType}."
+        },
+        {
+          "kind": "interface",
+          "name": "OOSUnitsType",
+          "declaration": "interface OOSUnitsType {\n  away: number[];\n  flagged: number[];\n  returned_to_service: number[];\n  written_off: number[];\n}",
+          "doc": "Which units sit in each bucket of a record, on a serialized product\n(`api-cloudrun/.claude/plans/serial-tracking.md` D6). Each set is a\ncanonical `UnitSet`, and the sets are pairwise disjoint.\n\n`units[k].length ≤ breakdown[k]`, not `===`: a historic record (24 walkie\nlosses on Replacement lines among them) names no unit at all, and writes off\nwithout vacating anything."
         },
         {
           "kind": "variable",
@@ -3351,7 +3423,7 @@
         {
           "kind": "interface",
           "name": "OutOfService",
-          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  destination: BookingDestinationRef | null;\n  uid_destination: string | null;\n  supplier: UidNameRefType | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  units?: OOSUnitsType | null;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  destination: BookingDestinationRef | null;\n  uid_destination: string | null;\n  supplier: UidNameRefType | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An out-of-service record tracking inventory removed from active service."
         },
         {
@@ -3381,7 +3453,7 @@
         {
           "kind": "variable",
           "name": "PERMISSIONS",
-          "declaration": "const PERMISSIONS: \"orders.create\" | \"orders.read\" | \"orders.update\" | \"orders.delete\" | \"orders.search\" | \"orders.checkout\" | \"orders.return\" | \"products.create\" | \"products.read\" | \"products.update\" | \"products.delete\" | \"products.search\" | \"webshopProducts.read\" | \"webshopProducts.search\" | \"contacts.create\" | \"contacts.read\" | \"contacts.update\" | \"contacts.delete\" | \"contacts.search\" | \"organizations.create\" | \"organizations.read\" | \"organizations.update\" | \"organizations.delete\" | \"organizations.search\" | \"transactions.create\" | \"transactions.read\" | \"transactions.update\" | \"transactions.delete\" | \"invoices.create\" | \"invoices.read\" | \"invoices.update\" | \"invoices.delete\" | \"invoices.search\" | \"settlements.create\" | \"settlements.read\" | \"settlements.reverse\" | \"creditNotes.create\" | \"creditNotes.read\" | \"creditNotes.update\" | \"creditNotes.void\" | \"creditNotes.search\" | \"quotes.create\" | \"quotes.read\" | \"quotes.update\" | \"quotes.delete\" | \"statements.create\" | \"statements.read\" | \"statements.update\" | \"statements.delete\" | \"locations.create\" | \"locations.read\" | \"locations.update\" | \"locations.delete\" | \"locations.search\" | \"locationTypes.create\" | \"locationTypes.read\" | \"locationTypes.update\" | \"locationTypes.delete\" | \"departmentTypes.create\" | \"departmentTypes.read\" | \"departmentTypes.update\" | \"departmentTypes.delete\" | \"stores.create\" | \"stores.read\" | \"stores.update\" | \"stores.delete\" | \"stores.search\" | \"taxCodes.create\" | \"taxCodes.read\" | \"taxCodes.update\" | \"taxRates.create\" | \"taxRates.read\" | \"taxRates.update\" | \"taxClasses.create\" | \"taxClasses.read\" | \"taxClasses.update\" | \"suppliers.create\" | \"suppliers.read\" | \"suppliers.update\" | \"suppliers.delete\" | \"suppliers.search\" | \"tags.create\" | \"tags.read\" | \"tags.update\" | \"tags.delete\" | \"tags.search\" | \"trackingCategories.create\" | \"trackingCategories.read\" | \"trackingCategories.update\" | \"trackingCategories.delete\" | \"trackingCategories.search\" | \"holidays.create\" | \"holidays.read\" | \"holidays.update\" | \"holidays.delete\" | \"billingSettings.update\" | \"templates.create\" | \"templates.read\" | \"templates.search\" | \"templates.propose\" | \"templates.release\" | \"templates.merge\" | \"templates.rollback\" | \"templates.blessGolden\" | \"templates.archive\" | \"lists.create\" | \"lists.read\" | \"lists.update\" | \"lists.delete\" | \"cards.create\" | \"cards.read\" | \"cards.update\" | \"cards.delete\" | \"cards.search\" | \"recurrences.create\" | \"recurrences.read\" | \"recurrences.update\" | \"recurrences.delete\" | \"bookings.read\" | \"bookings.search\" | \"bookings.update\" | \"chartOfAccounts.read\" | \"chartOfAccounts.search\" | \"dateHelpers.read\" | \"destinations.read\" | \"destinations.search\" | \"destinations.update\" | \"ledgers.read\" | \"fulfillment.read\" | \"fulfillment.search\" | \"fulfillment.update\" | \"fulfillment.reset\" | \"outOfService.create\" | \"outOfService.read\" | \"outOfService.update\" | \"outOfService.delete\" | \"outOfService.search\" | \"stockSummaries.read\" | \"typesenseSync.read\" | \"users.read\" | \"users.update\" | \"users.delete\" | \"users.invite\" | \"users.search\" | \"users.assignRoles\" | \"roles.read\" | \"roles.edit\" | \"threads.create\" | \"threads.read\" | \"threads.update\" | \"threads.search\" | \"comments.create\" | \"comments.read\" | \"comments.update\" | \"comments.delete\" | \"comments.moderate\" | \"comments.search\" | \"comments.react\" | \"uploads.sign\" | \"activities.read\" | \"reports.read\" | \"reports.readFinancial\" | \"admin.reindex\" | \"admin.validate\" | \"admin.sync\" | \"admin.previewRole\"[];",
+          "declaration": "const PERMISSIONS: \"orders.create\" | \"orders.read\" | \"orders.update\" | \"orders.delete\" | \"orders.search\" | \"orders.checkout\" | \"orders.return\" | \"products.create\" | \"products.read\" | \"products.update\" | \"products.delete\" | \"products.search\" | \"webshopProducts.read\" | \"webshopProducts.search\" | \"contacts.create\" | \"contacts.read\" | \"contacts.update\" | \"contacts.delete\" | \"contacts.search\" | \"organizations.create\" | \"organizations.read\" | \"organizations.update\" | \"organizations.delete\" | \"organizations.search\" | \"transactions.create\" | \"transactions.read\" | \"transactions.update\" | \"transactions.delete\" | \"invoices.create\" | \"invoices.read\" | \"invoices.update\" | \"invoices.delete\" | \"invoices.search\" | \"settlements.create\" | \"settlements.read\" | \"settlements.reverse\" | \"creditNotes.create\" | \"creditNotes.read\" | \"creditNotes.update\" | \"creditNotes.void\" | \"creditNotes.search\" | \"quotes.create\" | \"quotes.read\" | \"quotes.update\" | \"quotes.delete\" | \"statements.create\" | \"statements.read\" | \"statements.update\" | \"statements.delete\" | \"locations.create\" | \"locations.read\" | \"locations.update\" | \"locations.delete\" | \"locations.search\" | \"locationTypes.create\" | \"locationTypes.read\" | \"locationTypes.update\" | \"locationTypes.delete\" | \"departmentTypes.create\" | \"departmentTypes.read\" | \"departmentTypes.update\" | \"departmentTypes.delete\" | \"stores.create\" | \"stores.read\" | \"stores.update\" | \"stores.delete\" | \"stores.search\" | \"taxCodes.create\" | \"taxCodes.read\" | \"taxCodes.update\" | \"taxRates.create\" | \"taxRates.read\" | \"taxRates.update\" | \"taxClasses.create\" | \"taxClasses.read\" | \"taxClasses.update\" | \"suppliers.create\" | \"suppliers.read\" | \"suppliers.update\" | \"suppliers.delete\" | \"suppliers.search\" | \"tags.create\" | \"tags.read\" | \"tags.update\" | \"tags.delete\" | \"tags.search\" | \"trackingCategories.create\" | \"trackingCategories.read\" | \"trackingCategories.update\" | \"trackingCategories.delete\" | \"trackingCategories.search\" | \"holidays.create\" | \"holidays.read\" | \"holidays.update\" | \"holidays.delete\" | \"billingSettings.update\" | \"templates.create\" | \"templates.read\" | \"templates.search\" | \"templates.propose\" | \"templates.release\" | \"templates.merge\" | \"templates.rollback\" | \"templates.blessGolden\" | \"templates.archive\" | \"lists.create\" | \"lists.read\" | \"lists.update\" | \"lists.delete\" | \"cards.create\" | \"cards.read\" | \"cards.update\" | \"cards.delete\" | \"cards.search\" | \"recurrences.create\" | \"recurrences.read\" | \"recurrences.update\" | \"recurrences.delete\" | \"bookings.read\" | \"bookings.search\" | \"bookings.update\" | \"chartOfAccounts.read\" | \"chartOfAccounts.search\" | \"dateHelpers.read\" | \"destinations.read\" | \"destinations.search\" | \"destinations.update\" | \"ledgers.read\" | \"fulfillment.read\" | \"fulfillment.search\" | \"fulfillment.update\" | \"fulfillment.reset\" | \"outOfService.create\" | \"outOfService.read\" | \"outOfService.update\" | \"outOfService.delete\" | \"outOfService.search\" | \"stockSummaries.read\" | \"typesenseSync.read\" | \"units.create\" | \"units.read\" | \"units.update\" | \"users.read\" | \"users.update\" | \"users.delete\" | \"users.invite\" | \"users.search\" | \"users.assignRoles\" | \"roles.read\" | \"roles.edit\" | \"threads.create\" | \"threads.read\" | \"threads.update\" | \"threads.search\" | \"comments.create\" | \"comments.read\" | \"comments.update\" | \"comments.delete\" | \"comments.moderate\" | \"comments.search\" | \"comments.react\" | \"uploads.sign\" | \"activities.read\" | \"reports.read\" | \"reports.readFinancial\" | \"admin.reindex\" | \"admin.validate\" | \"admin.sync\" | \"admin.previewRole\"[];",
           "doc": "The full catalog of permissions. Adding a new route? Add its permission here first."
         },
         {
@@ -4017,7 +4089,7 @@
         {
           "kind": "typeAlias",
           "name": "RuleId",
-          "declaration": "type RuleId = \"create-order:org-to-order\" | \"create-order:products-to-order-items\" | \"create-order:order-self-derive\" | \"create-order:order-to-bookings\" | \"create-order:ledger-to-bookings\" | \"create-order:fulfillment-to-cards\" | \"create-order:order-to-fulfillment\" | \"update-order:org-to-order\" | \"update-order:order-self-derive\" | \"update-order:order-to-bookings\" | \"update-order:ledger-to-bookings\" | \"update-order:fulfillment-to-cards\" | \"update-order:order-to-fulfillment\" | \"update-booking:booking-to-self\" | \"update-booking:booking-to-out-of-service\" | \"update-booking:booking-to-transactions\" | \"update-booking:transactions-to-ledger\" | \"update-booking:transactions-to-locations\" | \"update-booking:booking-to-order\" | \"update-booking:booking-to-cards\" | \"create-out-of-service-record:sources-to-record\" | \"create-out-of-service-record:record-to-transactions\" | \"create-out-of-service-record:transactions-to-ledger\" | \"update-out-of-service-record:record-to-transactions\" | \"update-out-of-service-record:record-to-record\" | \"update-out-of-service-record:transactions-to-ledger\" | \"reclassify-out-of-service-record:record-to-booking\" | \"reclassify-out-of-service-record:record-to-record\" | \"create-transaction:transaction-to-ledger\" | \"create-transaction:transaction-to-locations\" | \"reverse-transaction:transaction-to-ledger\" | \"reverse-transaction:transaction-to-locations\" | \"reclass-stock:transaction-to-ledger\" | \"reclass-stock:transaction-to-locations\" | \"create-store-transfer:transaction-to-ledger\" | \"create-store-transfer:transaction-to-locations\" | \"create-store-transfer:transaction-to-out-of-service\" | \"create-product:product-to-tags\" | \"create-product:product-to-tracking-categories\" | \"create-product:product-to-components\" | \"create-product:product-to-ledger\" | \"create-product:product-to-opening-movement\" | \"create-product:product-to-webshop\" | \"update-product:catalog-to-components\" | \"update-product:components-to-components\" | \"update-product:component-entry-to-parents\" | \"update-product:name-to-locations\" | \"update-product:name-to-tags\" | \"update-product:name-to-tracking-categories\" | \"update-product:to-webshop\" | \"update-product:tags-to-tags\" | \"update-product:tracking-category-change\" | \"update-product:stock-method-change\" | \"update-product:type-change\" | \"update-product:price-to-components\" | \"update-product:price-to-webshop-components\" | \"update-product:product-to-draft-orders\" | \"create-org:org-to-contacts\" | \"create-org:node-to-tree\" | \"create-org:mint-derived-project\" | \"merge-org:loser-to-orders\" | \"merge-org:loser-to-invoices\" | \"merge-org:loser-to-credit-notes\" | \"merge-org:loser-to-settlements\" | \"merge-org:loser-to-bookings\" | \"merge-org:loser-to-fulfillments\" | \"merge-org:loser-to-cards\" | \"merge-org:loser-to-out-of-service\" | \"merge-org:loser-to-contacts\" | \"merge-org:activity-to-survivor\" | \"merge-org:merged-from-to-survivor\" | \"merge-org:delete-loser\" | \"merge-org:tombstone-loser\" | \"merge-org:merged-to-to-tombstones\" | \"merge-org:tombstone-parent\" | \"merge-org:thread-comments-to-survivor\" | \"update-department-type:name-to-departments\" | \"update-org:name-to-orders\" | \"update-org:billing-to-orders\" | \"update-org:name-to-invoices\" | \"update-org:name-to-bookings\" | \"update-org:name-to-fulfillments\" | \"update-org:name-to-cards\" | \"update-org:billing-to-invoices\" | \"update-org:tax-axes-to-orders\" | \"update-org:contacts-change\" | \"update-org:name-to-descendants\" | \"reparent-destination:tree-to-node\" | \"reparent-destination:place-name-to-units\" | \"reparent-org:tree-to-descendants\" | \"reparent-org:activity-to-new-ancestors\" | \"stamp-org-activity:orders-to-organizations\" | \"stamp-org-activity:invoices-to-organizations\" | \"create-contact:contact-to-orgs\" | \"create-contact:link-to-user\" | \"update-contact:name-to-orgs\" | \"update-contact:name-to-orders\" | \"update-contact:phones-to-orders\" | \"update-contact:orgs-change\" | \"update-contact:name-to-user\" | \"create-user:link-to-contact\" | \"update-user:name-to-contact\" | \"update-user:name-to-actor-refs\" | \"delete-user:unlink-contact\" | \"create-invoice:invoice-to-orders\" | \"update-invoice:status-to-orders\" | \"update-order:items-to-invoices\" | \"update-order:status-to-invoices\" | \"create-settlement:settlement-to-invoice\" | \"reverse-settlement:reverser-to-invoice\" | \"reverse-settlement:release-to-credit-note\" | \"close-invoice:closure-to-invoice\" | \"sync-xero-settlement:xero-to-settlements\" | \"sync-xero-settlement:settlements-to-invoice\" | \"void-invoice:reap-settlements\" | \"void-invoice:append-void-settlement\" | \"void-invoice-from-xero:reap-settlements\" | \"void-invoice-from-xero:append-void-settlement\" | \"void-invoice-from-cancel:reap-settlements\" | \"void-invoice-from-cancel:append-void-settlement\" | \"create-credit-note:number-from-counter\" | \"create-credit-note:posting-account\" | \"allocate-credit-note:note-to-settlements\" | \"allocate-credit-note:settlements-to-invoices\" | \"allocate-credit-note:remaining-credit\" | \"void-credit-note:status\" | \"update-fulfillment-items:items-self\" | \"update-fulfillment-items:fulfillment-to-cards\" | \"update-fulfillment-destinations:pairs-self\" | \"update-fulfillment-destinations:fulfillment-to-cards\" | \"create-fulfillment-exchange:leg-self\" | \"create-fulfillment-exchange:fulfillment-to-cards\" | \"reset-fulfillment:rebuild-from-order\" | \"reset-fulfillment:fulfillment-to-cards\" | \"reconcile-fulfillment-cards:fulfillment-to-cards\" | \"create-tax-rate:recompute-live-orders\" | \"create-tax-rate:recompute-live-invoices\" | \"update-tax-class:name-to-products\" | \"update-tax-class:name-to-webshop-products\" | \"update-tax-class:codes-recompute-live-orders\" | \"update-tax-class:codes-recompute-live-invoices\" | \"update-product:tax-class-to-live-orders\" | \"update-product:tax-class-to-components\" | \"update-product:tax-class-to-webshop-components\" | \"update-tag:name-to-products\" | \"delete-tag:remove-from-products\" | \"update-tracking-category:name-to-products\" | \"update-location-type:capacities-to-locations\" | \"update-location:name-to-inventory-ledgers\" | \"update-location:name-to-bookings\" | \"update-location:name-to-out-of-service\" | \"update-location:name-to-transactions\" | \"update-location:default-name-to-store\" | \"holiday-definition:materialize-dates\" | \"holiday-dates:rematerialize-snapshot\" | \"holiday-change:recompute-draft-orders\" | \"holiday-change:recompute-draft-invoices\" | \"create-store:unset-sibling-defaults\" | \"update-store:unset-sibling-defaults\" | \"update-store:deactivate-locations\" | \"create-location:default-location-to-store\" | \"update-location:set-default-to-store\" | \"update-location:unset-previous-default\" | \"cowrite-thread:orders-to-thread\" | \"cowrite-thread:thread-to-orders\" | \"cowrite-thread:invoices-to-thread\" | \"cowrite-thread:thread-to-invoices\" | \"cowrite-thread:contacts-to-thread\" | \"cowrite-thread:thread-to-contacts\" | \"cowrite-thread:organizations-to-thread\" | \"cowrite-thread:thread-to-organizations\" | \"cowrite-thread:products-to-thread\" | \"cowrite-thread:thread-to-products\" | \"cowrite-thread:roles-to-thread\" | \"cowrite-thread:thread-to-roles\" | \"cowrite-thread:out-of-service-to-thread\" | \"cowrite-thread:thread-to-out-of-service\" | \"cowrite-thread:credit-notes-to-thread\" | \"cowrite-thread:thread-to-credit-notes\" | \"create-comment:thread-to-comment\" | \"create-comment:comment-to-thread\" | \"delete-comment:comment-to-thread\" | \"cowrite-thread:cards-to-thread\" | \"cowrite-thread:thread-to-cards\" | \"delete-card:cascade-thread\" | \"delete-card:cascade-comments\" | \"create-template:thread\" | \"create-template:thread-to-family\" | \"manage-draft:family-rollup\" | \"manage-draft:component-family-rollup\" | \"manage-draft:version-to-thread\" | \"manage-draft:thread-to-version\" | \"publish-template:seq\" | \"publish-template:version-flip\" | \"publish-template:family-rollup\" | \"publish-template:component-family-rollup\" | \"create-recurrence:fan-out-cards\" | \"materialize-horizon:fan-out-cards\" | \"update-recurrence:fan-out-prototype\" | \"update-recurrence:rematerialize-future\" | \"delete-recurrence:fan-out-cards\" | \"update-card-scope-following:cascade-future-siblings\" | \"update-card-scope-all:update-recurrence-prototype\" | \"update-card-scope-all:cascade-siblings\" | \"delete-card-scope-this:append-exception-date\" | \"delete-card-scope-following:cascade-future-siblings\" | \"delete-card-scope-following:truncate-recurrence\" | \"delete-card-scope-all:cascade-siblings\" | \"delete-card-scope-all:delete-recurrence\" | \"generate-invoice-pdf:upload-to-worklist\" | \"generate-quote-pdf:upload-to-worklist\" | \"generate-statement-pdf:upload-to-worklist\" | \"stock:ledger-to-stock\" | \"stock:bookings-to-stock\" | \"stock:oos-to-stock\" | \"stock:seed-ledger-to-stock\";",
+          "declaration": "type RuleId = \"create-order:org-to-order\" | \"create-order:products-to-order-items\" | \"create-order:order-self-derive\" | \"create-order:order-to-bookings\" | \"create-order:ledger-to-bookings\" | \"create-order:fulfillment-to-cards\" | \"create-order:order-to-fulfillment\" | \"update-order:org-to-order\" | \"update-order:order-self-derive\" | \"update-order:order-to-bookings\" | \"update-order:ledger-to-bookings\" | \"update-order:fulfillment-to-cards\" | \"update-order:order-to-fulfillment\" | \"update-booking:booking-to-self\" | \"update-booking:booking-to-out-of-service\" | \"update-booking:booking-to-transactions\" | \"update-booking:transactions-to-ledger\" | \"update-booking:transactions-to-locations\" | \"update-booking:booking-to-order\" | \"update-booking:booking-to-cards\" | \"create-out-of-service-record:sources-to-record\" | \"create-out-of-service-record:record-to-transactions\" | \"create-out-of-service-record:transactions-to-ledger\" | \"update-out-of-service-record:record-to-transactions\" | \"update-out-of-service-record:record-to-record\" | \"update-out-of-service-record:transactions-to-ledger\" | \"reclassify-out-of-service-record:record-to-booking\" | \"reclassify-out-of-service-record:record-to-record\" | \"create-transaction:transaction-to-ledger\" | \"create-transaction:transaction-to-locations\" | \"reverse-transaction:transaction-to-ledger\" | \"reverse-transaction:transaction-to-locations\" | \"reclass-stock:transaction-to-ledger\" | \"reclass-stock:transaction-to-locations\" | \"create-store-transfer:transaction-to-ledger\" | \"create-store-transfer:transaction-to-locations\" | \"create-store-transfer:transaction-to-out-of-service\" | \"create-product:product-to-tags\" | \"create-product:product-to-tracking-categories\" | \"create-product:product-to-components\" | \"create-product:product-to-ledger\" | \"create-product:product-to-opening-movement\" | \"create-product:product-to-webshop\" | \"update-product:catalog-to-components\" | \"update-product:components-to-components\" | \"update-product:component-entry-to-parents\" | \"update-product:name-to-locations\" | \"update-product:name-to-tags\" | \"update-product:name-to-tracking-categories\" | \"update-product:to-webshop\" | \"update-product:tags-to-tags\" | \"update-product:tracking-category-change\" | \"update-product:stock-method-change\" | \"update-product:type-change\" | \"update-product:price-to-components\" | \"update-product:price-to-webshop-components\" | \"update-product:product-to-draft-orders\" | \"create-org:org-to-contacts\" | \"create-org:node-to-tree\" | \"create-org:mint-derived-project\" | \"merge-org:loser-to-orders\" | \"merge-org:loser-to-invoices\" | \"merge-org:loser-to-credit-notes\" | \"merge-org:loser-to-settlements\" | \"merge-org:loser-to-bookings\" | \"merge-org:loser-to-fulfillments\" | \"merge-org:loser-to-cards\" | \"merge-org:loser-to-out-of-service\" | \"merge-org:loser-to-contacts\" | \"merge-org:activity-to-survivor\" | \"merge-org:merged-from-to-survivor\" | \"merge-org:delete-loser\" | \"merge-org:tombstone-loser\" | \"merge-org:merged-to-to-tombstones\" | \"merge-org:tombstone-parent\" | \"merge-org:thread-comments-to-survivor\" | \"update-department-type:name-to-departments\" | \"update-org:name-to-orders\" | \"update-org:billing-to-orders\" | \"update-org:name-to-invoices\" | \"update-org:name-to-bookings\" | \"update-org:name-to-fulfillments\" | \"update-org:name-to-cards\" | \"update-org:billing-to-invoices\" | \"update-org:tax-axes-to-orders\" | \"update-org:contacts-change\" | \"update-org:name-to-descendants\" | \"reparent-destination:tree-to-node\" | \"reparent-destination:place-name-to-units\" | \"reparent-org:tree-to-descendants\" | \"reparent-org:activity-to-new-ancestors\" | \"stamp-org-activity:orders-to-organizations\" | \"stamp-org-activity:invoices-to-organizations\" | \"create-contact:contact-to-orgs\" | \"create-contact:link-to-user\" | \"update-contact:name-to-orgs\" | \"update-contact:name-to-orders\" | \"update-contact:phones-to-orders\" | \"update-contact:orgs-change\" | \"update-contact:name-to-user\" | \"create-user:link-to-contact\" | \"update-user:name-to-contact\" | \"update-user:name-to-actor-refs\" | \"delete-user:unlink-contact\" | \"create-invoice:invoice-to-orders\" | \"update-invoice:status-to-orders\" | \"update-order:items-to-invoices\" | \"update-order:status-to-invoices\" | \"create-settlement:settlement-to-invoice\" | \"reverse-settlement:reverser-to-invoice\" | \"reverse-settlement:release-to-credit-note\" | \"close-invoice:closure-to-invoice\" | \"sync-xero-settlement:xero-to-settlements\" | \"sync-xero-settlement:settlements-to-invoice\" | \"void-invoice:reap-settlements\" | \"void-invoice:append-void-settlement\" | \"void-invoice-from-xero:reap-settlements\" | \"void-invoice-from-xero:append-void-settlement\" | \"void-invoice-from-cancel:reap-settlements\" | \"void-invoice-from-cancel:append-void-settlement\" | \"create-credit-note:number-from-counter\" | \"create-credit-note:posting-account\" | \"allocate-credit-note:note-to-settlements\" | \"allocate-credit-note:settlements-to-invoices\" | \"allocate-credit-note:remaining-credit\" | \"void-credit-note:status\" | \"update-fulfillment-items:items-self\" | \"update-fulfillment-items:fulfillment-to-cards\" | \"update-fulfillment-destinations:pairs-self\" | \"update-fulfillment-destinations:fulfillment-to-cards\" | \"create-fulfillment-exchange:leg-self\" | \"create-fulfillment-exchange:fulfillment-to-cards\" | \"reset-fulfillment:rebuild-from-order\" | \"reset-fulfillment:fulfillment-to-cards\" | \"reconcile-fulfillment-cards:fulfillment-to-cards\" | \"create-tax-rate:recompute-live-orders\" | \"create-tax-rate:recompute-live-invoices\" | \"update-tax-class:name-to-products\" | \"update-tax-class:name-to-webshop-products\" | \"update-tax-class:codes-recompute-live-orders\" | \"update-tax-class:codes-recompute-live-invoices\" | \"update-product:tax-class-to-live-orders\" | \"update-product:tax-class-to-components\" | \"update-product:tax-class-to-webshop-components\" | \"update-tag:name-to-products\" | \"delete-tag:remove-from-products\" | \"update-tracking-category:name-to-products\" | \"update-location-type:capacities-to-locations\" | \"update-location:name-to-inventory-ledgers\" | \"update-location:name-to-bookings\" | \"update-location:name-to-out-of-service\" | \"update-location:name-to-transactions\" | \"update-location:default-name-to-store\" | \"holiday-definition:materialize-dates\" | \"holiday-dates:rematerialize-snapshot\" | \"holiday-change:recompute-draft-orders\" | \"holiday-change:recompute-draft-invoices\" | \"create-store:unset-sibling-defaults\" | \"update-store:unset-sibling-defaults\" | \"update-store:deactivate-locations\" | \"create-location:default-location-to-store\" | \"update-location:set-default-to-store\" | \"update-location:unset-previous-default\" | \"cowrite-thread:orders-to-thread\" | \"cowrite-thread:thread-to-orders\" | \"cowrite-thread:invoices-to-thread\" | \"cowrite-thread:thread-to-invoices\" | \"cowrite-thread:contacts-to-thread\" | \"cowrite-thread:thread-to-contacts\" | \"cowrite-thread:organizations-to-thread\" | \"cowrite-thread:thread-to-organizations\" | \"cowrite-thread:products-to-thread\" | \"cowrite-thread:thread-to-products\" | \"cowrite-thread:roles-to-thread\" | \"cowrite-thread:thread-to-roles\" | \"cowrite-thread:out-of-service-to-thread\" | \"cowrite-thread:thread-to-out-of-service\" | \"cowrite-thread:credit-notes-to-thread\" | \"cowrite-thread:thread-to-credit-notes\" | \"create-comment:thread-to-comment\" | \"create-comment:comment-to-thread\" | \"delete-comment:comment-to-thread\" | \"cowrite-thread:cards-to-thread\" | \"cowrite-thread:thread-to-cards\" | \"delete-card:cascade-thread\" | \"delete-card:cascade-comments\" | \"create-template:thread\" | \"create-template:thread-to-family\" | \"manage-draft:family-rollup\" | \"manage-draft:component-family-rollup\" | \"manage-draft:version-to-thread\" | \"manage-draft:thread-to-version\" | \"publish-template:seq\" | \"publish-template:version-flip\" | \"publish-template:family-rollup\" | \"publish-template:component-family-rollup\" | \"create-recurrence:fan-out-cards\" | \"materialize-horizon:fan-out-cards\" | \"update-recurrence:fan-out-prototype\" | \"update-recurrence:rematerialize-future\" | \"delete-recurrence:fan-out-cards\" | \"update-card-scope-following:cascade-future-siblings\" | \"update-card-scope-all:update-recurrence-prototype\" | \"update-card-scope-all:cascade-siblings\" | \"delete-card-scope-this:append-exception-date\" | \"delete-card-scope-following:cascade-future-siblings\" | \"delete-card-scope-following:truncate-recurrence\" | \"delete-card-scope-all:cascade-siblings\" | \"delete-card-scope-all:delete-recurrence\" | \"generate-invoice-pdf:upload-to-worklist\" | \"generate-quote-pdf:upload-to-worklist\" | \"generate-statement-pdf:upload-to-worklist\" | \"stock:ledger-to-stock\" | \"stock:bookings-to-stock\" | \"stock:oos-to-stock\" | \"stock:seed-ledger-to-stock\" | \"units:transactions-to-roster\" | \"units:transactions-to-units\" | \"units:product-to-roster\" | \"units:product-to-units\" | \"units:product-to-bookings\" | \"create-units:product-to-units\";",
           "doc": "Every `CollectionRule.id` in the catalog.\n\nA rule id is NOT always prefixed with the transaction that fires it — many rules\nare standalone single-rule cascades with no transaction at all\n(`update-tax-class:*`, `holiday-*`, `generate-*-pdf:*`), and several prefixes are\ndeliberately shorter than the transaction name (`create-org:*` under\n`create-organization`). Read the prefix as a namespace, never as a join key."
         },
         {
@@ -4025,6 +4097,12 @@
           "name": "SEEDED_ROLE_NAMES",
           "declaration": "const SEEDED_ROLE_NAMES: \"admin\" | \"authenticated\" | \"customer\" | \"template-editor\" | \"template-maintainer\" | \"warehouse\"[];",
           "doc": "The six roles declared in git (`api-cloudrun/scripts/rbacRoles.ts`) and seeded\nby `seed-rbac.ts`.\n\n⚠️ This is NOT the storage type — see {@link RoleId}. It exists so the role\nliterals scattered through production source and fixtures become compile-\nchecked rather than free strings."
+        },
+        {
+          "kind": "variable",
+          "name": "SERIAL_CHANGE_REASONS",
+          "declaration": "const SERIAL_CHANGE_REASONS: \"initial\" | \"replaced\" | \"corrected\"[];",
+          "doc": "Why a serial was set on a number.\n\n- `initial` — the first serial recorded for the number (a create, a\n  conversion, or a later bulk paste).\n- `replaced` — a different physical unit took over the number.\n- `corrected` — the previous entry was mis-typed; the unit did not change."
         },
         {
           "kind": "variable",
@@ -4079,6 +4157,18 @@
           "name": "SeededRoleName",
           "declaration": "type SeededRoleName = indexedAccess;",
           "doc": "One of the six git-declared roles. @see {@link SEEDED_ROLE_NAMES}"
+        },
+        {
+          "kind": "variable",
+          "name": "SerialChangeReasonEnum",
+          "declaration": "const SerialChangeReasonEnum: z.ZodType<SerialChangeReasonType>;",
+          "doc": "Zod schema for {@link SerialChangeReasonType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SerialChangeReasonType",
+          "declaration": "type SerialChangeReasonType = indexedAccess;",
+          "doc": "One serial-change reason. See {@link SERIAL_CHANGE_REASONS}."
         },
         {
           "kind": "variable",
@@ -4305,7 +4395,7 @@
         {
           "kind": "interface",
           "name": "StoreTransferLineInputType",
-          "declaration": "interface StoreTransferLineInputType {\n  from: string;\n  to: string;\n  quantity: number;\n  oos: typeLiteral | null;\n}",
+          "declaration": "interface StoreTransferLineInputType {\n  from: string;\n  to: string;\n  quantity: number;\n  oos: typeLiteral | null;\n  units?: number[];\n}",
           "doc": "One line of a transfer: `quantity` units leave location `from` for location\n`to`. `oos` says WHICH units:\n\n - `null` — units that are in service;\n - `{ uid }` — THAT out-of-service record's flagged units, which travel with\n   their flag. The server writes them as a `transfer {r → r}` naming the\n   record in `sources[]`, checks the record has that many flagged units on\n   `from`, and re-derives its `stores[]`.\n\nEvery key is required; `null` is an answer. The client sends the record's\nidentity only — its reason and number are the server's to read."
         },
         {
@@ -4749,7 +4839,7 @@
         {
           "kind": "typeAlias",
           "name": "TransactionId",
-          "declaration": "type TransactionId = \"create-order\" | \"update-order\" | \"update-booking\" | \"bulk-checkout-order\" | \"bulk-return-order\" | \"bulk-fulfillment-bookings\" | \"cross-order-bookings\" | \"finalize-order\" | \"create-out-of-service-record\" | \"update-out-of-service-record\" | \"reclassify-out-of-service-record\" | \"create-transaction\" | \"reverse-transaction\" | \"reclass-stock\" | \"create-store-transfer\" | \"create-product\" | \"update-product\" | \"create-department-type\" | \"update-department-type\" | \"create-supplier\" | \"update-supplier\" | \"reparent-destination\" | \"create-organization\" | \"update-organization\" | \"reparent-organization\" | \"organization-activity-stamp\" | \"merge-organization\" | \"create-contact\" | \"update-contact\" | \"create-user\" | \"update-user\" | \"delete-user\" | \"create-invoice\" | \"update-invoice\" | \"create-settlement\" | \"reverse-settlement\" | \"close-invoice\" | \"sync-xero-settlement\" | \"void-invoice\" | \"void-invoice-from-xero\" | \"void-invoice-from-cancel\" | \"create-credit-note\" | \"allocate-credit-note\" | \"void-credit-note\" | \"update-fulfillment-items\" | \"update-fulfillment-destinations\" | \"create-fulfillment-exchange\" | \"reset-fulfillment\" | \"reconcile-fulfillment-cards\" | \"create-tax-code\" | \"update-tax-code\" | \"create-tax-rate\" | \"update-tax-rate\" | \"create-tax-class\" | \"update-tax-class\" | \"create-holiday-definition\" | \"update-holiday-definition\" | \"delete-holiday-definition\" | \"create-location\" | \"update-location\" | \"create-role\" | \"create-comment\" | \"delete-comment\" | \"create-card\" | \"delete-card\" | \"create-template\" | \"manage-draft\" | \"publish-template\" | \"create-recurrence\" | \"materialize-horizon\" | \"update-recurrence\" | \"delete-recurrence\" | \"update-card-scope-following\" | \"update-card-scope-all\" | \"delete-card-scope-this\" | \"delete-card-scope-following\" | \"delete-card-scope-all\";",
+          "declaration": "type TransactionId = \"create-order\" | \"update-order\" | \"update-booking\" | \"bulk-checkout-order\" | \"bulk-return-order\" | \"bulk-fulfillment-bookings\" | \"cross-order-bookings\" | \"finalize-order\" | \"create-out-of-service-record\" | \"update-out-of-service-record\" | \"reclassify-out-of-service-record\" | \"create-transaction\" | \"reverse-transaction\" | \"reclass-stock\" | \"create-store-transfer\" | \"create-units\" | \"update-unit\" | \"create-product\" | \"update-product\" | \"create-department-type\" | \"update-department-type\" | \"create-supplier\" | \"update-supplier\" | \"reparent-destination\" | \"create-organization\" | \"update-organization\" | \"reparent-organization\" | \"organization-activity-stamp\" | \"merge-organization\" | \"create-contact\" | \"update-contact\" | \"create-user\" | \"update-user\" | \"delete-user\" | \"create-invoice\" | \"update-invoice\" | \"create-settlement\" | \"reverse-settlement\" | \"close-invoice\" | \"sync-xero-settlement\" | \"void-invoice\" | \"void-invoice-from-xero\" | \"void-invoice-from-cancel\" | \"create-credit-note\" | \"allocate-credit-note\" | \"void-credit-note\" | \"update-fulfillment-items\" | \"update-fulfillment-destinations\" | \"create-fulfillment-exchange\" | \"reset-fulfillment\" | \"reconcile-fulfillment-cards\" | \"create-tax-code\" | \"update-tax-code\" | \"create-tax-rate\" | \"update-tax-rate\" | \"create-tax-class\" | \"update-tax-class\" | \"create-holiday-definition\" | \"update-holiday-definition\" | \"delete-holiday-definition\" | \"create-location\" | \"update-location\" | \"create-role\" | \"create-comment\" | \"delete-comment\" | \"create-card\" | \"delete-card\" | \"create-template\" | \"manage-draft\" | \"publish-template\" | \"create-recurrence\" | \"materialize-horizon\" | \"update-recurrence\" | \"delete-recurrence\" | \"update-card-scope-following\" | \"update-card-scope-all\" | \"delete-card-scope-this\" | \"delete-card-scope-following\" | \"delete-card-scope-all\";",
           "doc": "Every `TransactionDefinition.id` in the catalog.\n\n⚠️ Disjoint from {@link RuleId} — verified, and asserted in\n`tests/propagation.test.ts`. The two namespaces are told apart by their type\nnow, not by the shape of the call that consumes them."
         },
         {
@@ -4820,6 +4910,36 @@
         },
         {
           "kind": "variable",
+          "name": "UNIT_ROSTER_STATES",
+          "declaration": "const UNIT_ROSTER_STATES: \"shelf\" | \"prepped\" | \"out\" | \"away\" | \"unattributed_out\"[];",
+          "doc": "The states a rostered unit can be in. See {@link UnitRosterEntryType}."
+        },
+        {
+          "kind": "variable",
+          "name": "UNIT_SERIAL_IN_TYPES",
+          "declaration": "const UNIT_SERIAL_IN_TYPES: \"purchase\" | \"find\" | \"make\" | \"opening_balance\" | \"adjustment_increase\"[];",
+          "doc": "The manual types that bring a unit IN to CFS ownership, so may carry the\nserial it arrives with. Every other type names units by number only: a serial\nchanges on an existing number through `PUT /units/{uid}`, never by moving it."
+        },
+        {
+          "kind": "variable",
+          "name": "UNIT_STATUSES",
+          "declaration": "const UNIT_STATUSES: \"active\" | \"vacant\" | \"retired\"[];",
+          "doc": "Whether a number is in use.\n\n- `active` — owned, and on the product's roster.\n- `vacant` — not owned right now (sold, written off, never activated). The\n  number can take a replacement unit with a new serial. EVERY departure\n  leaves a number vacant (owner, 2026-10-03); nothing retires one implicitly.\n- `retired` — never to be reused. Only an operator retires a number, and only\n  from `vacant`."
+        },
+        {
+          "kind": "variable",
+          "name": "UNIT_USER_SERIAL_REASONS",
+          "declaration": "const UNIT_USER_SERIAL_REASONS: \"initial\" | \"replaced\" | \"corrected\"[];",
+          "doc": "The reasons `PUT /units/{uid}` may send. Today every reason; kept as its own\nlist, the `OOS_USER_STATUSES` pattern, so narrowing what an operator may send\ndoes not narrow what storage may hold."
+        },
+        {
+          "kind": "variable",
+          "name": "UNIT_USER_STATUSES",
+          "declaration": "const UNIT_USER_STATUSES: \"retired\"[];",
+          "doc": "The statuses `PUT /units/{uid}` may ask for: only `retired`, and the server\nhonours it only from `vacant`. `active` and `vacant` are reached by ownership\nmovements, never set by hand."
+        },
+        {
+          "kind": "variable",
           "name": "UidNameRef",
           "declaration": "const UidNameRef: z.ZodType<UidNameRefType>;",
           "doc": "Zod schema for a uid + name reference."
@@ -4841,6 +4961,114 @@
           "name": "UnitNumber",
           "declaration": "const UnitNumber: z.ZodType<number>;",
           "doc": "A unit's number: the asset tag the operator reads off the unit, and the\nunit's identity (owner ruling 2026-09-21). Globally unique across products."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitRoster",
+          "declaration": "interface UnitRoster {\n  uid: string;\n  uid_product: string;\n  units: Record<string, UnitRosterEntryType>;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "One serialized product's roster. See the module docblock."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitRosterEntry",
+          "declaration": "const UnitRosterEntry: z.ZodType<UnitRosterEntryType>;",
+          "doc": "Zod schema for {@link UnitRosterEntryType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitRosterEntryType",
+          "declaration": "type UnitRosterEntryType = typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral;",
+          "doc": "Where one unit is.\n\n- `shelf` — on a CFS shelf. `flag` is the out-of-service reason it carries\n  there (damaged, cleaning, maintenance), with the record that flagged it;\n  both `null` for a unit in service. A flagged unit is never offered for\n  prep or check-out.\n- `prepped` — picked onto a booking's prep shelf; still physically at\n  `uid_location`.\n- `out` — at a customer, on `uid_booking`.\n- `away` — standing AT an out-of-service record: lost, or at the record's\n  destination (a vendor). Never offered.\n- `unattributed_out` — written only by the bulk → serialized conversion: a\n  unit that is out on some booking, but which booking's number it is was\n  never recorded. The physical count resolves these as ordinary custody.\n\nThe id fields are typed per state rather than a polymorphic `DocSource`,\nbecause the discriminant already fixes which collection each names.\n`OutOfServiceId`, not `FirestoreId`: a loss record's id is its opening\nmovement's (`MovementId`-shaped), so `FirestoreId` would refuse every\n`mark_lost` unit."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitRosterKey",
+          "declaration": "const UnitRosterKey: z.ZodType<string>;",
+          "doc": "A roster key: a unit number as Firestore spells a map key — decimal, no\nleading zero, never `0`. The same spelling as `UnitId`'s number segment."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitRosterSchema",
+          "declaration": "const UnitRosterSchema: z.ZodType<UnitRoster>;",
+          "doc": "Zod schema for {@link UnitRoster}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitRosterStateType",
+          "declaration": "type UnitRosterStateType = indexedAccess;",
+          "doc": "One roster state."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitSchema",
+          "declaration": "const UnitSchema: z.ZodType<UnitType>;",
+          "doc": "Zod schema for {@link UnitType}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitSerialChangeInputType",
+          "declaration": "interface UnitSerialChangeInputType {\n  serial_number: string | null;\n  reason: UnitUserSerialReasonType;\n  notes: string;\n}",
+          "doc": "A serial change sent to `PUT /units/{uid}`."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitSerialHistoryEntry",
+          "declaration": "const UnitSerialHistoryEntry: z.ZodType<UnitSerialHistoryEntryType>;",
+          "doc": "Zod schema for {@link UnitSerialHistoryEntryType}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitSerialHistoryEntryType",
+          "declaration": "interface UnitSerialHistoryEntryType {\n  serial_number: string;\n  start: string;\n  end: string | null;\n  reason: SerialChangeReasonType;\n  uid_movement: string | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
+          "doc": "One serial a number has carried, and over which span.\n\nThe acquisition reference lives HERE, per entry, rather than once per unit: a\nreplacement re-points the number at a new physical unit, and a single\nunit-level field would lose the original acquisition. The unit's CURRENT\nacquisition is the open entry's `uid_movement`."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitSet",
+          "declaration": "const UnitSet: z.ZodType<number[]>;",
+          "doc": "A canonical set of unit numbers: strictly ascending, no duplicates.\n\nUnsorted input and duplicates are REFUSED, never normalized. A client that\nholds a set in some other order canonicalizes it with `normalizeUnitSet`\n(`@cfs/core/utils/units`) before sending; a server that silently sorted would\nhide a client building the set wrong."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitStatusEnum",
+          "declaration": "const UnitStatusEnum: z.ZodType<UnitStatusType>;",
+          "doc": "Zod schema for {@link UnitStatusType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitStatusType",
+          "declaration": "type UnitStatusType = indexedAccess;",
+          "doc": "One unit status. See {@link UNIT_STATUSES}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitType",
+          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A unit number, its current serial and its history."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitUserSerialReasonEnum",
+          "declaration": "const UnitUserSerialReasonEnum: z.ZodType<UnitUserSerialReasonType>;",
+          "doc": "Zod schema for {@link UnitUserSerialReasonType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitUserSerialReasonType",
+          "declaration": "type UnitUserSerialReasonType = indexedAccess;",
+          "doc": "One reason an operator may send."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitUserStatusEnum",
+          "declaration": "const UnitUserStatusEnum: z.ZodType<UnitUserStatusType>;",
+          "doc": "Zod schema for {@link UnitUserStatusType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitUserStatusType",
+          "declaration": "type UnitUserStatusType = indexedAccess;",
+          "doc": "One status an operator may ask for."
         },
         {
           "kind": "interface",
@@ -5043,7 +5271,7 @@
         {
           "kind": "interface",
           "name": "UpdateOutOfServiceInputType",
-          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uuid_session: string;\n  version: number;\n}",
+          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  units?: OOSUnitsType;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uuid_session: string;\n  version: number;\n}",
           "doc": "Input for updating an out-of-service record.\n\n`breakdown` (when supplied) is the complete next state, Σ ≤ `quantity`. The\nwriter turns each bucket change into the movement that makes it true —\n`flag`, `send_away`, `return_to_service`, `write_off`, or a reversal of one.\n`status` is server-derived; only `\"canceled\"` is honored.\n\n`reason` edits the record IN PLACE, and only among the flag reasons: a\n`lost` ↔ other change is a change of PLACE, not of reason (R3). The writer\nrecords it as a `flag` `{r → r′}`, so the journal keeps the history.\n\n`dates.start` is honored only on a record with no sources (ad-hoc); a\nsource-bound record's start reflects the upstream event that pinned it."
         },
         {
@@ -5189,6 +5417,18 @@
           "name": "UpdateTransactionInputType",
           "declaration": "interface UpdateTransactionInputType {\n  reference: string;\n  version: number;\n}",
           "doc": "Input for editing a movement's descriptive fields.\n\n**Balance-affecting fields are absent by design.** Quantity, type, cost,\nplacement and date change through a reversal plus a corrected event, not an\nin-place edit — that is what makes the collection a journal rather than a\nmutable table. Only `reference` still edits in place."
+        },
+        {
+          "kind": "variable",
+          "name": "UpdateUnitInput",
+          "declaration": "const UpdateUnitInput: z.ZodType<UpdateUnitInputType>;",
+          "doc": "Zod schema for {@link UpdateUnitInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "UpdateUnitInputType",
+          "declaration": "interface UpdateUnitInputType {\n  version: number;\n  serial?: UnitSerialChangeInputType;\n  status?: UnitUserStatusType;\n}",
+          "doc": "Body of `PUT /units/{uid}`: change the serial, retire the number, or both.\n\nA serial remap does NOT cascade into past movements — `MovementUnit` keeps\nthe serial as a snapshot of the moment it moved."
         },
         {
           "kind": "variable",
@@ -5406,6 +5646,14 @@
         },
         {
           "kind": "function",
+          "name": "allocationUnitsIssue",
+          "signature": "allocationUnitsIssue(numbers: readonly number[] | undefined, allocations: readonly MovementAllocationInputType[] | undefined): string | null",
+          "doc": "What is wrong with how an input's allocations name its units, or `null`.\n\nEither no allocation names units, or every one does and together they name\nexactly `numbers` — the input's own list — each unit once. Shared by\n`CreateTransactionInput` and `CreateOutOfServiceInput`, so the two inputs\nthat place units on shelves cannot disagree about it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "availableUtilNamespaces",
           "signature": "availableUtilNamespaces(sources: readonly TemplateCollectionType[], targets: readonly TemplateCollectionType[]): string[]",
           "doc": "Resolve the `@cfs/core/utils` namespaces available to a template, as the union\nof the always-on set plus each source/target collection's namespace.\n\n```ts\navailableUtilNamespaces([\"orders\"], [\"quotes\"]);     // [\"dates\", \"orders\"]\navailableUtilNamespaces([\"orders\"], [\"invoices\"]);   // [\"dates\", \"orders\", \"invoices\"]\navailableUtilNamespaces([\"invoices\"], [\"invoices\"]); // [\"dates\", \"invoices\"]\n```\n\nNote that a **target**-derived namespace is forward-looking: `it.doc` is the\nsource document, so e.g. an orders→invoices template gets `it.invoices`\nhelpers with no invoice document to apply them to until the author builds\ninvoice-shaped data themselves.",
@@ -5562,6 +5810,14 @@
           "name": "duplicateCustodySlots",
           "signature": "duplicateCustodySlots(actions: readonly Pick<BookingActionType, \"rule\">[]): string[]",
           "doc": "Where two actions in one list would write the same movement id. Shared by the\nwire refine and by `applyCustodyActions`, so the two cannot disagree.\n\nThe slot is read off the RENTAL arm: a sale's arms are a subset whose\nmovements are distinct per rule, so the rental reading is the stricter one.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "emptyBookingUnitSets",
+          "signature": "emptyBookingUnitSets(): BookingUnitSetsType",
+          "doc": "Empty sets in every unit bucket: a seeded booking that names no unit yet.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -6069,7 +6325,7 @@
         {
           "kind": "typeAlias",
           "name": "RuleId",
-          "declaration": "type RuleId = \"create-order:org-to-order\" | \"create-order:products-to-order-items\" | \"create-order:order-self-derive\" | \"create-order:order-to-bookings\" | \"create-order:ledger-to-bookings\" | \"create-order:fulfillment-to-cards\" | \"create-order:order-to-fulfillment\" | \"update-order:org-to-order\" | \"update-order:order-self-derive\" | \"update-order:order-to-bookings\" | \"update-order:ledger-to-bookings\" | \"update-order:fulfillment-to-cards\" | \"update-order:order-to-fulfillment\" | \"update-booking:booking-to-self\" | \"update-booking:booking-to-out-of-service\" | \"update-booking:booking-to-transactions\" | \"update-booking:transactions-to-ledger\" | \"update-booking:transactions-to-locations\" | \"update-booking:booking-to-order\" | \"update-booking:booking-to-cards\" | \"create-out-of-service-record:sources-to-record\" | \"create-out-of-service-record:record-to-transactions\" | \"create-out-of-service-record:transactions-to-ledger\" | \"update-out-of-service-record:record-to-transactions\" | \"update-out-of-service-record:record-to-record\" | \"update-out-of-service-record:transactions-to-ledger\" | \"reclassify-out-of-service-record:record-to-booking\" | \"reclassify-out-of-service-record:record-to-record\" | \"create-transaction:transaction-to-ledger\" | \"create-transaction:transaction-to-locations\" | \"reverse-transaction:transaction-to-ledger\" | \"reverse-transaction:transaction-to-locations\" | \"reclass-stock:transaction-to-ledger\" | \"reclass-stock:transaction-to-locations\" | \"create-store-transfer:transaction-to-ledger\" | \"create-store-transfer:transaction-to-locations\" | \"create-store-transfer:transaction-to-out-of-service\" | \"create-product:product-to-tags\" | \"create-product:product-to-tracking-categories\" | \"create-product:product-to-components\" | \"create-product:product-to-ledger\" | \"create-product:product-to-opening-movement\" | \"create-product:product-to-webshop\" | \"update-product:catalog-to-components\" | \"update-product:components-to-components\" | \"update-product:component-entry-to-parents\" | \"update-product:name-to-locations\" | \"update-product:name-to-tags\" | \"update-product:name-to-tracking-categories\" | \"update-product:to-webshop\" | \"update-product:tags-to-tags\" | \"update-product:tracking-category-change\" | \"update-product:stock-method-change\" | \"update-product:type-change\" | \"update-product:price-to-components\" | \"update-product:price-to-webshop-components\" | \"update-product:product-to-draft-orders\" | \"create-org:org-to-contacts\" | \"create-org:node-to-tree\" | \"create-org:mint-derived-project\" | \"merge-org:loser-to-orders\" | \"merge-org:loser-to-invoices\" | \"merge-org:loser-to-credit-notes\" | \"merge-org:loser-to-settlements\" | \"merge-org:loser-to-bookings\" | \"merge-org:loser-to-fulfillments\" | \"merge-org:loser-to-cards\" | \"merge-org:loser-to-out-of-service\" | \"merge-org:loser-to-contacts\" | \"merge-org:activity-to-survivor\" | \"merge-org:merged-from-to-survivor\" | \"merge-org:delete-loser\" | \"merge-org:tombstone-loser\" | \"merge-org:merged-to-to-tombstones\" | \"merge-org:tombstone-parent\" | \"merge-org:thread-comments-to-survivor\" | \"update-department-type:name-to-departments\" | \"update-org:name-to-orders\" | \"update-org:billing-to-orders\" | \"update-org:name-to-invoices\" | \"update-org:name-to-bookings\" | \"update-org:name-to-fulfillments\" | \"update-org:name-to-cards\" | \"update-org:billing-to-invoices\" | \"update-org:tax-axes-to-orders\" | \"update-org:contacts-change\" | \"update-org:name-to-descendants\" | \"reparent-destination:tree-to-node\" | \"reparent-destination:place-name-to-units\" | \"reparent-org:tree-to-descendants\" | \"reparent-org:activity-to-new-ancestors\" | \"stamp-org-activity:orders-to-organizations\" | \"stamp-org-activity:invoices-to-organizations\" | \"create-contact:contact-to-orgs\" | \"create-contact:link-to-user\" | \"update-contact:name-to-orgs\" | \"update-contact:name-to-orders\" | \"update-contact:phones-to-orders\" | \"update-contact:orgs-change\" | \"update-contact:name-to-user\" | \"create-user:link-to-contact\" | \"update-user:name-to-contact\" | \"update-user:name-to-actor-refs\" | \"delete-user:unlink-contact\" | \"create-invoice:invoice-to-orders\" | \"update-invoice:status-to-orders\" | \"update-order:items-to-invoices\" | \"update-order:status-to-invoices\" | \"create-settlement:settlement-to-invoice\" | \"reverse-settlement:reverser-to-invoice\" | \"reverse-settlement:release-to-credit-note\" | \"close-invoice:closure-to-invoice\" | \"sync-xero-settlement:xero-to-settlements\" | \"sync-xero-settlement:settlements-to-invoice\" | \"void-invoice:reap-settlements\" | \"void-invoice:append-void-settlement\" | \"void-invoice-from-xero:reap-settlements\" | \"void-invoice-from-xero:append-void-settlement\" | \"void-invoice-from-cancel:reap-settlements\" | \"void-invoice-from-cancel:append-void-settlement\" | \"create-credit-note:number-from-counter\" | \"create-credit-note:posting-account\" | \"allocate-credit-note:note-to-settlements\" | \"allocate-credit-note:settlements-to-invoices\" | \"allocate-credit-note:remaining-credit\" | \"void-credit-note:status\" | \"update-fulfillment-items:items-self\" | \"update-fulfillment-items:fulfillment-to-cards\" | \"update-fulfillment-destinations:pairs-self\" | \"update-fulfillment-destinations:fulfillment-to-cards\" | \"create-fulfillment-exchange:leg-self\" | \"create-fulfillment-exchange:fulfillment-to-cards\" | \"reset-fulfillment:rebuild-from-order\" | \"reset-fulfillment:fulfillment-to-cards\" | \"reconcile-fulfillment-cards:fulfillment-to-cards\" | \"create-tax-rate:recompute-live-orders\" | \"create-tax-rate:recompute-live-invoices\" | \"update-tax-class:name-to-products\" | \"update-tax-class:name-to-webshop-products\" | \"update-tax-class:codes-recompute-live-orders\" | \"update-tax-class:codes-recompute-live-invoices\" | \"update-product:tax-class-to-live-orders\" | \"update-product:tax-class-to-components\" | \"update-product:tax-class-to-webshop-components\" | \"update-tag:name-to-products\" | \"delete-tag:remove-from-products\" | \"update-tracking-category:name-to-products\" | \"update-location-type:capacities-to-locations\" | \"update-location:name-to-inventory-ledgers\" | \"update-location:name-to-bookings\" | \"update-location:name-to-out-of-service\" | \"update-location:name-to-transactions\" | \"update-location:default-name-to-store\" | \"holiday-definition:materialize-dates\" | \"holiday-dates:rematerialize-snapshot\" | \"holiday-change:recompute-draft-orders\" | \"holiday-change:recompute-draft-invoices\" | \"create-store:unset-sibling-defaults\" | \"update-store:unset-sibling-defaults\" | \"update-store:deactivate-locations\" | \"create-location:default-location-to-store\" | \"update-location:set-default-to-store\" | \"update-location:unset-previous-default\" | \"cowrite-thread:orders-to-thread\" | \"cowrite-thread:thread-to-orders\" | \"cowrite-thread:invoices-to-thread\" | \"cowrite-thread:thread-to-invoices\" | \"cowrite-thread:contacts-to-thread\" | \"cowrite-thread:thread-to-contacts\" | \"cowrite-thread:organizations-to-thread\" | \"cowrite-thread:thread-to-organizations\" | \"cowrite-thread:products-to-thread\" | \"cowrite-thread:thread-to-products\" | \"cowrite-thread:roles-to-thread\" | \"cowrite-thread:thread-to-roles\" | \"cowrite-thread:out-of-service-to-thread\" | \"cowrite-thread:thread-to-out-of-service\" | \"cowrite-thread:credit-notes-to-thread\" | \"cowrite-thread:thread-to-credit-notes\" | \"create-comment:thread-to-comment\" | \"create-comment:comment-to-thread\" | \"delete-comment:comment-to-thread\" | \"cowrite-thread:cards-to-thread\" | \"cowrite-thread:thread-to-cards\" | \"delete-card:cascade-thread\" | \"delete-card:cascade-comments\" | \"create-template:thread\" | \"create-template:thread-to-family\" | \"manage-draft:family-rollup\" | \"manage-draft:component-family-rollup\" | \"manage-draft:version-to-thread\" | \"manage-draft:thread-to-version\" | \"publish-template:seq\" | \"publish-template:version-flip\" | \"publish-template:family-rollup\" | \"publish-template:component-family-rollup\" | \"create-recurrence:fan-out-cards\" | \"materialize-horizon:fan-out-cards\" | \"update-recurrence:fan-out-prototype\" | \"update-recurrence:rematerialize-future\" | \"delete-recurrence:fan-out-cards\" | \"update-card-scope-following:cascade-future-siblings\" | \"update-card-scope-all:update-recurrence-prototype\" | \"update-card-scope-all:cascade-siblings\" | \"delete-card-scope-this:append-exception-date\" | \"delete-card-scope-following:cascade-future-siblings\" | \"delete-card-scope-following:truncate-recurrence\" | \"delete-card-scope-all:cascade-siblings\" | \"delete-card-scope-all:delete-recurrence\" | \"generate-invoice-pdf:upload-to-worklist\" | \"generate-quote-pdf:upload-to-worklist\" | \"generate-statement-pdf:upload-to-worklist\" | \"stock:ledger-to-stock\" | \"stock:bookings-to-stock\" | \"stock:oos-to-stock\" | \"stock:seed-ledger-to-stock\";",
+          "declaration": "type RuleId = \"create-order:org-to-order\" | \"create-order:products-to-order-items\" | \"create-order:order-self-derive\" | \"create-order:order-to-bookings\" | \"create-order:ledger-to-bookings\" | \"create-order:fulfillment-to-cards\" | \"create-order:order-to-fulfillment\" | \"update-order:org-to-order\" | \"update-order:order-self-derive\" | \"update-order:order-to-bookings\" | \"update-order:ledger-to-bookings\" | \"update-order:fulfillment-to-cards\" | \"update-order:order-to-fulfillment\" | \"update-booking:booking-to-self\" | \"update-booking:booking-to-out-of-service\" | \"update-booking:booking-to-transactions\" | \"update-booking:transactions-to-ledger\" | \"update-booking:transactions-to-locations\" | \"update-booking:booking-to-order\" | \"update-booking:booking-to-cards\" | \"create-out-of-service-record:sources-to-record\" | \"create-out-of-service-record:record-to-transactions\" | \"create-out-of-service-record:transactions-to-ledger\" | \"update-out-of-service-record:record-to-transactions\" | \"update-out-of-service-record:record-to-record\" | \"update-out-of-service-record:transactions-to-ledger\" | \"reclassify-out-of-service-record:record-to-booking\" | \"reclassify-out-of-service-record:record-to-record\" | \"create-transaction:transaction-to-ledger\" | \"create-transaction:transaction-to-locations\" | \"reverse-transaction:transaction-to-ledger\" | \"reverse-transaction:transaction-to-locations\" | \"reclass-stock:transaction-to-ledger\" | \"reclass-stock:transaction-to-locations\" | \"create-store-transfer:transaction-to-ledger\" | \"create-store-transfer:transaction-to-locations\" | \"create-store-transfer:transaction-to-out-of-service\" | \"create-product:product-to-tags\" | \"create-product:product-to-tracking-categories\" | \"create-product:product-to-components\" | \"create-product:product-to-ledger\" | \"create-product:product-to-opening-movement\" | \"create-product:product-to-webshop\" | \"update-product:catalog-to-components\" | \"update-product:components-to-components\" | \"update-product:component-entry-to-parents\" | \"update-product:name-to-locations\" | \"update-product:name-to-tags\" | \"update-product:name-to-tracking-categories\" | \"update-product:to-webshop\" | \"update-product:tags-to-tags\" | \"update-product:tracking-category-change\" | \"update-product:stock-method-change\" | \"update-product:type-change\" | \"update-product:price-to-components\" | \"update-product:price-to-webshop-components\" | \"update-product:product-to-draft-orders\" | \"create-org:org-to-contacts\" | \"create-org:node-to-tree\" | \"create-org:mint-derived-project\" | \"merge-org:loser-to-orders\" | \"merge-org:loser-to-invoices\" | \"merge-org:loser-to-credit-notes\" | \"merge-org:loser-to-settlements\" | \"merge-org:loser-to-bookings\" | \"merge-org:loser-to-fulfillments\" | \"merge-org:loser-to-cards\" | \"merge-org:loser-to-out-of-service\" | \"merge-org:loser-to-contacts\" | \"merge-org:activity-to-survivor\" | \"merge-org:merged-from-to-survivor\" | \"merge-org:delete-loser\" | \"merge-org:tombstone-loser\" | \"merge-org:merged-to-to-tombstones\" | \"merge-org:tombstone-parent\" | \"merge-org:thread-comments-to-survivor\" | \"update-department-type:name-to-departments\" | \"update-org:name-to-orders\" | \"update-org:billing-to-orders\" | \"update-org:name-to-invoices\" | \"update-org:name-to-bookings\" | \"update-org:name-to-fulfillments\" | \"update-org:name-to-cards\" | \"update-org:billing-to-invoices\" | \"update-org:tax-axes-to-orders\" | \"update-org:contacts-change\" | \"update-org:name-to-descendants\" | \"reparent-destination:tree-to-node\" | \"reparent-destination:place-name-to-units\" | \"reparent-org:tree-to-descendants\" | \"reparent-org:activity-to-new-ancestors\" | \"stamp-org-activity:orders-to-organizations\" | \"stamp-org-activity:invoices-to-organizations\" | \"create-contact:contact-to-orgs\" | \"create-contact:link-to-user\" | \"update-contact:name-to-orgs\" | \"update-contact:name-to-orders\" | \"update-contact:phones-to-orders\" | \"update-contact:orgs-change\" | \"update-contact:name-to-user\" | \"create-user:link-to-contact\" | \"update-user:name-to-contact\" | \"update-user:name-to-actor-refs\" | \"delete-user:unlink-contact\" | \"create-invoice:invoice-to-orders\" | \"update-invoice:status-to-orders\" | \"update-order:items-to-invoices\" | \"update-order:status-to-invoices\" | \"create-settlement:settlement-to-invoice\" | \"reverse-settlement:reverser-to-invoice\" | \"reverse-settlement:release-to-credit-note\" | \"close-invoice:closure-to-invoice\" | \"sync-xero-settlement:xero-to-settlements\" | \"sync-xero-settlement:settlements-to-invoice\" | \"void-invoice:reap-settlements\" | \"void-invoice:append-void-settlement\" | \"void-invoice-from-xero:reap-settlements\" | \"void-invoice-from-xero:append-void-settlement\" | \"void-invoice-from-cancel:reap-settlements\" | \"void-invoice-from-cancel:append-void-settlement\" | \"create-credit-note:number-from-counter\" | \"create-credit-note:posting-account\" | \"allocate-credit-note:note-to-settlements\" | \"allocate-credit-note:settlements-to-invoices\" | \"allocate-credit-note:remaining-credit\" | \"void-credit-note:status\" | \"update-fulfillment-items:items-self\" | \"update-fulfillment-items:fulfillment-to-cards\" | \"update-fulfillment-destinations:pairs-self\" | \"update-fulfillment-destinations:fulfillment-to-cards\" | \"create-fulfillment-exchange:leg-self\" | \"create-fulfillment-exchange:fulfillment-to-cards\" | \"reset-fulfillment:rebuild-from-order\" | \"reset-fulfillment:fulfillment-to-cards\" | \"reconcile-fulfillment-cards:fulfillment-to-cards\" | \"create-tax-rate:recompute-live-orders\" | \"create-tax-rate:recompute-live-invoices\" | \"update-tax-class:name-to-products\" | \"update-tax-class:name-to-webshop-products\" | \"update-tax-class:codes-recompute-live-orders\" | \"update-tax-class:codes-recompute-live-invoices\" | \"update-product:tax-class-to-live-orders\" | \"update-product:tax-class-to-components\" | \"update-product:tax-class-to-webshop-components\" | \"update-tag:name-to-products\" | \"delete-tag:remove-from-products\" | \"update-tracking-category:name-to-products\" | \"update-location-type:capacities-to-locations\" | \"update-location:name-to-inventory-ledgers\" | \"update-location:name-to-bookings\" | \"update-location:name-to-out-of-service\" | \"update-location:name-to-transactions\" | \"update-location:default-name-to-store\" | \"holiday-definition:materialize-dates\" | \"holiday-dates:rematerialize-snapshot\" | \"holiday-change:recompute-draft-orders\" | \"holiday-change:recompute-draft-invoices\" | \"create-store:unset-sibling-defaults\" | \"update-store:unset-sibling-defaults\" | \"update-store:deactivate-locations\" | \"create-location:default-location-to-store\" | \"update-location:set-default-to-store\" | \"update-location:unset-previous-default\" | \"cowrite-thread:orders-to-thread\" | \"cowrite-thread:thread-to-orders\" | \"cowrite-thread:invoices-to-thread\" | \"cowrite-thread:thread-to-invoices\" | \"cowrite-thread:contacts-to-thread\" | \"cowrite-thread:thread-to-contacts\" | \"cowrite-thread:organizations-to-thread\" | \"cowrite-thread:thread-to-organizations\" | \"cowrite-thread:products-to-thread\" | \"cowrite-thread:thread-to-products\" | \"cowrite-thread:roles-to-thread\" | \"cowrite-thread:thread-to-roles\" | \"cowrite-thread:out-of-service-to-thread\" | \"cowrite-thread:thread-to-out-of-service\" | \"cowrite-thread:credit-notes-to-thread\" | \"cowrite-thread:thread-to-credit-notes\" | \"create-comment:thread-to-comment\" | \"create-comment:comment-to-thread\" | \"delete-comment:comment-to-thread\" | \"cowrite-thread:cards-to-thread\" | \"cowrite-thread:thread-to-cards\" | \"delete-card:cascade-thread\" | \"delete-card:cascade-comments\" | \"create-template:thread\" | \"create-template:thread-to-family\" | \"manage-draft:family-rollup\" | \"manage-draft:component-family-rollup\" | \"manage-draft:version-to-thread\" | \"manage-draft:thread-to-version\" | \"publish-template:seq\" | \"publish-template:version-flip\" | \"publish-template:family-rollup\" | \"publish-template:component-family-rollup\" | \"create-recurrence:fan-out-cards\" | \"materialize-horizon:fan-out-cards\" | \"update-recurrence:fan-out-prototype\" | \"update-recurrence:rematerialize-future\" | \"delete-recurrence:fan-out-cards\" | \"update-card-scope-following:cascade-future-siblings\" | \"update-card-scope-all:update-recurrence-prototype\" | \"update-card-scope-all:cascade-siblings\" | \"delete-card-scope-this:append-exception-date\" | \"delete-card-scope-following:cascade-future-siblings\" | \"delete-card-scope-following:truncate-recurrence\" | \"delete-card-scope-all:cascade-siblings\" | \"delete-card-scope-all:delete-recurrence\" | \"generate-invoice-pdf:upload-to-worklist\" | \"generate-quote-pdf:upload-to-worklist\" | \"generate-statement-pdf:upload-to-worklist\" | \"stock:ledger-to-stock\" | \"stock:bookings-to-stock\" | \"stock:oos-to-stock\" | \"stock:seed-ledger-to-stock\" | \"units:transactions-to-roster\" | \"units:transactions-to-units\" | \"units:product-to-roster\" | \"units:product-to-units\" | \"units:product-to-bookings\" | \"create-units:product-to-units\";",
           "doc": "Every `CollectionRule.id` in the catalog.\n\nA rule id is NOT always prefixed with the transaction that fires it — many rules\nare standalone single-rule cascades with no transaction at all\n(`update-tax-class:*`, `holiday-*`, `generate-*-pdf:*`), and several prefixes are\ndeliberately shorter than the transaction name (`create-org:*` under\n`create-organization`). Read the prefix as a namespace, never as a join key."
         },
         {
@@ -6081,7 +6337,7 @@
         {
           "kind": "typeAlias",
           "name": "TransactionId",
-          "declaration": "type TransactionId = \"create-order\" | \"update-order\" | \"update-booking\" | \"bulk-checkout-order\" | \"bulk-return-order\" | \"bulk-fulfillment-bookings\" | \"cross-order-bookings\" | \"finalize-order\" | \"create-out-of-service-record\" | \"update-out-of-service-record\" | \"reclassify-out-of-service-record\" | \"create-transaction\" | \"reverse-transaction\" | \"reclass-stock\" | \"create-store-transfer\" | \"create-product\" | \"update-product\" | \"create-department-type\" | \"update-department-type\" | \"create-supplier\" | \"update-supplier\" | \"reparent-destination\" | \"create-organization\" | \"update-organization\" | \"reparent-organization\" | \"organization-activity-stamp\" | \"merge-organization\" | \"create-contact\" | \"update-contact\" | \"create-user\" | \"update-user\" | \"delete-user\" | \"create-invoice\" | \"update-invoice\" | \"create-settlement\" | \"reverse-settlement\" | \"close-invoice\" | \"sync-xero-settlement\" | \"void-invoice\" | \"void-invoice-from-xero\" | \"void-invoice-from-cancel\" | \"create-credit-note\" | \"allocate-credit-note\" | \"void-credit-note\" | \"update-fulfillment-items\" | \"update-fulfillment-destinations\" | \"create-fulfillment-exchange\" | \"reset-fulfillment\" | \"reconcile-fulfillment-cards\" | \"create-tax-code\" | \"update-tax-code\" | \"create-tax-rate\" | \"update-tax-rate\" | \"create-tax-class\" | \"update-tax-class\" | \"create-holiday-definition\" | \"update-holiday-definition\" | \"delete-holiday-definition\" | \"create-location\" | \"update-location\" | \"create-role\" | \"create-comment\" | \"delete-comment\" | \"create-card\" | \"delete-card\" | \"create-template\" | \"manage-draft\" | \"publish-template\" | \"create-recurrence\" | \"materialize-horizon\" | \"update-recurrence\" | \"delete-recurrence\" | \"update-card-scope-following\" | \"update-card-scope-all\" | \"delete-card-scope-this\" | \"delete-card-scope-following\" | \"delete-card-scope-all\";",
+          "declaration": "type TransactionId = \"create-order\" | \"update-order\" | \"update-booking\" | \"bulk-checkout-order\" | \"bulk-return-order\" | \"bulk-fulfillment-bookings\" | \"cross-order-bookings\" | \"finalize-order\" | \"create-out-of-service-record\" | \"update-out-of-service-record\" | \"reclassify-out-of-service-record\" | \"create-transaction\" | \"reverse-transaction\" | \"reclass-stock\" | \"create-store-transfer\" | \"create-units\" | \"update-unit\" | \"create-product\" | \"update-product\" | \"create-department-type\" | \"update-department-type\" | \"create-supplier\" | \"update-supplier\" | \"reparent-destination\" | \"create-organization\" | \"update-organization\" | \"reparent-organization\" | \"organization-activity-stamp\" | \"merge-organization\" | \"create-contact\" | \"update-contact\" | \"create-user\" | \"update-user\" | \"delete-user\" | \"create-invoice\" | \"update-invoice\" | \"create-settlement\" | \"reverse-settlement\" | \"close-invoice\" | \"sync-xero-settlement\" | \"void-invoice\" | \"void-invoice-from-xero\" | \"void-invoice-from-cancel\" | \"create-credit-note\" | \"allocate-credit-note\" | \"void-credit-note\" | \"update-fulfillment-items\" | \"update-fulfillment-destinations\" | \"create-fulfillment-exchange\" | \"reset-fulfillment\" | \"reconcile-fulfillment-cards\" | \"create-tax-code\" | \"update-tax-code\" | \"create-tax-rate\" | \"update-tax-rate\" | \"create-tax-class\" | \"update-tax-class\" | \"create-holiday-definition\" | \"update-holiday-definition\" | \"delete-holiday-definition\" | \"create-location\" | \"update-location\" | \"create-role\" | \"create-comment\" | \"delete-comment\" | \"create-card\" | \"delete-card\" | \"create-template\" | \"manage-draft\" | \"publish-template\" | \"create-recurrence\" | \"materialize-horizon\" | \"update-recurrence\" | \"delete-recurrence\" | \"update-card-scope-following\" | \"update-card-scope-all\" | \"delete-card-scope-this\" | \"delete-card-scope-following\" | \"delete-card-scope-all\";",
           "doc": "Every `TransactionDefinition.id` in the catalog.\n\n⚠️ Disjoint from {@link RuleId} — verified, and asserted in\n`tests/propagation.test.ts`. The two namespaces are told apart by their type\nnow, not by the shape of the call that consumes them."
         },
         {
@@ -7067,9 +7323,15 @@
           "doc": ""
         },
         {
+          "kind": "variable",
+          "name": "BOOKING_UNIT_BUCKETS",
+          "declaration": "const BOOKING_UNIT_BUCKETS: \"cleaning\" | \"damaged\" | \"lost\" | \"maintenance\" | \"out\" | \"prepped\" | \"returned\"[];",
+          "doc": "The breakdown buckets that hold NAMED units on a serialized product's\nbooking (`api-cloudrun/.claude/plans/serial-tracking.md` D2). Alphabetical,\nbecause key order is column order.\n\n`quoted` and `reserved` are absent on purpose: a reserved unit is a count\nagainst the shelf, not a particular radio. Units are named from `prep` on.\n\nEvery TERMINAL bucket carries a set too, because a shrinking `out` set alone\ncannot say which units came back and which were lost."
+        },
+        {
           "kind": "interface",
           "name": "Booking",
-          "declaration": "interface Booking {\n  uid: string;\n  uid_order: string;\n  uid_product: string;\n  component_signature_hash: string | null;\n  name: string;\n  number: number;\n  type: ComponentTypeType;\n  status: BookingStatusType;\n  quantity: number;\n  quantity_ordered?: number;\n  shortage: number;\n  subject: string;\n  crms_id?: number | null;\n  crms_product_id?: number | null;\n  breakdown: BookingBreakdown;\n  dates: typeLiteral;\n  destinations: typeLiteral;\n  organization: typeLiteral;\n  stores: BookingStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_destination_delivery: string;\n  uid_destination_collection: string | null;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Booking {\n  uid: string;\n  uid_order: string;\n  uid_product: string;\n  component_signature_hash: string | null;\n  name: string;\n  number: number;\n  type: ComponentTypeType;\n  status: BookingStatusType;\n  quantity: number;\n  quantity_ordered?: number;\n  shortage: number;\n  subject: string;\n  crms_id?: number | null;\n  crms_product_id?: number | null;\n  breakdown: BookingBreakdown;\n  units?: BookingUnitSetsType | null;\n  dates: typeLiteral;\n  destinations: typeLiteral;\n  organization: typeLiteral;\n  stores: BookingStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_destination_delivery: string;\n  uid_destination_collection: string | null;\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Full Firestore document for a booking — an AGGREGATE per\n`(order, product, LEG, component_signature_hash)`, **not a line**.\n\n🔴 **The leg is the destination PAIR (`destinations[i].uid`), not the\naddress it ships to.** An order may carry two legs to one address; keyed on\nthe address they collapse to one row and every per-leg total then states its\nwhole quantity once per leg (api-cloudrun#933). `uid_destination_delivery` /\n`uid_destination_collection` remain the ADDRESSES and are what every\naddress-filtered query reads; the LEG is recovered from `uid` via\n`parseBookingId`.\n\nThe same product may repeat within one leg in ways that ARE\nfungible (a priced principal plus its own zero-priced accessories, a\n`splitItem` clone of the same subtree) and every such occurrence resolves\nto this ONE row.\n\n⚠️ **It is NOT one row per `(order, product, leg)` alone** — a\nstandalone unit of a product and an occurrence of the same product nested\ninside a kit are genuinely different bookings, disambiguated by\n`component_signature_hash` / `uid`'s 4th segment\n(`@cfs/core/utils/booking-id`). Reading a shared `(order, product,\nleg)` as one booking is the prod-961 defect class this field\nexists to close; reading a shared `(…, component_signature_hash)` row as a\nline is the OTHER standing defect — it renders one booking's quantities N\ntimes, every unit total N× wrong. Stated the same way in\n`api-cloudrun/src/lib/orderProjection.ts`, the manager's since-deleted `orderBookingJoin`,\n`core/src/schemas/pick-sheet.ts` and `manager/src/utils/pickSheet.ts`."
         },
         {
@@ -7139,6 +7401,24 @@
           "doc": "Zod schema for a booking's store allocation.\n\nExported because the pick sheet carries it verbatim — *\"where do I walk\"* is\nthe question that surface exists for, and a narrowed twin of this shape would\nbe a copy to keep in step for no gain."
         },
         {
+          "kind": "typeAlias",
+          "name": "BookingUnitBucketType",
+          "declaration": "type BookingUnitBucketType = indexedAccess;",
+          "doc": "One bucket that holds named units."
+        },
+        {
+          "kind": "variable",
+          "name": "BookingUnitSetsSchema",
+          "declaration": "const BookingUnitSetsSchema: z.ZodType<BookingUnitSetsType>;",
+          "doc": "Zod schema for {@link BookingUnitSetsType}, built the way {@link breakdownObjectSchema} is."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "BookingUnitSetsType",
+          "declaration": "type BookingUnitSetsType = Record<BookingUnitBucketType, number[]>;",
+          "doc": "Which units sit in each bucket of a booking. Each set is a canonical\n`UnitSet` (ascending, unique), and the sets are pairwise disjoint.\n\n`units[k].length` may be LESS than `breakdown[k]`: the difference is the\nbucket's UNTRACKED count, units a bulk → serialized conversion found already\nprepped or out and could not name. It is derived, never stored —\n`untrackedUnitCount` (`@cfs/core/utils/bookings`)."
+        },
+        {
           "kind": "variable",
           "name": "BookingUpdate",
           "declaration": "const BookingUpdate: z.ZodType<BookingUpdateType>;",
@@ -7197,6 +7477,14 @@
           "name": "UpdateBookingResponseType",
           "declaration": "interface UpdateBookingResponseType {\n  success: boolean;\n  version: number;\n  oos_records_written: number;\n}",
           "doc": "Response from `PUT /bookings/{uid}` — the single-row form.\n\nOne row plans to exactly one chunk, so it cannot partially succeed and\ncarries no `failures`/`chunks`. Kept a distinct shape from\n{@link BulkBookingUpdateResponseType} for that reason rather than sharing\none loosened type: N rows and one row genuinely differ in what can go wrong."
+        },
+        {
+          "kind": "function",
+          "name": "emptyBookingUnitSets",
+          "signature": "emptyBookingUnitSets(): BookingUnitSetsType",
+          "doc": "Empty sets in every unit bucket: a seeded booking that names no unit yet.",
+          "paramTags": [],
+          "returnsTag": null
         }
       ]
     },
@@ -7213,7 +7501,7 @@
         {
           "kind": "interface",
           "name": "BookingActionType",
-          "declaration": "interface BookingActionType {\n  rule: CustodyRuleId;\n  quantity: number;\n  uid_out_of_service?: string;\n}",
+          "declaration": "interface BookingActionType {\n  rule: CustodyRuleId;\n  quantity: number;\n  uid_out_of_service?: string;\n  units?: number[];\n}",
           "doc": "One step an operator takes on a booking.\n\n- `uid_out_of_service` — names the record a reclassification or an undo acts\n  on. Optional: an undo without one consumes the booking's open loss records\n  newest first, as the delta form always has.\n\nNo action names a reason: since P2b every reason is its own breakdown key and\nits own rule (`mark_cleaning`, `flag_maintenance_returned`, …)."
         },
         {
@@ -9054,7 +9342,7 @@
         {
           "kind": "interface",
           "name": "CreateOutOfServiceInputType",
-          "declaration": "interface CreateOutOfServiceInputType {\n  uid_product: string;\n  reason: OOSReasonType;\n  quantity: number;\n  dates: typeLiteral;\n  sources?: DocSourceType[];\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n}",
+          "declaration": "interface CreateOutOfServiceInputType {\n  uid_product: string;\n  reason: OOSReasonType;\n  quantity: number;\n  dates: typeLiteral;\n  sources?: DocSourceType[];\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  units?: number[];\n}",
           "doc": "Input for creating an out-of-service record."
         },
         {
@@ -9119,6 +9407,18 @@
         },
         {
           "kind": "variable",
+          "name": "OOSUnitsSchema",
+          "declaration": "const OOSUnitsSchema: z.ZodType<OOSUnitsType>;",
+          "doc": "Zod schema for {@link OOSUnitsType}."
+        },
+        {
+          "kind": "interface",
+          "name": "OOSUnitsType",
+          "declaration": "interface OOSUnitsType {\n  away: number[];\n  flagged: number[];\n  returned_to_service: number[];\n  written_off: number[];\n}",
+          "doc": "Which units sit in each bucket of a record, on a serialized product\n(`api-cloudrun/.claude/plans/serial-tracking.md` D6). Each set is a\ncanonical `UnitSet`, and the sets are pairwise disjoint.\n\n`units[k].length ≤ breakdown[k]`, not `===`: a historic record (24 walkie\nlosses on Replacement lines among them) names no unit at all, and writes off\nwithout vacating anything."
+        },
+        {
+          "kind": "variable",
           "name": "OOS_BREAKDOWN_KEYS",
           "declaration": "const OOS_BREAKDOWN_KEYS: \"flagged\" | \"away\" | \"written_off\" | \"returned_to_service\"[];",
           "doc": "Where a record's units are — see the module docblock's table."
@@ -9144,7 +9444,7 @@
         {
           "kind": "interface",
           "name": "OutOfService",
-          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  destination: BookingDestinationRef | null;\n  uid_destination: string | null;\n  supplier: UidNameRefType | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  units?: OOSUnitsType | null;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  destination: BookingDestinationRef | null;\n  uid_destination: string | null;\n  supplier: UidNameRefType | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An out-of-service record tracking inventory removed from active service."
         },
         {
@@ -9162,7 +9462,7 @@
         {
           "kind": "interface",
           "name": "UpdateOutOfServiceInputType",
-          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uuid_session: string;\n  version: number;\n}",
+          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  units?: OOSUnitsType;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uuid_session: string;\n  version: number;\n}",
           "doc": "Input for updating an out-of-service record.\n\n`breakdown` (when supplied) is the complete next state, Σ ≤ `quantity`. The\nwriter turns each bucket change into the movement that makes it true —\n`flag`, `send_away`, `return_to_service`, `write_off`, or a reversal of one.\n`status` is server-derived; only `\"canceled\"` is honored.\n\n`reason` edits the record IN PLACE, and only among the flag reasons: a\n`lost` ↔ other change is a change of PLACE, not of reason (R3). The writer\nrecords it as a `flag` `{r → r′}`, so the journal keeps the history.\n\n`dates.start` is honored only on a record with no sources (ad-hoc); a\nsource-bound record's start reflects the upstream event that pinned it."
         }
       ]
@@ -9796,7 +10096,7 @@
         {
           "kind": "interface",
           "name": "CreateTransactionInputType",
-          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  supplier?: typeLiteral | null;\n}",
+          "declaration": "interface CreateTransactionInputType {\n  uid_product: string;\n  type: indexedAccess;\n  quantity: number;\n  total_cost_cents: number;\n  date: string;\n  reference: string;\n  uuid_session: string;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n  supplier?: typeLiteral | null;\n}",
           "doc": "Input for creating a manual movement."
         },
         {
@@ -9826,7 +10126,7 @@
         {
           "kind": "interface",
           "name": "MovementAllocationInputType",
-          "declaration": "interface MovementAllocationInputType {\n  uid_location: string;\n  quantity: number;\n}",
+          "declaration": "interface MovementAllocationInputType {\n  uid_location: string;\n  quantity: number;\n  units?: number[];\n}",
           "doc": "One requested placement of `quantity` units. Direction-agnostic on purpose:\n{@link MOVEMENT_CONTRACTS} decides whether it lands on `location.from` or\n`location.to`, so the client never has to know which way a type moves."
         },
         {
@@ -9908,6 +10208,18 @@
           "doc": "Zod schema for one identified unit on a movement."
         },
         {
+          "kind": "variable",
+          "name": "MovementUnitInput",
+          "declaration": "const MovementUnitInput: z.ZodType<MovementUnitInputType>;",
+          "doc": "Zod schema for {@link MovementUnitInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "MovementUnitInputType",
+          "declaration": "interface MovementUnitInputType {\n  number: number;\n  serial_number?: string;\n}",
+          "doc": "One unit a manual movement names. `serial_number` only on an in-type\n({@link UNIT_SERIAL_IN_TYPES}): the serial the unit arrives with, which\nopens its serial history."
+        },
+        {
           "kind": "interface",
           "name": "MovementUnitType",
           "declaration": "interface MovementUnitType {\n  uid_unit: string;\n  number: number;\n  serial_number: string | null;\n}",
@@ -9946,8 +10258,14 @@
         {
           "kind": "interface",
           "name": "StoreTransferLineInputType",
-          "declaration": "interface StoreTransferLineInputType {\n  from: string;\n  to: string;\n  quantity: number;\n  oos: typeLiteral | null;\n}",
+          "declaration": "interface StoreTransferLineInputType {\n  from: string;\n  to: string;\n  quantity: number;\n  oos: typeLiteral | null;\n  units?: number[];\n}",
           "doc": "One line of a transfer: `quantity` units leave location `from` for location\n`to`. `oos` says WHICH units:\n\n - `null` — units that are in service;\n - `{ uid }` — THAT out-of-service record's flagged units, which travel with\n   their flag. The server writes them as a `transfer {r → r}` naming the\n   record in `sources[]`, checks the record has that many flagged units on\n   `from`, and re-derives its `stores[]`.\n\nEvery key is required; `null` is an answer. The client sends the record's\nidentity only — its reason and number are the server's to read."
+        },
+        {
+          "kind": "variable",
+          "name": "UNIT_SERIAL_IN_TYPES",
+          "declaration": "const UNIT_SERIAL_IN_TYPES: \"purchase\" | \"find\" | \"make\" | \"opening_balance\" | \"adjustment_increase\"[];",
+          "doc": "The manual types that bring a unit IN to CFS ownership, so may carry the\nserial it arrives with. Every other type names units by number only: a serial\nchanges on an existing number through `PUT /units/{uid}`, never by moving it."
         },
         {
           "kind": "variable",
@@ -9960,6 +10278,14 @@
           "name": "UpdateTransactionInputType",
           "declaration": "interface UpdateTransactionInputType {\n  reference: string;\n  version: number;\n}",
           "doc": "Input for editing a movement's descriptive fields.\n\n**Balance-affecting fields are absent by design.** Quantity, type, cost,\nplacement and date change through a reversal plus a corrected event, not an\nin-place edit — that is what makes the collection a journal rather than a\nmutable table. Only `reference` still edits in place."
+        },
+        {
+          "kind": "function",
+          "name": "allocationUnitsIssue",
+          "signature": "allocationUnitsIssue(numbers: readonly number[] | undefined, allocations: readonly MovementAllocationInputType[] | undefined): string | null",
+          "doc": "What is wrong with how an input's allocations name its units, or `null`.\n\nEither no allocation names units, or every one does and together they name\nexactly `numbers` — the input's own list — each unit once. Shared by\n`CreateTransactionInput` and `CreateOutOfServiceInput`, so the two inputs\nthat place units on shelves cannot disagree about it.",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",
@@ -9989,8 +10315,50 @@
     },
     {
       "entrypoint": "@cfs/core/schemas/unit",
-      "moduleDoc": "Serialized units — the primitives a unit number and its serial are checked\nagainst wherever they appear.\n\nToday this module holds only the two scalars that movements already carry\n(`MovementUnit` in `src/schemas/transaction.ts`). The `units` document, its\nroster and their inputs land here next\n(`api-cloudrun/.claude/plans/serial-tracking.md` § *Schemas (core)*, phase P2). The\ndependency runs one way: `src/schemas/transaction.ts` imports from here, never the\nreverse, so the unit document can later name movements without a cycle.\n\nThe id, `UnitId` (`unit-{number}`), lives with every other id shape in\n`_uid.ts`.",
+      "moduleDoc": "Serialized units — Firestore collection: `units`.\n\nOne document per unit NUMBER, the asset tag the operator reads off the unit.\nThe number is the identity; the serial is a changeable attribute (owner\nruling 2026-09-21): a replaced radio keeps its number and takes a new serial,\nand a tent has a number and no serial at all.\n\nWhere a unit IS right now is not on this document. That is the roster\n(`unit-roster.ts`, one document per product), which only the ledger writer\nwrites. This document holds what the roster cannot: the serial, its history,\nand whether the number is in use (`status`). The four places and their one\njob each are in `api-cloudrun/.claude/plans/serial-tracking.md` §\n*Architecture*.\n\nThe dependency runs one way: `src/schemas/transaction.ts` imports from here,\nnever the reverse, so this module may not import it. A movement id is named\nthrough `MovementId` in `_uid.ts`, which both modules share.\n\nThe id, `UnitId` (`unit-{number}`), lives with every other id shape in\n`_uid.ts`. That `uid === unit-${number}` holds is checked on the API's write\npath rather than refined here: a refine would leave `getTestDoc` unable to\nbuild the document without an `OVERRIDES` entry (`tests/testing.test.ts`).\n\n⚠️ **Not an activity-feed collection, deliberately.** It carries actors, but\na bulk serial paste is hundreds of rows of noise in the feed, and the feed's\ndistinct permissions sit 5 under Firestore's `in` cap of 30\n(`ACTIVITY_READ_PERMISSION_BY_COLLECTION`, `schemas/activity.ts`). A unit's\nhistory is already two queries: `serial_history` here, and the movements\nwhose `query_by_unit_number` contains it.",
       "symbols": [
+        {
+          "kind": "variable",
+          "name": "CreateUnitsInput",
+          "declaration": "const CreateUnitsInput: z.ZodType<CreateUnitsInputType>;",
+          "doc": "Zod schema for {@link CreateUnitsInputType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CreateUnitsInputType",
+          "declaration": "type CreateUnitsInputType = typeLiteral | typeLiteral;",
+          "doc": "Body of `POST /products/{uid}/units`: mint `vacant` numbers for a product.\n\n- `count` — the next `count` numbers in the product's block, assigned by the\n  server (`max + 1 …`).\n- `explicit` — exactly these numbers.\n\n⚠️ **No serial, in either arm.** A created number is `vacant`, and a vacant\nnumber carries no serial (`UnitSchema`'s refine), so a serial here would\nhave 500'd inside the create. A serial arrives with ACTIVATION — on the\nownership movement that brings the unit in (`CreateTransactionInput.units`),\nor afterwards through `PUT /units/{uid}` with reason `initial`.\n\n`uuid_session` is the create's idempotency key, as on\n`CreateOutOfServiceInput`: a retried count-mode create replays the batch\nrather than minting a second run of numbers."
+        },
+        {
+          "kind": "variable",
+          "name": "MAX_UNITS_PER_CREATE",
+          "declaration": "const MAX_UNITS_PER_CREATE: 400;",
+          "doc": "The most units one create may mint, in either mode."
+        },
+        {
+          "kind": "variable",
+          "name": "MAX_UNITS_PER_ROSTER",
+          "declaration": "const MAX_UNITS_PER_ROSTER: 5000;",
+          "doc": "The most units one product's roster may hold before it has to be split by\nnumber block. It also caps every {@link UnitSet}, so no single set can name\nmore units than one roster document is sized for (about 120 B per `out`\nentry, so 5,000 is roughly 600 KB against Firestore's 1 MiB)."
+        },
+        {
+          "kind": "variable",
+          "name": "SERIAL_CHANGE_REASONS",
+          "declaration": "const SERIAL_CHANGE_REASONS: \"initial\" | \"replaced\" | \"corrected\"[];",
+          "doc": "Why a serial was set on a number.\n\n- `initial` — the first serial recorded for the number (a create, a\n  conversion, or a later bulk paste).\n- `replaced` — a different physical unit took over the number.\n- `corrected` — the previous entry was mis-typed; the unit did not change."
+        },
+        {
+          "kind": "variable",
+          "name": "SerialChangeReasonEnum",
+          "declaration": "const SerialChangeReasonEnum: z.ZodType<SerialChangeReasonType>;",
+          "doc": "Zod schema for {@link SerialChangeReasonType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SerialChangeReasonType",
+          "declaration": "type SerialChangeReasonType = indexedAccess;",
+          "doc": "One serial-change reason. See {@link SERIAL_CHANGE_REASONS}."
+        },
         {
           "kind": "variable",
           "name": "SerialNumber",
@@ -9999,9 +10367,159 @@
         },
         {
           "kind": "variable",
+          "name": "UNIT_STATUSES",
+          "declaration": "const UNIT_STATUSES: \"active\" | \"vacant\" | \"retired\"[];",
+          "doc": "Whether a number is in use.\n\n- `active` — owned, and on the product's roster.\n- `vacant` — not owned right now (sold, written off, never activated). The\n  number can take a replacement unit with a new serial. EVERY departure\n  leaves a number vacant (owner, 2026-10-03); nothing retires one implicitly.\n- `retired` — never to be reused. Only an operator retires a number, and only\n  from `vacant`."
+        },
+        {
+          "kind": "variable",
+          "name": "UNIT_USER_SERIAL_REASONS",
+          "declaration": "const UNIT_USER_SERIAL_REASONS: \"initial\" | \"replaced\" | \"corrected\"[];",
+          "doc": "The reasons `PUT /units/{uid}` may send. Today every reason; kept as its own\nlist, the `OOS_USER_STATUSES` pattern, so narrowing what an operator may send\ndoes not narrow what storage may hold."
+        },
+        {
+          "kind": "variable",
+          "name": "UNIT_USER_STATUSES",
+          "declaration": "const UNIT_USER_STATUSES: \"retired\"[];",
+          "doc": "The statuses `PUT /units/{uid}` may ask for: only `retired`, and the server\nhonours it only from `vacant`. `active` and `vacant` are reached by ownership\nmovements, never set by hand."
+        },
+        {
+          "kind": "variable",
           "name": "UnitNumber",
           "declaration": "const UnitNumber: z.ZodType<number>;",
           "doc": "A unit's number: the asset tag the operator reads off the unit, and the\nunit's identity (owner ruling 2026-09-21). Globally unique across products."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitSchema",
+          "declaration": "const UnitSchema: z.ZodType<UnitType>;",
+          "doc": "Zod schema for {@link UnitType}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitSerialChangeInputType",
+          "declaration": "interface UnitSerialChangeInputType {\n  serial_number: string | null;\n  reason: UnitUserSerialReasonType;\n  notes: string;\n}",
+          "doc": "A serial change sent to `PUT /units/{uid}`."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitSerialHistoryEntry",
+          "declaration": "const UnitSerialHistoryEntry: z.ZodType<UnitSerialHistoryEntryType>;",
+          "doc": "Zod schema for {@link UnitSerialHistoryEntryType}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitSerialHistoryEntryType",
+          "declaration": "interface UnitSerialHistoryEntryType {\n  serial_number: string;\n  start: string;\n  end: string | null;\n  reason: SerialChangeReasonType;\n  uid_movement: string | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
+          "doc": "One serial a number has carried, and over which span.\n\nThe acquisition reference lives HERE, per entry, rather than once per unit: a\nreplacement re-points the number at a new physical unit, and a single\nunit-level field would lose the original acquisition. The unit's CURRENT\nacquisition is the open entry's `uid_movement`."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitSet",
+          "declaration": "const UnitSet: z.ZodType<number[]>;",
+          "doc": "A canonical set of unit numbers: strictly ascending, no duplicates.\n\nUnsorted input and duplicates are REFUSED, never normalized. A client that\nholds a set in some other order canonicalizes it with `normalizeUnitSet`\n(`@cfs/core/utils/units`) before sending; a server that silently sorted would\nhide a client building the set wrong."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitStatusEnum",
+          "declaration": "const UnitStatusEnum: z.ZodType<UnitStatusType>;",
+          "doc": "Zod schema for {@link UnitStatusType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitStatusType",
+          "declaration": "type UnitStatusType = indexedAccess;",
+          "doc": "One unit status. See {@link UNIT_STATUSES}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitType",
+          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A unit number, its current serial and its history."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitUserSerialReasonEnum",
+          "declaration": "const UnitUserSerialReasonEnum: z.ZodType<UnitUserSerialReasonType>;",
+          "doc": "Zod schema for {@link UnitUserSerialReasonType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitUserSerialReasonType",
+          "declaration": "type UnitUserSerialReasonType = indexedAccess;",
+          "doc": "One reason an operator may send."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitUserStatusEnum",
+          "declaration": "const UnitUserStatusEnum: z.ZodType<UnitUserStatusType>;",
+          "doc": "Zod schema for {@link UnitUserStatusType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitUserStatusType",
+          "declaration": "type UnitUserStatusType = indexedAccess;",
+          "doc": "One status an operator may ask for."
+        },
+        {
+          "kind": "variable",
+          "name": "UpdateUnitInput",
+          "declaration": "const UpdateUnitInput: z.ZodType<UpdateUnitInputType>;",
+          "doc": "Zod schema for {@link UpdateUnitInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "UpdateUnitInputType",
+          "declaration": "interface UpdateUnitInputType {\n  version: number;\n  serial?: UnitSerialChangeInputType;\n  status?: UnitUserStatusType;\n}",
+          "doc": "Body of `PUT /units/{uid}`: change the serial, retire the number, or both.\n\nA serial remap does NOT cascade into past movements — `MovementUnit` keeps\nthe serial as a snapshot of the moment it moved."
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/schemas/unit-roster",
+      "moduleDoc": "UnitRoster document schema — Firestore collection: `unit-rosters`.\n\nThe cross-booking index of a serialized product: where each of its units is\nright now. One document per product, id = the product uid (the `stock-locks`\npattern in `schemas/stock.ts`).\n\n## One author: the ledger writer\n\nThe roster is a FOLD of the movement journal — `foldRosterUnits`\n(`@cfs/core/utils/units`) over every movement's `units` / `lines[].units` —\nand only api-cloudrun's ledger writer (`commitLedgerMovements`) writes it,\nonce per serialized product per batch, under its `updateTime` precondition.\nBooking, out-of-service, store-transfer, unit-admin and conversion writers\nnever touch it; they put units on their movements and that is all. The one\nlifecycle writer (seed and delete, on a `stock_method` change or a create) is\n`api-cloudrun/src/services/products.ts`, as it already is for the ledger.\n`api-cloudrun/.claude/plans/serial-tracking.md` D5 has the reasoning.\n\n## Why one document per product\n\nA 200-radio check-out against one document per unit is 200 writes inside\ntwo 450-write budgets, and a product cannot be split across chunks. The\nroster costs one. Its keys are the product's ACTIVE numbers exactly, so\n`count(keys) === inventory-ledgers/{P}.quantity_held` on a seeded product.\n\n⚠️ **`units` needs a single-field index EXEMPTION** (api-cloudrun Terraform).\nWithout it every subfield is re-indexed on every write, against Firestore's\n40,000 index entries per document.\n\nAvailability never reads this. `stock/{P}` stays anonymous counts, and no\nunit identity reaches it.",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "UNIT_ROSTER_STATES",
+          "declaration": "const UNIT_ROSTER_STATES: \"shelf\" | \"prepped\" | \"out\" | \"away\" | \"unattributed_out\"[];",
+          "doc": "The states a rostered unit can be in. See {@link UnitRosterEntryType}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitRoster",
+          "declaration": "interface UnitRoster {\n  uid: string;\n  uid_product: string;\n  units: Record<string, UnitRosterEntryType>;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "One serialized product's roster. See the module docblock."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitRosterEntry",
+          "declaration": "const UnitRosterEntry: z.ZodType<UnitRosterEntryType>;",
+          "doc": "Zod schema for {@link UnitRosterEntryType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitRosterEntryType",
+          "declaration": "type UnitRosterEntryType = typeLiteral | typeLiteral | typeLiteral | typeLiteral | typeLiteral;",
+          "doc": "Where one unit is.\n\n- `shelf` — on a CFS shelf. `flag` is the out-of-service reason it carries\n  there (damaged, cleaning, maintenance), with the record that flagged it;\n  both `null` for a unit in service. A flagged unit is never offered for\n  prep or check-out.\n- `prepped` — picked onto a booking's prep shelf; still physically at\n  `uid_location`.\n- `out` — at a customer, on `uid_booking`.\n- `away` — standing AT an out-of-service record: lost, or at the record's\n  destination (a vendor). Never offered.\n- `unattributed_out` — written only by the bulk → serialized conversion: a\n  unit that is out on some booking, but which booking's number it is was\n  never recorded. The physical count resolves these as ordinary custody.\n\nThe id fields are typed per state rather than a polymorphic `DocSource`,\nbecause the discriminant already fixes which collection each names.\n`OutOfServiceId`, not `FirestoreId`: a loss record's id is its opening\nmovement's (`MovementId`-shaped), so `FirestoreId` would refuse every\n`mark_lost` unit."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitRosterKey",
+          "declaration": "const UnitRosterKey: z.ZodType<string>;",
+          "doc": "A roster key: a unit number as Firestore spells a map key — decimal, no\nleading zero, never `0`. The same spelling as `UnitId`'s number segment."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitRosterSchema",
+          "declaration": "const UnitRosterSchema: z.ZodType<UnitRoster>;",
+          "doc": "Zod schema for {@link UnitRoster}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitRosterStateType",
+          "declaration": "type UnitRosterStateType = indexedAccess;",
+          "doc": "One roster state."
         }
       ]
     },
@@ -11751,7 +12269,7 @@
         {
           "kind": "variable",
           "name": "PERMISSIONS",
-          "declaration": "const PERMISSIONS: \"orders.create\" | \"orders.read\" | \"orders.update\" | \"orders.delete\" | \"orders.search\" | \"orders.checkout\" | \"orders.return\" | \"products.create\" | \"products.read\" | \"products.update\" | \"products.delete\" | \"products.search\" | \"webshopProducts.read\" | \"webshopProducts.search\" | \"contacts.create\" | \"contacts.read\" | \"contacts.update\" | \"contacts.delete\" | \"contacts.search\" | \"organizations.create\" | \"organizations.read\" | \"organizations.update\" | \"organizations.delete\" | \"organizations.search\" | \"transactions.create\" | \"transactions.read\" | \"transactions.update\" | \"transactions.delete\" | \"invoices.create\" | \"invoices.read\" | \"invoices.update\" | \"invoices.delete\" | \"invoices.search\" | \"settlements.create\" | \"settlements.read\" | \"settlements.reverse\" | \"creditNotes.create\" | \"creditNotes.read\" | \"creditNotes.update\" | \"creditNotes.void\" | \"creditNotes.search\" | \"quotes.create\" | \"quotes.read\" | \"quotes.update\" | \"quotes.delete\" | \"statements.create\" | \"statements.read\" | \"statements.update\" | \"statements.delete\" | \"locations.create\" | \"locations.read\" | \"locations.update\" | \"locations.delete\" | \"locations.search\" | \"locationTypes.create\" | \"locationTypes.read\" | \"locationTypes.update\" | \"locationTypes.delete\" | \"departmentTypes.create\" | \"departmentTypes.read\" | \"departmentTypes.update\" | \"departmentTypes.delete\" | \"stores.create\" | \"stores.read\" | \"stores.update\" | \"stores.delete\" | \"stores.search\" | \"taxCodes.create\" | \"taxCodes.read\" | \"taxCodes.update\" | \"taxRates.create\" | \"taxRates.read\" | \"taxRates.update\" | \"taxClasses.create\" | \"taxClasses.read\" | \"taxClasses.update\" | \"suppliers.create\" | \"suppliers.read\" | \"suppliers.update\" | \"suppliers.delete\" | \"suppliers.search\" | \"tags.create\" | \"tags.read\" | \"tags.update\" | \"tags.delete\" | \"tags.search\" | \"trackingCategories.create\" | \"trackingCategories.read\" | \"trackingCategories.update\" | \"trackingCategories.delete\" | \"trackingCategories.search\" | \"holidays.create\" | \"holidays.read\" | \"holidays.update\" | \"holidays.delete\" | \"billingSettings.update\" | \"templates.create\" | \"templates.read\" | \"templates.search\" | \"templates.propose\" | \"templates.release\" | \"templates.merge\" | \"templates.rollback\" | \"templates.blessGolden\" | \"templates.archive\" | \"lists.create\" | \"lists.read\" | \"lists.update\" | \"lists.delete\" | \"cards.create\" | \"cards.read\" | \"cards.update\" | \"cards.delete\" | \"cards.search\" | \"recurrences.create\" | \"recurrences.read\" | \"recurrences.update\" | \"recurrences.delete\" | \"bookings.read\" | \"bookings.search\" | \"bookings.update\" | \"chartOfAccounts.read\" | \"chartOfAccounts.search\" | \"dateHelpers.read\" | \"destinations.read\" | \"destinations.search\" | \"destinations.update\" | \"ledgers.read\" | \"fulfillment.read\" | \"fulfillment.search\" | \"fulfillment.update\" | \"fulfillment.reset\" | \"outOfService.create\" | \"outOfService.read\" | \"outOfService.update\" | \"outOfService.delete\" | \"outOfService.search\" | \"stockSummaries.read\" | \"typesenseSync.read\" | \"users.read\" | \"users.update\" | \"users.delete\" | \"users.invite\" | \"users.search\" | \"users.assignRoles\" | \"roles.read\" | \"roles.edit\" | \"threads.create\" | \"threads.read\" | \"threads.update\" | \"threads.search\" | \"comments.create\" | \"comments.read\" | \"comments.update\" | \"comments.delete\" | \"comments.moderate\" | \"comments.search\" | \"comments.react\" | \"uploads.sign\" | \"activities.read\" | \"reports.read\" | \"reports.readFinancial\" | \"admin.reindex\" | \"admin.validate\" | \"admin.sync\" | \"admin.previewRole\"[];",
+          "declaration": "const PERMISSIONS: \"orders.create\" | \"orders.read\" | \"orders.update\" | \"orders.delete\" | \"orders.search\" | \"orders.checkout\" | \"orders.return\" | \"products.create\" | \"products.read\" | \"products.update\" | \"products.delete\" | \"products.search\" | \"webshopProducts.read\" | \"webshopProducts.search\" | \"contacts.create\" | \"contacts.read\" | \"contacts.update\" | \"contacts.delete\" | \"contacts.search\" | \"organizations.create\" | \"organizations.read\" | \"organizations.update\" | \"organizations.delete\" | \"organizations.search\" | \"transactions.create\" | \"transactions.read\" | \"transactions.update\" | \"transactions.delete\" | \"invoices.create\" | \"invoices.read\" | \"invoices.update\" | \"invoices.delete\" | \"invoices.search\" | \"settlements.create\" | \"settlements.read\" | \"settlements.reverse\" | \"creditNotes.create\" | \"creditNotes.read\" | \"creditNotes.update\" | \"creditNotes.void\" | \"creditNotes.search\" | \"quotes.create\" | \"quotes.read\" | \"quotes.update\" | \"quotes.delete\" | \"statements.create\" | \"statements.read\" | \"statements.update\" | \"statements.delete\" | \"locations.create\" | \"locations.read\" | \"locations.update\" | \"locations.delete\" | \"locations.search\" | \"locationTypes.create\" | \"locationTypes.read\" | \"locationTypes.update\" | \"locationTypes.delete\" | \"departmentTypes.create\" | \"departmentTypes.read\" | \"departmentTypes.update\" | \"departmentTypes.delete\" | \"stores.create\" | \"stores.read\" | \"stores.update\" | \"stores.delete\" | \"stores.search\" | \"taxCodes.create\" | \"taxCodes.read\" | \"taxCodes.update\" | \"taxRates.create\" | \"taxRates.read\" | \"taxRates.update\" | \"taxClasses.create\" | \"taxClasses.read\" | \"taxClasses.update\" | \"suppliers.create\" | \"suppliers.read\" | \"suppliers.update\" | \"suppliers.delete\" | \"suppliers.search\" | \"tags.create\" | \"tags.read\" | \"tags.update\" | \"tags.delete\" | \"tags.search\" | \"trackingCategories.create\" | \"trackingCategories.read\" | \"trackingCategories.update\" | \"trackingCategories.delete\" | \"trackingCategories.search\" | \"holidays.create\" | \"holidays.read\" | \"holidays.update\" | \"holidays.delete\" | \"billingSettings.update\" | \"templates.create\" | \"templates.read\" | \"templates.search\" | \"templates.propose\" | \"templates.release\" | \"templates.merge\" | \"templates.rollback\" | \"templates.blessGolden\" | \"templates.archive\" | \"lists.create\" | \"lists.read\" | \"lists.update\" | \"lists.delete\" | \"cards.create\" | \"cards.read\" | \"cards.update\" | \"cards.delete\" | \"cards.search\" | \"recurrences.create\" | \"recurrences.read\" | \"recurrences.update\" | \"recurrences.delete\" | \"bookings.read\" | \"bookings.search\" | \"bookings.update\" | \"chartOfAccounts.read\" | \"chartOfAccounts.search\" | \"dateHelpers.read\" | \"destinations.read\" | \"destinations.search\" | \"destinations.update\" | \"ledgers.read\" | \"fulfillment.read\" | \"fulfillment.search\" | \"fulfillment.update\" | \"fulfillment.reset\" | \"outOfService.create\" | \"outOfService.read\" | \"outOfService.update\" | \"outOfService.delete\" | \"outOfService.search\" | \"stockSummaries.read\" | \"typesenseSync.read\" | \"units.create\" | \"units.read\" | \"units.update\" | \"users.read\" | \"users.update\" | \"users.delete\" | \"users.invite\" | \"users.search\" | \"users.assignRoles\" | \"roles.read\" | \"roles.edit\" | \"threads.create\" | \"threads.read\" | \"threads.update\" | \"threads.search\" | \"comments.create\" | \"comments.read\" | \"comments.update\" | \"comments.delete\" | \"comments.moderate\" | \"comments.search\" | \"comments.react\" | \"uploads.sign\" | \"activities.read\" | \"reports.read\" | \"reports.readFinancial\" | \"admin.reindex\" | \"admin.validate\" | \"admin.sync\" | \"admin.previewRole\"[];",
           "doc": "The full catalog of permissions. Adding a new route? Add its permission here first."
         },
         {
@@ -12137,6 +12655,14 @@
           "doc": "Units that reached a terminal key: back, or out of service with a reason.",
           "paramTags": [],
           "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "untrackedUnitCount",
+          "signature": "untrackedUnitCount(booking: Pick<Booking, \"breakdown\" | \"units\">, key: BookingUnitBucketType): number",
+          "doc": "How many of a bucket's units are UNTRACKED on a unit-tracked booking:\n`breakdown[k] − units[k].length`. Units a bulk → serialized conversion found\nalready prepped or out and could not name (`api-cloudrun/.claude/plans/serial-tracking.md`\nD1, D9).\n\nDerived, never stored: given the booking refine `units[k].length ≤\nbreakdown[k]`, a stored copy could only restate this, so it could only drift.\n`0` on a booking that is not unit-tracked (`units` `null` or absent), where\nthe question does not arise.",
+          "paramTags": [],
+          "returnsTag": null
         }
       ]
     },
@@ -12153,7 +12679,7 @@
         {
           "kind": "interface",
           "name": "CustodyApplication",
-          "declaration": "interface CustodyApplication {\n  breakdown: FullBookingBreakdown;\n  status: indexedAccess;\n  transitions: CustodyTransition[];\n}",
+          "declaration": "interface CustodyApplication {\n  breakdown: FullBookingBreakdown;\n  status: indexedAccess;\n  transitions: CustodyTransition[];\n  units: BookingUnitSetsType | null;\n}",
           "doc": "What a list of actions does to a booking."
         },
         {
@@ -12165,8 +12691,8 @@
         {
           "kind": "typeAlias",
           "name": "CustodyBooking",
-          "declaration": "type CustodyBooking = Pick<Booking, \"type\" | \"breakdown\" | \"quantity\" | \"status\">;",
-          "doc": "A booking as the ruleset reads it."
+          "declaration": "type CustodyBooking = Pick<Booking, \"type\" | \"breakdown\" | \"quantity\" | \"status\" | \"units\">;",
+          "doc": "A booking as the ruleset reads it. `units` is read when present: `null` or\nabsent means the booking is not unit-tracked, and its actions may name no\nunits."
         },
         {
           "kind": "interface",
@@ -12213,7 +12739,7 @@
         {
           "kind": "interface",
           "name": "CustodyTransition",
-          "declaration": "interface CustodyTransition {\n  rule: CustodyRuleId;\n  type: MovementTypeType;\n  from: BookingBreakdownKeyType;\n  to: BookingBreakdownKeyType;\n  quantity: number;\n  service: typeLiteral | null;\n}",
+          "declaration": "interface CustodyTransition {\n  rule: CustodyRuleId;\n  type: MovementTypeType;\n  from: BookingBreakdownKeyType;\n  to: BookingBreakdownKeyType;\n  quantity: number;\n  service: typeLiteral | null;\n  units: number[];\n}",
           "doc": "One movement's worth of custody change, as the journal will record it."
         },
         {
@@ -17996,6 +18522,114 @@
           "name": "validateTaxSetup",
           "signature": "validateTaxSetup(catalog: TaxCatalog): TaxSetupViolation[]",
           "doc": "**The cross-document invariants of the tax catalog.** An empty array is the\nhealthy answer.\n\nOne function, three callers, which is the drift resistance the plan asks for:\nevery API writer of a code, rate or class runs it on the catalog AS IT WOULD\nBE after the write and refuses on any violation; `audit-tax-catalog.ts` runs\nit on the stored catalog; and the daily watch runs it too.\n\n| code | why it is a defect |\n|---|---|\n| `multiple_percent_rates` | an active class has two percent rates live for one jurisdiction at one instant. Xero takes one TaxType per line, and it is how a line would get double sales tax |\n| `rate_overlap` | two versions of one code bracket one instant — pricing cannot pick |\n| `rate_gap` | an interior hole between two versions of one code. A schedule lapsing at the END is a review, not this; see `UnreviewedTaxWarning` |\n| `effective_after_applied` | a rate's `effective_from` is after its `applied_from` — CFS priced at it before it existed in law. The ordinary late discovery is the reverse |\n| `xero_tax_type_lost` | a percent code's successor rate has no Xero `TaxType` where its predecessor had one, so the invoice push sends `TaxType: NONE` and Xero bills $0 tax while CFS bills the rate. Conditioned on the predecessor: a flat code never has one |\n| `rate_type_mismatch` | a rate's `type` copy disagrees with its code's, so the unit it renders is wrong |\n| `orphan_rate` / `unknown_code_in_class` | a reference to nothing |\n| `inactive_code_in_class` | an ACTIVE class draws from a code an operator retired |\n| `duplicate_type_default` | two active classes both preselect one product type |\n| `missing_type_default` | no active class is the default for a line type, so a line with no product class (a custom line, or a product whose class is null) stamps `uid_tax_class: null` — which the line schema refuses, so every order or invoice write carrying one would 400 |\n| `duplicate_*_name` | a label that no longer identifies one thing (whole collection, inactive included) |\n\n⚠️ **Jurisdictions are the TAX vocabulary, not the live registrations.** A\nclosed registration (paxton) still has codes and rates, and a class listing\ntwo percent codes there is still a contradiction for the frozen documents\nthat resolve it — so every code jurisdiction is checked, not only\n`COLLECTING_JURISDICTIONS`.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/units",
+      "moduleDoc": "Serialized units, applied: the range text operators type, the canonical\nset every wire carries, the picker's suggestion, and the ONE fold that turns\nmovements into a product's roster.\n\n```ts\nimport { formatUnitRanges, parseUnitRanges, suggestUnits } from \"@cfs/core/utils/units\";\n```\n\nEverything here is pure and platform-free. The manager's picker and the\napi's validation read the same parser; the api's ledger writer and the\n`audit-unit-replay` script run the same {@link foldRosterUnits}.",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "FormatUnitRangesOptions",
+          "declaration": "interface FormatUnitRangesOptions {\n  separator?: string;\n  dash?: string;\n}",
+          "doc": "Options for {@link formatUnitRanges}."
+        },
+        {
+          "kind": "interface",
+          "name": "ParseUnitRangesOptions",
+          "declaration": "interface ParseUnitRangesOptions {\n  max?: number;\n}",
+          "doc": "Options for {@link parseUnitRanges}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ParseUnitRangesResult",
+          "declaration": "type ParseUnitRangesResult = typeLiteral | typeLiteral;",
+          "doc": "The outcome of {@link parseUnitRanges}."
+        },
+        {
+          "kind": "other",
+          "name": "RosterFoldError",
+          "declaredKind": "class",
+          "doc": "A movement that does not fit the roster it is folded into: a unit that is\nnot where the movement says it came from. On the write path that is a\nrefusal (map it to a 409 or 400); in `audit-unit-replay` it is a finding."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "RosterMovement",
+          "declaration": "type RosterMovement = Pick<Movement, \"uid\" | \"type\" | \"uid_booking\" | \"custody\" | \"service\" | \"lines\" | \"units\" | \"sources\">;",
+          "doc": "The movement fields the fold reads."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "RosterUnits",
+          "declaration": "type RosterUnits = Record<string, UnitRosterEntryType>;",
+          "doc": "A roster's `units` map: unit number (as a key) → where it is."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitRange",
+          "declaration": "interface UnitRange {\n  start: number;\n  end: number;\n}",
+          "doc": "One inclusive run of consecutive unit numbers."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitRangeError",
+          "declaration": "interface UnitRangeError {\n  kind: UnitRangeErrorKind;\n  token: string;\n}",
+          "doc": "One refused piece of range text."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitRangeErrorKind",
+          "declaration": "type UnitRangeErrorKind = \"syntax\" | \"reversed\" | \"overlap\" | \"too_many\";",
+          "doc": "Why one piece of range text was refused."
+        },
+        {
+          "kind": "function",
+          "name": "foldRosterUnits",
+          "signature": "foldRosterUnits(roster: RosterUnits, m: RosterMovement): RosterUnits",
+          "doc": "Fold one movement's units into a product's roster, returning the NEW map\n(the input is not mutated, so a rejected group member's fold rolls back by\ndropping the result).\n\nThe one author of roster state: api-cloudrun's ledger writer runs it for\nevery movement it applies, and `audit-unit-replay` runs it over the whole\njournal and diffs against the stored roster\n(`api-cloudrun/.claude/plans/serial-tracking.md` D5). A movement naming no\nunits leaves the roster untouched.\n\nDriven by each line's places, so it needs no knowledge of the movement type\nand a reversal (lines negated, type kept) folds correctly:\n\n| line `to`             | the unit becomes                                       |\n|-----------------------|--------------------------------------------------------|\n| `null` (outside)      | removed — the number is no longer active               |\n| `bookings/B`          | `out` on B                                             |\n| `out-of-service/R`    | `away` at R                                            |\n| `locations/L`         | `prepped` on the booking if custody lands in `prepped`; else `shelf` at L, flagged by the arrival's flag and the record in `sources[]` |\n\n`prep` and `unprep` move nothing physically and have no lines: a prep turns\nan unflagged shelf unit `prepped` where it stands, and an unprep puts it\nback.\n\nEvery unit must be where the line's `from` side says — absent for a unit\ncoming in, `out` on the booking (or `unattributed_out`) for one coming back,\non the shelf with the expected flag, and so on. Anything else throws\n{@link RosterFoldError}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "formatUnitRanges",
+          "signature": "formatUnitRanges(numbers: Iterable<number>, _: unknown): string",
+          "doc": "Unit numbers as the fewest runs a reader can scan: `\"1001–1040, 1045\"`.\nThe form printed on packing lists and invoices, which customers read\n(owner, 2026-09-21). An empty set is `\"\"`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "normalizeUnitSet",
+          "signature": "normalizeUnitSet(numbers: Iterable<number>): number[]",
+          "doc": "The one client-side canonicalizer: ascending, each number once.\n\nThe wire REFUSES a set in any other order (`UnitSet`), so a client that\naccumulates picks in click order runs them through this before sending.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "parseUnitRanges",
+          "signature": "parseUnitRanges(text: string, _: unknown): ParseUnitRangesResult",
+          "doc": "Parse what an operator types — `\"1001-1040, 1045 1050–1052\"` — into a\ncanonical set.\n\nPieces are separated by commas, semicolons or whitespace; a run is\n`start-end` with a hyphen, en dash or em dash, spaces allowed around it. A\npiece that is not a number or a run, a reversed run, a number named twice,\nand more than `max` units are each REFUSED, never repaired: the picker shows\nthe error beside the text rather than guessing what was meant. Every error is\nreported, not just the first.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "suggestUnits",
+          "signature": "suggestUnits(available: Iterable<number>, count: number): number[] | null",
+          "doc": "The units a picker pre-fills when `count` are needed from `available`, or\n`null` when there are not enough.\n\nRanges are the operator's main gesture (owner, 2026-09-21), so the\nsuggestion is the FEWEST runs: a single run long enough wins, the lowest such\nrun first. Failing that, the `k` longest runs for the smallest `k` that\ncovers `count` (longer first, then lower start), filled in ascending order and\ntrimmed at the high end. Deterministic for a given input, so two clients\nsuggest the same units.\n\n`available` is whatever the caller may offer — unflagged shelf units for a\nprep — and need not be sorted.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "toUnitRanges",
+          "signature": "toUnitRanges(numbers: Iterable<number>): UnitRange[]",
+          "doc": "The fewest inclusive runs covering `numbers`, ascending.",
           "paramTags": [],
           "returnsTag": null
         }

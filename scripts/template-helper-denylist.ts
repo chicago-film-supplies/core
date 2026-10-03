@@ -742,4 +742,16 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "canonicalChargeWindows",
     "chicagoDaysBetween",
   ],
+  // Serialized units (api-cloudrun serial-tracking P2). A document PRINTS units —
+  // `formatUnitRanges` / `toUnitRanges` stay emitted for the packing list,
+  // invoice and "Serialized item details" (P5). The rest is input and write-path
+  // machinery: parsing what an operator types, canonicalizing a picker's set,
+  // the picker's suggestion, and the roster fold that only the ledger writer and
+  // its audit run.
+  units: [
+    "foldRosterUnits",
+    "normalizeUnitSet",
+    "parseUnitRanges",
+    "suggestUnits",
+  ],
 };

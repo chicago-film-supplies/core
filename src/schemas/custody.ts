@@ -38,6 +38,7 @@
  */
 import { z } from "zod";
 import { BookingId, OutOfServiceId } from "./_uid.ts";
+import { UnitSet } from "./unit.ts";
 import type { BookingBreakdownKeyType } from "./booking.ts";
 import type { MovementTypeType } from "./transaction.ts";
 import type { EnforcementRef } from "./propagation/types.ts";
@@ -602,6 +603,22 @@ export interface BookingActionType {
   rule: CustodyRuleId;
   quantity: number;
   uid_out_of_service?: string;
+  /**
+   * Which units this step moves, on a serialized product: a canonical
+   * `UnitSet` of exactly `quantity` numbers. Absent on a bulk product.
+   *
+   * Each rung names the units it moves and a rewind names the units it
+   * rewinds, so a booking's unit sets are a fold of its actions
+   * (`applyCustodyActions`) with nothing inferred. Once a product's roster is
+   * seeded, the api refuses a serialized row's action WITHOUT units, except an
+   * `unprep` of an untracked prepped count, which drains a count no unit was
+   * ever named for (`api-cloudrun/.claude/plans/serial-tracking.md` D1).
+   *
+   * ⚠️ **Release order:** this schema is a `z.object`, so an api older than
+   * this field STRIPS `units` silently. The api release that reads it must be
+   * live in prod before the manager sends it.
+   */
+  units?: number[];
 }
 
 /** Zod schema for {@link BookingActionType}. */
@@ -609,6 +626,10 @@ export const BookingAction: z.ZodType<BookingActionType> = z.object({
   rule: CustodyRuleIdEnum,
   quantity: z.int().min(1),
   uid_out_of_service: OutOfServiceId.optional(),
+  units: UnitSet.optional(),
+}).refine((a) => a.units === undefined || a.units.length === a.quantity, {
+  message: "an action that names units names exactly `quantity` of them",
+  path: ["units"],
 });
 
 /**

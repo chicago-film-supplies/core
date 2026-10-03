@@ -49,7 +49,7 @@
  */
 import { z } from "zod";
 import { BookingId, FirestoreId, MovementId, OutOfServiceId, UnitId } from "./_uid.ts";
-import { SerialNumber, UnitNumber } from "./unit.ts";
+import { SerialNumber, UnitNumber, UnitSet } from "./unit.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
@@ -1693,12 +1693,71 @@ const MANUAL_MOVEMENT_TYPES = [
 export interface MovementAllocationInputType {
   uid_location: string;
   quantity: number;
+  /**
+   * Which units this placement moves, on a serialized product: a canonical
+   * `UnitSet` of exactly `quantity` numbers. When one allocation names units,
+   * every allocation does, and together they partition the input's own unit
+   * list (see {@link allocationUnitsIssue}).
+   */
+  units?: number[];
 }
 
 /** Zod schema for one requested placement. */
 export const MovementAllocationInput: z.ZodType<MovementAllocationInputType> = z.object({
   uid_location: FirestoreId,
   quantity: z.number().int().positive(),
+  units: UnitSet.optional(),
+}).refine((a) => a.units === undefined || a.units.length === a.quantity, {
+  message: "an allocation that names units names exactly `quantity` of them",
+  path: ["units"],
+});
+
+/**
+ * What is wrong with how an input's allocations name its units, or `null`.
+ *
+ * Either no allocation names units, or every one does and together they name
+ * exactly `numbers` — the input's own list — each unit once. Shared by
+ * `CreateTransactionInput` and `CreateOutOfServiceInput`, so the two inputs
+ * that place units on shelves cannot disagree about it.
+ */
+export function allocationUnitsIssue(
+  numbers: readonly number[] | undefined,
+  allocations: readonly MovementAllocationInputType[] | undefined,
+): string | null {
+  if (!allocations) return null;
+  const naming = allocations.filter((a) => a.units !== undefined).length;
+  if (naming === 0) return null;
+  if (naming !== allocations.length) return "when one allocation names units, every allocation must";
+  if (!numbers) return "allocations name units, so the input must list them too";
+  const placed = allocations.flatMap((a) => a.units!).sort((a, b) => a - b);
+  const want = [...numbers].sort((a, b) => a - b);
+  if (placed.length !== want.length || placed.some((n, i) => n !== want[i])) {
+    return "the allocations' units must be exactly the input's units, each placed once";
+  }
+  return null;
+}
+
+/**
+ * The manual types that bring a unit IN to CFS ownership, so may carry the
+ * serial it arrives with. Every other type names units by number only: a serial
+ * changes on an existing number through `PUT /units/{uid}`, never by moving it.
+ */
+export const UNIT_SERIAL_IN_TYPES = ["purchase", "find", "make", "opening_balance", "adjustment_increase"] as const;
+
+/**
+ * One unit a manual movement names. `serial_number` only on an in-type
+ * ({@link UNIT_SERIAL_IN_TYPES}): the serial the unit arrives with, which
+ * opens its serial history.
+ */
+export interface MovementUnitInputType {
+  number: number;
+  serial_number?: string;
+}
+
+/** Zod schema for {@link MovementUnitInputType}. */
+export const MovementUnitInput: z.ZodType<MovementUnitInputType> = z.object({
+  number: UnitNumber,
+  serial_number: SerialNumber.optional(),
 });
 
 /** Input for creating a manual movement. */
@@ -1711,6 +1770,14 @@ export interface CreateTransactionInputType {
   reference: string;
   uuid_session: string;
   allocations?: MovementAllocationInputType[];
+  /**
+   * Which units this movement moves, on a serialized product: exactly
+   * `quantity` of them, ascending by number, each once
+   * (`api-cloudrun/.claude/plans/serial-tracking.md` D8). An in-type names a
+   * vacant number or a fresh one, with the serial it arrives with; an out-type
+   * names active units, which the movement leaves `vacant`.
+   */
+  units?: MovementUnitInputType[];
   /**
    * Who the stock was bought from, on a `purchase`. `null`/absent everywhere
    * else, and on a `purchase` until an operator picks one.
@@ -1741,8 +1808,35 @@ export const CreateTransactionInput: z.ZodType<CreateTransactionInputType> = z.o
   reference: z.string(),
   uuid_session: z.uuid(),
   allocations: z.array(MovementAllocationInput).min(1).optional(),
+  units: z.array(MovementUnitInput).optional(),
   // The uid alone; the writer resolves the name. See the interface docblock.
   supplier: z.object({ uid: FirestoreId }).nullable().optional(),
+}).superRefine((t, ctx) => {
+  if (t.units !== undefined) {
+    const numbers = t.units.map((u) => u.number);
+    if (numbers.length !== t.quantity) {
+      ctx.addIssue({ code: "custom", path: ["units"], message: "a movement that names units names exactly `quantity` of them" });
+    }
+    for (let i = 1; i < numbers.length; i++) {
+      if (numbers[i] <= numbers[i - 1]) {
+        ctx.addIssue({ code: "custom", path: ["units", i], message: "units must be ascending by number, each named once" });
+        break;
+      }
+    }
+    if (!(UNIT_SERIAL_IN_TYPES as readonly string[]).includes(t.type)) {
+      t.units.forEach((u, i) => {
+        if (u.serial_number !== undefined) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["units", i, "serial_number"],
+            message: `a "${t.type}" names units by number only; a serial arrives with a unit coming in`,
+          });
+        }
+      });
+    }
+  }
+  const issue = allocationUnitsIssue(t.units?.map((u) => u.number), t.allocations);
+  if (issue !== null) ctx.addIssue({ code: "custom", path: ["allocations"], message: issue });
 }).refine(
   // The scalar quantity must equal Σ per-location allocation, or the movement is
   // born desynced. `CreateProductInput` has carried the identical rule since
@@ -1855,6 +1949,12 @@ export interface StoreTransferLineInputType {
   to: string;
   quantity: number;
   oos: { uid: string } | null;
+  /**
+   * Which units this line moves, on a serialized product: a canonical
+   * `UnitSet` of exactly `quantity` numbers. A flagged unit travels with its
+   * flag, as the line's `oos` already says.
+   */
+  units?: number[];
 }
 
 /** Zod schema for {@link StoreTransferLineInputType}. */
@@ -1863,9 +1963,13 @@ export const StoreTransferLineInput: z.ZodType<StoreTransferLineInputType> = z.s
   to: FirestoreId,
   quantity: z.number().int().positive(),
   oos: z.strictObject({ uid: OutOfServiceId }).nullable(),
+  units: UnitSet.optional(),
 }).refine((l) => l.from !== l.to, {
   message: "a transfer line moves units to a DIFFERENT location",
   path: ["to"],
+}).refine((l) => l.units === undefined || l.units.length === l.quantity, {
+  message: "a line that names units names exactly `quantity` of them",
+  path: ["units"],
 });
 
 /** Input for creating a store-to-store transfer. */

@@ -226,6 +226,12 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["products.uid_tax_class", "mid-expand"],
   ["webshop-products.tax_class_name", "mid-expand"],
   ["webshop-products.uid_tax_class", "mid-expand"],
+  // Serialized units (api-cloudrun serial-tracking D2/D6) — the expand step of
+  // add-optional → writers stamp null → backfill → `feat!` to required-nullable.
+  // Required, not optional, is the end state: a `?` lets a writer that builds a
+  // literal document drop the field silently.
+  ["bookings.units", "mid-expand"],
+  ["out-of-service.units", "mid-expand"],
   // The movement `service` axis (api-cloudrun#768, 2026-09-25). ~1,400 movements
   // per env predate it; `movementScaffold` stamps it on every new write. It can
   // be contracted to required-nullable once a census finds no absent key — the

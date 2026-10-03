@@ -150,6 +150,7 @@ const createStoreTransferTransaction: TransactionDefinition = {
     "create-store-transfer:transaction-to-ledger",
     "create-store-transfer:transaction-to-locations",
     "create-store-transfer:transaction-to-out-of-service",
+    "units:transactions-to-roster",
   ],
 };
 

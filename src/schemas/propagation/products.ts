@@ -459,6 +459,8 @@ const createProductTransaction: TransactionDefinition = {
     "create-product:product-to-webshop",
     "cowrite-thread:products-to-thread",
     "cowrite-thread:thread-to-products",
+    "units:product-to-roster",
+    "units:product-to-units",
   ],
 };
 
@@ -962,6 +964,9 @@ const updateProductTransaction: TransactionDefinition = {
     "update-product:tracking-category-change",
     "update-product:stock-method-change",
     "update-product:type-change",
+    "units:product-to-roster",
+    "units:product-to-units",
+    "units:product-to-bookings",
   ],
 };
 

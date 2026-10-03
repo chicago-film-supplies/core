@@ -29,6 +29,7 @@
  * @module
  */
 import { z } from "zod";
+import { UnitSet } from "./unit.ts";
 
 /**
  * Per-status quantity breakdown for a booking.
@@ -176,4 +177,67 @@ export function breakdownObjectSchema(
   for (const key of BOOKING_BREAKDOWN_KEYS) shape[key] = leaf();
   const schema = mode === "strict" ? z.strictObject(shape) : z.object(shape);
   return schema as unknown as z.ZodType<BookingBreakdown>;
+}
+
+// ── Unit sets (serialized products) ─────────────────────────────────
+
+/**
+ * The breakdown buckets that hold NAMED units on a serialized product's
+ * booking (`api-cloudrun/.claude/plans/serial-tracking.md` D2). Alphabetical,
+ * because key order is column order.
+ *
+ * `quoted` and `reserved` are absent on purpose: a reserved unit is a count
+ * against the shelf, not a particular radio. Units are named from `prep` on.
+ *
+ * Every TERMINAL bucket carries a set too, because a shrinking `out` set alone
+ * cannot say which units came back and which were lost.
+ */
+export const BOOKING_UNIT_BUCKETS = [
+  "cleaning", "damaged", "lost", "maintenance", "out", "prepped", "returned",
+] as const;
+
+/** One bucket that holds named units. */
+export type BookingUnitBucketType = typeof BOOKING_UNIT_BUCKETS[number];
+
+// Compile-time guard: every unit bucket is a breakdown key.
+type _UnitBucketsAreKeys = BookingUnitBucketType extends BookingBreakdownKeyType ? true : never;
+const _unitBucketSubset: _UnitBucketsAreKeys = true;
+void _unitBucketSubset;
+
+/**
+ * Which units sit in each bucket of a booking. Each set is a canonical
+ * `UnitSet` (ascending, unique), and the sets are pairwise disjoint.
+ *
+ * `units[k].length` may be LESS than `breakdown[k]`: the difference is the
+ * bucket's UNTRACKED count, units a bulk → serialized conversion found already
+ * prepped or out and could not name. It is derived, never stored —
+ * `untrackedUnitCount` (`@cfs/core/utils/bookings`).
+ */
+export type BookingUnitSetsType = Record<BookingUnitBucketType, number[]>;
+
+/** Zod schema for {@link BookingUnitSetsType}, built the way {@link breakdownObjectSchema} is. */
+export const BookingUnitSetsSchema: z.ZodType<BookingUnitSetsType> = (() => {
+  const shape: Record<string, z.ZodType> = {};
+  for (const key of BOOKING_UNIT_BUCKETS) shape[key] = UnitSet;
+  return (z.strictObject(shape) as unknown as z.ZodType<BookingUnitSetsType>).superRefine((sets, ctx) => {
+    const seen = new Map<number, BookingUnitBucketType>();
+    for (const key of BOOKING_UNIT_BUCKETS) {
+      for (const n of sets[key]) {
+        const other = seen.get(n);
+        if (other !== undefined) {
+          ctx.addIssue({
+            code: "custom",
+            path: [key],
+            message: `unit ${n} is in both "${other}" and "${key}"; a unit is in one bucket at a time`,
+          });
+        }
+        seen.set(n, key);
+      }
+    }
+  });
+})();
+
+/** Empty sets in every unit bucket: a seeded booking that names no unit yet. */
+export function emptyBookingUnitSets(): BookingUnitSetsType {
+  return { cleaning: [], damaged: [], lost: [], maintenance: [], out: [], prepped: [], returned: [] };
 }

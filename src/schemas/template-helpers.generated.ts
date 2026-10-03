@@ -43,6 +43,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "sumBookingsBreakdown", expr: "it.bookings.sumBookingsBreakdown(bookings)", desc: "Sum a list of booking breakdowns into the order's roll-up shape.", returns: "FullBookingBreakdown" },
     { name: "sumBreakdownKeys", expr: "it.bookings.sumBreakdownKeys(b, keys)", desc: "Σ of the named buckets — **the ONE place a breakdown is summed.**", returns: "number" },
     { name: "terminalQuantity", expr: "it.bookings.terminalQuantity(b)", desc: "Units that reached a terminal key: back, or out of service with a reason.", returns: "number" },
+    { name: "untrackedUnitCount", expr: "it.bookings.untrackedUnitCount(booking, key)", desc: "How many of a bucket's units are UNTRACKED on a unit-tracked booking: `breakdown[k] − units[k].length`. Units a bulk → serialized conversion found already prepped or out and could not name (`api-cloudrun/.claude/plans/serial-tracking.md` D1, D9).", returns: "number" },
   ],
   "cards": [
     { name: "computeCardActionFromBookings", expr: "it.cards.computeCardActionFromBookings(side, siblings, current)", desc: "Recompute a card's denormalized **next fulfillment action** from its sibling bookings — the value the `CardTile` button shows on surfaces (Dashboard kanban, Calendar agenda) where no bookings are loaded. Pure function — no Firestore reads. Computed in lockstep with `computeCardStatusFromBookings` on every booking write.", returns: "CardAction | null" },
@@ -313,5 +314,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "rewriteDocFieldRefs", expr: "it.templates.rewriteDocFieldRefs(content, fieldMap)", desc: "Rewrite `it.doc.<from>` → `it.doc.<to>` across a content map per `fieldMap` (normalized paths from `scanDocFieldRefs`). Entries mapped to `null` (or to themselves) are left untouched — the operator resolves those by hand. Array indices are preserved (`items[0].name` with map `items[].name`→`lines[].name` becomes `lines[0].name`). Longest `from` rewritten first so a nested path is handled before its prefix.", returns: "Record<string, string>" },
     { name: "scanDocFieldRefs", expr: "it.templates.scanDocFieldRefs(content)", desc: "Distinct `it.doc.<path>` references across a content map, with array indices normalized (`it.doc.items[0].name` → `items[].name`) so paths match the `templateSchemaFields` catalog. Sorted, deduped.", returns: "string[]" },
     { name: "slugify", expr: "it.templates.slugify(name)", desc: "Derive a URL/git-safe slug from a display name. Lowercases, replaces every run of non-alphanumeric characters with a single hyphen, and trims leading/ trailing hyphens. Two distinct display names can collapse to the same slug (e.g. \"Quote!\" and \"quote\") — callers enforce slug uniqueness at create.", returns: "string" },
+  ],
+  "units": [
+    { name: "formatUnitRanges", expr: "it.units.formatUnitRanges(numbers, arg2)", desc: "Unit numbers as the fewest runs a reader can scan: `\"1001–1040, 1045\"`. The form printed on packing lists and invoices, which customers read (owner, 2026-09-21). An empty set is `\"\"`.", returns: "string" },
+    { name: "toUnitRanges", expr: "it.units.toUnitRanges(numbers)", desc: "The fewest inclusive runs covering `numbers`, ascending.", returns: "UnitRange[]" },
   ],
 };

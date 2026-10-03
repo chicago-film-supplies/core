@@ -20,6 +20,7 @@ import type {
   BookingBreakdown,
   BookingBreakdownKeyType,
   BookingDestinationRef,
+  BookingUnitBucketType,
   ComponentTypeType,
   Order,
   OrderStatusType,
@@ -41,6 +42,25 @@ export {
   BookingBreakdownKeyEnum,
   type BookingBreakdownKeyType,
 } from "../schemas/mod.ts";
+
+/**
+ * How many of a bucket's units are UNTRACKED on a unit-tracked booking:
+ * `breakdown[k] − units[k].length`. Units a bulk → serialized conversion found
+ * already prepped or out and could not name (`api-cloudrun/.claude/plans/serial-tracking.md`
+ * D1, D9).
+ *
+ * Derived, never stored: given the booking refine `units[k].length ≤
+ * breakdown[k]`, a stored copy could only restate this, so it could only drift.
+ * `0` on a booking that is not unit-tracked (`units` `null` or absent), where
+ * the question does not arise.
+ */
+export function untrackedUnitCount(
+  booking: Pick<Booking, "breakdown" | "units">,
+  key: BookingUnitBucketType,
+): number {
+  if (booking.units == null) return 0;
+  return booking.breakdown[key] - booking.units[key].length;
+}
 
 /**
  * A breakdown with every key stated. Since the keys' `feat!` this IS

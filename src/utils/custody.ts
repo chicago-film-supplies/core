@@ -25,10 +25,13 @@
  */
 import {
   BOOKING_BREAKDOWN_KEYS,
+  BOOKING_UNIT_BUCKETS,
   type Booking,
   type BookingActionType,
   type BookingBreakdown,
   type BookingBreakdownKeyType,
+  type BookingUnitBucketType,
+  type BookingUnitSetsType,
   CUSTODY_RULES,
   type CustodyRule,
   type CustodyRuleId,
@@ -45,8 +48,12 @@ import {
 } from "../schemas/mod.ts";
 import { breakdownQuantity, type FullBookingBreakdown, fullBookingBreakdown, sumBreakdownKeys, terminalQuantity } from "./bookings.ts";
 
-/** A booking as the ruleset reads it. */
-export type CustodyBooking = Pick<Booking, "type" | "breakdown" | "quantity" | "status">;
+/**
+ * A booking as the ruleset reads it. `units` is read when present: `null` or
+ * absent means the booking is not unit-tracked, and its actions may name no
+ * units.
+ */
+export type CustodyBooking = Pick<Booking, "type" | "breakdown" | "quantity" | "status" | "units">;
 
 /** A refused action: illegal for the booking, or short of units. Map it to a 400. */
 export class CustodyRefusal extends Error {
@@ -68,6 +75,8 @@ export interface CustodyTransition {
   quantity: number;
   /** The flag's service axis; `null` off the flag rows. */
   service: { from: OOSReasonType | null; to: OOSReasonType | null } | null;
+  /** The units the action named, ascending; `[]` when it named none. */
+  units: number[];
 }
 
 /** The arm a booking type takes under a rule, or `null`: the type may not take it. */
@@ -126,6 +135,11 @@ export interface CustodyApplication {
   status: Booking["status"];
   /** One per action that writes a movement, in action order. */
   transitions: CustodyTransition[];
+  /**
+   * The booking's unit sets after the actions, or `null` for a booking that is
+   * not unit-tracked. A writer stores it beside `breakdown`.
+   */
+  units: BookingUnitSetsType | null;
 }
 
 /** Server knowledge the pure booking cannot carry. */
@@ -162,6 +176,7 @@ export function applyCustodyActions(
     );
   }
   const breakdown = fullBookingBreakdown(booking.breakdown);
+  const units = booking.units == null ? null : copyUnitSets(booking.units);
   let unflagged = Math.min(ctx.unflaggedReturned ?? breakdown.returned, breakdown.returned);
   let seenForward = false;
   const transitions: CustodyTransition[] = [];
@@ -196,6 +211,13 @@ export function applyCustodyActions(
       }
       unflagged -= action.quantity;
     }
+    if (units === null) {
+      if (action.units !== undefined) {
+        throw new CustodyRefusal(`"${rule.id}" names units, but this booking is not unit-tracked`, rule.id);
+      }
+    } else {
+      moveUnits(units, breakdown, rule, action);
+    }
     breakdown[rule.from] -= action.quantity;
     breakdown[rule.to] += action.quantity;
     // Units landing on `returned` with no flag: a check-in, a flag cleared, a
@@ -213,6 +235,7 @@ export function applyCustodyActions(
         to: rule.to,
         quantity: action.quantity,
         service: serviceFor(rule),
+        units: action.units ? [...action.units] : [],
       });
     }
   }
@@ -220,7 +243,93 @@ export function applyCustodyActions(
     breakdown,
     status: deriveCustodyStatus(breakdown, booking.quantity, booking.status),
     transitions,
+    units,
   };
+}
+
+const UNIT_BUCKETS: ReadonlySet<BookingBreakdownKeyType> = new Set(BOOKING_UNIT_BUCKETS);
+
+function isUnitBucket(key: BookingBreakdownKeyType): key is BookingUnitBucketType {
+  return UNIT_BUCKETS.has(key);
+}
+
+function copyUnitSets(sets: BookingUnitSetsType): BookingUnitSetsType {
+  const out = {} as BookingUnitSetsType;
+  for (const key of BOOKING_UNIT_BUCKETS) out[key] = [...sets[key]];
+  return out;
+}
+
+/**
+ * Fold one action's named units into a tracked booking's sets, BEFORE the
+ * breakdown moves (it reads the source bucket's count as it stands).
+ *
+ * What an action may name (`api-cloudrun/.claude/plans/serial-tracking.md`
+ * D1, D7):
+ *
+ * - out of a unit bucket: units already in that bucket's set, plus — up to the
+ *   bucket's UNTRACKED count (`breakdown[k] − units[k].length`, left by a
+ *   conversion) — units this booking does not hold anywhere. Those are shelf
+ *   or `unattributed_out` units the roster vouches for, which is the server's
+ *   check, not this one;
+ * - out of `reserved` (a `prep`): units this booking does not hold anywhere;
+ * - nothing at all: only an `unprep` of untracked prepped units, which drains
+ *   a count no unit was ever named for. Every other action on a tracked
+ *   booking names its units.
+ *
+ * ⚠️ **A unit is in at most one of a booking's sets**, so a unit this booking
+ * already returned cannot be prepped onto it a second time. Pick another unit.
+ */
+function moveUnits(
+  units: BookingUnitSetsType,
+  breakdown: BookingBreakdown,
+  rule: CustodyRule,
+  action: BookingActionType,
+): void {
+  const from = rule.from;
+  const untracked = isUnitBucket(from) ? breakdown[from] - units[from].length : 0;
+  if (action.units === undefined) {
+    if (rule.id === "unprep" && untracked >= action.quantity) return;
+    throw new CustodyRefusal(
+      rule.id === "unprep"
+        ? `"unprep" may omit units only for untracked prepped units; ${untracked} are untracked`
+        : `"${rule.id}" must name the units it moves on a unit-tracked booking`,
+      rule.id,
+    );
+  }
+  const named = action.units;
+  for (let i = 1; i < named.length; i++) {
+    if (named[i] <= named[i - 1]) {
+      throw new CustodyRefusal(`"${rule.id}" names its units out of order or twice`, rule.id);
+    }
+  }
+  if (named.length !== action.quantity) {
+    throw new CustodyRefusal(`"${rule.id}" moves ${action.quantity} but names ${named.length} units`, rule.id);
+  }
+  const holder = new Map<number, BookingUnitBucketType>();
+  for (const key of BOOKING_UNIT_BUCKETS) for (const n of units[key]) holder.set(n, key);
+
+  let drawn = 0;
+  for (const n of named) {
+    const at = holder.get(n);
+    if (isUnitBucket(from) && at === from) continue;
+    if (at !== undefined) {
+      throw new CustodyRefusal(`"${rule.id}" moves unit ${n} from ${from}, but this booking holds it in ${at}`, rule.id);
+    }
+    if (isUnitBucket(from)) drawn++;
+  }
+  if (drawn > untracked) {
+    throw new CustodyRefusal(
+      `"${rule.id}" names ${drawn} unit(s) this booking does not hold in ${from}, and ${from} has ${untracked} untracked`,
+      rule.id,
+    );
+  }
+  if (isUnitBucket(from)) {
+    const leaving = new Set(named);
+    units[from] = units[from].filter((n) => !leaving.has(n));
+  }
+  if (isUnitBucket(rule.to)) {
+    units[rule.to] = [...units[rule.to], ...named].sort((a, b) => a - b);
+  }
 }
 
 /** A row that puts a flag on units carrying none: every `flag_*_returned`. */
@@ -545,6 +654,9 @@ export function decomposeCustodyDelta(
         to: rule.to,
         quantity: s.quantity,
         service: serviceFor(rule),
+        // A delta names no units; the api refuses a delta row on a seeded
+        // serialized product (serial-tracking D3).
+        units: [],
       });
     }
   }

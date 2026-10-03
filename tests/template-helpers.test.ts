@@ -64,6 +64,7 @@ import * as templateLintUtils from "../src/utils/template-lint.ts";
 import * as substitutionUtils from "../src/utils/substitutions.ts";
 import * as itemPairingUtils from "../src/utils/item-pairing.ts";
 import * as taxClassUtils from "../src/utils/tax-classes.ts";
+import * as unitUtils from "../src/utils/units.ts";
 import * as priceDocumentUtils from "../src/utils/price-document.ts";
 import * as replacementUtils from "../src/utils/replacements.ts";
 import * as outOfServiceUtils from "../src/utils/out-of-service.ts";
@@ -158,6 +159,11 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // resolves to. A template renders a document whose taxes are already priced
   // and holds no catalog to ask. Listed so the drift guard sees its exports.
   "tax-classes": taxClassUtils,
+  // Serialized units (api-cloudrun serial-tracking). Not injected into any
+  // template yet: P5 (the packing list, invoice and "Serialized item details")
+  // is what adds it, for `formatUnitRanges`. Listed so the drift guard sees
+  // its exports now.
+  units: unitUtils,
   // And again: `utils/price-document.ts` WRITES a document's money. A template
   // renders money already written. Listed so the drift guard sees its exports.
   "price-document": priceDocumentUtils,

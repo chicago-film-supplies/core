@@ -209,6 +209,16 @@ export const PERMISSIONS = [
   "stockSummaries.read",
   "typesenseSync.read",
 
+  // Serialized-unit ADMIN (api-cloudrun serial-tracking, owner 2026-10-03):
+  // minting numbers, recording and remapping serials, retiring a number. Moving a
+  // unit is NOT one of these — custody stays `fulfillment.update`, and an
+  // ownership movement stays `transactions.create`, with the units riding along.
+  // `units.read` also gates the per-product roster (`unit-rosters`), which is
+  // the same question asked across units.
+  "units.create",
+  "units.read",
+  "units.update",
+
   "users.read",
   "users.update",
   "users.delete",

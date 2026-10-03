@@ -14,7 +14,7 @@ export const aggregates: AggregateDefinition[] = [
   {
     id: "product",
     root: "products",
-    members: ["webshop-products", "inventory-ledgers"],
+    members: ["webshop-products", "inventory-ledgers", "units", "unit-rosters"],
     description:
       "Product catalog and inventory state — the source of truth for what can be rented/sold",
   },

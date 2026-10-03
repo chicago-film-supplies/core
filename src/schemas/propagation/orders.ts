@@ -660,6 +660,12 @@ const updateOrderRules: CollectionRule[] = [
     ],
     transaction: "update-order",
     fields: [
+      {
+        source: [],
+        target: ["units"],
+        transform:
+          "CARRIED FORWARD from the stored booking, never rebuilt — an order edit does not move a unit, and a literal Booking that omitted the field would drop which units are prepped or out",
+      },
       { source: ["uid"], target: ["uid_order"] },
       { source: ["number"], target: ["number"] },
       { source: ["status"], target: ["status"] },
@@ -855,6 +861,12 @@ const updateBookingRules: CollectionRule[] = [
     fields: [
       {
         source: [],
+        target: ["units"],
+        transform:
+          "serialized only: each action's `units` leave its source bucket's set and join its target's (applyCustodyActions); null stays null on a booking that is not unit-tracked",
+      },
+      {
+        source: [],
         target: ["status"],
         transform: "from input.status (defaults to current)",
       },
@@ -881,6 +893,18 @@ const updateBookingRules: CollectionRule[] = [
     enforced_by: [OOS_COWRITTEN_FROM_BOOKING],
     transaction: "update-booking",
     fields: [
+      {
+        source: ["units", "lost"],
+        target: ["units", "away"],
+        transform:
+          "serialized only: a mark_lost's named units stand away at the record it opens",
+      },
+      {
+        source: ["units", "damaged"],
+        target: ["units", "flagged"],
+        transform:
+          "a mark_damaged / mark_cleaning / mark_maintenance's named units are flagged on the arrival shelf; same for cleaning and maintenance",
+      },
       {
         source: [],
         target: ["sources"],
@@ -926,6 +950,24 @@ const updateBookingRules: CollectionRule[] = [
     enforced_by: [CUSTODY_REPLAY],
     transaction: "update-booking",
     fields: [
+      {
+        source: ["units"],
+        target: ["units"],
+        transform:
+          "serialized only: the units the action named, each with the serial its unit carries at the moment (a snapshot)",
+      },
+      {
+        source: ["units"],
+        target: ["lines", "units"],
+        transform:
+          "the same units, partitioned across the lines by where each one moved from or to",
+      },
+      {
+        source: ["units"],
+        target: ["query_by_unit_number"],
+        transform:
+          "units[].number, flat, in order",
+      },
       { source: ["uid_product"], target: ["uid_product"] },
       { source: ["uid"], target: ["uid_booking"] },
       {
@@ -1104,6 +1146,8 @@ const updateBookingTransaction: TransactionDefinition = {
     "create-out-of-service-record:sources-to-record",
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
+    "units:transactions-to-roster",
+    "units:transactions-to-units",
   ],
 };
 
@@ -1128,6 +1172,8 @@ const bulkCheckoutOrderTransaction: TransactionDefinition = {
     "update-booking:booking-to-order",
     "update-order:order-to-fulfillment",
     "update-booking:booking-to-cards",
+    "units:transactions-to-roster",
+    "units:transactions-to-units",
   ],
 };
 
@@ -1148,6 +1194,8 @@ const bulkReturnOrderTransaction: TransactionDefinition = {
     "create-out-of-service-record:sources-to-record",
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
+    "units:transactions-to-roster",
+    "units:transactions-to-units",
   ],
 };
 
@@ -1175,6 +1223,8 @@ const bulkFulfillmentBookingsTransaction: TransactionDefinition = {
     "create-out-of-service-record:sources-to-record",
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
+    "units:transactions-to-roster",
+    "units:transactions-to-units",
   ],
 };
 
@@ -1215,6 +1265,8 @@ const crossOrderBookingsTransaction: TransactionDefinition = {
     "create-out-of-service-record:sources-to-record",
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
+    "units:transactions-to-roster",
+    "units:transactions-to-units",
   ],
 };
 

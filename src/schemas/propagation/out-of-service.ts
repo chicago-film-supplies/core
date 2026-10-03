@@ -134,6 +134,18 @@ const createOutOfServiceRules: CollectionRule[] = [
     enforced_by: [OOS_COWRITES_MOVEMENT],
     transaction: "create-out-of-service-record",
     fields: [
+      {
+        source: ["units"],
+        target: ["units"],
+        transform:
+          "serialized only: the units the record takes, picked from unflagged shelf units (a flag) or named by the booking's mark (a loss)",
+      },
+      {
+        source: ["units"],
+        target: ["lines", "units"],
+        transform:
+          "partitioned across the lines by shelf",
+      },
       { source: ["uid_product"], target: ["uid_product"] },
       { source: ["quantity"], target: ["quantity"] },
       {
@@ -188,6 +200,7 @@ const createOutOfServiceTransaction: TransactionDefinition = {
     ...STOCK_STEPS,
     "cowrite-thread:out-of-service-to-thread",
     "cowrite-thread:thread-to-out-of-service",
+    "units:transactions-to-roster",
   ],
 };
 
@@ -202,6 +215,18 @@ const updateOutOfServiceRules: CollectionRule[] = [
     enforced_by: [OOS_COWRITES_MOVEMENT],
     transaction: "update-out-of-service-record",
     fields: [
+      {
+        source: ["units"],
+        target: ["units"],
+        transform:
+          "serialized only: exactly the units whose bucket changed between the stored sets and the input's — a set is a fact, so the diff guesses nothing",
+      },
+      {
+        source: ["units"],
+        target: ["lines", "units"],
+        transform:
+          "partitioned across the lines by shelf",
+      },
       { source: ["uid_product"], target: ["uid_product"] },
       {
         source: ["breakdown", "flagged"],
@@ -245,6 +270,12 @@ const updateOutOfServiceRules: CollectionRule[] = [
     enforced_by: [OOS_SPLIT_STANDALONE],
     transaction: "update-out-of-service-record",
     fields: [
+      {
+        source: [],
+        target: ["units"],
+        transform:
+          "the input's next sets; a reason edit that splits the record PARTITIONS units.flagged onto the sibling, and the flag {old → new} movement names them",
+      },
       {
         source: ["quantity"],
         target: ["quantity"],
@@ -306,6 +337,8 @@ const updateOutOfServiceTransaction: TransactionDefinition = {
     "update-out-of-service-record:record-to-transactions",
     "update-out-of-service-record:record-to-record",
     "update-out-of-service-record:transactions-to-ledger",
+    "units:transactions-to-roster",
+    "units:transactions-to-units",
   ],
 };
 
@@ -351,6 +384,12 @@ const reclassifyOutOfServiceRules: CollectionRule[] = [
     transaction: "reclassify-out-of-service-record",
     fields: [
       {
+        source: ["units", "flagged"],
+        target: ["units"],
+        transform:
+          "the booking's reclassify_X_to_Y action names the units, which move from the X set to the Y set",
+      },
+      {
         source: ["reason"],
         target: ["breakdown"],
         transform: "breakdown[old reason] − flagged, breakdown[new reason] + flagged — the flagged count, which is record.quantity only when nothing has been resolved",
@@ -372,6 +411,12 @@ const reclassifyOutOfServiceRules: CollectionRule[] = [
     enforced_by: [RECLASSIFY_SPLITS_THE_RECORD],
     transaction: "reclassify-out-of-service-record",
     fields: [
+      {
+        source: [],
+        target: ["units"],
+        transform:
+          "a split moves the named flagged units onto the sibling record",
+      },
       {
         source: ["quantity"],
         target: ["quantity"],
@@ -411,6 +456,7 @@ const reclassifyOutOfServiceTransaction: TransactionDefinition = {
     "update-booking:booking-to-order",
     "update-order:order-to-fulfillment",
     "update-booking:booking-to-cards",
+    "units:transactions-to-roster",
   ],
 };
 

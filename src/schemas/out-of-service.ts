@@ -69,7 +69,8 @@ import {
   type UidNameRefType,
 } from "./common.ts";
 import { type BookingDestinationRef, BookingDestinationRefSchema } from "./booking.ts";
-import { MovementAllocationInput, type MovementAllocationInputType } from "./transaction.ts";
+import { allocationUnitsIssue, MovementAllocationInput, type MovementAllocationInputType } from "./transaction.ts";
+import { UnitSet } from "./unit.ts";
 
 // ── Status ───────────────────────────────────────────────────────
 
@@ -121,6 +122,62 @@ export const OOSBreakdownSchema: z.ZodType<OOSBreakdown> = z.strictObject({
   returned_to_service: z.int().min(0).meta({ column: true, label: "Returned To Service" }),
 });
 
+/**
+ * Which units sit in each bucket of a record, on a serialized product
+ * (`api-cloudrun/.claude/plans/serial-tracking.md` D6). Each set is a
+ * canonical `UnitSet`, and the sets are pairwise disjoint.
+ *
+ * `units[k].length ≤ breakdown[k]`, not `===`: a historic record (24 walkie
+ * losses on Replacement lines among them) names no unit at all, and writes off
+ * without vacating anything.
+ */
+export interface OOSUnitsType {
+  away: number[];
+  flagged: number[];
+  returned_to_service: number[];
+  written_off: number[];
+}
+
+/** Zod schema for {@link OOSUnitsType}. */
+export const OOSUnitsSchema: z.ZodType<OOSUnitsType> = z.strictObject({
+  away: UnitSet,
+  flagged: UnitSet,
+  returned_to_service: UnitSet,
+  written_off: UnitSet,
+}).superRefine((sets, ctx) => {
+  const seen = new Map<number, OOSBreakdownKeyType>();
+  for (const key of OOS_BREAKDOWN_KEYS) {
+    for (const n of sets[key]) {
+      const other = seen.get(n);
+      if (other !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: [key],
+          message: `unit ${n} is in both "${other}" and "${key}"; a unit is in one bucket at a time`,
+        });
+      }
+      seen.set(n, key);
+    }
+  }
+});
+
+function unitsOverBreakdown(
+  units: OOSUnitsType,
+  breakdown: OOSBreakdown,
+  ctx: z.RefinementCtx,
+  path: (string | number)[],
+): void {
+  for (const key of OOS_BREAKDOWN_KEYS) {
+    if (units[key].length > breakdown[key]) {
+      ctx.addIssue({
+        code: "custom",
+        path: [...path, key],
+        message: `"${key}" names ${units[key].length} units but holds ${breakdown[key]}`,
+      });
+    }
+  }
+}
+
 /** A location within a store affected by an out-of-service record. */
 export interface OOSStoreLocation {
   uid_location: string;
@@ -163,6 +220,17 @@ export interface OutOfService {
   status: OOSStatusType;
   quantity: number;
   breakdown: OOSBreakdown;
+  /**
+   * Which units sit in each bucket — `null` when the record names no unit (a
+   * bulk product, or a serialized one before its roster was seeded). See
+   * {@link OOSUnitsType}.
+   *
+   * ⚠️ **Optional only while it is mid-expand**, the same four steps as
+   * `Booking.units` (serial-tracking D2/D6): optional now, writers stamp
+   * `null`, a backfill, then a `feat!` to required-nullable. 0 stored records
+   * carry the key today.
+   */
+  units?: OOSUnitsType | null;
   canceled_at: FirestoreTimestampType | null;
   organization: {
     uid: string | null;
@@ -245,6 +313,8 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   status: OOSStatusEnum.meta({ column: true, label: "Status" }),
   quantity: z.int().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
   breakdown: OOSBreakdownSchema,
+  // Mid-expand — see the interface field's own note. `null` names no unit.
+  units: OOSUnitsSchema.nullable().optional(),
   canceled_at: FirestoreTimestamp.nullable().meta({ column: true, label: "Canceled" }),
   organization: z.strictObject({
     uid: FirestoreId.nullable(),
@@ -281,6 +351,7 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
       message: `breakdown places ${placed} units but the record holds ${doc.quantity}`,
     });
   }
+  if (doc.units != null) unitsOverBreakdown(doc.units, doc.breakdown, ctx, ["units"]);
   if (doc.uid_destination !== (doc.destination?.uid ?? null)) {
     ctx.addIssue({
       code: "custom",
@@ -360,6 +431,13 @@ export interface CreateOutOfServiceInputType {
   destination?: OOSDestinationInputType | null;
   /** The uid only — the server resolves the name. */
   supplier?: { uid: string } | null;
+  /**
+   * Which units the record takes, on a serialized product: a canonical
+   * `UnitSet` of at most `quantity` numbers. A manual record picks from
+   * unflagged shelf units (serial-tracking D6). When allocations name units
+   * too, they partition this list.
+   */
+  units?: number[];
 }
 
 /** Zod schema for CreateOutOfServiceInput. */
@@ -376,10 +454,17 @@ export const CreateOutOfServiceInput: z.ZodType<CreateOutOfServiceInputType> = z
   allocations: z.array(MovementAllocationInput).min(1).optional(),
   destination: OOSDestinationInput.nullable().optional(),
   supplier: z.object({ uid: FirestoreId }).nullable().optional(),
+  units: UnitSet.optional(),
 }).refine(
   (t) => !t.allocations || t.quantity === t.allocations.reduce((sum, a) => sum + a.quantity, 0),
   { message: "quantity must equal the sum of per-location allocation quantities", path: ["quantity"] },
-) as z.ZodType<CreateOutOfServiceInputType>;
+).superRefine((t, ctx) => {
+  if (t.units !== undefined && t.units.length > t.quantity) {
+    ctx.addIssue({ code: "custom", path: ["units"], message: `names ${t.units.length} units but the record holds ${t.quantity}` });
+  }
+  const issue = allocationUnitsIssue(t.units, t.allocations);
+  if (issue !== null) ctx.addIssue({ code: "custom", path: ["allocations"], message: issue });
+}) as z.ZodType<CreateOutOfServiceInputType>;
 
 /**
  * Input for updating an out-of-service record.
@@ -400,6 +485,12 @@ export interface UpdateOutOfServiceInputType {
   status?: typeof OOS_USER_STATUSES[number];
   reason?: OOSFlagReasonType;
   breakdown?: OOSBreakdown;
+  /**
+   * The complete next unit sets, beside the complete next `breakdown` it
+   * names units for (and only with it). The writer moves exactly the units
+   * whose bucket changed; a set is a fact, so the diff guesses nothing.
+   */
+  units?: OOSUnitsType;
   dates?: { start?: string | null; end?: string | null };
   destination?: OOSDestinationInputType | null;
   supplier?: { uid: string } | null;
@@ -413,6 +504,7 @@ export const UpdateOutOfServiceInput: z.ZodType<UpdateOutOfServiceInputType> = z
   status: z.enum(OOS_USER_STATUSES).optional(),
   reason: z.enum(OOS_FLAG_REASONS).optional(),
   breakdown: OOSBreakdownSchema.optional(),
+  units: OOSUnitsSchema.optional(),
   dates: z.object({
     start: chicagoInstant().nullable().optional(),
     end: chicagoInstant().nullable().optional(),
@@ -421,4 +513,11 @@ export const UpdateOutOfServiceInput: z.ZodType<UpdateOutOfServiceInputType> = z
   supplier: z.object({ uid: FirestoreId }).nullable().optional(),
   uuid_session: z.uuid(),
   version: z.int().min(0),
+}).superRefine((u, ctx) => {
+  if (u.units === undefined) return;
+  if (u.breakdown === undefined) {
+    ctx.addIssue({ code: "custom", path: ["units"], message: "units are sent with the breakdown they name units for" });
+    return;
+  }
+  unitsOverBreakdown(u.units, u.breakdown, ctx, ["units"]);
 });

@@ -247,6 +247,8 @@ const createTransactionTransaction: TransactionDefinition = {
     "create-transaction:transaction-to-ledger",
     "create-transaction:transaction-to-locations",
     ...STOCK_STEPS,
+    "units:transactions-to-roster",
+    "units:transactions-to-units",
   ],
 };
 
@@ -273,6 +275,8 @@ const reverseTransactionTransaction: TransactionDefinition = {
     "reverse-transaction:transaction-to-ledger",
     "reverse-transaction:transaction-to-locations",
     ...STOCK_STEPS,
+    "units:transactions-to-roster",
+    "units:transactions-to-units",
   ],
 };
 

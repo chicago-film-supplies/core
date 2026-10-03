@@ -68,6 +68,9 @@ export type TransactionId =
   | "reclass-stock"
   // store-transfers.ts
   | "create-store-transfer"
+  // units.ts
+  | "create-units"
+  | "update-unit"
   // products.ts
   | "create-product"
   | "update-product"
@@ -406,4 +409,11 @@ export type RuleId =
   | "stock:ledger-to-stock"
   | "stock:bookings-to-stock"
   | "stock:oos-to-stock"
-  | "stock:seed-ledger-to-stock";
+  | "stock:seed-ledger-to-stock"
+  // units.ts
+  | "units:transactions-to-roster"
+  | "units:transactions-to-units"
+  | "units:product-to-roster"
+  | "units:product-to-units"
+  | "units:product-to-bookings"
+  | "create-units:product-to-units";

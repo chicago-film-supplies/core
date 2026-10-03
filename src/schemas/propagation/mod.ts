@@ -53,6 +53,7 @@ import { templates } from "./templates.ts";
 import { recurrences } from "./recurrences.ts";
 import { uploadcare } from "./uploadcare.ts";
 import { stock } from "./stock.ts";
+import { units } from "./units.ts";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -113,6 +114,7 @@ const MODULES: readonly PropagationModule[] = [
   recurrences,
   uploadcare,
   stock,
+  units,
 ];
 
 /** Every transaction across every module. */

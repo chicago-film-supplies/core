@@ -747,6 +747,11 @@ export {
   BOOKING_BREAKDOWN_TERMINAL_KEYS,
   BookingBreakdownKeyEnum,
   type BookingBreakdownKeyType,
+  BOOKING_UNIT_BUCKETS,
+  type BookingUnitBucketType,
+  type BookingUnitSetsType,
+  BookingUnitSetsSchema,
+  emptyBookingUnitSets,
   type Booking,
   type BookingBreakdown,
   type BookingDestinationRef,
@@ -882,6 +887,10 @@ export {
   MovementService,
   MovementCost,
   MovementAllocationInput,
+  allocationUnitsIssue,
+  MovementUnitInput,
+  type MovementUnitInputType,
+  UNIT_SERIAL_IN_TYPES,
   getTransactionMultiplier,
   hasCosts,
   getDisplayTransactionTypes,
@@ -919,6 +928,8 @@ export {
   type OOSBreakdownKeyType,
   OOSBreakdownSchema,
   type OOSBreakdown,
+  OOSUnitsSchema,
+  type OOSUnitsType,
   type OOSStore,
   type OOSStoreLocation,
   type OOSDates,
@@ -1036,7 +1047,43 @@ export {
   type MovementSessionOrderRef,
 } from "./movement-session.ts";
 
-export { SerialNumber, UnitNumber } from "./unit.ts";
+export {
+  CreateUnitsInput,
+  type CreateUnitsInputType,
+  MAX_UNITS_PER_CREATE,
+  MAX_UNITS_PER_ROSTER,
+  SERIAL_CHANGE_REASONS,
+  SerialChangeReasonEnum,
+  type SerialChangeReasonType,
+  SerialNumber,
+  UNIT_STATUSES,
+  UNIT_USER_SERIAL_REASONS,
+  UNIT_USER_STATUSES,
+  UnitNumber,
+  UnitSchema,
+  UnitSerialHistoryEntry,
+  type UnitSerialHistoryEntryType,
+  type UnitSerialChangeInputType,
+  UnitSet,
+  UnitStatusEnum,
+  type UnitStatusType,
+  type UnitType,
+  UnitUserSerialReasonEnum,
+  type UnitUserSerialReasonType,
+  UnitUserStatusEnum,
+  type UnitUserStatusType,
+  UpdateUnitInput,
+  type UpdateUnitInputType,
+} from "./unit.ts";
+export {
+  UNIT_ROSTER_STATES,
+  type UnitRoster,
+  UnitRosterEntry,
+  type UnitRosterEntryType,
+  UnitRosterKey,
+  UnitRosterSchema,
+  type UnitRosterStateType,
+} from "./unit-roster.ts";
 
 export {
   PICK_SHEET_GATES,
@@ -1300,6 +1347,8 @@ import type { TemplateVersion } from "./template-version.ts";
 import type { RateLimit } from "./rate-limit.ts";
 import type { Session } from "./session.ts";
 import type { Stock, StockLock } from "./stock.ts";
+import type { UnitType } from "./unit.ts";
+import type { UnitRoster } from "./unit-roster.ts";
 import type { Store } from "./store.ts";
 import type { Role } from "./role.ts";
 import type { Thread } from "./thread.ts";
@@ -1409,6 +1458,8 @@ import { RecurrenceSchema } from "./recurrence.ts";
 import { RoleSchema } from "./role.ts";
 import { SessionSchema } from "./session.ts";
 import { StockLockSchema, StockSchema } from "./stock.ts";
+import { UnitSchema } from "./unit.ts";
+import { UnitRosterSchema } from "./unit-roster.ts";
 import { StoreSchema } from "./store.ts";
 import { TagSchema } from "./tag.ts";
 import { TaxCodeSchema as TaxCodeSchema_ } from "./taxes-code.ts";
@@ -1568,6 +1619,10 @@ export interface CollectionDocs {
   "tracking-categories": TrackingCategory;
   transaction: Movement;
   transactions: Movement;
+  unit: UnitType;
+  units: UnitType;
+  "unit-roster": UnitRoster;
+  "unit-rosters": UnitRoster;
   user: User;
   users: User;
   "webhook-event": WebhookEvent;
@@ -1659,6 +1714,8 @@ const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "thread": ThreadSchema, "threads": ThreadSchema,
   "tracking-category": TrackingCategorySchema, "tracking-categories": TrackingCategorySchema,
   "transaction": MovementSchema, "transactions": MovementSchema,
+  "unit": UnitSchema, "units": UnitSchema,
+  "unit-roster": UnitRosterSchema, "unit-rosters": UnitRosterSchema,
   "user": UserSchema, "users": UserSchema,
   "webhook-event": WebhookEventSchema_, "webhook-events": WebhookEventSchema_,
   // `events` is the inbound-webhook idempotency subcollection webhooks/{service}/events.
