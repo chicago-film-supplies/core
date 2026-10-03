@@ -1,60 +1,47 @@
 # Invoice line → order line pointer: `path_order_item` (core#125)
 
-**Date:** 2026-10-03 • **Repo:** core (+ api-cloudrun, manager) • **Status:** in progress — Phases 0–2 done; 2b and 3 remain
+**Date:** 2026-10-03 • **Repo:** core (+ api-cloudrun, manager) • **Status:** in progress — Phases 0–3 built; prod release order + 2b remain
 **Origin:** core#125 (core#124 Phase 4). Sequenced ahead of core#127 (standalone invoices) — see core#127 comment of 2026-10-03.
 **Related:** core#124, core#127, manager#472, api-cloudrun#538 §2, api-cloudrun#1189, `core/src/utils/substitutions.ts`, `core/src/utils/invoices.ts` (`syncOrderToInvoiceSelective`), `manager/src/utils/invoiceDrop.ts`
 **Closes:** core#125 when Phase 3 lands (core#125 stays the tracker until then).
 
-> ## ⚠️ STATUS UPDATE 2026-10-03 — Phases 0, 1, 1b, 2 done; 2b waits on the prod API release
+> ## ⚠️ STATUS UPDATE 2026-10-03 (session 2) — Phases 0–3 built; prod release and 2b remain
 >
 > **Shipped.** core `beta.590` (`e98d558`, the field + readers) and `beta.591` (`837733e`, credit-note
-> `path_invoice_item` seed fix). Plugin `cfs-skills` 1.40.0 (`claude-plugins` `d1948d1`, Phase 1b). api-cloudrun
-> `e2dfa92d` (pin) + `65b0bed3` (Phase 2) are committed on `main`. ⚠️ **Not yet pushed** at the time of writing:
-> they sit behind a peer session's 3 local commits; check `git log origin/main` before assuming they landed.
+> `path_invoice_item` seed fix). Plugin `cfs-skills` 1.40.0 (Phase 1b). api-cloudrun `e2dfa92d` (pin) +
+> `65b0bed3` (Phase 2) are on local `main`, riding a peer's push. ⚠️ Confirm with
+> that `api-cloudrun/src/lib/invoiceOrderLineClaims.ts` is on `origin/main`. manager `a786b783` (pin `beta.591`)
+> + `fe574d7d` (Phase 3) are pushed to `main` (preview).
 >
-> **Phase 0.** Uniqueness 400 confirmed (`api-cloudrun/src/lib/firestoreWrite.ts` runs
-> `validateInvoiceItemUniqueness` on every invoice write). `splitInvoiceItem` has the SAME gap: the clone lands
-> in a new invoice-authored "New Group", so Phase 3 stamps there too. Fulfillments have no regrouping UI and
-> stay out of scope. ⚠️ **Still open: the prod/dev candidate count.** The predicate is Q3's: a root line under
-> an order block, at a path the order lacks, with exactly one same-uid order line not carried at its own path.
-> Derive it in Phase 2b's dry-run.
+> **Phase 3 (manager), as built.** `withOrderLinePointers` (`manager/src/utils/invoiceDrop.ts`) recomputes paths
+> after a move and stamps the moved ROOT line from where it came from (`createReorderable`'s `onReorder` now also
+> passes the original array; `splitInvoiceItem` maps each clone to its source). It keeps a chained move's
+> original X, clears the pointer on a move back, and strips it from components. Every pointer is filtered through core's
+> `orderLineClaimIssues`, the check the API 400s on. So a line the order lacks (custom, substitute) moves with
+> no pointer, and with the order not cached (`peekOrderItems`, no listener) a NEW pointer is dropped. The diff's
+> `moved` entry renders in `DiffRow`: "Moved here · bills its line on Order #N" at the row, "Billed from another
+> group on Invoice #N" at X, plus the row's terms. manager#472's realign is not built yet; it should offer
+> "move back" (clear the pointer) for a `moved` entry instead of delete + re-add. Noted on that issue.
 >
-> **Phase 1 (core).** Where it departs from the design below:
-> - 🔴 **NOT in `INVOICE_ONLY_ITEM_FIELDS`.** That tuple drives `carryForwardOverrides`, which keys on `uid`, so
->   the pointer would land on another occurrence of the same product. It sits in `INVOICE_ROW_POINTER_FIELDS`,
->   read only by the comparator's key-set exclusion. So `POST /invoices/{uid}/resync` drops pointers, as it
->   drops every override.
-> - **One reader:** `orderLineClaims` (row key → claimed order path; components by suffix; a self-pointer is no
->   claim). Sync, coverage, `invoicedByPath`, alignment (`invoiceScopeDividersMatch`), the sync badge
->   (`computeInvoiceSyncStatus`) and the diff all read it.
-> - **D3 lives in core:** `orderLineClaimIssues(items, orderLines, stored)` → `outside_order_block` /
->   `not_a_line` / `order_unknown`. An unchanged stored pointer is grandfathered.
-> - **Diff kind `moved`** (`DocumentMovedEntry`). Manager has no exhaustive switch, so it renders "Only on …"
->   until Phase 3 gives it copy.
-> - **`.meta({ seed: false })`** (`schemas/initial.ts`): the form seed omits the key, because `[]` fails `.min(1)`.
+> **Phase 0 facts that still matter.** The uniqueness 400 is real (`validateInvoiceItemUniqueness` on every
+> invoice write). Fulfillments have no regrouping UI and stay out of scope.
 >
-> **Phase 2 (api-cloudrun).** `buildInvoiceItems` carries the key (conditional spread).
-> `src/lib/invoiceOrderLineClaims.ts`: `clearSelfOrderLinePointers` (a pointer naming the row's own position, or
-> `[]`, is dropped on canonical paths) and `assertOrderLineClaims` (reads only real order-divider uids, then
-> 400s on core's issues). Both run on POST and PUT, after the substitution block. Proof:
-> `tests/integration/invoices/invoiceOrderLineClaim.test.ts`: moved line stored with pointer; split across two
-> groups → 200; group-path pointer → 400 `not_a_line`; root line → 400 `outside_order_block`; self-pointer
-> cleared. ⚠️ The "prod coverage audit still 0 unaligned" proof needs the prod release; not yet run.
+> **Phase 1/2 departures from the design below (all still current):** the key is in `INVOICE_ROW_POINTER_FIELDS`,
+> NOT `INVOICE_ONLY_ITEM_FIELDS` (carry-forward keys on uid, so resync drops pointers like every override). One reader:
+> `orderLineClaims`. D3 lives in core as `orderLineClaimIssues`; an unchanged stored pointer is grandfathered. Diff
+> kind `moved`. `.meta({ seed: false })`. api-cloudrun clears self-pointers and 400s on core's issues
+> (`api-cloudrun/src/lib/invoiceOrderLineClaims.ts`).
 >
-> **Phase 2b preconditions, partly settled:**
-> - ✅ **No Xero re-push.** `shouldEnqueueInvoiceEditPush` compares `invoiceXeroProjection`
->   (`core/src/utils/invoice-xero-sync.ts`), a fixed field set without `path_order_item`.
-> - 🔴 **Deploy before backfill.** Stored lines are `z.strictObject`; prod must run an API build pinned ≥ `beta.590`
->   before any stored line carries the key, or the next whole-document write erodes or refuses it.
-> - The script must hold `version`, and it must pause the invoice consumer queues (the bulk-write rule in
->   `api-cloudrun/CLAUDE.md`; other Eventarc consumers of `invoices` still fire).
-> - ⚠️ **Owner decision still open:** do frozen (settled/paid/void) invoices get the pointer? It is metadata, but
->   it changes their coverage reading.
+> 🔴 **Release order, which is the next step.** api-cloudrun's release PR (pinned ≥ `beta.590`) must reach PROD
+> before manager's next release PR is merged. The stored line is `z.strictObject`, so an older prod API 400s every
+> drop that stamps a pointer. Arm 2 of `requires-manager` checks the other direction and will NOT catch this.
+> Merge the API release first.
 >
-> **Release order:** core ✅ → api-cloudrun (push, then the release PR to prod) → manager Phase 3 (may be built
-> now; its prod release must follow the API's). No `Requires-Manager` trailer is needed (the API goes first). The
-> `requires-manager` arm 2 will go red if manager's released pin is below `beta.591`. That is its documented
-> noise, and Phase 3's pin bump clears it.
+> **Phase 2b (backfill), still open.** Preconditions: the API prod release above; no Xero re-push
+> (`invoiceXeroProjection` has a fixed field set, ✅ settled); hold `version` and pause the invoice consumer queues;
+> ⚠️ **owner decision still open:** do frozen (settled/paid/void) invoices get the pointer? Derive the prod/dev
+> candidate count (Q3's predicate) in the dry-run, then confirm the coverage audit's "extra invoice lines" drops by the
+> stamped count. Proof of Phase 2 in prod ("coverage audit still 0 unaligned") also waits on the release.
 
 ## START HERE
 
@@ -62,8 +49,8 @@ An operator can drag an invoice LINE into a different group or destination **ins
 (manager's `planInvoiceDrop` allows it; cross-block drops are already blocked). Its path changes, so it
 stops matching order line X: X reads uninvoiced, "invoice remaining" re-offers X, and manager#472's
 realign would delete and re-add the line, losing its overrides. This doc decides how a line records
-"I am order line X, moved". D1–D3 are built as amended in the status block. Next: Phase 3 (manager), which
-can be built now, and Phase 2b once the API release is live in prod.
+"I am order line X, moved". D1–D3 and Phase 3 are built as amended in the status block. Next: release the API to
+prod BEFORE manager's next release, then Phase 2b.
 
 ## The problem in one example
 
@@ -218,5 +205,5 @@ Release order: core beta → api-cloudrun (validator) → manager (writer). The 
 validator accepts the field (`z.strictObject` on the stored line).
 
 ## Context recommendation
-**Context:** CLEAR CONTEXT — everything learned is in the status block; Phase 3 launches from `~/cfs/manager` (skills: cfs-order-projections, cfs-items, cfs-release-order; read `manager/.claude/skills/order-items/SKILL.md`), Phase 2b from `~/cfs/api-cloudrun` (add cfs-invoices, queueing).
-**Execute with:** opus — the sync change is a merge-semantics edit where a wrong diff compiles and passes (it moves billed quantities on live invoices).
+**Context:** CLEAR CONTEXT — everything learned is in the status block. Phase 2b launches from `~/cfs/api-cloudrun` (skills: cfs-order-projections, cfs-items, cfs-release-order; read `api-cloudrun/.claude/skills/cfs-invoices/SKILL.md` and the queueing/bulk-write rule in `api-cloudrun/CLAUDE.md`).
+**Execute with:** opus — a backfill on live invoices where a wrong pointer moves billed coverage.
