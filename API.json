@@ -2733,7 +2733,7 @@
         {
           "kind": "interface",
           "name": "Movement",
-          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  service: MovementServiceType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  units?: MovementUnitType[];\n  query_by_unit_number?: number[];\n  serialized_details?: typeLiteral | null;\n  xero_id?: string | null;\n  supplier?: UidNameRefType | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  service: MovementServiceType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  units: MovementUnitType[];\n  query_by_unit_number: number[];\n  xero_id?: string | null;\n  supplier?: UidNameRefType | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A movement-journal event."
         },
         {
@@ -2823,7 +2823,7 @@
         {
           "kind": "interface",
           "name": "MovementSessionItem",
-          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  owner_path: string[] | null;\n  lines: MovementLineType[];\n  serialized_details?: typeLiteral | null;\n  reference: string;\n}",
+          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  owner_path: string[] | null;\n  lines: MovementLineType[];\n  reference: string;\n}",
           "doc": "One movement, joined to what a receipt has to name.\n\nCalled `items` on the session for the same reason orders, invoices and\nfulfillments call theirs that way: `partials/shared/*.eta` is written against\na document with an `items[]`, and a fourth spelling would make the shared\nmarkup un-shareable."
         },
         {
@@ -4081,6 +4081,12 @@
           "doc": "One of the six git-declared roles. @see {@link SEEDED_ROLE_NAMES}"
         },
         {
+          "kind": "variable",
+          "name": "SerialNumber",
+          "declaration": "const SerialNumber: z.ZodType<string>;",
+          "doc": "A manufacturer serial. A changeable ATTRIBUTE of a unit number, never its\nidentity: a replaced radio keeps its number and takes a new serial."
+        },
+        {
           "kind": "interface",
           "name": "Session",
           "declaration": "interface Session {\n  uid: string;\n  user_id: string;\n  anonymous: boolean;\n  expiresAt: FirestoreTimestampType;\n  created_at: number;\n  user_agent: string;\n  preview_role?: string;\n}",
@@ -4823,6 +4829,18 @@
           "name": "UidNameRefType",
           "declaration": "interface UidNameRefType {\n  uid: string;\n  name: string;\n}",
           "doc": "Generic uid + name reference used across many collections."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitId",
+          "declaration": "const UnitId: z.ZodType<string>;",
+          "doc": "`units.uid` — `unit-{number}`, derived from the unit number.\n\nUnit numbers are globally unique by owner ruling (2026-09-21): walkies own\n1001–2999, everything else draws from 3000 up. So the number IS the identity,\na duplicate is refused structurally by `create()` on the derived id, and\nfinding a unit by number is a point read. The serial is a changeable\nattribute, never part of the id.\n\nThe number segment has no leading zero and no zero, so `unit-0` and\n`unit-007` are refused: one number, one spelling.\n\n⚠️ `uid_unit` beside a `number` is derivable, and `checkMovementUnits`\nasserts the two agree rather than trusting either."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitNumber",
+          "declaration": "const UnitNumber: z.ZodType<number>;",
+          "doc": "A unit's number: the asset tag the operator reads off the unit, and the\nunit's identity (owner ruling 2026-09-21). Globally unique across products."
         },
         {
           "kind": "interface",
@@ -6815,6 +6833,12 @@
           "name": "UidNameRefType",
           "declaration": "interface UidNameRefType {\n  uid: string;\n  name: string;\n}",
           "doc": "Generic uid + name reference used across many collections."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitId",
+          "declaration": "const UnitId: z.ZodType<string>;",
+          "doc": "`units.uid` — `unit-{number}`, derived from the unit number.\n\nUnit numbers are globally unique by owner ruling (2026-09-21): walkies own\n1001–2999, everything else draws from 3000 up. So the number IS the identity,\na duplicate is refused structurally by `create()` on the derived id, and\nfinding a unit by number is a point read. The serial is a changeable\nattribute, never part of the id.\n\nThe number segment has no leading zero and no zero, so `unit-0` and\n`unit-007` are refused: one number, one spelling.\n\n⚠️ `uid_unit` beside a `number` is derivable, and `checkMovementUnits`\nasserts the two agree rather than trusting either."
         },
         {
           "kind": "interface",
@@ -9790,7 +9814,7 @@
         {
           "kind": "interface",
           "name": "Movement",
-          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  service: MovementServiceType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  units?: MovementUnitType[];\n  query_by_unit_number?: number[];\n  serialized_details?: typeLiteral | null;\n  xero_id?: string | null;\n  supplier?: UidNameRefType | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Movement {\n  uid: string;\n  number: number;\n  uid_product: string;\n  uid_booking: string | null;\n  type: MovementTypeType;\n  quantity: number;\n  custody: MovementCustodyType | null;\n  service: MovementServiceType | null;\n  cost: MovementCostType | null;\n  lines: MovementLineType[];\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string;\n  uuid_session: string;\n  reverses: string | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  units: MovementUnitType[];\n  query_by_unit_number: number[];\n  xero_id?: string | null;\n  supplier?: UidNameRefType | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A movement-journal event."
         },
         {
@@ -9960,6 +9984,24 @@
           "doc": "Whether a movement type carries a cost object. Derived from the contract.",
           "paramTags": [],
           "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/schemas/unit",
+      "moduleDoc": "Serialized units — the primitives a unit number and its serial are checked\nagainst wherever they appear.\n\nToday this module holds only the two scalars that movements already carry\n(`MovementUnit` in `src/schemas/transaction.ts`). The `units` document, its\nroster and their inputs land here next\n(`api-cloudrun/.claude/plans/serial-tracking.md` § *Schemas (core)*, phase P2). The\ndependency runs one way: `src/schemas/transaction.ts` imports from here, never the\nreverse, so the unit document can later name movements without a cycle.\n\nThe id, `UnitId` (`unit-{number}`), lives with every other id shape in\n`_uid.ts`.",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "SerialNumber",
+          "declaration": "const SerialNumber: z.ZodType<string>;",
+          "doc": "A manufacturer serial. A changeable ATTRIBUTE of a unit number, never its\nidentity: a replaced radio keeps its number and takes a new serial."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitNumber",
+          "declaration": "const UnitNumber: z.ZodType<number>;",
+          "doc": "A unit's number: the asset tag the operator reads off the unit, and the\nunit's identity (owner ruling 2026-09-21). Globally unique across products."
         }
       ]
     },
@@ -10678,7 +10720,7 @@
         {
           "kind": "interface",
           "name": "MovementSessionItem",
-          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  owner_path: string[] | null;\n  lines: MovementLineType[];\n  serialized_details?: typeLiteral | null;\n  reference: string;\n}",
+          "declaration": "interface MovementSessionItem {\n  uid: string;\n  number: number;\n  type: MovementTypeType;\n  quantity: number;\n  uid_product: string;\n  name: string;\n  uid_booking: string | null;\n  uid_order: string | null;\n  order_number: number | null;\n  custody: MovementCustodyType | null;\n  owner_path: string[] | null;\n  lines: MovementLineType[];\n  reference: string;\n}",
           "doc": "One movement, joined to what a receipt has to name.\n\nCalled `items` on the session for the same reason orders, invoices and\nfulfillments call theirs that way: `partials/shared/*.eta` is written against\na document with an `items[]`, and a fourth spelling would make the shared\nmarkup un-shareable."
         },
         {

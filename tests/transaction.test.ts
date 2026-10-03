@@ -166,7 +166,8 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     reference: "test",
     uuid_session: SESSION,
     reverses: null,
-    serialized_details: null,
+    units: [],
+    query_by_unit_number: [],
     created_by: { uid: "test-bot", name: "Test Bot" },
     updated_by: { uid: "test-bot", name: "Test Bot" },
     created_at: mockTimestamp,
@@ -1007,7 +1008,7 @@ Deno.test("StoreTransferLineInput: every key is required; oos is an answer, null
 // cannot pass by failing for some other reason.
 
 const unit = (number: number, serial: string | null = null) => ({
-  uid_unit: `testunit${String(number).padStart(12, "0")}`,
+  uid_unit: `unit-${number}`,
   number,
   serial_number: serial,
 });
@@ -1032,14 +1033,16 @@ Deno.test("rule 5: only the twin reclass forbids units", () => {
   assertEquals(forbidden, ["reclass_out", "reclass_in"]);
 });
 
-Deno.test("rule 5: every type accepts no unit keys (the stored corpus) and empty ones (the scaffold)", () => {
+Deno.test("rule 5: every type accepts empty unit keys (the scaffold) and refuses absent ones", () => {
+  // Required since 2026-10-03: every stored movement in both environments
+  // carries both keys, so an absent key is a writer that skipped the scaffold.
   for (const type of MOVEMENT_TYPES) {
-    const legacy = movement(type) as Record<string, unknown>;
-    delete legacy.units;
-    delete legacy.query_by_unit_number;
-    assertEquals(issuePaths(legacy), [], `${type}: written before tracking`);
     const stamped = movement(type, { units: [], query_by_unit_number: [] });
     assertEquals(issuePaths(stamped), [], `${type}: names no units`);
+    const absent = movement(type) as Record<string, unknown>;
+    delete absent.units;
+    delete absent.query_by_unit_number;
+    assertEquals(issuePaths(absent).sort(), ["query_by_unit_number", "units"], `${type}: keys absent`);
   }
 });
 
@@ -1059,8 +1062,10 @@ Deno.test("rule 5: a type with no lines may still name its units", () => {
   assertEquals(issuePaths(prep), []);
 });
 
-Deno.test("rule 5: units and the mirror are written together", () => {
-  assertEquals(issuePaths(unitsCheckOut({ query_by_unit_number: undefined })), ["query_by_unit_number"]);
+Deno.test("rule 5: units and the mirror are each required", () => {
+  const noMirror = unitsCheckOut() as Record<string, unknown>;
+  delete noMirror.query_by_unit_number;
+  assertEquals(issuePaths(noMirror), ["query_by_unit_number"]);
   const noUnits = movement("check_out", { query_by_unit_number: [] }) as Record<string, unknown>;
   delete noUnits.units;
   assertEquals(issuePaths(noUnits), ["units"]);
@@ -1077,11 +1082,22 @@ Deno.test("rule 5: named units number exactly the quantity", () => {
   assertEquals(issuePaths(one), ["units"]);
 });
 
-Deno.test("rule 5: units are strictly ascending, and no unit appears twice", () => {
+Deno.test("rule 5: units are strictly ascending, so no unit appears twice", () => {
   const descending = unitsCheckOut({ units: [unit(7), unit(3)], query_by_unit_number: [7, 3] });
   assertEquals(issuePaths(descending), ["units.1.number"]);
-  const sameUid = unitsCheckOut({ units: [unit(3), { ...unit(7), uid_unit: unit(3).uid_unit }] });
-  assertEquals(issuePaths(sameUid), ["units"]);
+  // A prep has no lines, so the ordering is the only thing that can fail.
+  const repeated = movement("prep", { units: [unit(3), unit(3)], query_by_unit_number: [3, 3] });
+  assertEquals(issuePaths(repeated), ["units.1.number"]);
+});
+
+Deno.test("rule 5: each uid_unit is the id its number derives", () => {
+  // Well-formed and distinct, and still wrong: it names unit 8 while the
+  // timeline mirror says 7.
+  const misnamed = unitsCheckOut({ units: [unit(3), { ...unit(7), uid_unit: "unit-8" }] });
+  assertEquals(issuePaths(misnamed), ["units.1.uid_unit"]);
+  // The shape alone is refused: a Firestore auto-id is not a unit id.
+  const autoId = unitsCheckOut({ units: [unit(3), { ...unit(7), uid_unit: "testunit000000000007" }] });
+  assertEquals(issuePaths(autoId), ["units.1.uid_unit"]);
 });
 
 Deno.test("rule 5: a reclass names no units, but may carry the empty keys", () => {
@@ -1128,14 +1144,12 @@ Deno.test("rule 5: a line names no units when the movement names none", () => {
   assertEquals(issuePaths(bad), ["lines.0.units"]);
 });
 
-// ── serialized_details is retiring ──────────────────────────────────
+// ── serialized_details is gone ──────────────────────────────────────
 
-Deno.test("serialized_details is optional on a stored movement", () => {
-  const without = movement("check_out") as Record<string, unknown>;
-  delete without.serialized_details;
-  assertEquals(issuePaths(without), []);
+Deno.test("serialized_details is refused on a stored movement", () => {
+  // 0 of 22,150 prod and 0 of 22,162 dev movements carry the key (2026-10-03).
   const legacy = movement("check_out", { serialized_details: { asset_tags: ["W-1"], serial_numbers: ["SN-1"] } });
-  assertEquals(issuePaths(legacy), [], "stored copies still parse until the rebuild purges them");
+  assertEquals(issuePaths(legacy), [""]);
 });
 
 Deno.test("serialized_details is gone from both inputs — a client sending it has it stripped", () => {

@@ -6223,9 +6223,8 @@ interface Movement {
   query_by_sources: string[];
   query_by_uid_store: string[];
   query_by_uid_location: string[];
-  units?: MovementUnitType[];
-  query_by_unit_number?: number[];
-  serialized_details?: typeLiteral | null;
+  units: MovementUnitType[];
+  query_by_unit_number: number[];
   xero_id?: string | null;
   supplier?: UidNameRefType | null;
   version: number;
@@ -6498,7 +6497,6 @@ interface MovementSessionItem {
   custody: MovementCustodyType | null;
   owner_path: string[] | null;
   lines: MovementLineType[];
-  serialized_details?: typeLiteral | null;
   reference: string;
 }
 ```
@@ -9377,6 +9375,15 @@ One of the six git-declared roles. @see {@link SEEDED_ROLE_NAMES}
 type SeededRoleName = indexedAccess;
 ```
 
+### `SerialNumber`
+
+A manufacturer serial. A changeable ATTRIBUTE of a unit number, never its
+identity: a replaced radio keeps its number and takes a new serial.
+
+```ts
+const SerialNumber: z.ZodType<string>;
+```
+
 ### `Session`
 
 Full session document schema (Firestore document shape).
@@ -11081,6 +11088,35 @@ interface UidNameRefType {
   uid: string;
   name: string;
 }
+```
+
+### `UnitId`
+
+`units.uid` — `unit-{number}`, derived from the unit number.
+
+Unit numbers are globally unique by owner ruling (2026-09-21): walkies own
+1001–2999, everything else draws from 3000 up. So the number IS the identity,
+a duplicate is refused structurally by `create()` on the derived id, and
+finding a unit by number is a point read. The serial is a changeable
+attribute, never part of the id.
+
+The number segment has no leading zero and no zero, so `unit-0` and
+`unit-007` are refused: one number, one spelling.
+
+⚠️ `uid_unit` beside a `number` is derivable, and `checkMovementUnits`
+asserts the two agree rather than trusting either.
+
+```ts
+const UnitId: z.ZodType<string>;
+```
+
+### `UnitNumber`
+
+A unit's number: the asset tag the operator reads off the unit, and the
+unit's identity (owner ruling 2026-09-21). Globally unique across products.
+
+```ts
+const UnitNumber: z.ZodType<number>;
 ```
 
 ### `UnplacedEndpoint`
@@ -15342,6 +15378,26 @@ interface UidNameRefType {
   uid: string;
   name: string;
 }
+```
+
+### `UnitId`
+
+`units.uid` — `unit-{number}`, derived from the unit number.
+
+Unit numbers are globally unique by owner ruling (2026-09-21): walkies own
+1001–2999, everything else draws from 3000 up. So the number IS the identity,
+a duplicate is refused structurally by `create()` on the derived id, and
+finding a unit by number is a point read. The serial is a changeable
+attribute, never part of the id.
+
+The number segment has no leading zero and no zero, so `unit-0` and
+`unit-007` are refused: one number, one spelling.
+
+⚠️ `uid_unit` beside a `number` is derivable, and `checkMovementUnits`
+asserts the two agree rather than trusting either.
+
+```ts
+const UnitId: z.ZodType<string>;
 ```
 
 ### `ZeroPricedComponentFinding`
@@ -21988,9 +22044,8 @@ interface Movement {
   query_by_sources: string[];
   query_by_uid_store: string[];
   query_by_uid_location: string[];
-  units?: MovementUnitType[];
-  query_by_unit_number?: number[];
-  serialized_details?: typeLiteral | null;
+  units: MovementUnitType[];
+  query_by_unit_number: number[];
   xero_id?: string | null;
   supplier?: UidNameRefType | null;
   version: number;
@@ -22371,6 +22426,39 @@ produced; a type-level prediction can.
 ### `hasCosts(type: MovementTypeType): boolean`
 
 Whether a movement type carries a cost object. Derived from the contract.
+
+## `@cfs/core/schemas/unit`
+
+Serialized units — the primitives a unit number and its serial are checked
+against wherever they appear.
+
+Today this module holds only the two scalars that movements already carry
+(`MovementUnit` in `src/schemas/transaction.ts`). The `units` document, its
+roster and their inputs land here next
+(`api-cloudrun/.claude/plans/serial-tracking.md` § *Schemas (core)*, phase P2). The
+dependency runs one way: `src/schemas/transaction.ts` imports from here, never the
+reverse, so the unit document can later name movements without a cycle.
+
+The id, `UnitId` (`unit-{number}`), lives with every other id shape in
+`_uid.ts`.
+
+### `SerialNumber`
+
+A manufacturer serial. A changeable ATTRIBUTE of a unit number, never its
+identity: a replaced radio keeps its number and takes a new serial.
+
+```ts
+const SerialNumber: z.ZodType<string>;
+```
+
+### `UnitNumber`
+
+A unit's number: the asset tag the operator reads off the unit, and the
+unit's identity (owner ruling 2026-09-21). Globally unique across products.
+
+```ts
+const UnitNumber: z.ZodType<number>;
+```
 
 ## `@cfs/core/schemas/user`
 
@@ -24040,7 +24128,6 @@ interface MovementSessionItem {
   custody: MovementCustodyType | null;
   owner_path: string[] | null;
   lines: MovementLineType[];
-  serialized_details?: typeLiteral | null;
   reference: string;
 }
 ```

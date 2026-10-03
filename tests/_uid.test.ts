@@ -12,6 +12,7 @@ import {
   RoleId,
   SEEDED_ROLE_NAMES,
   ThreadId,
+  UnitId,
 } from "../src/schemas/_uid.ts";
 import { bookingId, fid, legUid } from "./helpers/ids.ts";
 
@@ -135,6 +136,19 @@ Deno.test("MovementId accepts a pair-uid booking subject, 3- and 4-segment", () 
   );
   // A product subject is a bare Firestore id and is unaffected by any of this.
   accepts(MovementId, `${session}|purchase|0BIQ73UMiHTtd8mo0yNk`);
+});
+
+Deno.test("UnitId is unit-{number}, one spelling per number", () => {
+  accepts(UnitId, "unit-1");
+  accepts(UnitId, "unit-1001");
+  accepts(UnitId, "unit-3000");
+  rejects(UnitId, "unit-0");
+  rejects(UnitId, "unit-007");
+  rejects(UnitId, "unit-");
+  rejects(UnitId, "unit-12a");
+  rejects(UnitId, "unit--1");
+  rejects(UnitId, "1001");
+  rejects(UnitId, fid("u"));
 });
 
 Deno.test("isProductShapedUid: false for a bare divider uuid, true for a product/custom id", () => {

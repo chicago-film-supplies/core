@@ -123,8 +123,6 @@ export interface MovementSessionItem {
    * threw the pointer away would leave a receipt unable to link back.
    */
   lines: MovementLineType[];
-  /** Retiring with `Movement.serialized_details`; carried only when the movement has it. */
-  serialized_details?: { asset_tags: string[]; serial_numbers: string[] } | null;
   reference: string;
 }
 
@@ -142,10 +140,6 @@ export const MovementSessionItemSchema: z.ZodType<MovementSessionItem> = z.stric
   custody: MovementCustody.nullable(),
   owner_path: z.array(ItemUid).nullable().default(null),
   lines: z.array(MovementLine).default([]),
-  serialized_details: z.strictObject({
-    asset_tags: z.array(z.string()).default([]),
-    serial_numbers: z.array(z.string()).default([]),
-  }).nullable().optional(),
   reference: z.string(),
 });
 

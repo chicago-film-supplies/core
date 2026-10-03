@@ -41,6 +41,7 @@
     "./schemas/tag": "./src/schemas/tag.ts",
     "./schemas/tracking-category": "./src/schemas/tracking-category.ts",
     "./schemas/transaction": "./src/schemas/transaction.ts",
+    "./schemas/unit": "./src/schemas/unit.ts",
     "./schemas/user": "./src/schemas/user.ts",
     "./schemas/webshop-product": "./src/schemas/webshop-product.ts",
     "./schemas/typesense": "./src/schemas/typesense/mod.ts",

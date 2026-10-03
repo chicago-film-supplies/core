@@ -48,7 +48,8 @@
  * @module
  */
 import { z } from "zod";
-import { BookingId, FirestoreId, MovementId, OutOfServiceId } from "./_uid.ts";
+import { BookingId, FirestoreId, MovementId, OutOfServiceId, UnitId } from "./_uid.ts";
+import { SerialNumber, UnitNumber } from "./unit.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
   ActorRef,
@@ -847,7 +848,7 @@ export const MovementLine: z.ZodType<MovementLineType> = z.strictObject({
  * now.
  */
 export interface MovementUnitType {
-  /** The unit's document id. */
+  /** The unit's document id, `unit-{number}` — derived, see `UnitId`. */
   uid_unit: string;
   /** The unit's number within its product: the asset tag. */
   number: number;
@@ -857,9 +858,9 @@ export interface MovementUnitType {
 
 /** Zod schema for one identified unit on a movement. */
 export const MovementUnit: z.ZodType<MovementUnitType> = z.strictObject({
-  uid_unit: FirestoreId,
-  number: z.int().positive(),
-  serial_number: z.string().min(1).nullable(),
+  uid_unit: UnitId,
+  number: UnitNumber,
+  serial_number: SerialNumber.nullable(),
 });
 
 /**
@@ -1027,32 +1028,24 @@ export interface Movement {
 
   // ── unit identity ─────────────────────────────────────────────────
   /**
-   * Which units moved, ascending by `number`. Absent on a movement written
-   * before unit tracking. `[]` means the movement names no units: a bulk or
-   * untracked product, or a tracked one moved without naming them. When
-   * non-empty it lists exactly `quantity` units (rule 5 of
+   * Which units moved, ascending by `number`. `[]` means the movement names no
+   * units: a bulk or untracked product, or a tracked one moved without naming
+   * them. When non-empty it lists exactly `quantity` units (rule 5 of
    * `checkMovementContract`).
    *
-   * Optional because no stored movement carries the key yet (2026-10-02).
-   * `movementScaffold` stamps `[]` on every write, and the journal rebuild
-   * (api-cloudrun#1088) rewrites every stored movement through it. The serial
-   * plan makes it required after counting key presence in both environments,
-   * so do not index-exempt it: an exemption would hide that count.
+   * Required: 22,150 of 22,150 prod and 22,162 of 22,162 dev movements carry
+   * the key, every one empty (2026-10-03), because `movementScaffold` stamps
+   * `[]` on every write and the journal rebuild (api-cloudrun#1088) rewrote
+   * every stored movement through it. Do not index-exempt it: the per-unit
+   * timeline queries `query_by_unit_number`, and an exemption would also hide
+   * any future key-presence count.
    */
-  units?: MovementUnitType[];
+  units: MovementUnitType[];
   /**
    * `units[].number`, flat, in the same order: the per-unit timeline query
-   * (`array-contains`). Present exactly when `units` is.
+   * (`array-contains`). Required for the same reason and count as `units`.
    */
-  query_by_unit_number?: number[];
-
-  // ── retiring ──────────────────────────────────────────────────────
-  /**
-   * Superseded by `units`. Optional now, and gone from both inputs. The rest
-   * of the removal: writers stop (api-cloudrun), the journal rebuild writes no
-   * key (which purges every stored copy), then the schema drops it.
-   */
-  serialized_details?: { asset_tags: string[]; serial_numbers: string[] } | null;
+  query_by_unit_number: number[];
 
   // ── external links ────────────────────────────────────────────────
   /**
@@ -1307,11 +1300,12 @@ function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
 /**
  * Rule 5 of {@link checkMovementContract}: which units moved.
  *
- * - `units` and `query_by_unit_number` are both present or both absent, and
- *   the mirror is `units[].number` in order.
+ * - The mirror `query_by_unit_number` is `units[].number` in order.
  * - A contract that forbids units allows none.
  * - Non-empty `units` lists exactly `quantity` units, strictly ascending by
- *   `number` (so no number repeats), with no `uid_unit` repeated.
+ *   `number` (so no number repeats), and each `uid_unit` is the id its
+ *   `number` derives, `unit-{number}`. A mismatch would point the journal at
+ *   one unit while the timeline query finds another.
  * - Each line's `units` is empty or absent, or exactly `line.quantity` numbers.
  *   When the movement names units and has lines, the lines together name each
  *   unit exactly once. With no units named, no line may name any.
@@ -1321,16 +1315,10 @@ function checkMovementUnits(
   contract: MovementContract,
   ctx: z.RefinementCtx,
 ): void {
-  const units = m.units ?? [];
+  const units = m.units;
   const numbers = units.map((u) => u.number);
-  const mirror = m.query_by_unit_number ?? [];
-  if ((m.units === undefined) !== (m.query_by_unit_number === undefined)) {
-    ctx.addIssue({
-      code: "custom",
-      path: [m.units === undefined ? "units" : "query_by_unit_number"],
-      message: "units and query_by_unit_number are written together: both present or both absent",
-    });
-  } else if (mirror.length !== numbers.length || mirror.some((n, i) => n !== numbers[i])) {
+  const mirror = m.query_by_unit_number;
+  if (mirror.length !== numbers.length || mirror.some((n, i) => n !== numbers[i])) {
     ctx.addIssue({
       code: "custom",
       path: ["query_by_unit_number"],
@@ -1363,10 +1351,16 @@ function checkMovementUnits(
         });
       }
     });
-    const uids = new Set(units.map((u) => u.uid_unit));
-    if (uids.size !== units.length) {
-      ctx.addIssue({ code: "custom", path: ["units"], message: "a uid_unit appears more than once" });
-    }
+    // Strictly ascending numbers already make the derived ids distinct.
+    units.forEach((u, i) => {
+      if (u.uid_unit !== `unit-${u.number}`) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["units", i, "uid_unit"],
+          message: `uid_unit ${u.uid_unit} is not unit ${u.number}'s id (unit-${u.number})`,
+        });
+      }
+    });
   }
 
   const named = new Set(numbers);
@@ -1590,14 +1584,9 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   query_by_sources: z.array(z.string()),
   query_by_uid_store: z.array(FirestoreId),
   query_by_uid_location: z.array(FirestoreId),
-  // Optional: no stored movement carries either key yet. See the interface.
-  units: z.array(MovementUnit).optional(),
-  query_by_unit_number: z.array(z.int().positive()).optional(),
-  // Optional while it retires; see the interface.
-  serialized_details: z.strictObject({
-    asset_tags: z.array(z.string()),
-    serial_numbers: z.array(z.string()),
-  }).nullable().optional(),
+  // Required since 2026-10-03; the key-presence counts are on the interface.
+  units: z.array(MovementUnit),
+  query_by_unit_number: z.array(UnitNumber),
   // Optional, never required-nullable: 0 of 1,153 prod / 0 of 1,405 dev
   // movements carry the key (2026-08-30). See the interface docblock.
   xero_id: z.uuid().nullable().optional(),

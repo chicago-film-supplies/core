@@ -425,6 +425,7 @@ export {
   SEEDED_ROLE_NAMES,
   type SeededRoleName,
   ThreadId,
+  UnitId,
 } from "./common.ts";
 
 export {
@@ -1034,6 +1035,8 @@ export {
   type MovementSessionItem,
   type MovementSessionOrderRef,
 } from "./movement-session.ts";
+
+export { SerialNumber, UnitNumber } from "./unit.ts";
 
 export {
   PICK_SHEET_GATES,

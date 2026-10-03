@@ -16,6 +16,7 @@
  * | `StatementDocumentId` | `{id}:v{N}`                        | `statement-documents.uid` (saved org statements) |
  * | `MovementId`     | `{uuid}|{type}|{FirestoreId\|BookingId}` | `transactions.uid` for journal events (see below) |
  * | `OutOfServiceId` | `FirestoreId \| MovementId`              | `out-of-service.uid` — TWO populations, see below |
+ * | `UnitId`         | `unit-{number}`                         | `units.uid`, and `MovementUnit.uid_unit` — derived from the unit number, see below |
  * | *(none)*         | third-party uuid                        | `uploadcare-worklist.uuid` — an Uploadcare id, so `uuid` not `uid`; see the carve-outs below |
  *
  * Carve-outs that intentionally stay looser: `ActorRef.uid` (free-form
@@ -308,6 +309,26 @@ export const MovementId: z.ZodType<string> = z.templateLiteral([
  * `query_by_sources` for that, exactly as before.
  */
 export const OutOfServiceId: z.ZodType<string> = z.union([FirestoreId, MovementId]);
+
+/**
+ * `units.uid` — `unit-{number}`, derived from the unit number.
+ *
+ * Unit numbers are globally unique by owner ruling (2026-09-21): walkies own
+ * 1001–2999, everything else draws from 3000 up. So the number IS the identity,
+ * a duplicate is refused structurally by `create()` on the derived id, and
+ * finding a unit by number is a point read. The serial is a changeable
+ * attribute, never part of the id.
+ *
+ * The number segment has no leading zero and no zero, so `unit-0` and
+ * `unit-007` are refused: one number, one spelling.
+ *
+ * ⚠️ `uid_unit` beside a `number` is derivable, and `checkMovementUnits`
+ * asserts the two agree rather than trusting either.
+ */
+export const UnitId: z.ZodType<string> = z.templateLiteral([
+  "unit-",
+  z.string().regex(/^[1-9][0-9]*$/, "Must be a unit number without leading zeros"),
+]);
 
 /**
  * `quotes.uid` — deterministic composite `{uid_order}:v{N}`, one per saved
