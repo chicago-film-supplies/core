@@ -927,14 +927,29 @@ Deno.test("documentDiff: a leg only the fulfillment carries is ONE pair entry �
   assertEquals(summary(onFulfillment.lines), {});
 });
 
-Deno.test("documentDiff: an invoice without one of the order's legs is UNALIGNED — one entry, no pair or line entries", () => {
-  // Leg presence is never compared against an invoice: an aligned invoice
-  // carries every divider the order does, so a one-sided leg there is an
-  // unaligned scope, and is reported as exactly that.
-  const items = [...orderItems(), { uid: LEG2, type: "destination", name: "Second", description: "", path: [LEG2] } as unknown as LineItem, line(TRIPOD, [LEG2, TRIPOD], 1, 3000)];
+Deno.test("documentDiff: an invoice that DECLINED one of the order's legs is aligned — its lines read uninvoiced, no pair entry (core#126)", () => {
+  // A leg is decided like a line: a partial invoice that leaves one out is
+  // aligned, and the leg's lines are an ordinary `quantity` entry at
+  // `invoiced: 0`. Leg presence is still never a PAIR entry against an invoice.
+  const items = [...orderItems(), { uid: LEG2, type: "destination", name: "Second", description: "", path: [LEG2] } as LineItem, line(TRIPOD, [LEG2, TRIPOD], 1, 3000)];
   const ord = order(items);
-  (ord.destinations as unknown as Record<string, unknown>[]).push({ ...structuredClone(PAIR), uid: LEG2 });
+  ord.destinations.push({ ...structuredClone(PAIR), uid: LEG2 } as Order["destinations"][number]);
   const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  const diff = computeDocumentDiffs({ orders: [ord], invoices: [inv] }, { kind: "order", uid: O }, CONTEXT);
+  assertEquals(
+    [summary(diff.pairs), summary(diff.lines), diff.unaligned.map((u) => u.source.kind)],
+    [{}, { [`${LEG2}/${TRIPOD}`]: ["qty[#2241](o1 f- i0,q3000,x0)"] }, []],
+  );
+});
+
+Deno.test("documentDiff: an invoice lacking a leg whose line it bills ELSEWHERE is still UNALIGNED — one entry, nothing per line", () => {
+  // The broken-skeleton half of the same shape: the tripod is on the invoice,
+  // hung under the order's first leg instead of its own. Read as declined, it
+  // would count as unbilled and a remaining invoice would bill it twice.
+  const items = [...orderItems(), { uid: LEG2, type: "destination", name: "Second", description: "", path: [LEG2] } as LineItem, line(TRIPOD, [LEG2, TRIPOD], 1, 3000)];
+  const ord = order(items);
+  ord.destinations.push({ ...structuredClone(PAIR), uid: LEG2 } as Order["destinations"][number]);
+  const inv = invoice("inv-1", [{ order: O, items: [...orderItems(), line(TRIPOD, [D, TRIPOD], 1, 3000)] }]);
   const diff = computeDocumentDiffs({ orders: [ord], invoices: [inv] }, { kind: "order", uid: O }, CONTEXT);
   assertEquals([summary(diff.pairs), summary(diff.lines), diff.unaligned.map((u) => u.source.kind)], [{}, {}, ["invoice"]]);
 });

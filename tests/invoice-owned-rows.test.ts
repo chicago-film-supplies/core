@@ -175,7 +175,7 @@ Deno.test("🔴 scope: an invoice-authored destination — pair, divider and lin
   assertEquals((r.scopedItems[3] as InvoiceItem).quantity, 4, "the order's light followed the edit");
   assertEquals(r.destinations.map((p) => p.uid), [D, D_INV]);
   assertEquals(r.destinations[1].jurisdiction, "rantoul");
-  assertEquals([r.dropped, r.kept], [[], []]);
+  assertEquals(r.dropped, []);
 
   // And again: a second edit is where an override used to be lost.
   const r2 = syncOrderDestinationScope(next, next, r.scopedItems, r.destinations, O, PF);
@@ -195,7 +195,6 @@ Deno.test("🔴 scope: the order deletes leg D2 holding an invoice-authored grou
 
   assertEquals(keys(r.scopedItems).filter((k) => k.includes(D2)), [`${O}/${D2}`, `${O}/${D2}/${G_INV}`, `${O}/${D2}/${G_INV}/${STAND}`]);
   assertEquals(r.destinations.map((p) => p.uid), [D, D2]);
-  assertEquals(r.kept, [{ uid_order: O, uid: D2, divider_overridden: false, pair_overridden: false, holds_invoice_rows: true }]);
   assertEquals(r.dropped, []);
 
   // Without the authored group, the same delete drops D2 whole.
@@ -213,7 +212,8 @@ Deno.test("alignment: an invoice-authored group and leg are a SUPERSET of the sk
   assertEquals(invoiceScopeDividersMatch(items, orderItems(), O), true);
 });
 
-Deno.test("alignment: a MISSING or MOVED order divider is still unaligned — the order's own divider is never excused", () => {
+Deno.test("alignment: a missing divider whose line is still pathed under it, or a MOVED one, is unaligned — the order's own divider is never excused", () => {
+  // G gone, its light still at `D/G/LIGHT`: malformed, not declined (core#126).
   const missing = buildOrderScopedItems(orderItems(), O).filter((it) => it.uid !== G) as InvoiceItem[];
   assertEquals(invoiceScopeDividersMatch(missing, orderItems(), O), false, "missing");
   // G moved onto an invoice-authored leg: its uid is the order's, so it is not authored.
@@ -326,3 +326,110 @@ function computeInvoiceItemPathsLike(rows: Row[]): Row[] {
     .slice(1)
     .map((r) => ({ ...(r as unknown as Row), path: (r as unknown as Row).path.slice(1) }));
 }
+
+// ── Phase 1b (core#126): a divider is decided like a line ───────────
+//
+// | | invoice has it | invoice lacks it |
+// |---|---|---|
+// | on prev and next order | merge per field | DECLINED: stays out |
+// | new on next order | — | project it |
+// | on prev only | override test | gone |
+// | on neither | the invoice's own, stays | — |
+//
+// A divider exists while something under it does: a NEW order line beneath a
+// declined divider re-opens it, every declined ancestor and the pair with it.
+
+const G2 = "0b6c3a51-6c1a-4f0e-9a51-6f1f2b9d0a04";
+/** The order with a second leg D2 holding a group G2 and a tripod. */
+const twoLegOrder = (): LineItem[] => [
+  ...orderItems(),
+  dest(D2, "Second"),
+  group(G2, D2, "Electric"),
+  line(TRIPOD, [D2, G2, TRIPOD]),
+];
+const scopeOf = (items: LineItem[]) => ({ items, destinations: [pair(D), pair(D2)] });
+/** The invoice bills leg D only: D2, its group, line and pair were declined. */
+const legDOnly = () => ({
+  items: buildOrderScopedItems(orderItems(), O),
+  destinations: [scoped(pair(D))],
+});
+
+Deno.test("🔴 1b: a DECLINED group stays out across an order edit — it is not re-projected empty", () => {
+  const prev = orderItems();
+  const next = prev.map((it) => it.uid === TRIPOD ? rename(it, "Tripod v2") : it);
+  // The invoice bills the tripod only: group G and its light were left out.
+  const stored = buildOrderScopedItems(prev, O).filter((it) => it.uid !== G && it.uid !== LIGHT);
+  const out = syncOrderToInvoiceSelective(prev, next, stored, O);
+  assertEquals(keys(out), [`${O}/${D}`, `${O}/${D}/${TRIPOD}`]);
+  assertEquals(out[1].name, "Tripod v2", "the billed line still follows the order");
+});
+
+Deno.test("🔴 1b: a DECLINED destination stays out — divider, group and pair (core#126's resurrection case)", () => {
+  const prev = scopeOf(twoLegOrder());
+  const next = scopeOf(twoLegOrder().map((it) => it.uid === LIGHT ? { ...it, quantity: 4 } : it));
+  const inv = legDOnly();
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, O, PF);
+  assertEquals(keys(r.scopedItems), [`${O}/${D}`, `${O}/${D}/${TRIPOD}`, `${O}/${D}/${G}`, `${O}/${D}/${G}/${LIGHT}`]);
+  assertEquals(r.destinations.map((p) => p.uid), [D]);
+  assertEquals(r.dropped, []);
+  // And it stays out on the edit after.
+  const r2 = syncOrderDestinationScope(next, next, r.scopedItems, r.destinations, O, PF);
+  assertEquals([keys(r2.scopedItems), r2.destinations.map((p) => p.uid)], [keys(r.scopedItems), [D]]);
+});
+
+Deno.test("🔴 1b: a NEW order line under a declined destination RE-OPENS it — divider, its group and pair, before the line", () => {
+  const STAND_PATH = [D2, G2, STAND];
+  const prev = scopeOf(twoLegOrder());
+  const next = scopeOf([...twoLegOrder(), line(STAND, STAND_PATH)]);
+  const inv = legDOnly();
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, O, PF);
+  assertEquals(keys(r.scopedItems).filter((k) => k.includes(D2)), [`${O}/${D2}`, `${O}/${D2}/${G2}`, `${O}/${D2}/${G2}/${STAND}`]);
+  assertEquals(r.scopedItems.some((it) => it.uid === TRIPOD && it.path.includes(D2)), false, "the declined tripod stays out");
+  assertEquals(r.destinations.map((p) => p.uid), [D, D2], "the pair re-opens with its divider");
+  assertEquals(computeInvoiceItemPaths([{ ...divider } as InvoiceItem, ...r.scopedItems as InvoiceItem[]]).slice(1).map((it) => it.path.join("/")), keys(r.scopedItems), "a fixed point of the one path author");
+});
+
+Deno.test("1b: a group or destination NEW on the order is projected, even with nothing under it", () => {
+  const prev = scopeOf(twoLegOrder().filter((it) => !it.path.includes(D2)));
+  prev.destinations = [pair(D)];
+  const next = scopeOf([...orderItems(), dest(D2, "Second")]);
+  const inv = legDOnly();
+  const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, O, PF);
+  assertEquals(keys(r.scopedItems).at(-1), `${O}/${D2}`);
+  assertEquals(r.destinations.map((p) => p.uid), [D, D2]);
+});
+
+Deno.test("1b: a pair whose divider the invoice lacks while the order keeps it goes with its divider — reported, never silent", () => {
+  const prev = scopeOf(twoLegOrder());
+  const inv = legDOnly();
+  const r = syncOrderDestinationScope(prev, prev, inv.items, [...inv.destinations, scoped(pair(D2))], O, PF);
+  assertEquals(r.destinations.map((p) => p.uid), [D]);
+  assertEquals(r.dropped.map((d) => [d.uid, d.reason]), [[D2, "divider_absent"]]);
+});
+
+Deno.test("🔴 1b alignment: a declined group or leg is aligned; billing its line ELSEWHERE is not", () => {
+  const order = twoLegOrder();
+  const declined = buildOrderScopedItems(orderItems(), O) as InvoiceItem[];
+  assertEquals(invoiceScopeDividersMatch(declined, order, O), true, "D2 declined");
+  const noGroup = declined.filter((it) => it.uid !== G && it.uid !== LIGHT);
+  assertEquals(invoiceScopeDividersMatch(noGroup, order, O), true, "G declined too");
+  // D2's tripod billed under D instead: its uid is under a missing divider at a path the order lacks.
+  const elsewhere = [...declined, ...buildOrderScopedItems([line(TRIPOD, [D, G, TRIPOD])], O)] as InvoiceItem[];
+  assertEquals(invoiceScopeDividersMatch(elsewhere, order, O), false, "billed elsewhere");
+  // …and on an invoice-authored leg: the regroup core#125 has no pointer for yet.
+  const onAuthored = [...declined, ...authoredLeg().items, ...buildOrderScopedItems([line(TRIPOD, [D_INV, TRIPOD])], O)] as InvoiceItem[];
+  assertEquals(invoiceScopeDividersMatch(onAuthored, order, O), false, "billed on an authored leg");
+});
+
+Deno.test("🔴 1b accounting: a declined leg's lines read UNBILLED and the remainder bills them — once", () => {
+  const order = twoLegOrder();
+  const billed: AccountedInvoice = {
+    uid: "a",
+    status: "issued",
+    items: [divider, ...(buildOrderScopedItems(orderItems(), O) as unknown as InvoiceItem[])],
+    destinations: [scoped(pair(D))] as never,
+  };
+  const { lines, unaligned } = remainingForOrder(O, order, [billed], [pair(D), pair(D2)]);
+  assertEquals(unaligned, []);
+  assertEquals(lines.map((l) => [l.path.join("/"), l.quantity]), [[`${D2}/${G2}/${TRIPOD}`, 1]]);
+});

@@ -29533,10 +29533,11 @@ type Discount = DiscountType;
 
 ### `DroppedInvoiceDestination`
 
-One invoice destination pair that {@link syncOrderDestinationsSelective}
-removed. There is one way left to be removed: the order deleted a pair the
-invoice had not edited (`removed_from_order`), which is the intended
-behaviour and is reported for completeness, not because anything is wrong.
+One invoice destination pair that {@link syncOrderDestinationsSelective} or
+{@link syncOrderDestinationScope} removed. The ordinary way to be removed is
+that the order deleted a pair the invoice had not edited
+(`removed_from_order`), which is the intended behaviour and is reported for
+completeness, not because anything is wrong.
 
 ⚠️ **There used to be a second reason, `key_names_no_order_pair`, and core#124
 made it unreachable rather than reported.** It named a pair on NEITHER order —
@@ -29554,7 +29555,7 @@ interface DroppedInvoiceDestination {
   delivery_uid: string | null;
   collection_uid: string | null;
   jurisdiction: JurisdictionType | null;
-  reason: "removed_from_order";
+  reason: "removed_from_order" | "divider_absent";
 }
 ```
 
@@ -29696,20 +29697,6 @@ interface ItemUniquenessIssue {
 }
 ```
 
-### `KeptInvoiceDestination`
-
-A destination the order deleted that the invoice kept, and which half kept it.
-
-```ts
-interface KeptInvoiceDestination {
-  uid_order: string;
-  uid: string;
-  divider_overridden: boolean;
-  pair_overridden: boolean;
-  holds_invoice_rows: boolean;
-}
-```
-
 ### `LineItem`
 
 A single item in an order/invoice/fulfillment array — product, divider,
@@ -29760,7 +29747,6 @@ interface OrderDestinationScopeSyncResult {
   scopedItems: InvoiceDocItemType[];
   destinations: InvoiceDestinationPair[];
   dropped: DroppedInvoiceDestination[];
-  kept: KeptInvoiceDestination[];
 }
 ```
 
@@ -30737,8 +30723,22 @@ counterpart by construction (`isDividerItemType("order")` is `true`).
 🔴 **So is every invoice-authored subtree** ({@link invoiceAuthoredSubtrees},
 core#124): a group or destination the invoice added is a SUPERSET of the
 order's skeleton, not a disagreement with it, and its lines bill no order
-line. What still fails is a disagreement about a divider the ORDER owns —
-one the invoice lacks, or carries at another path.
+line.
+
+🔴 **An order divider the invoice LACKS is not a disagreement either — it was
+DECLINED** (core#126, owner 2026-10-03): a group or destination is decided
+like a line, so a partial invoice that bills one group of its order leaves
+the others out and stays aligned. That costs the predicate the ability to
+tell a declined divider from a lost one, and it keeps exactly the part of the
+distinction that protects money: **a missing divider whose order lines the
+invoice bills ELSEWHERE** — the same uid at a path the order lacks, the
+flattened CRMS skeleton — is still unaligned. Read as declined, those lines
+would count as unbilled and a remaining invoice would bill them twice.
+(api-cloudrun#1189's three prod invoices were the declined kind: each bills
+one group, or only lost/damaged lines, and lacks the rest.)
+
+What fails is a divider the ORDER owns carried at another path, or a missing
+one whose lines moved.
 
 ### `isInExtensionSection(path: readonly string[], orderDividerUid: string, targets: ReadonlyMap<string, readonly string[]>): boolean`
 
@@ -31019,30 +31019,30 @@ re-prices it with `priceDocument` before writing.
 
 ### `syncOrderDestinationScope(prevOrder: typeLiteral, nextOrder: typeLiteral, currentScopedItems: InvoiceDocItemType[], currentInvoiceDests: InvoiceDestinationPair[], orderUid: string, mode: OrderInvoiceFieldSync): OrderDestinationScopeSyncResult`
 
-Sync one order's scope of an invoice — its items and its destination pairs —
-and decide each deleted destination ONCE (api-cloudrun#664).
+Sync one order's scope of an invoice — its items and its destination pairs.
 
-{@link syncOrderToInvoiceSelective} decides a destination divider by path and
-{@link syncOrderDestinationsSelective} decides its pair by `pair.uid`, each
-with its own override test. Run alone, they can split a destination the order
-deleted: a renamed divider is kept while its unedited pair is dropped, or an
-edited pair is kept while its unedited divider is dropped. Either result
-fails the divider ⟺ pair write guard, and because the invoice write is staged
-inside the ORDER's transaction, the order edit fails with it.
+🔴 **A pair follows its destination divider and decides no membership of its
+own** (core#126, owner 2026-10-03). The items decide which destinations the
+invoice holds — by the one row rule {@link syncOrderToInvoiceSelective} runs
+on lines, groups and destination dividers alike — and then each pair whose
+divider is present is merged PER FIELD ({@link mergePair}), projected from the
+order when the invoice has none (a new destination, or a declined one a new
+line re-opened), or kept as the invoice's own when no order carried it. A pair
+whose divider is gone goes with it.
 
-So after both run, every destination the order deleted in this edit is
-re-decided as one row via {@link destinationRowOverridden}: overridden ⇒ both
-halves kept (the missing one restored from the stored invoice), otherwise both
-dropped — **unless a row the invoice authored or kept still hangs beneath the
-divider** (core#124), in which case the destination is that section's and
-both halves stay (`holds_invoice_rows`). Destinations still on the order are
-untouched — a consistent order already adds and keeps both halves together,
-and a destination on NEITHER order is the invoice's own and is kept by both
-helpers' "absent from both" arms.
+That makes the divider ⟺ pair join hold by construction. It replaces the
+api-cloudrun#664 re-decision loop, which ran two independent membership rules
+(by path for the divider, by `pair.uid` for the pair) and then re-decided every
+deleted destination as one row afterwards; and it ends the resurrection
+core#126 found, where the pair loop read a pair the invoice had DECLINED as a
+new one and re-added it with an empty section.
 
-⚠️ A divider restored here only for its overridden PAIR is appended at the
-tail of the scope. Every other kept row stays where it stood
-({@link interleaveStoredOnlyRows}).
+⚠️ **The pair's own override still keeps a destination the order deleted.**
+The divider's override is the item sync's own test; the pair's is not, so for
+a destination on the previous order and not the next, an overridden pair
+(`jurisdiction`, dates, an endpoint) restores the stored divider — appended at
+the tail of the scope, where the old loop put it. Every other kept row stays
+where it stood ({@link interleaveStoredOnlyRows}).
 
 **Parameters**
 
@@ -31051,16 +31051,8 @@ tail of the scope. Every other kept row stays where it stood
 - `currentScopedItems` — The invoice's items under the order divider, without the divider
 - `currentInvoiceDests` — The invoice's full destinations array (all orders)
 - `orderUid` — The order's uid, which is also its invoice divider's uid
-- `mode` — The merge context ({@link OrderInvoiceFieldSync}).
-
-⚠️ **There is no per-half `flags` argument any more.** It named which halves
-the edit touched, so an untouched half could be carried as stored — a saving
-the per-field rule does not need and cannot safely take: a field the order did
-not change merges to what the invoice already has, so running both halves
-unconditionally is already a no-op where the old flag would have skipped.
-Both halves merge per field. A line's `chargeable_days` is derived, so the
-merge leaves it alone and the caller's `priceDocument` stamps it from the
-line's own invoice pair.
+- `mode` — The merge context ({@link OrderInvoiceFieldSync}); its
+`holidays` settle a merged window's derived day counts.
 
 ### `syncOrderDestinationsSelective(prevOrderDests: DocDestinationType[], newOrderDests: DocDestinationType[], currentInvoiceDests: InvoiceDestinationPair[], uidOrder: string, extensionPairUids: ReadonlySet<string>, mode: OrderInvoiceFieldSync): OrderDestinationSyncResult`
 
@@ -31070,6 +31062,13 @@ respecting invoice-side overrides. Per-pair matching is by
 ENDPOINT uids until api-cloudrun#663, where the key itself moved whenever an
 address was corrected. Only pairs scoped to `uidOrder` are touched — pairs
 from other orders pass through unchanged.
+
+⚠️ **This is the PAIR-ONLY sync, for an invoice with no order divider** — so no
+destination divider for a pair to follow. Wherever the invoice has one, use
+{@link syncOrderDestinationScope}, where a pair follows its divider (core#126)
+and a destination the invoice declined stays out. Here a pair the invoice
+lacks reads as new, because without items structure nothing can say it was
+declined.
 
 Policy per pair:
 - Not in invoice (new in order) → add, tagged with `uid_order`.
@@ -31098,8 +31097,8 @@ reconciled separately, so a jurisdiction-only edit was not an override and a
 pair the ORDER deleted was DROPPED — on the stated ground that *"an
 owned-field edit is not a claim that the destination still exists"*. Per
 field there is no owned set: `jurisdiction` is a shared field like any other,
-so editing it IS an override and the pair now SURVIVES its own deletion,
-reported in `kept`. Both readings are defensible; this one follows from the
+so editing it IS an override and the pair now SURVIVES its own deletion.
+Both readings are defensible; this one follows from the
 campaign's single rule, and it is the behaviour prod has had since
 2026-09-15.
 
@@ -31154,7 +31153,9 @@ multiple positions in the items array. For each item:
   replaced with the new order item, carrying forward invoice-only overrides
 - **Overridden** (invoice item differs from prev order): left unchanged
 - **New** (in new order, not in prev): added under the order divider
-- **Left out** (a LINE in prev and new, never on the invoice): stays out
+- **Left out** (a row in prev and new, never on the invoice — a LINE, a group
+  or a destination divider alike): stays out, unless a NEW row is projected
+  beneath a left-out divider, which re-opens it (core#126)
 - **Removed** (in prev order, not in new): removed only if synced, kept if overridden
 - **Invoice-authored** (on NEITHER order — a line, group or destination an
   operator added on the invoice, or a row an earlier edit kept): kept (core#124)
@@ -31204,8 +31205,18 @@ code projected EVERY order line the invoice lacked. So an unsettled partial
 invoice was refilled with the whole order on its next save, and an "invoice
 remaining" invoice re-billed lines another invoice had already billed. A line
 counts as new only when the previous order had no line at its path and no line
-that moved there. Dividers are still projected when missing: they are the
-skeleton alignment reads, not something an operator bills.
+that moved there.
+
+## 🔴 …and so does a DIVIDER (core#126, owner 2026-10-03)
+
+Dividers used to be projected whenever missing, as "the skeleton alignment
+reads". So a group or destination an operator deleted from a partial invoice
+came back, empty, on the next order save. A divider is now decided exactly
+like a line, with one addition: **a divider exists while something under it
+does.** A new order line beneath a declined group or destination drags it
+back in (ruled: it re-opens the section), and a kept row keeps its ancestors
+({@link interleaveStoredOnlyRows}). The price is that alignment can no longer
+tell a declined divider from a missing one — {@link invoiceScopeDividersMatch}.
 
 ## 🔴 A row on NEITHER order is the invoice's own (core#124)
 

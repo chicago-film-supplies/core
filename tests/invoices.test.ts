@@ -3373,12 +3373,11 @@ Deno.test("manager#421 stage two: the PROJECTION emits zero_priced, unconditiona
   });
 });
 
-// ── syncOrderDestinationScope (api-cloudrun#664) ────────────────
+// ── syncOrderDestinationScope (api-cloudrun#664, core#126) ──────
 //
-// A destination row is its divider AND its pair. The two selective helpers each
-// decide one half with their own override test; these tests pin that a deleted
-// destination is kept or dropped WHOLE, so the invoice always satisfies the
-// divider ⟺ pair write guard.
+// A destination row is its divider AND its pair, and the pair follows the
+// divider. These tests pin that a deleted destination is kept or dropped
+// WHOLE, so the invoice always satisfies the divider ⟺ pair write guard.
 
 function scopeOrder(dests: string[]): { items: LineItem[]; destinations: ReturnType<typeof makePair>[] } {
   const items: LineItem[] = [];
@@ -3411,7 +3410,6 @@ Deno.test("syncOrderDestinationScope: a clean delete drops divider and pair toge
   const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, PF);
   assertJoined(r.scopedItems, r.destinations);
   assertEquals(r.destinations.map((p) => p.uid), [DEST_1]);
-  assertEquals(r.kept, []);
   assertEquals(r.dropped.map((d) => [d.uid, d.reason]), [[DEST_2, "removed_from_order"]]);
 });
 
@@ -3423,7 +3421,6 @@ Deno.test("syncOrderDestinationScope: a RENAMED divider keeps its unedited pair 
   const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, PF);
   assertJoined(r.scopedItems, r.destinations);
   assertEquals(r.destinations.map((p) => p.uid).sort(), [DEST_1, DEST_2].sort());
-  assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: true, pair_overridden: false, holds_invoice_rows: false }]);
   assertEquals(r.dropped, []);
 });
 
@@ -3437,7 +3434,6 @@ Deno.test("syncOrderDestinationScope: an EDITED pair keeps its unedited divider 
   const r = syncOrderDestinationScope(prev, next, inv.items, inv.destinations, ORDER_DIV_1, PF);
   assertJoined(r.scopedItems, r.destinations);
   assertEquals(r.scopedItems.some((it) => it.type === "destination" && it.uid === DEST_2), true);
-  assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: false, pair_overridden: true, holds_invoice_rows: false }]);
 });
 
 Deno.test("syncOrderDestinationScope: a jurisdiction-only edit KEEPS a deleted destination — and keeps BOTH halves", () => {
@@ -3454,7 +3450,6 @@ Deno.test("syncOrderDestinationScope: a jurisdiction-only edit KEEPS a deleted d
   assertEquals(r.destinations.map((p) => p.uid), [DEST_1, DEST_2]);
   assertEquals(r.scopedItems.some((it) => it.type === "destination" && it.uid === DEST_2), true);
   assertEquals(r.dropped, [], "nothing was dropped, so nothing should be reported as dropped");
-  assertEquals(r.kept, [{ uid_order: ORDER_DIV_1, uid: DEST_2, divider_overridden: false, pair_overridden: true, holds_invoice_rows: false }]);
 });
 
 Deno.test("syncOrderDestinationScope: a new destination arrives as divider and pair", () => {
@@ -3526,7 +3521,7 @@ Deno.test("syncOrderToInvoiceSelective: a line the prev order had and the invoic
   assertEquals(result.map((it) => it.uid), [DEST_1, ITEM_1, "Item0000000000000003"]);
 });
 
-Deno.test("syncOrderToInvoiceSelective: a missing DIVIDER is still projected — it is the skeleton alignment reads", () => {
+Deno.test("syncOrderToInvoiceSelective: a missing divider over a line the invoice BILLS is re-emitted — a kept row keeps its ancestors (core#126)", () => {
   const light = orderShapedLine();
   const invoice = buildOrderScopedItems([light], ORDER_DIV_1);
   const result = syncOrderToInvoiceSelective([destDivider(), light], [destDivider(), light], invoice, ORDER_DIV_1);

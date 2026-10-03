@@ -260,7 +260,7 @@ Deno.test("per field: a pair the order deleted is kept when its dates were overr
   (inv.destinations[1] as unknown as Record<string, unknown>).dates = dates(iso(6), iso(9), 0);
   const kept = sync(prev, next, inv, FIELD);
   assertEquals(kept.destinations.map((p) => p.uid).sort(), [DEST_A, DEST_B].sort());
-  assertEquals(kept.kept.map((k) => k.uid), [DEST_B], "divider and pair kept together");
+  assertEquals(kept.scopedItems.some((it) => it.type === "destination" && it.uid === DEST_B), true, "divider and pair kept together");
 });
 
 // ── Charge days are derived (charge-windows decision 3) ──────────────────────

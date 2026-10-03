@@ -70,8 +70,9 @@
  * reports once and its components are suppressed. An exchange leg is simply such a
  * pair — a reader tells it apart by the pair's own `exchange`, so there is no
  * dedicated kind. Between an order and an INVOICE, a leg the order owns is not
- * compared for presence: an invoice scope missing it fails the divider-skeleton
- * match and is reported once, in `unaligned`. A leg the INVOICE authored
+ * compared for presence: an invoice that DECLINED it (core#126) is aligned and
+ * its lines are ordinary `quantity` entries at `invoiced: 0`, and one whose
+ * skeleton is broken is reported once, in `unaligned`. A leg the INVOICE authored
  * (`invoiceAuthoredSubtrees`, core#124) is the one exception — the skeleton
  * match ignores it, so it reports here, once, like any one-sided leg. A group
  * the invoice authored reports its lines one by one (`not_on_source` /
@@ -814,7 +815,8 @@ function compareScope(
    * any leg. Against an invoice, only a leg the INVOICE authored
    * (`invoiceLegs`, core#124): an invoice is compared at all only when its
    * scope carries the order's divider skeleton (`invoiceScopeDividersMatch`),
-   * so a leg the order owns and the invoice lacks is an `unaligned` scope and is
+   * so a leg the order owns and the invoice lacks is either DECLINED (core#126 —
+   * no pair entry; its lines are `quantity` entries) or an `unaligned` scope
    * reported as one — while a leg the invoice ADDED is a superset of that
    * skeleton, reported once here with its rows suppressed.
    */
