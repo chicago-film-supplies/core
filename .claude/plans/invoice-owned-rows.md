@@ -20,10 +20,10 @@
 > The tax as-of move was already pinned by `api-cloudrun/tests/unit/documentTaxContext.test.ts` (D8).
 > No log of `kept`/`holds_invoice_rows` was added — nothing needed it.
 >
-> ⚠️ Filed: **core#126** — removing a destination the ORDER still carries is now writable, and the
-> next order edit re-adds it as an empty section. Owner decision; the manager does not offer removal.
+> ⚠️ **core#126 is RULED (owner, 2026-10-03): dividers and pairs follow the LINE rule** — see
+> *Phase 1b* below. It supersedes #126's three options.
 >
-> **Next: push api-cloudrun (dev deploy), then Phase 3**, launched from `~/cfs/manager`.
+> **Next: push api-cloudrun (dev deploy), then Phase 1b (core), then Phase 3 (manager).**
 
 ## Context
 
@@ -57,6 +57,49 @@ already dropped by the sync are not in the corpus.
 The rule is the fulfillment's (`mergePairs` + `syncRows`, `api-cloudrun/src/lib/orderFulfillmentSync.ts`):
 **absent from BOTH orders ⇒ downstream-authored ⇒ stays**; absent only from next ⇒ admin removal ⇒ the
 override test.
+
+## Phase 1b — one row rule for lines, groups and destinations (core, core#126)
+
+**Launch from:** `~/cfs/core` (then api-cloudrun for the fulfillment half and the pin)
+**Skills:** cfs-order-projections, cfs-items, cfs-release-order, fulfillment-ladder (api-cloudrun)
+**Read:** `core/CLAUDE.md`; this doc.
+
+**Owner rulings (2026-10-03):** a destination or group divider is decided exactly like a line.
+Agreed costs 1–4 and both questions below.
+
+| | projection has it | projection lacks it |
+|---|---|---|
+| on prev and next order | merge per field | **declined: stays out** |
+| new on next order | — | project it |
+| on prev only | override test | gone |
+| on neither | the projection's own, stays | — |
+
+- **A divider exists while something under it does.** A kept row keeps its ancestors
+  (`placeStoredOnlyRows`); a projected NEW row drags any missing ancestor back in — so a new order
+  line under a declined destination re-opens it, divider AND pair (ruled: yes).
+- **A pair follows its destination divider** and decides no membership of its own:
+  `syncOrderDestinationsSelective` (invoice) and `mergePairs` (`api-cloudrun/src/lib/orderFulfillmentSync.ts`)
+  merge fields only for pairs whose divider is present. The "absent ⇒ new pair" arm goes.
+- **The fulfillment follows the same rule** (ruled: yes). Its `syncRows` has the same divider
+  exception (`prevByPath` excludes dividers, so a missing divider re-projects).
+- Collapses: the divider re-projection in `syncScopedItems`, most of `syncOrderDestinationScope`'s
+  #664 re-decision loop and probably `KeptInvoiceDestination` / `holds_invoice_rows`.
+
+**Agreed costs:**
+1. `invoiceScopeDividersMatch` can no longer tell a DECLINED destination/group from a broken
+   skeleton. Alignment narrows to what the single path author cannot guarantee. ⚠️ **Before landing,
+   establish why api-cloudrun#1189's three invoices lack an order divider** — under this rule they
+   would probably read as declined and stop being flagged.
+2. A group or destination an operator deletes on a partial invoice stays deleted (today the order
+   puts it back).
+3. A new order line re-opens a declined section (above).
+4. Bringing a declined row back is manager#472's sync buttons, extended to dividers.
+
+**Unchanged:** lines under a declined destination read uninvoiced in coverage and are billed by a
+remaining invoice; Phase 2's write side (pair follows divider) is already this rule's shape.
+
+**Tests:** prev/next/projection matrix per row kind (line, group, destination) on both projections;
+re-open on a new line; #126's resurrection case now stays out; the fulfillment oracle suites.
 
 ## Phase 2 — api-cloudrun (`main`) — DONE (see status)
 
