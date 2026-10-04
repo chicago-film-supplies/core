@@ -51,9 +51,13 @@ import { breakdownQuantity, type FullBookingBreakdown, fullBookingBreakdown, sum
 /**
  * A booking as the ruleset reads it. `units` is read when present: `null` or
  * absent means the booking is not unit-tracked, and its actions may name no
- * units.
+ * units. Optional HERE although `Booking.units` is required: the ruleset is
+ * also driven from bare custody states (a replay, a manager preview) that
+ * carry no unit sets at all.
  */
-export type CustodyBooking = Pick<Booking, "type" | "breakdown" | "quantity" | "status" | "units">;
+export type CustodyBooking =
+  & Pick<Booking, "type" | "breakdown" | "quantity" | "status">
+  & Partial<Pick<Booking, "units">>;
 
 /** A refused action: illegal for the booking, or short of units. Map it to a 400. */
 export class CustodyRefusal extends Error {

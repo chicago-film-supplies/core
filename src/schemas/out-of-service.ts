@@ -225,12 +225,11 @@ export interface OutOfService {
    * bulk product, or a serialized one before its roster was seeded). See
    * {@link OOSUnitsType}.
    *
-   * ⚠️ **Optional only while it is mid-expand**, the same four steps as
-   * `Booking.units` (serial-tracking D2/D6): optional now, writers stamp
-   * `null`, a backfill, then a `feat!` to required-nullable. 0 stored records
-   * carry the key today.
+   * 🔴 **REQUIRED-nullable, never optional**, for the reason and by the four
+   * steps `Booking.units` records (serial-tracking D2/D6). Census 2026-10-04
+   * after the backfill: 325/325 prod and 382/382 dev records carry the key.
    */
-  units?: OOSUnitsType | null;
+  units: OOSUnitsType | null;
   canceled_at: FirestoreTimestampType | null;
   organization: {
     uid: string | null;
@@ -313,8 +312,8 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   status: OOSStatusEnum.meta({ column: true, label: "Status" }),
   quantity: z.int().meta({ serverSortVia: "quantity", column: true, label: "Quantity" }),
   breakdown: OOSBreakdownSchema,
-  // Mid-expand — see the interface field's own note. `null` names no unit.
-  units: OOSUnitsSchema.nullable().optional(),
+  // Required-nullable — see the interface field's own note. `null` names no unit.
+  units: OOSUnitsSchema.nullable(),
   canceled_at: FirestoreTimestamp.nullable().meta({ column: true, label: "Canceled" }),
   organization: z.strictObject({
     uid: FirestoreId.nullable(),

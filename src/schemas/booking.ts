@@ -178,16 +178,15 @@ export interface Booking {
    * bulk → serialized conversion and derived rather than stored
    * (`untrackedUnitCount`, `@cfs/core/utils/bookings`).
    *
-   * ⚠️ **Optional only while it is mid-expand** (`api-cloudrun/.claude/plans/serial-tracking.md`
-   * D2): added optional (this beta), then every writer
-   * stamps `null` and `reconcileOrderBookings` carries it forward, then a
-   * backfill stamps `null` on every stored booking, then a `feat!` makes it
-   * REQUIRED-nullable. Required rather than optional is the end state because a
-   * `?` is exactly what lets a writer that builds a literal `Booking` drop the
-   * field silently; required turns that into a compile error. 0 stored bookings
-   * carry the key today.
+   * 🔴 **REQUIRED-nullable, never optional** (`api-cloudrun/.claude/plans/serial-tracking.md`
+   * D2). A `?` is exactly what lets a writer that builds a literal `Booking`
+   * drop the field silently (the api-cloudrun#782 class); required turns that
+   * into a compile error. It got here in four steps: added optional (beta.593),
+   * every writer stamping `null` with `reconcileOrderBookings` carrying it
+   * forward, a backfill, then this. Census 2026-10-04 after the backfill:
+   * 7,449/7,449 prod and 7,468/7,468 dev bookings carry the key.
    */
-  units?: BookingUnitSetsType | null;
+  units: BookingUnitSetsType | null;
   dates: {
     start: string | null;
     start_fs: FirestoreTimestampType | null;
@@ -548,8 +547,8 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   crms_id: z.int().nullable().optional(),
   crms_product_id: z.int().nullable().optional(),
   breakdown: BookingBreakdownSchema,
-  // Mid-expand — see the interface field's own note. `null` is "not unit-tracked".
-  units: BookingUnitSetsSchema.nullable().optional(),
+  // Required-nullable — see the interface field's own note. `null` is "not unit-tracked".
+  units: BookingUnitSetsSchema.nullable(),
   dates: z.strictObject({
     start: chicagoInstant().meta({ serverSortVia: "dates.start_fs", column: true, label: "Start" }).nullable(),
     start_fs: FirestoreTimestamp.nullable(),

@@ -16,6 +16,7 @@ const validOOS = {
   status: "active",
   quantity: 2,
   breakdown: { flagged: 2, away: 0, written_off: 0, returned_to_service: 0 },
+  units: null,
   canceled_at: null,
   organization: null,
   dates: {
@@ -41,6 +42,14 @@ const validOOS = {
 
 Deno.test("OutOfServiceSchema validates a complete document", () => {
   assertEquals(OutOfServiceSchema.safeParse(validOOS).success, true);
+});
+
+Deno.test("OutOfServiceSchema: `units` is REQUIRED-nullable — absent refused, null accepted (serial-tracking D6)", () => {
+  const { units: _units, ...absent } = validOOS;
+  const r = OutOfServiceSchema.safeParse(absent);
+  assertEquals(r.success, false);
+  assertEquals(r.error?.issues.map((i) => i.path.join(".")), ["units"]);
+  assertEquals(OutOfServiceSchema.safeParse({ ...validOOS, units: null }).success, true);
 });
 
 Deno.test("OutOfServiceSchema validates all reasons", () => {

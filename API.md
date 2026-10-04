@@ -822,7 +822,7 @@ interface Booking {
   crms_id?: number | null;
   crms_product_id?: number | null;
   breakdown: BookingBreakdown;
-  units?: BookingUnitSetsType | null;
+  units: BookingUnitSetsType | null;
   dates: typeLiteral;
   destinations: typeLiteral;
   organization: typeLiteral;
@@ -7843,7 +7843,7 @@ interface OutOfService {
   status: OOSStatusType;
   quantity: number;
   breakdown: OOSBreakdown;
-  units?: OOSUnitsType | null;
+  units: OOSUnitsType | null;
   canceled_at: FirestoreTimestampType | null;
   organization: typeLiteral | null;
   dates: OOSDates;
@@ -16327,7 +16327,7 @@ interface Booking {
   crms_id?: number | null;
   crms_product_id?: number | null;
   breakdown: BookingBreakdown;
-  units?: BookingUnitSetsType | null;
+  units: BookingUnitSetsType | null;
   dates: typeLiteral;
   destinations: typeLiteral;
   organization: typeLiteral;
@@ -20902,7 +20902,7 @@ interface OutOfService {
   status: OOSStatusType;
   quantity: number;
   breakdown: OOSBreakdown;
-  units?: OOSUnitsType | null;
+  units: OOSUnitsType | null;
   canceled_at: FirestoreTimestampType | null;
   organization: typeLiteral | null;
   dates: OOSDates;
@@ -28397,10 +28397,12 @@ interface CustodyApplyContext {
 
 A booking as the ruleset reads it. `units` is read when present: `null` or
 absent means the booking is not unit-tracked, and its actions may name no
-units.
+units. Optional HERE although `Booking.units` is required: the ruleset is
+also driven from bare custody states (a replay, a manager preview) that
+carry no unit sets at all.
 
 ```ts
-type CustodyBooking = Pick<Booking, "type" | "breakdown" | "quantity" | "status" | "units">;
+type CustodyBooking = Pick<Booking, "type" | "breakdown" | "quantity" | "status"> & Partial<Pick<Booking, "units">>;
 ```
 
 ### `CustodyDecomposition`

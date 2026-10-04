@@ -205,6 +205,7 @@ function booking(productUid: string, legUid: string, opts: BookingOpts = {}): Bo
     quantity,
     shortage: 0,
     subject: "Ep 101",
+    units: null,
     breakdown: {
       cleaning: 0,
       maintenance: 0,

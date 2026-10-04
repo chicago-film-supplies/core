@@ -52,6 +52,14 @@ Deno.test("BookingSchema validates a complete document", () => {
   assertEquals(BookingSchema.safeParse(validBooking).success, true);
 });
 
+Deno.test("BookingSchema: `units` is REQUIRED-nullable — absent refused, null accepted (serial-tracking D2)", () => {
+  const { units: _units, ...absent } = { ...validBooking, units: null };
+  const r = BookingSchema.safeParse(absent);
+  assertEquals(r.success, false);
+  assertEquals(r.error?.issues.map((i) => i.path.join(".")), ["units"]);
+  assertEquals(BookingSchema.safeParse({ ...validBooking, units: null }).success, true);
+});
+
 Deno.test("BookingSchema validates with stores", () => {
   const doc = {
     ...validBooking,
