@@ -75,6 +75,7 @@ function activeUnit() {
       changed_by: ACTOR,
     }],
     status: "active",
+    uuid_session: null,
     version: 0,
     created_by: ACTOR,
     updated_by: ACTOR,

@@ -5043,7 +5043,7 @@
         {
           "kind": "interface",
           "name": "UnitType",
-          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A unit number, its current serial and its history."
         },
         {
@@ -10434,7 +10434,7 @@
         {
           "kind": "interface",
           "name": "UnitType",
-          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A unit number, its current serial and its history."
         },
         {

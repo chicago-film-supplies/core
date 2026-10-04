@@ -95,6 +95,15 @@ Deno.test("negateLines swaps both sides and is its own inverse", () => {
   assertEquals(negateLines(back), lines, "reversing a reversal is the original");
 });
 
+Deno.test("negateLines carries each line's units, and only when the original states them", () => {
+  const named: MovementLineType = { quantity: 2, location: { from: null, to: at(LOC_A) }, units: [1001, 1002] };
+  const plain = line(1, at(LOC_B), null);
+  const back = negateLines([named, plain]);
+  assertEquals(back[0].units, [1001, 1002], "the reversal takes back the units the line placed");
+  assertEquals("units" in back[1], false, "a unit-less line reverses to a unit-less line");
+  assertEquals(negateLines(back), [named, plain], "reversing a reversal is still the original");
+});
+
 Deno.test("a reversal exactly cancels the original's held delta", () => {
   const lines = [line(2, null, at(LOC_A)), line(5, at(LOC_B), null)];
   assertEquals(movementHeldDelta(lines) + movementHeldDelta(negateLines(lines)), 0);

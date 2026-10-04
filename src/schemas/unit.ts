@@ -197,6 +197,17 @@ export interface UnitType {
   serial_number: string | null;
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
+  /**
+   * The `POST /products/{uid}/units` request that minted this number — its
+   * `uuid_session`, the create's idempotency key. A retried count-mode create
+   * finds the numbers its first attempt minted by this field and replays them
+   * rather than drawing a second run from the block.
+   *
+   * `null` when the number was minted any other way: by an ownership movement
+   * naming a fresh number (the history entry's `uid_movement` names it), or by
+   * a stock-method conversion.
+   */
+  uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -262,6 +273,7 @@ export const UnitSchema: z.ZodType<UnitType> = z.strictObject({
   serial_number: SerialNumber.nullable().meta({ column: true, label: "Serial" }),
   serial_history: z.array(UnitSerialHistoryEntry).meta({ label: "Serial History" }),
   status: UnitStatusEnum.meta({ column: true, label: "Status" }),
+  uuid_session: z.uuid().nullable(),
   // Plain, not `.default(0)`: every writer states it, and a stored default is
   // inert (`tests/stored-defaults.test.ts`).
   version: z.int().min(0),

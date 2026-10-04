@@ -133,4 +133,8 @@ export const UPLOADCARE_CANDIDATE_EXEMPTIONS: ReadonlyMap<string, string> = new 
     "transactions::uuid_session",
     "client-minted v4 uuid grouping one operator action; the movement's document id is `{uuid_session}|{type}|{subject}` and it names no CDN file",
   ],
+  [
+    "units::uuid_session",
+    "client-minted v4 uuid of the `POST /products/{uid}/units` request that minted the number — its idempotency key — and it names no CDN file",
+  ],
 ]);

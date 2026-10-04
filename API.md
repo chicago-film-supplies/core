@@ -11519,6 +11519,7 @@ interface UnitType {
   serial_number: string | null;
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
+  uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -23282,6 +23283,7 @@ interface UnitType {
   serial_number: string | null;
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
+  uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;

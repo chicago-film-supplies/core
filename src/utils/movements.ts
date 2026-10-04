@@ -136,6 +136,10 @@ export function negateLines(lines: readonly MovementLineType[]): MovementLineTyp
   return lines.map((l) => ({
     quantity: l.quantity,
     location: { from: l.location.to, to: l.location.from },
+    // The units a line placed are the units its reversal takes back. Carried
+    // only when the original states the key, so a reversal of a unit-less line
+    // stays byte-identical to what this function has always produced.
+    ...(l.units !== undefined ? { units: [...l.units] } : {}),
   }));
 }
 
