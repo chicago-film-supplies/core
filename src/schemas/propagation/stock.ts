@@ -100,7 +100,7 @@ const INTERVAL_MODEL: EnforcementRef = {
 };
 
 /**
- * The biconditional (`productHoldsStock` ⟺ ledger ⟺ `stock/{P}` ⟺
+ * The biconditional (`productHasLedger` ⟺ ledger ⟺ `stock/{P}` ⟺
  * `stock-locks/{P}`) is what the seed/teardown pair claims, and it is the
  * audit's invariant 1.
  */
@@ -109,7 +109,7 @@ const STOCK_BICONDITIONAL: EnforcementRef = {
   ref:
     "api-cloudrun/scripts/audit-stock.ts::── 1. The biconditional, all four legs",
   clause:
-    "invariant 1, every leg in both directions — `productHoldsStock` ⟺ ledger ⟺ `stock/{P}` ⟺ `stock-locks/{P}`, each reported separately (`product_without_ledger`, `ledger_without_stock_product`, `ledger_without_stock`, `ledger_without_token`, `stock_without_ledger`, `token_without_ledger`). The TOKEN leg is the one with teeth: `stageStockClaim` PATCHES `stock-locks/{P}` and Firestore's `update` does not upsert, so a ledger without a token fails every claim against that product with NOT_FOUND.",
+    "invariant 1, every leg in both directions — `productHasLedger` (every rental/sale, counted or not) ⟺ ledger ⟺ `stock/{P}` ⟺ `stock-locks/{P}`, each reported separately (`product_without_ledger`, `ledger_without_stock_product`, `ledger_without_stock`, `ledger_without_token`, `stock_without_ledger`, `token_without_ledger`). The TOKEN leg is the one with teeth: `stageStockClaim` PATCHES `stock-locks/{P}` and Firestore's `update` does not upsert, so a ledger without a token fails every claim against that product with NOT_FOUND.",
   gates: true,
 };
 

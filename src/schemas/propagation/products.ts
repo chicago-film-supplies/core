@@ -185,9 +185,9 @@ const TRACKING_CATEGORY_MOVE_TESTED: EnforcementRef = {
 const SUMMARY_BICONDITIONAL_TESTED: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts::PUT stock_method bulk→none deletes the inventory ledger and stock summaries",
+    "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts::PUT stock_method bulk→none on a rental UNCOUNTS the ledger in place",
   clause:
-    "both branches, in both directions, across five steps of that suite — the anchored one is `bulk→none` deleting the ledger AND the summaries; `PUT stock_method none→bulk on a rental creates an empty inventory ledger`, `PUT stock_method none→bulk on a NON-stock type creates nothing`, `PUT type surcharge→rental with stock_method 'none' is a 200, not a 500` and `PUT type rental→sale carrying stock_method 'none' drops the stale ledger` carry the rest",
+    "both branches, in both directions, across that suite's ledger steps — the anchored one is a counted rental going `none` and keeping its ledger UNCOUNTED (`quantity_held: null`) with its projection and token; `PUT stock_method bulk→none on a NON-ledger type deletes the trio`, `PUT stock_method bulk→none is REFUSED while units sit on a shelf`, `PUT stock_method none→bulk on a rental creates an empty inventory ledger`, `PUT stock_method none→bulk seeds held = units out on rentals + units away`, `PUT type surcharge→rental with stock_method 'none' mints an UNCOUNTED trio` and `PUT type rental→sale carrying stock_method 'none' keeps the ledger, uncounted` carry the rest",
   gates: true,
 };
 
@@ -308,25 +308,25 @@ const createProductRules: CollectionRule[] = [
     target: "inventory-ledgers",
     mode: "co-write",
     // "bulk/serialized" named only `stock_method` and was therefore a FOURTH
-    // spelling of a predicate that already has one. `productHoldsStock`
-    // (`api-cloudrun/src/lib/productStock.ts:37`) is `type ∈ {rental, sale} &&
-    // stock_method !== "none"` — the `type` half is missing above, so a
-    // `service` product with stock_method "bulk" reads as needing a ledger and
-    // does not get one.
+    // spelling of a predicate that already has one. Since uncounted-ledger
+    // phase 3 that predicate is `productHasLedger`
+    // (`api-cloudrun/src/lib/productStock.ts`): `type ∈ {rental, sale}`, and
+    // stock_method decides only whether the ledger is counted
+    // (`productCountsStock`).
     //
     // That file's header exists specifically to record that `services/products.ts`
     // once carried three inconsistent spellings of this and that "adding a fourth
     // answer is how the drift in #310 recurs". This string was the fourth answer,
     // published to /docs.
     invariant:
-      "A product needs an inventory ledger from day one exactly when it can physically hold units — type is 'rental' or 'sale' AND stock_method is not 'none' (the `productHoldsStock` predicate). Neither half alone decides it: a service product is never stocked whatever its stock_method, and a rental with stock_method 'none' is not tracked.",
+      "A product needs an inventory ledger from day one exactly when it is a 'rental' or a 'sale' (the `productHasLedger` predicate), whatever its stock_method. A service product never has one. A rental or sale with stock_method 'none' gets an UNCOUNTED ledger — `quantity_held: null`, no shelves, no basis, unbounded availability — so its lines still book, and an opening balance on it is refused.",
     transaction: "create-product",
     enforced_by: [
       {
         kind: "audit",
         ref: "api-cloudrun/scripts/audit-stock.ts::product_without_ledger",
         clause:
-          "the whole predicate against the corpus — it imports productHoldsStock itself and reports both directions separately (`product_without_ledger` and `ledger_without_stock_product`), so this covers the invariant rather than a clause of it (exit 1 on any violation)",
+          "the whole predicate against the corpus — it imports productHasLedger itself and reports both directions separately (`product_without_ledger` and `ledger_without_stock_product`), so this covers the invariant rather than a clause of it (exit 1 on any violation)",
         gates: true,
       },
       {
@@ -768,7 +768,7 @@ const updateProductRules: CollectionRule[] = [
     target: "inventory-ledgers",
     mode: "co-write",
     invariant:
-      "Changing stock_method to 'none' deletes the ledger AND the product's `stock/{P}` projection and its `stock-locks/{P}` token; changing away from 'none' creates all three. The projection and the token exist if and only if the ledger does — see `stock:seed-ledger-to-stock`. The old rule described only the ledger, while the code also deleted summaries (and leaked their public twins).",
+      "Every rental/sale has an inventory ledger, `stock/{P}` projection and `stock-locks/{P}` token whatever its stock_method; stock_method decides only whether the ledger is COUNTED. Changing a rental/sale to 'none' UNCOUNTS its ledger in place — `quantity_held` and `quantity_in_service` become null, the shelves and basis go, the out-of-service breakdown stays — and is refused while units sit on a shelf or carry basis (write them off first). Changing it away from 'none' COUNTS the ledger, seeding `quantity_held` from the units owned off any shelf (out on live rentals plus away on open records) with the shelves empty, so the shelf identity holds at once. A product with no ledger type keeps no trio. The projection and the token exist if and only if the ledger does — see `stock:seed-ledger-to-stock`. Until uncounted-ledger phase 3 a change to 'none' DELETED all three, which left the product's lines unbookable.",
     enforced_by: [SUMMARY_BICONDITIONAL_TESTED],
     transaction: "update-product",
     fields: [
@@ -776,13 +776,13 @@ const updateProductRules: CollectionRule[] = [
         source: ["stock_method"],
         target: [],
         transform:
-          "delete ledger if 'none', create empty ledger if 'bulk'/'serialized'",
+          "uncount the ledger (quantity_held: null) if 'none'; count it (quantity_held = units owned off-shelf) if 'bulk'/'serialized'; delete it for a type with no ledger",
       },
       {
         source: ["stock_method"],
         target: [],
         transform:
-          "stock/{uid} + stock-locks/{uid} deleted or seeded in lockstep with the ledger. The TOKEN leg is the one with teeth: stageStockClaim PATCHES it and update does not upsert, so a ledger left without one fails every claim against that product.",
+          "stock/{uid} + stock-locks/{uid} rebuilt, seeded or deleted in lockstep with the ledger. The TOKEN leg is the one with teeth: stageStockClaim PATCHES it and update does not upsert, so a ledger left without one fails every claim against that product.",
       },
     ],
   },
@@ -802,12 +802,12 @@ const updateProductRules: CollectionRule[] = [
     //
     // ⭐ Adding the sixth name to one of the two lists is the defect, not the
     // fix. `create-product:product-to-ledger` in this same file already records
-    // why — `productHoldsStock` is the ONE predicate, and that rule's comment
+    // why — `productHasLedger` is the ONE predicate, and that rule's comment
     // says in terms that "adding a fourth answer is how the drift in #310
     // recurs". An enumeration re-opens on every new member; a predicate does not.
     // Type names below are illustration, never the rule. (core#55's class.)
     invariant:
-      "A product holds an inventory ledger exactly when `productHoldsStock` says so — type is 'rental' or 'sale' AND stock_method is not 'none'. A type change that makes the predicate FALSE deletes the ledger, the `stock/{P}` projection and the `stock-locks/{P}` token together (service, surcharge, replacement and transaction_fee all fail it, whatever their stock_method); a change that makes it TRUE creates the ledger. Read the predicate, not the type names: a new member of PRODUCT_TYPES is governed the day it is added, with no edit here. When the predicate holds on BOTH sides the summary is (re)seeded rather than deleted — a rental→sale flip keeps its ledger, so deleting its summary would leave a permanent hole now that there is no mint-on-read to backfill it. ⚠️ **The projection carries NO `type`**, so nothing about it follows the product's — `StockSchema`'s own header says so, and a projection carrying one is a `validateBeforeWrite` rejection rather than a drift. This sentence claimed the opposite until 2026-08-18: the `fields[]` mapping below was corrected on 2026-08-17 and the prose describing it was not (core#55 item 2).",
+      "A product has an inventory ledger exactly when `productHasLedger` says so — type is 'rental' or 'sale', whatever its stock_method; `productCountsStock` (stock_method not 'none') decides only whether that ledger is COUNTED. A type change that makes `productHasLedger` FALSE deletes the ledger, the `stock/{P}` projection and the `stock-locks/{P}` token together (service, surcharge, replacement and transaction_fee all fail it, whatever their stock_method); a change that makes it TRUE creates the ledger, uncounted when stock_method is 'none'. Read the predicate, not the type names: a new member of PRODUCT_TYPES is governed the day it is added, with no edit here. When the predicate holds on BOTH sides the summary is (re)built rather than deleted — a rental→sale flip keeps its ledger, so deleting its summary would leave a permanent hole now that there is no mint-on-read to backfill it. ⚠️ **The projection carries NO `type`**, so nothing about it follows the product's — `StockSchema`'s own header says so, and a projection carrying one is a `validateBeforeWrite` rejection rather than a drift. This sentence claimed the opposite until 2026-08-18: the `fields[]` mapping below was corrected on 2026-08-17 and the prose describing it was not (core#55 item 2).",
     enforced_by: [SUMMARY_BICONDITIONAL_TESTED],
     transaction: "update-product",
     fields: [
@@ -825,13 +825,13 @@ const updateProductRules: CollectionRule[] = [
         source: ["type"],
         target: [],
         transform:
-          "delete the ledger, the `stock/{P}` projection and the `stock-locks/{P}` token for service/surcharge/replacement",
+          "delete the ledger, the `stock/{P}` projection and the `stock-locks/{P}` token for a type with no ledger (service/surcharge/replacement/transaction_fee)",
       },
       {
         source: ["type"],
         target: [],
         transform:
-          "create all three when entering rental/sale from a non-stock type",
+          "create all three when entering rental/sale from a type with no ledger — uncounted when stock_method is 'none'",
       },
     ],
   },
