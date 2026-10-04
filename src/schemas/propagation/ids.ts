@@ -416,4 +416,5 @@ export type RuleId =
   | "units:product-to-roster"
   | "units:product-to-units"
   | "units:product-to-bookings"
+  | "units:product-to-out-of-service"
   | "create-units:product-to-units";

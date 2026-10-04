@@ -20,7 +20,8 @@
  * has been opened and read, and the audits that will check these edges
  * (`audit-units`, `audit-unit-replay`) are api-cloudrun P3 work.
  *
- * Traced from: the plan above; api-cloudrun has no unit writer yet.
+ * Traced from: the plan above, and its writers — `api-cloudrun/src/lib/ledgerWriter.ts` (the fold),
+ * `api-cloudrun/src/services/stockMethodChange.ts` and `api-cloudrun/src/services/products.ts` (the lifecycle).
  */
 import type { CollectionRule, PropagationModule, TransactionDefinition } from "./types.ts";
 
@@ -127,6 +128,26 @@ const sharedRules: CollectionRule[] = [
         source: ["stock_method"],
         target: ["units"],
         transform: "empty sets on → serialized, null on serialized →",
+      },
+    ],
+  },
+  {
+    id: "units:product-to-out-of-service",
+    source: "products",
+    target: "out-of-service",
+    mode: "co-write",
+    invariant:
+      "Seeding names the units of every OPEN record of the product: the numbers the seed placed `shelf`+flag for the record go in its `flagged` set, and the numbers it placed `away` at the record go in its `away` set. Without it a record the conversion left unnamed could never be reclassified, sent away or written off by number, because those writers refuse a tracked record whose live bucket names fewer units than it holds. Leaving `serialized` sets `units` to `null` on every record that carries one. A record already closed keeps what it has.",
+    fields: [
+      {
+        source: ["stock_method"],
+        target: ["units", "flagged"],
+        transform: "the numbers seeded `shelf` + this record's flag, on → serialized; null on serialized →",
+      },
+      {
+        source: ["stock_method"],
+        target: ["units", "away"],
+        transform: "the numbers seeded `away` at this record, on → serialized; null on serialized →",
       },
     ],
   },

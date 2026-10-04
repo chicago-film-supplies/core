@@ -952,7 +952,7 @@ const updateProductOrderRules: CollectionRule[] = [
 const updateProductTransaction: TransactionDefinition = {
   id: "update-product",
   description:
-    "Updates a product with cascading name changes to components/alternates/locations/tags/tracking-categories, tag/category cross-ref diffs, and webshop fan-out.",
+    "Updates a product with cascading name changes to components/alternates/locations/tags/tracking-categories, tag/category cross-ref diffs, and webshop fan-out. A `stock_method` change to or from `serialized` is a CHAIN rather than one transaction (serial-tracking D9): it can touch hundreds of unit documents, so each step is idempotent and an interrupted chain is finished by re-sending the same PUT. That is also why a PUT naming `serialized` on a product that is already `serialized` but has no roster yet is not a no-op: it runs the seed.",
   steps: [
     "update-product:catalog-to-components",
     "update-product:components-to-components",
@@ -967,6 +967,7 @@ const updateProductTransaction: TransactionDefinition = {
     "units:product-to-roster",
     "units:product-to-units",
     "units:product-to-bookings",
+    "units:product-to-out-of-service",
   ],
 };
 
