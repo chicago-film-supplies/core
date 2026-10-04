@@ -14,6 +14,7 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 
 import {
+  availableFrom,
   type AvailabilityWindow,
   boundMs,
   bookingHoldsStock,
@@ -256,7 +257,7 @@ Deno.test("unavailableFromOOS: the unresolved units until terminal", () => {
 
 // ── The fold ───────────────────────────────────────────────────────────────
 
-const stock = (quantity_held: number, unavailable: StockUnavailableEntry[]) => ({
+const stock = (quantity_held: number | null, unavailable: StockUnavailableEntry[]) => ({
   quantity_held,
   unavailable,
 });
@@ -425,8 +426,12 @@ Deno.test("peakStockConsumption: the ALL-TIME window is never more available tha
     const peak = peakStockConsumption(s);
     // `end: null` reaches past any finite window, so extend to cover it.
     const all = computeStockAvailability(s, win(dayNum(lo), dayNum(Math.min(28, hi + 1))));
+    // Compared as CONSUMPTION, which is what both folds actually sum and is
+    // independent of `quantity_held` — so the same inequality also holds for an
+    // uncounted product, whose `quantity_available` is null on both sides.
     assert(
-      all.quantity_available <= peak.quantity_available,
+      all.quantity_booked + all.quantity_out_of_service >=
+        peak.quantity_booked + peak.quantity_out_of_service,
       `all-time window [${lo},${hi}] reported ${all.quantity_available} available, ABOVE ` +
         `the peak's ${peak.quantity_available}. The peak is the LEAST pessimistic of the ` +
         `two, so this means one of the folds is wrong. entries=${JSON.stringify(entries)}`,
@@ -580,4 +585,78 @@ Deno.test("corpus canary: the shelf-definition reducer DISAGREES with the real o
   // the corpus until it reproduces that number, which is fitting rather than
   // testing.
   console.log(`  corpus canary: the shelf-definition reducer is wrong on ${disagreements} of 5,000 cases`);
+});
+
+// ── An uncounted product: `quantity_held: null` ─────────────────────────────
+
+Deno.test("availableFrom: null held is UNBOUNDED, and is not 0", () => {
+  assertEquals(availableFrom(null, 0), null);
+  assertEquals(availableFrom(null, 50), null);
+  // The plant that matters: the tempting coercion `held ?? 0` turns an
+  // uncounted product into one that refuses everything.
+  assertEquals(availableFrom(0, 3), -3);
+  assertEquals(availableFrom(10, 3), 7);
+});
+
+Deno.test("computeStockAvailability: an uncounted product still sums booked and out-of-service", () => {
+  const s = stock(null, [iv(D1, D5, 3, "booking"), iv(D1, D5, 2, "oos")]);
+  assertEquals(computeStockAvailability(s, win("2026-06-01", "2026-06-05")), {
+    quantity_held: null,
+    quantity_booked: 3,
+    quantity_out_of_service: 2,
+    quantity_available: null,
+  });
+});
+
+Deno.test("peakStockConsumption: an uncounted product reports its demand peak and never oversells", () => {
+  const s = stock(null, [
+    iv("2026-06-01T00:00:00.000-05:00", "2026-06-03T23:59:59.999-05:00", 4),
+    iv("2026-06-02T00:00:00.000-05:00", "2026-06-05T23:59:59.999-05:00", 5),
+    iv("2026-06-10T00:00:00.000-05:00", "2026-06-11T23:59:59.999-05:00", 2, "oos"),
+  ]);
+  const peak = peakStockConsumption(s);
+  assertEquals(peak, {
+    quantity_held: null,
+    quantity_booked: 9,
+    quantity_out_of_service: 0,
+    quantity_available: null,
+    since: "2026-06-02T00:00:00.000-05:00",
+  });
+  // The advisory keys on `quantity_available < 0`; a null must never satisfy it.
+  assertEquals(peak.quantity_available !== null && peak.quantity_available < 0, false);
+});
+
+Deno.test("peakStockConsumption: an empty uncounted projection is a zero peak, not a missing one", () => {
+  assertEquals(peakStockConsumption(stock(null, [])), {
+    quantity_held: null,
+    quantity_booked: 0,
+    quantity_out_of_service: 0,
+    quantity_available: null,
+    since: null,
+  });
+});
+
+Deno.test("property: nulling quantity_held changes ONLY quantity_available, in both folds, over 5,000 cases", () => {
+  // The claim the uncounted ledger rests on: `held` enters the arithmetic as a
+  // constant offset and nowhere else, so an uncounted product's booked, OOS and
+  // peak instant are exactly a counted twin's. Asserted against the counted
+  // fold on the same sources, so a change that let `held` steer WHICH entries
+  // count (or which instant is the peak) fails here.
+  let peaksWithDemand = 0;
+  for (let seed = 1; seed <= 5_000; seed++) {
+    const c = randomCase(seed);
+    const counted = reduce(c);
+    const uncounted = stock(null, counted.unavailable);
+
+    const a = computeStockAvailability(counted, c.window);
+    const u = computeStockAvailability(uncounted, c.window);
+    assertEquals(u, { ...a, quantity_held: null, quantity_available: null }, `seed ${seed}: window fold`);
+
+    const pa = peakStockConsumption(counted);
+    const pu = peakStockConsumption(uncounted);
+    assertEquals(pu, { ...pa, quantity_held: null, quantity_available: null }, `seed ${seed}: peak`);
+    if (pa.quantity_booked + pa.quantity_out_of_service > 0) peaksWithDemand++;
+  }
+  // Non-degeneracy: a corpus with no demand would pass the peak half vacuously.
+  assert(peaksWithDemand > 0, "no generated case had any demand — the peak half proved nothing");
 });

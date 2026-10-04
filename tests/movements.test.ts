@@ -18,7 +18,7 @@ import {
   movementHeldDelta,
   negateLines,
 } from "../src/utils/movements.ts";
-import { MOVEMENT_CONTRACTS, MOVEMENT_TYPES } from "../src/schemas/mod.ts";
+import { InventoryLedgerSchema, MOVEMENT_CONTRACTS, MOVEMENT_TYPES } from "../src/schemas/mod.ts";
 import type {
   InventoryLedger,
   MovementContract,
@@ -938,7 +938,10 @@ Deno.test("in_service and out_of_service always partition held", () => {
   assertEquals(next.quantity_held, 10, "damaged units are still owned");
   assertEquals(next.quantity_out_of_service, 4);
   assertEquals(next.quantity_in_service, 6);
-  assertEquals(next.quantity_in_service + next.quantity_out_of_service, next.quantity_held);
+  assertEquals(
+    next.quantity_in_service,
+    next.quantity_held === null ? null : next.quantity_held - next.quantity_out_of_service,
+  );
 });
 
 Deno.test("a write-off removes ownership and clears the out-of-service count", () => {
@@ -1161,4 +1164,97 @@ Deno.test("a movement that moves no service units leaves the breakdown alone", (
   assertEquals(quiet.quantity_out_of_service, 2);
   assertEquals(quiet.out_of_service_breakdown.damaged, 2);
   assertEquals(quiet.oosUnattributedDelta, 0);
+});
+
+// ── An uncounted ledger (`quantity_held: null`) ─────────────────────
+
+/** A `stock_method: "none"` ledger: no count, no shelves, no basis. */
+function uncounted(over: Partial<InventoryLedger> = {}): InventoryLedger {
+  return ledger({ stock_method: "none", quantity_held: null, quantity_in_service: null, ...over });
+}
+
+Deno.test("uncounted: the fixture itself is a valid stored ledger", () => {
+  assertEquals(InventoryLedgerSchema.safeParse(uncounted()).success, true);
+});
+
+Deno.test("uncounted: a sale off a booking leaves the count null and moves no basis", () => {
+  const { ledger: next, costAppliedCents, unitCost, uncountedCostCents } = applyMovementToLedger(
+    uncounted(),
+    {
+      reverses: null,
+      service: null,
+      type: "sale",
+      custody: { from: "out", to: null },
+      quantity: 6,
+      lines: [line(6, atBooking, null)],
+      cost: { amount_cents: 1200, unit_cost: 2, unit_costs_cents: [] },
+    },
+    placements,
+    mockTimestamp,
+  );
+  // The plant: a fold that ran `null + delta` would store -6 (JS coerces null to 0).
+  assertEquals(next.quantity_held, null);
+  assertEquals(next.quantity_in_service, null);
+  assertEquals(next.total_cost_basis_cents, 0);
+  assertEquals(next.average_unit_cost, 0);
+  assertEquals(costAppliedCents, 0);
+  assertEquals(unitCost, 0);
+  assertEquals(uncountedCostCents, 0, "a decrease's stated number is revenue, never basis — counted or not");
+  assertEquals(InventoryLedgerSchema.safeParse(next).success, true);
+});
+
+Deno.test("uncounted: a lost unit is a real out-of-service count, with no in-service count beside it", () => {
+  const { ledger: next, oosUnattributedDelta } = applyMovementToLedger(
+    uncounted(),
+    {
+      reverses: null,
+      service: null,
+      type: "mark_lost",
+      custody: { from: "out", to: "lost" },
+      quantity: 2,
+      lines: [line(2, atBooking, atOos)],
+      cost: null,
+    },
+    placements,
+    mockTimestamp,
+    "lost",
+  );
+  assertEquals(next.out_of_service_breakdown.lost, 2);
+  assertEquals(next.quantity_out_of_service, 2);
+  assertEquals(next.quantity_in_service, null);
+  assertEquals(next.quantity_held, null);
+  assertEquals(oosUnattributedDelta, 0);
+  assertEquals(InventoryLedgerSchema.safeParse(next).success, true);
+});
+
+Deno.test("uncounted: a cost-bearing increase REPORTS its cost instead of inventing a basis", () => {
+  const { ledger: next, costAppliedCents, uncountedCostCents } = applyMovementToLedger(
+    uncounted(),
+    {
+      reverses: null,
+      service: null,
+      type: "purchase",
+      custody: null,
+      quantity: 10,
+      lines: [line(10, null, at(LOC_A))],
+      cost: { amount_cents: 400000, unit_cost: 400, unit_costs_cents: [] },
+    },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(uncountedCostCents, 400000, "the writer refuses on this; a scan counts it");
+  assertEquals(costAppliedCents, 0);
+  assertEquals(next.total_cost_basis_cents, 0);
+  assertEquals(next.quantity_held, null, "buying into an uncounted product is not a count");
+  // ⚠️ Placement is folded as on any ledger, so the shelf leg lands — and the
+  // schema refuses the result. That is the loud failure the fold chose over
+  // silently dropping a shelf leg the writer should never have emitted.
+  assertEquals(next.store_breakdown[0]?.locations[0]?.quantity, 10);
+  assertEquals(InventoryLedgerSchema.safeParse(next).success, false);
+});
+
+Deno.test("uncounted: deriveServiceQuantities keeps a null held null, and a counted one numeric", () => {
+  const mv = { lines: [line(1, atBooking, atOos)], custody: null, service: null };
+  assertEquals(deriveServiceQuantities(uncounted(), mv, "lost").quantity_in_service, null);
+  assertEquals(deriveServiceQuantities(ledger({ quantity_held: 5, quantity_in_service: 5 }), mv, "lost").quantity_in_service, 4);
 });

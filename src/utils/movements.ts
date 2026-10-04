@@ -224,6 +224,20 @@ export interface LedgerFoldResult {
    * must refuse; a replay SCAN counts it.
    */
   oosUnattributedDelta: number;
+  /**
+   * The stated acquisition cost, in cents, of a cost-bearing INCREASE folded
+   * onto an **uncounted** ledger (`quantity_held: null`) — which has no count to
+   * spread a basis over, so the fold adds none. `0` on every counted ledger and
+   * on every decrease.
+   *
+   * Reported on the same WRITER-refuses / SCAN-counts split as
+   * {@link basisUnderflowCents}: a purchase, find or make against an uncounted
+   * product is money the valuation would silently lose, and only the writer
+   * has an operator to tell. The way to bring an uncounted product into the
+   * valuation is to COUNT it (the `none` → `bulk` flip seeds `quantity_held`),
+   * not to buy into it.
+   */
+  uncountedCostCents: number;
 }
 
 /** A shallow-cloned store entry, so the fold never mutates its input. */
@@ -325,6 +339,21 @@ export interface LocationPlacement {
  * A type whose contract forbids cost never touches the basis at all. That is
  * what makes #286 (a costed transfer corrupting the basis) structurally
  * impossible rather than gated: a transfer has no cost object to mis-gate.
+ *
+ * ## An uncounted ledger (`quantity_held: null`)
+ *
+ * Holds no count and no basis, so the fold moves **neither**: `quantity_held`
+ * stays `null`, the basis and average stay 0, and a cost-bearing increase's
+ * stated cost is reported as `uncountedCostCents` rather than applied. Service
+ * quantities still move — a lost or damaged uncounted unit is a real
+ * out-of-service record — and `quantity_in_service` stays `null`.
+ *
+ * ⚠️ **Placement is folded exactly as on a counted ledger, on purpose.** An
+ * uncounted ledger has no shelves (`InventoryLedgerSchema` refuses a non-empty
+ * `store_breakdown` on one), so a writer that names a shelf endpoint for an
+ * uncounted product fails validation LOUDLY here, rather than having its shelf
+ * leg dropped silently while the location document it also writes takes it.
+ * The writer's job is to emit no shelf leg for an uncounted product at all.
  */
 export function applyMovementToLedger(
   ledger: InventoryLedger,
@@ -366,7 +395,11 @@ export function applyMovementToLedger(
   let costAppliedCents = 0;
   let unitCost = 0;
   let basisUnderflowCents = 0;
-  if (carriesCost) {
+  let uncountedCostCents = 0;
+  const heldBefore = next.quantity_held;
+  if (carriesCost && heldBefore === null) {
+    if (delta > 0) uncountedCostCents = movement.cost?.amount_cents ?? 0;
+  } else if (carriesCost && heldBefore !== null) {
     const basisCents = BigInt(next.total_cost_basis_cents);
     if (delta > 0) {
       const addCents = BigInt(movement.cost?.amount_cents ?? 0);
@@ -376,7 +409,7 @@ export function applyMovementToLedger(
     } else if (delta < 0) {
       const units = -delta;
       const outCents = reversalReliefCents(movement) ??
-        costOfUnits(basisCents, next.quantity_held, units);
+        costOfUnits(basisCents, heldBefore, units);
       // 🔴 A reversal may relieve more basis than is there, and the shortfall
       // is REPORTED rather than clamped — see `basisUnderflowCents`. The
       // weighted-average branch cannot underflow: `costOfUnits` caps at the
@@ -388,23 +421,27 @@ export function applyMovementToLedger(
     }
   }
 
-  next.quantity_held += delta;
-
-  if (next.quantity_held > 0) {
-    next.average_unit_cost = perUnitCostAt4dp(
-      BigInt(next.total_cost_basis_cents),
-      BigInt(next.quantity_held),
-    );
-  } else if (carriesCost) {
-    // No units held after a cost-bearing move (a sale of the last unit) means no
-    // carrying cost. Zero both, so a residual basis cannot corrupt the average of
-    // the next purchase — held→0 then buy 1 must not inherit.
-    next.average_unit_cost = 0;
-    next.total_cost_basis_cents = 0;
+  // Uncounted (`heldBefore === null`): no count to move and no basis to
+  // average, so `quantity_held` stays null — see the docblock.
+  if (heldBefore !== null) {
+    const heldAfter = heldBefore + delta;
+    next.quantity_held = heldAfter;
+    if (heldAfter > 0) {
+      next.average_unit_cost = perUnitCostAt4dp(
+        BigInt(next.total_cost_basis_cents),
+        BigInt(heldAfter),
+      );
+    } else if (carriesCost) {
+      // No units held after a cost-bearing move (a sale of the last unit) means no
+      // carrying cost. Zero both, so a residual basis cannot corrupt the average of
+      // the next purchase — held→0 then buy 1 must not inherit.
+      next.average_unit_cost = 0;
+      next.total_cost_basis_cents = 0;
+    }
+    // else: a placement-only movement drove held transiently to 0 (#286 defect 2).
+    // Leave basis and average untouched; zeroing here PERMANENTLY destroyed the
+    // basis, which is the prod corruption that fix addressed.
   }
-  // else: a placement-only movement drove held transiently to 0 (#286 defect 2).
-  // Leave basis and average untouched; zeroing here PERMANENTLY destroyed the
-  // basis, which is the prod corruption that fix addressed.
 
   // ── Placement ──
   for (const line of movement.lines) {
@@ -454,6 +491,7 @@ export function applyMovementToLedger(
     unitCost,
     basisUnderflowCents,
     oosUnattributedDelta: service.oosUnattributedDelta,
+    uncountedCostCents,
   };
 }
 
@@ -590,7 +628,8 @@ export function deriveServiceQuantities(
   return {
     out_of_service_breakdown: breakdown,
     quantity_out_of_service: outOfService,
-    quantity_in_service: ledger.quantity_held - outOfService,
+    // `null` held (an uncounted ledger) has no in-service count either.
+    quantity_in_service: ledger.quantity_held === null ? null : ledger.quantity_held - outOfService,
     oosUnattributedDelta: unattributed,
   };
 }

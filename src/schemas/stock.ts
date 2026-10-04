@@ -111,7 +111,14 @@ export interface StockUnavailableEntry {
 export interface Stock {
   uid: string;
   uid_product: string;
-  quantity_held: number;
+  /**
+   * A copy of `inventory-ledgers/{P}.quantity_held` — **`null` when the product is
+   * uncounted**, which availability reads as unbounded: `quantity_available` is
+   * `null`, while `quantity_booked` and `quantity_out_of_service` are still
+   * computed, because for an uncounted product they are the whole point (the
+   * Booked tab, per-day demand). See `InventoryLedger.quantity_held`.
+   */
+  quantity_held: number | null;
   unavailable: StockUnavailableEntry[];
   /**
    * The value of `stock-locks/{P}.seq` this projection was built from — a
@@ -228,8 +235,9 @@ export const StockSchema: z.ZodType<Stock> = z.strictObject({
   // deliberately NOT tightened to `z.int()`. This is a copy of the ledger's
   // number, and a projection stricter than its source refuses to store a value
   // the source permits — which fails the rebuild rather than the write that
-  // created the situation.
-  quantity_held: z.number().min(0).meta({ column: true, label: "Quantity Held" }),
+  // created the situation. Nullable for the same reason: the ledger's `null`
+  // (uncounted) has to survive the copy.
+  quantity_held: z.number().min(0).meta({ column: true, label: "Quantity Held" }).nullable(),
   unavailable: z.array(StockUnavailableEntrySchema).meta({ label: "Unavailable" }),
   claim_seq: z.int().min(0).meta({ column: true, label: "Claim Seq" }),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),

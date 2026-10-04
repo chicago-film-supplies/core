@@ -162,6 +162,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "unavailableFromOOS",
     "computeStockAvailability",
     "peakStockConsumption",
+    // The uncounted arm of the fold's arithmetic. Its inputs are a ledger's
+    // `quantity_held` and a fold's consumption, neither of which a render
+    // context holds.
+    "availableFrom",
   ],
   // The movement-journal fold, denylisted whole — but ⚠️ **the reason is no
   // longer uniform, and the sentence that stood here is stale.** It read "a

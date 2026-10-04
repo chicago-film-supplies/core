@@ -67,9 +67,12 @@
  * version of this claim is false: 439 `service` bookings DO exist (over 15
  * products), so "services have no bookings" is not what makes this safe. What
  * makes it safe is that **0 of those 15 products carry an inventory ledger** — a
- * service product is `stock_method: "none"`, so it has no ledger, therefore no
- * stock projection, therefore nothing to evaluate here. Bookings exist for
- * `rental` and `sale`; only those with a stock method hold stock.
+ * ledger exists only for a `rental` or `sale` product, so a service has no
+ * ledger, therefore no stock projection, therefore nothing to evaluate here.
+ * (This used to say "a service product is `stock_method: "none"`, so it has no
+ * ledger". Since the uncounted ledger, a `none` RENTAL or SALE product does carry
+ * one — `quantity_held: null` — so the type, not the stock method, is what keeps
+ * services out.)
  *
  * So do NOT "align" the two predicates. They are answering different questions
  * about the only two types that arrive, and each is right about its own.
@@ -366,12 +369,35 @@ export function unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | n
 
 // ── The fold ────────────────────────────────────────────────────────────────
 
-/** Everything a consumer needs from one product over one window. */
+/**
+ * Everything a consumer needs from one product over one window.
+ *
+ * ## An uncounted product: `quantity_held: null` ⟹ `quantity_available: null`
+ *
+ * `null` held is an uncounted ledger (`InventoryLedger.quantity_held`), and its
+ * availability is **unbounded**, spelled `null` — never a number, and never 0.
+ * `quantity_booked` and `quantity_out_of_service` are still computed in full:
+ * for an uncounted product they are the tracker the ledger exists to be.
+ *
+ * ⚠️ **Every consumer has to choose what `null` means to it**, and the type forces
+ * the choice: a gate passes it (nothing to oversell), a display renders
+ * "Unlimited", a kit's available-sets `min` drops the term, a valuation sum
+ * skips it. Coercing it to a number anywhere — `?? 0` refuses everything,
+ * `?? Infinity` poisons a sum — is the defect this shape exists to prevent.
+ */
 export interface StockAvailability {
-  quantity_held: number;
+  quantity_held: number | null;
   quantity_booked: number;
   quantity_out_of_service: number;
-  quantity_available: number;
+  quantity_available: number | null;
+}
+
+/**
+ * `held − consumed`, or `null` (unbounded) when `held` is — the one place the
+ * uncounted arm of the availability arithmetic is written.
+ */
+export function availableFrom(held: number | null, consumed: number): number | null {
+  return held === null ? null : held - consumed;
 }
 
 /**
@@ -385,6 +411,10 @@ export interface StockAvailability {
  * Negative results are preserved, never clamped: an oversold product must stay
  * visibly oversold, and #424 makes that the intended shortage signal for
  * operators rather than an error state.
+ *
+ * An uncounted product (`quantity_held: null`) answers `quantity_available:
+ * null` — unbounded — with booked and out-of-service still summed. See
+ * {@link StockAvailability}.
  *
  * `quantity_in_service` is not returned — it is `quantity_held −
  * quantity_out_of_service`, and no current consumer asks for it.
@@ -417,7 +447,7 @@ export function computeStockAvailability(
     quantity_held,
     quantity_booked,
     quantity_out_of_service,
-    quantity_available: quantity_held - quantity_booked - quantity_out_of_service,
+    quantity_available: availableFrom(quantity_held, quantity_booked + quantity_out_of_service),
   };
 }
 
@@ -486,6 +516,19 @@ export interface PeakStockConsumption extends StockAvailability {
  * across both environments), and the quadratic form is `intervalsOverlap` applied
  * directly at each candidate — no boundary arithmetic to get subtly wrong, and no
  * second definition of what "live at t" means.
+ *
+ * ## The peak is a CONSUMPTION maximum, so it survives an uncounted product
+ *
+ * The search maximises `booked + out_of_service`, which for a counted product is
+ * the same instant as minimising `available` (`held` is a constant). For an
+ * uncounted one (`quantity_held: null`) there is no `available` to minimise, but
+ * the busiest instant is still a real answer — it is the per-product demand peak
+ * — so it is still returned, with `quantity_available: null`. A `null` is never
+ * `< 0`, so the physical-oversell advisory cannot fire on an uncounted product,
+ * which is correct: there is no count for the demand to exceed.
+ *
+ * On a TIE the earliest candidate wins (strict `>`), exactly as the strict `<`
+ * on `available` did.
  */
 export function peakStockConsumption(
   stock: Pick<Stock, "quantity_held" | "unavailable">,
@@ -511,9 +554,10 @@ export function peakStockConsumption(
     quantity_held,
     quantity_booked: 0,
     quantity_out_of_service: 0,
-    quantity_available: quantity_held,
+    quantity_available: availableFrom(quantity_held, 0),
     since: null,
   };
+  let peakConsumed = 0;
 
   for (const c of candidates) {
     let quantity_booked = 0;
@@ -523,13 +567,14 @@ export function peakStockConsumption(
       if (e.kind === "booking") quantity_booked += e.quantity;
       else quantity_out_of_service += e.quantity;
     }
-    const quantity_available = quantity_held - quantity_booked - quantity_out_of_service;
-    if (quantity_available < peak.quantity_available) {
+    const consumed = quantity_booked + quantity_out_of_service;
+    if (consumed > peakConsumed) {
+      peakConsumed = consumed;
       peak = {
         quantity_held,
         quantity_booked,
         quantity_out_of_service,
-        quantity_available,
+        quantity_available: availableFrom(quantity_held, consumed),
         since: c.iso,
       };
     }

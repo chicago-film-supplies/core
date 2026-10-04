@@ -5044,8 +5044,8 @@ interface InventoryLedger {
   uid_product: string;
   type: ProductTypeType;
   stock_method: InventoryStockMethodType;
-  quantity_held: number;
-  quantity_in_service: number;
+  quantity_held: number | null;
+  quantity_in_service: number | null;
   quantity_out_of_service: number;
   average_unit_cost: number;
   total_cost_basis_cents: number;
@@ -9824,7 +9824,7 @@ minted per question asked.
 interface Stock {
   uid: string;
   uid_product: string;
-  quantity_held: number;
+  quantity_held: number | null;
   unavailable: StockUnavailableEntry[];
   claim_seq: number;
   created_at: FirestoreTimestampType;
@@ -17934,8 +17934,8 @@ interface InventoryLedger {
   uid_product: string;
   type: ProductTypeType;
   stock_method: InventoryStockMethodType;
-  quantity_held: number;
-  quantity_in_service: number;
+  quantity_held: number | null;
+  quantity_in_service: number | null;
   quantity_out_of_service: number;
   average_unit_cost: number;
   total_cost_basis_cents: number;
@@ -21957,7 +21957,7 @@ minted per question asked.
 interface Stock {
   uid: string;
   uid_product: string;
-  quantity_held: number;
+  quantity_held: number | null;
   unavailable: StockUnavailableEntry[];
   claim_seq: number;
   created_at: FirestoreTimestampType;
@@ -34078,12 +34078,25 @@ interface PeakStockConsumption {
 
 Everything a consumer needs from one product over one window.
 
+## An uncounted product: `quantity_held: null` ⟹ `quantity_available: null`
+
+`null` held is an uncounted ledger (`InventoryLedger.quantity_held`), and its
+availability is **unbounded**, spelled `null` — never a number, and never 0.
+`quantity_booked` and `quantity_out_of_service` are still computed in full:
+for an uncounted product they are the tracker the ledger exists to be.
+
+⚠️ **Every consumer has to choose what `null` means to it**, and the type forces
+the choice: a gate passes it (nothing to oversell), a display renders
+"Unlimited", a kit's available-sets `min` drops the term, a valuation sum
+skips it. Coercing it to a number anywhere — `?? 0` refuses everything,
+`?? Infinity` poisons a sum — is the defect this shape exists to prevent.
+
 ```ts
 interface StockAvailability {
-  quantity_held: number;
+  quantity_held: number | null;
   quantity_booked: number;
   quantity_out_of_service: number;
-  quantity_available: number;
+  quantity_available: number | null;
 }
 ```
 
@@ -34133,6 +34146,11 @@ OOS statuses that no longer hold units out of service.
 const TERMINAL_OOS_STATUSES: ReadonlySet<string>;
 ```
 
+### `availableFrom(held: number | null, consumed: number): number | null`
+
+`held − consumed`, or `null` (unbounded) when `held` is — the one place the
+uncounted arm of the availability arithmetic is written.
+
 ### `bookingHoldsStock(b: typeLiteral): boolean`
 
 Does this booking hold any physical stock at all? The shelf-side liveness
@@ -34163,6 +34181,10 @@ quantity_available = quantity_held − quantity_booked(w) − quantity_out_of_se
 Negative results are preserved, never clamped: an oversold product must stay
 visibly oversold, and #424 makes that the intended shortage signal for
 operators rather than an error state.
+
+An uncounted product (`quantity_held: null`) answers `quantity_available:
+null` — unbounded — with booked and out-of-service still summed. See
+{@link StockAvailability}.
 
 `quantity_in_service` is not returned — it is `quantity_held −
 quantity_out_of_service`, and no current consumer asks for it.
@@ -34290,6 +34312,19 @@ O(n²) on purpose: `n` is one product's live entries (26 is the corpus max
 across both environments), and the quadratic form is `intervalsOverlap` applied
 directly at each candidate — no boundary arithmetic to get subtly wrong, and no
 second definition of what "live at t" means.
+
+## The peak is a CONSUMPTION maximum, so it survives an uncounted product
+
+The search maximises `booked + out_of_service`, which for a counted product is
+the same instant as minimising `available` (`held` is a constant). For an
+uncounted one (`quantity_held: null`) there is no `available` to minimise, but
+the busiest instant is still a real answer — it is the per-product demand peak
+— so it is still returned, with `quantity_available: null`. A `null` is never
+`< 0`, so the physical-oversell advisory cannot fire on an uncounted product,
+which is correct: there is no count for the demand to exceed.
+
+On a TIE the earliest candidate wins (strict `>`), exactly as the strict `<`
+on `available` did.
 
 ### `unavailableFromBooking(b: StockBookingSource): StockUnavailableEntry | null`
 
@@ -35138,6 +35173,7 @@ interface LedgerFoldResult {
   unitCost: number;
   basisUnderflowCents: number;
   oosUnattributedDelta: number;
+  uncountedCostCents: number;
 }
 ```
 
@@ -35282,6 +35318,21 @@ itself is money and is unchanged.
 A type whose contract forbids cost never touches the basis at all. That is
 what makes #286 (a costed transfer corrupting the basis) structurally
 impossible rather than gated: a transfer has no cost object to mis-gate.
+
+## An uncounted ledger (`quantity_held: null`)
+
+Holds no count and no basis, so the fold moves **neither**: `quantity_held`
+stays `null`, the basis and average stay 0, and a cost-bearing increase's
+stated cost is reported as `uncountedCostCents` rather than applied. Service
+quantities still move — a lost or damaged uncounted unit is a real
+out-of-service record — and `quantity_in_service` stays `null`.
+
+⚠️ **Placement is folded exactly as on a counted ledger, on purpose.** An
+uncounted ledger has no shelves (`InventoryLedgerSchema` refuses a non-empty
+`store_breakdown` on one), so a writer that names a shelf endpoint for an
+uncounted product fails validation LOUDLY here, rather than having its shelf
+leg dropped silently while the location document it also writes takes it.
+The writer's job is to emit no shelf leg for an uncounted product at all.
 
 ### `applyOutOfServiceReason(breakdown: indexedAccess, reason: keyof indexedAccess, delta: number): indexedAccess`
 

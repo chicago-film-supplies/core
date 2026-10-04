@@ -16,6 +16,7 @@ import {
   CreateContactInput,
   FirestoreTimestamp,
   getInitialValues,
+  InventoryLedgerSchema,
   MovementSchema,
   ProductSchema,
   QuoteSchema,
@@ -311,7 +312,7 @@ Deno.test("overrides — objects merge key-wise, arrays and scalars replace, und
   assertThrows(() => getTestDoc(S, { gone: undefined }), Error, "gone");
 });
 
-Deno.test("enum-arm search — re-chooses exactly three arms across the corpus, by name", () => {
+Deno.test("enum-arm search — re-chooses exactly four arms across the corpus, by name", () => {
   // `product` parses only as a SALE: a rental obliges `price.replacement_cents`
   // through a superRefine. Documented, because it is surprising.
   const product = getTestDoc(ProductSchema, undefined, NOW);
@@ -345,7 +346,20 @@ Deno.test("enum-arm search — re-chooses exactly three arms across the corpus, 
       if (doc[key] !== undefined && doc[key] !== first) rechosen.push(`${name}.${key}`);
     }
   }
-  assertEquals(rechosen.sort(), ["booking.type", "product.type", "templates-versions.status"]);
+  // `inventory-ledger` parses only as `stock_method: "none"`: the cheapest valid
+  // `quantity_held` is `null` (required-only seeds a nullable as null), and a
+  // superRefine makes a null count and the `none` method one fact. So a bare
+  // `getTestDoc(InventoryLedgerSchema)` is an UNCOUNTED ledger — a caller that
+  // wants a counted one must override `stock_method` and both quantities.
+  const ledger = getTestDoc(InventoryLedgerSchema, undefined, NOW);
+  assertEquals([ledger.stock_method, ledger.quantity_held], ["none", null]);
+
+  assertEquals(rechosen.sort(), [
+    "booking.type",
+    "inventory-ledger.stock_method",
+    "product.type",
+    "templates-versions.status",
+  ]);
 });
 
 Deno.test("enum-arm search companion — the first arm really does fail without it", () => {

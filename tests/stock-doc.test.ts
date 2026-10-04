@@ -91,6 +91,8 @@ Deno.test("StockSchema rejects a fractional entry quantity but ALLOWS a fraction
   );
   assertEquals(StockSchema.safeParse({ ...validStock, quantity_held: 1.5 }).success, true);
   assertEquals(StockSchema.safeParse({ ...validStock, quantity_held: -1 }).success, false);
+  // `null` is the uncounted ledger's copy, and must survive into the projection.
+  assertEquals(StockSchema.safeParse({ ...validStock, quantity_held: null }).success, true);
 });
 
 Deno.test("StockSchema rejects an unknown unavailable kind", () => {
