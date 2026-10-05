@@ -394,12 +394,43 @@ export interface MovementContract {
    * unit on the wrong product's roster.
    */
   units: "forbidden" | "allowed";
+  /**
+   * Whether the type may be written with `lines: []` for an UNCOUNTED product
+   * (`InventoryLedger.quantity_held: null`), which has no shelves for a line
+   * to name.
+   *
+   * `lineless` on the booking ladder (check-out, check-in, the marks, a shelf
+   * flag, a sale and its return, every undo) and on the two record
+   * resolutions an uncounted unit can reach (`return_to_service`,
+   * `write_off`). An uncounted product's units are still delivered, returned,
+   * lost and damaged, and each of those is still a movement, so the custody
+   * journal and the out-of-service record stay complete. What the movement
+   * cannot say is WHERE: there is no shelf, so it carries the custody step and
+   * no line.
+   *
+   * `refused` on everything that only means anything as a count: buying,
+   * counting, adjusting, reclassing, a transfer between shelves, a vendor
+   * trip off a flagged shelf.
+   *
+   * ⚠️ **The schema cannot see the ledger, so it accepts a lineless
+   * `lineless` type for ANY product.** The fold is what refuses one on a
+   * COUNTED ledger — `LedgerFoldResult.linelessCountedQuantity`, on the same
+   * writer-refuses / scan-counts split as `basisUnderflowCents`. A lineless
+   * check-out on a counted ledger would move custody and leave the shelf
+   * holding units that left it.
+   *
+   * ⚠️ **A lineless cost-bearing movement must state a ZERO cost.** That is
+   * the core#75 trap: `lines: []` beside a non-zero cost is a cost-only event
+   * the fold folds to nothing. An uncounted ledger carries no basis, so zero is
+   * also the true cost.
+   */
+  uncounted: "lineless" | "refused";
 }
 
 /** The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member. */
 export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContract>> = {
   // Reserved and prepped units are both on the shelf, so nothing moves.
-  prep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed" },
+  prep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed", uncounted: "lineless" },
   check_out: {
     custody: "required",
     cost: "forbidden",
@@ -407,6 +438,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   check_in: {
     custody: "required",
@@ -415,6 +447,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   // A damaged return IS a return that also sets a flag — identical in places to
   // `check_in`, so `allocationSide` answers `"to"` and the return flow picks the
@@ -438,6 +471,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   // `locations` is a legitimate origin here and NOT for `mark_damaged`, and the
   // asymmetry is the model rather than an oversight: a unit that should be on a
@@ -452,6 +486,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   // ── the reachable rewinds, mirrored ──
   // Each is its forward twin's `places` swapped end for end. Mirroring here
@@ -459,7 +494,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
   // places of the RIGHT KIND, just in the opposite order — the same reasoning
   // `checkMovementContract` applies to a reversal, stated once per type instead
   // of inferred from a `reverses` that a rewind has no business setting.
-  unprep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed" },
+  unprep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed", uncounted: "lineless" },
   check_out_undo: {
     custody: "required",
     cost: "forbidden",
@@ -467,6 +502,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   check_in_undo: {
     custody: "required",
@@ -475,6 +511,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   // 🔴 **Mirrored EXACTLY, including the widening on `mark_lost`'s origin.** A
   // loss may come off the booking (`out → lost`) or off a shelf
@@ -491,6 +528,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   mark_damaged_undo: {
     custody: "required",
@@ -499,6 +537,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   // `mark_damaged` and its undo, for the two other in-building reasons. The
   // custody key carries the flag (`custody.to === "cleaning"`), so `service` is
@@ -510,6 +549,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   mark_cleaning_undo: {
     custody: "required",
@@ -518,6 +558,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   mark_maintenance: {
     custody: "required",
@@ -526,6 +567,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   mark_maintenance_undo: {
     custody: "required",
@@ -534,6 +576,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "required",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   // A one-sided line: the units leave both the shelf and ownership, and that is
   // what drops `quantity_held`.
@@ -550,6 +593,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "optional",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   // A no-refund return is the same event with `cost.amount === 0` — the zero IS
   // the decision, which is why cost is required rather than nullable here.
@@ -560,6 +604,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "optional",
     service: "forbidden",
     units: "allowed",
+    uncounted: "lineless",
   },
   opening_balance: {
     custody: "forbidden",
@@ -568,6 +613,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "forbidden",
     units: "allowed",
+    uncounted: "refused",
   },
   purchase: {
     custody: "forbidden",
@@ -576,6 +622,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "forbidden",
     units: "allowed",
+    uncounted: "refused",
   },
   find: {
     custody: "forbidden",
@@ -584,6 +631,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "forbidden",
     units: "allowed",
+    uncounted: "refused",
   },
   make: {
     custody: "forbidden",
@@ -592,6 +640,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "forbidden",
     units: "allowed",
+    uncounted: "refused",
   },
   adjustment_increase: {
     custody: "forbidden",
@@ -600,6 +649,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "forbidden",
     units: "allowed",
+    uncounted: "refused",
   },
   adjustment_decrease: {
     custody: "forbidden",
@@ -608,6 +658,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "forbidden",
     units: "allowed",
+    uncounted: "refused",
   },
   trade_in: {
     custody: "forbidden",
@@ -616,6 +667,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "forbidden",
     units: "allowed",
+    uncounted: "refused",
   },
   // ── the twin reclass ──
   // Mirrors of `adjustment_decrease` / `adjustment_increase`: the units leave
@@ -630,6 +682,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "forbidden",
     units: "forbidden",
+    uncounted: "refused",
   },
   reclass_in: {
     custody: "forbidden",
@@ -638,6 +691,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "forbidden",
     units: "forbidden",
+    uncounted: "refused",
   },
   // No custody: the booking keeps `damaged: N` forever — a terminal key and part
   // of its history — so removing it would break `sum(breakdown) === quantity`.
@@ -654,6 +708,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "nullable",
     units: "allowed",
+    uncounted: "lineless",
   },
   // Nets to zero on ownership, so it has no cost object to mis-gate — which is
   // what made #286 (a costed transfer corrupting the basis) possible.
@@ -670,6 +725,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "nullable",
     units: "allowed",
+    uncounted: "refused",
   },
   // The found-and-returned resolution: a unit recorded lost turns up and goes
   // back on a shelf. Until this existed `out-of-service` was a ONE-WAY place —
@@ -696,6 +752,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "nullable",
     units: "allowed",
+    uncounted: "lineless",
   },
   // ── out of service ──
   // In place. `with_booking` rather than `forbidden`: a booking `returned →
@@ -715,6 +772,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "optional",
     service: "required",
     units: "allowed",
+    uncounted: "lineless",
   },
   // Shelf → record. `booking: "forbidden"` for the reason `return_to_service`
   // gives: the trip belongs to the RECORD, not to whichever order happened to
@@ -726,6 +784,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     booking: "forbidden",
     service: "required",
     units: "allowed",
+    uncounted: "refused",
   },
 };
 
@@ -1231,6 +1290,21 @@ function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
     return;
   }
   if (m.lines.length === 0) {
+    // An uncounted product's step: custody moved, and no shelf exists to name.
+    // Whether the LEDGER is uncounted is the fold's to check — see
+    // `MovementContract.uncounted`.
+    if (contract.uncounted === "lineless") {
+      if (m.cost !== null && m.cost.amount_cents !== 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["cost"],
+          message: `a lineless "${m.type}" moves no units, so its cost must be 0 (core#75)`,
+        });
+      }
+      // Rules 1–3 read lines; rule 4's axis rules do not, and still apply.
+      checkMovementService(m, contract, ctx);
+      return;
+    }
     ctx.addIssue({
       code: "custom",
       path: ["lines"],

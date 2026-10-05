@@ -24,6 +24,7 @@ import type {
   MovementContract,
   MovementCustodyType,
   MovementLineType,
+  MovementTypeType,
 } from "../src/schemas/mod.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -495,7 +496,7 @@ Deno.test("no contract pairs `places: null` with a required cost — the fold co
   // predicate that can never return true reports just as cleanly. Plant the
   // depreciation-shaped contract this exists to catch and assert it is caught.
   assertEquals(
-    costOnly({ custody: "forbidden", cost: "required", places: null, booking: "forbidden", service: "forbidden", units: "allowed" }),
+    costOnly({ custody: "forbidden", cost: "required", places: null, booking: "forbidden", service: "forbidden", units: "allowed", uncounted: "refused" }),
     true,
     "a planted cost-only contract must be caught",
   );
@@ -1257,4 +1258,75 @@ Deno.test("uncounted: deriveServiceQuantities keeps a null held null, and a coun
   const mv = { lines: [line(1, atBooking, atOos)], custody: null, service: null };
   assertEquals(deriveServiceQuantities(uncounted(), mv, "lost").quantity_in_service, null);
   assertEquals(deriveServiceQuantities(ledger({ quantity_held: 5, quantity_in_service: 5 }), mv, "lost").quantity_in_service, 4);
+});
+
+// ── Lineless movements: an uncounted product's custody step ─────────
+
+Deno.test("lineless: on an uncounted ledger every ladder step folds to nothing but updated_at", () => {
+  const start = uncounted();
+  const steps: Array<[MovementTypeType, { from: string | null; to: string | null }]> = [
+    ["check_out", { from: "prepped", to: "out" }],
+    ["check_in", { from: "out", to: "returned" }],
+    ["mark_damaged", { from: "out", to: "damaged" }],
+    ["mark_lost", { from: "out", to: "lost" }],
+    ["sale", { from: "prepped", to: "out" }],
+  ];
+  for (const [type, custody] of steps) {
+    const result = applyMovementToLedger(
+      start,
+      {
+        reverses: null,
+        service: null,
+        type,
+        custody: custody as MovementCustodyType,
+        quantity: 3,
+        lines: [],
+        cost: MOVEMENT_CONTRACTS[type].cost === "required" ? { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] } : null,
+      },
+      placements,
+      mockTimestamp,
+      type === "mark_lost" ? "lost" : null,
+    );
+    assertEquals(result.linelessCountedQuantity, 0, type);
+    assertEquals(result.ledger.quantity_held, null, type);
+    assertEquals(result.ledger.store_breakdown, [], type);
+    assertEquals(result.ledger.quantity_out_of_service, 0, `${type}: the record states the loss, not the ledger`);
+    assertEquals(result.oosUnattributedDelta, 0, type);
+    assertEquals(InventoryLedgerSchema.safeParse(result.ledger).success, true, type);
+  }
+});
+
+Deno.test("lineless: the same document on a COUNTED ledger is reported, so the writer can refuse it", () => {
+  const counted = ledgerAtShelfA(5);
+  const lineless = {
+    reverses: null,
+    service: null,
+    type: "check_out" as const,
+    custody: { from: "prepped", to: "out" } as MovementCustodyType,
+    quantity: 3,
+    lines: [],
+    cost: null,
+  };
+  const reported = applyMovementToLedger(counted, lineless, placements, mockTimestamp);
+  assertEquals(reported.linelessCountedQuantity, 3);
+  // Nothing left the shelf, which is exactly the defect being reported.
+  assertEquals(reported.ledger.quantity_held, 5);
+
+  // Fail-closed companion: the same step WITH its shelf line is not reported.
+  const lined = applyMovementToLedger(
+    counted,
+    { ...lineless, lines: [line(3, at(LOC_A), atBooking)] },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(lined.linelessCountedQuantity, 0);
+
+  // `prep` has no places at all, so its empty lines are the norm, not a report.
+  const prep = applyMovementToLedger(
+    counted,
+    { ...lineless, type: "prep", custody: { from: "reserved", to: "prepped" } as MovementCustodyType },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(prep.linelessCountedQuantity, 0);
 });

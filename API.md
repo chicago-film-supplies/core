@@ -6382,6 +6382,7 @@ interface MovementContract {
   booking: "required" | "forbidden" | "optional";
   service: "required" | "forbidden" | "nullable";
   units: "forbidden" | "allowed";
+  uncounted: "lineless" | "refused";
 }
 ```
 
@@ -22661,6 +22662,7 @@ interface MovementContract {
   booking: "required" | "forbidden" | "optional";
   service: "required" | "forbidden" | "nullable";
   units: "forbidden" | "allowed";
+  uncounted: "lineless" | "refused";
 }
 ```
 
@@ -35174,6 +35176,7 @@ interface LedgerFoldResult {
   basisUnderflowCents: number;
   oosUnattributedDelta: number;
   uncountedCostCents: number;
+  linelessCountedQuantity: number;
 }
 ```
 
@@ -35323,9 +35326,11 @@ impossible rather than gated: a transfer has no cost object to mis-gate.
 
 Holds no count and no basis, so the fold moves **neither**: `quantity_held`
 stays `null`, the basis and average stay 0, and a cost-bearing increase's
-stated cost is reported as `uncountedCostCents` rather than applied. Service
-quantities still move — a lost or damaged uncounted unit is a real
-out-of-service record — and `quantity_in_service` stays `null`.
+stated cost is reported as `uncountedCostCents` rather than applied.
+`quantity_in_service` stays `null`. Service quantities move only with a
+line, and an uncounted product's movements carry none (below), so its
+out-of-service breakdown stays at zero: a lost or damaged uncounted unit is
+stated by its out-of-service RECORD, not by the ledger.
 
 ⚠️ **Placement is folded exactly as on a counted ledger, on purpose.** An
 uncounted ledger has no shelves (`InventoryLedgerSchema` refuses a non-empty
@@ -35333,6 +35338,11 @@ uncounted ledger has no shelves (`InventoryLedgerSchema` refuses a non-empty
 uncounted product fails validation LOUDLY here, rather than having its shelf
 leg dropped silently while the location document it also writes takes it.
 The writer's job is to emit no shelf leg for an uncounted product at all.
+
+So an uncounted product's movements carry **no lines** (its contract's
+`uncounted: "lineless"`): the custody step is journalled and nothing is
+folded but `updated_at`. The same lineless document on a COUNTED ledger is
+reported as `linelessCountedQuantity`.
 
 ### `applyOutOfServiceReason(breakdown: indexedAccess, reason: keyof indexedAccess, delta: number): indexedAccess`
 

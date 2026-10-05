@@ -238,6 +238,20 @@ export interface LedgerFoldResult {
    * not to buy into it.
    */
   uncountedCostCents: number;
+  /**
+   * The quantity of a movement written with `lines: []` (its contract's
+   * `uncounted: "lineless"`) folded onto a **COUNTED** ledger. `0` on every
+   * uncounted ledger, on every movement that carries lines, and on a type with
+   * no places at all (`prep`, `unprep`).
+   *
+   * A lineless movement is an uncounted product's custody step: its units
+   * moved and no shelf exists to say from where. On a counted ledger the same
+   * document moves custody while the shelf keeps units that left it, which
+   * breaks `quantity_held === Σ store_breakdown + units out`. The schema
+   * cannot see the ledger, so the fold is the first place this is knowable.
+   * WRITER refuses, SCAN counts — the split {@link basisUnderflowCents} uses.
+   */
+  linelessCountedQuantity: number;
 }
 
 /** A shallow-cloned store entry, so the fold never mutates its input. */
@@ -344,9 +358,11 @@ export interface LocationPlacement {
  *
  * Holds no count and no basis, so the fold moves **neither**: `quantity_held`
  * stays `null`, the basis and average stay 0, and a cost-bearing increase's
- * stated cost is reported as `uncountedCostCents` rather than applied. Service
- * quantities still move — a lost or damaged uncounted unit is a real
- * out-of-service record — and `quantity_in_service` stays `null`.
+ * stated cost is reported as `uncountedCostCents` rather than applied.
+ * `quantity_in_service` stays `null`. Service quantities move only with a
+ * line, and an uncounted product's movements carry none (below), so its
+ * out-of-service breakdown stays at zero: a lost or damaged uncounted unit is
+ * stated by its out-of-service RECORD, not by the ledger.
  *
  * ⚠️ **Placement is folded exactly as on a counted ledger, on purpose.** An
  * uncounted ledger has no shelves (`InventoryLedgerSchema` refuses a non-empty
@@ -354,6 +370,11 @@ export interface LocationPlacement {
  * uncounted product fails validation LOUDLY here, rather than having its shelf
  * leg dropped silently while the location document it also writes takes it.
  * The writer's job is to emit no shelf leg for an uncounted product at all.
+ *
+ * So an uncounted product's movements carry **no lines** (its contract's
+ * `uncounted: "lineless"`): the custody step is journalled and nothing is
+ * folded but `updated_at`. The same lineless document on a COUNTED ledger is
+ * reported as `linelessCountedQuantity`.
  */
 export function applyMovementToLedger(
   ledger: InventoryLedger,
@@ -492,6 +513,10 @@ export function applyMovementToLedger(
     basisUnderflowCents,
     oosUnattributedDelta: service.oosUnattributedDelta,
     uncountedCostCents,
+    linelessCountedQuantity: movement.lines.length === 0 && heldBefore !== null &&
+        MOVEMENT_CONTRACTS[movement.type].places !== null
+      ? movement.quantity
+      : 0,
   };
 }
 

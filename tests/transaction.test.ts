@@ -6,7 +6,7 @@
  * is required, and the axis present when it is forbidden. A one-sided test would
  * pass against a schema that simply accepted everything.
  */
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
 import {
   CreateStoreTransferInput,
@@ -449,15 +449,75 @@ Deno.test("prep moves nothing physically — lines must be empty", () => {
   assertEquals(MovementSchema.safeParse(stray).success, false);
 });
 
-Deno.test("a type that moves units rejects an empty lines array", () => {
+Deno.test("a type that only means anything as a count rejects an empty lines array", () => {
+  let refused = 0;
   for (const type of MOVEMENT_TYPES) {
-    if (MOVEMENT_CONTRACTS[type].places === null) continue;
+    const contract = MOVEMENT_CONTRACTS[type];
+    if (contract.places === null || contract.uncounted === "lineless") continue;
+    refused++;
     assertEquals(
       MovementSchema.safeParse(movement(type, { lines: [] })).success,
       false,
       `${type} with no lines should fail`,
     );
   }
+  // Fail-closed: a loop that skipped every type would pass vacuously.
+  assert(refused >= 10, `only ${refused} refused types were checked`);
+});
+
+Deno.test("an uncounted product's step is lineless: the ladder and two record resolutions accept `lines: []`", () => {
+  const lineless = MOVEMENT_TYPES.filter((t) =>
+    MOVEMENT_CONTRACTS[t].places !== null && MOVEMENT_CONTRACTS[t].uncounted === "lineless"
+  );
+  assertEquals([...lineless].sort(), [
+    "check_in",
+    "check_in_undo",
+    "check_out",
+    "check_out_undo",
+    "flag",
+    "mark_cleaning",
+    "mark_cleaning_undo",
+    "mark_damaged",
+    "mark_damaged_undo",
+    "mark_lost",
+    "mark_lost_undo",
+    "mark_maintenance",
+    "mark_maintenance_undo",
+    "return_to_service",
+    "sale",
+    "sale_return",
+    "write_off",
+  ]);
+  for (const type of lineless) {
+    const doc = movement(type, {
+      lines: [],
+      ...(MOVEMENT_CONTRACTS[type].cost === "required"
+        ? { cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] } }
+        : {}),
+    });
+    const parsed = MovementSchema.safeParse(doc);
+    assertEquals(parsed.success, true, `${type}: ${parsed.error?.message}`);
+  }
+});
+
+Deno.test("a lineless cost-bearing movement must state a zero cost (core#75)", () => {
+  const zero = { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] };
+  const money = { amount_cents: 1200, unit_cost: 12, unit_costs_cents: [1200] };
+  for (const type of ["sale", "sale_return", "write_off"] as const) {
+    assertEquals(MovementSchema.safeParse(movement(type, { lines: [], cost: zero })).success, true, type);
+    assertEquals(MovementSchema.safeParse(movement(type, { lines: [], cost: money })).success, false, type);
+    // The same money WITH a line is an ordinary movement — the refusal above
+    // is the lineless rule and not a fixture that could never parse.
+    assertEquals(MovementSchema.safeParse(movement(type, { cost: money })).success, true, `${type} with lines`);
+  }
+});
+
+Deno.test("a lineless flag still answers rule 4: {r → r} and a lost flag stay refused", () => {
+  const flag = (service: { from: string | null; to: string | null }) =>
+    MovementSchema.safeParse(movement("flag", { lines: [], service })).success;
+  assertEquals(flag({ from: null, to: "damaged" }), true);
+  assertEquals(flag({ from: "damaged", to: "damaged" }), false);
+  assertEquals(flag({ from: null, to: "lost" }), false);
 });
 
 Deno.test("balance rule 1: lines sum to the event quantity", () => {
