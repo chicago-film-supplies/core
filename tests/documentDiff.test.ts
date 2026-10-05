@@ -1127,7 +1127,7 @@ Deno.test("documentDiff: a REVERSING credit nets out of invoiced, clearing the q
   const { o, inv } = overbilled();
   const cn = creditNote("cn-1", 1030, "inv-1", [{ quantity: 1, path: LIGHT_ON_INVOICE, reverses_billing: true }]);
   const sources = { orders: [o], invoices: [inv], creditNotes: [cn] };
-  const expected = [{ uid_credit_note: "cn-1", number: 1030, uid_invoice: "inv-1", quantity: 1, reverses_billing: true }];
+  const expected = [{ uid_credit_note: "cn-1", number: 1030, uid_invoice: "inv-1", quantity: 1, reverses_billing: true, bills_order_line: true }];
 
   const onOrder = computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT);
   assertEquals(quantityAt(onOrder, LIGHT_REL), []);
@@ -1138,11 +1138,11 @@ Deno.test("documentDiff: a REVERSING credit nets out of invoiced, clearing the q
   assertEquals(onInvoice.credits.get(`${O}/${LIGHT_REL}`), expected);
 });
 
-Deno.test("documentDiff: a NON-reversing credit (the CN-1027 shape) is shown and never netted — invoiced stays gross", () => {
+Deno.test("documentDiff: a NON-reversing credit on a line the order still has is shown and never netted — invoiced stays gross", () => {
   const { o, inv } = overbilled();
   const cn = creditNote("cn-1027", 1027, "inv-1", [{ quantity: 1, path: LIGHT_ON_INVOICE, reverses_billing: false }]);
   const sources = { orders: [o], invoices: [inv], creditNotes: [cn] };
-  const expected = [{ uid_credit_note: "cn-1027", number: 1027, uid_invoice: "inv-1", quantity: 1, reverses_billing: false }];
+  const expected = [{ uid_credit_note: "cn-1027", number: 1027, uid_invoice: "inv-1", quantity: 1, reverses_billing: false, bills_order_line: true }];
 
   const onOrder = computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT);
   assertEquals(quantityAt(onOrder, LIGHT_REL), [[2, 3]]);
@@ -1167,8 +1167,8 @@ Deno.test("documentDiff: credits on two invoices of one order are attributed per
   const cnA = creditNote("cn-a", 1040, "inv-a", [{ quantity: 1, path: LIGHT_ON_INVOICE }]);
   const cnB = creditNote("cn-b", 1041, "inv-b", [{ quantity: 2, path: LIGHT_ON_INVOICE }]);
   const sources = { orders: [order()], invoices: [a, b], creditNotes: [cnA, cnB] };
-  const creditA = { uid_credit_note: "cn-a", number: 1040, uid_invoice: "inv-a", quantity: 1, reverses_billing: false };
-  const creditB = { uid_credit_note: "cn-b", number: 1041, uid_invoice: "inv-b", quantity: 2, reverses_billing: false };
+  const creditA = { uid_credit_note: "cn-a", number: 1040, uid_invoice: "inv-a", quantity: 1, reverses_billing: false, bills_order_line: true };
+  const creditB = { uid_credit_note: "cn-b", number: 1041, uid_invoice: "inv-b", quantity: 2, reverses_billing: false, bills_order_line: true };
 
   assertEquals(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).credits.get(LIGHT_REL), [creditA, creditB]);
   assertEquals([...computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-a" }, CONTEXT).credits], [[`${O}/${LIGHT_REL}`, [creditA]]]);
@@ -1182,7 +1182,7 @@ Deno.test("documentDiff: a legacy line with no path keys by uid only when the ui
   const unique = creditNote("cn-tripod", 1051, "inv-1", [{ quantity: 1, uid_invoice_item: TRIPOD }]);
   const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv], creditNotes: [ambiguous, unique] }, { kind: "order", uid: O }, CONTEXT);
 
-  assertEquals([...diff.credits], [[`${D}/${G}/${TRIPOD}`, [{ uid_credit_note: "cn-tripod", number: 1051, uid_invoice: "inv-1", quantity: 1, reverses_billing: false }]]]);
+  assertEquals([...diff.credits], [[`${D}/${G}/${TRIPOD}`, [{ uid_credit_note: "cn-tripod", number: 1051, uid_invoice: "inv-1", quantity: 1, reverses_billing: false, bills_order_line: true }]]]);
   assertEquals(diff.unkeyed_credit_notes, [{ uid_credit_note: "cn-light", number: 1050, uid_invoice: "inv-1" }]);
 });
 
@@ -1192,4 +1192,23 @@ Deno.test("documentDiff: a note naming two invoices cannot be keyed to a row, an
   const diff = computeDocumentDiffs({ orders: [order()], invoices: [inv], creditNotes: [cn] }, { kind: "invoice", uid: "inv-1" }, CONTEXT);
   assertEquals(diff.credits.size, 0);
   assertEquals(diff.unkeyed_credit_notes, [{ uid_credit_note: "cn-2src", number: 1060, uid_invoice: null }]);
+});
+
+Deno.test("documentDiff: a credit on a group the ORDER deleted (kept on the invoice) bills no order line — said, not netted, not owed (the CN-1027 case)", () => {
+  // The invoice still carries group G and its two lines; the order removed G.
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  const reduced = orderItems().filter((it) => !(it.path ?? []).includes(G));
+  const cn = creditNote("cn-1027", 1027, "inv-1", [{ quantity: 2, path: LIGHT_ON_INVOICE, reverses_billing: false }]);
+  const sources = { orders: [order(reduced)], invoices: [inv], creditNotes: [cn] };
+  const expected = [{ uid_credit_note: "cn-1027", number: 1027, uid_invoice: "inv-1", quantity: 2, reverses_billing: false, bills_order_line: false }];
+
+  assertEquals(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).credits.get(LIGHT_REL), expected);
+  assertEquals(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT).credits.get(`${O}/${LIGHT_REL}`), expected);
+});
+
+Deno.test("documentDiff: without the order passed, whether a credited row bills an order line is open — null, never a guess", () => {
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  const cn = creditNote("cn-1", 1030, "inv-1", [{ quantity: 1, path: LIGHT_ON_INVOICE }]);
+  const diff = computeDocumentDiffs({ invoices: [inv], creditNotes: [cn] }, { kind: "invoice", uid: "inv-1" }, CONTEXT);
+  assertEquals(diff.credits.get(`${O}/${LIGHT_REL}`)?.map((c) => c.bills_order_line), [null]);
 });

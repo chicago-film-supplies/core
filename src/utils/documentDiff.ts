@@ -168,6 +168,7 @@ import {
   invoiceAuthoredSubtrees,
   invoiceScopeDividersMatch,
   isInExtensionSection,
+  isInInvoiceAuthoredSubtree,
   orderInvoiceSharedFields,
   orderLineClaims,
   projectOrderItemToInvoiceItem,
@@ -459,6 +460,14 @@ export interface DocumentCredit {
    * netted out of `invoiced`. False means shown and NOT netted.
    */
   reverses_billing: boolean;
+  /**
+   * Whether the credited row bills an ORDER line at all. `false` for a row in an
+   * invoice-authored subtree ({@link invoiceAuthoredSubtrees}) — a group the
+   * invoice added, or kept after the order deleted it — which `invoicedByPath`
+   * never counts, so netting has nothing to apply to and "not netted" says
+   * nothing. `null` when the order was not passed and the question is open.
+   */
+  bills_order_line: boolean | null;
 }
 
 /** A credit note no row could be found for. @see {@link DocumentDiffMap.unkeyed_credit_notes} */
@@ -1304,7 +1313,7 @@ export function computeDocumentDiffs(
     outOfServiceEntries(orderUid, coverage, (rel) => rel);
   };
 
-  fileCredits(out, creditKeys(creditNotes, sources.invoices ?? []), viewing, sources.invoices ?? []);
+  fileCredits(out, creditKeys(creditNotes, sources.invoices ?? [], orders), viewing, sources.invoices ?? []);
 
   if (viewing.kind === "order") {
     const order = orderByUid.get(viewing.uid);
@@ -1396,8 +1405,19 @@ interface CreditKeys {
  * is on exactly one line of the invoice. Netting never takes that fallback —
  * a guessed row is acceptable on screen and not in arithmetic.
  */
-function creditKeys(notes: readonly DocumentDiffCreditNote[], invoices: readonly Invoice[]): CreditKeys {
+function creditKeys(notes: readonly DocumentDiffCreditNote[], invoices: readonly Invoice[], orders: readonly Order[]): CreditKeys {
   const invoiceByUid = new Map(invoices.map((i) => [i.uid, i]));
+  const orderByUid = new Map(orders.map((o) => [o.uid, o]));
+  /** Does this invoice row bill an order line? See {@link DocumentCredit.bills_order_line}. */
+  const billsOrderLine = (invoice: Invoice | undefined, path: readonly string[]): boolean | null => {
+    const orderUid = path[0];
+    const order = orderByUid.get(orderUid);
+    if (invoice === undefined || order === undefined) return null;
+    const scoped = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.path[0] === orderUid) as unknown as InvoiceItem[];
+    // A moved row (core#125) bills its claimed order line even inside an authored group.
+    if (orderLineClaims(scoped, orderUid).has(key(path.slice(1)))) return true;
+    return !isInInvoiceAuthoredSubtree(path, orderUid, invoiceAuthoredSubtrees(scoped, order.items as unknown as LineItem[], orderUid));
+  };
   const rows: CreditKeys["rows"] = new Map();
   const unkeyed: DocumentUnkeyedCredit[] = [];
   for (const note of notes) {
@@ -1426,7 +1446,10 @@ function creditKeys(notes: readonly DocumentDiffCreditNote[], invoices: readonly
         existing.quantity += line.quantity ?? 0;
         existing.reverses_billing &&= reverses;
       } else {
-        row.credits.push({ uid_credit_note: note.uid, number: note.number, uid_invoice: uidInvoice, quantity: line.quantity ?? 0, reverses_billing: reverses });
+        row.credits.push({
+          uid_credit_note: note.uid, number: note.number, uid_invoice: uidInvoice, quantity: line.quantity ?? 0,
+          reverses_billing: reverses, bills_order_line: billsOrderLine(invoice, path),
+        });
       }
     }
   }

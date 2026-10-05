@@ -29722,6 +29722,7 @@ interface DocumentCredit {
   uid_invoice: string;
   quantity: number;
   reverses_billing: boolean;
+  bills_order_line: boolean | null;
 }
 ```
 

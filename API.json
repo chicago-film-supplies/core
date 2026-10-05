@@ -13473,7 +13473,7 @@
         {
           "kind": "interface",
           "name": "DocumentCredit",
-          "declaration": "interface DocumentCredit {\n  uid_credit_note: string;\n  number: number;\n  uid_invoice: string;\n  quantity: number;\n  reverses_billing: boolean;\n}",
+          "declaration": "interface DocumentCredit {\n  uid_credit_note: string;\n  number: number;\n  uid_invoice: string;\n  quantity: number;\n  reverses_billing: boolean;\n  bills_order_line: boolean | null;\n}",
           "doc": "One credit note's credit against one invoice row. @see {@link DocumentDiffMap.credits}"
         },
         {
