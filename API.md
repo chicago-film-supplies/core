@@ -29711,6 +29711,20 @@ must not take down every write in its subtree.
 
 ## `@cfs/core/utils/documentDiff`
 
+### `DocumentCredit`
+
+One credit note's credit against one invoice row. @see {@link DocumentDiffMap.credits}
+
+```ts
+interface DocumentCredit {
+  uid_credit_note: string;
+  number: number;
+  uid_invoice: string;
+  quantity: number;
+  reverses_billing: boolean;
+}
+```
+
 ### `DocumentDiffContext`
 
 What the order ↔ invoice explanation arms need, per order.
@@ -29719,6 +29733,27 @@ What the order ↔ invoice explanation arms need, per order.
 interface DocumentDiffContext {
   taxNameByUid: ReadonlyMap<string, string>;
   isOrderFrozen: fnOrConstructor;
+}
+```
+
+### `DocumentDiffCreditNote`
+
+A credit note as the diff reads it: the accounting shape plus its number.
+
+```ts
+interface DocumentDiffCreditNote {
+  number: number;
+  items: readonly DocumentDiffCreditNoteItem[];
+}
+```
+
+### `DocumentDiffCreditNoteItem`
+
+One credit note line, as the diff reads it.
+
+```ts
+interface DocumentDiffCreditNoteItem {
+  uid_invoice_item: string | null;
 }
 ```
 
@@ -29768,6 +29803,8 @@ interface DocumentDiffMap {
   status: Array<typeLiteral>;
   doc: DocumentDiffEntry[];
   unplaced_out_of_service: DocumentQuantityEntry[];
+  credits: Map<string, DocumentCredit[]>;
+  unkeyed_credit_notes: DocumentUnkeyedCredit[];
 }
 ```
 
@@ -29789,6 +29826,7 @@ interface DocumentDiffSources {
   fulfillments?: readonly Fulfillment[];
   invoices?: readonly Invoice[];
   outOfService?: readonly DocumentDiffOutOfService[];
+  creditNotes?: readonly DocumentDiffCreditNote[];
 }
 ```
 
@@ -29935,6 +29973,18 @@ interface DocumentSubstitutionEntry {
   source: DocumentRef;
   replaced: string;
   substitute: string;
+}
+```
+
+### `DocumentUnkeyedCredit`
+
+A credit note no row could be found for. @see {@link DocumentDiffMap.unkeyed_credit_notes}
+
+```ts
+interface DocumentUnkeyedCredit {
+  uid_credit_note: string;
+  number: number;
+  uid_invoice: string | null;
 }
 ```
 

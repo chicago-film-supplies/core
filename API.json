@@ -13472,9 +13472,27 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "DocumentCredit",
+          "declaration": "interface DocumentCredit {\n  uid_credit_note: string;\n  number: number;\n  uid_invoice: string;\n  quantity: number;\n  reverses_billing: boolean;\n}",
+          "doc": "One credit note's credit against one invoice row. @see {@link DocumentDiffMap.credits}"
+        },
+        {
+          "kind": "interface",
           "name": "DocumentDiffContext",
           "declaration": "interface DocumentDiffContext {\n  taxNameByUid: ReadonlyMap<string, string>;\n  isOrderFrozen: fnOrConstructor;\n}",
           "doc": "What the order ↔ invoice explanation arms need, per order."
+        },
+        {
+          "kind": "interface",
+          "name": "DocumentDiffCreditNote",
+          "declaration": "interface DocumentDiffCreditNote {\n  number: number;\n  items: readonly DocumentDiffCreditNoteItem[];\n}",
+          "doc": "A credit note as the diff reads it: the accounting shape plus its number."
+        },
+        {
+          "kind": "interface",
+          "name": "DocumentDiffCreditNoteItem",
+          "declaration": "interface DocumentDiffCreditNoteItem {\n  uid_invoice_item: string | null;\n}",
+          "doc": "One credit note line, as the diff reads it."
         },
         {
           "kind": "typeAlias",
@@ -13497,7 +13515,7 @@
         {
           "kind": "interface",
           "name": "DocumentDiffMap",
-          "declaration": "interface DocumentDiffMap {\n  lines: Map<string, DocumentDiffEntry[]>;\n  pairs: Map<string, DocumentDiffEntry[]>;\n  unaligned: Array<typeLiteral>;\n  status: Array<typeLiteral>;\n  doc: DocumentDiffEntry[];\n  unplaced_out_of_service: DocumentQuantityEntry[];\n}",
+          "declaration": "interface DocumentDiffMap {\n  lines: Map<string, DocumentDiffEntry[]>;\n  pairs: Map<string, DocumentDiffEntry[]>;\n  unaligned: Array<typeLiteral>;\n  status: Array<typeLiteral>;\n  doc: DocumentDiffEntry[];\n  unplaced_out_of_service: DocumentQuantityEntry[];\n  credits: Map<string, DocumentCredit[]>;\n  unkeyed_credit_notes: DocumentUnkeyedCredit[];\n}",
           "doc": "The answer for one viewed document.\n\nKeys are `path.join(\"/\")` in the VIEWED document's own path space, so a row\nlooks itself up by its own stored path: an invoice line's key carries its\norder-divider prefix, an order or fulfillment line's does not. A destination\npair is keyed by its destination divider's path key, in the same space."
         },
         {
@@ -13509,7 +13527,7 @@
         {
           "kind": "interface",
           "name": "DocumentDiffSources",
-          "declaration": "interface DocumentDiffSources {\n  orders?: readonly Order[];\n  fulfillments?: readonly Fulfillment[];\n  invoices?: readonly Invoice[];\n  outOfService?: readonly DocumentDiffOutOfService[];\n}",
+          "declaration": "interface DocumentDiffSources {\n  orders?: readonly Order[];\n  fulfillments?: readonly Fulfillment[];\n  invoices?: readonly Invoice[];\n  outOfService?: readonly DocumentDiffOutOfService[];\n  creditNotes?: readonly DocumentDiffCreditNote[];\n}",
           "doc": "Documents the caller holds. Any may be absent or partial."
         },
         {
@@ -13553,6 +13571,12 @@
           "name": "DocumentSubstitutionEntry",
           "declaration": "interface DocumentSubstitutionEntry {\n  kind: \"substituted\";\n  source: DocumentRef;\n  replaced: string;\n  substitute: string;\n}",
           "doc": "A substitution between the viewed document and one source. Filed at\nwhichever of the two lines the viewed document carries — `replaced` on the\nside without the substitute, `substitute` on the side with it — so the entry always\nlands on a row. The other key names the source's line.\n\nBoth keys are in the VIEWED document's path space, like every map key."
+        },
+        {
+          "kind": "interface",
+          "name": "DocumentUnkeyedCredit",
+          "declaration": "interface DocumentUnkeyedCredit {\n  uid_credit_note: string;\n  number: number;\n  uid_invoice: string | null;\n}",
+          "doc": "A credit note no row could be found for. @see {@link DocumentDiffMap.unkeyed_credit_notes}"
         },
         {
           "kind": "function",

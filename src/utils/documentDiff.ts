@@ -184,7 +184,7 @@ import {
   standInUnits,
   type SubstitutionAnchor,
 } from "./substitutions.ts";
-import { accountLine, type AccountedInvoice, type InvoicedByPath, invoicedByPath, crmsAuthoredInvoices, orderLineWindow, substitutionCredit } from "./quantityAccounting.ts";
+import { accountLine, type AccountedCreditNote, type AccountedCreditNoteItem, type AccountedInvoice, type InvoicedByPath, invoicedByPath, crmsAuthoredInvoices, orderLineWindow, substitutionCredit } from "./quantityAccounting.ts";
 import { orderFulfillmentSharedFields, type SharedField } from "./shared-fields.ts";
 import { bookingIdsByPath } from "./order-edit-delta.ts";
 import { parseBookingId } from "./booking-id.ts";
@@ -419,6 +419,70 @@ export interface DocumentDiffMap {
    * dropped, so a record the documents disagree about is never invisible.
    */
   unplaced_out_of_service: DocumentQuantityEntry[];
+  /**
+   * Every issued or applied credit note line, filed at the row it credits —
+   * keyed like {@link lines}, in the VIEWED document's path space.
+   *
+   * 🔴 **An annotation, not an entry, and not a ninth kind.** It is filed even
+   * where {@link lines} has nothing: a REVERSING note nets in `invoicedByPath`,
+   * which is exactly what clears the `quantity` entry, and the operator still
+   * needs to see which note did it. A NON-reversing note is money given back,
+   * not a statement that units were unbilled (`CreditNoteDocLineItem.reverses_billing`),
+   * so it is shown here and never netted — `invoiced` stays gross of it.
+   *
+   * On the invoice view: that invoice's own rows. On the order and fulfillment
+   * views: every invoice scoping the order, at the order-relative key the row
+   * bills (a moved row's at the order line it claims). Quantity and identity
+   * only — no derived money, the same rule as every entry here.
+   */
+  credits: Map<string, DocumentCredit[]>;
+  /**
+   * Credit notes relevant to the viewed document that name no row this can key:
+   * no `path_invoice_item` and a `uid_invoice_item` that is not unique on its
+   * invoice (or no invoice passed to resolve it against), or not exactly one
+   * `invoices` source. Listed rather than dropped, like
+   * {@link unplaced_out_of_service} — "no credit shown" must never read as "no credit".
+   */
+  unkeyed_credit_notes: DocumentUnkeyedCredit[];
+}
+
+/** One credit note's credit against one invoice row. @see {@link DocumentDiffMap.credits} */
+export interface DocumentCredit {
+  uid_credit_note: string;
+  number: number;
+  /** The invoice the note was raised on — the row's document. */
+  uid_invoice: string;
+  /** Units the note credits at this row, summed over its lines there. */
+  quantity: number;
+  /**
+   * True when every line of the note at this row reverses billing, i.e. it was
+   * netted out of `invoiced`. False means shown and NOT netted.
+   */
+  reverses_billing: boolean;
+}
+
+/** A credit note no row could be found for. @see {@link DocumentDiffMap.unkeyed_credit_notes} */
+export interface DocumentUnkeyedCredit {
+  uid_credit_note: string;
+  number: number;
+  /** `null` when the note does not name exactly one invoice. */
+  uid_invoice: string | null;
+}
+
+/** One credit note line, as the diff reads it. */
+export interface DocumentDiffCreditNoteItem extends AccountedCreditNoteItem {
+  /**
+   * The legacy key, read only when `path_invoice_item` is absent — and then only
+   * when this uid is on exactly ONE line of the invoice, because `item.uid`
+   * repeats within a document (`cfs-items` invariant 4).
+   */
+  uid_invoice_item: string | null;
+}
+
+/** A credit note as the diff reads it: the accounting shape plus its number. */
+export interface DocumentDiffCreditNote extends AccountedCreditNote {
+  number: number;
+  items: readonly DocumentDiffCreditNoteItem[];
 }
 
 /** A lifecycle mismatch no per-line comparison can show. */
@@ -441,6 +505,15 @@ export interface DocumentDiffSources {
    * read is silent by design).
    */
   outOfService?: readonly DocumentDiffOutOfService[];
+  /**
+   * Credit notes raised on the invoices passed (`query_by_sources`
+   * array-contains-any `invoices:<uid>`). REVERSING lines net out of
+   * `invoiced` exactly as `createOrderInvoiceCoverage` nets them, so the diff
+   * and the coverage menu agree; every issued/applied line is annotated in
+   * {@link DocumentDiffMap.credits}. Absent ⇒ nothing nets and nothing is
+   * annotated, silent by design like {@link outOfService}.
+   */
+  creditNotes?: readonly DocumentDiffCreditNote[];
 }
 
 /** What the order ↔ invoice explanation arms need, per order. */
@@ -1025,7 +1098,11 @@ export function computeDocumentDiffs(
   viewing: { kind: DocumentKind; uid: string },
   context: DocumentDiffContext,
 ): DocumentDiffMap {
-  const out: DocumentDiffMap = { lines: new Map(), pairs: new Map(), unaligned: [], status: [], doc: [], unplaced_out_of_service: [] };
+  const out: DocumentDiffMap = {
+    lines: new Map(), pairs: new Map(), unaligned: [], status: [], doc: [], unplaced_out_of_service: [],
+    credits: new Map(), unkeyed_credit_notes: [],
+  };
+  const creditNotes = sources.creditNotes ?? [];
   const orders = sources.orders ?? [];
   const fulfillments = sources.fulfillments ?? [];
   // A void invoice bills nothing: dropped before any comparison (see the module doc).
@@ -1065,6 +1142,7 @@ export function computeDocumentDiffs(
       orderUid,
       (orderByUid.get(orderUid)?.items ?? []) as unknown as LineItem[],
       alignedInvoices as unknown as AccountedInvoice[],
+      creditNotes,
     );
     return { invoiced, invoices: refs, alignedInvoices };
   };
@@ -1226,6 +1304,8 @@ export function computeDocumentDiffs(
     outOfServiceEntries(orderUid, coverage, (rel) => rel);
   };
 
+  fileCredits(out, creditKeys(creditNotes, sources.invoices ?? []), viewing, sources.invoices ?? []);
+
   if (viewing.kind === "order") {
     const order = orderByUid.get(viewing.uid);
     if (order === undefined) return out;
@@ -1297,4 +1377,98 @@ export function computeDocumentDiffs(
     outOfServiceEntries(orderUid, coverage, viewedKey);
   }
   return out;
+}
+
+/** Every keyable credit, per invoice row, plus the notes that could not be keyed. */
+interface CreditKeys {
+  /** `invoiceUid|pathKey` → the row's path and the notes crediting it. */
+  rows: Map<string, { uid_invoice: string; path: readonly string[]; credits: DocumentCredit[] }>;
+  unkeyed: DocumentUnkeyedCredit[];
+}
+
+/**
+ * Key every issued/applied credit note line to the invoice row it credits.
+ *
+ * The keying is `billingReversals`' (`utils/quantityAccounting.ts`) WITHOUT its
+ * `reverses_billing` filter: exactly one `invoices` source, and the row's
+ * `path_invoice_item`. One fallback it does not take, because this only
+ * DISPLAYS: a legacy line with no path keys by `uid_invoice_item` when that uid
+ * is on exactly one line of the invoice. Netting never takes that fallback —
+ * a guessed row is acceptable on screen and not in arithmetic.
+ */
+function creditKeys(notes: readonly DocumentDiffCreditNote[], invoices: readonly Invoice[]): CreditKeys {
+  const invoiceByUid = new Map(invoices.map((i) => [i.uid, i]));
+  const rows: CreditKeys["rows"] = new Map();
+  const unkeyed: DocumentUnkeyedCredit[] = [];
+  for (const note of notes) {
+    if (note.status !== "issued" && note.status !== "applied") continue;
+    const sourced = (note.sources ?? []).filter((s) => s.collection === "invoices");
+    const uidInvoice = sourced.length === 1 ? sourced[0].uid : null;
+    for (const line of note.items) {
+      let path: readonly string[] | undefined = line.path_invoice_item?.length ? line.path_invoice_item : undefined;
+      const invoice = uidInvoice === null ? undefined : invoiceByUid.get(uidInvoice);
+      if (path === undefined && invoice !== undefined && line.uid_invoice_item) {
+        const matches = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.uid === line.uid_invoice_item && !isDividerItemType(it.type));
+        if (matches.length === 1) path = matches[0].path;
+      }
+      if (uidInvoice === null || path === undefined) {
+        if (!unkeyed.some((u) => u.uid_credit_note === note.uid)) {
+          unkeyed.push({ uid_credit_note: note.uid, number: note.number, uid_invoice: uidInvoice });
+        }
+        continue;
+      }
+      const k = `${uidInvoice}|${key(path)}`;
+      let row = rows.get(k);
+      if (!row) rows.set(k, row = { uid_invoice: uidInvoice, path, credits: [] });
+      const reverses = line.reverses_billing === true;
+      const existing = row.credits.find((c) => c.uid_credit_note === note.uid);
+      if (existing) {
+        existing.quantity += line.quantity ?? 0;
+        existing.reverses_billing &&= reverses;
+      } else {
+        row.credits.push({ uid_credit_note: note.uid, number: note.number, uid_invoice: uidInvoice, quantity: line.quantity ?? 0, reverses_billing: reverses });
+      }
+    }
+  }
+  return { rows, unkeyed };
+}
+
+/** File {@link creditKeys}' answer into the viewed document's path space. */
+function fileCredits(out: DocumentDiffMap, keys: CreditKeys, viewing: { kind: DocumentKind; uid: string }, invoices: readonly Invoice[]): void {
+  const invoiceByUid = new Map(invoices.map((i) => [i.uid, i]));
+  const file = (k: string, credits: readonly DocumentCredit[]) => {
+    const list = out.credits.get(k) ?? [];
+    out.credits.set(k, [...list, ...credits]);
+  };
+  if (viewing.kind === "invoice") {
+    for (const row of keys.rows.values()) {
+      if (row.uid_invoice === viewing.uid) file(key(row.path), row.credits);
+    }
+    out.unkeyed_credit_notes = keys.unkeyed.filter((u) => u.uid_invoice === viewing.uid || u.uid_invoice === null);
+    return;
+  }
+  // Order and fulfillment views share the order's path space (a fulfillment's uid IS its order's).
+  const orderUid = viewing.uid;
+  const claimsByInvoice = new Map<string, Map<string, readonly string[]>>();
+  const claimsOf = (invoice: Invoice) => {
+    let claims = claimsByInvoice.get(invoice.uid);
+    if (!claims) {
+      const scoped = (invoice.items as readonly InvoiceDocItemType[]).filter((it) => it.path[0] === orderUid);
+      claimsByInvoice.set(invoice.uid, claims = orderLineClaims(scoped as unknown as InvoiceItem[], orderUid));
+    }
+    return claims;
+  };
+  for (const row of keys.rows.values()) {
+    if (row.path[0] !== orderUid) continue;
+    const rel = row.path.slice(1);
+    const invoice = invoiceByUid.get(row.uid_invoice);
+    // A moved row (core#125) bills the order line it claims, so it is filed there.
+    const billed = invoice === undefined ? undefined : claimsOf(invoice).get(key(rel));
+    file(key(billed ?? rel), row.credits);
+  }
+  out.unkeyed_credit_notes = keys.unkeyed.filter((u) => {
+    if (u.uid_invoice === null) return true;
+    const invoice = invoiceByUid.get(u.uid_invoice);
+    return invoice === undefined || invoiceScopes(invoice).includes(orderUid);
+  });
 }
