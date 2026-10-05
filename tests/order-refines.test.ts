@@ -372,6 +372,43 @@ function orderWith(status: string, lines: unknown[], pairOverrides: Record<strin
   };
 }
 
+Deno.test("checkStoredEndpoints: a canceled order or fulfillment may leave a leg unplaced; a live one may not", async (t) => {
+  const unplaced = { uid: "destdelivery00000001", address: null, instructions: null, contact: null };
+  const ADDRESS = ["destinations", 0, "delivery", "address"];
+  await t.step("order: canceled parses, quoted and reserved refuse at the address", () => {
+    const canceled = OrderSchema.safeParse(
+      orderWith("canceled", [rentalLine(PARENT)], { delivery: unplaced, collection: unplaced }),
+    );
+    assertEquals(canceled.success, true, JSON.stringify(canceled.error?.issues));
+    for (const status of ["quoted", "reserved"]) {
+      const r = OrderSchema.safeParse(orderWith(status, [rentalLine(PARENT)], { delivery: unplaced, collection: unplaced }));
+      assertEquals(refusedAt(r, ADDRESS), true, status);
+      assertEquals(refusedAt(r, ["destinations", 0, "collection", "address"]), true, status);
+    }
+  });
+  await t.step("fulfillment: its status is its order's, so canceled is exempt too", () => {
+    const stored = orderWith("canceled", [rentalLine(PARENT)]);
+    const base = withPairs(fulfillment(), [DIV_A]);
+    const make = (status: string) => ({
+      ...base,
+      status,
+      items: [divider(DIV_A), getTestDoc(FulfillmentLineItem, { uid: PARENT, type: "rental", path: [DIV_A, PARENT], quantity: 1 })],
+      destinations: [{
+        ...base.destinations[0],
+        delivery: unplaced,
+        collection: unplaced,
+        customer_returning: false,
+        dates: stored.destinations[0].dates,
+      }],
+    });
+    const canceled = FulfillmentSchema.safeParse(make("canceled"));
+    assertEquals(canceled.success, true, JSON.stringify(canceled.error?.issues));
+    for (const status of ["quoted", "reserved"]) {
+      assertEquals(refusedAt(FulfillmentSchema.safeParse(make(status)), ADDRESS), true, status);
+    }
+  });
+});
+
 Deno.test("checkCollectionLegs: the order's leg, flag, dates and windows agree", async (t) => {
   await t.step("controls: a placed rental order, and a dropped sales-only order, are accepted", () => {
     const placed = OrderSchema.safeParse(orderWith("reserved", [rentalLine(PARENT)]));

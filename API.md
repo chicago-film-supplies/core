@@ -11308,6 +11308,32 @@ movements, never set by hand.
 const UNIT_USER_STATUSES: "retired"[];
 ```
 
+### `UNPLACED_STATUSES`
+
+The statuses in which a document may leave a leg unplaced — every one in which
+it sends goods NOWHERE. The placement rule exists so a document moving FORWARD
+past draft names where its goods go; these three are not moving forward.
+
+- `draft` — still being built; the operator has not picked an address yet.
+- `canceled` (order, and so fulfillment, whose status IS its order's) — goes
+  nowhere, and requiring an address to cancel would make the operator invent
+  one (api-cloudrun Order #1062). Safe because a reopen CHANGES the status, so
+  the check re-runs on the target and anything past draft demands the address.
+- `void` (invoice) — terminal: `INVOICE_STATUS_CONTRACTS.void.operator_moves`
+  is empty and `deriveInvoiceStatus` returns `void` unchanged, so an unplaced
+  void invoice can never come back to life. Without this an invoice whose own
+  legs were unplaced (only possible on a draft) could not be voided at all.
+
+One set serves all three documents because their vocabularies do not overlap:
+an order has no `void`, an invoice no `canceled`.
+
+⚠️ **This is the placement rule only.** `checkCollectionLegs` clause 4 and
+`normalizeCollectionLegs` stay keyed on `draft` — a different rule.
+
+```ts
+const UNPLACED_STATUSES: ReadonlySet<string>;
+```
+
 ### `UidNameRef`
 
 Zod schema for a uid + name reference.
@@ -13859,7 +13885,8 @@ Every endpoint half a document at `status` is missing — the rule
 {@link checkStoredEndpoints} enforces on the stored schemas, as data, so a
 WRITER can refuse the same input with a 400 before it builds a document the
 schema would reject with a 500. One author: the refinement is this function
-plus an `addIssue` per entry. Empty for a draft.
+plus an `addIssue` per entry. Empty for every {@link UNPLACED_STATUSES} member
+— a draft, a canceled order or fulfillment, a void invoice.
 
 🔴 **`items` is what decides a `null` collection leg** (api-cloudrun#1154).
 A document whose items hold no line that comes back has nothing to collect,
@@ -19953,6 +19980,32 @@ publishing the parts publishes a second way to spell one.
 const TotalsCore: typeLiteral;
 ```
 
+### `UNPLACED_STATUSES`
+
+The statuses in which a document may leave a leg unplaced — every one in which
+it sends goods NOWHERE. The placement rule exists so a document moving FORWARD
+past draft names where its goods go; these three are not moving forward.
+
+- `draft` — still being built; the operator has not picked an address yet.
+- `canceled` (order, and so fulfillment, whose status IS its order's) — goes
+  nowhere, and requiring an address to cancel would make the operator invent
+  one (api-cloudrun Order #1062). Safe because a reopen CHANGES the status, so
+  the check re-runs on the target and anything past draft demands the address.
+- `void` (invoice) — terminal: `INVOICE_STATUS_CONTRACTS.void.operator_moves`
+  is empty and `deriveInvoiceStatus` returns `void` unchanged, so an unplaced
+  void invoice can never come back to life. Without this an invoice whose own
+  legs were unplaced (only possible on a draft) could not be voided at all.
+
+One set serves all three documents because their vocabularies do not overlap:
+an order has no `void`, an invoice no `canceled`.
+
+⚠️ **This is the placement rule only.** `checkCollectionLegs` clause 4 and
+`normalizeCollectionLegs` stay keyed on `draft` — a different rule.
+
+```ts
+const UNPLACED_STATUSES: ReadonlySet<string>;
+```
+
 ### `UnplacedEndpoint`
 
 One missing half of one endpoint, as {@link unplacedEndpoints} reports it.
@@ -20105,8 +20158,11 @@ every one of 1,035 order-linked invoices with an `order`).
 
 ### `checkStoredEndpoints(doc: typeLiteral, ctx: z.RefinementCtx): void`
 
-A STORED order, fulfillment or invoice that has left `draft` names a real place
-on every leg: each endpoint carries a `uid` and an `address`.
+A STORED order, fulfillment or invoice that has moved FORWARD past `draft`
+names a real place on every leg: each endpoint carries a `uid` and an
+`address`. A canceled order or fulfillment and a void invoice are exempt with
+the draft — they send goods nowhere ({@link UNPLACED_STATUSES} says why each
+is safe: a canceled order re-asks at reopen, a void invoice is terminal).
 
 🔴 **Stored, not input, and not on a draft** (owner, 2026-09-22 —
 fulfillment-surface Phase 4 item 2). `DocDestinationEndpoint.address` stays
@@ -20270,7 +20326,8 @@ Every endpoint half a document at `status` is missing — the rule
 {@link checkStoredEndpoints} enforces on the stored schemas, as data, so a
 WRITER can refuse the same input with a 400 before it builds a document the
 schema would reject with a 500. One author: the refinement is this function
-plus an `addIssue` per entry. Empty for a draft.
+plus an `addIssue` per entry. Empty for every {@link UNPLACED_STATUSES} member
+— a draft, a canceled order or fulfillment, a void invoice.
 
 🔴 **`items` is what decides a `null` collection leg** (api-cloudrun#1154).
 A document whose items hold no line that comes back has nothing to collect,

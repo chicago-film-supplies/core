@@ -236,6 +236,7 @@ export {
   hasCollectionLine,
   isCollectionLineType,
   unplacedEndpoints,
+  UNPLACED_STATUSES,
   type UnplacedEndpoint,
 } from "./order.ts";
 

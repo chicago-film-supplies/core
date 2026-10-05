@@ -3146,10 +3146,11 @@ export interface DestinationGroup {
    * The section's delivery ADDRESS — a `destinations/{uid}` document id, read
    * off its pair (or off `destinations[0]` for a section with no pair).
    *
-   * ⚠️ **`null` only on a DRAFT.** Past draft every stored endpoint names a
-   * place (`checkStoredEndpoints`), so a writer that runs only past draft may
-   * treat `null` as a violated invariant and refuse — never substitute a
-   * placeholder, which mints an id naming no document.
+   * ⚠️ **`null` only on a DRAFT, a canceled order or a void invoice**
+   * (`UNPLACED_STATUSES`). On every other status each stored endpoint names a
+   * place (`checkStoredEndpoints`), so a writer that runs only on a live
+   * document may treat `null` as a violated invariant and refuse — never
+   * substitute a placeholder, which mints an id naming no document.
    */
   uid_delivery: string | null;
   /** The section's collection address. Same nullability as {@link DestinationGroup.uid_delivery}. */

@@ -210,7 +210,7 @@ Deno.test("InvoiceSchema rejects invalid status", () => {
   assertEquals(InvoiceSchema.safeParse(doc).success, false);
 });
 
-Deno.test("checkStoredEndpoints — a draft may leave a leg unplaced; nothing past draft may", () => {
+Deno.test("checkStoredEndpoints — a draft or void invoice may leave a leg unplaced; nothing live may", () => {
   const unplaced = { uid: null, address: null, instructions: null, contact: null };
   const withLeg = (status: InvoiceStatusType, collection: typeof unplaced | typeof placedEndpoint) => ({
     ...validInvoice,
@@ -218,7 +218,10 @@ Deno.test("checkStoredEndpoints — a draft may leave a leg unplaced; nothing pa
     destinations: [{ ...validDestination, collection }],
   });
   assertEquals(InvoiceSchema.safeParse(withLeg("draft", unplaced)).success, true, "a draft is still being built");
-  for (const status of ["issued", "part_paid", "paid", "void"] as const) {
+  // A void invoice is terminal and bills nothing — an unplaced draft must be voidable.
+  const voided = InvoiceSchema.safeParse(withLeg("void", unplaced));
+  assertEquals(voided.success, true, JSON.stringify(voided.error?.issues));
+  for (const status of ["issued", "part_paid", "paid"] as const) {
     const result = InvoiceSchema.safeParse(withLeg(status, unplaced));
     assertEquals(result.success, false, `${status} with an unplaced leg`);
     if (!result.success) {
@@ -234,7 +237,14 @@ Deno.test("checkStoredEndpoints — a draft may leave a leg unplaced; nothing pa
 Deno.test("unplacedEndpoints — the refinement as data, so a writer can 400 on it", () => {
   const unplaced = { uid: null, address: null };
   const rental = [{ type: "rental" }];
-  assertEquals(unplacedEndpoints("draft", [{ delivery: unplaced, collection: unplaced }], rental), []);
+  for (const status of ["draft", "canceled", "void"]) {
+    assertEquals(unplacedEndpoints(status, [{ delivery: unplaced, collection: unplaced }], rental), [], status);
+    // …and a null collection leg beside a rental, which past draft is an `endpoint` gap.
+    assertEquals(unplacedEndpoints(status, [{ delivery: unplaced, collection: null }], rental), [], `${status} null leg`);
+  }
+  for (const status of ["quoted", "reserved", "issued", "paid"]) {
+    assertEquals(unplacedEndpoints(status, [{ delivery: unplaced, collection: unplaced }], rental).length, 4, status);
+  }
   assertEquals(unplacedEndpoints("reserved", [{ delivery: placedEndpoint, collection: placedEndpoint }], rental), []);
   assertEquals(
     unplacedEndpoints("reserved", [{ delivery: placedEndpoint, collection: { uid: "x", address: null } }], rental),
