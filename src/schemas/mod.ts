@@ -647,6 +647,7 @@ export {
 
 export {
   DepartmentTypeSchema,
+  foldDepartmentTypeName,
   CreateDepartmentTypeInput,
   UpdateDepartmentTypeInput,
   type DepartmentType,

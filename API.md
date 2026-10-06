@@ -3601,6 +3601,7 @@ A department-type document in Firestore.
 interface DepartmentType {
   uid: string;
   name: string;
+  name_key?: string;
   active: boolean;
   version: number;
   created_by: ActorRefType;
@@ -13967,6 +13968,15 @@ Display defaults for every Firestore collection, derived from schema meta.
 ```ts
 const firestoreDisplayDefaults: Record<string, FirestoreDisplayDefaults>;
 ```
+
+### `foldDepartmentTypeName(name: string): string`
+
+The ONE fold of a department-type name: trimmed and lower-cased, which is how
+a duplicate actually presents (`Transportation` beside `transportation `).
+Stored as `DepartmentType.name_key`, and the uniqueness guard compares on it.
+
+⚠️ `toLowerCase`, not `toLocaleLowerCase` — the result is a stored key, so it
+must not depend on the runtime's locale (Turkish `I` folds differently).
 
 ### `getDisplayTransactionTypes(increaseOnly?: boolean): MovementTypeType[]`
 

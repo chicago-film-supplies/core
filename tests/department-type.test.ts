@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import {
   CreateDepartmentTypeInput,
   DepartmentTypeSchema,
+  foldDepartmentTypeName,
   UpdateDepartmentTypeInput,
 } from "../src/schemas/department-type.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
@@ -71,4 +72,19 @@ Deno.test("UpdateDepartmentTypeInput is how a type is DEACTIVATED — there is n
   assertEquals(UpdateDepartmentTypeInput.safeParse({ uid: "testdept100000000000", active: false, version: 3 }).success, true);
   assertEquals(UpdateDepartmentTypeInput.safeParse({ uid: "testdept100000000000", name: "Transportation", version: 3 }).success, true);
   assertEquals(UpdateDepartmentTypeInput.safeParse({ uid: "testdept100000000000" }).success, false, "`version` is required — optimistic concurrency, as everywhere else");
+});
+
+Deno.test("foldDepartmentTypeName trims and lower-cases — how a duplicate actually presents", () => {
+  assertEquals(foldDepartmentTypeName("  Transportation "), "transportation");
+  assertEquals(foldDepartmentTypeName("Set Dec"), foldDepartmentTypeName("set dec"));
+});
+
+Deno.test("DepartmentTypeSchema accepts a name_key that is the fold of name", () => {
+  assertEquals(DepartmentTypeSchema.safeParse(validDepartmentType({ name_key: "locations" })).success, true);
+});
+
+Deno.test("DepartmentTypeSchema refuses a name_key that disagrees with name — a stale key is a lock on the wrong entry", () => {
+  const result = DepartmentTypeSchema.safeParse(validDepartmentType({ name: "Office", name_key: "locations" }));
+  assertEquals(result.success, false);
+  assertEquals(result.error?.issues.map((i) => i.path.join(".")), ["name_key"]);
 });

@@ -60,6 +60,26 @@ export interface DepartmentType {
   uid: string;
   name: string;
   /**
+   * {@link foldDepartmentTypeName} of `name` — the key the uniqueness guard
+   * queries by EQUALITY (api-cloudrun#1182).
+   *
+   * 🔴 **It exists to shrink a LOCK, not to make a lookup faster.** The guard
+   * must be a transactional range read (a natural key: "no document with this
+   * key exists" is true only if the read set was complete), and it used to read
+   * the WHOLE collection because `name` alone cannot express a case-folded
+   * match. Every create and rename therefore locked every type's index entries,
+   * so two creates of DIFFERENT names blocked each other to the 15s deadline —
+   * measured as the suite's worst flake, 41 rung-2 retries in a week. An
+   * equality filter on this key locks one key's entries.
+   *
+   * ⚠️ **Optional ONLY through the backfill window** — under `z.strictObject`
+   * the deploy that writes it must precede the backfill that stores it, and the
+   * guard switches to it only after every document carries it. Required next.
+   * The schema refuses a stored key that disagrees with `name`, so it cannot
+   * drift from the field it derives from.
+   */
+  name_key?: string;
+  /**
    * Whether this department appears in the picker. Soft delete — a deactivated
    * type stays resolvable for the nodes already using it.
    *
@@ -99,15 +119,38 @@ export interface DepartmentType {
   updated_at: FirestoreTimestampType;
 }
 
+/**
+ * The ONE fold of a department-type name: trimmed and lower-cased, which is how
+ * a duplicate actually presents (`Transportation` beside `transportation `).
+ * Stored as `DepartmentType.name_key`, and the uniqueness guard compares on it.
+ *
+ * ⚠️ `toLowerCase`, not `toLocaleLowerCase` — the result is a stored key, so it
+ * must not depend on the runtime's locale (Turkish `I` folds differently).
+ */
+export function foldDepartmentTypeName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
 /** Zod schema for DepartmentType. */
 export const DepartmentTypeSchema: z.ZodType<DepartmentType> = z.strictObject({
   uid: FirestoreId,
   name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
+  // Derived from `name` (see the interface). Optional through the backfill
+  // window only; the refine below refuses one that disagrees with `name`.
+  name_key: z.string().max(100).optional(),
   active: z.boolean().meta({ column: true, label: "Active" }),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
+}).superRefine((doc, ctx) => {
+  if (doc.name_key !== undefined && doc.name_key !== foldDepartmentTypeName(doc.name)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["name_key"],
+      message: `name_key must be foldDepartmentTypeName(name) — "${foldDepartmentTypeName(doc.name)}"`,
+    });
+  }
 }).meta({
   title: "Department Type",
   collection: "department-types",

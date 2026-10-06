@@ -1581,7 +1581,7 @@
         {
           "kind": "interface",
           "name": "DepartmentType",
-          "declaration": "interface DepartmentType {\n  uid: string;\n  name: string;\n  active: boolean;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface DepartmentType {\n  uid: string;\n  name: string;\n  name_key?: string;\n  active: boolean;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A department-type document in Firestore."
         },
         {
@@ -6212,6 +6212,14 @@
           "name": "firestoreDisplayDefaults",
           "declaration": "const firestoreDisplayDefaults: Record<string, FirestoreDisplayDefaults>;",
           "doc": "Display defaults for every Firestore collection, derived from schema meta."
+        },
+        {
+          "kind": "function",
+          "name": "foldDepartmentTypeName",
+          "signature": "foldDepartmentTypeName(name: string): string",
+          "doc": "The ONE fold of a department-type name: trimmed and lower-cased, which is how\na duplicate actually presents (`Transportation` beside `transportation `).\nStored as `DepartmentType.name_key`, and the uniqueness guard compares on it.\n\n⚠️ `toLowerCase`, not `toLocaleLowerCase` — the result is a stored key, so it\nmust not depend on the runtime's locale (Turkish `I` folds differently).",
+          "paramTags": [],
+          "returnsTag": null
         },
         {
           "kind": "function",
