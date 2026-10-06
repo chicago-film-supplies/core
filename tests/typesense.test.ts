@@ -14,6 +14,9 @@ import {
   organizations,
   outOfService,
   products,
+  purchaseBills,
+  purchaseCredits,
+  purchases,
   stores,
   suppliers,
   tags,
@@ -43,6 +46,9 @@ const allConfigs = [
   organizations,
   outOfService,
   products,
+  purchaseBills,
+  purchaseCredits,
+  purchases,
   stores,
   suppliers,
   tags,
@@ -221,6 +227,14 @@ Deno.test("the money marker names exactly the amount fields — pinned, not scat
     "products:components.price.replacement_cents",
     "products:price.base_cents",
     "products:price.replacement_cents",
+    "purchase-bills:totals.amount_credited_cents",
+    "purchase-bills:totals.amount_due_cents",
+    "purchase-bills:totals.amount_paid_cents",
+    "purchase-bills:totals.amount_void_cents",
+    "purchase-bills:totals.total_cents",
+    "purchase-credits:remaining_credit_cents",
+    "purchase-credits:total_cents",
+    "purchases:total_cents",
     "webshop-products:component_of.price.base_cents",
     "webshop-products:component_of.price.replacement_cents",
     "webshop-products:components.price.base_cents",
@@ -311,10 +325,12 @@ Deno.test("every declared money _str mirror has a money-marked source", () => {
 
   assertEquals(
     checked,
-    8,
-    `expected exactly 8 money _str mirrors (orders totals.total_cents; invoices total_cents + ` +
+    16,
+    `expected exactly 16 money _str mirrors (orders totals.total_cents; invoices total_cents + ` +
       `amount_paid_cents + amount_credited_cents + amount_void_cents + amount_due_cents; ` +
-      `credit-notes total_cents + ` +
+      `credit-notes total_cents + remaining_credit_cents; purchases total_cents; ` +
+      `purchase-bills total_cents + amount_paid_cents + amount_credited_cents + ` +
+      `amount_void_cents + amount_due_cents; purchase-credits total_cents + ` +
       `remaining_credit_cents) but walked ${checked}. A LOWER number means a mirror was dropped ` +
       `or renamed out of the _cents convention and is no longer checked; a HIGHER one means a ` +
       `new mirror landed and should be added to this count deliberately. Do not relax this to ` +

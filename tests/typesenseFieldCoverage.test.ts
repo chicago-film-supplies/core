@@ -1195,7 +1195,7 @@ function documentMapKeys(source: string): string[] {
  * documents, and **unreachable from manager's typed search surface**, because
  * every typed consumer there is generic over `keyof TypesenseDocumentMap`.
  *
- * ⚠️ **Assert ALL 22, not the live ones.** `enabled` defaults to on and
+ * ⚠️ **Assert EVERY declared alias, not the live ones.** `enabled` defaults to on and
  * `bookings` is disabled *and* mapped, so this map is about TYPE REACHABILITY,
  * not liveness. Keying it on `enabled` would drop a type the moment someone
  * toggled a flag, which is a config change silently becoming a type change.

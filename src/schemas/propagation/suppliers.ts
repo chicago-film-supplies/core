@@ -18,6 +18,19 @@
  * organization-name cascade (`liveOrgSnapshotScans`) deliberately scopes itself
  * to NOT-YET-SETTLED documents, and every movement is settled by nature.
  *
+ * ⚠️ **Purchases, purchase bills and supplier credits keep the snapshot too —
+ * and for them the "settled history" argument only half applies.** Their
+ * `supplier` is the same point-in-time `{uid, name}` (`schemas/purchase.ts`),
+ * and the writers assert every bill and receipt equals the purchase's copy, so
+ * rewriting one document alone would break that invariant. A CLOSED purchase is
+ * settled history like a movement. An ACTIVE one is the not-yet-settled case
+ * the org-name cascade DOES update, and since api-cloudrun#1220 indexed all
+ * three collections in Typesense, a rename leaves the old name searchable on
+ * open purchases. Today that is accepted: a rename changes nothing already
+ * written. Whether to scope an `update-supplier:name-to-purchases` cascade to
+ * `status: "active"` (and carry its bills and credits with it) is an owner
+ * question filed as its own issue, not a gap in this file.
+ *
  * ⚠️ **If this is ever reversed**, the rule is `update-supplier:name-to-movements`,
  * and it needs its id in `propagation/ids.ts` — `core/tests/propagation.test.ts`
  * asserts set equality in BOTH directions — plus an `enforced_by` ref in

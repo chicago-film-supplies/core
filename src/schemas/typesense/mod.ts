@@ -48,6 +48,9 @@ export type {
   OutOfServiceDocument,
   ProductDocument,
   ProductDocumentComponent,
+  PurchaseBillDocument,
+  PurchaseCreditDocument,
+  PurchaseDocument,
   StoreDocument,
   SupplierDocument,
   TagDocument,
@@ -75,6 +78,9 @@ export { fulfillments } from "./fulfillments.ts";
 export { organizations } from "./organizations.ts";
 export { outOfService } from "./out-of-service.ts";
 export { products } from "./products.ts";
+export { purchases } from "./purchases.ts";
+export { purchaseBills } from "./purchase-bills.ts";
+export { purchaseCredits } from "./purchase-credits.ts";
 export { stores } from "./stores.ts";
 export { suppliers } from "./suppliers.ts";
 export { tags } from "./tags.ts";
@@ -115,6 +121,9 @@ import { fulfillments } from "./fulfillments.ts";
 import { organizations } from "./organizations.ts";
 import { outOfService } from "./out-of-service.ts";
 import { products } from "./products.ts";
+import { purchases } from "./purchases.ts";
+import { purchaseBills } from "./purchase-bills.ts";
+import { purchaseCredits } from "./purchase-credits.ts";
 import { stores } from "./stores.ts";
 import { suppliers } from "./suppliers.ts";
 import { tags } from "./tags.ts";
@@ -140,6 +149,9 @@ const allSchemas: TypesenseCollectionConfig[] = [
   organizations,
   outOfService,
   products,
+  purchases,
+  purchaseBills,
+  purchaseCredits,
   stores,
   suppliers,
   tags,
@@ -167,6 +179,9 @@ export type TypesenseAlias =
   | "organizations"
   | "out-of-service"
   | "products"
+  | "purchases"
+  | "purchase-bills"
+  | "purchase-credits"
   | "stores"
   | "suppliers"
   | "tags"
@@ -237,10 +252,11 @@ export function getSearchAlias(collection: string): string | null {
  * permission) and by the api-cloudrun scoped-key minter (resolve which parent
  * key to derive a user's scoped key from per granted `.search` permission).
  *
- * ⚠️ **Every alias is mapped, `enabled: false` included** — 23 of 23, measured.
- * The docblock this replaces claimed disabled aliases were omitted and named
- * `bookings` as one; `bookings` has been enabled for some time, `threads` is
- * the only disabled config, and it is mapped like the rest. A `Partial` record
+ * ⚠️ **Every alias is mapped, `enabled: false` included.** An earlier
+ * docblock claimed disabled aliases were omitted and named `bookings` as one;
+ * `bookings` has been enabled for some time, `threads` is the only disabled
+ * config, and it is mapped like the rest. (No count here on purpose — count the
+ * keys against `allSchemas` rather than trusting a number in prose.) A `Partial` record
  * that happens to be total is fine; a comment asserting a gap that does not
  * exist is what sends the next reader looking for a fallback path.
  */
@@ -259,6 +275,12 @@ export const SEARCH_PERMISSION_BY_ALIAS: Partial<Record<TypesenseAlias, Permissi
   "organizations": "organizations.search",
   "out-of-service": "outOfService.search",
   "products": "products.search",
+  // All three purchase-family aliases share ONE verb, as their reads already
+  // share `purchases.read` (`schemas/activity.ts`) — a bill or credit is not a
+  // separate permission scope from the purchase it names (api-cloudrun#1220).
+  "purchases": "purchases.search",
+  "purchase-bills": "purchases.search",
+  "purchase-credits": "purchases.search",
   "stores": "stores.search",
   "suppliers": "suppliers.search",
   "tags": "tags.search",

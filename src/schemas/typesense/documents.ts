@@ -977,6 +977,9 @@ export type TypesenseDocument =
   | OrganizationDocument
   | OutOfServiceDocument
   | ProductDocument
+  | PurchaseDocument
+  | PurchaseBillDocument
+  | PurchaseCreditDocument
   | StoreDocument
   | TagDocument
   | TemplateDocument
@@ -1126,6 +1129,89 @@ export interface SupplierDocument {
   updated_at: number;
 }
 
+// ── Purchases ───────────────────────────────────────────────────────
+
+/**
+ * A purchase as indexed in Typesense (api-cloudrun#1220). `reference` is
+ * optional here and `string | null` on the stored document: the translate path
+ * omits a null rather than sending one.
+ */
+export interface PurchaseDocument {
+  id: string;
+  uid: string;
+  number: number;
+  number_str?: string;
+  status: string;
+  supplier: { uid?: string; name: string };
+  store: { uid?: string; name: string };
+  reference?: string;
+  lines?: Array<{ uid_product?: string; name?: string }>;
+  total_cents?: number;
+  total_cents_str?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  date_fs: number;
+  created_at?: number;
+  updated_at?: number;
+}
+
+/** A purchase bill as indexed in Typesense. No `store`, no `status`, no line `name`. */
+export interface PurchaseBillDocument {
+  id: string;
+  uid: string;
+  number: number;
+  number_str?: string;
+  uid_purchase: string;
+  supplier: { uid?: string; name: string };
+  origin: string;
+  xero_document: string;
+  xero_id?: string;
+  reference?: string;
+  lines?: Array<{ uid_product?: string }>;
+  totals?: {
+    total_cents?: number;
+    total_cents_str?: string;
+    amount_paid_cents?: number;
+    amount_paid_cents_str?: string;
+    amount_credited_cents?: number;
+    amount_credited_cents_str?: string;
+    amount_void_cents?: number;
+    amount_void_cents_str?: string;
+    amount_due_cents?: number;
+    amount_due_cents_str?: string;
+  };
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  date_fs: number;
+  created_at?: number;
+  updated_at?: number;
+}
+
+/** A supplier credit as indexed in Typesense. `lines` may be empty on the stored document. */
+export interface PurchaseCreditDocument {
+  id: string;
+  uid: string;
+  number: number;
+  number_str?: string;
+  uid_purchase: string;
+  supplier: { uid?: string; name: string };
+  origin: string;
+  reason: string;
+  status: string;
+  xero_id?: string;
+  reference?: string;
+  lines?: Array<{ uid_product?: string }>;
+  total_cents?: number;
+  total_cents_str?: string;
+  remaining_credit_cents?: number;
+  remaining_credit_cents_str?: string;
+  created_by?: TypesenseActorRef;
+  updated_by?: TypesenseActorRef;
+  date_fs: number;
+  created_at?: number;
+  updated_at?: number;
+}
+
 export interface TypesenseDocumentMap {
   bookings: BookingDocument;
   cards: CardDocument;
@@ -1141,6 +1227,9 @@ export interface TypesenseDocumentMap {
   organizations: OrganizationDocument;
   "out-of-service": OutOfServiceDocument;
   products: ProductDocument;
+  purchases: PurchaseDocument;
+  "purchase-bills": PurchaseBillDocument;
+  "purchase-credits": PurchaseCreditDocument;
   stores: StoreDocument;
   tags: TagDocument;
   suppliers: SupplierDocument;

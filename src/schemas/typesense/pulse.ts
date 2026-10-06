@@ -31,9 +31,9 @@
  *
  * The writer holds a **Firestore collection name**; the manager holds a
  * **Typesense alias**. Those are two names for one thing that agree only
- * because all 23 configs currently set `alias === firestoreCollection`
- * (measured). If one ever diverged, the refresh would stop and nothing would go
- * red — so neither side spells the key itself. The writer mints through
+ * because every config currently sets `alias === firestoreCollection`. If
+ * one ever diverged, the refresh would stop and nothing would go red — so
+ * neither side spells the key itself. The writer mints through
  * {@link pulseDocIdForDocument}, the reader parses through
  * {@link pulseCollectionOf}, and a client holding an alias reaches the key half
  * through {@link pulseCollectionForAlias}.
@@ -88,7 +88,7 @@ const PULSE_SEPARATOR = "~";
  * Keyed on a bare `string`, not `CollectionName`: every caller reaches this
  * with an untrusted id (a pulse doc's own id, an alias off the wire), so
  * narrowing here would only move the cast to the callers. Unique by
- * construction — 23 configs, 23 distinct `firestoreCollection`s, measured.
+ * construction — no two configs share a `firestoreCollection`.
  */
 let configByFirestoreCollection: Map<string, TypesenseCollectionConfig> | null = null;
 

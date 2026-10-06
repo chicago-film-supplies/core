@@ -212,6 +212,10 @@ export const PERMISSIONS = [
   // Xero ledger, so it is its own grant too.
   "purchases.create",
   "purchases.read",
+  // One search verb for all three purchase-family aliases — purchases, bills
+  // and supplier credits (api-cloudrun#1220), mirroring how they share
+  // `purchases.read`.
+  "purchases.search",
   "purchases.update",
   "purchases.receive",
   "purchases.bill",
