@@ -3909,7 +3909,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBill",
-          "declaration": "interface PurchaseBill {\n  uid: string;\n  number: number;\n  uid_purchase: string;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  xero_document: PurchaseBillXeroDocumentType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date: string | null;\n  reference: string | null;\n  lines: PurchaseDocumentLine[];\n  direct_lines: PurchaseDirectLine[];\n  totals: PurchaseBillTotals;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface PurchaseBill {\n  uid: string;\n  number: number;\n  uid_purchase: string;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  xero_document: PurchaseBillXeroDocumentType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date: string | null;\n  due_date_fs?: FirestoreTimestampType | null;\n  reference: string | null;\n  lines: PurchaseDocumentLine[];\n  direct_lines: PurchaseDirectLine[];\n  totals: PurchaseBillTotals;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A supplier bill against one purchase."
         },
         {
@@ -10252,7 +10252,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBill",
-          "declaration": "interface PurchaseBill {\n  uid: string;\n  number: number;\n  uid_purchase: string;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  xero_document: PurchaseBillXeroDocumentType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date: string | null;\n  reference: string | null;\n  lines: PurchaseDocumentLine[];\n  direct_lines: PurchaseDirectLine[];\n  totals: PurchaseBillTotals;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface PurchaseBill {\n  uid: string;\n  number: number;\n  uid_purchase: string;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  xero_document: PurchaseBillXeroDocumentType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date: string | null;\n  due_date_fs?: FirestoreTimestampType | null;\n  reference: string | null;\n  lines: PurchaseDocumentLine[];\n  direct_lines: PurchaseDirectLine[];\n  totals: PurchaseBillTotals;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A supplier bill against one purchase."
         },
         {
@@ -11572,7 +11572,7 @@
         {
           "kind": "interface",
           "name": "PurchaseBillDocument",
-          "declaration": "interface PurchaseBillDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  uid_purchase: string;\n  supplier: typeLiteral;\n  origin: string;\n  xero_document: string;\n  xero_id?: string;\n  reference?: string;\n  lines?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  created_at?: number;\n  updated_at?: number;\n}",
+          "declaration": "interface PurchaseBillDocument {\n  id: string;\n  uid: string;\n  number: number;\n  number_str?: string;\n  uid_purchase: string;\n  supplier: typeLiteral;\n  origin: string;\n  xero_document: string;\n  xero_id?: string;\n  reference?: string;\n  lines?: Array<typeLiteral>;\n  totals?: typeLiteral;\n  created_by?: TypesenseActorRef;\n  updated_by?: TypesenseActorRef;\n  date_fs: number;\n  due_date_fs?: number;\n  created_at?: number;\n  updated_at?: number;\n}",
           "doc": "A purchase bill as indexed in Typesense. No `store`, no `status`, no line `name`."
         },
         {
@@ -11941,7 +11941,7 @@
           "kind": "variable",
           "name": "purchaseBills",
           "declaration": "const purchaseBills: TypesenseCollectionConfig;",
-          "doc": "Typesense collection config for purchase bills (api-cloudrun#1220) — the\nsupplier's ACCPAY bill against one purchase.\n\n⚠️ **Not the purchase skeleton.** A bill has no `store` and no `status`, and\nits `lines` are `PurchaseDocumentLine` — `uid_product`, `quantity`,\n`amount_cents`, no `name` — so declaring either here would fail field\nresolution. `direct_lines` (freight and the like) are not declared.\n\n`uid_purchase` is indexed but not faceted: a purchase's own bills are a\nFirestore `where`, not a search, and this field exists so a search can\nstill be narrowed by it.\n\n📝 **No due-date sort.** `PurchaseBill` stores `due_date` as a bare\nChicago-offset string with no `due_date_fs` beside it (contrast\n`typesense/invoices.ts`), and sorting the string is the lexicographic-date\ntrap. A \"what's due\" list needs the `_fs` twin added to storage first.\n\n`supplier.name` stays `facet: false` — see `typesense/suppliers.ts`.\n`xero_id` and `reference` are `optional: true` because their Zod leaves are\n`.nullable()`."
+          "doc": "Typesense collection config for purchase bills (api-cloudrun#1220) — the\nsupplier's ACCPAY bill against one purchase.\n\n⚠️ **Not the purchase skeleton.** A bill has no `store` and no `status`, and\nits `lines` are `PurchaseDocumentLine` — `uid_product`, `quantity`,\n`amount_cents`, no `name` — so declaring either here would fail field\nresolution. `direct_lines` (freight and the like) are not declared.\n\n`uid_purchase` is indexed but not faceted: a purchase's own bills are a\nFirestore `where`, not a search, and this field exists so a search can\nstill be narrowed by it.\n\n`supplier.name` stays `facet: false` — see `typesense/suppliers.ts`.\n`xero_id` and `reference` are `optional: true` because their Zod leaves are\n`.nullable()`."
         },
         {
           "kind": "variable",

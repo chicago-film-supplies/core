@@ -362,6 +362,17 @@ Deno.test("PurchaseBillSchema: a bank transaction is linked, never pushed, and d
   assertEquals(issuePaths(PurchaseBillSchema, bill({ ...spend, due_date: "2026-10-31T00:00:00.000-05:00" })), ["due_date"]);
 });
 
+Deno.test("PurchaseBillSchema: due_date_fs is a mirror — absent until backfilled, never beside a null due_date", () => {
+  // Control: the base bill (a due date, no mirror yet) parses, so the gap between
+  // deploy and backfill stays readable.
+  assertEquals(issuePaths(PurchaseBillSchema, bill()), []);
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ due_date_fs: mockTimestamp })), []);
+  // A bill with no due date: absent and null are both fine, a timestamp is not.
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ due_date: null })), []);
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ due_date: null, due_date_fs: null })), []);
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ due_date: null, due_date_fs: mockTimestamp })), ["due_date_fs"]);
+});
+
 Deno.test("PurchaseBillSchema: one line per product, and at least one", () => {
   assertEquals(issuePaths(PurchaseBillSchema, bill({ lines: [billLine, billLine], origin: "linked", xero_id: XERO_ID })), [
     "lines.1.uid_product",

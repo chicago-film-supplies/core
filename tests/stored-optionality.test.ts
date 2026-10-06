@@ -89,6 +89,10 @@ type Reason =
   | "structurally-absent";
 
 const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
+  // ── mid-expand — api-cloudrun#1223. Absent = a bill written before the backfill,
+  //    null = a bill with no due date, a value = the mirror. Tighten to bare
+  //    `.nullable()` once the dev and prod backfills have run.
+  ["purchase-bills.due_date_fs", "mid-expand"],
   // ── pending-census — measurable with `orderBy`, awaiting the both-environment
   //    census before any of them is tightened. The directly actionable set.
   ["bookings.destinations.collection.address.address_coordinates", "pending-census"],

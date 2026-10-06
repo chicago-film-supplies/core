@@ -1183,6 +1183,7 @@ export interface PurchaseBillDocument {
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;
   date_fs: number;
+  due_date_fs?: number;
   created_at?: number;
   updated_at?: number;
 }

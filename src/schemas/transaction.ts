@@ -850,7 +850,7 @@ export function hasCosts(type: MovementTypeType): boolean {
  * transaction on a product.
  */
 export function getDisplayTransactionTypes(increaseOnly?: boolean): MovementTypeType[] {
-  if (increaseOnly) return ["purchase", "make", "find"];
+  if (increaseOnly) return ["make", "find"];
   return MANUAL_MOVEMENT_TYPES.filter((t) => t !== "opening_balance");
 }
 
@@ -1772,9 +1772,16 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
  * Types an operator may key directly. The booking-scoped fulfillment events are
  * excluded — the picker writes those — as are `transfer` (its own UI) and
  * `sale_return` (raised from the sale it reverses, so it can find the basis).
+ *
+ * ⚠️ **`purchase` is NOT a member (api-cloudrun#1210).** Stock bought from a
+ * supplier is received against a `Purchase` document, whose receipt movements
+ * carry the `purchases` source and are billed through a `PurchaseBill`. A keyed
+ * `purchase` movement was the old path: it posted its own movement-level Xero
+ * bill, with no purchase to receive against. This is an INPUT refusal only —
+ * stored `purchase` movements still parse (`MovementTypeEnum` is unchanged), and
+ * `CreateProductInput.transaction` still accepts a `purchase` opening balance.
  */
 const MANUAL_MOVEMENT_TYPES = [
-  "purchase",
   "find",
   "make",
   "opening_balance",
@@ -1879,8 +1886,10 @@ export interface CreateTransactionInputType {
    */
   units?: MovementUnitInputType[];
   /**
-   * Who the stock was bought from, on a `purchase`. `null`/absent everywhere
-   * else, and on a `purchase` until an operator picks one.
+   * Who the stock was bought from. Only a `purchase` names one, and
+   * `CreateTransactionInput` no longer accepts that type (a purchase is received
+   * against a `Purchase` document), so this is `null`/absent on every keyed
+   * movement; the writer refuses anything else.
    *
    * 🔴 **The uid ONLY — the caller does NOT supply the name.** `Movement.supplier`
    * is a `{uid, name}` snapshot, and a client that asserted the name could store
@@ -1959,38 +1968,6 @@ export const CreateTransactionInput: z.ZodType<CreateTransactionInputType> = z.o
   {
     message: "quantity must equal the sum of per-location allocation quantities",
     path: ["quantity"],
-  },
-).refine(
-  // 🔴 **A `purchase` MUST name a supplier.** Its offset is real Accounts
-  // Payable and the document total IS the payable, so the bill has to be billed
-  // to somebody — and the only other candidate is the "Inventory Adjustments"
-  // placeholder, which is precisely the defect this whole channel exists to
-  // retire (api-cloudrun#727 put $106 of phantom AP against that contact).
-  //
-  // ⚠️ **This replaces a SKIP with a rejection, and that is the point.** The
-  // push already refused to post a supplier-less purchase — quietly, at info
-  // level, hours later, in a log nobody reads. Rejecting at the door turns "the
-  // operator forgot" into a 400 naming the field, at the moment they can still
-  // fix it. Prod movement #1161 is the worked example: a real $2.00 purchase
-  // recorded 2026-08-31 that silently posted nothing.
-  //
-  // ⚠️ The push's skip branch STAYS as a defensive fallback and must NOT become
-  // a terminal: 76 prod purchases predate this rule and can never acquire a
-  // supplier, and Phase 4 deliberately plans to make historical movements
-  // visible to the bill sweep. A terminal there would turn that backfill into
-  // 76 alerts.
-  //
-  // ⭐ **Consequence for Phase 4's history import**: it must resolve a supplier
-  // per purchase rather than importing them bare. That is not extra work — the
-  // Phase 0 report already derives the vendor set (62 contacts evidenced by a
-  // 1400/6500 line), which is exactly what this now obliges it to use.
-  (t) => t.type !== "purchase" || (t.supplier != null && t.supplier.uid.length > 0),
-  {
-    message: "a purchase must name the supplier it was bought from",
-    // Pathed at `supplier` so the manager renders the error ON the picker
-    // rather than as a form-level message the operator has to map back to a
-    // field themselves.
-    path: ["supplier"],
   },
 ) as z.ZodType<CreateTransactionInputType>;
 

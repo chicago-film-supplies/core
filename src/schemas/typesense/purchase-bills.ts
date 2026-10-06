@@ -13,11 +13,6 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * Firestore `where`, not a search, and this field exists so a search can
  * still be narrowed by it.
  *
- * 📝 **No due-date sort.** `PurchaseBill` stores `due_date` as a bare
- * Chicago-offset string with no `due_date_fs` beside it (contrast
- * `typesense/invoices.ts`), and sorting the string is the lexicographic-date
- * trap. A "what's due" list needs the `_fs` twin added to storage first.
- *
  * `supplier.name` stays `facet: false` — see `typesense/suppliers.ts`.
  * `xero_id` and `reference` are `optional: true` because their Zod leaves are
  * `.nullable()`.
@@ -63,6 +58,7 @@ export const purchaseBills: TypesenseCollectionConfig = {
       { name: "updated_by.uid", type: "string", facet: true, optional: true },
       { name: "updated_by.name", type: "string", sort: true, stem: true, facet: true, optional: true },
       { name: "date_fs", type: "int64", sort: true, index: true, facet: false },
+      { name: "due_date_fs", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "created_at", type: "int64", sort: true, index: true, facet: false, optional: true },
       { name: "updated_at", type: "int64", sort: true, index: true, facet: false, optional: true },
     ],
@@ -74,6 +70,7 @@ export const purchaseBills: TypesenseCollectionConfig = {
     columns: [
       "number",
       "date_fs",
+      "due_date_fs",
       "supplier.name",
       "reference",
       "totals.total_cents",

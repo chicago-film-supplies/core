@@ -199,6 +199,13 @@ export interface PurchaseBill {
    * A pushed bill always states one: `CreatePurchaseBillInput` requires it.
    */
   due_date: string | null;
+  /**
+   * The server's queryable mirror of `due_date`, so a "what's due" list can sort
+   * and range-filter it (api-cloudrun#1223). Absent or `null` when `due_date` is
+   * `null`. Optional only until the dev/prod backfill lands: a bill written
+   * before it carries no mirror, and a required key would make those unreadable.
+   */
+  due_date_fs?: FirestoreTimestampType | null;
   /** The supplier's own invoice number. */
   reference: string | null;
   lines: PurchaseDocumentLine[];
@@ -229,6 +236,11 @@ function checkPurchaseBill(b: PurchaseBill, ctx: z.RefinementCtx): void {
       ctx.addIssue({ code: "custom", path: ["due_date"], message: "a bill born paid is due on nothing; due_date must be null" });
     }
   }
+  // Only one direction is asserted: a bill with no due date can carry no mirror.
+  // The converse (a due date with no mirror) stays legal until the backfill runs.
+  if (b.due_date === null && b.due_date_fs != null) {
+    ctx.addIssue({ code: "custom", path: ["due_date_fs"], message: "due_date_fs must be absent or null when due_date is null" });
+  }
   const t = b.totals;
   if (t.amount_paid_cents + t.amount_credited_cents + t.amount_void_cents + t.amount_due_cents !== t.total_cents) {
     ctx.addIssue({
@@ -250,7 +262,8 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
   xero_id: z.uuid().nullable(),
   date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
   date_fs: FirestoreTimestamp,
-  due_date: chicagoStartOfDay().nullable().meta({ column: true, label: "Due Date" }),
+  due_date: chicagoStartOfDay().nullable().meta({ column: true, label: "Due Date", serverSortVia: "due_date_fs" }),
+  due_date_fs: FirestoreTimestamp.nullable().optional(),
   reference: z.string().max(255).nullable().meta({ column: true, label: "Reference" }),
   // `.min(1)`: a bill bills at least one purchase line — that is what makes it
   // this purchase's. A freight-only bill from a carrier is an ordinary Xero bill.

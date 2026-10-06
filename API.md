@@ -9059,6 +9059,7 @@ interface PurchaseBill {
   date: string;
   date_fs: FirestoreTimestampType;
   due_date: string | null;
+  due_date_fs?: FirestoreTimestampType | null;
   reference: string | null;
   lines: PurchaseDocumentLine[];
   direct_lines: PurchaseDirectLine[];
@@ -22738,6 +22739,7 @@ interface PurchaseBill {
   date: string;
   date_fs: FirestoreTimestampType;
   due_date: string | null;
+  due_date_fs?: FirestoreTimestampType | null;
   reference: string | null;
   lines: PurchaseDocumentLine[];
   direct_lines: PurchaseDirectLine[];
@@ -25809,6 +25811,7 @@ interface PurchaseBillDocument {
   created_by?: TypesenseActorRef;
   updated_by?: TypesenseActorRef;
   date_fs: number;
+  due_date_fs?: number;
   created_at?: number;
   updated_at?: number;
 }
@@ -26594,11 +26597,6 @@ resolution. `direct_lines` (freight and the like) are not declared.
 `uid_purchase` is indexed but not faceted: a purchase's own bills are a
 Firestore `where`, not a search, and this field exists so a search can
 still be narrowed by it.
-
-📝 **No due-date sort.** `PurchaseBill` stores `due_date` as a bare
-Chicago-offset string with no `due_date_fs` beside it (contrast
-`typesense/invoices.ts`), and sorting the string is the lexicographic-date
-trap. A "what's due" list needs the `_fs` twin added to storage first.
 
 `supplier.name` stays `facet: false` — see `typesense/suppliers.ts`.
 `xero_id` and `reference` are `optional: true` because their Zod leaves are

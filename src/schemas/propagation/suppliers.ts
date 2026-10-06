@@ -19,17 +19,23 @@
  * to NOT-YET-SETTLED documents, and every movement is settled by nature.
  *
  * ⚠️ **Purchases, purchase bills and supplier credits keep the snapshot too —
- * and for them the "settled history" argument only half applies.** Their
- * `supplier` is the same point-in-time `{uid, name}` (`schemas/purchase.ts`),
- * and the writers assert every bill and receipt equals the purchase's copy, so
- * rewriting one document alone would break that invariant. A CLOSED purchase is
- * settled history like a movement. An ACTIVE one is the not-yet-settled case
- * the org-name cascade DOES update, and since api-cloudrun#1220 indexed all
- * three collections in Typesense, a rename leaves the old name searchable on
- * open purchases. Today that is accepted: a rename changes nothing already
- * written. Whether to scope an `update-supplier:name-to-purchases` cascade to
- * `status: "active"` (and carry its bills and credits with it) is an owner
- * question filed as its own issue, not a gap in this file.
+ * DECIDED by the owner, 2026-10-06 (api-cloudrun#1224): NO cascade.** Their
+ * `supplier` is the same point-in-time `{uid, name}` (`schemas/purchase.ts`).
+ * Three reasons, each sufficient on its own:
+ *
+ * 1. **The Xero contact is not renamed either.** `updateSupplier` deliberately
+ *    leaves it alone, so a cascaded bill or credit would disagree with the Xero
+ *    document it was pushed as.
+ * 2. **It would loosen two equality invariants** — receipt↔purchase and
+ *    bill/credit↔purchase, which the writers assert on the whole `{uid, name}` —
+ *    to compare the uid only.
+ * 3. **It would only half-fix search.** Closed purchases keep the old name
+ *    regardless, so a rename would leave the index split by status.
+ *
+ * The real need — "find this supplier's purchases after a rename" — is met by
+ * filtering on `supplier.uid`, which all three Typesense aliases index. A name
+ * search for the OLD name finding an open purchase is therefore expected, not a
+ * gap.
  *
  * ⚠️ **If this is ever reversed**, the rule is `update-supplier:name-to-movements`,
  * and it needs its id in `propagation/ids.ts` — `core/tests/propagation.test.ts`

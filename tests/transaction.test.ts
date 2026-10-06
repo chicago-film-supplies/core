@@ -750,7 +750,7 @@ Deno.test("getDisplayTransactionTypes hides booking-scoped and transfer types", 
   ) {
     assertEquals(shown.includes(hidden as MovementTypeType), false, `${hidden} should be hidden`);
   }
-  assertEquals(shown.includes("purchase"), true);
+  assertEquals(shown.includes("purchase"), false, "a purchase is received against a Purchase document");
   assertEquals(shown.includes("sale"), true);
 });
 
@@ -776,13 +776,12 @@ Deno.test("getDisplayTransactionTypes(true) offers only stock-adding types", () 
  */
 // ── input schemas ───────────────────────────────────────────────────
 
-// ⚠️ Carries a `supplier` because its type is `purchase`, and a purchase
-// without one is now REJECTED. Every test below spreads this, so leaving it out
-// would turn each of them into "fails for SOME reason" — the exact shape that
-// lets a constraint be deleted with the suite still green.
+// A keyed `find`: `purchase` is no longer operator-keyable (api-cloudrun#1210).
+// Every test below spreads this, so each negative case must drop or change
+// exactly one field of it, or it becomes "fails for SOME reason".
 const validCreateInput = {
   uid_product: PRODUCT,
-  type: "purchase",
+  type: "find",
   quantity: 10,
   total_cost_cents: 250000,
   date: "2026-03-01T00:00:00Z",
@@ -826,40 +825,21 @@ Deno.test("opening_balance is accepted by the input but deliberately not display
 });
 
 
-Deno.test("CreateTransactionInput REJECTS a purchase with no supplier", () => {
-  // A purchase's offset is real Accounts Payable and the document total IS the
-  // payable, so the bill must name somebody. The only other candidate is the
-  // adjustment placeholder, which is the defect the movement-bill channel exists
-  // to retire. Prod #1161 is the worked example: a real $2.00 purchase that
-  // silently posted nothing because it named no supplier.
-  const { supplier: _dropped, ...noSupplier } = validCreateInput;
-  const parsed = CreateTransactionInput.safeParse(noSupplier);
-  assertEquals(parsed.success, false);
-  // Pathed at the FIELD, so the manager renders it on the picker rather than as
-  // a form-level message the operator has to map back themselves.
-  assertEquals(parsed.error?.issues.some((i) => i.path.join(".") === "supplier"), true);
-
-  // An explicit null is the same answer as absent — the manager's "clear
-  // supplier" button sets null, and it must not be a way past the rule.
-  assertEquals(
-    CreateTransactionInput.safeParse({ ...validCreateInput, supplier: null }).success,
-    false,
-  );
+Deno.test("CreateTransactionInput REFUSES a purchase, with or without a supplier", () => {
+  // A purchase is received against a Purchase document (api-cloudrun#1210); the
+  // keyed movement was the old path and posted its own movement-level Xero bill.
+  for (const supplier of [{ uid: SUPPLIER }, null, undefined]) {
+    const parsed = CreateTransactionInput.safeParse({ ...validCreateInput, type: "purchase", supplier });
+    assertEquals(parsed.success, false);
+    assertEquals(parsed.error?.issues.some((i) => i.path.join(".") === "type"), true);
+  }
+  // Control: the same payload as a `find` parses, so the refusal is the TYPE.
+  assertEquals(CreateTransactionInput.safeParse({ ...validCreateInput, type: "find" }).success, true);
 });
 
-Deno.test("...and a NON-purchase with no supplier is still accepted — the fail-closed companion", () => {
-  // Without this the refine above passes just as well when written as "a
-  // supplier is always required", which would reject every `find`, `write_off`
-  // and `adjustment_*` the picker offers. It is the arm that says the rule is
-  // about PURCHASES rather than about the field being mandatory.
-  const { supplier: _dropped, ...noSupplier } = validCreateInput;
-  for (const type of ["find", "make", "adjustment_increase", "write_off"]) {
-    assertEquals(
-      CreateTransactionInput.safeParse({ ...noSupplier, type }).success,
-      true,
-      `${type} carries no payable, so it needs no supplier`,
-    );
-  }
+Deno.test("getDisplayTransactionTypes never offers a purchase", () => {
+  assertEquals(getDisplayTransactionTypes().includes("purchase"), false);
+  assertEquals(getDisplayTransactionTypes(true).includes("purchase"), false);
 });
 
 Deno.test("CreateTransactionInput accepts an event with no allocations (server allocates)", () => {
