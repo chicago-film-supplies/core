@@ -7,6 +7,7 @@ import { FirestoreId, ThreadId } from "./_uid.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
 import { MovementAllocationInput, type MovementAllocationInputType } from "./transaction.ts";
+import { CreateProductPurchaseInput, type CreateProductPurchaseInputType } from "./purchase.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -802,30 +803,24 @@ export interface CreateProductInputType {
     available: boolean;
     description?: string | null;
   };
+  /**
+   * The opening-balance movement: stock the shop already HAS. `purchase` is not
+   * a member — stock bought from a supplier is a {@link CreateProductInputType.purchase}.
+   */
   transaction?: {
-    type: "purchase" | "make" | "find";
+    type: "make" | "find";
     quantity: number;
     total_cost_cents: number;
     date: string;
     reference: string;
     uuid_session: string;
     allocations: MovementAllocationInputType[];
-    /**
-     * Who the opening stock was bought from. REQUIRED key: a `{ uid }` on a
-     * `purchase`, `null` on `make`/`find`.
-     *
-     * 🔴 **Required, not optional, on purpose.** An opening `purchase` posts a
-     * bill to Accounts Payable, and `MovementSchema` refuses a stored purchase
-     * whose `supplier` is `null` — so before this key existed EVERY product
-     * created with an opening purchase 400'd at `validateBeforeWrite`. Making
-     * the caller state it (even as `null`) means a client that forgets the key
-     * fails at the door, naming the field, instead of deep in the transaction.
-     *
-     * The uid only; the server resolves the name — see
-     * `CreateTransactionInputType.supplier`.
-     */
-    supplier: { uid: string } | null;
   };
+  /**
+   * An OPEN purchase created with the product, optional. See
+   * {@link CreateProductPurchaseInputType}.
+   */
+  purchase?: CreateProductPurchaseInputType;
 }
 
 /** Input schema for creating a product. */
@@ -894,16 +889,18 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   // (`{uuid_session}|{type}|{subject}`), which is what makes a retried create
   // idempotent rather than appending a second event.
   transaction: z.object({
-    type: z.enum(["purchase", "make", "find"]),
+    type: z.enum(["make", "find"]),
     quantity: z.number().int().nonnegative(),
     total_cost_cents: z.int(),
     date: chicagoInstant(),
     reference: z.string(),
     uuid_session: z.uuid(),
     allocations: z.array(MovementAllocationInput).min(1),
-    // The uid alone; the writer resolves the name. See the interface docblock.
-    supplier: z.object({ uid: FirestoreId }).nullable(),
   }).optional(),
+  // `seed: false`: the type-derived zero (`supplier: { uid: "" }`, `quantity: 0`) is
+  // unparseable, and the only legal "no purchase" is absence — so a form seeded
+  // from `getInitialValues` must not carry the key at all (cf. `path_order_item`).
+  purchase: CreateProductPurchaseInput.optional().meta({ seed: false }),
 }).refine(
   (p) => p.type !== "rental" || p.stock_method === "none" || p.price.replacement_cents != null,
   {
@@ -924,24 +921,8 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     message: "transaction.quantity must equal the sum of per-location allocation quantities",
     path: ["transaction", "quantity"],
   },
-).refine(
-  // Same rule as `CreateTransactionInput`: a purchase's offset is real Accounts
-  // Payable, so it has to be billed to somebody. Pathed at `supplier` so the
-  // manager renders the error on the picker.
-  (p) => !p.transaction || p.transaction.type !== "purchase" || p.transaction.supplier != null,
-  {
-    message: "a purchase must name the supplier it was bought from",
-    path: ["transaction", "supplier"],
-  },
-).refine(
-  // And only a purchase: a supplier on a `make`/`find` would store a snapshot
-  // that reads as a purchase from someone. `createTransaction` refuses it too.
-  (p) => !p.transaction || p.transaction.type === "purchase" || p.transaction.supplier == null,
-  {
-    message: "only a purchase names a supplier",
-    path: ["transaction", "supplier"],
-  },
 );
+
 /** Input type for updating a product. */
 export interface UpdateProductInputType {
   uid: string;

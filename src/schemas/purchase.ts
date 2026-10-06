@@ -345,6 +345,49 @@ export const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType> = z.object(
 }).superRefine((p, ctx) => uniqueProducts(p.lines, ctx));
 
 /**
+ * The purchase a new product can be created WITH (api-cloudrun#1210) — "I just
+ * ordered 10 of a new item": `CreateProductInput.purchase`.
+ *
+ * It is {@link CreatePurchaseInputType} with the `lines` collapsed to the one
+ * thing a product-create can say: the new product's own quantity and price. The
+ * line's `uid_product` is NOT an input — it is the product being created, so a
+ * client that could name another would be creating a purchase for a product it
+ * is not creating. `createProduct` assembles the one-line purchase and writes it
+ * in the same transaction as the product (`create-product:product-to-purchase`).
+ *
+ * An OPEN purchase only: it moves no stock and posts nothing to Xero. Receiving
+ * and billing stay on the purchase (`POST /purchases/{uid}/receipts`, `/bills`),
+ * so a purchase seeded here is exactly one created at `POST /purchases`.
+ * `uuid_session` derives the purchase id (`purchase:{uuid_session}`) as it does
+ * there, and must differ from the opening movement's own session.
+ */
+export interface CreateProductPurchaseInputType {
+  supplier: { uid: string };
+  store: { uid: string };
+  date: string;
+  reference?: string | null;
+  notes?: string | null;
+  quantity: number;
+  /** The line's total price in cents, not a unit price. */
+  amount_cents: number;
+  expected_date?: string | null;
+  uuid_session: string;
+}
+
+/** Zod schema for {@link CreateProductPurchaseInputType}. */
+export const CreateProductPurchaseInput: z.ZodType<CreateProductPurchaseInputType> = z.object({
+  supplier: z.object({ uid: FirestoreId }),
+  store: z.object({ uid: FirestoreId }),
+  date: chicagoStartOfDay(),
+  reference: z.string().max(200).nullable().optional(),
+  notes: z.string().meta({ pii: "mask" }).nullable().optional(),
+  quantity: z.int().min(1),
+  amount_cents: z.int().min(0),
+  expected_date: chicagoStartOfDay().nullable().optional(),
+  uuid_session: z.uuid(),
+});
+
+/**
  * Input for amending a purchase — a PATCH.
  *
  * `lines`, when present, is the complete next set. The writer refuses to change

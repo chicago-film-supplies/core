@@ -441,6 +441,52 @@ const createProductMovementRule: CollectionRule = {
   ],
 };
 
+/**
+ * The purchase a product is created WITH (`CreateProductInput.purchase`,
+ * api-cloudrun#1210) — "I just ordered ten of a new item", recorded where the
+ * item is created. It is the document `POST /purchases` writes, one line naming
+ * the new product, so nothing about it is special downstream: a receipt, a bill
+ * and a short close all find it as any purchase.
+ *
+ * ⚠️ **An OPEN purchase only.** It moves no stock (receiving is its own step) and
+ * posts nothing to Xero, which is why the opening BALANCE (`make`/`find`, stock
+ * the shop already holds) and this are different inputs: the old opening
+ * `purchase` movement was received and billed in one act, and had no document.
+ */
+const createProductPurchaseRule: CollectionRule = {
+  id: "create-product:product-to-purchase",
+  source: "products",
+  target: "purchases",
+  mode: "co-write",
+  invariant:
+    "A product created with a `purchase` writes ONE open purchase in the same transaction, at the id derived from the client's uuid_session — so a retried create cannot mint a second order. The purchase's single line names the new product, and the purchase carries its own default thread (the cowrite-thread rules). Absent when the create states no purchase.",
+  transaction: "create-product",
+  enforced_by: [
+    {
+      kind: "test",
+      ref:
+        "api-cloudrun/tests/integration/products/products.test.ts::POST - a product created WITH a purchase writes the open purchase, its thread and PO number in one commit",
+      clause:
+        "the purchase exists at the derived id with one line naming the new product, quantity and amount as sent, every bucket at zero and status active; it carries a PO number and a default thread; no movement and no stock were written for it; a caller without purchases.create is refused before anything is written; a missing supplier writes neither the product nor the purchase",
+      gates: true,
+    },
+  ],
+  fields: [
+    { source: ["uid"], target: ["lines", "uid_product"] },
+    { source: ["name"], target: ["lines", "name"] },
+    {
+      source: [],
+      target: ["uid"],
+      transform: "purchaseIdForSession(uuid_session) — derived, so a retry is idempotent",
+    },
+    {
+      source: [],
+      target: ["number"],
+      transform: "allocated in-transaction from counters/purchases, after every other read",
+    },
+  ],
+};
+
 const createProductTransaction: TransactionDefinition = {
   id: "create-product",
   description:
@@ -451,6 +497,9 @@ const createProductTransaction: TransactionDefinition = {
     "create-product:product-to-components",
     "create-product:product-to-ledger",
     "create-product:product-to-opening-movement",
+    "create-product:product-to-purchase",
+    "cowrite-thread:purchases-to-thread",
+    "cowrite-thread:thread-to-purchases",
     // Shared step, declared in `propagation/transactions.ts`: the opening movement folds
     // onto the location documents through the same applier `create-transaction`
     // uses. Measured undeclared in prod 2026-08-17 (`locations`, 11 records).
@@ -977,6 +1026,7 @@ export const products: PropagationModule = {
   rules: [
     ...createProductRules,
     createProductMovementRule,
+    createProductPurchaseRule,
     ...updateProductRules,
     ...updateProductPriceRules,
     ...updateProductOrderRules,
