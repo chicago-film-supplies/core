@@ -593,6 +593,21 @@ export const AllocatePurchaseCreditInput: z.ZodType<AllocatePurchaseCreditInputT
 });
 
 /**
+ * Input for reversing an allocation CFS has not yet pushed to Xero. `version` is
+ * the CREDIT's, as an allocation's is. `uuid_session` keys the reversal.
+ */
+export interface ReversePurchaseCreditAllocationInputType {
+  uuid_session: string;
+  version: number;
+}
+
+/** Zod schema for ReversePurchaseCreditAllocationInputType. */
+export const ReversePurchaseCreditAllocationInput: z.ZodType<ReversePurchaseCreditAllocationInputType> = z.object({
+  uuid_session: z.uuid(),
+  version: z.int().min(0),
+});
+
+/**
  * Input for voiding a supplier credit from CFS. `version` is the credit's.
  * Refused while anything draws on the credit — remove its allocations and
  * refunds in Xero first, as Xero itself requires.

@@ -357,6 +357,16 @@ const CREDIT_ALLOCATED: EnforcementRef = {
   gates: true,
 };
 
+/** An operator reversing an UNSYNCED allocation, asserted on both folds and the refusals. */
+const ALLOCATION_REVERSED: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::reverse allocation — an unsynced allocation is reversed and both documents refold, a synced one is refused",
+  clause:
+    "reversing an unsynced bill_credit row appends ONE bill_credit_reversal naming it, keyed on the target so a second reversal is the same document; the bill's amount_credited_cents and the credit's remaining_credit_cents are both their journals folded, in the same commit conditioned on both versions; a row already reported by Xero is refused (remove it in Xero, whose webhook then reaps it); a replay writes nothing",
+  gates: true,
+};
+
 /** A Xero-side allocation reaching a tracked bill, asserted end to end. */
 const XERO_CREDIT_FOLDED: EnforcementRef = {
   kind: "test",
@@ -476,6 +486,60 @@ const allocatePurchaseCreditRules: CollectionRule[] = [
       "The credit's `remaining_credit_cents` is its journal folded by `purchaseCreditRemainingFromJournal`, written in the allocation's commit, and its status re-derives (`applied` at 0). Its `version` is bumped.",
     enforced_by: [CREDIT_ALLOCATED],
     transaction: "allocate-purchase-credit",
+    fields: [
+      {
+        source: ["amount_cents"],
+        target: ["remaining_credit_cents"],
+        transform: "total − Σ signed draws, by fold",
+      },
+    ],
+  },
+];
+
+const reversePurchaseCreditAllocationRules: CollectionRule[] = [
+  {
+    id: "reverse-purchase-credit-allocation:reverser-to-settlements",
+    source: "purchase-credits",
+    target: "settlements",
+    mode: "co-write",
+    invariant:
+      "An operator undoing an allocation CFS has not yet pushed appends ONE `bill_credit_reversal` row naming the `bill_credit` it retracts, with an id derived from its target so a second reversal is the same document. Only a row with `synced_at: null` can be reversed here: once Xero reports it, the way out is deleting the allocation in Xero, whose webhook reaps the row.",
+    enforced_by: [ALLOCATION_REVERSED],
+    transaction: "reverse-purchase-credit-allocation",
+    fields: [
+      {
+        source: ["uid"],
+        target: ["uid_purchase_credit"],
+        transform: "the reverser draws back on the same credit as its target",
+      },
+    ],
+  },
+  {
+    id: "reverse-purchase-credit-allocation:settlements-to-bill",
+    source: "settlements",
+    target: "purchase-bills",
+    mode: "co-write",
+    invariant:
+      "The bill's `totals` are its journal folded by `recomputePurchaseBillTotals` in the reversal's commit, so `amount_credited_cents` falls by the allocation and `amount_due_cents` rises by it. Its `version` is bumped.",
+    enforced_by: [ALLOCATION_REVERSED],
+    transaction: "reverse-purchase-credit-allocation",
+    fields: [
+      {
+        source: ["amount_cents"],
+        target: ["totals", "amount_credited_cents"],
+        transform: "Σ live bill_credit − bill_credit_reversal, by fold",
+      },
+    ],
+  },
+  {
+    id: "reverse-purchase-credit-allocation:settlements-to-credit",
+    source: "settlements",
+    target: "purchase-credits",
+    mode: "co-write",
+    invariant:
+      "The credit's `remaining_credit_cents` is its journal folded by `purchaseCreditRemainingFromJournal`, written in the reversal's commit, and its status re-derives (an `applied` credit with balance again is `issued`). Its `version` is bumped.",
+    enforced_by: [ALLOCATION_REVERSED],
+    transaction: "reverse-purchase-credit-allocation",
     fields: [
       {
         source: ["amount_cents"],
@@ -731,6 +795,17 @@ const allocatePurchaseCreditTransaction: TransactionDefinition = {
   ],
 };
 
+const reversePurchaseCreditAllocationTransaction: TransactionDefinition = {
+  id: "reverse-purchase-credit-allocation",
+  description:
+    "Undoes an allocation of a supplier credit that has not reached Xero: one `bill_credit_reversal` row retracting the unsynced `bill_credit`, the bill and the credit both refolded and version-bumped, in one commit conditioned on both documents' versions. Posts nothing to Xero, and the credit's push skips a reversed row. A row Xero already reports is refused. Fires on: every reversal that is not a replay.",
+  steps: [
+    "reverse-purchase-credit-allocation:reverser-to-settlements",
+    "reverse-purchase-credit-allocation:settlements-to-bill",
+    "reverse-purchase-credit-allocation:settlements-to-credit",
+  ],
+};
+
 const settlePurchaseCreditTransaction: TransactionDefinition = {
   id: "settle-purchase-credit",
   description:
@@ -822,6 +897,7 @@ export const purchases: PropagationModule = {
     settlementsToCreditRule("void-purchase-bill-from-xero:settlements-to-credit", "void-purchase-bill-from-xero"),
     ...createPurchaseCreditRules,
     ...allocatePurchaseCreditRules,
+    ...reversePurchaseCreditAllocationRules,
     ...closePurchaseRules,
     ...settlePurchaseCreditRules,
     ...voidPurchaseCreditRules,
@@ -838,6 +914,7 @@ export const purchases: PropagationModule = {
     voidPurchaseBillFromXeroTransaction,
     createPurchaseCreditTransaction,
     allocatePurchaseCreditTransaction,
+    reversePurchaseCreditAllocationTransaction,
     settlePurchaseCreditTransaction,
     voidPurchaseCreditTransaction,
     voidPurchaseCreditFromXeroTransaction,
