@@ -26,12 +26,12 @@ import type { TransactionId } from "./ids.ts";
 // ── Cowrite helper ──────────────────────────────────────────────────
 
 /**
- * The eight source entities that get a default thread cowritten here.
+ * The source entities that get a default thread cowritten here.
  *
  * ⚠️ **Enumerated, not `string`, and that is what makes the factory safe.** The
  * two ids it mints are template literals over this union, so TypeScript expands
- * them to the sixteen concrete ids and checks each against `RuleId` — add a
- * ninth entity without declaring its two ids in `propagation/ids.ts` and the factory stops
+ * them to the concrete ids and checks each against `RuleId` — add an entity
+ * without declaring its two ids in `propagation/ids.ts` and the factory stops
  * compiling. With `collection: string` the composed id widened to `string` and
  * nothing downstream could see it. `cards` is deliberately absent: its two
  * cowrite rules are declared literally in `propagation/cards.ts`, because a
@@ -45,6 +45,9 @@ type ThreadSourceCollection =
   | "products"
   | "out-of-service"
   | "credit-notes"
+  | "purchases"
+  | "purchase-bills"
+  | "purchase-credits"
   | "roles";
 
 interface ThreadCowriteConfig {
@@ -201,6 +204,33 @@ const threadOutOfServiceRules: CollectionRule[] = cowriteRulesFor({
 const threadCreditNoteRules: CollectionRule[] = cowriteRulesFor({
   collection: "credit-notes",
   transaction: "create-credit-note",
+});
+
+/**
+ * The three purchase documents cowrite a thread, on the credit-note reasoning:
+ * each is a document an operator raises and argues with a supplier about — a
+ * short shipment, a price the bill disagrees with, a credit that never came —
+ * not an event whose story belongs on something else (api-cloudrun#1210).
+ *
+ * ⚠️ **A supplier credit has TWO creating transactions.** An operator raises
+ * one through `create-purchase-credit`; a short close raises one inside
+ * `close-purchase`. The rules are owned by the first, and `close-purchase`
+ * lists them as steps — the same borrowing `receive-purchase` does with the
+ * ledger rules — so the close's credit is not the one credit with no thread.
+ */
+const threadPurchaseRules: CollectionRule[] = cowriteRulesFor({
+  collection: "purchases",
+  transaction: "create-purchase",
+});
+
+const threadPurchaseBillRules: CollectionRule[] = cowriteRulesFor({
+  collection: "purchase-bills",
+  transaction: "create-purchase-bill",
+});
+
+const threadPurchaseCreditRules: CollectionRule[] = cowriteRulesFor({
+  collection: "purchase-credits",
+  transaction: "create-purchase-credit",
 });
 
 // ── Role transaction (new — role creation is promoted to a transaction) ─
@@ -390,6 +420,9 @@ export const threads: PropagationModule = {
     ...threadRoleRules,
     ...threadOutOfServiceRules,
     ...threadCreditNoteRules,
+    ...threadPurchaseRules,
+    ...threadPurchaseBillRules,
+    ...threadPurchaseCreditRules,
     ...createCommentRules,
     ...deleteCommentRules,
     ...mergeThreadRules,

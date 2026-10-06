@@ -678,7 +678,12 @@ const createPurchaseBillTransaction: TransactionDefinition = {
   id: "create-purchase-bill",
   description:
     "Bills a purchase: either PUSHES a new ACCPAY (`CFS-BILL-n`, posted by a post-commit task with read-before-create) or LINKS an existing Xero bill or card payment, read from Xero rather than the caller. The bill moves its purchase lines' `quantity_billed` in the same transaction. A linked card payment is born paid, and a linked ACCPAY carries the payments Xero already reports, as `bill_payment` settlement rows in the same transaction — fires on: a link whose Xero document holds any payment.",
-  steps: ["create-purchase-bill:bill-to-purchase", "create-purchase-bill:bill-to-settlements"],
+  steps: [
+    "create-purchase-bill:bill-to-purchase",
+    "create-purchase-bill:bill-to-settlements",
+    "cowrite-thread:purchase-bills-to-thread",
+    "cowrite-thread:thread-to-purchase-bills",
+  ],
 };
 
 const settlePurchaseBillTransaction: TransactionDefinition = {
@@ -708,7 +713,11 @@ const createPurchaseCreditTransaction: TransactionDefinition = {
   id: "create-purchase-credit",
   description:
     "Records a supplier credit against a purchase: either PUSHES a new ACCPAYCREDIT (`CFS-SCR-n`, posted by a post-commit task with read-before-create) or LINKS one entered in Xero, read from Xero rather than the caller. Each credit line un-bills its purchase line, lowering `quantity_billed` in the same transaction. The credit is written holding its whole total; allocations are their own writes — a linked credit's existing Xero allocations arrive through the bills they name.",
-  steps: ["create-purchase-credit:credit-to-purchase"],
+  steps: [
+    "create-purchase-credit:credit-to-purchase",
+    "cowrite-thread:purchase-credits-to-thread",
+    "cowrite-thread:thread-to-purchase-credits",
+  ],
 };
 
 const allocatePurchaseCreditTransaction: TransactionDefinition = {
@@ -751,8 +760,8 @@ const voidPurchaseCreditFromXeroTransaction: TransactionDefinition = {
 const createPurchaseTransaction: TransactionDefinition = {
   id: "create-purchase",
   description:
-    "Creates a purchase order: a supplier, a store, and one line per product with its quantity and amount. Propagates NOTHING — a purchase moves no stock and posts nothing to Xero; receipts and bills are their own writes. The document id is derived from the client's uuid_session, so a retried create lands on the same purchase.",
-  steps: [],
+    "Creates a purchase order: a supplier, a store, and one line per product with its quantity and amount, and cowrites its default thread. A purchase moves no stock and posts nothing to Xero; receipts and bills are their own writes. The document id is derived from the client's uuid_session, so a retried create lands on the same purchase.",
+  steps: ["cowrite-thread:purchases-to-thread", "cowrite-thread:thread-to-purchases"],
 };
 
 const updatePurchaseTransaction: TransactionDefinition = {
@@ -765,8 +774,12 @@ const updatePurchaseTransaction: TransactionDefinition = {
 const closePurchaseTransaction: TransactionDefinition = {
   id: "close-purchase",
   description:
-    "Short-closes (or, with nothing received, cancels) some or all of a purchase's lines: `quantity_canceled = quantity − quantity_received`. When that leaves a line billed beyond what it received, the same commit raises a pushed supplier credit (`short_close`) for the excess and lowers `quantity_billed` to `quantity_received`; after the commit the credit is pushed to Xero and allocated to the purchase's bills, newest first, one `allocate-purchase-credit` per bill. Fires on: a close of an over-billed line; any other close propagates nothing.",
-  steps: ["close-purchase:excess-to-credit"],
+    "Short-closes (or, with nothing received, cancels) some or all of a purchase's lines: `quantity_canceled = quantity − quantity_received`. When that leaves a line billed beyond what it received, the same commit raises a pushed supplier credit (`short_close`) for the excess and lowers `quantity_billed` to `quantity_received`; after the commit the credit is pushed to Xero and allocated to the purchase's bills, newest first, one `allocate-purchase-credit` per bill. The raised credit gets its default thread in the same commit, as an operator-raised one does. Fires on: a close of an over-billed line; any other close propagates nothing.",
+  steps: [
+    "close-purchase:excess-to-credit",
+    "cowrite-thread:purchase-credits-to-thread",
+    "cowrite-thread:thread-to-purchase-credits",
+  ],
 };
 
 const receivePurchaseTransaction: TransactionDefinition = {
