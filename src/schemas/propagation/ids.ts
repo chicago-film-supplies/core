@@ -73,6 +73,8 @@ export type TransactionId =
   | "receive-purchase"
   | "reverse-purchase-receipt"
   | "create-purchase-bill"
+  | "settle-purchase-bill"
+  | "void-purchase-bill-from-xero"
   // store-transfers.ts
   | "create-store-transfer"
   // units.ts
@@ -208,6 +210,11 @@ export type RuleId =
   | "reverse-purchase-receipt:receipt-to-purchase"
   | "create-purchase-bill:bill-to-purchase"
   | "create-purchase-bill:bill-to-settlements"
+  | "settle-purchase-bill:xero-to-settlements"
+  | "settle-purchase-bill:settlements-to-bill"
+  | "void-purchase-bill-from-xero:void-to-settlements"
+  | "void-purchase-bill-from-xero:settlements-to-bill"
+  | "void-purchase-bill-from-xero:bill-to-purchase"
   // out-of-service.ts
   | "create-out-of-service-record:sources-to-record"
   | "create-out-of-service-record:record-to-transactions"

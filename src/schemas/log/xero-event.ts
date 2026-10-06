@@ -243,6 +243,14 @@ export const XERO_EVENT_MSGS = [
   "xero_void_requires_manual_action",
   "xero_webhook_invoice_not_found",
   "xero_webhook_no_invoice",
+  // An ACCPAY webhook for a bill CFS does not track (api-cloudrun#1210) — the
+  // tenant's company payables ("July Loan"), a movement's `CFS-MOV-*` bill, or a
+  // supplier bill nobody has linked to a purchase yet. Informational: it RETURNS
+  // rather than fails, so Xero does not redeliver it. Its own arm because it is
+  // NOT `xero_webhook_invoice_not_found` — an ACCPAY is never looked up among
+  // CFS invoices at all, by id or by number. Carries `xero_invoice_id` +
+  // `xero_invoice_number` + `xero_status`.
+  "xero_untracked_accpay",
 ] as const;
 
 /** Discriminated msg union for Xero-archetype log records. */
