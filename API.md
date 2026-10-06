@@ -3601,7 +3601,7 @@ A department-type document in Firestore.
 interface DepartmentType {
   uid: string;
   name: string;
-  name_key?: string;
+  name_key: string;
   active: boolean;
   version: number;
   created_by: ActorRefType;

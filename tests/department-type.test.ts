@@ -17,6 +17,7 @@ const actor = { uid: "testuser100000000000", name: "Test User" };
 const validDepartmentType = (overrides: Record<string, unknown> = {}) => ({
   uid: "testdept100000000000",
   name: "Locations",
+  name_key: "locations",
   active: true,
   created_by: actor,
   updated_by: actor,
@@ -79,8 +80,11 @@ Deno.test("foldDepartmentTypeName trims and lower-cases — how a duplicate actu
   assertEquals(foldDepartmentTypeName("Set Dec"), foldDepartmentTypeName("set dec"));
 });
 
-Deno.test("DepartmentTypeSchema accepts a name_key that is the fold of name", () => {
-  assertEquals(DepartmentTypeSchema.safeParse(validDepartmentType({ name_key: "locations" })).success, true);
+Deno.test("DepartmentTypeSchema requires name_key — the guard's equality query cannot see a document without it", () => {
+  const { name_key: _omitted, ...withoutKey } = validDepartmentType();
+  const result = DepartmentTypeSchema.safeParse(withoutKey);
+  assertEquals(result.success, false);
+  assertEquals(result.error?.issues.map((i) => i.path.join(".")), ["name_key"]);
 });
 
 Deno.test("DepartmentTypeSchema refuses a name_key that disagrees with name — a stale key is a lock on the wrong entry", () => {

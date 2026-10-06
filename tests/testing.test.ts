@@ -51,6 +51,10 @@ const BOOKING_ID = "AAAAAAAAAAAAAAAAAAAA:AAAAAAAAAAAAAAAAAAAA:9c2f4a10-6b3d-4e57
  * a new one cannot be added silently.
  */
 const OVERRIDES: Record<string, Record<string, unknown>> = {
+  // ⚠️ **Added when `name_key` became required** (api-cloudrun#1182).
+  // `name_key === foldDepartmentTypeName(name)` is a CROSS-FIELD equality, the
+  // class the walker cannot derive.
+  "department-type": { name: "Locations", name_key: "locations" },
   transaction: {
     uid_booking: BOOKING_ID,
     custody: { from: "quoted", to: "prepped" },
@@ -155,7 +159,7 @@ Deno.test("corpus gate — every registry schema has a minimal fixture that pars
   // The escape hatch is the measurement. Structural coverage is 61/63 without
   // it; if this grows for a reason OTHER than a new cross-field refinement, the
   // walker has stopped keeping up with the schemas.
-  assertEquals(Object.keys(OVERRIDES).length, 4, "a schema now needs hand-written fixture knowledge");
+  assertEquals(Object.keys(OVERRIDES).length, 5, "a schema now needs hand-written fixture knowledge");
 });
 
 Deno.test("corpus gate companion — an unsatisfiable invariant still throws, naming its path", () => {

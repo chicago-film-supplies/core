@@ -72,13 +72,13 @@ export interface DepartmentType {
    * measured as the suite's worst flake, 41 rung-2 retries in a week. An
    * equality filter on this key locks one key's entries.
    *
-   * ⚠️ **Optional ONLY through the backfill window** — under `z.strictObject`
-   * the deploy that writes it must precede the backfill that stores it, and the
-   * guard switches to it only after every document carries it. Required next.
-   * The schema refuses a stored key that disagrees with `name`, so it cannot
-   * drift from the field it derives from.
+   * 🔴 **Required, because the guard is an EQUALITY query** — a document missing
+   * the key is invisible to it, so a missing key is a hole in uniqueness, not a
+   * cosmetic gap. Every writer stamps it, and both corpora were backfilled and
+   * verified 13/13 on 2026-10-06 before this tightened. The schema refuses a key
+   * that disagrees with `name`, so it cannot drift from the field it derives from.
    */
-  name_key?: string;
+  name_key: string;
   /**
    * Whether this department appears in the picker. Soft delete — a deactivated
    * type stays resolvable for the nodes already using it.
@@ -135,16 +135,16 @@ export function foldDepartmentTypeName(name: string): string {
 export const DepartmentTypeSchema: z.ZodType<DepartmentType> = z.strictObject({
   uid: FirestoreId,
   name: z.string().min(1).max(100).meta({ column: true, label: "Name" }),
-  // Derived from `name` (see the interface). Optional through the backfill
-  // window only; the refine below refuses one that disagrees with `name`.
-  name_key: z.string().max(100).optional(),
+  // Derived from `name` (see the interface); the refine below refuses one that
+  // disagrees with it.
+  name_key: z.string().max(100),
   active: z.boolean().meta({ column: true, label: "Active" }),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).superRefine((doc, ctx) => {
-  if (doc.name_key !== undefined && doc.name_key !== foldDepartmentTypeName(doc.name)) {
+  if (doc.name_key !== foldDepartmentTypeName(doc.name)) {
     ctx.addIssue({
       code: "custom",
       path: ["name_key"],

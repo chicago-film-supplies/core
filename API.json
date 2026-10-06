@@ -1581,7 +1581,7 @@
         {
           "kind": "interface",
           "name": "DepartmentType",
-          "declaration": "interface DepartmentType {\n  uid: string;\n  name: string;\n  name_key?: string;\n  active: boolean;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface DepartmentType {\n  uid: string;\n  name: string;\n  name_key: string;\n  active: boolean;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A department-type document in Firestore."
         },
         {
