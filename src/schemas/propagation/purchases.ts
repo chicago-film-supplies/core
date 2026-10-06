@@ -21,7 +21,17 @@
  * alone. A purchase moves no stock and posts nothing to Xero; the buckets a
  * close moves (`quantity_canceled`) are the document's own. A short close that
  * leaves a line billed beyond what was received raises a supplier credit, and
- * that edge lands with the purchase-bills writers.
+ * that edge lands with the purchase-credits writers.
+ *
+ * ## Billing
+ *
+ * A bill is its own document (`purchase-bills`), written in ONE transaction with
+ * its purchase lines' `quantity_billed` — the bucket is the sum of the bills
+ * naming it by construction, exactly as `quantity_received` is of the receipts.
+ * A card payment linked as a bill is BORN PAID: the same transaction appends its
+ * one `bill_payment` row and folds it, so its due is 0 from the first write. The
+ * Xero push of a CFS-authored bill is a post-commit task writing the bill's own
+ * `xero_id`, a root write, so it declares no edge.
  *
  * Traced from: api-cloudrun/src/services/purchases.ts
  */
@@ -104,6 +114,91 @@ const reversePurchaseReceiptRules: CollectionRule[] = [
   },
 ];
 
+/** The bill co-write, asserted on a pushed bill billed in two parts. */
+const BILL_MOVES_THE_BUCKET: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/purchases/purchaseBills.test.ts::push — two bills move quantity_billed and each line costs its cumulative share",
+  clause:
+    "each bill moves its purchase lines' quantity_billed in the same commit; each line is priced at its cumulative share, so the bills of a fully billed line sum to its amount_cents exactly; billing past quantity − quantity_canceled is refused",
+  gates: true,
+};
+
+/** The born-paid card bill, asserted on a linked SPEND. */
+const CARD_BILL_BORN_PAID: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/purchases/purchaseBills.test.ts::link a card payment — the bill is born paid by one bill_payment row",
+  clause:
+    "a linked bank_transaction bill appends exactly one bill_payment row for its whole total in the same commit, keyed from the BankTransactionID, so amount_due_cents is 0 on the first write and a replay appends nothing",
+  gates: true,
+};
+
+const createPurchaseBillRules: CollectionRule[] = [
+  {
+    id: "create-purchase-bill:bill-to-purchase",
+    source: "purchase-bills",
+    target: "purchases",
+    mode: "co-write",
+    invariant:
+      "Every bill line bills some quantity of ONE purchase line (keyed by product) and moves that line's `quantity_billed` in the same commit, so the bucket is the sum of the bills naming it. Billing is refused past `quantity − quantity_canceled`. Each line is priced at `cumulativeShareCents(line.amount_cents, line.quantity, billed_before, billed_after)` — never a client input — so the bills of a fully billed line sum to its amount exactly. A LINKED bill's lines are priced the same way for attribution; its total is Xero's and is exempt.",
+    enforced_by: [BILL_MOVES_THE_BUCKET],
+    transaction: "create-purchase-bill",
+    fields: [
+      {
+        source: ["lines", "quantity"],
+        target: ["lines", "quantity_billed"],
+        transform: "+ quantity on the purchase line whose uid_product is the bill line's",
+      },
+      {
+        source: ["uid_purchase"],
+        target: ["uid"],
+        transform: "the bill names its purchase",
+      },
+      {
+        source: ["lines", "amount_cents"],
+        target: ["lines", "amount_cents"],
+        transform:
+          "cumulativeShareCents(line.amount_cents, line.quantity, billed_before, billed_before + quantity) — read from the purchase line, never written to it",
+      },
+    ],
+  },
+  {
+    id: "create-purchase-bill:bill-to-settlements",
+    source: "purchase-bills",
+    target: "settlements",
+    mode: "co-write",
+    invariant:
+      "A linked `bank_transaction` bill — a card payment, BORN PAID — appends exactly one `bill_payment` row (reason `payment_sent`, `xero_payment_id: null`, since the BankTransactionID is the bill's own `xero_id`) for its whole total in the bill's commit, and the bill's totals are that row folded by `recomputePurchaseBillTotals`. A linked ACCPAY appends one `bill_payment` row per payment Xero already reports. A pushed bill appends nothing: it is unpaid when written.",
+    enforced_by: [CARD_BILL_BORN_PAID],
+    transaction: "create-purchase-bill",
+    fields: [
+      {
+        source: ["totals", "total_cents"],
+        target: ["amount_cents"],
+        transform: "a card bill's whole total; a linked ACCPAY's each Xero payment amount",
+      },
+      {
+        source: ["uid"],
+        target: ["uid_purchase_bill"],
+        transform: "the row settles the bill",
+      },
+      {
+        source: ["supplier", "uid"],
+        target: ["uid_supplier"],
+        transform: "denormalized for per-supplier reporting",
+      },
+    ],
+  },
+];
+
+const createPurchaseBillTransaction: TransactionDefinition = {
+  id: "create-purchase-bill",
+  description:
+    "Bills a purchase: either PUSHES a new ACCPAY (`CFS-BILL-n`, posted by a post-commit task with read-before-create) or LINKS an existing Xero bill or card payment, read from Xero rather than the caller. The bill moves its purchase lines' `quantity_billed` in the same transaction. A linked card payment is born paid, and a linked ACCPAY carries the payments Xero already reports, as `bill_payment` settlement rows in the same transaction — fires on: a link whose Xero document holds any payment.",
+  steps: ["create-purchase-bill:bill-to-purchase", "create-purchase-bill:bill-to-settlements"],
+};
+
 const createPurchaseTransaction: TransactionDefinition = {
   id: "create-purchase",
   description:
@@ -155,12 +250,13 @@ const reversePurchaseReceiptTransaction: TransactionDefinition = {
 
 /** Everything `propagation/purchases.ts` contributes to the catalog. */
 export const purchases: PropagationModule = {
-  rules: [...receivePurchaseRules, ...reversePurchaseReceiptRules],
+  rules: [...receivePurchaseRules, ...reversePurchaseReceiptRules, ...createPurchaseBillRules],
   transactions: [
     createPurchaseTransaction,
     updatePurchaseTransaction,
     closePurchaseTransaction,
     receivePurchaseTransaction,
     reversePurchaseReceiptTransaction,
+    createPurchaseBillTransaction,
   ],
 };

@@ -208,11 +208,13 @@ export const PERMISSIONS = [
   "outOfService.search",
   // A purchase order and its receipts (api-cloudrun#1210). CRUD-verbed, plus
   // `receive`: receiving moves stock, so it is a different grant from editing
-  // the order. Billing arrives with the purchase-bills writers.
+  // the order. `bill` pushes or links a supplier bill — it writes the live
+  // Xero ledger, so it is its own grant too.
   "purchases.create",
   "purchases.read",
   "purchases.update",
   "purchases.receive",
+  "purchases.bill",
   "stockSummaries.read",
   "typesenseSync.read",
 

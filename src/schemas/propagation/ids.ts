@@ -72,6 +72,7 @@ export type TransactionId =
   | "close-purchase"
   | "receive-purchase"
   | "reverse-purchase-receipt"
+  | "create-purchase-bill"
   // store-transfers.ts
   | "create-store-transfer"
   // units.ts
@@ -205,6 +206,8 @@ export type RuleId =
   // purchases.ts
   | "receive-purchase:receipt-to-purchase"
   | "reverse-purchase-receipt:receipt-to-purchase"
+  | "create-purchase-bill:bill-to-purchase"
+  | "create-purchase-bill:bill-to-settlements"
   // out-of-service.ts
   | "create-out-of-service-record:sources-to-record"
   | "create-out-of-service-record:record-to-transactions"

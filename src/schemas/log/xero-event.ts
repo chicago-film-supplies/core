@@ -135,6 +135,28 @@ export const XERO_EVENT_MSGS = [
   // The scheduler-driven sweep over `xero_id == null` is the backstop, and this
   // arm is how you know it has work to do. Needs an alert.
   "xero_bill_enqueue_failed",
+  // ── Purchase bills (api-cloudrun#1210) ──
+  // The purchase's OWN bill (`purchase-bills/{uid}`, `CFS-BILL-{n}`), not a
+  // movement bill. Its own arms rather than the `xero_bill_*` ones, for the
+  // reason above: two subjects on one msg make the alert unqueryable. Every arm
+  // carries `uid_purchase_bill` + `purchase_bill_number`.
+  //
+  // A pushed bill posted; `xero_invoice_id` is the ACCPAY's InvoiceID.
+  "purchase_bill_pushed",
+  // The push re-read the bill and found nothing to do (it already carries an
+  // `xero_id`, it is linked, or it is gone). `reason` says which.
+  "purchase_bill_push_skipped",
+  // Read-before-create found a live ACCPAY under `CFS-BILL-{n}` and adopted it —
+  // the only guard between a redelivered task and a duplicate live bill, since
+  // `POST /Invoices` does not upsert ACCPAY.
+  "purchase_bill_twin_adopted",
+  // A permanent refusal: Xero's 400, or a CFS-side terminal found before any
+  // Xero call (a product with no Xero code on an inventory line). The handler
+  // 200-drops it, so this arm carries an alert.
+  "purchase_bill_push_rejected",
+  // The bill committed but its push task could not be enqueued. The daily
+  // bill sweep is the backstop; this arm carries an alert.
+  "purchase_bill_enqueue_failed",
   // ── Settlements (the `settlements` journal) ──
   // A settlement document was written from a Xero payment or credit-note
   // allocation. Carries `settlement_uid` + `settlement_type`.
@@ -256,6 +278,10 @@ export interface XeroEventLogRecord {
    * that way), so a reusable key would let a voided bill's number be re-minted.
    */
   movement_number?: number;
+  /** The purchase bill a `purchase_bill_*` arm is about. Its uid IS the document id. */
+  uid_purchase_bill?: string;
+  /** `PurchaseBill.number` — what `CFS-BILL-{number}` is keyed on. Never reused. */
+  purchase_bill_number?: number;
   /** Which manual-intervention seam fired. @see `xero_manual_intervention_required` */
   seam?: string;
   /** What a human must do about it — carried into the alert annotation. */
@@ -350,6 +376,8 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   refunds_reaped: z.number().optional(),
   movement_uid: z.string().optional(),
   movement_number: z.number().optional(),
+  uid_purchase_bill: z.string().optional(),
+  purchase_bill_number: z.number().optional(),
   seam: z.string().optional(),
   remedy: z.string().optional(),
   xero_url: z.string().optional(),
