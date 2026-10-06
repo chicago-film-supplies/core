@@ -707,6 +707,7 @@ export {
   CreatePurchaseBillInput,
   CreatePurchaseCreditInput,
   AllocatePurchaseCreditInput,
+  VoidPurchaseCreditInput,
   type PurchaseDocumentOriginType,
   type PurchaseBillXeroDocumentType,
   type PurchaseDocumentLine,
@@ -720,6 +721,7 @@ export {
   type CreatePurchaseBillInputType,
   type CreatePurchaseCreditInputType,
   type AllocatePurchaseCreditInputType,
+  type VoidPurchaseCreditInputType,
 } from "./purchase-bill.ts";
 
 export {

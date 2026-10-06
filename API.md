@@ -13255,6 +13255,26 @@ interface ValidationIssue {
 }
 ```
 
+### `VoidPurchaseCreditInput`
+
+Zod schema for VoidPurchaseCreditInputType.
+
+```ts
+const VoidPurchaseCreditInput: z.ZodType<VoidPurchaseCreditInputType>;
+```
+
+### `VoidPurchaseCreditInputType`
+
+Input for voiding a supplier credit from CFS. `version` is the credit's.
+Refused while anything draws on the credit — remove its allocations and
+refunds in Xero first, as Xero itself requires.
+
+```ts
+interface VoidPurchaseCreditInputType {
+  version: number;
+}
+```
+
 ### `WebhookEvent`
 
 An inbound webhook event stored for processing.

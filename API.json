@@ -5881,6 +5881,18 @@
           "doc": "Single Zod issue, structurally."
         },
         {
+          "kind": "variable",
+          "name": "VoidPurchaseCreditInput",
+          "declaration": "const VoidPurchaseCreditInput: z.ZodType<VoidPurchaseCreditInputType>;",
+          "doc": "Zod schema for VoidPurchaseCreditInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "VoidPurchaseCreditInputType",
+          "declaration": "interface VoidPurchaseCreditInputType {\n  version: number;\n}",
+          "doc": "Input for voiding a supplier credit from CFS. `version` is the credit's.\nRefused while anything draws on the credit — remove its allocations and\nrefunds in Xero first, as Xero itself requires."
+        },
+        {
           "kind": "interface",
           "name": "WebhookEvent",
           "declaration": "interface WebhookEvent {\n  uid: string;\n  event: string;\n  received: FirestoreTimestampType;\n  expiresAt: FirestoreTimestampType;\n  payload: unknown;\n}",
