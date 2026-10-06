@@ -29,6 +29,7 @@ import type {
 
 import { orders } from "./orders.ts";
 import { outOfService } from "./out-of-service.ts";
+import { purchases } from "./purchases.ts";
 // Aliased: this file exports a `transactions` array of its own, below.
 import { transactions as transactionsModule } from "./transactions.ts";
 import { storeTransfers } from "./store-transfers.ts";
@@ -91,6 +92,7 @@ export { aggregates } from "./aggregates.ts";
 const MODULES: readonly PropagationModule[] = [
   orders,
   outOfService,
+  purchases,
   transactionsModule,
   storeTransfers,
   products,

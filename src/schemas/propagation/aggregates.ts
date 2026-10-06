@@ -47,6 +47,13 @@ export const aggregates: AggregateDefinition[] = [
       "Physical storage locations and their capacity/layout configuration",
   },
   {
+    id: "purchase",
+    root: "purchases",
+    members: ["purchase-bills", "purchase-credits"],
+    description:
+      "What CFS ordered from a supplier (the purchase), what the supplier billed and credited (bills and supplier credits), each its own document. Receipts are `purchase` movements in the transaction aggregate naming the purchase in sources[]; payments are payable settlements (api-cloudrun#1210).",
+  },
+  {
     id: "transaction",
     root: "transactions",
     members: ["out-of-service"],

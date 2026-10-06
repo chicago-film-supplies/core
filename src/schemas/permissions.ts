@@ -206,6 +206,13 @@ export const PERMISSIONS = [
   "outOfService.update",
   "outOfService.delete",
   "outOfService.search",
+  // A purchase order and its receipts (api-cloudrun#1210). CRUD-verbed, plus
+  // `receive`: receiving moves stock, so it is a different grant from editing
+  // the order. Billing arrives with the purchase-bills writers.
+  "purchases.create",
+  "purchases.read",
+  "purchases.update",
+  "purchases.receive",
   "stockSummaries.read",
   "typesenseSync.read",
 
