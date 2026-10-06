@@ -1762,14 +1762,15 @@ export const InvoiceStatusEnum: z.ZodType<InvoiceStatusType> = z.enum(INVOICE_ST
 
 // ── Settlements ──────────────────────────────────────────────────
 //
-// The vocabulary of the `settlements` journal — the revenue-side twin of the
-// `transactions` movement journal. It lives in `schemas/common.ts` rather than in
+// The vocabulary of the `settlements` journal — the money-side twin of the
+// `transactions` movement journal, for receivables AND payables (api-cloudrun#1210). It lives in `schemas/common.ts` rather than in
 // `settlement.ts` because `credit-notes` shares the reason enum: one credit
 // note allocated across three invoices has ONE reason, denormalized onto each
 // settlement, and authoring it three times invites three answers.
 
 /**
- * EIGHT members, in four do/undo pairs.
+ * Nine do/undo pairs: five RECEIVABLE (an invoice or a customer credit note)
+ * and four PAYABLE (a supplier bill or a supplier credit).
  *
  * The reversal arms are their own **types**, exactly as `MOVEMENT_TYPES` carries
  * `sale` and `sale_return` rather than a second `kind` field. That is what lets
@@ -1809,6 +1810,22 @@ export const InvoiceStatusEnum: z.ZodType<InvoiceStatusType> = z.enum(INVOICE_ST
  * refund is a Payment of type `ARCREDITPAYMENT`. The target is the contract's
  * `settles` axis; a refund feeds no invoice total (`sums_into` and `counts_into`
  * both `null`) and draws the note's credit (`draws_credit`).
+ *
+ * **The `bill_*` and `supplier_refund` pairs are the PAYABLE side**
+ * (api-cloudrun#1210): a payment CFS sent against a supplier bill, a supplier
+ * credit allocated to one, a bill voided in Xero, and a supplier's cash refund of
+ * a supplier credit. They are their own TYPES rather than the receivable types
+ * with a second target, and that is the load-bearing choice: every existing
+ * reader that asks `type === "payment"` or folds by `sums_into` was written for
+ * receivables, so a payable row reusing `payment` would be read as cash
+ * received the first time a reader scanned the collection. As separate members
+ * an exhaustive `switch` stops compiling until it decides, and a non-exhaustive
+ * `===` excludes them by default. The contract's `settles` names the target
+ * (`purchase_bill` / `purchase_credit`), and both folds refuse a row for the
+ * other side rather than skipping it.
+ *
+ * There is no payable closure pair: a $0 bill bills nothing, and a bill is
+ * never edited the way a $0 shrink invoice is.
  */
 const SETTLEMENT_TYPES = [
   "payment",
@@ -1821,6 +1838,14 @@ const SETTLEMENT_TYPES = [
   "closure_reversal",
   "refund",
   "refund_reversal",
+  "bill_payment",
+  "bill_payment_reversal",
+  "bill_credit",
+  "bill_credit_reversal",
+  "bill_void",
+  "bill_void_reversal",
+  "supplier_refund",
+  "supplier_refund_reversal",
 ] as const;
 /** One settlement event's kind. @see {@link SETTLEMENT_CONTRACTS} */
 export type SettlementTypeType = typeof SETTLEMENT_TYPES[number];
@@ -1883,6 +1908,23 @@ const SETTLEMENT_REASONS = [
    * the NOTE exists, and the refund row says what happened to its credit.
    */
   "credit_refunded",
+  /** bill_payment — cash CFS sent against a supplier bill, or a card purchase born paid. */
+  "payment_sent",
+  /** bill_credit — a short close left a line billed beyond what was received. */
+  "short_close",
+  /** bill_credit — the supplier corrected a price or quantity after billing. */
+  "supplier_adjustment",
+  /**
+   * bill_void — the supplier bill was annulled in Xero. Not `invoice_voided`:
+   * that member already describes receivable history, and re-meaning it to
+   * cover a payable is the expensive kind of change this enum's docblock warns of.
+   */
+  "bill_voided",
+  /**
+   * supplier_refund — a supplier paid a supplier credit back to CFS in cash. Not
+   * `credit_refunded`, which says the money went to a CUSTOMER.
+   */
+  "supplier_refunded",
   /** any — an operator fixing their own record. */
   "correction",
   /** backfilled history only — never written by new code. */
@@ -1893,34 +1935,70 @@ export type SettlementReasonType = typeof SETTLEMENT_REASONS[number];
 /** Zod schema for SettlementReasonType. */
 export const SettlementReasonEnum: z.ZodType<SettlementReasonType> = z.enum(SETTLEMENT_REASONS);
 
+/**
+ * The documents a settlement can settle: two RECEIVABLE (`invoice`,
+ * `credit_note`) and two PAYABLE (`purchase_bill`, `purchase_credit`). Each names
+ * its own key on the row — `uid_invoice`, `uid_credit_note`, `uid_purchase_bill`,
+ * `uid_purchase_credit` — so the side is derivable from the key present and never
+ * stored. @see {@link SettlementContract.settles}
+ */
+export const SETTLEMENT_TARGETS = ["invoice", "credit_note", "purchase_bill", "purchase_credit"] as const;
+/** One {@link SETTLEMENT_TARGETS} member. */
+export type SettlementTargetType = typeof SETTLEMENT_TARGETS[number];
+
+/**
+ * Which side of the ledger a target sits on. A receivable row names
+ * `uid_organization` (the customer); a payable row names `uid_supplier`. The
+ * settlement refine reads this to decide which party key the row must carry.
+ */
+export const SETTLEMENT_TARGET_SIDE: Readonly<Record<SettlementTargetType, "receivable" | "payable">> = {
+  invoice: "receivable",
+  credit_note: "receivable",
+  purchase_bill: "payable",
+  purchase_credit: "payable",
+};
+
 /** How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS} */
 export interface SettlementContract {
   /** Which reasons are legal for this type. */
   reasons: readonly SettlementReasonType[];
   /**
-   * Which document this type settles (api-cloudrun#1207). `"invoice"` rows name
-   * `uid_invoice` and feed exactly one invoice total; `"credit_note"` rows have a
-   * `null` `uid_invoice`, name `uid_credit_note`, and feed NO invoice total —
-   * both `sums_into` and `counts_into` are `null`.
+   * Which document this type settles (api-cloudrun#1207, #1210). `"invoice"`
+   * rows name `uid_invoice` and feed exactly one invoice total; `"credit_note"`
+   * rows have a `null` `uid_invoice`, name `uid_credit_note`, and feed NO
+   * invoice total — both `sums_into` and `counts_into` are `null`.
+   * `"purchase_bill"` rows name `uid_purchase_bill` and feed exactly one bill
+   * total (the bill's totals use the invoice's storage keys); `"purchase_credit"`
+   * rows name `uid_purchase_credit` and feed no bill total.
    *
-   * ⚠️ **Every invoice fold must refuse a `"credit_note"` row, never skip it.**
-   * `recomputeSettlementTotals` throws on one: such a row reaching it means a
-   * caller read settlements by something other than `uid_invoice`, and silently
-   * skipping would hide that.
+   * ⚠️ **Every fold must refuse a row for another target, never skip it.**
+   * `recomputeSettlementTotals` throws on anything but `"invoice"`, and
+   * `recomputePurchaseBillTotals` on anything but `"purchase_bill"`: such a row
+   * reaching either means a caller read settlements by something other than the
+   * target's key, and silently skipping would hide that.
    */
-  settles: "invoice" | "credit_note";
+  settles: SettlementTargetType;
   /**
-   * Whether this type spends (or, as a reversal, restores) a credit note's
-   * credit — the rows `creditNoteRemainingFromJournal` folds, and the only
+   * Whether this type spends (or, as a reversal, restores) a CUSTOMER credit
+   * note's credit — the rows `creditNoteRemainingFromJournal` folds, and the only
    * rows that may name a credit note at all. `credit` and `refund` and their
-   * reversals.
+   * reversals. `false` on every payable type.
    */
   draws_credit: boolean;
+  /**
+   * The payable twin of {@link draws_credit}: whether this type spends (or
+   * restores) a SUPPLIER credit's credit — the rows
+   * `purchaseCreditRemainingFromJournal` folds, and the only rows that may name
+   * `uid_purchase_credit`. `bill_credit` and `supplier_refund` and their
+   * reversals. A second boolean rather than a widened `draws_credit`, because
+   * the two name different fields and a row drawing one must not name the other.
+   */
+  draws_purchase_credit: boolean;
   /** Which external-id field this type may carry; `null` ⇒ neither. */
   xero_id_field: "xero_payment_id" | "xero_credit_note_id" | null;
   /**
-   * Which invoice total this type feeds — **the storage key, deliberately, not
-   * the semantic name.**
+   * Which invoice (or, on a `"purchase_bill"` type, bill) total this type feeds
+   * — **the storage key, deliberately, not the semantic name.**
    *
    * The `_cents` suffix is not decoration that drifted in from the migration:
    * these literals must keep matching a real field on `InvoiceDocTotalsType`, and
@@ -1941,8 +2019,9 @@ export interface SettlementContract {
   /**
    * Which invoice COUNT this type feeds, or `null` for a money type. **On an
    * invoice-settling type exactly one of `sums_into` / `counts_into` is
-   * non-null; on a credit-note-settling type both are `null`** — asserted for
-   * every row by `tests/settlements.test.ts`.
+   * non-null; on a bill-settling type `sums_into` is set and `counts_into` is
+   * `null`; on a credit-settling type (customer or supplier) both are `null`** —
+   * asserted for every row by `tests/settlements.test.ts`.
    *
    * ⭐ **A second axis rather than a fourth `sums_into` member**, because a
    * closure carries `amount_cents: 0`: folded through a cents bucket it would
@@ -1974,6 +2053,7 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   payment: {
     settles: "invoice",
     draws_credit: false,
+    draws_purchase_credit: false,
     reasons: ["payment_received", "correction", "unspecified"],
     xero_id_field: "xero_payment_id",
     sums_into: "amount_paid_cents",
@@ -1983,6 +2063,7 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   payment_reversal: {
     settles: "invoice",
     draws_credit: false,
+    draws_purchase_credit: false,
     reasons: ["source_retracted", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_paid_cents",
@@ -1992,6 +2073,7 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   credit: {
     settles: "invoice",
     draws_credit: true,
+    draws_purchase_credit: false,
     reasons: [
       "bad_debt",
       "early_return",
@@ -2008,6 +2090,7 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   credit_reversal: {
     settles: "invoice",
     draws_credit: true,
+    draws_purchase_credit: false,
     reasons: ["source_retracted", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_credited_cents",
@@ -2021,6 +2104,7 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   void: {
     settles: "invoice",
     draws_credit: false,
+    draws_purchase_credit: false,
     reasons: ["invoice_voided", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_void_cents",
@@ -2034,6 +2118,7 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   void_reversal: {
     settles: "invoice",
     draws_credit: false,
+    draws_purchase_credit: false,
     reasons: ["source_retracted", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_void_cents",
@@ -2046,6 +2131,7 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   closure: {
     settles: "invoice",
     draws_credit: false,
+    draws_purchase_credit: false,
     reasons: ["zero_total", "correction"],
     xero_id_field: null,
     sums_into: null,
@@ -2058,6 +2144,7 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   closure_reversal: {
     settles: "invoice",
     draws_credit: false,
+    draws_purchase_credit: false,
     reasons: ["source_retracted", "correction"],
     xero_id_field: null,
     sums_into: null,
@@ -2072,6 +2159,7 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   refund: {
     settles: "credit_note",
     draws_credit: true,
+    draws_purchase_credit: false,
     reasons: ["credit_refunded", "correction"],
     xero_id_field: "xero_payment_id",
     sums_into: null,
@@ -2083,6 +2171,106 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   refund_reversal: {
     settles: "credit_note",
     draws_credit: true,
+    draws_purchase_credit: false,
+    reasons: ["source_retracted", "correction"],
+    xero_id_field: null,
+    sums_into: null,
+    counts_into: null,
+    reverses: "required",
+  },
+  // ── payable (api-cloudrun#1210) ─────────────────────────────────
+  // No `unspecified` on any payable type: the historic payables P4 backfills
+  // (296 paid SPEND/ACCPAY documents, 0 supplier credits) all have a known
+  // reason, so the member would describe nothing — the `refund` ruling.
+  //
+  // A payment CFS sent against a bill. It carries the Xero PaymentID when Xero
+  // has one. A card purchase is a linked `bank_transaction` bill BORN PAID, and
+  // its one payment row carries `null` here: the BankTransactionID is the BILL's
+  // own `xero_id`, not a payment's, exactly as a void's linkage is its
+  // invoice's `xero_id` (see `void` above).
+  bill_payment: {
+    settles: "purchase_bill",
+    draws_credit: false,
+    draws_purchase_credit: false,
+    reasons: ["payment_sent", "correction"],
+    xero_id_field: "xero_payment_id",
+    sums_into: "amount_paid_cents",
+    counts_into: null,
+    reverses: "forbidden",
+  },
+  bill_payment_reversal: {
+    settles: "purchase_bill",
+    draws_credit: false,
+    draws_purchase_credit: false,
+    reasons: ["source_retracted", "correction"],
+    xero_id_field: null,
+    sums_into: "amount_paid_cents",
+    counts_into: null,
+    reverses: "required",
+  },
+  // A supplier credit allocated to a bill. Its reasons ARE the supplier credit's
+  // (`PURCHASE_CREDIT_REASONS` in `schemas/purchase-bill.ts` must equal this list)
+  // — the row carries its credit's reason, as an AR `credit` does.
+  bill_credit: {
+    settles: "purchase_bill",
+    draws_credit: false,
+    draws_purchase_credit: true,
+    reasons: ["short_close", "supplier_adjustment", "correction"],
+    xero_id_field: "xero_credit_note_id",
+    sums_into: "amount_credited_cents",
+    counts_into: null,
+    reverses: "forbidden",
+  },
+  bill_credit_reversal: {
+    settles: "purchase_bill",
+    draws_credit: false,
+    draws_purchase_credit: true,
+    reasons: ["source_retracted", "correction"],
+    xero_id_field: null,
+    sums_into: "amount_credited_cents",
+    counts_into: null,
+    reverses: "required",
+  },
+  // A bill voided in Xero zeroes its due amount through the fold, mirroring
+  // `void` — the plan's `markInvoiceVoidedFromXero` twin.
+  bill_void: {
+    settles: "purchase_bill",
+    draws_credit: false,
+    draws_purchase_credit: false,
+    reasons: ["bill_voided", "correction"],
+    xero_id_field: null,
+    sums_into: "amount_void_cents",
+    counts_into: null,
+    reverses: "forbidden",
+  },
+  bill_void_reversal: {
+    settles: "purchase_bill",
+    draws_credit: false,
+    draws_purchase_credit: false,
+    reasons: ["source_retracted", "correction"],
+    xero_id_field: null,
+    sums_into: "amount_void_cents",
+    counts_into: null,
+    reverses: "required",
+  },
+  // A supplier paying a supplier credit back in cash — Xero's `APCREDITPAYMENT`.
+  // The payable `refund`: it settles the CREDIT, feeds no bill total, and is
+  // what makes `PurchaseCredit.remaining_credit_cents` rebuildable from the
+  // journal, which the AR note could not be until api-cloudrun#1207.
+  supplier_refund: {
+    settles: "purchase_credit",
+    draws_credit: false,
+    draws_purchase_credit: true,
+    reasons: ["supplier_refunded", "correction"],
+    xero_id_field: "xero_payment_id",
+    sums_into: null,
+    counts_into: null,
+    reverses: "forbidden",
+  },
+  supplier_refund_reversal: {
+    settles: "purchase_credit",
+    draws_credit: false,
+    draws_purchase_credit: true,
     reasons: ["source_retracted", "correction"],
     xero_id_field: null,
     sums_into: null,

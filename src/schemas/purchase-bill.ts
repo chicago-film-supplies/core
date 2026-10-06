@@ -59,6 +59,7 @@ import {
   type ActorRefType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  type SettlementReasonType,
   TimestampFields,
   UidNameRef,
   type UidNameRefType,
@@ -281,10 +282,12 @@ export const PurchaseBillSchema: z.ZodType<PurchaseBill> = z.strictObject({
  * Why a supplier credited CFS. Closed, like `SETTLEMENT_REASONS`, and for the
  * same reason: it becomes a ledger code.
  *
- * ⚠️ **A separate vocabulary from `SETTLEMENT_REASONS` for now**, and the
- * settlements half of api-cloudrun#1210 is where they meet: an AP allocation
- * row carries its credit's reason, so these members join that enum there, and
- * this list becomes a subset of it the way `CREDIT_NOTE_REASONS` is.
+ * **A subset of `SETTLEMENT_REASONS`, equal to `SETTLEMENT_CONTRACTS.bill_credit.reasons`**
+ * — a `bill_credit` allocation row carries its credit's reason, as an AR `credit`
+ * row does (`CREDIT_NOTE_REASONS`). Kept as its own `as const` tuple rather than
+ * derived from the contract so `PurchaseCredit.reason` stays a narrow `z.enum`;
+ * the subset is a compile-time check below and the equality is asserted by
+ * `tests/settlements.test.ts`.
  */
 export const PURCHASE_CREDIT_REASONS = [
   /** A short close left a line billed beyond what was received; auto-raised for the excess. */
@@ -296,6 +299,12 @@ export const PURCHASE_CREDIT_REASONS = [
 ] as const;
 /** One {@link PURCHASE_CREDIT_REASONS} member. */
 export type PurchaseCreditReasonType = typeof PURCHASE_CREDIT_REASONS[number];
+// A reason here that the settlements journal cannot carry would be a credit
+// whose allocation row cannot be written — a compile error, not a 400.
+type _PurchaseCreditReasonsAreSettlementReasons = PurchaseCreditReasonType extends SettlementReasonType ? true
+  : never;
+const _purchaseCreditReasonParity: _PurchaseCreditReasonsAreSettlementReasons = true;
+void _purchaseCreditReasonParity;
 /** Zod schema for PurchaseCreditReasonType. */
 export const PurchaseCreditReasonEnum: z.ZodType<PurchaseCreditReasonType> = z.enum(PURCHASE_CREDIT_REASONS);
 
@@ -330,10 +339,11 @@ export interface PurchaseCredit {
   direct_lines: PurchaseDirectLine[];
   total_cents: number;
   /**
-   * Credit not yet consumed: `total_cents` minus every unreversed allocation
-   * minus any cash refund. ⚠️ **Not rebuildable from the journal** — a supplier
-   * cash refund consumes credit with no settlement row, which is the AR credit
-   * note's api-cloudrun#469 lesson carried over.
+   * Credit not yet consumed: a **co-written projection** of the journal,
+   * `purchaseCreditRemainingFromJournal(total_cents, rows)` — `total_cents` minus
+   * every signed `bill_credit` allocation and `supplier_refund`. A supplier's
+   * cash refund is a `supplier_refund` row, so unlike the AR note before
+   * api-cloudrun#1207 this is rebuildable from the first document.
    */
   remaining_credit_cents: number;
   uid_thread?: string;

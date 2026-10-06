@@ -685,7 +685,7 @@ export const templateSchemaFields: Partial<
     { path: "lines[].uid_invoice", type: "string" },
     { path: "lines[].number", type: "number" },
     { path: "lines[].uid_settlement", type: "string | null" },
-    { path: "lines[].settlement_type", type: "payment | payment_reversal | credit | credit_reversal | void | void_reversal | closure | closure_reversal | refund | refund_reversal | null" },
+    { path: "lines[].settlement_type", type: "payment | payment_reversal | credit | credit_reversal | void | void_reversal | closure | closure_reversal | refund | refund_reversal | bill_payment | bill_payment_reversal | bill_credit | bill_credit_reversal | bill_void | bill_void_reversal | supplier_refund | supplier_refund_reversal | null" },
     { path: "lines[].date", type: "string" },
     { path: "lines[].reference", type: "string | null" },
     { path: "lines[].amount_cents", type: "number" },

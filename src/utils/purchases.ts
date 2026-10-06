@@ -8,8 +8,12 @@
  */
 import { derivePurchaseStatus, type PurchaseLine } from "../schemas/mod.ts";
 import { roundDivHalfUp } from "./money.ts";
+import { purchaseCreditRemainingFromJournal, recomputePurchaseBillTotals } from "./invoices.ts";
 
-export { derivePurchaseStatus };
+// The payable settlement folds live beside their receivable twins in
+// `utils/invoices.ts`, which owns the one fold; re-exported here so a purchase
+// writer finds them in its own namespace.
+export { derivePurchaseStatus, purchaseCreditRemainingFromJournal, recomputePurchaseBillTotals };
 
 /**
  * The cents a line's units `(before, after]` cost — the k-th receipt or the

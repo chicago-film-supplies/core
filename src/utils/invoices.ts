@@ -88,7 +88,7 @@ import {
 } from "./substitutions.ts";
 import { mapPathsAcrossRebuild, pairItemsByUidOccurrence } from "./item-pairing.ts";
 import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
-import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTypeType, SubstitutedForEntryType } from "../schemas/mod.ts";
+import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
   InvoiceSchema,
@@ -432,6 +432,73 @@ export function recomputeSettlementTotals(
   closure_count: number;
   breakdown: Partial<Record<SettlementReasonType, number>>;
 } {
+  return foldSettlements("invoice", totalCents, settlements);
+}
+
+/**
+ * A supplier bill's settlement projection (api-cloudrun#1210) — the payable twin
+ * of {@link recomputeSettlementTotals}, and the same fold: a straight signed sum
+ * over every row, three cents buckets dispatched on `sums_into`, negatives
+ * preserved. `PurchaseBill.totals` uses the invoice's storage keys exactly, which
+ * is what lets one fold serve both.
+ *
+ * ⚠️ **Refuses any row that does not settle a `purchase_bill`** — a receivable
+ * row, or a `supplier_refund` — rather than skipping it, for the reason the
+ * invoice fold refuses a refund: such a row reaching here means the caller read
+ * settlements by something other than `uid_purchase_bill`. There is no closure
+ * count; no payable type feeds one.
+ *
+ * @param totalCents - The bill's `totals.total_cents`
+ * @param settlements - Every settlement naming the bill, reversals included
+ */
+export function recomputePurchaseBillTotals(
+  totalCents: number,
+  settlements: readonly {
+    type: SettlementTypeType;
+    reason: SettlementReasonType;
+    amount_cents: number;
+  }[],
+): {
+  amount_paid_cents: number;
+  amount_credited_cents: number;
+  amount_void_cents: number;
+  amount_due_cents: number;
+  breakdown: Partial<Record<SettlementReasonType, number>>;
+} {
+  const { closure_count: _none, ...totals } = foldSettlements("purchase_bill", totalCents, settlements);
+  return totals;
+}
+
+/** A target as prose, for the fold's refusal message. */
+const TARGET_LABEL: Readonly<Record<SettlementTargetType, string>> = {
+  invoice: "an invoice",
+  credit_note: "a credit note",
+  purchase_bill: "a purchase bill",
+  purchase_credit: "a supplier credit",
+};
+
+/**
+ * The one settlement fold, for whichever document `target` names. Not exported:
+ * each caller is a named projection ({@link recomputeSettlementTotals},
+ * {@link recomputePurchaseBillTotals}) so a reader can never fold the wrong side
+ * by passing the wrong string.
+ */
+function foldSettlements(
+  target: "invoice" | "purchase_bill",
+  totalCents: number,
+  settlements: readonly {
+    type: SettlementTypeType;
+    reason: SettlementReasonType;
+    amount_cents: number;
+  }[],
+): {
+  amount_paid_cents: number;
+  amount_credited_cents: number;
+  amount_void_cents: number;
+  amount_due_cents: number;
+  closure_count: number;
+  breakdown: Partial<Record<SettlementReasonType, number>>;
+} {
   let paidCents = 0;
   let creditedCents = 0;
   let voidedCents = 0;
@@ -441,13 +508,15 @@ export function recomputeSettlementTotals(
   for (const s of settlements) {
     const multiplier = getSettlementMultiplier(s.type);
     const contract = SETTLEMENT_CONTRACTS[s.type];
-    // A credit-note row (`refund`) feeds no invoice total, and one reaching an
-    // invoice fold means the caller read settlements by something other than
-    // `uid_invoice`. Its `null` buckets would skip it silently below, so refuse
-    // here instead (api-cloudrun#1207).
-    if (contract.settles !== "invoice") {
+    // A row for another target (a `refund`'s credit note, a payable row in an
+    // invoice fold, a receivable in a bill fold) feeds none of these totals,
+    // and one reaching here means the caller read settlements by something
+    // other than the target's key. Its buckets would mis-route or skip it
+    // silently below, so refuse here instead (api-cloudrun#1207, #1210).
+    if (contract.settles !== target) {
       throw new Error(
-        `a "${s.type}" settles a credit note and cannot be folded into an invoice's totals`,
+        `a "${s.type}" settles ${TARGET_LABEL[contract.settles]} and cannot be folded ` +
+          `into ${TARGET_LABEL[target]}'s totals`,
       );
     }
     // A COUNT row folds its multiplier, never its (zero) amount — see
@@ -526,6 +595,35 @@ export function creditNoteRemainingFromJournal(
     const contract = SETTLEMENT_CONTRACTS[s.type];
     if (!contract) throw new Error(`unknown settlement type: ${s.type}`);
     if (!contract.draws_credit) continue;
+    drawnCents += s.amount_cents * getSettlementMultiplier(s.type);
+  }
+  return totalCents - drawnCents;
+}
+
+/**
+ * A supplier credit's unconsumed credit, folded from the journal
+ * (api-cloudrun#1210) — the payable twin of {@link creditNoteRemainingFromJournal}:
+ * `total − Σ signed draws` over every row with `draws_purchase_credit`
+ * (`bill_credit`, `supplier_refund` and their reversals). Because a supplier's
+ * cash refund is a `supplier_refund` row, `PurchaseCredit.remaining_credit_cents`
+ * is rebuildable from the journal from the first document — the AR note could
+ * not be until api-cloudrun#1207.
+ *
+ * Rows that do not draw a supplier credit are skipped, not refused, exactly as
+ * the AR twin skips. Negative results are preserved, never clamped.
+ *
+ * @param totalCents - The credit's `total_cents`
+ * @param settlements - Every settlement naming the credit, reversals included
+ */
+export function purchaseCreditRemainingFromJournal(
+  totalCents: number,
+  settlements: readonly { type: SettlementTypeType; amount_cents: number }[],
+): number {
+  let drawnCents = 0;
+  for (const s of settlements) {
+    const contract = SETTLEMENT_CONTRACTS[s.type];
+    if (!contract) throw new Error(`unknown settlement type: ${s.type}`);
+    if (!contract.draws_purchase_credit) continue;
     drawnCents += s.amount_cents * getSettlementMultiplier(s.type);
   }
   return totalCents - drawnCents;

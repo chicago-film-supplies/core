@@ -2,8 +2,9 @@
  * Settlement document schema — Firestore collection: `settlements`
  *
  * One settlement event against an invoice — or, for a `refund`, against a credit
- * note (api-cloudrun#1207; the contract's `settles` axis). **The revenue-side twin of the
- * `transactions` movement journal**: append-only, dated, reversible, and
+ * note (api-cloudrun#1207; the contract's `settles` axis) — or, on the PAYABLE
+ * side, against a supplier bill or supplier credit (api-cloudrun#1210).
+ * **The money-side twin of the `transactions` movement journal**: append-only, dated, reversible, and
  * type-blind by design — a cash payment and a credit-note allocation differ
  * only in `type` and `reason`.
  *
@@ -20,6 +21,18 @@
  * `linkSettlementToXero` (api-cloudrun `api-cloudrun/src/lib/settlements.ts`) writing
  * `xero_payment_id` null → value once — late-binding external linkage is not
  * part of the money fact.
+ *
+ * ## One journal, two sides, no stored side
+ *
+ * A receivable row names `uid_organization` and an `uid_invoice` or
+ * `uid_credit_note`; a payable row names `uid_supplier` and a `uid_purchase_bill`
+ * or `uid_purchase_credit`. Every target key is `null` on the other side, and the
+ * refine ties each to the type's `settles`, so **every existing equality query
+ * (`uid_invoice` / `uid_organization` / `uid_credit_note`) is blind to payable rows
+ * by construction**, and {@link isInvoiceSettlement} excludes them for free. Only
+ * a reader that SCANS the collection holds both sides, and it must narrow with
+ * {@link isReceivableSettlement} / {@link isPayableSettlement}. There is no
+ * `side` field: it would be a second source of truth for the key that is present.
  *
  * The invoice's `totals.{amount_paid, amount_credited, amount_due}` are a
  * **co-written projection** of this log, produced only by
@@ -38,6 +51,7 @@ import {
   FirestoreTimestamp,
   type FirestoreTimestampType,
   SETTLEMENT_CONTRACTS,
+  SETTLEMENT_TARGET_SIDE,
   SettlementReasonEnum,
   type SettlementReasonType,
   SettlementTypeEnum,
@@ -46,21 +60,36 @@ import {
 } from "./common.ts";
 
 /**
- * One settlement event against an invoice.
+ * One settlement event against an invoice, a customer credit note, a supplier
+ * bill or a supplier credit — the contract's `settles` says which.
  *
  * @see {@link SETTLEMENT_CONTRACTS} for which combinations are legal.
  */
 export interface Settlement {
   uid: string;
   /**
-   * The invoice this row settles, or `null` on a row that settles a credit note
-   * (`SETTLEMENT_CONTRACTS[type].settles === "credit_note"` — a `refund`). The
-   * refine makes the two agree, so a reader filtering by `uid_invoice` can never
-   * receive a refund, and a refund can never be folded into an invoice.
+   * The invoice this row settles, or `null` on a row that settles anything else
+   * (a `refund`'s credit note, or any payable row). The refine makes this and
+   * `SETTLEMENT_CONTRACTS[type].settles === "invoice"` agree, so a reader
+   * filtering by `uid_invoice` can never receive a refund or a payable, and
+   * neither can ever be folded into an invoice.
    */
   uid_invoice: string | null;
-  /** Denormalized so per-customer settlement reporting needs no join. */
-  uid_organization: string;
+  /**
+   * The customer, denormalized so per-customer settlement reporting needs no
+   * join. `null` exactly on a payable row, which names `uid_supplier` instead.
+   */
+  uid_organization: string | null;
+  /** The bill a payable row settles; `null` on every other row. */
+  uid_purchase_bill: string | null;
+  /**
+   * The supplier credit a payable row draws on (`bill_credit`) or settles
+   * (`supplier_refund`); `null` on every other row. The payable twin of
+   * `uid_credit_note`.
+   */
+  uid_purchase_credit: string | null;
+  /** The supplier, on a payable row; `null` exactly on a receivable row. */
+  uid_supplier: string | null;
 
   // ── what happened ─────────────────────────────────────────────────
   type: SettlementTypeType;
@@ -131,21 +160,68 @@ export interface Settlement {
 }
 
 /**
- * A settlement that settles an INVOICE — every type but `refund` and
+ * A RECEIVABLE settlement — one that settles an invoice or a customer credit
+ * note, and so names its customer. The refine makes `uid_organization !== null`
+ * and `SETTLEMENT_TARGET_SIDE[settles] === "receivable"` the same fact.
+ */
+export type ReceivableSettlement = Settlement & {
+  uid_organization: string;
+  uid_supplier: null;
+  uid_purchase_bill: null;
+  uid_purchase_credit: null;
+};
+
+/**
+ * A settlement that settles an INVOICE — every receivable type but `refund` and
  * `refund_reversal` (api-cloudrun#1207). The refine makes `uid_invoice !== null`
  * and `SETTLEMENT_CONTRACTS[type].settles === "invoice"` the same fact, so this
  * is the type a reader holds once it has filtered.
  */
-export type InvoiceSettlement = Settlement & { uid_invoice: string };
+export type InvoiceSettlement = ReceivableSettlement & { uid_invoice: string };
+
+/**
+ * A PAYABLE settlement — one that settles a supplier bill or supplier credit
+ * (api-cloudrun#1210), and so names its supplier.
+ */
+export type PayableSettlement = Settlement & {
+  uid_supplier: string;
+  uid_organization: null;
+  uid_invoice: null;
+  uid_credit_note: null;
+  number_credit_note: null;
+};
+
+/** A payable settlement that settles a supplier BILL — every payable type but the `supplier_refund` pair. */
+export type PurchaseBillSettlement = PayableSettlement & { uid_purchase_bill: string };
 
 /**
  * Narrow a settlement to {@link InvoiceSettlement}. A reader that queried by
  * `uid_invoice` already holds only these; a reader that scans the collection,
  * or reads by `uid_credit_note`, holds refunds too and MUST filter — a refund
- * folded into an invoice is money from nowhere.
+ * folded into an invoice is money from nowhere. A payable row has a `null`
+ * `uid_invoice`, so this excludes the whole payable side as well.
  */
 export function isInvoiceSettlement(s: Settlement): s is InvoiceSettlement {
   return s.uid_invoice !== null;
+}
+
+/**
+ * Narrow a settlement to {@link ReceivableSettlement}. A reader that scans the
+ * collection (an audit, a per-customer statement built from a full read) holds
+ * payable rows too and MUST filter before treating `uid_organization` as set.
+ */
+export function isReceivableSettlement(s: Settlement): s is ReceivableSettlement {
+  return s.uid_organization !== null;
+}
+
+/** Narrow a settlement to {@link PayableSettlement}. */
+export function isPayableSettlement(s: Settlement): s is PayableSettlement {
+  return s.uid_supplier !== null;
+}
+
+/** Narrow a settlement to {@link PurchaseBillSettlement}. */
+export function isPurchaseBillSettlement(s: Settlement): s is PurchaseBillSettlement {
+  return s.uid_purchase_bill !== null;
 }
 
 /**
@@ -207,31 +283,63 @@ function checkSettlementContract(s: Settlement, ctx: z.RefinementCtx): void {
     });
   }
 
-  // Which document the row settles (api-cloudrun#1207). An invoice row names its
-  // invoice; a credit-note row (`refund`) names no invoice and MUST name its
-  // note — it is the note's projection that the row moves.
-  if (contract.settles === "invoice" && s.uid_invoice === null) {
+  // Which document the row settles (api-cloudrun#1207, #1210). Each target has
+  // its own key, set exactly when the type settles that target — so a reader
+  // filtering by `uid_invoice` can never receive a refund or a payable row, and
+  // a reader filtering by `uid_purchase_bill` can never receive a receivable.
+  // `uid_credit_note` and `uid_purchase_credit` are also the DRAWN instrument on
+  // a `credit` / `bill_credit` row, so their "must be null" half is the
+  // `draws_*` checks below rather than this one.
+  const settles = contract.settles;
+  if ((settles === "invoice") !== (s.uid_invoice !== null)) {
     ctx.addIssue({
       code: "custom",
       path: ["uid_invoice"],
-      message: `a "${s.type}" settles an invoice and must name it in uid_invoice`,
+      message: settles === "invoice"
+        ? `a "${s.type}" settles an invoice and must name it in uid_invoice`
+        : `a "${s.type}" settles a ${settles.replace("_", " ")}, not an invoice; uid_invoice must be null`,
     });
   }
-  if (contract.settles === "credit_note") {
-    if (s.uid_invoice !== null) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["uid_invoice"],
-        message: `a "${s.type}" settles a credit note, not an invoice; uid_invoice must be null`,
-      });
-    }
-    if (s.uid_credit_note === null) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["uid_credit_note"],
-        message: `a "${s.type}" settles a credit note and must name it in uid_credit_note`,
-      });
-    }
+  if ((settles === "purchase_bill") !== (s.uid_purchase_bill !== null)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_purchase_bill"],
+      message: settles === "purchase_bill"
+        ? `a "${s.type}" settles a supplier bill and must name it in uid_purchase_bill`
+        : `a "${s.type}" does not settle a supplier bill; uid_purchase_bill must be null`,
+    });
+  }
+  if (settles === "credit_note" && s.uid_credit_note === null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_credit_note"],
+      message: `a "${s.type}" settles a credit note and must name it in uid_credit_note`,
+    });
+  }
+  // A `"purchase_credit"` row's key is required by the `draws_purchase_credit`
+  // check below — every type settling a supplier credit also draws on it.
+
+  // Which party the row names. A receivable names its customer and no supplier;
+  // a payable the reverse. Both directions are checked, so a row can never carry
+  // both — which is what keeps the per-customer and per-supplier queries disjoint.
+  const payable = SETTLEMENT_TARGET_SIDE[settles] === "payable";
+  if (payable !== (s.uid_supplier !== null)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_supplier"],
+      message: payable
+        ? `a "${s.type}" is a payable and must name its supplier in uid_supplier`
+        : `a "${s.type}" is a receivable; uid_supplier must be null`,
+    });
+  }
+  if (payable === (s.uid_organization !== null)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_organization"],
+      message: payable
+        ? `a "${s.type}" is a payable; uid_organization must be null`
+        : `a "${s.type}" is a receivable and must name its customer in uid_organization`,
+    });
   }
 
   // Only a row that draws on a note's credit may name a credit note.
@@ -256,6 +364,22 @@ function checkSettlementContract(s: Settlement, ctx: z.RefinementCtx): void {
       }
     }
   }
+  // The payable twin. A `bill_credit` names the supplier credit it draws, and a
+  // `supplier_refund` the one it settles; nothing else may name one.
+  if (!contract.draws_purchase_credit && s.uid_purchase_credit !== null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_purchase_credit"],
+      message: `a "${s.type}" does not draw on a supplier credit and cannot reference one`,
+    });
+  }
+  if (contract.draws_purchase_credit && s.uid_purchase_credit === null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_purchase_credit"],
+      message: `a "${s.type}" draws on a supplier credit and must name it in uid_purchase_credit`,
+    });
+  }
 }
 
 /** Zod schema for a Settlement. */
@@ -265,7 +389,10 @@ export const SettlementSchema: z.ZodType<Settlement> = z.strictObject({
   // its ID is a Firestore auto-ID.
   uid: FirestoreId,
   uid_invoice: FirestoreId.nullable(),
-  uid_organization: FirestoreId,
+  uid_organization: FirestoreId.nullable(),
+  uid_purchase_bill: FirestoreId.nullable(),
+  uid_purchase_credit: FirestoreId.nullable(),
+  uid_supplier: FirestoreId.nullable(),
   type: SettlementTypeEnum.meta({ column: true, label: "Type" }),
   reason: SettlementReasonEnum.meta({ column: true, label: "Reason" }),
   amount_cents: z.int().nonnegative().meta({ column: true, label: "Amount" }),

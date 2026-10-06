@@ -2457,8 +2457,8 @@
         {
           "kind": "typeAlias",
           "name": "InvoiceSettlement",
-          "declaration": "type InvoiceSettlement = Settlement & typeLiteral;",
-          "doc": "A settlement that settles an INVOICE — every type but `refund` and\n`refund_reversal` (api-cloudrun#1207). The refine makes `uid_invoice !== null`\nand `SETTLEMENT_CONTRACTS[type].settles === \"invoice\"` the same fact, so this\nis the type a reader holds once it has filtered."
+          "declaration": "type InvoiceSettlement = ReceivableSettlement & typeLiteral;",
+          "doc": "A settlement that settles an INVOICE — every receivable type but `refund` and\n`refund_reversal` (api-cloudrun#1207). The refine makes `uid_invoice !== null`\nand `SETTLEMENT_CONTRACTS[type].settles === \"invoice\"` the same fact, so this\nis the type a reader holds once it has filtered."
         },
         {
           "kind": "interface",
@@ -3532,7 +3532,7 @@
           "kind": "variable",
           "name": "PURCHASE_CREDIT_REASONS",
           "declaration": "const PURCHASE_CREDIT_REASONS: \"short_close\" | \"supplier_adjustment\" | \"correction\"[];",
-          "doc": "Why a supplier credited CFS. Closed, like `SETTLEMENT_REASONS`, and for the\nsame reason: it becomes a ledger code.\n\n⚠️ **A separate vocabulary from `SETTLEMENT_REASONS` for now**, and the\nsettlements half of api-cloudrun#1210 is where they meet: an AP allocation\nrow carries its credit's reason, so these members join that enum there, and\nthis list becomes a subset of it the way `CREDIT_NOTE_REASONS` is."
+          "doc": "Why a supplier credited CFS. Closed, like `SETTLEMENT_REASONS`, and for the\nsame reason: it becomes a ledger code.\n\n**A subset of `SETTLEMENT_REASONS`, equal to `SETTLEMENT_CONTRACTS.bill_credit.reasons`**\n— a `bill_credit` allocation row carries its credit's reason, as an AR `credit`\nrow does (`CREDIT_NOTE_REASONS`). Kept as its own `as const` tuple rather than\nderived from the contract so `PurchaseCredit.reason` stays a narrow `z.enum`;\nthe subset is a compile-time check below and the equality is asserted by\n`tests/settlements.test.ts`."
         },
         {
           "kind": "variable",
@@ -3575,6 +3575,12 @@
           "name": "PatchNameParts",
           "declaration": "interface PatchNameParts {\n  first_name?: string;\n  middle_name?: string | null;\n  last_name?: string | null;\n  pronunciation?: string | null;\n}",
           "doc": "All-optional variant of `NameParts` **with a clear verb** — use for a PUT\nbody whose client can unset a name part.\n\n## Four contracts, four names\n\nA fourth near-identical block is only defensible if each one's reason is\nwritten down beside it, so:\n\n| block | shape | who spreads it, and why |\n|---|---|---|\n| {@link NameParts} / `NamePartsFields` | **STORED** — key required, `string \\| null` | every stored surface. Absence is the state that yields `undefined` and breaks unrelated writers (core#83) |\n| {@link NamePartsInput} / `NamePartsFieldsInput` | **CREATE INPUT** — `?: string \\| null` | `CreateContactInput`, `CreateUserInput`, `CreateInviteInput`, `NewContactInput`, `DestinationContact`, `RegisterInput`. A client with no middle name has no reason to send the key; the writer normalizes `?? null` |\n| {@link PartialNameParts} / `NamePartsFieldsPartial` | **PATCH, no clear verb** — `?: string` | `UpdateUserInput`, `AcceptInviteInput` |\n| **this** / `NamePartsFieldsPatch` | **PATCH with a clear verb** — `?: string \\| null` | `UpdateContactInput` |\n\n🔴 **`first_name` gets no null arm in any of the four.** It is `min(1)` and\nrequired on every document spreading `NamePartsFields`, so a `null` there\nwould type-check its way to a write that cannot validate.\n\n🔴 **Why this is a new block rather than a widening of\n{@link PartialNameParts}** — the widening was measured (core#70) and does\nclear three `TS2322`s, but `AcceptInviteInput` also spreads that block, and\n`api-cloudrun/src/routes/invites.ts` merges the accept body with\n`body.middle_name ?? invite.middle_name`. `null ?? x` yields `x`, so an\ninvitee who cleared their middle name would silently inherit **the\ninviter's** — and it type-checks. Accept-invite is create-shaped, not\npatch-shaped. A separate block means that hazard never opens, and\n`UpdateUserInput` — which has no client that clears a part — is not moved for\nnothing."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PayableSettlement",
+          "declaration": "type PayableSettlement = Settlement & typeLiteral;",
+          "doc": "A PAYABLE settlement — one that settles a supplier bill or supplier credit\n(api-cloudrun#1210), and so names its supplier."
         },
         {
           "kind": "typeAlias",
@@ -3889,6 +3895,12 @@
           "doc": "Zod schema for PurchaseBill."
         },
         {
+          "kind": "typeAlias",
+          "name": "PurchaseBillSettlement",
+          "declaration": "type PurchaseBillSettlement = PayableSettlement & typeLiteral;",
+          "doc": "A payable settlement that settles a supplier BILL — every payable type but the `supplier_refund` pair."
+        },
+        {
           "kind": "interface",
           "name": "PurchaseBillTotals",
           "declaration": "interface PurchaseBillTotals {\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents: number;\n  amount_void_cents: number;\n  amount_due_cents: number;\n}",
@@ -4115,6 +4127,12 @@
           "name": "ReactionActionType",
           "declaration": "type ReactionActionType = indexedAccess;",
           "doc": "Allowed reaction actions."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ReceivableSettlement",
+          "declaration": "type ReceivableSettlement = Settlement & typeLiteral;",
+          "doc": "A RECEIVABLE settlement — one that settles an invoice or a customer credit\nnote, and so names its customer. The refine makes `uid_organization !== null`\nand `SETTLEMENT_TARGET_SIDE[settles] === \"receivable\"` the same fact."
         },
         {
           "kind": "variable",
@@ -4394,6 +4412,18 @@
         },
         {
           "kind": "variable",
+          "name": "SETTLEMENT_TARGETS",
+          "declaration": "const SETTLEMENT_TARGETS: \"invoice\" | \"credit_note\" | \"purchase_bill\" | \"purchase_credit\"[];",
+          "doc": "The documents a settlement can settle: two RECEIVABLE (`invoice`,\n`credit_note`) and two PAYABLE (`purchase_bill`, `purchase_credit`). Each names\nits own key on the row — `uid_invoice`, `uid_credit_note`, `uid_purchase_bill`,\n`uid_purchase_credit` — so the side is derivable from the key present and never\nstored. @see {@link SettlementContract.settles}"
+        },
+        {
+          "kind": "variable",
+          "name": "SETTLEMENT_TARGET_SIDE",
+          "declaration": "const SETTLEMENT_TARGET_SIDE: Readonly<Record<SettlementTargetType, \"receivable\" | \"payable\">>;",
+          "doc": "Which side of the ledger a target sits on. A receivable row names\n`uid_organization` (the customer); a payable row names `uid_supplier`. The\nsettlement refine reads this to decide which party key the row must carry."
+        },
+        {
+          "kind": "variable",
           "name": "STATEMENT_FORMATS",
           "declaration": "const STATEMENT_FORMATS: \"open_item\" | \"balance_forward\"[];",
           "doc": "How a statement presents the account.\n\n🔴 **Storage is OPEN-ITEM; balance-forward is a RENDERING.** Both formats read\nthe same lines — the difference is whether the document leads with an opening\nbalance and a running column, or lists the outstanding items. A `param` on one\ntemplate family, never two families.\n\n⚠️ **The balance-forward presentation must not imply a posting policy.**\nHistorically it implies FIFO application — Oracle's wording is that payments\n*\"are not matched to bills… implicitly relieve a customer's oldest debt\"* — and\nCFS does not work that way: every settlement names its `uid_invoice`\nexplicitly. {@link StatementLine.balance_cents} is therefore arithmetic over\ndated events and nothing more. A template must not caption it as an\napplication order."
@@ -4467,13 +4497,13 @@
         {
           "kind": "interface",
           "name": "Settlement",
-          "declaration": "interface Settlement {\n  uid: string;\n  uid_invoice: string | null;\n  uid_organization: string;\n  type: SettlementTypeType;\n  reason: SettlementReasonType;\n  amount_cents: number;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  uuid_session: string;\n  reverses: string | null;\n  uid_credit_note: string | null;\n  number_credit_note: string | null;\n  xero_payment_id: string | null;\n  xero_credit_note_id: string | null;\n  synced_at: FirestoreTimestampType | null;\n  legacy_payment_uid: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
-          "doc": "One settlement event against an invoice."
+          "declaration": "interface Settlement {\n  uid: string;\n  uid_invoice: string | null;\n  uid_organization: string | null;\n  uid_purchase_bill: string | null;\n  uid_purchase_credit: string | null;\n  uid_supplier: string | null;\n  type: SettlementTypeType;\n  reason: SettlementReasonType;\n  amount_cents: number;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  uuid_session: string;\n  reverses: string | null;\n  uid_credit_note: string | null;\n  number_credit_note: string | null;\n  xero_payment_id: string | null;\n  xero_credit_note_id: string | null;\n  synced_at: FirestoreTimestampType | null;\n  legacy_payment_uid: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "One settlement event against an invoice, a customer credit note, a supplier\nbill or a supplier credit — the contract's `settles` says which."
         },
         {
           "kind": "interface",
           "name": "SettlementContract",
-          "declaration": "interface SettlementContract {\n  reasons: readonly SettlementReasonType[];\n  settles: \"invoice\" | \"credit_note\";\n  draws_credit: boolean;\n  xero_id_field: \"xero_payment_id\" | \"xero_credit_note_id\" | null;\n  sums_into: \"amount_paid_cents\" | \"amount_credited_cents\" | \"amount_void_cents\" | null;\n  counts_into: \"closure_count\" | null;\n  reverses: \"required\" | \"forbidden\";\n}",
+          "declaration": "interface SettlementContract {\n  reasons: readonly SettlementReasonType[];\n  settles: SettlementTargetType;\n  draws_credit: boolean;\n  draws_purchase_credit: boolean;\n  xero_id_field: \"xero_payment_id\" | \"xero_credit_note_id\" | null;\n  sums_into: \"amount_paid_cents\" | \"amount_credited_cents\" | \"amount_void_cents\" | null;\n  counts_into: \"closure_count\" | null;\n  reverses: \"required\" | \"forbidden\";\n}",
           "doc": "How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}"
         },
         {
@@ -4493,6 +4523,12 @@
           "name": "SettlementSchema",
           "declaration": "const SettlementSchema: z.ZodType<Settlement>;",
           "doc": "Zod schema for a Settlement."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SettlementTargetType",
+          "declaration": "type SettlementTargetType = indexedAccess;",
+          "doc": "One {@link SETTLEMENT_TARGETS} member."
         },
         {
           "kind": "variable",
@@ -6341,7 +6377,7 @@
           "kind": "function",
           "name": "isInvoiceSettlement",
           "signature": "isInvoiceSettlement(s: Settlement): s is InvoiceSettlement",
-          "doc": "Narrow a settlement to {@link InvoiceSettlement}. A reader that queried by\n`uid_invoice` already holds only these; a reader that scans the collection,\nor reads by `uid_credit_note`, holds refunds too and MUST filter — a refund\nfolded into an invoice is money from nowhere.",
+          "doc": "Narrow a settlement to {@link InvoiceSettlement}. A reader that queried by\n`uid_invoice` already holds only these; a reader that scans the collection,\nor reads by `uid_credit_note`, holds refunds too and MUST filter — a refund\nfolded into an invoice is money from nowhere. A payable row has a `null`\n`uid_invoice`, so this excludes the whole payable side as well.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -6371,9 +6407,33 @@
         },
         {
           "kind": "function",
+          "name": "isPayableSettlement",
+          "signature": "isPayableSettlement(s: Settlement): s is PayableSettlement",
+          "doc": "Narrow a settlement to {@link PayableSettlement}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isProductShapedUid",
           "signature": "isProductShapedUid(uid: string): boolean",
           "doc": "Whether an `ItemUid`-shaped `path` segment names a PRODUCT (including a\ncustom product) rather than a structural (destination/group) divider — see\nthe \"`BookingId`'s 4th segment\" section above. A bare `z.uuid()` is always a\ndivider; a `FirestoreId` or a `custom-`-prefixed uid is always a product,\nand the two are distinguishable by this one check because a `FirestoreId`\nnever contains a `-`. This is `core/src/utils/booking-id.ts`'s\n`componentAncestry` filter, exported from the grammar it reads rather than\nfrom the booking-specific module that consumes it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isPurchaseBillSettlement",
+          "signature": "isPurchaseBillSettlement(s: Settlement): s is PurchaseBillSettlement",
+          "doc": "Narrow a settlement to {@link PurchaseBillSettlement}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isReceivableSettlement",
+          "signature": "isReceivableSettlement(s: Settlement): s is ReceivableSettlement",
+          "doc": "Narrow a settlement to {@link ReceivableSettlement}. A reader that scans the\ncollection (an audit, a per-customer statement built from a full read) holds\npayable rows too and MUST filter before treating `uid_organization` as set.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -7263,6 +7323,18 @@
           "doc": "The per-type settlement contract, one entry per {@link SETTLEMENT_TYPES}\nmember — a table the schema reads, so a contradiction is reported by the\nschema instead of restated in every consumer.\n\n`sums_into` is load-bearing rather than documentation: `recomputeSettlementTotals`\ntakes its settlement argument structurally, so without a declared target a\ncredit row would be silently summed into `amount_paid`. Reading the target\nfrom the table removes that class entirely.\n\nA reversal carries **no** external id. The reap appends a reverser because\nXero stopped reporting a payment — the reverser is a CFS event with no Xero\ncounterpart, and the id it retracts is still on the row `reverses` names."
         },
         {
+          "kind": "variable",
+          "name": "SETTLEMENT_TARGETS",
+          "declaration": "const SETTLEMENT_TARGETS: \"invoice\" | \"credit_note\" | \"purchase_bill\" | \"purchase_credit\"[];",
+          "doc": "The documents a settlement can settle: two RECEIVABLE (`invoice`,\n`credit_note`) and two PAYABLE (`purchase_bill`, `purchase_credit`). Each names\nits own key on the row — `uid_invoice`, `uid_credit_note`, `uid_purchase_bill`,\n`uid_purchase_credit` — so the side is derivable from the key present and never\nstored. @see {@link SettlementContract.settles}"
+        },
+        {
+          "kind": "variable",
+          "name": "SETTLEMENT_TARGET_SIDE",
+          "declaration": "const SETTLEMENT_TARGET_SIDE: Readonly<Record<SettlementTargetType, \"receivable\" | \"payable\">>;",
+          "doc": "Which side of the ledger a target sits on. A receivable row names\n`uid_organization` (the customer); a payable row names `uid_supplier`. The\nsettlement refine reads this to decide which party key the row must carry."
+        },
+        {
           "kind": "typeAlias",
           "name": "SeededRoleName",
           "declaration": "type SeededRoleName = indexedAccess;",
@@ -7271,7 +7343,7 @@
         {
           "kind": "interface",
           "name": "SettlementContract",
-          "declaration": "interface SettlementContract {\n  reasons: readonly SettlementReasonType[];\n  settles: \"invoice\" | \"credit_note\";\n  draws_credit: boolean;\n  xero_id_field: \"xero_payment_id\" | \"xero_credit_note_id\" | null;\n  sums_into: \"amount_paid_cents\" | \"amount_credited_cents\" | \"amount_void_cents\" | null;\n  counts_into: \"closure_count\" | null;\n  reverses: \"required\" | \"forbidden\";\n}",
+          "declaration": "interface SettlementContract {\n  reasons: readonly SettlementReasonType[];\n  settles: SettlementTargetType;\n  draws_credit: boolean;\n  draws_purchase_credit: boolean;\n  xero_id_field: \"xero_payment_id\" | \"xero_credit_note_id\" | null;\n  sums_into: \"amount_paid_cents\" | \"amount_credited_cents\" | \"amount_void_cents\" | null;\n  counts_into: \"closure_count\" | null;\n  reverses: \"required\" | \"forbidden\";\n}",
           "doc": "How one settlement type may be filled. @see {@link SETTLEMENT_CONTRACTS}"
         },
         {
@@ -7285,6 +7357,12 @@
           "name": "SettlementReasonType",
           "declaration": "type SettlementReasonType = indexedAccess;",
           "doc": "Why a settlement happened. @see {@link SETTLEMENT_CONTRACTS}"
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SettlementTargetType",
+          "declaration": "type SettlementTargetType = indexedAccess;",
+          "doc": "One {@link SETTLEMENT_TARGETS} member."
         },
         {
           "kind": "variable",
@@ -10089,7 +10167,7 @@
           "kind": "variable",
           "name": "PURCHASE_CREDIT_REASONS",
           "declaration": "const PURCHASE_CREDIT_REASONS: \"short_close\" | \"supplier_adjustment\" | \"correction\"[];",
-          "doc": "Why a supplier credited CFS. Closed, like `SETTLEMENT_REASONS`, and for the\nsame reason: it becomes a ledger code.\n\n⚠️ **A separate vocabulary from `SETTLEMENT_REASONS` for now**, and the\nsettlements half of api-cloudrun#1210 is where they meet: an AP allocation\nrow carries its credit's reason, so these members join that enum there, and\nthis list becomes a subset of it the way `CREDIT_NOTE_REASONS` is."
+          "doc": "Why a supplier credited CFS. Closed, like `SETTLEMENT_REASONS`, and for the\nsame reason: it becomes a ledger code.\n\n**A subset of `SETTLEMENT_REASONS`, equal to `SETTLEMENT_CONTRACTS.bill_credit.reasons`**\n— a `bill_credit` allocation row carries its credit's reason, as an AR `credit`\nrow does (`CREDIT_NOTE_REASONS`). Kept as its own `as const` tuple rather than\nderived from the contract so `PurchaseCredit.reason` stays a narrow `z.enum`;\nthe subset is a compile-time check below and the equality is asserted by\n`tests/settlements.test.ts`."
         },
         {
           "kind": "variable",
@@ -10433,19 +10511,37 @@
     },
     {
       "entrypoint": "@cfs/core/schemas/settlement",
-      "moduleDoc": "Settlement document schema — Firestore collection: `settlements`\n\nOne settlement event against an invoice — or, for a `refund`, against a credit\nnote (api-cloudrun#1207; the contract's `settles` axis). **The revenue-side twin of the\n`transactions` movement journal**: append-only, dated, reversible, and\ntype-blind by design — a cash payment and a credit-note allocation differ\nonly in `type` and `reason`.\n\nCFS puts event journals in collections and value-detail in arrays. `items[]`\nis detail; movements are events; a settlement is an event. `schemas/transaction.ts`\ndraws the boundary from the other side — *\"cost is cost only, never revenue —\ncustomer-facing money lives in Xero\"* — so the shape is the model and revenue\nis exactly what it excludes. This is that missing half.\n\n**APPEND-ONLY.** Nothing is edited or deleted; a correction is a NEW document\ncarrying `reverses`. There is deliberately no `status` field, for the same\nreason `Movement` has none: a status flag *and* a reverser link is two sources\nof truth. The one permitted mutation in the whole design is\n`linkSettlementToXero` (api-cloudrun `api-cloudrun/src/lib/settlements.ts`) writing\n`xero_payment_id` null → value once — late-binding external linkage is not\npart of the money fact.\n\nThe invoice's `totals.{amount_paid, amount_credited, amount_due}` are a\n**co-written projection** of this log, produced only by\n`recomputeSettlementTotals` and rebuildable from it. That is CFS v2's shape —\nan event log plus a client-ready projection for snapshot listeners — arriving\nearly in one domain, and it is `transactions` + `stock` for money.",
+      "moduleDoc": "Settlement document schema — Firestore collection: `settlements`\n\nOne settlement event against an invoice — or, for a `refund`, against a credit\nnote (api-cloudrun#1207; the contract's `settles` axis) — or, on the PAYABLE\nside, against a supplier bill or supplier credit (api-cloudrun#1210).\n**The money-side twin of the `transactions` movement journal**: append-only, dated, reversible, and\ntype-blind by design — a cash payment and a credit-note allocation differ\nonly in `type` and `reason`.\n\nCFS puts event journals in collections and value-detail in arrays. `items[]`\nis detail; movements are events; a settlement is an event. `schemas/transaction.ts`\ndraws the boundary from the other side — *\"cost is cost only, never revenue —\ncustomer-facing money lives in Xero\"* — so the shape is the model and revenue\nis exactly what it excludes. This is that missing half.\n\n**APPEND-ONLY.** Nothing is edited or deleted; a correction is a NEW document\ncarrying `reverses`. There is deliberately no `status` field, for the same\nreason `Movement` has none: a status flag *and* a reverser link is two sources\nof truth. The one permitted mutation in the whole design is\n`linkSettlementToXero` (api-cloudrun `api-cloudrun/src/lib/settlements.ts`) writing\n`xero_payment_id` null → value once — late-binding external linkage is not\npart of the money fact.\n\n## One journal, two sides, no stored side\n\nA receivable row names `uid_organization` and an `uid_invoice` or\n`uid_credit_note`; a payable row names `uid_supplier` and a `uid_purchase_bill`\nor `uid_purchase_credit`. Every target key is `null` on the other side, and the\nrefine ties each to the type's `settles`, so **every existing equality query\n(`uid_invoice` / `uid_organization` / `uid_credit_note`) is blind to payable rows\nby construction**, and {@link isInvoiceSettlement} excludes them for free. Only\na reader that SCANS the collection holds both sides, and it must narrow with\n{@link isReceivableSettlement} / {@link isPayableSettlement}. There is no\n`side` field: it would be a second source of truth for the key that is present.\n\nThe invoice's `totals.{amount_paid, amount_credited, amount_due}` are a\n**co-written projection** of this log, produced only by\n`recomputeSettlementTotals` and rebuildable from it. That is CFS v2's shape —\nan event log plus a client-ready projection for snapshot listeners — arriving\nearly in one domain, and it is `transactions` + `stock` for money.",
       "symbols": [
         {
           "kind": "typeAlias",
           "name": "InvoiceSettlement",
-          "declaration": "type InvoiceSettlement = Settlement & typeLiteral;",
-          "doc": "A settlement that settles an INVOICE — every type but `refund` and\n`refund_reversal` (api-cloudrun#1207). The refine makes `uid_invoice !== null`\nand `SETTLEMENT_CONTRACTS[type].settles === \"invoice\"` the same fact, so this\nis the type a reader holds once it has filtered."
+          "declaration": "type InvoiceSettlement = ReceivableSettlement & typeLiteral;",
+          "doc": "A settlement that settles an INVOICE — every receivable type but `refund` and\n`refund_reversal` (api-cloudrun#1207). The refine makes `uid_invoice !== null`\nand `SETTLEMENT_CONTRACTS[type].settles === \"invoice\"` the same fact, so this\nis the type a reader holds once it has filtered."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PayableSettlement",
+          "declaration": "type PayableSettlement = Settlement & typeLiteral;",
+          "doc": "A PAYABLE settlement — one that settles a supplier bill or supplier credit\n(api-cloudrun#1210), and so names its supplier."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseBillSettlement",
+          "declaration": "type PurchaseBillSettlement = PayableSettlement & typeLiteral;",
+          "doc": "A payable settlement that settles a supplier BILL — every payable type but the `supplier_refund` pair."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ReceivableSettlement",
+          "declaration": "type ReceivableSettlement = Settlement & typeLiteral;",
+          "doc": "A RECEIVABLE settlement — one that settles an invoice or a customer credit\nnote, and so names its customer. The refine makes `uid_organization !== null`\nand `SETTLEMENT_TARGET_SIDE[settles] === \"receivable\"` the same fact."
         },
         {
           "kind": "interface",
           "name": "Settlement",
-          "declaration": "interface Settlement {\n  uid: string;\n  uid_invoice: string | null;\n  uid_organization: string;\n  type: SettlementTypeType;\n  reason: SettlementReasonType;\n  amount_cents: number;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  uuid_session: string;\n  reverses: string | null;\n  uid_credit_note: string | null;\n  number_credit_note: string | null;\n  xero_payment_id: string | null;\n  xero_credit_note_id: string | null;\n  synced_at: FirestoreTimestampType | null;\n  legacy_payment_uid: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
-          "doc": "One settlement event against an invoice."
+          "declaration": "interface Settlement {\n  uid: string;\n  uid_invoice: string | null;\n  uid_organization: string | null;\n  uid_purchase_bill: string | null;\n  uid_purchase_credit: string | null;\n  uid_supplier: string | null;\n  type: SettlementTypeType;\n  reason: SettlementReasonType;\n  amount_cents: number;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  uuid_session: string;\n  reverses: string | null;\n  uid_credit_note: string | null;\n  number_credit_note: string | null;\n  xero_payment_id: string | null;\n  xero_credit_note_id: string | null;\n  synced_at: FirestoreTimestampType | null;\n  legacy_payment_uid: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "One settlement event against an invoice, a customer credit note, a supplier\nbill or a supplier credit — the contract's `settles` says which."
         },
         {
           "kind": "variable",
@@ -10457,7 +10553,31 @@
           "kind": "function",
           "name": "isInvoiceSettlement",
           "signature": "isInvoiceSettlement(s: Settlement): s is InvoiceSettlement",
-          "doc": "Narrow a settlement to {@link InvoiceSettlement}. A reader that queried by\n`uid_invoice` already holds only these; a reader that scans the collection,\nor reads by `uid_credit_note`, holds refunds too and MUST filter — a refund\nfolded into an invoice is money from nowhere.",
+          "doc": "Narrow a settlement to {@link InvoiceSettlement}. A reader that queried by\n`uid_invoice` already holds only these; a reader that scans the collection,\nor reads by `uid_credit_note`, holds refunds too and MUST filter — a refund\nfolded into an invoice is money from nowhere. A payable row has a `null`\n`uid_invoice`, so this excludes the whole payable side as well.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isPayableSettlement",
+          "signature": "isPayableSettlement(s: Settlement): s is PayableSettlement",
+          "doc": "Narrow a settlement to {@link PayableSettlement}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isPurchaseBillSettlement",
+          "signature": "isPurchaseBillSettlement(s: Settlement): s is PurchaseBillSettlement",
+          "doc": "Narrow a settlement to {@link PurchaseBillSettlement}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isReceivableSettlement",
+          "signature": "isReceivableSettlement(s: Settlement): s is ReceivableSettlement",
+          "doc": "Narrow a settlement to {@link ReceivableSettlement}. A reader that scans the\ncollection (an audit, a per-customer statement built from a full read) holds\npayable rows too and MUST filter before treating `uid_organization` as set.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -15313,6 +15433,40 @@
         },
         {
           "kind": "function",
+          "name": "purchaseCreditRemainingFromJournal",
+          "signature": "purchaseCreditRemainingFromJournal(totalCents: number, settlements: readonly typeLiteral[]): number",
+          "doc": "A supplier credit's unconsumed credit, folded from the journal\n(api-cloudrun#1210) — the payable twin of {@link creditNoteRemainingFromJournal}:\n`total − Σ signed draws` over every row with `draws_purchase_credit`\n(`bill_credit`, `supplier_refund` and their reversals). Because a supplier's\ncash refund is a `supplier_refund` row, `PurchaseCredit.remaining_credit_cents`\nis rebuildable from the journal from the first document — the AR note could\nnot be until api-cloudrun#1207.\n\nRows that do not draw a supplier credit are skipped, not refused, exactly as\nthe AR twin skips. Negative results are preserved, never clamped.",
+          "paramTags": [
+            {
+              "name": "totalCents",
+              "doc": "The credit's `total_cents`"
+            },
+            {
+              "name": "settlements",
+              "doc": "Every settlement naming the credit, reversals included"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "recomputePurchaseBillTotals",
+          "signature": "recomputePurchaseBillTotals(totalCents: number, settlements: readonly typeLiteral[]): typeLiteral",
+          "doc": "A supplier bill's settlement projection (api-cloudrun#1210) — the payable twin\nof {@link recomputeSettlementTotals}, and the same fold: a straight signed sum\nover every row, three cents buckets dispatched on `sums_into`, negatives\npreserved. `PurchaseBill.totals` uses the invoice's storage keys exactly, which\nis what lets one fold serve both.\n\n⚠️ **Refuses any row that does not settle a `purchase_bill`** — a receivable\nrow, or a `supplier_refund` — rather than skipping it, for the reason the\ninvoice fold refuses a refund: such a row reaching here means the caller read\nsettlements by something other than `uid_purchase_bill`. There is no closure\ncount; no payable type feeds one.",
+          "paramTags": [
+            {
+              "name": "totalCents",
+              "doc": "The bill's `totals.total_cents`"
+            },
+            {
+              "name": "settlements",
+              "doc": "Every settlement naming the bill, reversals included"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "recomputeSettlementTotals",
           "signature": "recomputeSettlementTotals(totalCents: number, settlements: readonly typeLiteral[]): typeLiteral",
           "doc": "Turn the settlements journal into the invoice's stored totals.\n\n**This is the one function that produces `amount_paid_cents`,\n`amount_credited_cents` and `amount_due_cents`.** It runs inside the api's\nco-write transaction and again in manager's optimistic recompute, so the two\ncannot disagree — the property `computeAvailability` already provides for\nstock.\n\nIt used to be \"the one place the cents↔dollars boundary is crossed\": the\njournal has always stored minor units while the invoice's `total` was\ndollars, so this fold converted at the end. With `total_cents` the two sides\nare the same unit and the boundary is gone — the function is now integer in,\ninteger out, with nothing to convert and nothing to round.\n\n**A straight signed fold over EVERY row, with no filtering.** A reversal is\nsimply a settlement whose contract multiplier is −1, so a do/undo pair nets to\nzero arithmetically rather than by being excluded, and an invoice's\nsettlements can do and undo each other perpetually with the totals correct\nafter every single append. That deletes the liveness derivation entirely —\nalong with the `R2 → R1 → S1` chain that silently vanished money when the\ntrichotomy got it wrong, which under the fold is just `+500 −500 +500 = +500`,\ncorrect at every step. `reverses` is provenance for the UI and for audit; it\ncontributes nothing to the sum.\n\nInteger sums are exact by construction — nothing to round, no ordering to get\nwrong — which is the whole reason the journal stores minor units.\n`Number.MAX_SAFE_INTEGER` is ~$90 trillion in cents, so plain integers are\nsafe here without BigInt.\n\n**Negative results are preserved, never clamped.** An over-credited invoice\nmust stay negative, exactly as availability preserves an oversold product's\nnegative. Clamping hides the defect this exists to find.\n\n**THREE buckets, dispatched on `sums_into` with no fallthrough arm.** It was\ntwo — `if (… === \"amount_paid_cents\") paid += …; else credited += …` — and\nthat `else` is precisely what made `void` a schema change with a silent\nruntime hazard: a void row would have landed in `amount_credited_cents`, the\nidentity would still have balanced, and every consumer would have reported a\nvoided invoice as fully credited. A `switch` with a `default` that throws\nturns the next bucket into a loud failure at the one site that must know\nabout it, instead of a quiet mis-route at every site that reads the result.",
@@ -18056,6 +18210,40 @@
           "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"lines\">): PurchaseStatusType",
           "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every line is canceled in full: nothing received, nothing\n  left billed. A cancel is a close with nothing received.\n- `complete` when every line is RESOLVED on BOTH axes: each unit either\n  received or canceled, and billed for exactly what was not canceled. Payment\n  is the bill's business and does not hold a purchase open.\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.\n\nLives in the schema module, not in `utils/`, because the document refine\ncalls it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "purchaseCreditRemainingFromJournal",
+          "signature": "purchaseCreditRemainingFromJournal(totalCents: number, settlements: readonly typeLiteral[]): number",
+          "doc": "A supplier credit's unconsumed credit, folded from the journal\n(api-cloudrun#1210) — the payable twin of {@link creditNoteRemainingFromJournal}:\n`total − Σ signed draws` over every row with `draws_purchase_credit`\n(`bill_credit`, `supplier_refund` and their reversals). Because a supplier's\ncash refund is a `supplier_refund` row, `PurchaseCredit.remaining_credit_cents`\nis rebuildable from the journal from the first document — the AR note could\nnot be until api-cloudrun#1207.\n\nRows that do not draw a supplier credit are skipped, not refused, exactly as\nthe AR twin skips. Negative results are preserved, never clamped.",
+          "paramTags": [
+            {
+              "name": "totalCents",
+              "doc": "The credit's `total_cents`"
+            },
+            {
+              "name": "settlements",
+              "doc": "Every settlement naming the credit, reversals included"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "recomputePurchaseBillTotals",
+          "signature": "recomputePurchaseBillTotals(totalCents: number, settlements: readonly typeLiteral[]): typeLiteral",
+          "doc": "A supplier bill's settlement projection (api-cloudrun#1210) — the payable twin\nof {@link recomputeSettlementTotals}, and the same fold: a straight signed sum\nover every row, three cents buckets dispatched on `sums_into`, negatives\npreserved. `PurchaseBill.totals` uses the invoice's storage keys exactly, which\nis what lets one fold serve both.\n\n⚠️ **Refuses any row that does not settle a `purchase_bill`** — a receivable\nrow, or a `supplier_refund` — rather than skipping it, for the reason the\ninvoice fold refuses a refund: such a row reaching here means the caller read\nsettlements by something other than `uid_purchase_bill`. There is no closure\ncount; no payable type feeds one.",
+          "paramTags": [
+            {
+              "name": "totalCents",
+              "doc": "The bill's `totals.total_cents`"
+            },
+            {
+              "name": "settlements",
+              "doc": "Every settlement naming the bill, reversals included"
+            }
+          ],
           "returnsTag": null
         },
         {

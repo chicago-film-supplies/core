@@ -91,8 +91,14 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
   // refine ties it to the TYPE — an invoice-settling type must name one — so the
   // walker's `null` for a nullable field is a payment with no invoice. Same
   // class as the three above: a cross-field rule, not a structural one.
+  // `uid_organization` joined it when the PAYABLE side landed (api-cloudrun#1210):
+  // it became nullable — null exactly on a payable row — and a receivable type
+  // must name its customer, the same tie one key over. Still one entry: the
+  // party keys of the payable side stay at the walker's `null`, which is what a
+  // receivable row states.
   settlement: {
     uid_invoice: "AAAAAAAAAAAAAAAAAAAA",
+    uid_organization: "AAAAAAAAAAAAAAAAAAAA",
   },
 };
 
