@@ -244,6 +244,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "buildComponentEntries", expr: "it.products.buildComponentEntries(parentUid, sourceComponents, baseDepth, maxDepth)", desc: "Build component entries for a parent product from a component product's own `components` array. Each entry's `path` is prepended with `parentUid` so it reflects its position in the parent's tree.", returns: "T[]" },
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
+  "purchases": [
+
+  ],
   "quantityAccounting": [
     { name: "buildOverbillingCredits", expr: "it.quantityAccounting.buildOverbillingCredits(order, invoices, arg3)", desc: "**Build the credit notes that give back what an order's invoices over-billed it** (api-cloudrun#1028). The ONE author of the offer: the server rebuilds it inside the create transaction and the manager renders it as a preview, so the two cannot answer differently.", returns: "OverbillingCredits" },
     { name: "buildRemainingInvoice", expr: "it.quantityAccounting.buildRemainingInvoice(order, invoices, creditNotes, arg4)", desc: "Build the invoice that bills what is left on an order: new lines whole, quantity increases at their own path, and each extension of dates as a date-extension section (owner decisions, 2026-09-13 and 2026-09-15).", returns: "RemainingInvoice" },

@@ -196,6 +196,36 @@ Deno.test("MovementSchema accepts a well-formed event of every type", () => {
   }
 });
 
+// ── a receipt names its purchase (api-cloudrun#1210) ──────────────────
+
+const PURCHASE = "testpurch10000000000";
+const atPurchase = { collection: "purchases" as const, uid: PURCHASE };
+
+Deno.test("a purchase may name ONE purchase in sources[], and an unlinked purchase still parses", () => {
+  // Both arms matter: the linked receipt is the new path, and the unlinked one is
+  // every historic purchase until the backfill and every new one until P6.
+  assertEquals(MovementSchema.safeParse(movement("purchase", { sources: [atPurchase] })).success, true);
+  assertEquals(MovementSchema.safeParse(movement("purchase")).success, true);
+});
+
+Deno.test("a purchase naming TWO purchases is refused — its bucket would be ambiguous", () => {
+  const two = movement("purchase", {
+    sources: [atPurchase, { collection: "purchases", uid: "testpurch20000000000" }],
+  });
+  assertEquals(issuePaths(two), ["sources"]);
+});
+
+Deno.test("only a purchase may name a purchase: every other type is refused", () => {
+  // Swept over every type rather than one example, so a new type defaults to
+  // being checked. Each fixture is otherwise valid, so the ONE issue is this rule.
+  for (const type of MOVEMENT_TYPES) {
+    if (type === "purchase") continue;
+    const base = movement(type);
+    const doc = { ...base, sources: [...(base.sources as unknown[]), atPurchase] };
+    assertEquals(issuePaths(doc), ["sources"], type);
+  }
+});
+
 Deno.test("a stored purchase with an explicit null supplier is REFUSED", () => {
   const result = MovementSchema.safeParse({ ...movement("purchase"), supplier: null });
   assertEquals(result.success, false);

@@ -1206,7 +1206,7 @@ the units physically are: a `locations` doc (on a shelf), a `bookings` doc
 `DocSource` shape is unchanged.
 
 ```ts
-const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "fulfillments" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "settlements" | "suppliers" | "template-components" | "templates" | "templates-versions" | "transactions"[];
+const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "fulfillments" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "purchase-bills" | "purchase-credits" | "purchases" | "roles" | "settlements" | "suppliers" | "template-components" | "templates" | "templates-versions" | "transactions"[];
 ```
 
 ### `COAClass`
@@ -1981,6 +1981,31 @@ legitimate ceiling.
 const ClientLogEntrySchema: z.ZodType<ClientLogEntry>;
 ```
 
+### `ClosePurchaseInput`
+
+Zod schema for ClosePurchaseInputType.
+
+```ts
+const ClosePurchaseInput: z.ZodType<ClosePurchaseInputType>;
+```
+
+### `ClosePurchaseInputType`
+
+Input for a short close or a cancel.
+
+Sets each named line's `quantity_canceled` to `quantity − quantity_received`.
+`uid_products` absent closes every line; a cancel is a close of a purchase
+with nothing received. When the close leaves a line billed beyond what was
+received, the writer raises a `purchase-credits` document for the excess.
+
+```ts
+interface ClosePurchaseInputType {
+  uid_products?: string[];
+  uuid_session: string;
+  version: number;
+}
+```
+
 ### `CollectDisplayColumnsResult`
 
 Result of {@link collectDisplayColumns}. `unhandled` MUST be empty.
@@ -2117,6 +2142,12 @@ interface CollectionDocs {
   settlements: Settlement;
   supplier: Supplier;
   suppliers: Supplier;
+  purchase: Purchase;
+  purchases: Purchase;
+  purchase-bill: PurchaseBill;
+  purchase-bills: PurchaseBill;
+  purchase-credit: PurchaseCredit;
+  purchase-credits: PurchaseCredit;
   stock: Stock;
   stock-lock: StockLock;
   stock-locks: StockLock;
@@ -2854,6 +2885,55 @@ interface CreateProductInputType {
   uid_linked_replacement?: string | null;
   webshop: typeLiteral;
   transaction?: typeLiteral;
+}
+```
+
+### `CreatePurchaseBillInput`
+
+Zod schema for CreatePurchaseBillInputType.
+
+```ts
+const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType>;
+```
+
+### `CreatePurchaseBillInputType`
+
+Input for billing a purchase — push a new ACCPAY, or link an existing Xero
+bill or card payment.
+
+A PUSHED bill line carries no amount: the writer prices it at the purchase
+line's cumulative share, so a price the purchase does not hold cannot be
+billed. A LINKED bill carries `total_cents` as Xero has it.
+
+```ts
+type CreatePurchaseBillInputType = typeLiteral | typeLiteral;
+```
+
+### `CreatePurchaseInput`
+
+Zod schema for CreatePurchaseInputType.
+
+```ts
+const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType>;
+```
+
+### `CreatePurchaseInputType`
+
+Input for creating a purchase.
+
+`supplier` and `store` are uids only — the server resolves the names, as
+`CreateTransactionInput.supplier` does, so a snapshot never disagrees with
+its document.
+
+```ts
+interface CreatePurchaseInputType {
+  supplier: typeLiteral;
+  store: typeLiteral;
+  date: string;
+  reference?: string | null;
+  notes?: string | null;
+  lines: PurchaseLineInputType[];
+  uuid_session: string;
 }
 ```
 
@@ -8024,6 +8104,63 @@ honest, checked in BOTH directions.
 const PRE_TAX_ITEM_TYPES: "rental" | "replacement" | "sale" | "service" | "surcharge"[];
 ```
 
+### `PURCHASE_BILL_XERO_DOCUMENTS`
+
+Which Xero collection a bill's `xero_id` lives in. A GUID cannot say: ACCPAY
+bills and SPEND bank transactions are both plain GUIDs, which is the
+ambiguity `Movement.xero_id` carries unresolved (api-cloudrun#1091). A bill
+states it.
+
+```ts
+const PURCHASE_BILL_XERO_DOCUMENTS: "invoice" | "bank_transaction"[];
+```
+
+### `PURCHASE_CREDIT_REASONS`
+
+Why a supplier credited CFS. Closed, like `SETTLEMENT_REASONS`, and for the
+same reason: it becomes a ledger code.
+
+⚠️ **A separate vocabulary from `SETTLEMENT_REASONS` for now**, and the
+settlements half of api-cloudrun#1210 is where they meet: an AP allocation
+row carries its credit's reason, so these members join that enum there, and
+this list becomes a subset of it the way `CREDIT_NOTE_REASONS` is.
+
+```ts
+const PURCHASE_CREDIT_REASONS: "short_close" | "supplier_adjustment" | "correction"[];
+```
+
+### `PURCHASE_CREDIT_STATUSES`
+
+`issued` while it holds credit, `applied` once it holds none, `void` when
+annulled — the AR credit note's vocabulary minus `draft` (a supplier credit is
+raised by a close or recorded from the supplier, never drafted).
+
+```ts
+const PURCHASE_CREDIT_STATUSES: "issued" | "applied" | "void"[];
+```
+
+### `PURCHASE_DOCUMENT_ORIGINS`
+
+Who authored the Xero document — see the module docblock.
+
+```ts
+const PURCHASE_DOCUMENT_ORIGINS: "pushed" | "linked"[];
+```
+
+### `PURCHASE_STATUSES`
+
+Derived by {@link derivePurchaseStatus}, never client-set. The out-of-service
+vocabulary, for the reason `OOS_STATUSES` gives: orders, bookings and cards
+all say `active` for "in progress".
+
+Partial progress — some received, some billed — is read off the buckets, not
+encoded here. A status per stage (`partially_received`, `billed`, …) would be
+a second rendering of numbers the line already carries.
+
+```ts
+const PURCHASE_STATUSES: "active" | "complete" | "canceled"[];
+```
+
 ### `PartialNameParts`
 
 All-optional variant of `NameParts` — use for partial update input types
@@ -8821,6 +8958,323 @@ Status outcome of a propagation rule execution.
 type PropagationStatusType = indexedAccess;
 ```
 
+### `Purchase`
+
+A purchase order placed with a supplier.
+
+```ts
+interface Purchase {
+  uid: string;
+  number: number;
+  status: PurchaseStatusType;
+  supplier: UidNameRefType;
+  store: UidNameRefType;
+  date: string;
+  date_fs: FirestoreTimestampType;
+  reference: string | null;
+  notes: string | null;
+  lines: PurchaseLine[];
+  total_cents: number;
+  uid_thread?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `PurchaseBill`
+
+A supplier bill against one purchase.
+
+```ts
+interface PurchaseBill {
+  uid: string;
+  number: number;
+  uid_purchase: string;
+  supplier: UidNameRefType;
+  origin: PurchaseDocumentOriginType;
+  xero_document: PurchaseBillXeroDocumentType;
+  xero_id: string | null;
+  date: string;
+  date_fs: FirestoreTimestampType;
+  due_date: string | null;
+  reference: string | null;
+  lines: PurchaseDocumentLine[];
+  direct_lines: PurchaseDirectLine[];
+  totals: PurchaseBillTotals;
+  uid_thread?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `PurchaseBillSchema`
+
+Zod schema for PurchaseBill.
+
+```ts
+const PurchaseBillSchema: z.ZodType<PurchaseBill>;
+```
+
+### `PurchaseBillTotals`
+
+A bill's settlement projection — the invoice's keys, see the module docblock.
+
+```ts
+interface PurchaseBillTotals {
+  total_cents: number;
+  amount_paid_cents: number;
+  amount_credited_cents: number;
+  amount_void_cents: number;
+  amount_due_cents: number;
+}
+```
+
+### `PurchaseBillTotalsSchema`
+
+Zod schema for PurchaseBillTotals.
+
+```ts
+const PurchaseBillTotalsSchema: z.ZodType<PurchaseBillTotals>;
+```
+
+### `PurchaseBillXeroDocumentEnum`
+
+Zod schema for PurchaseBillXeroDocumentType.
+
+```ts
+const PurchaseBillXeroDocumentEnum: z.ZodType<PurchaseBillXeroDocumentType>;
+```
+
+### `PurchaseBillXeroDocumentType`
+
+One {@link PURCHASE_BILL_XERO_DOCUMENTS} member.
+
+```ts
+type PurchaseBillXeroDocumentType = indexedAccess;
+```
+
+### `PurchaseCredit`
+
+A supplier credit (ACCPAYCREDIT) against one purchase.
+
+```ts
+interface PurchaseCredit {
+  uid: string;
+  number: number;
+  uid_purchase: string;
+  supplier: UidNameRefType;
+  origin: PurchaseDocumentOriginType;
+  reason: PurchaseCreditReasonType;
+  status: PurchaseCreditStatusType;
+  xero_id: string | null;
+  date: string;
+  date_fs: FirestoreTimestampType;
+  reference: string | null;
+  lines: PurchaseDocumentLine[];
+  direct_lines: PurchaseDirectLine[];
+  total_cents: number;
+  remaining_credit_cents: number;
+  uid_thread?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `PurchaseCreditReasonEnum`
+
+Zod schema for PurchaseCreditReasonType.
+
+```ts
+const PurchaseCreditReasonEnum: z.ZodType<PurchaseCreditReasonType>;
+```
+
+### `PurchaseCreditReasonType`
+
+One {@link PURCHASE_CREDIT_REASONS} member.
+
+```ts
+type PurchaseCreditReasonType = indexedAccess;
+```
+
+### `PurchaseCreditSchema`
+
+Zod schema for PurchaseCredit.
+
+```ts
+const PurchaseCreditSchema: z.ZodType<PurchaseCredit>;
+```
+
+### `PurchaseCreditStatusEnum`
+
+Zod schema for PurchaseCreditStatusType.
+
+```ts
+const PurchaseCreditStatusEnum: z.ZodType<PurchaseCreditStatusType>;
+```
+
+### `PurchaseCreditStatusType`
+
+One {@link PURCHASE_CREDIT_STATUSES} member.
+
+```ts
+type PurchaseCreditStatusType = indexedAccess;
+```
+
+### `PurchaseDirectLine`
+
+A line billing something that is not a product — freight, a fee. Posts to
+its own account and never touches basis (landed cost is a follow-up).
+
+```ts
+interface PurchaseDirectLine {
+  description: string;
+  account_code: number;
+  amount_cents: number;
+}
+```
+
+### `PurchaseDirectLineSchema`
+
+Zod schema for PurchaseDirectLine.
+
+```ts
+const PurchaseDirectLineSchema: z.ZodType<PurchaseDirectLine>;
+```
+
+### `PurchaseDocumentLine`
+
+A bill or credit line: some quantity of ONE purchase line, keyed by product.
+
+```ts
+interface PurchaseDocumentLine {
+  uid_product: string;
+  quantity: number;
+  amount_cents: number;
+}
+```
+
+### `PurchaseDocumentLineInput`
+
+Zod schema for PurchaseDocumentLineInputType.
+
+```ts
+const PurchaseDocumentLineInput: z.ZodType<PurchaseDocumentLineInputType>;
+```
+
+### `PurchaseDocumentLineInputType`
+
+A bill or credit line as an operator matches it to a purchase line.
+
+```ts
+interface PurchaseDocumentLineInputType {
+  uid_product: string;
+  quantity: number;
+}
+```
+
+### `PurchaseDocumentLineSchema`
+
+Zod schema for PurchaseDocumentLine.
+
+```ts
+const PurchaseDocumentLineSchema: z.ZodType<PurchaseDocumentLine>;
+```
+
+### `PurchaseDocumentOriginEnum`
+
+Zod schema for PurchaseDocumentOriginType.
+
+```ts
+const PurchaseDocumentOriginEnum: z.ZodType<PurchaseDocumentOriginType>;
+```
+
+### `PurchaseDocumentOriginType`
+
+One {@link PURCHASE_DOCUMENT_ORIGINS} member.
+
+```ts
+type PurchaseDocumentOriginType = indexedAccess;
+```
+
+### `PurchaseLine`
+
+One product ordered on a purchase.
+
+```ts
+interface PurchaseLine {
+  uid_product: string;
+  name: string;
+  quantity: number;
+  amount_cents: number;
+  expected_date: string | null;
+  quantity_received: number;
+  quantity_billed: number;
+  quantity_canceled: number;
+}
+```
+
+### `PurchaseLineInput`
+
+Zod schema for PurchaseLineInputType.
+
+```ts
+const PurchaseLineInput: z.ZodType<PurchaseLineInputType>;
+```
+
+### `PurchaseLineInputType`
+
+One line as an operator orders it — the buckets are the server's.
+
+```ts
+interface PurchaseLineInputType {
+  uid_product: string;
+  quantity: number;
+  amount_cents: number;
+  expected_date?: string | null;
+}
+```
+
+### `PurchaseLineSchema`
+
+Zod schema for PurchaseLine.
+
+```ts
+const PurchaseLineSchema: z.ZodType<PurchaseLine>;
+```
+
+### `PurchaseSchema`
+
+Zod schema for Purchase.
+
+```ts
+const PurchaseSchema: z.ZodType<Purchase>;
+```
+
+### `PurchaseStatusEnum`
+
+Zod schema for PurchaseStatusType.
+
+```ts
+const PurchaseStatusEnum: z.ZodType<PurchaseStatusType>;
+```
+
+### `PurchaseStatusType`
+
+Allowed purchase statuses. See {@link PURCHASE_STATUSES}.
+
+```ts
+type PurchaseStatusType = indexedAccess;
+```
+
 ### `Quote`
 
 A PDF quote document associated with an order.
@@ -8952,6 +9406,56 @@ Allowed reaction actions.
 
 ```ts
 type ReactionActionType = indexedAccess;
+```
+
+### `ReceivePurchaseInput`
+
+Zod schema for ReceivePurchaseInputType.
+
+```ts
+const ReceivePurchaseInput: z.ZodType<ReceivePurchaseInputType>;
+```
+
+### `ReceivePurchaseInputType`
+
+Input for receiving goods against a purchase.
+
+Each line becomes ONE `purchase` movement naming the purchase in `sources[]`,
+all in one transaction with the bucket co-write. The movement id is
+`{uuid_session}|purchase|{uid_product}`, so a delivery of several products
+shares one session and a retry lands on the same movements. Cost is not an
+input: each receipt costs its cumulative share of the line
+(`cumulativeShareCents`), which is what keeps basis equal to what is billed.
+
+```ts
+interface ReceivePurchaseInputType {
+  date: string;
+  reference?: string;
+  lines: ReceivePurchaseLineInputType[];
+  uuid_session: string;
+  version: number;
+}
+```
+
+### `ReceivePurchaseLineInput`
+
+Zod schema for ReceivePurchaseLineInputType.
+
+```ts
+const ReceivePurchaseLineInput: z.ZodType<ReceivePurchaseLineInputType>;
+```
+
+### `ReceivePurchaseLineInputType`
+
+One product received in a delivery.
+
+```ts
+interface ReceivePurchaseLineInputType {
+  uid_product: string;
+  quantity: number;
+  allocations?: MovementAllocationInputType[];
+  units?: MovementUnitInputType[];
+}
 ```
 
 ### `Recurrence`
@@ -9238,6 +9742,30 @@ Input for restoring a soft-deleted quote.
 ```ts
 interface RestoreQuoteInputType {
   uid: string;
+}
+```
+
+### `ReversePurchaseReceiptInput`
+
+Zod schema for ReversePurchaseReceiptInputType.
+
+```ts
+const ReversePurchaseReceiptInput: z.ZodType<ReversePurchaseReceiptInputType>;
+```
+
+### `ReversePurchaseReceiptInputType`
+
+Input for reversing one receipt (`POST /purchases/{uid}/receipts/{movementUid}/reverse`).
+
+A standalone reversal of a receipt is refused; this lever reverses it AND
+decrements `quantity_received` in one transaction. It posts nothing to Xero —
+a receipt never did.
+
+```ts
+interface ReversePurchaseReceiptInputType {
+  uuid_session: string;
+  reference?: string;
+  version: number;
 }
 ```
 
@@ -12111,6 +12639,35 @@ interface UpdateProductInputType {
 }
 ```
 
+### `UpdatePurchaseInput`
+
+Zod schema for UpdatePurchaseInputType.
+
+```ts
+const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType>;
+```
+
+### `UpdatePurchaseInputType`
+
+Input for amending a purchase — a PATCH.
+
+`lines`, when present, is the complete next set. The writer refuses to change
+a line's `quantity` below what is received or billed, and refuses to change
+its `amount_cents` once it has any receipt or bill: a price that moved after
+goods or a bill exist is a short close plus a new purchase (the plan's *Money
+rules*), because every receipt already carries its share of the old price.
+Those are cross-document facts the writer holds, so they are not refined here.
+
+```ts
+interface UpdatePurchaseInputType {
+  date?: string;
+  reference?: string | null;
+  notes?: string | null;
+  lines?: PurchaseLineInputType[];
+  version: number;
+}
+```
+
 ### `UpdateRecurrenceInput`
 
 Zod schema for updating a recurrence.
@@ -13219,6 +13776,26 @@ But `images` remains the sole authority on display order: this field exists
 for Firestore `array-contains`, and the refinement below compares it as a
 multiset, so a differently-ordered mirror holding the same uuids is still
 valid. Nothing may read order back out of it.
+
+### `derivePurchaseStatus(purchase: Pick<Purchase, "lines">): PurchaseStatusType`
+
+The purchase's status, derived — never client-set.
+
+- `canceled` when every line is canceled in full: nothing received, nothing
+  left billed. A cancel is a close with nothing received.
+- `complete` when every line is RESOLVED on BOTH axes: each unit either
+  received or canceled, and billed for exactly what was not canceled. Payment
+  is the bill's business and does not hold a purchase open.
+- `active` otherwise.
+
+⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's
+sequence bills before delivery as often as after, and a purchase that reads
+`complete` while a bill is still owed hides exactly the work the split exists
+to show.
+
+Lives in the schema module, not in `utils/`, because the document refine
+calls it and `utils/` imports `schemas/` one way only.
+`@cfs/core/utils/purchases` re-exports it.
 
 ### `destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]`
 
@@ -14434,7 +15011,7 @@ the units physically are: a `locations` doc (on a shelf), a `bookings` doc
 `DocSource` shape is unchanged.
 
 ```ts
-const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "fulfillments" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "roles" | "settlements" | "suppliers" | "template-components" | "templates" | "templates-versions" | "transactions"[];
+const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "fulfillments" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "purchase-bills" | "purchase-credits" | "purchases" | "roles" | "settlements" | "suppliers" | "template-components" | "templates" | "templates-versions" | "transactions"[];
 ```
 
 ### `COARevenueEnum`
@@ -21449,6 +22026,686 @@ But `images` remains the sole authority on display order: this field exists
 for Firestore `array-contains`, and the refinement below compares it as a
 multiset, so a differently-ordered mirror holding the same uuids is still
 valid. Nothing may read order back out of it.
+
+## `@cfs/core/schemas/purchase`
+
+Purchase document schema — Firestore collection: `purchases`
+
+What CFS ORDERED from a supplier: one line per product, each with the
+quantity and the amount agreed. It moves nothing. api-cloudrun#1210 split a
+`purchase` movement, which used to be the order, the delivery, the bill and
+(through Xero) the debt all at once, into four facts with four homes:
+
+| fact     | home                                                   | moves                         |
+|----------|--------------------------------------------------------|-------------------------------|
+| ordered  | this document                                          | nothing                       |
+| received | `purchase` movements naming it in `sources[]`          | `quantity_held`, basis, units |
+| billed   | `purchase-bills` / `purchase-credits` naming it        | the Xero document             |
+| paid     | `settlements` rows against a bill                      | the bill's `totals`           |
+
+The owner's real sequence is order → bill → delivery (days or weeks later,
+possibly partial) → payment, and before this document nothing could hold
+"billed, not received" — movement #3882 recorded three radios that had not
+arrived. Plan: `api-cloudrun/.claude/plans/purchases.md`.
+
+## The shape is the out-of-service record's, on purpose
+
+`schemas/out-of-service.ts` is the package's parent-with-movements shape and this
+copies every part of it:
+
+- **Its receipts name it in `sources[]`** and it finds them through
+  `query_by_sources`. There is no `Movement.purchase` field and no back-list
+  of movement ids here — the HISTORY of a purchase is the journal.
+- **Co-written buckets** per line (`quantity_received`, `quantity_billed`,
+  `quantity_canceled`), each written in the same transaction as the receipt,
+  bill or close that moves it — the analogue of the record's `breakdown`.
+- **A derived status** in the record's vocabulary (`active | complete |
+  canceled`), authored by {@link derivePurchaseStatus} and refined here, so a
+  document asserting one status and holding buckets that say another does not
+  parse.
+
+## A line is `(purchase, uid_product)`
+
+One line per product, refined below. A receipt's subject is already
+`uid_product`, so a movement needs no line slot in `sources[]` to say which
+line it received against. A second price for the same product is a second
+PURCHASE, never a second line (see the plan's *Money rules*).
+
+## Money
+
+`amount_cents` is what the whole line costs, integer cents. The k-th receipt
+or bill against a line is priced by `cumulativeShareCents`
+(`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the
+partials sum to `amount_cents` exactly with no remainder rule. There is no
+stored `unit_cost`: it is a display rate, derivable by `perUnitCostAt4dp`, and
+a stored copy beside the amount it derives from is a second source of truth.
+
+There is no tax anywhere on a purchase (owner, 2026-10-05): stock bought for
+sale or rent is bought resale-exempt and the tax is collected from the end
+user, so `priceDocument` never runs here.
+
+### `ClosePurchaseInput`
+
+Zod schema for ClosePurchaseInputType.
+
+```ts
+const ClosePurchaseInput: z.ZodType<ClosePurchaseInputType>;
+```
+
+### `ClosePurchaseInputType`
+
+Input for a short close or a cancel.
+
+Sets each named line's `quantity_canceled` to `quantity − quantity_received`.
+`uid_products` absent closes every line; a cancel is a close of a purchase
+with nothing received. When the close leaves a line billed beyond what was
+received, the writer raises a `purchase-credits` document for the excess.
+
+```ts
+interface ClosePurchaseInputType {
+  uid_products?: string[];
+  uuid_session: string;
+  version: number;
+}
+```
+
+### `CreatePurchaseInput`
+
+Zod schema for CreatePurchaseInputType.
+
+```ts
+const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType>;
+```
+
+### `CreatePurchaseInputType`
+
+Input for creating a purchase.
+
+`supplier` and `store` are uids only — the server resolves the names, as
+`CreateTransactionInput.supplier` does, so a snapshot never disagrees with
+its document.
+
+```ts
+interface CreatePurchaseInputType {
+  supplier: typeLiteral;
+  store: typeLiteral;
+  date: string;
+  reference?: string | null;
+  notes?: string | null;
+  lines: PurchaseLineInputType[];
+  uuid_session: string;
+}
+```
+
+### `PURCHASE_STATUSES`
+
+Derived by {@link derivePurchaseStatus}, never client-set. The out-of-service
+vocabulary, for the reason `OOS_STATUSES` gives: orders, bookings and cards
+all say `active` for "in progress".
+
+Partial progress — some received, some billed — is read off the buckets, not
+encoded here. A status per stage (`partially_received`, `billed`, …) would be
+a second rendering of numbers the line already carries.
+
+```ts
+const PURCHASE_STATUSES: "active" | "complete" | "canceled"[];
+```
+
+### `Purchase`
+
+A purchase order placed with a supplier.
+
+```ts
+interface Purchase {
+  uid: string;
+  number: number;
+  status: PurchaseStatusType;
+  supplier: UidNameRefType;
+  store: UidNameRefType;
+  date: string;
+  date_fs: FirestoreTimestampType;
+  reference: string | null;
+  notes: string | null;
+  lines: PurchaseLine[];
+  total_cents: number;
+  uid_thread?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `PurchaseLine`
+
+One product ordered on a purchase.
+
+```ts
+interface PurchaseLine {
+  uid_product: string;
+  name: string;
+  quantity: number;
+  amount_cents: number;
+  expected_date: string | null;
+  quantity_received: number;
+  quantity_billed: number;
+  quantity_canceled: number;
+}
+```
+
+### `PurchaseLineInput`
+
+Zod schema for PurchaseLineInputType.
+
+```ts
+const PurchaseLineInput: z.ZodType<PurchaseLineInputType>;
+```
+
+### `PurchaseLineInputType`
+
+One line as an operator orders it — the buckets are the server's.
+
+```ts
+interface PurchaseLineInputType {
+  uid_product: string;
+  quantity: number;
+  amount_cents: number;
+  expected_date?: string | null;
+}
+```
+
+### `PurchaseLineSchema`
+
+Zod schema for PurchaseLine.
+
+```ts
+const PurchaseLineSchema: z.ZodType<PurchaseLine>;
+```
+
+### `PurchaseSchema`
+
+Zod schema for Purchase.
+
+```ts
+const PurchaseSchema: z.ZodType<Purchase>;
+```
+
+### `PurchaseStatusEnum`
+
+Zod schema for PurchaseStatusType.
+
+```ts
+const PurchaseStatusEnum: z.ZodType<PurchaseStatusType>;
+```
+
+### `PurchaseStatusType`
+
+Allowed purchase statuses. See {@link PURCHASE_STATUSES}.
+
+```ts
+type PurchaseStatusType = indexedAccess;
+```
+
+### `ReceivePurchaseInput`
+
+Zod schema for ReceivePurchaseInputType.
+
+```ts
+const ReceivePurchaseInput: z.ZodType<ReceivePurchaseInputType>;
+```
+
+### `ReceivePurchaseInputType`
+
+Input for receiving goods against a purchase.
+
+Each line becomes ONE `purchase` movement naming the purchase in `sources[]`,
+all in one transaction with the bucket co-write. The movement id is
+`{uuid_session}|purchase|{uid_product}`, so a delivery of several products
+shares one session and a retry lands on the same movements. Cost is not an
+input: each receipt costs its cumulative share of the line
+(`cumulativeShareCents`), which is what keeps basis equal to what is billed.
+
+```ts
+interface ReceivePurchaseInputType {
+  date: string;
+  reference?: string;
+  lines: ReceivePurchaseLineInputType[];
+  uuid_session: string;
+  version: number;
+}
+```
+
+### `ReceivePurchaseLineInput`
+
+Zod schema for ReceivePurchaseLineInputType.
+
+```ts
+const ReceivePurchaseLineInput: z.ZodType<ReceivePurchaseLineInputType>;
+```
+
+### `ReceivePurchaseLineInputType`
+
+One product received in a delivery.
+
+```ts
+interface ReceivePurchaseLineInputType {
+  uid_product: string;
+  quantity: number;
+  allocations?: MovementAllocationInputType[];
+  units?: MovementUnitInputType[];
+}
+```
+
+### `ReversePurchaseReceiptInput`
+
+Zod schema for ReversePurchaseReceiptInputType.
+
+```ts
+const ReversePurchaseReceiptInput: z.ZodType<ReversePurchaseReceiptInputType>;
+```
+
+### `ReversePurchaseReceiptInputType`
+
+Input for reversing one receipt (`POST /purchases/{uid}/receipts/{movementUid}/reverse`).
+
+A standalone reversal of a receipt is refused; this lever reverses it AND
+decrements `quantity_received` in one transaction. It posts nothing to Xero —
+a receipt never did.
+
+```ts
+interface ReversePurchaseReceiptInputType {
+  uuid_session: string;
+  reference?: string;
+  version: number;
+}
+```
+
+### `UpdatePurchaseInput`
+
+Zod schema for UpdatePurchaseInputType.
+
+```ts
+const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType>;
+```
+
+### `UpdatePurchaseInputType`
+
+Input for amending a purchase — a PATCH.
+
+`lines`, when present, is the complete next set. The writer refuses to change
+a line's `quantity` below what is received or billed, and refuses to change
+its `amount_cents` once it has any receipt or bill: a price that moved after
+goods or a bill exist is a short close plus a new purchase (the plan's *Money
+rules*), because every receipt already carries its share of the old price.
+Those are cross-document facts the writer holds, so they are not refined here.
+
+```ts
+interface UpdatePurchaseInputType {
+  date?: string;
+  reference?: string | null;
+  notes?: string | null;
+  lines?: PurchaseLineInputType[];
+  version: number;
+}
+```
+
+### `derivePurchaseStatus(purchase: Pick<Purchase, "lines">): PurchaseStatusType`
+
+The purchase's status, derived — never client-set.
+
+- `canceled` when every line is canceled in full: nothing received, nothing
+  left billed. A cancel is a close with nothing received.
+- `complete` when every line is RESOLVED on BOTH axes: each unit either
+  received or canceled, and billed for exactly what was not canceled. Payment
+  is the bill's business and does not hold a purchase open.
+- `active` otherwise.
+
+⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's
+sequence bills before delivery as often as after, and a purchase that reads
+`complete` while a bill is still owed hides exactly the work the split exists
+to show.
+
+Lives in the schema module, not in `utils/`, because the document refine
+calls it and `utils/` imports `schemas/` one way only.
+`@cfs/core/utils/purchases` re-exports it.
+
+## `@cfs/core/schemas/purchase-bill`
+
+Purchase bill and supplier credit schemas — Firestore collections
+`purchase-bills` and `purchase-credits`.
+
+What a supplier BILLED CFS for a purchase (an ACCPAY bill, or a SPEND bank
+transaction — a bill born paid), and what it CREDITED back (an ACCPAYCREDIT).
+Many bills per purchase, each its own document; each bill line bills some
+quantity of one purchase line, and moves that line's `quantity_billed` in the
+same transaction. Plan: `api-cloudrun/.claude/plans/purchases.md`.
+
+## Why not `invoices` with a direction
+
+A CFS invoice is an order PROJECTION — shared-field merge, destinations,
+`priceDocument` tax, invoice actions, templates — and every one of those
+readers would need a direction filter. A bill shares none of it. Supplier
+credits are likewise not AR `credit-notes`: those carry an organization
+snapshot, `priceCreditNote` tax and AR reasons.
+
+## Pushed or linked
+
+`origin` says who authored the Xero document, and it decides which money rule
+binds:
+
+- **`pushed`** — CFS authored it and POSTs it (`CFS-BILL-n` as the number, the
+  supplier's in `Reference`). Each line must equal its purchase line's
+  cumulative share for the quantity it bills, to the cent, and the total is
+  the Σ of the lines — refined here as far as one document can say it, and
+  the share itself asserted by the writer, which holds the purchase.
+- **`linked`** — an existing Xero document CFS attaches to without pushing:
+  every backfilled bill, and an operator linking a bill or card payment
+  entered in Xero. Its total is XERO's, stored as Xero has it. P0 measured 21
+  of 299 historic documents whose purchase-account lines disagree with the
+  CFS basis (lines never received, lines coded off the purchase accounts), so
+  a linked bill is EXEMPT from the share rule — the difference is reported by
+  an audit, never refused.
+
+A **card-paid purchase is a linked `bank_transaction` bill** (owner,
+2026-10-05; 276 of the 299 historic documents are SPEND). It is never pushed,
+carries no due date, and gets one payable payment settlement for its whole
+total, so "billed" and "paid" need no second code path.
+
+## Totals are a settlement projection
+
+`totals.amount_{paid,credited,void,due}_cents` are the invoice's keys exactly,
+because `SETTLEMENT_CONTRACTS[type].sums_into` names those storage fields and
+`recomputeSettlementTotals` never sees which document it is folding for. The
+identity `paid + credited + void + due === total` is refined, as on the
+invoice.
+
+No tax: purchases are resale-exempt (owner, 2026-10-05) and push `NoTax`.
+
+### `CreatePurchaseBillInput`
+
+Zod schema for CreatePurchaseBillInputType.
+
+```ts
+const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType>;
+```
+
+### `CreatePurchaseBillInputType`
+
+Input for billing a purchase — push a new ACCPAY, or link an existing Xero
+bill or card payment.
+
+A PUSHED bill line carries no amount: the writer prices it at the purchase
+line's cumulative share, so a price the purchase does not hold cannot be
+billed. A LINKED bill carries `total_cents` as Xero has it.
+
+```ts
+type CreatePurchaseBillInputType = typeLiteral | typeLiteral;
+```
+
+### `PURCHASE_BILL_XERO_DOCUMENTS`
+
+Which Xero collection a bill's `xero_id` lives in. A GUID cannot say: ACCPAY
+bills and SPEND bank transactions are both plain GUIDs, which is the
+ambiguity `Movement.xero_id` carries unresolved (api-cloudrun#1091). A bill
+states it.
+
+```ts
+const PURCHASE_BILL_XERO_DOCUMENTS: "invoice" | "bank_transaction"[];
+```
+
+### `PURCHASE_CREDIT_REASONS`
+
+Why a supplier credited CFS. Closed, like `SETTLEMENT_REASONS`, and for the
+same reason: it becomes a ledger code.
+
+⚠️ **A separate vocabulary from `SETTLEMENT_REASONS` for now**, and the
+settlements half of api-cloudrun#1210 is where they meet: an AP allocation
+row carries its credit's reason, so these members join that enum there, and
+this list becomes a subset of it the way `CREDIT_NOTE_REASONS` is.
+
+```ts
+const PURCHASE_CREDIT_REASONS: "short_close" | "supplier_adjustment" | "correction"[];
+```
+
+### `PURCHASE_CREDIT_STATUSES`
+
+`issued` while it holds credit, `applied` once it holds none, `void` when
+annulled — the AR credit note's vocabulary minus `draft` (a supplier credit is
+raised by a close or recorded from the supplier, never drafted).
+
+```ts
+const PURCHASE_CREDIT_STATUSES: "issued" | "applied" | "void"[];
+```
+
+### `PURCHASE_DOCUMENT_ORIGINS`
+
+Who authored the Xero document — see the module docblock.
+
+```ts
+const PURCHASE_DOCUMENT_ORIGINS: "pushed" | "linked"[];
+```
+
+### `PurchaseBill`
+
+A supplier bill against one purchase.
+
+```ts
+interface PurchaseBill {
+  uid: string;
+  number: number;
+  uid_purchase: string;
+  supplier: UidNameRefType;
+  origin: PurchaseDocumentOriginType;
+  xero_document: PurchaseBillXeroDocumentType;
+  xero_id: string | null;
+  date: string;
+  date_fs: FirestoreTimestampType;
+  due_date: string | null;
+  reference: string | null;
+  lines: PurchaseDocumentLine[];
+  direct_lines: PurchaseDirectLine[];
+  totals: PurchaseBillTotals;
+  uid_thread?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `PurchaseBillSchema`
+
+Zod schema for PurchaseBill.
+
+```ts
+const PurchaseBillSchema: z.ZodType<PurchaseBill>;
+```
+
+### `PurchaseBillTotals`
+
+A bill's settlement projection — the invoice's keys, see the module docblock.
+
+```ts
+interface PurchaseBillTotals {
+  total_cents: number;
+  amount_paid_cents: number;
+  amount_credited_cents: number;
+  amount_void_cents: number;
+  amount_due_cents: number;
+}
+```
+
+### `PurchaseBillTotalsSchema`
+
+Zod schema for PurchaseBillTotals.
+
+```ts
+const PurchaseBillTotalsSchema: z.ZodType<PurchaseBillTotals>;
+```
+
+### `PurchaseBillXeroDocumentEnum`
+
+Zod schema for PurchaseBillXeroDocumentType.
+
+```ts
+const PurchaseBillXeroDocumentEnum: z.ZodType<PurchaseBillXeroDocumentType>;
+```
+
+### `PurchaseBillXeroDocumentType`
+
+One {@link PURCHASE_BILL_XERO_DOCUMENTS} member.
+
+```ts
+type PurchaseBillXeroDocumentType = indexedAccess;
+```
+
+### `PurchaseCredit`
+
+A supplier credit (ACCPAYCREDIT) against one purchase.
+
+```ts
+interface PurchaseCredit {
+  uid: string;
+  number: number;
+  uid_purchase: string;
+  supplier: UidNameRefType;
+  origin: PurchaseDocumentOriginType;
+  reason: PurchaseCreditReasonType;
+  status: PurchaseCreditStatusType;
+  xero_id: string | null;
+  date: string;
+  date_fs: FirestoreTimestampType;
+  reference: string | null;
+  lines: PurchaseDocumentLine[];
+  direct_lines: PurchaseDirectLine[];
+  total_cents: number;
+  remaining_credit_cents: number;
+  uid_thread?: string;
+  version: number;
+  created_by: ActorRefType;
+  updated_by: ActorRefType;
+  created_at: FirestoreTimestampType;
+  updated_at: FirestoreTimestampType;
+}
+```
+
+### `PurchaseCreditReasonEnum`
+
+Zod schema for PurchaseCreditReasonType.
+
+```ts
+const PurchaseCreditReasonEnum: z.ZodType<PurchaseCreditReasonType>;
+```
+
+### `PurchaseCreditReasonType`
+
+One {@link PURCHASE_CREDIT_REASONS} member.
+
+```ts
+type PurchaseCreditReasonType = indexedAccess;
+```
+
+### `PurchaseCreditSchema`
+
+Zod schema for PurchaseCredit.
+
+```ts
+const PurchaseCreditSchema: z.ZodType<PurchaseCredit>;
+```
+
+### `PurchaseCreditStatusEnum`
+
+Zod schema for PurchaseCreditStatusType.
+
+```ts
+const PurchaseCreditStatusEnum: z.ZodType<PurchaseCreditStatusType>;
+```
+
+### `PurchaseCreditStatusType`
+
+One {@link PURCHASE_CREDIT_STATUSES} member.
+
+```ts
+type PurchaseCreditStatusType = indexedAccess;
+```
+
+### `PurchaseDirectLine`
+
+A line billing something that is not a product — freight, a fee. Posts to
+its own account and never touches basis (landed cost is a follow-up).
+
+```ts
+interface PurchaseDirectLine {
+  description: string;
+  account_code: number;
+  amount_cents: number;
+}
+```
+
+### `PurchaseDirectLineSchema`
+
+Zod schema for PurchaseDirectLine.
+
+```ts
+const PurchaseDirectLineSchema: z.ZodType<PurchaseDirectLine>;
+```
+
+### `PurchaseDocumentLine`
+
+A bill or credit line: some quantity of ONE purchase line, keyed by product.
+
+```ts
+interface PurchaseDocumentLine {
+  uid_product: string;
+  quantity: number;
+  amount_cents: number;
+}
+```
+
+### `PurchaseDocumentLineInput`
+
+Zod schema for PurchaseDocumentLineInputType.
+
+```ts
+const PurchaseDocumentLineInput: z.ZodType<PurchaseDocumentLineInputType>;
+```
+
+### `PurchaseDocumentLineInputType`
+
+A bill or credit line as an operator matches it to a purchase line.
+
+```ts
+interface PurchaseDocumentLineInputType {
+  uid_product: string;
+  quantity: number;
+}
+```
+
+### `PurchaseDocumentLineSchema`
+
+Zod schema for PurchaseDocumentLine.
+
+```ts
+const PurchaseDocumentLineSchema: z.ZodType<PurchaseDocumentLine>;
+```
+
+### `PurchaseDocumentOriginEnum`
+
+Zod schema for PurchaseDocumentOriginType.
+
+```ts
+const PurchaseDocumentOriginEnum: z.ZodType<PurchaseDocumentOriginType>;
+```
+
+### `PurchaseDocumentOriginType`
+
+One {@link PURCHASE_DOCUMENT_ORIGINS} member.
+
+```ts
+type PurchaseDocumentOriginType = indexedAccess;
+```
 
 ## `@cfs/core/schemas/recurrence`
 
@@ -37972,6 +39229,66 @@ makes).
 section ADDS rather than their pair's total. A caller holding items that may
 sit in one must exclude them first, as {@link lineChargeableDays} does through
 {@link extensionFor}.
+
+## `@cfs/core/utils/purchases`
+
+Purchase helpers — the cumulative share that prices every receipt and every
+pushed bill line, the per-line headroom, and the status rule.
+
+Plan: `api-cloudrun/.claude/plans/purchases.md` (api-cloudrun#1210).
+
+### `cumulativeShareCents(amountCents: number, quantity: number, before: number, after: number): number`
+
+The cents a line's units `(before, after]` cost — the k-th receipt or the
+k-th bill line against a purchase line, priced from where the cumulative
+count stood before it to where it stands after.
+
+`round(amount × after ÷ quantity) − round(amount × before ÷ quantity)`, each
+rounded once, half-up, over integers.
+
+⭐ **The CUMULATIVE value is rounded, never the partial.** So the partials
+along any path from 0 to `quantity` telescope to `amount_cents` exactly — no
+remainder rule, no "last one absorbs the cent" — and the price of reaching a
+cumulative count is the same whichever deliveries got there. Rounding each
+partial instead (`round(amount × k ÷ quantity)`) drifts: three receipts of 1
+against a $10.00 line of 3 cost 333 + 333 + 333 = 999.
+
+Receipts and bills run this SEPARATELY, each on its own cumulative count, so
+a CFS-pushed bill and the receipts it covers carry the same money however the
+two were split (`cfs-money`: closure under the quantum, × n ÷ d in integer
+cents, round once).
+
+A REVERSAL is the same call with the bounds swapped in sign: the units
+`(after, before]` leave at exactly what they cost to arrive, because the
+cumulative value at a count does not depend on the path.
+
+### `derivePurchaseStatus(purchase: Pick<Purchase, "lines">): PurchaseStatusType`
+
+The purchase's status, derived — never client-set.
+
+- `canceled` when every line is canceled in full: nothing received, nothing
+  left billed. A cancel is a close with nothing received.
+- `complete` when every line is RESOLVED on BOTH axes: each unit either
+  received or canceled, and billed for exactly what was not canceled. Payment
+  is the bill's business and does not hold a purchase open.
+- `active` otherwise.
+
+⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's
+sequence bills before delivery as often as after, and a purchase that reads
+`complete` while a bill is still owed hides exactly the work the split exists
+to show.
+
+Lives in the schema module, not in `utils/`, because the document refine
+calls it and `utils/` imports `schemas/` one way only.
+`@cfs/core/utils/purchases` re-exports it.
+
+### `remainingToBill(line: Pick<PurchaseLine, "quantity" | "quantity_billed" | "quantity_canceled">): number`
+
+Units of a line still to be billed: `quantity − canceled − billed`.
+
+### `remainingToReceive(line: Pick<PurchaseLine, "quantity" | "quantity_received" | "quantity_canceled">): number`
+
+Units of a line still to be received: `quantity − canceled − received`.
 
 ## `@cfs/core/utils/organizations`
 

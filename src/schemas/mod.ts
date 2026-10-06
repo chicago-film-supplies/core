@@ -661,6 +661,60 @@ export {
 } from "./supplier.ts";
 
 export {
+  PURCHASE_STATUSES,
+  PurchaseStatusEnum,
+  PurchaseLineSchema,
+  PurchaseSchema,
+  derivePurchaseStatus,
+  PurchaseLineInput,
+  CreatePurchaseInput,
+  UpdatePurchaseInput,
+  ClosePurchaseInput,
+  ReceivePurchaseLineInput,
+  ReceivePurchaseInput,
+  ReversePurchaseReceiptInput,
+  type PurchaseStatusType,
+  type PurchaseLine,
+  type Purchase,
+  type PurchaseLineInputType,
+  type CreatePurchaseInputType,
+  type UpdatePurchaseInputType,
+  type ClosePurchaseInputType,
+  type ReceivePurchaseLineInputType,
+  type ReceivePurchaseInputType,
+  type ReversePurchaseReceiptInputType,
+} from "./purchase.ts";
+
+export {
+  PURCHASE_DOCUMENT_ORIGINS,
+  PurchaseDocumentOriginEnum,
+  PURCHASE_BILL_XERO_DOCUMENTS,
+  PurchaseBillXeroDocumentEnum,
+  PurchaseDocumentLineSchema,
+  PurchaseDirectLineSchema,
+  PurchaseBillTotalsSchema,
+  PurchaseBillSchema,
+  PURCHASE_CREDIT_REASONS,
+  PurchaseCreditReasonEnum,
+  PURCHASE_CREDIT_STATUSES,
+  PurchaseCreditStatusEnum,
+  PurchaseCreditSchema,
+  PurchaseDocumentLineInput,
+  CreatePurchaseBillInput,
+  type PurchaseDocumentOriginType,
+  type PurchaseBillXeroDocumentType,
+  type PurchaseDocumentLine,
+  type PurchaseDirectLine,
+  type PurchaseBillTotals,
+  type PurchaseBill,
+  type PurchaseCreditReasonType,
+  type PurchaseCreditStatusType,
+  type PurchaseCredit,
+  type PurchaseDocumentLineInputType,
+  type CreatePurchaseBillInputType,
+} from "./purchase-bill.ts";
+
+export {
   LocationTypeSchema,
   CreateLocationTypeInput,
   UpdateLocationTypeInput,
@@ -1339,6 +1393,8 @@ import type { Organization } from "./organization.ts";
 import type { OutOfService } from "./out-of-service.ts";
 import type { Settlement } from "./settlement.ts";
 import type { Supplier } from "./supplier.ts";
+import type { Purchase } from "./purchase.ts";
+import type { PurchaseBill, PurchaseCredit } from "./purchase-bill.ts";
 import type { CreditNote } from "./credit-note.ts";
 import type { PasswordReset } from "./password-reset.ts";
 import type { Product } from "./product.ts";
@@ -1448,6 +1504,8 @@ import { OrganizationSchema } from "./organization.ts";
 import { OutOfServiceSchema } from "./out-of-service.ts";
 import { SettlementSchema } from "./settlement.ts";
 import { SupplierSchema } from "./supplier.ts";
+import { PurchaseSchema } from "./purchase.ts";
+import { PurchaseBillSchema, PurchaseCreditSchema } from "./purchase-bill.ts";
 import { CreditNoteSchema } from "./credit-note.ts";
 import { PasswordResetSchema } from "./password-reset.ts";
 import { ProductSchema } from "./product.ts";
@@ -1605,6 +1663,12 @@ export interface CollectionDocs {
   settlements: Settlement;
   supplier: Supplier;
   suppliers: Supplier;
+  purchase: Purchase;
+  purchases: Purchase;
+  "purchase-bill": PurchaseBill;
+  "purchase-bills": PurchaseBill;
+  "purchase-credit": PurchaseCredit;
+  "purchase-credits": PurchaseCredit;
   stock: Stock;
   "stock-lock": StockLock;
   "stock-locks": StockLock;
@@ -1705,6 +1769,9 @@ const schemasTyped: { [C in CollectionName]: z.ZodType<CollectionDocs[C]> } = {
   "credit-note": CreditNoteSchema, "credit-notes": CreditNoteSchema,
   "settlement": SettlementSchema, "settlements": SettlementSchema,
   "supplier": SupplierSchema, "suppliers": SupplierSchema,
+  "purchase": PurchaseSchema, "purchases": PurchaseSchema,
+  "purchase-bill": PurchaseBillSchema, "purchase-bills": PurchaseBillSchema,
+  "purchase-credit": PurchaseCreditSchema, "purchase-credits": PurchaseCreditSchema,
   // `stock` is both the singular and the plural, so it takes one key rather than
   // the usual pair. `stock-locks` gets the pair like everything else.
   "stock": StockSchema,

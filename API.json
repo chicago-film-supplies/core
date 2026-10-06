@@ -501,7 +501,7 @@
         {
           "kind": "variable",
           "name": "CFS_SOURCE_COLLECTIONS",
-          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"cards\" | \"contacts\" | \"credit-notes\" | \"fulfillments\" | \"invoices\" | \"locations\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"roles\" | \"settlements\" | \"suppliers\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
+          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"cards\" | \"contacts\" | \"credit-notes\" | \"fulfillments\" | \"invoices\" | \"locations\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"purchase-bills\" | \"purchase-credits\" | \"purchases\" | \"roles\" | \"settlements\" | \"suppliers\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
           "doc": "Collections that may legitimately appear as a {@link DocSourceType} `collection`.\n\nThis was `z.string().min(1)` — free text that reached a Firestore collection\nname. `CreateCardInput.sources` comes straight off the POST body and\n`createCard` copies it into the THREAD's `sources`, so\n`POST /cards {sources:[{collection:\"cards\", uid:X}]}` wrote a thread claiming\na card as its own source, which `deleteCard` then unpicks by\n`s.collection === \"cards\"`. Every consumer was re-deriving the same implicit\n\"it's one of the known CFS collections\" contract; it is encoded once here.\n\nMembership is the union of a read-only survey of every stored `DocSource` in\nBOTH envs (threads, comments, cards, recurrences.prototype, out-of-service\n`sources[]` + `transactions[].source` — dev and prod agreed on the same 12\nvalues, no malformed entries) plus `template-components`, which has no stored\ninstance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.\n\n`transactions` is now a live-written source: the movement journal links a\nreversal to the event it negates, and a component event to its parent, both\nthrough `sources[]`. (It was historical-only when this list was surveyed —\n898 instances, identical count in both envs.) Never narrow this past stored\ndata; survey first.\n\n`locations` carries no `sources[]` of its own — it is here because a movement\nline's `location.from` / `location.to` is a `DocSource` pointing at wherever\nthe units physically are: a `locations` doc (on a shelf), a `bookings` doc\n(out on a job), or an `out-of-service` record. Widening is safe; the\n`DocSource` shape is unchanged."
         },
         {
@@ -865,6 +865,18 @@
           "doc": "Zod schema for {@link ClientLogEntry}.\n\nThe `data` field is capped at 20 top-level keys + 4 KB stringified to\ndefend against runaway client-side payloads. Manager logs in practice\ncarry ≤5 keys and <500 bytes per entry, so this cap is far above the\nlegitimate ceiling."
         },
         {
+          "kind": "variable",
+          "name": "ClosePurchaseInput",
+          "declaration": "const ClosePurchaseInput: z.ZodType<ClosePurchaseInputType>;",
+          "doc": "Zod schema for ClosePurchaseInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ClosePurchaseInputType",
+          "declaration": "interface ClosePurchaseInputType {\n  uid_products?: string[];\n  uuid_session: string;\n  version: number;\n}",
+          "doc": "Input for a short close or a cancel.\n\nSets each named line's `quantity_canceled` to `quantity − quantity_received`.\n`uid_products` absent closes every line; a cancel is a close of a purchase\nwith nothing received. When the close leaves a line billed beyond what was\nreceived, the writer raises a `purchase-credits` document for the excess."
+        },
+        {
           "kind": "interface",
           "name": "CollectDisplayColumnsResult",
           "declaration": "interface CollectDisplayColumnsResult {\n  columns: DisplayColumn[];\n  unhandled: Array<typeLiteral>;\n}",
@@ -879,7 +891,7 @@
         {
           "kind": "interface",
           "name": "CollectionDocs",
-          "declaration": "interface CollectionDocs {\n  activity: Activity;\n  activities: Activity;\n  booking: Booking;\n  bookings: Booking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  settings: BillingSettings;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  department-type: DepartmentType;\n  department-types: DepartmentType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  statement-documents: StatementDocument;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  supplier: Supplier;\n  suppliers: Supplier;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  taxes-codes: TaxCode;\n  taxes-rates: TaxRate;\n  taxes-classes: TaxClass;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  unit: UnitType;\n  units: UnitType;\n  unit-roster: UnitRoster;\n  unit-rosters: UnitRoster;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
+          "declaration": "interface CollectionDocs {\n  activity: Activity;\n  activities: Activity;\n  booking: Booking;\n  bookings: Booking;\n  card: Card;\n  cards: Card;\n  counter: Counter;\n  counters: Counter;\n  cache-geocodes: CacheGeocodes;\n  chart-of-accounts: ChartOfAccounts;\n  comment: Comment;\n  comments: Comment;\n  contact: Contact;\n  contacts: Contact;\n  destination: Destination;\n  destinations: Destination;\n  email-verification: EmailVerification;\n  email-verifications: EmailVerification;\n  holiday-dates: HolidayDates;\n  dates: HolidayDates;\n  holiday-definition: HolidayDefinition;\n  holiday-definitions: HolidayDefinition;\n  holiday-snapshot: HolidaySnapshot;\n  settings: BillingSettings;\n  inventory-ledger: InventoryLedger;\n  inventory-ledgers: InventoryLedger;\n  invite: Invite;\n  invites: Invite;\n  invoice: Invoice;\n  invoices: Invoice;\n  list: List;\n  lists: List;\n  location: Location;\n  locations: Location;\n  location-type: LocationType;\n  location-types: LocationType;\n  department-type: DepartmentType;\n  department-types: DepartmentType;\n  order: Order;\n  orders: Order;\n  fulfillment: Fulfillment;\n  fulfillments: Fulfillment;\n  organization: Organization;\n  organizations: Organization;\n  out-of-service: OutOfService;\n  password-reset: PasswordReset;\n  password-resets: PasswordReset;\n  product: Product;\n  products: Product;\n  quote: Quote;\n  quotes: Quote;\n  statement-documents: StatementDocument;\n  template: Template;\n  templates: Template;\n  templates-versions: TemplateVersion;\n  template-components: TemplateComponent;\n  rate-limit: RateLimit;\n  rate-limits: RateLimit;\n  recurrence: Recurrence;\n  recurrences: Recurrence;\n  role: Role;\n  roles: Role;\n  session: Session;\n  sessions: Session;\n  credit-note: CreditNote;\n  credit-notes: CreditNote;\n  settlement: Settlement;\n  settlements: Settlement;\n  supplier: Supplier;\n  suppliers: Supplier;\n  purchase: Purchase;\n  purchases: Purchase;\n  purchase-bill: PurchaseBill;\n  purchase-bills: PurchaseBill;\n  purchase-credit: PurchaseCredit;\n  purchase-credits: PurchaseCredit;\n  stock: Stock;\n  stock-lock: StockLock;\n  stock-locks: StockLock;\n  store: Store;\n  stores: Store;\n  tag: Tag;\n  tags: Tag;\n  taxes-codes: TaxCode;\n  taxes-rates: TaxRate;\n  taxes-classes: TaxClass;\n  thread: Thread;\n  threads: Thread;\n  tracking-category: TrackingCategory;\n  tracking-categories: TrackingCategory;\n  transaction: Movement;\n  transactions: Movement;\n  unit: UnitType;\n  units: UnitType;\n  unit-roster: UnitRoster;\n  unit-rosters: UnitRoster;\n  user: User;\n  users: User;\n  webhook-event: WebhookEvent;\n  webhook-events: WebhookEvent;\n  events: WebhookEvent;\n  webshop-product: WebshopProduct;\n  webshop-products: WebshopProduct;\n  typesense-config: TypesenseConfig;\n  typesense: TypesenseConfig;\n  uploadcare-sweep: UploadcareSweepRun;\n  uploadcare-worklist: UploadcareWorkListEntry;\n  xero-budget: XeroBudget;\n  xero-sync: XeroSyncState;\n  documents: OrderDocument;\n  template_previews: PreviewRecord;\n  mcp-oauth-clients: McpOAuthClient;\n  mcp-oauth-authorize-requests: McpOAuthAuthorizeRequest;\n  mcp-oauth-codes: McpOAuthCode;\n  mcp-oauth-tokens: McpOAuthToken;\n}",
           "doc": "The ONE place a collection name is bound to its document type.\n\n`schemas` below is annotated by a mapped type over this interface, so the two\ncannot drift: a key here with no entry there is an error at the object\nliteral, and an entry there with no key here is an excess property. That is\nthe compiler enforcing the parity — not a test that can go stale, and not the\n\"parity assertion between two hand-maintained lists\" the workspace rules warn\nabout. It fails at `deno task check`.\n\n⚠️ **Both halves are written out explicitly, and that is deliberate.** JSR's\nnpm declaration emit is SYNTACTIC — it writes declarations without running\ninference — so a type it has to COMPUTE from an initializer can publish\nwrongly to npm consumers while Deno consumers, this suite, `deno task check`\nand `deno publish --dry-run` all agree with the source. That is core#43: nine\n`as const` members emitted as one, and 57 phantom type errors on manager's\nnext pin bump. An interface and a written mapped-type annotation are text the\nemitter copies verbatim, so neither needs expanding.\n\n⚠️ Measured 2026-08-14, because the obvious reasoning is wrong: the\ninference-requiring form (`= {…} satisfies Record<string, z.ZodType>` plus\n`keyof typeof`) **also passes** `deno publish --dry-run`'s slow-types check.\nPassing that check is NOT evidence the emit is right. The explicit form is\nchosen because it needs no expansion at all, which is a reasoned preference\nrather than a measured one.\n\n⚠️ The line above used to add *\"core#44 closed as 'no post-publish declaration\ngate', so nothing here can see a wrong published declaration.\"* **That is no\nlonger true**: core#44 reopened on a second divergence and\n`deno task check:declarations` now runs `isolatedDeclarations` over all of\n`src/`. It is still not a check of JSR's *emitter* — it is a conservative\nover-approximation of it — so \"passing does not prove the emit is right\"\nsurvives; what does not survive is \"nothing can see it\".\n\nSingular and plural both appear because the registry has always carried both.\n⚠️ The singular half may be vestigial — there are zero literal `schemas[\"order\"]`\n-style lookups across api-cloudrun, manager and templates, and every call site\nfound passes a plural or the literal `\"events\"`. Removing them would halve this\nfile's hand-written surface, but it is a breaking change to a published API and\nwants the dynamic callers' domain established first. Not folded in here."
         },
         {
@@ -1241,6 +1253,30 @@
           "name": "CreateProductInputType",
           "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  webshop: typeLiteral;\n  transaction?: typeLiteral;\n}",
           "doc": "Input type for creating a product."
+        },
+        {
+          "kind": "variable",
+          "name": "CreatePurchaseBillInput",
+          "declaration": "const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType>;",
+          "doc": "Zod schema for CreatePurchaseBillInputType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CreatePurchaseBillInputType",
+          "declaration": "type CreatePurchaseBillInputType = typeLiteral | typeLiteral;",
+          "doc": "Input for billing a purchase — push a new ACCPAY, or link an existing Xero\nbill or card payment.\n\nA PUSHED bill line carries no amount: the writer prices it at the purchase\nline's cumulative share, so a price the purchase does not hold cannot be\nbilled. A LINKED bill carries `total_cents` as Xero has it."
+        },
+        {
+          "kind": "variable",
+          "name": "CreatePurchaseInput",
+          "declaration": "const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType>;",
+          "doc": "Zod schema for CreatePurchaseInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "CreatePurchaseInputType",
+          "declaration": "interface CreatePurchaseInputType {\n  supplier: typeLiteral;\n  store: typeLiteral;\n  date: string;\n  reference?: string | null;\n  notes?: string | null;\n  lines: PurchaseLineInputType[];\n  uuid_session: string;\n}",
+          "doc": "Input for creating a purchase.\n\n`supplier` and `store` are uids only — the server resolves the names, as\n`CreateTransactionInput.supplier` does, so a snapshot never disagrees with\nits document."
         },
         {
           "kind": "variable",
@@ -3487,6 +3523,36 @@
           "doc": "The {@link PreTaxItemType} members as a runtime enum — the vocabulary of\n`Tax.item_types`, i.e. *which line types a tax covers*.\n\n🔑 **`PreTaxItemType`, not {@link DocLineItemTypeType}, and the difference is\nthe whole point.** `transaction_fee` is `pricing: \"from_total\"`, and\n`calculateItemTax` **throws** `Item is not priceable` on it. Typing the field\nat the pre-tax subset makes *\"a tax that covers transaction fees\"*\nunrepresentable rather than merely absent from a list, and keeps\n{@link ITEM_CONTRACTS} the single author of what is priceable. The\n`destination` / `group` dividers fall out for free.\n\n⚠️ **Written out rather than derived, deliberately** — JSR's npm declaration\nemit truncates a spread inside an `as const` array (core#43), so a\n`[...X] as const` here would publish a different, wrong type to the manager\nonly. `_preTaxParity` below is the mechanism that keeps the hand-written list\nhonest, checked in BOTH directions."
         },
         {
+          "kind": "variable",
+          "name": "PURCHASE_BILL_XERO_DOCUMENTS",
+          "declaration": "const PURCHASE_BILL_XERO_DOCUMENTS: \"invoice\" | \"bank_transaction\"[];",
+          "doc": "Which Xero collection a bill's `xero_id` lives in. A GUID cannot say: ACCPAY\nbills and SPEND bank transactions are both plain GUIDs, which is the\nambiguity `Movement.xero_id` carries unresolved (api-cloudrun#1091). A bill\nstates it."
+        },
+        {
+          "kind": "variable",
+          "name": "PURCHASE_CREDIT_REASONS",
+          "declaration": "const PURCHASE_CREDIT_REASONS: \"short_close\" | \"supplier_adjustment\" | \"correction\"[];",
+          "doc": "Why a supplier credited CFS. Closed, like `SETTLEMENT_REASONS`, and for the\nsame reason: it becomes a ledger code.\n\n⚠️ **A separate vocabulary from `SETTLEMENT_REASONS` for now**, and the\nsettlements half of api-cloudrun#1210 is where they meet: an AP allocation\nrow carries its credit's reason, so these members join that enum there, and\nthis list becomes a subset of it the way `CREDIT_NOTE_REASONS` is."
+        },
+        {
+          "kind": "variable",
+          "name": "PURCHASE_CREDIT_STATUSES",
+          "declaration": "const PURCHASE_CREDIT_STATUSES: \"issued\" | \"applied\" | \"void\"[];",
+          "doc": "`issued` while it holds credit, `applied` once it holds none, `void` when\nannulled — the AR credit note's vocabulary minus `draft` (a supplier credit is\nraised by a close or recorded from the supplier, never drafted)."
+        },
+        {
+          "kind": "variable",
+          "name": "PURCHASE_DOCUMENT_ORIGINS",
+          "declaration": "const PURCHASE_DOCUMENT_ORIGINS: \"pushed\" | \"linked\"[];",
+          "doc": "Who authored the Xero document — see the module docblock."
+        },
+        {
+          "kind": "variable",
+          "name": "PURCHASE_STATUSES",
+          "declaration": "const PURCHASE_STATUSES: \"active\" | \"complete\" | \"canceled\"[];",
+          "doc": "Derived by {@link derivePurchaseStatus}, never client-set. The out-of-service\nvocabulary, for the reason `OOS_STATUSES` gives: orders, bookings and cards\nall say `active` for \"in progress\".\n\nPartial progress — some received, some billed — is read off the buckets, not\nencoded here. A status per stage (`partially_received`, `billed`, …) would be\na second rendering of numbers the line already carries."
+        },
+        {
           "kind": "interface",
           "name": "PartialNameParts",
           "declaration": "interface PartialNameParts {\n  first_name?: string;\n  middle_name?: string;\n  last_name?: string;\n  pronunciation?: string;\n}",
@@ -3806,6 +3872,174 @@
         },
         {
           "kind": "interface",
+          "name": "Purchase",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  lines: PurchaseLine[];\n  total_cents: number;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A purchase order placed with a supplier."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseBill",
+          "declaration": "interface PurchaseBill {\n  uid: string;\n  number: number;\n  uid_purchase: string;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  xero_document: PurchaseBillXeroDocumentType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date: string | null;\n  reference: string | null;\n  lines: PurchaseDocumentLine[];\n  direct_lines: PurchaseDirectLine[];\n  totals: PurchaseBillTotals;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A supplier bill against one purchase."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseBillSchema",
+          "declaration": "const PurchaseBillSchema: z.ZodType<PurchaseBill>;",
+          "doc": "Zod schema for PurchaseBill."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseBillTotals",
+          "declaration": "interface PurchaseBillTotals {\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents: number;\n  amount_void_cents: number;\n  amount_due_cents: number;\n}",
+          "doc": "A bill's settlement projection — the invoice's keys, see the module docblock."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseBillTotalsSchema",
+          "declaration": "const PurchaseBillTotalsSchema: z.ZodType<PurchaseBillTotals>;",
+          "doc": "Zod schema for PurchaseBillTotals."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseBillXeroDocumentEnum",
+          "declaration": "const PurchaseBillXeroDocumentEnum: z.ZodType<PurchaseBillXeroDocumentType>;",
+          "doc": "Zod schema for PurchaseBillXeroDocumentType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseBillXeroDocumentType",
+          "declaration": "type PurchaseBillXeroDocumentType = indexedAccess;",
+          "doc": "One {@link PURCHASE_BILL_XERO_DOCUMENTS} member."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseCredit",
+          "declaration": "interface PurchaseCredit {\n  uid: string;\n  number: number;\n  uid_purchase: string;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  reason: PurchaseCreditReasonType;\n  status: PurchaseCreditStatusType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  lines: PurchaseDocumentLine[];\n  direct_lines: PurchaseDirectLine[];\n  total_cents: number;\n  remaining_credit_cents: number;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A supplier credit (ACCPAYCREDIT) against one purchase."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseCreditReasonEnum",
+          "declaration": "const PurchaseCreditReasonEnum: z.ZodType<PurchaseCreditReasonType>;",
+          "doc": "Zod schema for PurchaseCreditReasonType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseCreditReasonType",
+          "declaration": "type PurchaseCreditReasonType = indexedAccess;",
+          "doc": "One {@link PURCHASE_CREDIT_REASONS} member."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseCreditSchema",
+          "declaration": "const PurchaseCreditSchema: z.ZodType<PurchaseCredit>;",
+          "doc": "Zod schema for PurchaseCredit."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseCreditStatusEnum",
+          "declaration": "const PurchaseCreditStatusEnum: z.ZodType<PurchaseCreditStatusType>;",
+          "doc": "Zod schema for PurchaseCreditStatusType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseCreditStatusType",
+          "declaration": "type PurchaseCreditStatusType = indexedAccess;",
+          "doc": "One {@link PURCHASE_CREDIT_STATUSES} member."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseDirectLine",
+          "declaration": "interface PurchaseDirectLine {\n  description: string;\n  account_code: number;\n  amount_cents: number;\n}",
+          "doc": "A line billing something that is not a product — freight, a fee. Posts to\nits own account and never touches basis (landed cost is a follow-up)."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseDirectLineSchema",
+          "declaration": "const PurchaseDirectLineSchema: z.ZodType<PurchaseDirectLine>;",
+          "doc": "Zod schema for PurchaseDirectLine."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseDocumentLine",
+          "declaration": "interface PurchaseDocumentLine {\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n}",
+          "doc": "A bill or credit line: some quantity of ONE purchase line, keyed by product."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseDocumentLineInput",
+          "declaration": "const PurchaseDocumentLineInput: z.ZodType<PurchaseDocumentLineInputType>;",
+          "doc": "Zod schema for PurchaseDocumentLineInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseDocumentLineInputType",
+          "declaration": "interface PurchaseDocumentLineInputType {\n  uid_product: string;\n  quantity: number;\n}",
+          "doc": "A bill or credit line as an operator matches it to a purchase line."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseDocumentLineSchema",
+          "declaration": "const PurchaseDocumentLineSchema: z.ZodType<PurchaseDocumentLine>;",
+          "doc": "Zod schema for PurchaseDocumentLine."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseDocumentOriginEnum",
+          "declaration": "const PurchaseDocumentOriginEnum: z.ZodType<PurchaseDocumentOriginType>;",
+          "doc": "Zod schema for PurchaseDocumentOriginType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseDocumentOriginType",
+          "declaration": "type PurchaseDocumentOriginType = indexedAccess;",
+          "doc": "One {@link PURCHASE_DOCUMENT_ORIGINS} member."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseLine",
+          "declaration": "interface PurchaseLine {\n  uid_product: string;\n  name: string;\n  quantity: number;\n  amount_cents: number;\n  expected_date: string | null;\n  quantity_received: number;\n  quantity_billed: number;\n  quantity_canceled: number;\n}",
+          "doc": "One product ordered on a purchase."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseLineInput",
+          "declaration": "const PurchaseLineInput: z.ZodType<PurchaseLineInputType>;",
+          "doc": "Zod schema for PurchaseLineInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseLineInputType",
+          "declaration": "interface PurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  expected_date?: string | null;\n}",
+          "doc": "One line as an operator orders it — the buckets are the server's."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseLineSchema",
+          "declaration": "const PurchaseLineSchema: z.ZodType<PurchaseLine>;",
+          "doc": "Zod schema for PurchaseLine."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseSchema",
+          "declaration": "const PurchaseSchema: z.ZodType<Purchase>;",
+          "doc": "Zod schema for Purchase."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseStatusEnum",
+          "declaration": "const PurchaseStatusEnum: z.ZodType<PurchaseStatusType>;",
+          "doc": "Zod schema for PurchaseStatusType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseStatusType",
+          "declaration": "type PurchaseStatusType = indexedAccess;",
+          "doc": "Allowed purchase statuses. See {@link PURCHASE_STATUSES}."
+        },
+        {
+          "kind": "interface",
           "name": "Quote",
           "declaration": "interface Quote {\n  uid: string;\n  uid_order: string;\n  order_number: number;\n  version: number;\n  uploadcare_uuid: string;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  source_hash: string;\n  deleted_at: FirestoreTimestampType | null;\n  expires_at: FirestoreTimestampType | null;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A PDF quote document associated with an order."
@@ -3881,6 +4115,30 @@
           "name": "ReactionActionType",
           "declaration": "type ReactionActionType = indexedAccess;",
           "doc": "Allowed reaction actions."
+        },
+        {
+          "kind": "variable",
+          "name": "ReceivePurchaseInput",
+          "declaration": "const ReceivePurchaseInput: z.ZodType<ReceivePurchaseInputType>;",
+          "doc": "Zod schema for ReceivePurchaseInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ReceivePurchaseInputType",
+          "declaration": "interface ReceivePurchaseInputType {\n  date: string;\n  reference?: string;\n  lines: ReceivePurchaseLineInputType[];\n  uuid_session: string;\n  version: number;\n}",
+          "doc": "Input for receiving goods against a purchase.\n\nEach line becomes ONE `purchase` movement naming the purchase in `sources[]`,\nall in one transaction with the bucket co-write. The movement id is\n`{uuid_session}|purchase|{uid_product}`, so a delivery of several products\nshares one session and a retry lands on the same movements. Cost is not an\ninput: each receipt costs its cumulative share of the line\n(`cumulativeShareCents`), which is what keeps basis equal to what is billed."
+        },
+        {
+          "kind": "variable",
+          "name": "ReceivePurchaseLineInput",
+          "declaration": "const ReceivePurchaseLineInput: z.ZodType<ReceivePurchaseLineInputType>;",
+          "doc": "Zod schema for ReceivePurchaseLineInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ReceivePurchaseLineInputType",
+          "declaration": "interface ReceivePurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n}",
+          "doc": "One product received in a delivery."
         },
         {
           "kind": "interface",
@@ -4031,6 +4289,18 @@
           "name": "RestoreQuoteInputType",
           "declaration": "interface RestoreQuoteInputType {\n  uid: string;\n}",
           "doc": "Input for restoring a soft-deleted quote."
+        },
+        {
+          "kind": "variable",
+          "name": "ReversePurchaseReceiptInput",
+          "declaration": "const ReversePurchaseReceiptInput: z.ZodType<ReversePurchaseReceiptInputType>;",
+          "doc": "Zod schema for ReversePurchaseReceiptInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ReversePurchaseReceiptInputType",
+          "declaration": "interface ReversePurchaseReceiptInputType {\n  uuid_session: string;\n  reference?: string;\n  version: number;\n}",
+          "doc": "Input for reversing one receipt (`POST /purchases/{uid}/receipts/{movementUid}/reverse`).\n\nA standalone reversal of a receipt is refused; this lever reverses it AND\ndecrements `quantity_received` in one transaction. It posts nothing to Xero —\na receipt never did."
         },
         {
           "kind": "variable",
@@ -5300,6 +5570,18 @@
         },
         {
           "kind": "variable",
+          "name": "UpdatePurchaseInput",
+          "declaration": "const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType>;",
+          "doc": "Zod schema for UpdatePurchaseInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "UpdatePurchaseInputType",
+          "declaration": "interface UpdatePurchaseInputType {\n  date?: string;\n  reference?: string | null;\n  notes?: string | null;\n  lines?: PurchaseLineInputType[];\n  version: number;\n}",
+          "doc": "Input for amending a purchase — a PATCH.\n\n`lines`, when present, is the complete next set. The writer refuses to change\na line's `quantity` below what is received or billed, and refuses to change\nits `amount_cents` once it has any receipt or bill: a price that moved after\ngoods or a bill exist is a short close plus a new purchase (the plan's *Money\nrules*), because every receipt already carries its share of the old price.\nThose are cross-document facts the writer holds, so they are not refined here."
+        },
+        {
+          "kind": "variable",
           "name": "UpdateRecurrenceInput",
           "declaration": "const UpdateRecurrenceInput: z.ZodType<UpdateRecurrenceInputType>;",
           "doc": "Zod schema for updating a recurrence."
@@ -5806,6 +6088,14 @@
           "name": "deriveProductImageUuids",
           "signature": "deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]",
           "doc": "Derive `query_by_images` from `images` — each row's `uuid` followed by its\n`uuid_cutout` when set, walking `images` in order.\n\nThe single source of the denormalization, called by every writer. Defined here\nrather than in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\n**Ordered, but not an ordering source.** The emitted array follows `images`\nrow order — it costs nothing (one pass either way) and a mirror that tracks\nthe display array is easier to eyeball in the console than an arbitrary one.\nBut `images` remains the sole authority on display order: this field exists\nfor Firestore `array-contains`, and the refinement below compares it as a\nmultiset, so a differently-ordered mirror holding the same uuids is still\nvalid. Nothing may read order back out of it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "derivePurchaseStatus",
+          "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"lines\">): PurchaseStatusType",
+          "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every line is canceled in full: nothing received, nothing\n  left billed. A cancel is a close with nothing received.\n- `complete` when every line is RESOLVED on BOTH axes: each unit either\n  received or canceled, and billed for exactly what was not canceled. Payment\n  is the bill's business and does not hold a purchase open.\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.\n\nLives in the schema module, not in `utils/`, because the document refine\ncalls it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -6477,7 +6767,7 @@
         {
           "kind": "variable",
           "name": "CFS_SOURCE_COLLECTIONS",
-          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"cards\" | \"contacts\" | \"credit-notes\" | \"fulfillments\" | \"invoices\" | \"locations\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"roles\" | \"settlements\" | \"suppliers\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
+          "declaration": "const CFS_SOURCE_COLLECTIONS: \"bookings\" | \"cards\" | \"contacts\" | \"credit-notes\" | \"fulfillments\" | \"invoices\" | \"locations\" | \"orders\" | \"organizations\" | \"out-of-service\" | \"products\" | \"purchase-bills\" | \"purchase-credits\" | \"purchases\" | \"roles\" | \"settlements\" | \"suppliers\" | \"template-components\" | \"templates\" | \"templates-versions\" | \"transactions\"[];",
           "doc": "Collections that may legitimately appear as a {@link DocSourceType} `collection`.\n\nThis was `z.string().min(1)` — free text that reached a Firestore collection\nname. `CreateCardInput.sources` comes straight off the POST body and\n`createCard` copies it into the THREAD's `sources`, so\n`POST /cards {sources:[{collection:\"cards\", uid:X}]}` wrote a thread claiming\na card as its own source, which `deleteCard` then unpicks by\n`s.collection === \"cards\"`. Every consumer was re-deriving the same implicit\n\"it's one of the known CFS collections\" contract; it is encoded once here.\n\nMembership is the union of a read-only survey of every stored `DocSource` in\nBOTH envs (threads, comments, cards, recurrences.prototype, out-of-service\n`sources[]` + `transactions[].source` — dev and prod agreed on the same 12\nvalues, no malformed entries) plus `template-components`, which has no stored\ninstance yet but is declared legitimate by `TEMPLATE_SOURCES` in `comment.ts`.\n\n`transactions` is now a live-written source: the movement journal links a\nreversal to the event it negates, and a component event to its parent, both\nthrough `sources[]`. (It was historical-only when this list was surveyed —\n898 instances, identical count in both envs.) Never narrow this past stored\ndata; survey first.\n\n`locations` carries no `sources[]` of its own — it is here because a movement\nline's `location.from` / `location.to` is a `DocSource` pointing at wherever\nthe units physically are: a `locations` doc (on a shelf), a `bookings` doc\n(out on a job), or an `out-of-service` record. Widening is safe; the\n`DocSource` shape is unchanged."
         },
         {
@@ -9630,6 +9920,308 @@
           "doc": "Derive `query_by_images` from `images` — each row's `uuid` followed by its\n`uuid_cutout` when set, walking `images` in order.\n\nThe single source of the denormalization, called by every writer. Defined here\nrather than in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\n**Ordered, but not an ordering source.** The emitted array follows `images`\nrow order — it costs nothing (one pass either way) and a mirror that tracks\nthe display array is easier to eyeball in the console than an arbitrary one.\nBut `images` remains the sole authority on display order: this field exists\nfor Firestore `array-contains`, and the refinement below compares it as a\nmultiset, so a differently-ordered mirror holding the same uuids is still\nvalid. Nothing may read order back out of it.",
           "paramTags": [],
           "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/schemas/purchase",
+      "moduleDoc": "Purchase document schema — Firestore collection: `purchases`\n\nWhat CFS ORDERED from a supplier: one line per product, each with the\nquantity and the amount agreed. It moves nothing. api-cloudrun#1210 split a\n`purchase` movement, which used to be the order, the delivery, the bill and\n(through Xero) the debt all at once, into four facts with four homes:\n\n| fact     | home                                                   | moves                         |\n|----------|--------------------------------------------------------|-------------------------------|\n| ordered  | this document                                          | nothing                       |\n| received | `purchase` movements naming it in `sources[]`          | `quantity_held`, basis, units |\n| billed   | `purchase-bills` / `purchase-credits` naming it        | the Xero document             |\n| paid     | `settlements` rows against a bill                      | the bill's `totals`           |\n\nThe owner's real sequence is order → bill → delivery (days or weeks later,\npossibly partial) → payment, and before this document nothing could hold\n\"billed, not received\" — movement #3882 recorded three radios that had not\narrived. Plan: `api-cloudrun/.claude/plans/purchases.md`.\n\n## The shape is the out-of-service record's, on purpose\n\n`schemas/out-of-service.ts` is the package's parent-with-movements shape and this\ncopies every part of it:\n\n- **Its receipts name it in `sources[]`** and it finds them through\n  `query_by_sources`. There is no `Movement.purchase` field and no back-list\n  of movement ids here — the HISTORY of a purchase is the journal.\n- **Co-written buckets** per line (`quantity_received`, `quantity_billed`,\n  `quantity_canceled`), each written in the same transaction as the receipt,\n  bill or close that moves it — the analogue of the record's `breakdown`.\n- **A derived status** in the record's vocabulary (`active | complete |\n  canceled`), authored by {@link derivePurchaseStatus} and refined here, so a\n  document asserting one status and holding buckets that say another does not\n  parse.\n\n## A line is `(purchase, uid_product)`\n\nOne line per product, refined below. A receipt's subject is already\n`uid_product`, so a movement needs no line slot in `sources[]` to say which\nline it received against. A second price for the same product is a second\nPURCHASE, never a second line (see the plan's *Money rules*).\n\n## Money\n\n`amount_cents` is what the whole line costs, integer cents. The k-th receipt\nor bill against a line is priced by `cumulativeShareCents`\n(`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the\npartials sum to `amount_cents` exactly with no remainder rule. There is no\nstored `unit_cost`: it is a display rate, derivable by `perUnitCostAt4dp`, and\na stored copy beside the amount it derives from is a second source of truth.\n\nThere is no tax anywhere on a purchase (owner, 2026-10-05): stock bought for\nsale or rent is bought resale-exempt and the tax is collected from the end\nuser, so `priceDocument` never runs here.",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "ClosePurchaseInput",
+          "declaration": "const ClosePurchaseInput: z.ZodType<ClosePurchaseInputType>;",
+          "doc": "Zod schema for ClosePurchaseInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ClosePurchaseInputType",
+          "declaration": "interface ClosePurchaseInputType {\n  uid_products?: string[];\n  uuid_session: string;\n  version: number;\n}",
+          "doc": "Input for a short close or a cancel.\n\nSets each named line's `quantity_canceled` to `quantity − quantity_received`.\n`uid_products` absent closes every line; a cancel is a close of a purchase\nwith nothing received. When the close leaves a line billed beyond what was\nreceived, the writer raises a `purchase-credits` document for the excess."
+        },
+        {
+          "kind": "variable",
+          "name": "CreatePurchaseInput",
+          "declaration": "const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType>;",
+          "doc": "Zod schema for CreatePurchaseInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "CreatePurchaseInputType",
+          "declaration": "interface CreatePurchaseInputType {\n  supplier: typeLiteral;\n  store: typeLiteral;\n  date: string;\n  reference?: string | null;\n  notes?: string | null;\n  lines: PurchaseLineInputType[];\n  uuid_session: string;\n}",
+          "doc": "Input for creating a purchase.\n\n`supplier` and `store` are uids only — the server resolves the names, as\n`CreateTransactionInput.supplier` does, so a snapshot never disagrees with\nits document."
+        },
+        {
+          "kind": "variable",
+          "name": "PURCHASE_STATUSES",
+          "declaration": "const PURCHASE_STATUSES: \"active\" | \"complete\" | \"canceled\"[];",
+          "doc": "Derived by {@link derivePurchaseStatus}, never client-set. The out-of-service\nvocabulary, for the reason `OOS_STATUSES` gives: orders, bookings and cards\nall say `active` for \"in progress\".\n\nPartial progress — some received, some billed — is read off the buckets, not\nencoded here. A status per stage (`partially_received`, `billed`, …) would be\na second rendering of numbers the line already carries."
+        },
+        {
+          "kind": "interface",
+          "name": "Purchase",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  lines: PurchaseLine[];\n  total_cents: number;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A purchase order placed with a supplier."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseLine",
+          "declaration": "interface PurchaseLine {\n  uid_product: string;\n  name: string;\n  quantity: number;\n  amount_cents: number;\n  expected_date: string | null;\n  quantity_received: number;\n  quantity_billed: number;\n  quantity_canceled: number;\n}",
+          "doc": "One product ordered on a purchase."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseLineInput",
+          "declaration": "const PurchaseLineInput: z.ZodType<PurchaseLineInputType>;",
+          "doc": "Zod schema for PurchaseLineInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseLineInputType",
+          "declaration": "interface PurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  expected_date?: string | null;\n}",
+          "doc": "One line as an operator orders it — the buckets are the server's."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseLineSchema",
+          "declaration": "const PurchaseLineSchema: z.ZodType<PurchaseLine>;",
+          "doc": "Zod schema for PurchaseLine."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseSchema",
+          "declaration": "const PurchaseSchema: z.ZodType<Purchase>;",
+          "doc": "Zod schema for Purchase."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseStatusEnum",
+          "declaration": "const PurchaseStatusEnum: z.ZodType<PurchaseStatusType>;",
+          "doc": "Zod schema for PurchaseStatusType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseStatusType",
+          "declaration": "type PurchaseStatusType = indexedAccess;",
+          "doc": "Allowed purchase statuses. See {@link PURCHASE_STATUSES}."
+        },
+        {
+          "kind": "variable",
+          "name": "ReceivePurchaseInput",
+          "declaration": "const ReceivePurchaseInput: z.ZodType<ReceivePurchaseInputType>;",
+          "doc": "Zod schema for ReceivePurchaseInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ReceivePurchaseInputType",
+          "declaration": "interface ReceivePurchaseInputType {\n  date: string;\n  reference?: string;\n  lines: ReceivePurchaseLineInputType[];\n  uuid_session: string;\n  version: number;\n}",
+          "doc": "Input for receiving goods against a purchase.\n\nEach line becomes ONE `purchase` movement naming the purchase in `sources[]`,\nall in one transaction with the bucket co-write. The movement id is\n`{uuid_session}|purchase|{uid_product}`, so a delivery of several products\nshares one session and a retry lands on the same movements. Cost is not an\ninput: each receipt costs its cumulative share of the line\n(`cumulativeShareCents`), which is what keeps basis equal to what is billed."
+        },
+        {
+          "kind": "variable",
+          "name": "ReceivePurchaseLineInput",
+          "declaration": "const ReceivePurchaseLineInput: z.ZodType<ReceivePurchaseLineInputType>;",
+          "doc": "Zod schema for ReceivePurchaseLineInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ReceivePurchaseLineInputType",
+          "declaration": "interface ReceivePurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n}",
+          "doc": "One product received in a delivery."
+        },
+        {
+          "kind": "variable",
+          "name": "ReversePurchaseReceiptInput",
+          "declaration": "const ReversePurchaseReceiptInput: z.ZodType<ReversePurchaseReceiptInputType>;",
+          "doc": "Zod schema for ReversePurchaseReceiptInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ReversePurchaseReceiptInputType",
+          "declaration": "interface ReversePurchaseReceiptInputType {\n  uuid_session: string;\n  reference?: string;\n  version: number;\n}",
+          "doc": "Input for reversing one receipt (`POST /purchases/{uid}/receipts/{movementUid}/reverse`).\n\nA standalone reversal of a receipt is refused; this lever reverses it AND\ndecrements `quantity_received` in one transaction. It posts nothing to Xero —\na receipt never did."
+        },
+        {
+          "kind": "variable",
+          "name": "UpdatePurchaseInput",
+          "declaration": "const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType>;",
+          "doc": "Zod schema for UpdatePurchaseInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "UpdatePurchaseInputType",
+          "declaration": "interface UpdatePurchaseInputType {\n  date?: string;\n  reference?: string | null;\n  notes?: string | null;\n  lines?: PurchaseLineInputType[];\n  version: number;\n}",
+          "doc": "Input for amending a purchase — a PATCH.\n\n`lines`, when present, is the complete next set. The writer refuses to change\na line's `quantity` below what is received or billed, and refuses to change\nits `amount_cents` once it has any receipt or bill: a price that moved after\ngoods or a bill exist is a short close plus a new purchase (the plan's *Money\nrules*), because every receipt already carries its share of the old price.\nThose are cross-document facts the writer holds, so they are not refined here."
+        },
+        {
+          "kind": "function",
+          "name": "derivePurchaseStatus",
+          "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"lines\">): PurchaseStatusType",
+          "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every line is canceled in full: nothing received, nothing\n  left billed. A cancel is a close with nothing received.\n- `complete` when every line is RESOLVED on BOTH axes: each unit either\n  received or canceled, and billed for exactly what was not canceled. Payment\n  is the bill's business and does not hold a purchase open.\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.\n\nLives in the schema module, not in `utils/`, because the document refine\ncalls it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/schemas/purchase-bill",
+      "moduleDoc": "Purchase bill and supplier credit schemas — Firestore collections\n`purchase-bills` and `purchase-credits`.\n\nWhat a supplier BILLED CFS for a purchase (an ACCPAY bill, or a SPEND bank\ntransaction — a bill born paid), and what it CREDITED back (an ACCPAYCREDIT).\nMany bills per purchase, each its own document; each bill line bills some\nquantity of one purchase line, and moves that line's `quantity_billed` in the\nsame transaction. Plan: `api-cloudrun/.claude/plans/purchases.md`.\n\n## Why not `invoices` with a direction\n\nA CFS invoice is an order PROJECTION — shared-field merge, destinations,\n`priceDocument` tax, invoice actions, templates — and every one of those\nreaders would need a direction filter. A bill shares none of it. Supplier\ncredits are likewise not AR `credit-notes`: those carry an organization\nsnapshot, `priceCreditNote` tax and AR reasons.\n\n## Pushed or linked\n\n`origin` says who authored the Xero document, and it decides which money rule\nbinds:\n\n- **`pushed`** — CFS authored it and POSTs it (`CFS-BILL-n` as the number, the\n  supplier's in `Reference`). Each line must equal its purchase line's\n  cumulative share for the quantity it bills, to the cent, and the total is\n  the Σ of the lines — refined here as far as one document can say it, and\n  the share itself asserted by the writer, which holds the purchase.\n- **`linked`** — an existing Xero document CFS attaches to without pushing:\n  every backfilled bill, and an operator linking a bill or card payment\n  entered in Xero. Its total is XERO's, stored as Xero has it. P0 measured 21\n  of 299 historic documents whose purchase-account lines disagree with the\n  CFS basis (lines never received, lines coded off the purchase accounts), so\n  a linked bill is EXEMPT from the share rule — the difference is reported by\n  an audit, never refused.\n\nA **card-paid purchase is a linked `bank_transaction` bill** (owner,\n2026-10-05; 276 of the 299 historic documents are SPEND). It is never pushed,\ncarries no due date, and gets one payable payment settlement for its whole\ntotal, so \"billed\" and \"paid\" need no second code path.\n\n## Totals are a settlement projection\n\n`totals.amount_{paid,credited,void,due}_cents` are the invoice's keys exactly,\nbecause `SETTLEMENT_CONTRACTS[type].sums_into` names those storage fields and\n`recomputeSettlementTotals` never sees which document it is folding for. The\nidentity `paid + credited + void + due === total` is refined, as on the\ninvoice.\n\nNo tax: purchases are resale-exempt (owner, 2026-10-05) and push `NoTax`.",
+      "symbols": [
+        {
+          "kind": "variable",
+          "name": "CreatePurchaseBillInput",
+          "declaration": "const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType>;",
+          "doc": "Zod schema for CreatePurchaseBillInputType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CreatePurchaseBillInputType",
+          "declaration": "type CreatePurchaseBillInputType = typeLiteral | typeLiteral;",
+          "doc": "Input for billing a purchase — push a new ACCPAY, or link an existing Xero\nbill or card payment.\n\nA PUSHED bill line carries no amount: the writer prices it at the purchase\nline's cumulative share, so a price the purchase does not hold cannot be\nbilled. A LINKED bill carries `total_cents` as Xero has it."
+        },
+        {
+          "kind": "variable",
+          "name": "PURCHASE_BILL_XERO_DOCUMENTS",
+          "declaration": "const PURCHASE_BILL_XERO_DOCUMENTS: \"invoice\" | \"bank_transaction\"[];",
+          "doc": "Which Xero collection a bill's `xero_id` lives in. A GUID cannot say: ACCPAY\nbills and SPEND bank transactions are both plain GUIDs, which is the\nambiguity `Movement.xero_id` carries unresolved (api-cloudrun#1091). A bill\nstates it."
+        },
+        {
+          "kind": "variable",
+          "name": "PURCHASE_CREDIT_REASONS",
+          "declaration": "const PURCHASE_CREDIT_REASONS: \"short_close\" | \"supplier_adjustment\" | \"correction\"[];",
+          "doc": "Why a supplier credited CFS. Closed, like `SETTLEMENT_REASONS`, and for the\nsame reason: it becomes a ledger code.\n\n⚠️ **A separate vocabulary from `SETTLEMENT_REASONS` for now**, and the\nsettlements half of api-cloudrun#1210 is where they meet: an AP allocation\nrow carries its credit's reason, so these members join that enum there, and\nthis list becomes a subset of it the way `CREDIT_NOTE_REASONS` is."
+        },
+        {
+          "kind": "variable",
+          "name": "PURCHASE_CREDIT_STATUSES",
+          "declaration": "const PURCHASE_CREDIT_STATUSES: \"issued\" | \"applied\" | \"void\"[];",
+          "doc": "`issued` while it holds credit, `applied` once it holds none, `void` when\nannulled — the AR credit note's vocabulary minus `draft` (a supplier credit is\nraised by a close or recorded from the supplier, never drafted)."
+        },
+        {
+          "kind": "variable",
+          "name": "PURCHASE_DOCUMENT_ORIGINS",
+          "declaration": "const PURCHASE_DOCUMENT_ORIGINS: \"pushed\" | \"linked\"[];",
+          "doc": "Who authored the Xero document — see the module docblock."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseBill",
+          "declaration": "interface PurchaseBill {\n  uid: string;\n  number: number;\n  uid_purchase: string;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  xero_document: PurchaseBillXeroDocumentType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  due_date: string | null;\n  reference: string | null;\n  lines: PurchaseDocumentLine[];\n  direct_lines: PurchaseDirectLine[];\n  totals: PurchaseBillTotals;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A supplier bill against one purchase."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseBillSchema",
+          "declaration": "const PurchaseBillSchema: z.ZodType<PurchaseBill>;",
+          "doc": "Zod schema for PurchaseBill."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseBillTotals",
+          "declaration": "interface PurchaseBillTotals {\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents: number;\n  amount_void_cents: number;\n  amount_due_cents: number;\n}",
+          "doc": "A bill's settlement projection — the invoice's keys, see the module docblock."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseBillTotalsSchema",
+          "declaration": "const PurchaseBillTotalsSchema: z.ZodType<PurchaseBillTotals>;",
+          "doc": "Zod schema for PurchaseBillTotals."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseBillXeroDocumentEnum",
+          "declaration": "const PurchaseBillXeroDocumentEnum: z.ZodType<PurchaseBillXeroDocumentType>;",
+          "doc": "Zod schema for PurchaseBillXeroDocumentType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseBillXeroDocumentType",
+          "declaration": "type PurchaseBillXeroDocumentType = indexedAccess;",
+          "doc": "One {@link PURCHASE_BILL_XERO_DOCUMENTS} member."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseCredit",
+          "declaration": "interface PurchaseCredit {\n  uid: string;\n  number: number;\n  uid_purchase: string;\n  supplier: UidNameRefType;\n  origin: PurchaseDocumentOriginType;\n  reason: PurchaseCreditReasonType;\n  status: PurchaseCreditStatusType;\n  xero_id: string | null;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  lines: PurchaseDocumentLine[];\n  direct_lines: PurchaseDirectLine[];\n  total_cents: number;\n  remaining_credit_cents: number;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "doc": "A supplier credit (ACCPAYCREDIT) against one purchase."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseCreditReasonEnum",
+          "declaration": "const PurchaseCreditReasonEnum: z.ZodType<PurchaseCreditReasonType>;",
+          "doc": "Zod schema for PurchaseCreditReasonType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseCreditReasonType",
+          "declaration": "type PurchaseCreditReasonType = indexedAccess;",
+          "doc": "One {@link PURCHASE_CREDIT_REASONS} member."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseCreditSchema",
+          "declaration": "const PurchaseCreditSchema: z.ZodType<PurchaseCredit>;",
+          "doc": "Zod schema for PurchaseCredit."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseCreditStatusEnum",
+          "declaration": "const PurchaseCreditStatusEnum: z.ZodType<PurchaseCreditStatusType>;",
+          "doc": "Zod schema for PurchaseCreditStatusType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseCreditStatusType",
+          "declaration": "type PurchaseCreditStatusType = indexedAccess;",
+          "doc": "One {@link PURCHASE_CREDIT_STATUSES} member."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseDirectLine",
+          "declaration": "interface PurchaseDirectLine {\n  description: string;\n  account_code: number;\n  amount_cents: number;\n}",
+          "doc": "A line billing something that is not a product — freight, a fee. Posts to\nits own account and never touches basis (landed cost is a follow-up)."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseDirectLineSchema",
+          "declaration": "const PurchaseDirectLineSchema: z.ZodType<PurchaseDirectLine>;",
+          "doc": "Zod schema for PurchaseDirectLine."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseDocumentLine",
+          "declaration": "interface PurchaseDocumentLine {\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n}",
+          "doc": "A bill or credit line: some quantity of ONE purchase line, keyed by product."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseDocumentLineInput",
+          "declaration": "const PurchaseDocumentLineInput: z.ZodType<PurchaseDocumentLineInputType>;",
+          "doc": "Zod schema for PurchaseDocumentLineInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseDocumentLineInputType",
+          "declaration": "interface PurchaseDocumentLineInputType {\n  uid_product: string;\n  quantity: number;\n}",
+          "doc": "A bill or credit line as an operator matches it to a purchase line."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseDocumentLineSchema",
+          "declaration": "const PurchaseDocumentLineSchema: z.ZodType<PurchaseDocumentLine>;",
+          "doc": "Zod schema for PurchaseDocumentLine."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseDocumentOriginEnum",
+          "declaration": "const PurchaseDocumentOriginEnum: z.ZodType<PurchaseDocumentOriginType>;",
+          "doc": "Zod schema for PurchaseDocumentOriginType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseDocumentOriginType",
+          "declaration": "type PurchaseDocumentOriginType = indexedAccess;",
+          "doc": "One {@link PURCHASE_DOCUMENT_ORIGINS} member."
         }
       ]
     },
@@ -17441,6 +18033,44 @@
           "name": "windowChargeableDays",
           "signature": "windowChargeableDays(item: LineItem, pairs: readonly PairChargeWindows[]): number | null",
           "doc": "**What a line's pair's windows bill it for** — the window half of\n{@link lineChargeableDays}, split out so the invoice sync comparator can ask\nthe same question without re-deriving the rule (core#112).\n\n`null` means *this line does not take its days from windows at all*: it is not\na `rental` priced `five_day_week`, or it hangs under no pair. The two cases are\ndeliberately not distinguished here — {@link lineChargeableDays} owns the\nrefusal, because a pairless rental is a document defect and reporting it twice\nwould be two findings for one fault (the same split {@link chargeWindowPairViolations}\nmakes).\n\n⚠️ **It knows nothing about extension sections**, which bill the days their\nsection ADDS rather than their pair's total. A caller holding items that may\nsit in one must exclude them first, as {@link lineChargeableDays} does through\n{@link extensionFor}.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/purchases",
+      "moduleDoc": "Purchase helpers — the cumulative share that prices every receipt and every\npushed bill line, the per-line headroom, and the status rule.\n\nPlan: `api-cloudrun/.claude/plans/purchases.md` (api-cloudrun#1210).",
+      "symbols": [
+        {
+          "kind": "function",
+          "name": "cumulativeShareCents",
+          "signature": "cumulativeShareCents(amountCents: number, quantity: number, before: number, after: number): number",
+          "doc": "The cents a line's units `(before, after]` cost — the k-th receipt or the\nk-th bill line against a purchase line, priced from where the cumulative\ncount stood before it to where it stands after.\n\n`round(amount × after ÷ quantity) − round(amount × before ÷ quantity)`, each\nrounded once, half-up, over integers.\n\n⭐ **The CUMULATIVE value is rounded, never the partial.** So the partials\nalong any path from 0 to `quantity` telescope to `amount_cents` exactly — no\nremainder rule, no \"last one absorbs the cent\" — and the price of reaching a\ncumulative count is the same whichever deliveries got there. Rounding each\npartial instead (`round(amount × k ÷ quantity)`) drifts: three receipts of 1\nagainst a $10.00 line of 3 cost 333 + 333 + 333 = 999.\n\nReceipts and bills run this SEPARATELY, each on its own cumulative count, so\na CFS-pushed bill and the receipts it covers carry the same money however the\ntwo were split (`cfs-money`: closure under the quantum, × n ÷ d in integer\ncents, round once).\n\nA REVERSAL is the same call with the bounds swapped in sign: the units\n`(after, before]` leave at exactly what they cost to arrive, because the\ncumulative value at a count does not depend on the path.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "derivePurchaseStatus",
+          "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"lines\">): PurchaseStatusType",
+          "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every line is canceled in full: nothing received, nothing\n  left billed. A cancel is a close with nothing received.\n- `complete` when every line is RESOLVED on BOTH axes: each unit either\n  received or canceled, and billed for exactly what was not canceled. Payment\n  is the bill's business and does not hold a purchase open.\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.\n\nLives in the schema module, not in `utils/`, because the document refine\ncalls it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "remainingToBill",
+          "signature": "remainingToBill(line: Pick<PurchaseLine, \"quantity\" | \"quantity_billed\" | \"quantity_canceled\">): number",
+          "doc": "Units of a line still to be billed: `quantity − canceled − billed`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "remainingToReceive",
+          "signature": "remainingToReceive(line: Pick<PurchaseLine, \"quantity\" | \"quantity_received\" | \"quantity_canceled\">): number",
+          "doc": "Units of a line still to be received: `quantity − canceled − received`.",
           "paramTags": [],
           "returnsTag": null
         }

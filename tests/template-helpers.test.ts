@@ -68,6 +68,7 @@ import * as unitUtils from "../src/utils/units.ts";
 import * as priceDocumentUtils from "../src/utils/price-document.ts";
 import * as replacementUtils from "../src/utils/replacements.ts";
 import * as outOfServiceUtils from "../src/utils/out-of-service.ts";
+import * as purchaseUtils from "../src/utils/purchases.ts";
 import * as custodyUtils from "../src/utils/custody.ts";
 import * as invoiceActionUtils from "../src/utils/invoice-actions.ts";
 
@@ -122,6 +123,10 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // write-path derivations shared by the API writers and the manager's preview.
   // Listed so the drift guard sees its exports.
   "out-of-service": outOfServiceUtils,
+  // `utils/purchases.ts` prices a receipt or a bill line and derives a purchase's
+  // status — write-path rules shared by the API and the manager.
+  // Listed so the drift guard sees its exports.
+  purchases: purchaseUtils,
   // `utils/custody.ts` is the booking LEVER's ruleset — which step is legal,
   // what it does to a breakdown, what a record PUT moves. Every export answers a
   // question about a write; a template renders one that already happened.

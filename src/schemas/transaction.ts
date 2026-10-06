@@ -1714,6 +1714,32 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
         "so the bill it posts has to be billed to somebody",
     });
   }
+
+  // A receipt names the purchase it receives against (api-cloudrun#1210), and
+  // the purchase finds its receipts — and their reversals, which carry the same
+  // `sources[]` — only through `query_by_sources`, the out-of-service shape.
+  // ONE purchase: its line is `(purchase, uid_product)`, so a second would make
+  // the bucket the receipt moves ambiguous. Only a `purchase` may name one:
+  // every other type moves stock CFS already owns.
+  //
+  // ⚠️ "At most one", not "exactly one". The 406 historic purchases name none
+  // until the backfill links them, and an unlinked purchase stays writable
+  // until P6 retires that path — refusing it is a separate, ordered step.
+  const purchases = doc.sources.filter((s) => s.collection === "purchases").length;
+  if (doc.type === "purchase" && purchases > 1) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["sources"],
+      message: "a purchase receipt names exactly ONE purchase in sources[]",
+    });
+  }
+  if (doc.type !== "purchase" && purchases > 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["sources"],
+      message: `a "${doc.type}" is not a receipt and cannot name a purchase in sources[]`,
+    });
+  }
 }).meta({
   title: "Movement",
   collection: "transactions",
