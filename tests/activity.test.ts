@@ -103,27 +103,29 @@ Deno.test("the derivation is NOT the kebab→camel rule — two collections prov
   );
 });
 
-Deno.test("the feed stamps 25 DISTINCT permissions, 5 under Firestore's `in` cap of 30", () => {
+Deno.test("the feed stamps 26 DISTINCT permissions, 4 under Firestore's `in` cap of 30", () => {
   // 🔴 The number is asserted, not commented, because it is what has to stay
   // under the cap — and the cap binds on the ADMIN first, so the feed breaks for
   // the most privileged user. `manager/firestore.rules` gates **34 distinct
   // permissions** across 42 collection rules (measured 2026-09-05, not 32 as
   // this comment previously said); only the feed's narrower scope keeps this
-  // under 30, and every new actor-carrying collection spends one of the spare (5 left).
+  // under 30, and every new actor-carrying collection spends one of the spare (4 left).
   //
   // ⚠️ That 34 is NOT asserted here, deliberately — it lives in another repo, so
   // a ratchet on it from `core` would go red on a `manager` edit with no way to
   // fix it from this side. It is a measured aside; the ASSERTED number is the
-  // feed's own 25 below.
+  // feed's own 26 below.
   //
-  // 26 collections, 25 permissions: `templates` and `template-components` both
-  // map to `templates.read`. ⚠️ The tax catalog (api-cloudrun#993) spent THREE
-  // of the spare at once — `taxes-codes`, `taxes-rates`, `taxes-classes` each
+  // `templates` and `template-components` both map to `templates.read`.
+  // ⚠️ The tax catalog (api-cloudrun#993) spent THREE of the spare at once — `taxes-codes`, `taxes-rates`, `taxes-classes` each
   // gate on their own read — and handed one back when legacy `taxes` was
   // contracted. `fulfillments` (api-cloudrun#1112) spent one more on
-  // `fulfillment.read`.
-  assertEquals(FEED_COLLECTIONS.length, 26, "feed collections");
-  assertEquals(ACTIVITY_FEED_PERMISSIONS.length, 25, "distinct feed permissions");
+  // `fulfillment.read`. The three purchase documents (api-cloudrun#1210) spent
+  // one between them: all gate on `purchases.read`.
+  //
+  // 29 collections, 26 permissions.
+  assertEquals(FEED_COLLECTIONS.length, 29, "feed collections");
+  assertEquals(ACTIVITY_FEED_PERMISSIONS.length, 26, "distinct feed permissions");
   assertEquals(
     ACTIVITY_FEED_PERMISSIONS.length <= 30,
     true,

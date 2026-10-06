@@ -109,6 +109,9 @@ const ACTIVITY_SUBJECT_COLLECTIONS = [
   "organizations",
   "out-of-service",
   "products",
+  "purchase-bills",
+  "purchase-credits",
+  "purchases",
   "recurrences",
   "settlements",
   "suppliers",
@@ -181,6 +184,11 @@ export const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<
   "organizations": "organizations.read",
   "out-of-service": "outOfService.read",
   "products": "products.read",
+  // All three purchase documents share one read — `readableCollections.ts`
+  // gates them together, and the manager rules (api-cloudrun#1210 P3) will too.
+  "purchase-bills": "purchases.read",
+  "purchase-credits": "purchases.read",
+  "purchases": "purchases.read",
   "recurrences": "recurrences.read",
   "settlements": "settlements.read",
   "suppliers": "suppliers.read",
@@ -200,8 +208,8 @@ export const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<
  * The DISTINCT permissions a feed row can carry — the universe a client
  * intersects against.
  *
- * ⚠️ **25, not 26** — `templates` and `template-components` both map to
- * `templates.read`. Derived rather than listed so it cannot disagree with the
+ * ⚠️ **26, not 29** — `templates` and `template-components` both map to
+ * `templates.read`, and the three purchase documents all to `purchases.read`. Derived rather than listed so it cannot disagree with the
  * map above; the COUNT is asserted in `tests/activity.test.ts`, because the
  * number is the thing that has to stay under Firestore's `in` cap of 30 and a
  * comment cannot notice when it stops being true.
@@ -212,7 +220,7 @@ export const ACTIVITY_READ_PERMISSION_BY_COLLECTION: Readonly<
  * distinct permissions** across 42 collection rules (measured 2026-09-05), so
  * "one permission per readable collection" is *already* over the cap by four —
  * only the feed's narrower scope keeps it under, and every new actor-carrying
- * collection spends one of the 5 spare.
+ * collection spends one of the 4 spare (a collection sharing a permission spends none).
  */
 export const ACTIVITY_FEED_PERMISSIONS: readonly Permission[] = [
   ...new Set(Object.values(ACTIVITY_READ_PERMISSION_BY_COLLECTION)),
