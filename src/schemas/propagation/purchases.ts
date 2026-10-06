@@ -228,7 +228,7 @@ const settlePurchaseBillRules: CollectionRule[] = [
     target: "settlements",
     mode: "co-write",
     invariant:
-      "Xero is the authority on what CFS has paid a supplier, so the payments Xero reports on a tracked ACCPAY are reconciled INTO the journal: one it reports and CFS has not recorded is appended as a `bill_payment`, and one CFS holds that Xero no longer lists is reaped by appending its `bill_payment_reversal`. Matched on the Xero PaymentID, keyed (bill, PaymentID, generation), so a redelivery converges on the same document and a payment reported again after a reap takes a fresh one. The reap needs the `Payments` key PRESENT, and never touches a row with no `xero_payment_id` (a card bill born paid).",
+      "Xero is the authority on what CFS has paid a supplier, so the payments and supplier-credit allocations Xero reports on a tracked ACCPAY are reconciled INTO the journal. A credit allocation is reconciled as one aggregate per (bill, credit) against CFS's live `bill_credit` rows: CFS allocations Xero had not yet shown are matched and stamped synced, a remaining excess is appended, and a shortfall reaps synced rows — an unsynced row is never reaped. For payments: one it reports and CFS has not recorded is appended as a `bill_payment`, and one CFS holds that Xero no longer lists is reaped by appending its `bill_payment_reversal`. Matched on the Xero PaymentID, keyed (bill, PaymentID, generation), so a redelivery converges on the same document and a payment reported again after a reap takes a fresh one. The reap needs the `Payments` key PRESENT, and never touches a row with no `xero_payment_id` (a card bill born paid).",
     enforced_by: [BILL_PAYMENT_SYNCED, BILL_PAYMENT_REAPED],
     transaction: "settle-purchase-bill",
     fields: [
@@ -337,6 +337,142 @@ const voidPurchaseBillFromXeroRules: CollectionRule[] = [
   },
 ];
 
+/** The credit co-write, asserted on a pushed credit un-billing part of a line. */
+const CREDIT_UNBILLS_THE_BUCKET: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::push — a credit un-bills its lines at their cumulative share",
+  clause:
+    "each credit line lowers its purchase line's quantity_billed by its quantity in the same commit; a pushed credit line is priced at the share of the range it un-bills, so a bill and the credit of all its units sum to zero; un-billing past quantity_billed is refused",
+  gates: true,
+};
+
+/** An operator allocation, asserted on both folds and a replay. */
+const CREDIT_ALLOCATED: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::allocate — a credit allocated to a bill folds both, and a replay moves nothing",
+  clause:
+    "an allocation appends one bill_credit row naming the bill and the credit, keyed on the request session; the bill's amount_credited_cents and the credit's remaining_credit_cents are both their journals folded, in the same commit; an allocation past the credit's remaining or the bill's due is refused; a replay writes nothing",
+  gates: true,
+};
+
+/** A Xero-side allocation reaching a tracked bill, asserted end to end. */
+const XERO_CREDIT_FOLDED: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::webhook — a credit allocated in Xero appends one bill_credit row and refolds the credit",
+  clause:
+    "a supplier credit Xero reports allocated to a tracked bill, beyond what CFS's synced rows for that (bill, credit) hold, is first matched against CFS allocations Xero had not yet shown (stamped synced, never duplicated) and the rest appended as a bill_credit row; the bill and the credit are refolded in the same commit; a redelivery writes nothing",
+  gates: true,
+};
+
+const createPurchaseCreditRules: CollectionRule[] = [
+  {
+    id: "create-purchase-credit:credit-to-purchase",
+    source: "purchase-credits",
+    target: "purchases",
+    mode: "co-write",
+    invariant:
+      "Every credit line UN-bills some quantity of ONE purchase line (keyed by product): it lowers that line's `quantity_billed` in the same commit, so the bucket stays the bills naming it minus the credits naming it. Un-billing past `quantity_billed` is refused. A PUSHED credit line is priced at `cumulativeShareCents(line.amount_cents, line.quantity, billed_after, billed_before)` — the share of the range it un-bills — so a bill and a credit of all its units net to zero. A LINKED credit's lines are priced the same way for attribution; its total is Xero's.",
+    enforced_by: [CREDIT_UNBILLS_THE_BUCKET],
+    transaction: "create-purchase-credit",
+    fields: [
+      {
+        source: ["lines", "quantity"],
+        target: ["lines", "quantity_billed"],
+        transform: "− quantity on the purchase line whose uid_product is the credit line's",
+      },
+      {
+        source: ["uid_purchase"],
+        target: ["uid"],
+        transform: "the credit names its purchase",
+      },
+    ],
+  },
+];
+
+const allocatePurchaseCreditRules: CollectionRule[] = [
+  {
+    id: "allocate-purchase-credit:credit-to-settlements",
+    source: "purchase-credits",
+    target: "settlements",
+    mode: "co-write",
+    invariant:
+      "An operator allocating a supplier credit to a bill of the same supplier appends ONE `bill_credit` row naming both (`uid_purchase_bill` + `uid_purchase_credit`), carrying the credit's reason, keyed on the request session so a retry converges. It is written UNSYNCED (`synced_at: null`): the Xero allocation is a post-commit push, and until Xero reports it the INVOICE webhook matches rather than reaps it.",
+    enforced_by: [CREDIT_ALLOCATED],
+    transaction: "allocate-purchase-credit",
+    fields: [
+      {
+        source: ["uid"],
+        target: ["uid_purchase_credit"],
+        transform: "the row draws on the credit",
+      },
+      {
+        source: ["reason"],
+        target: ["reason"],
+        transform: "the allocation carries its credit's reason",
+      },
+    ],
+  },
+  {
+    id: "allocate-purchase-credit:settlements-to-bill",
+    source: "settlements",
+    target: "purchase-bills",
+    mode: "co-write",
+    invariant:
+      "The bill's `totals` are its journal folded by `recomputePurchaseBillTotals` in the allocation's commit, so `amount_credited_cents` moves by the allocation and `amount_due_cents` falls by it. Its `version` is bumped, as every writer of a bill's rows must.",
+    enforced_by: [CREDIT_ALLOCATED],
+    transaction: "allocate-purchase-credit",
+    fields: [
+      {
+        source: ["amount_cents"],
+        target: ["totals", "amount_credited_cents"],
+        transform: "Σ live bill_credit − bill_credit_reversal, by fold",
+      },
+    ],
+  },
+  {
+    id: "allocate-purchase-credit:settlements-to-credit",
+    source: "settlements",
+    target: "purchase-credits",
+    mode: "co-write",
+    invariant:
+      "The credit's `remaining_credit_cents` is its journal folded by `purchaseCreditRemainingFromJournal`, written in the allocation's commit, and its status re-derives (`applied` at 0). Its `version` is bumped.",
+    enforced_by: [CREDIT_ALLOCATED],
+    transaction: "allocate-purchase-credit",
+    fields: [
+      {
+        source: ["amount_cents"],
+        target: ["remaining_credit_cents"],
+        transform: "total − Σ signed draws, by fold",
+      },
+    ],
+  },
+];
+
+/** The credit half of a Xero-side reconcile — shared by the settle and void transactions. */
+const settlementsToCreditRule = (
+  id: "settle-purchase-bill:settlements-to-credit" | "void-purchase-bill-from-xero:settlements-to-credit",
+  transaction: "settle-purchase-bill" | "void-purchase-bill-from-xero",
+): CollectionRule => ({
+  id,
+  source: "settlements",
+  target: "purchase-credits",
+  mode: "co-write",
+  invariant:
+    "Every supplier credit whose `bill_credit` rows this commit appends, reverses or stamps is refolded in the SAME commit: `remaining_credit_cents` is its journal folded by `purchaseCreditRemainingFromJournal`, its status re-derives and its `version` is bumped — so a credit's balance never trails its journal, whichever writer moved it.",
+  enforced_by: [XERO_CREDIT_FOLDED],
+  transaction,
+  fields: [
+    {
+      source: ["amount_cents"],
+      target: ["remaining_credit_cents"],
+      transform: "total − Σ signed draws, by fold",
+    },
+  ],
+});
+
 const createPurchaseBillTransaction: TransactionDefinition = {
   id: "create-purchase-bill",
   description:
@@ -348,7 +484,11 @@ const settlePurchaseBillTransaction: TransactionDefinition = {
   id: "settle-purchase-bill",
   description:
     "Reconciles the payments Xero reports on a tracked ACCPAY into the bill's journal — appends a `bill_payment` for each one CFS has not recorded and reaps one Xero no longer lists — and folds the bill's totals in the same commit. Run by the Xero INVOICE webhook (an ACCPAY resolves `purchase-bills` by `xero_id`, never a CFS invoice) and by the daily open-bill sweep. One-directional: it never writes to Xero. Fires on: a payment added or removed in Xero.",
-  steps: ["settle-purchase-bill:xero-to-settlements", "settle-purchase-bill:settlements-to-bill"],
+  steps: [
+    "settle-purchase-bill:xero-to-settlements",
+    "settle-purchase-bill:settlements-to-bill",
+    "settle-purchase-bill:settlements-to-credit",
+  ],
 };
 
 const voidPurchaseBillFromXeroTransaction: TransactionDefinition = {
@@ -359,6 +499,25 @@ const voidPurchaseBillFromXeroTransaction: TransactionDefinition = {
     "void-purchase-bill-from-xero:void-to-settlements",
     "void-purchase-bill-from-xero:settlements-to-bill",
     "void-purchase-bill-from-xero:bill-to-purchase",
+    "void-purchase-bill-from-xero:settlements-to-credit",
+  ],
+};
+
+const createPurchaseCreditTransaction: TransactionDefinition = {
+  id: "create-purchase-credit",
+  description:
+    "Records a supplier credit against a purchase: either PUSHES a new ACCPAYCREDIT (`CFS-SCR-n`, posted by a post-commit task with read-before-create) or LINKS one entered in Xero, read from Xero rather than the caller. Each credit line un-bills its purchase line, lowering `quantity_billed` in the same transaction. The credit is written holding its whole total; allocations are their own writes — a linked credit's existing Xero allocations arrive through the bills they name.",
+  steps: ["create-purchase-credit:credit-to-purchase"],
+};
+
+const allocatePurchaseCreditTransaction: TransactionDefinition = {
+  id: "allocate-purchase-credit",
+  description:
+    "Allocates some of a supplier credit to one bill of the same supplier: one unsynced `bill_credit` row, the bill and the credit both refolded and version-bumped, in one commit conditioned on both documents' versions. The Xero allocation is pushed after the commit by the credit's push task. Fires on: every allocation that is not a replay.",
+  steps: [
+    "allocate-purchase-credit:credit-to-settlements",
+    "allocate-purchase-credit:settlements-to-bill",
+    "allocate-purchase-credit:settlements-to-credit",
   ],
 };
 
@@ -418,7 +577,11 @@ export const purchases: PropagationModule = {
     ...reversePurchaseReceiptRules,
     ...createPurchaseBillRules,
     ...settlePurchaseBillRules,
+    settlementsToCreditRule("settle-purchase-bill:settlements-to-credit", "settle-purchase-bill"),
     ...voidPurchaseBillFromXeroRules,
+    settlementsToCreditRule("void-purchase-bill-from-xero:settlements-to-credit", "void-purchase-bill-from-xero"),
+    ...createPurchaseCreditRules,
+    ...allocatePurchaseCreditRules,
   ],
   transactions: [
     createPurchaseTransaction,
@@ -429,5 +592,7 @@ export const purchases: PropagationModule = {
     createPurchaseBillTransaction,
     settlePurchaseBillTransaction,
     voidPurchaseBillFromXeroTransaction,
+    createPurchaseCreditTransaction,
+    allocatePurchaseCreditTransaction,
   ],
 };

@@ -157,6 +157,27 @@ export const XERO_EVENT_MSGS = [
   // The bill committed but its push task could not be enqueued. The daily
   // bill sweep is the backstop; this arm carries an alert.
   "purchase_bill_enqueue_failed",
+  // ── Supplier credits (api-cloudrun#1210) ──
+  // The purchase's supplier credit (`purchase-credits/{uid}`, an ACCPAYCREDIT
+  // numbered `CFS-SCR-{n}`). Its own arms for the reason the bill has its own.
+  // Every arm carries `uid_purchase_credit` + `purchase_credit_number`.
+  //
+  // A pushed credit posted; `xero_credit_note_id` is the CreditNoteID.
+  "purchase_credit_pushed",
+  // The push re-read the credit and found no note to post (already carries an
+  // `xero_id`, linked, or gone). `reason` says which. Allocations may still push.
+  "purchase_credit_push_skipped",
+  // Read-before-create found a live ACCPAYCREDIT under `CFS-SCR-{n}` and adopted it.
+  "purchase_credit_twin_adopted",
+  // A permanent refusal before or at Xero (a dead twin, a product with no Xero
+  // code, a 400). The handler 200-drops it, so this arm carries an alert.
+  "purchase_credit_push_rejected",
+  // The credit or an allocation committed but the push task could not be
+  // enqueued. The daily sweep is the backstop; this arm carries an alert.
+  "purchase_credit_enqueue_failed",
+  // A CFS allocation of the credit to a bill was PUT to Xero. Carries
+  // `settlement_uid` + `uid_purchase_bill` + `xero_invoice_id`.
+  "purchase_credit_allocation_pushed",
   // ── Settlements (the `settlements` journal) ──
   // A settlement document was written from a Xero payment or credit-note
   // allocation. Carries `settlement_uid` + `settlement_type`.
@@ -290,6 +311,10 @@ export interface XeroEventLogRecord {
   uid_purchase_bill?: string;
   /** `PurchaseBill.number` — what `CFS-BILL-{number}` is keyed on. Never reused. */
   purchase_bill_number?: number;
+  /** The supplier credit a `purchase_credit_*` arm is about. Its uid IS the document id. */
+  uid_purchase_credit?: string;
+  /** `PurchaseCredit.number` — what `CFS-SCR-{number}` is keyed on. Never reused. */
+  purchase_credit_number?: number;
   /** Which manual-intervention seam fired. @see `xero_manual_intervention_required` */
   seam?: string;
   /** What a human must do about it — carried into the alert annotation. */
@@ -386,6 +411,8 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   movement_number: z.number().optional(),
   uid_purchase_bill: z.string().optional(),
   purchase_bill_number: z.number().optional(),
+  uid_purchase_credit: z.string().optional(),
+  purchase_credit_number: z.number().optional(),
   seam: z.string().optional(),
   remedy: z.string().optional(),
   xero_url: z.string().optional(),

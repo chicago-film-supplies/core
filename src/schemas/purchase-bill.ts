@@ -490,3 +490,91 @@ export const CreatePurchaseBillInput: z.ZodType<CreatePurchaseBillInputType> = z
     seen.add(line.uid_product);
   });
 }) as z.ZodType<CreatePurchaseBillInputType>;
+
+/**
+ * Input for recording a supplier credit against a purchase — push a new
+ * ACCPAYCREDIT, or link one the supplier's credit was entered as in Xero.
+ *
+ * Each `lines` entry UN-bills that quantity of its purchase line: it lowers
+ * `quantity_billed`, and a PUSHED credit prices it at the line's cumulative
+ * share of the range it un-bills, so a price the purchase does not hold cannot
+ * be credited. A price correction with no quantity is a `direct_lines` entry
+ * (push only). A LINKED credit reads its date, reference and total from Xero,
+ * as a linked bill does.
+ */
+export type CreatePurchaseCreditInputType =
+  | {
+    mode: "push";
+    reason: PurchaseCreditReasonType;
+    date: string;
+    reference?: string | null;
+    lines: PurchaseDocumentLineInputType[];
+    direct_lines?: PurchaseDirectLine[];
+    uuid_session: string;
+    version: number;
+  }
+  | {
+    mode: "link";
+    reason: PurchaseCreditReasonType;
+    xero_id: string;
+    lines: PurchaseDocumentLineInputType[];
+    uuid_session: string;
+    version: number;
+  };
+
+const pushCreditInput = z.object({
+  mode: z.literal("push"),
+  reason: PurchaseCreditReasonEnum,
+  date: chicagoStartOfDay(),
+  reference: z.string().max(255).nullable().optional(),
+  lines: z.array(PurchaseDocumentLineInput),
+  direct_lines: z.array(PurchaseDirectLineSchema).optional(),
+  uuid_session: z.uuid(),
+  version: z.int().min(0),
+});
+
+const linkCreditInput = z.object({
+  mode: z.literal("link"),
+  reason: PurchaseCreditReasonEnum,
+  xero_id: z.uuid(),
+  lines: z.array(PurchaseDocumentLineInput),
+  uuid_session: z.uuid(),
+  version: z.int().min(0),
+});
+
+/** Zod schema for CreatePurchaseCreditInputType. */
+export const CreatePurchaseCreditInput: z.ZodType<CreatePurchaseCreditInputType> = z.discriminatedUnion("mode", [
+  pushCreditInput,
+  linkCreditInput,
+]).superRefine((c, ctx) => {
+  const seen = new Set<string>();
+  c.lines.forEach((line, i) => {
+    if (seen.has(line.uid_product)) {
+      ctx.addIssue({ code: "custom", path: ["lines", i, "uid_product"], message: "one line per product" });
+    }
+    seen.add(line.uid_product);
+  });
+  if (c.mode === "push" && c.lines.length + (c.direct_lines?.length ?? 0) === 0) {
+    ctx.addIssue({ code: "custom", path: ["lines"], message: "a pushed credit names at least one line or direct line" });
+  }
+}) as z.ZodType<CreatePurchaseCreditInputType>;
+
+/**
+ * Input for allocating some of a supplier credit to one bill of the same
+ * supplier. `version` is the CREDIT's — the document whose balance the
+ * allocation spends.
+ */
+export interface AllocatePurchaseCreditInputType {
+  uid_purchase_bill: string;
+  amount_cents: number;
+  uuid_session: string;
+  version: number;
+}
+
+/** Zod schema for AllocatePurchaseCreditInputType. */
+export const AllocatePurchaseCreditInput: z.ZodType<AllocatePurchaseCreditInputType> = z.object({
+  uid_purchase_bill: FirestoreId,
+  amount_cents: z.int().min(1),
+  uuid_session: z.uuid(),
+  version: z.int().min(0),
+});
