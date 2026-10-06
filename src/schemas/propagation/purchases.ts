@@ -17,11 +17,11 @@
  *
  * ## What propagates nothing
  *
- * `create-purchase`, `update-purchase` and `close-purchase` write the purchase
- * alone. A purchase moves no stock and posts nothing to Xero; the buckets a
- * close moves (`quantity_canceled`) are the document's own. A short close that
- * leaves a line billed beyond what was received raises a supplier credit, and
- * that edge lands with the purchase-credits writers.
+ * `create-purchase` and `update-purchase` write the purchase alone. A purchase
+ * moves no stock and posts nothing to Xero. A close moves the document's own
+ * `quantity_canceled`, and propagates only when it leaves a line billed beyond
+ * what was received: it then raises a supplier credit for the excess in the same
+ * commit (`close-purchase:excess-to-credit`).
  *
  * ## Billing
  *
@@ -392,6 +392,41 @@ const createPurchaseCreditRules: CollectionRule[] = [
   },
 ];
 
+/** The short-close auto-credit, asserted with a bill it is then allocated to. */
+const CLOSE_RAISES_CREDIT: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::short close — a line billed beyond what it received raises a short_close credit, allocated to the bill",
+  clause:
+    "closing a line billed beyond what it received writes one pushed purchase-credit (reason short_close, keyed on the purchase and the close session) for the excess units at the share of the range they un-bill, and sets quantity_billed to quantity_received in the same commit; the credit is then allocated newest bill first; a retried close writes nothing new",
+  gates: true,
+};
+
+const closePurchaseRules: CollectionRule[] = [
+  {
+    id: "close-purchase:excess-to-credit",
+    source: "purchases",
+    target: "purchase-credits",
+    mode: "co-write",
+    invariant:
+      "A close that leaves a line billed beyond what it received (`quantity_billed > quantity_received`) raises ONE pushed supplier credit (`reason: short_close`) in the same commit, with one line per such purchase line for `quantity_billed − quantity_received` units, priced at `cumulativeShareCents(amount_cents, quantity, received, billed)` — the share of the range it un-bills, as any pushed credit is. The purchase line's `quantity_billed` falls to `quantity_received` in that commit. The credit's id is derived from the purchase and the close session, so a retried close finds it rather than minting a second. Allocating it to the purchase's bills is a separate write per bill (`allocate-purchase-credit`), newest bill first, after the commit.",
+    enforced_by: [CLOSE_RAISES_CREDIT],
+    transaction: "close-purchase",
+    fields: [
+      {
+        source: ["lines", "quantity_billed"],
+        target: ["lines", "quantity"],
+        transform: "quantity_billed − quantity_received, for each line the close leaves over-billed",
+      },
+      {
+        source: ["uid"],
+        target: ["uid_purchase"],
+        transform: "the credit names the purchase it closes",
+      },
+    ],
+  },
+];
+
 const allocatePurchaseCreditRules: CollectionRule[] = [
   {
     id: "allocate-purchase-credit:credit-to-settlements",
@@ -538,8 +573,8 @@ const updatePurchaseTransaction: TransactionDefinition = {
 const closePurchaseTransaction: TransactionDefinition = {
   id: "close-purchase",
   description:
-    "Short-closes (or, with nothing received, cancels) some or all of a purchase's lines: `quantity_canceled = quantity − quantity_received`. Propagates NOTHING in this release — the buckets it moves are the purchase's own. A close that would leave a line billed beyond what was received is refused until the purchase-bills writers can raise the supplier credit for the excess.",
-  steps: [],
+    "Short-closes (or, with nothing received, cancels) some or all of a purchase's lines: `quantity_canceled = quantity − quantity_received`. When that leaves a line billed beyond what it received, the same commit raises a pushed supplier credit (`short_close`) for the excess and lowers `quantity_billed` to `quantity_received`; after the commit the credit is pushed to Xero and allocated to the purchase's bills, newest first, one `allocate-purchase-credit` per bill. Fires on: a close of an over-billed line; any other close propagates nothing.",
+  steps: ["close-purchase:excess-to-credit"],
 };
 
 const receivePurchaseTransaction: TransactionDefinition = {
@@ -582,6 +617,7 @@ export const purchases: PropagationModule = {
     settlementsToCreditRule("void-purchase-bill-from-xero:settlements-to-credit", "void-purchase-bill-from-xero"),
     ...createPurchaseCreditRules,
     ...allocatePurchaseCreditRules,
+    ...closePurchaseRules,
   ],
   transactions: [
     createPurchaseTransaction,

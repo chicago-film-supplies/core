@@ -178,6 +178,10 @@ export const XERO_EVENT_MSGS = [
   // A CFS allocation of the credit to a bill was PUT to Xero. Carries
   // `settlement_uid` + `uid_purchase_bill` + `xero_invoice_id`.
   "purchase_credit_allocation_pushed",
+  // A short close raised a credit and could not allocate it to one of the
+  // purchase's bills (the credit committed; the close's response says so).
+  // Carries `uid_purchase_bill`. Re-sending the same close retries it.
+  "purchase_credit_allocation_failed",
   // ── Settlements (the `settlements` journal) ──
   // A settlement document was written from a Xero payment or credit-note
   // allocation. Carries `settlement_uid` + `settlement_type`.

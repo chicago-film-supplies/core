@@ -223,6 +223,7 @@ export type RuleId =
   | "allocate-purchase-credit:credit-to-settlements"
   | "allocate-purchase-credit:settlements-to-bill"
   | "allocate-purchase-credit:settlements-to-credit"
+  | "close-purchase:excess-to-credit"
   // out-of-service.ts
   | "create-out-of-service-record:sources-to-record"
   | "create-out-of-service-record:record-to-transactions"
