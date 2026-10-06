@@ -388,7 +388,7 @@ const mergeThreadRules: CollectionRule[] = [
       {
         kind: "test",
         ref:
-          "api-cloudrun/tests/integration/organizations/organizationMerge.test.ts::a department collision under a (default) merges into the survivor",
+          "api-cloudrun/tests/integration/organizations/organizationMergeCollisions.test.ts::a department collision under a (default) merges into the survivor",
         clause: "the loser's comments land on the survivor's thread, with the survivor thread's `sources[]`.",
         gates: true,
       },

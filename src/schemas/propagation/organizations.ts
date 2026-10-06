@@ -218,7 +218,7 @@ const ORG_NAME_TO_DESCENDANTS: EnforcementRef[] = [
 const ORG_MINT_ON_REMOVE: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/organizations/organizationMerge.test.ts::route — a project removed with NO survivor mints the root's (default) and moves its departments",
+    "api-cloudrun/tests/integration/organizations/organizationMergeRoute.test.ts::route — a project removed with NO survivor mints the root's (default) and moves its departments",
   clause:
     "the REMOVAL arm: a project removed with no survivor mints exactly one `(default)` under a root that had none, with `xero_id` null, moves its departments under it and records itself in its `merged_from`; a second removal under the same root REUSES it (asserted as a count). A `(default)` refused as the removed node mints nothing.",
   gates: true,
@@ -727,61 +727,64 @@ const updateOrganizationTransaction: TransactionDefinition = {
 // when its money must stay under its own Xero contact, KEPT as a tombstone that
 // names the survivor (api-cloudrun#978).
 
-const MERGE_TEST = "api-cloudrun/tests/integration/organizations/organizationMerge.test.ts";
+const MERGE_DIR = "api-cloudrun/tests/integration/organizations/";
+const MERGE_COLLISIONS = MERGE_DIR + "organizationMergeCollisions.test.ts";
+const MERGE_MONEY = MERGE_DIR + "organizationMergeMoney.test.ts";
+const MERGE_ROUTE = MERGE_DIR + "organizationMergeRoute.test.ts";
 
 const MERGE_ENFORCEMENT: EnforcementRef[] = [
   {
     kind: "test",
-    ref: MERGE_TEST + "::a department collision under a (default) merges into the survivor",
+    ref: MERGE_COLLISIONS + "::a department collision under a (default) merges into the survivor",
     clause:
       "every reference to the loser repointed at the survivor, the loser and its thread deleted, its comments on the survivor's thread, `merged_from` set — for a collision under a `(default)` and under a named project.",
     gates: true,
   },
   {
     kind: "test",
-    ref: MERGE_TEST + "::the money guard refuses a merge across two Xero contacts",
+    ref: MERGE_MONEY + "::the money guard refuses a merge across two Xero contacts",
     clause:
       "the write-time money guard: a money document arriving AFTER the merge decided to move money, across two Xero contacts, is refused with 409 and stays where it is.",
     gates: true,
   },
   {
     kind: "test",
-    ref: MERGE_TEST + "::money across two Xero contacts TOMBSTONES the loser; its money and invoiced orders stay",
+    ref: MERGE_MONEY + "::money across two Xero contacts TOMBSTONES the loser; its money and invoiced orders stay",
     clause:
       "the decision: a loser whose money would cross Xero contacts is kept as a tombstone — its invoices, credit notes, settlements and the orders that have an invoice stay untouched (no Xero write), everything else moves, and `merged_to` names the survivor; a shared contact merges fully.",
     gates: true,
   },
   {
     kind: "test",
-    ref: MERGE_TEST + "::a head that merges away takes its tombstones with it; a tombstone is no merge partner",
+    ref: MERGE_MONEY + "::a head that merges away takes its tombstones with it; a tombstone is no merge partner",
     clause:
       "a head that merges away re-points its own tombstones to the new head BEFORE it is deleted, so a chain is always one hop; merging into or again out of a tombstone is refused.",
     gates: true,
   },
   {
     kind: "test",
-    ref: MERGE_TEST + "::a paired department with money is tombstoned, and so is its PROJECT",
+    ref: MERGE_MONEY + "::a paired department with money is tombstoned, and so is its PROJECT",
     clause:
       "a project left holding only tombstone children becomes a tombstone itself instead of being deleted, so the children keep the path that addresses them.",
     gates: true,
   },
   {
     kind: "test",
-    ref: MERGE_TEST + "::route — an organization merge pairs projects by name and (default) with (default)",
+    ref: MERGE_ROUTE + "::route — an organization merge pairs projects by name and (default) with (default)",
     clause:
       "an ORGANIZATION merge: projects pair by case-folded name and `(default)` with `(default)`, each pair merging recursively (a paired department merged away), an unpaired project moved across, the unpaired `(default)` department moved under the survivor's `(default)`, and the loser root deleted. The preview names the same pairs first.",
     gates: true,
   },
   {
     kind: "test",
-    ref: MERGE_TEST + "::route — a project with money removed into (default) is tombstoned; its orders stay billable",
+    ref: MERGE_ROUTE + "::route — a project with money removed into (default) is tombstoned; its orders stay billable",
     clause:
       "a project removed into its root's `(default)` while it holds an invoice under its own contact is tombstoned onto the minted `(default)`; the invoice and its order stay, the open order moves and freezes the ROOT's `xero_id`, since a `(default)` bills its root's contact.",
     gates: true,
   },
   {
     kind: "test",
-    ref: MERGE_TEST + "::a planted reference leaves MERGE_INCOMPLETE and a re-send completes",
+    ref: MERGE_COLLISIONS + "::a planted reference leaves MERGE_INCOMPLETE and a re-send completes",
     clause:
       "the gated delete: the loser is deleted only when a claimed read of every referencing collection is empty, otherwise 409 `MERGE_INCOMPLETE`, and re-sending the PUT resumes.",
     gates: true,
