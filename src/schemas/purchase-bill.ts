@@ -578,3 +578,17 @@ export const AllocatePurchaseCreditInput: z.ZodType<AllocatePurchaseCreditInputT
   uuid_session: z.uuid(),
   version: z.int().min(0),
 });
+
+/**
+ * Input for voiding a supplier credit from CFS. `version` is the credit's.
+ * Refused while anything draws on the credit — remove its allocations and
+ * refunds in Xero first, as Xero itself requires.
+ */
+export interface VoidPurchaseCreditInputType {
+  version: number;
+}
+
+/** Zod schema for VoidPurchaseCreditInputType. */
+export const VoidPurchaseCreditInput: z.ZodType<VoidPurchaseCreditInputType> = z.object({
+  version: z.int().min(0),
+});

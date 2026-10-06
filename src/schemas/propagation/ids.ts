@@ -77,6 +77,9 @@ export type TransactionId =
   | "void-purchase-bill-from-xero"
   | "create-purchase-credit"
   | "allocate-purchase-credit"
+  | "settle-purchase-credit"
+  | "void-purchase-credit"
+  | "void-purchase-credit-from-xero"
   // store-transfers.ts
   | "create-store-transfer"
   // units.ts
@@ -224,6 +227,13 @@ export type RuleId =
   | "allocate-purchase-credit:settlements-to-bill"
   | "allocate-purchase-credit:settlements-to-credit"
   | "close-purchase:excess-to-credit"
+  | "settle-purchase-credit:xero-to-settlements"
+  | "settle-purchase-credit:settlements-to-credit"
+  | "void-purchase-credit:credit-to-purchase"
+  | "void-purchase-credit-from-xero:void-to-settlements"
+  | "void-purchase-credit-from-xero:settlements-to-bill"
+  | "void-purchase-credit-from-xero:settlements-to-credit"
+  | "void-purchase-credit-from-xero:credit-to-purchase"
   // out-of-service.ts
   | "create-out-of-service-record:sources-to-record"
   | "create-out-of-service-record:record-to-transactions"
