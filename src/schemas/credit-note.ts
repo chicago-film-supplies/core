@@ -128,7 +128,8 @@ export function deriveCreditPostingAccount(
  * `applied` means **`remaining_credit_cents === 0`, however it got there** — by
  * allocation *or* by cash refund. CN-1013 and CN-1016 are PAID in Xero with a
  * Payment attached and zero allocations, and a cash refund IS a credit note
- * settled by cash rather than by allocation.
+ * settled by cash rather than by allocation — recorded, since api-cloudrun#1207,
+ * as a `refund` settlement naming the note.
  */
 const CREDIT_NOTE_STATUSES = ["draft", "issued", "applied", "void"] as const;
 /** Allowed credit-note statuses. */
@@ -158,7 +159,9 @@ export interface CreditNoteStatusContract {
   /**
    * May its credit be allocated to an invoice? `applied` is excluded because it
    * IS `remaining_credit_cents === 0` (the refine below), so there is nothing to
-   * allocate; `draft` because it has not reached Xero.
+   * allocate; `draft` because it has not reached Xero. Also the status gate for
+   * recording a cash refund (`record_refund`), which spends credit exactly as an
+   * allocation does (api-cloudrun#1207).
    */
   accepts_allocation: boolean;
 }
@@ -437,22 +440,21 @@ export interface CreditNote {
    * unreversed allocation minus any cash refunded.
    *
    * A stored projection of the settlements that name this note, exactly as the
-   * invoice's `amount_credited_cents` is — co-written in the same transaction.
+   * invoice's `amount_credited_cents` is: `creditNoteRemainingFromJournal`
+   * (`@cfs/core/utils/invoices`) over every `credit` and `refund` row and their
+   * reversals. The writers apply deltas under compare-and-set; the fold is what
+   * `audit-credit-note-remaining.ts` checks them against and what a lost-claim
+   * repair rebuilds from.
    *
-   * ⚠️ **NOT rebuildable from the journal, and an earlier revision of this line
-   * said it was.** A cash refund consumes a note without touching any invoice,
-   * so it appends no settlement row — there is none to append, since a
-   * `Settlement` is keyed on `uid_invoice`. The status docblock above states the
-   * same thing from the other side (*"however it got there"*), and the two
-   * claims cannot both be true. Measured on prod 2026-08-16: CN-1013 ($485.06)
-   * and CN-1016 ($62.16) are `applied` with `remaining_credit_cents: 0` and
-   * **zero** rows naming them, and Xero agrees — `RemainingCredit: 0`,
-   * `Allocations: []`, one `Payments[]` entry each. A rebuild from the journal
-   * would hand both notes their full credit back and flip them out of
-   * `applied`, re-opening $547.22 of credit that has already been paid out in
-   * cash. Nothing rebuilds this field today — `allocateCreditNote` applies a
-   * delta and `createCreditNote` seeds it — and nothing should start.
-   * api-cloudrun#469.
+   * ⚠️ **This was NOT rebuildable until api-cloudrun#1207, and the reason is
+   * worth keeping.** A cash refund consumes a note without touching any invoice,
+   * and a `Settlement` used to require an invoice, so a refund appended no row at
+   * all. CN-1013 ($485.06) and CN-1016 ($62.16) sat `applied` with zero rows
+   * naming them, and a fold would have handed $547.22 of credit already paid out
+   * in cash back (api-cloudrun#469). A `refund` settlement names the note and no
+   * invoice, and the backfill gives those two notes their rows — so a fold is
+   * sound only once the corpus holds every refund. Never rebuild a note from a
+   * journal you have not audited.
    */
   remaining_credit_cents: number;
   sources: DocSourceType[];

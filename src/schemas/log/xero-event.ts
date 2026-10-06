@@ -155,6 +155,18 @@ export const XERO_EVENT_MSGS = [
   // the business is created by hand in Xero and silently changes a CFS
   // invoice's balance — `credit_created_out_of_band` is that signal.
   "xero_manual_intervention_required",
+  // ── Credit notes ──
+  // A CREDITNOTE webhook carried a note numbered above `counters/credit-notes`,
+  // so `raiseFloor` moved the counter up to it (api-cloudrun#1207 item 3b). Xero
+  // is a live second numberer: a note made in its UI takes the next CN number,
+  // and without this CFS's next mint collides with it. Emitted only when the
+  // counter MOVED, so its rate is the rate of notes made in Xero. Carries
+  // `credit_note_number`, `counter_from` and `counter_to`.
+  "credit_note_counter_raised",
+  // A CREDITNOTE webhook's `Payments[]` (cash refunds) was reconciled into the
+  // journal as `refund` settlements (api-cloudrun#1207). Carries
+  // `xero_credit_note_id` and the counts of rows appended, linked and reaped.
+  "xero_credit_note_refunds_synced",
   "xero_payment_already_synced",
   "xero_payment_backfilled",
   "xero_payment_processing_failed",
@@ -227,6 +239,13 @@ export interface XeroEventLogRecord {
   settlement_uid?: string;
   settlement_type?: string;
   credit_note_number?: string;
+  /** `credit_note_counter_raised`: the counter before and after the raise. */
+  counter_from?: number;
+  counter_to?: number;
+  /** `xero_credit_note_refunds_synced`: rows this call appended, linked and reaped. */
+  refunds_appended?: number;
+  refunds_linked?: number;
+  refunds_reaped?: number;
   /** The movement whose bill was pushed. Its uid IS the document id. */
   movement_uid?: string;
   /**
@@ -324,6 +343,11 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   settlement_uid: z.string().optional(),
   settlement_type: z.string().optional(),
   credit_note_number: z.string().optional(),
+  counter_from: z.number().optional(),
+  counter_to: z.number().optional(),
+  refunds_appended: z.number().optional(),
+  refunds_linked: z.number().optional(),
+  refunds_reaped: z.number().optional(),
   movement_uid: z.string().optional(),
   movement_number: z.number().optional(),
   seam: z.string().optional(),

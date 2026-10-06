@@ -8,7 +8,7 @@
  * when the derivation got it wrong, and it is why an invoice can do and undo
  * perpetually with correct totals after every append.
  */
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
   getSettlementMultiplier,
   SETTLEMENT_CONTRACTS,
@@ -17,7 +17,12 @@ import {
   type SettlementReasonType,
   type SettlementTypeType,
 } from "../src/schemas/mod.ts";
-import { deriveInvoiceStatus, invoiceIsFrozen, recomputeSettlementTotals } from "../src/utils/invoices.ts";
+import {
+  creditNoteRemainingFromJournal,
+  deriveInvoiceStatus,
+  invoiceIsFrozen,
+  recomputeSettlementTotals,
+} from "../src/utils/invoices.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 import type { InvoiceStatusType } from "../src/schemas/mod.ts";
 
@@ -156,7 +161,8 @@ Deno.test("a void cannot reference a credit note — the guard names the CREDIT 
 
 Deno.test("settlementContract tolerates an unknown type rather than throwing", () => {
   assertEquals(settlementContract("payment")?.sums_into, "amount_paid_cents");
-  assertEquals(settlementContract("refund"), undefined);
+  assertEquals(settlementContract("refund")?.settles, "credit_note");
+  assertEquals(settlementContract("not_a_type"), undefined);
   assertEquals(settlementContract(""), undefined);
 });
 
@@ -464,14 +470,19 @@ Deno.test("an untouched issued invoice stays issued", () => {
 
 // ── closure (api-cloudrun#1169) ──────────────────────────────────
 
-Deno.test("every settlement type feeds EXACTLY one of a cents bucket and a count", () => {
+Deno.test("every INVOICE-settling type feeds exactly one of a cents bucket and a count; a CREDIT-NOTE one feeds neither", () => {
   // Built from the vocabulary, not the table: a type with both, or neither,
   // would be folded twice or not at all.
   const types = Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[];
   for (const type of types) {
     const c = SETTLEMENT_CONTRACTS[type];
-    assertEquals((c.sums_into === null) !== (c.counts_into === null), true, type);
+    if (c.settles === "invoice") {
+      assertEquals((c.sums_into === null) !== (c.counts_into === null), true, type);
+    } else {
+      assertEquals([c.sums_into, c.counts_into], [null, null], type);
+    }
   }
+  assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].settles === "credit_note").sort(), ["refund", "refund_reversal"]);
   // Non-vacuity: both arms are populated.
   assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].counts_into !== null).sort(), ["closure", "closure_reversal"]);
   assertEquals(types.filter((t) => SETTLEMENT_CONTRACTS[t].sums_into !== null).length, 6);
@@ -561,4 +572,103 @@ Deno.test("SettlementSchema enforces the closure contract", async (t) => {
       assertEquals(r.error!.issues.map((i) => i.path.join(".")), [path]);
     });
   }
+});
+
+// ── refund (api-cloudrun#1207) ───────────────────────────────────
+
+const NOTE = "testcrn1000000000000";
+
+/** A valid refund row: names the note, no invoice. */
+const refundRow = (overrides: Record<string, unknown> = {}) =>
+  makeSettlement({
+    type: "refund",
+    reason: "credit_refunded",
+    uid_invoice: null,
+    uid_credit_note: NOTE,
+    number_credit_note: "CN-1030",
+    xero_payment_id: "edf5d932-0000-4000-8000-000000000001",
+    ...overrides,
+  });
+
+Deno.test("SettlementSchema enforces the refund contract", async (t) => {
+  await t.step("a well-formed refund parses, linked or not", () => {
+    assertEquals(SettlementSchema.safeParse(refundRow()).success, true);
+    assertEquals(SettlementSchema.safeParse(refundRow({ xero_payment_id: null })).success, true);
+  });
+  await t.step("a refund naming an invoice is refused — it settles the note", () => {
+    assertEquals(SettlementSchema.safeParse(refundRow({ uid_invoice: INV })).success, false);
+  });
+  await t.step("a refund naming no note is refused", () => {
+    assertEquals(SettlementSchema.safeParse(refundRow({ uid_credit_note: null })).success, false);
+  });
+  await t.step("a refund carries the PaymentID, never xero_credit_note_id", () => {
+    assertEquals(SettlementSchema.safeParse(refundRow({ xero_credit_note_id: "cn-xero" })).success, false);
+  });
+  await t.step("an invoice type with no invoice is refused", () => {
+    assertEquals(SettlementSchema.safeParse(makeSettlement({ uid_invoice: null })).success, false);
+  });
+  await t.step("a refund_reversal names its target and carries no Xero id", () => {
+    const reversal = refundRow({ type: "refund_reversal", reason: "source_retracted", reverses: SETTLEMENT, xero_payment_id: null });
+    assertEquals(SettlementSchema.safeParse(reversal).success, true);
+    assertEquals(SettlementSchema.safeParse({ ...reversal, reverses: null }).success, false);
+  });
+  await t.step("only credit-drawing types may name a note — the guard is draws_credit, not a bucket", () => {
+    const named = { uid_credit_note: NOTE, number_credit_note: "CN-1030" };
+    for (const type of Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[]) {
+      if (SETTLEMENT_CONTRACTS[type].draws_credit) continue;
+      const c = SETTLEMENT_CONTRACTS[type];
+      const row = makeSettlement({
+        type,
+        reason: c.reasons[0],
+        amount_cents: c.counts_into !== null ? 0 : 100,
+        reverses: c.reverses === "required" ? SETTLEMENT : null,
+        ...named,
+      });
+      assertEquals(SettlementSchema.safeParse(row).success, false, type);
+    }
+  });
+});
+
+Deno.test("draws_credit is exactly credit, refund and their reversals", () => {
+  const types = Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[];
+  assertEquals(
+    types.filter((t) => SETTLEMENT_CONTRACTS[t].draws_credit).sort(),
+    ["credit", "credit_reversal", "refund", "refund_reversal"],
+  );
+});
+
+Deno.test("an invoice fold REFUSES a refund row rather than skipping it", () => {
+  assertThrows(
+    () => recomputeSettlementTotals(10_000, [S({ type: "refund", reason: "credit_refunded", amount_cents: 500 })]),
+    Error,
+    "settles a credit note",
+  );
+});
+
+Deno.test("creditNoteRemainingFromJournal: total − signed draws, over credits AND refunds", () => {
+  const R = (type: SettlementTypeType, amount_cents: number) => ({ type, amount_cents });
+  assertEquals(creditNoteRemainingFromJournal(2_400, []), 2_400, "untouched");
+  assertEquals(creditNoteRemainingFromJournal(2_400, [R("refund", 2_400)]), 0, "fully refunded (CN-1030)");
+  assertEquals(creditNoteRemainingFromJournal(48_506, [R("refund", 48_506)]), 0, "CN-1013 once backfilled");
+  assertEquals(creditNoteRemainingFromJournal(10_000, [R("credit", 3_000), R("refund", 2_000)]), 5_000, "mixed");
+  assertEquals(
+    creditNoteRemainingFromJournal(2_400, [R("refund", 2_400), R("refund_reversal", 2_400)]),
+    2_400,
+    "a reaped refund gives the credit back",
+  );
+  assertEquals(
+    creditNoteRemainingFromJournal(2_400, [R("refund", 2_400), R("refund_reversal", 2_400), R("refund", 2_400)]),
+    0,
+    "refund → reap → refund reads 0 at the end",
+  );
+  assertEquals(creditNoteRemainingFromJournal(1_000, [R("credit", 1_500)]), -500, "negative is preserved");
+  assertEquals(creditNoteRemainingFromJournal(1_000, [R("payment", 1_000)]), 1_000, "a non-drawing row is skipped");
+});
+
+Deno.test("a voided note folds to its total — it voids only with nothing live", () => {
+  const rows = [
+    { type: "credit" as SettlementTypeType, amount_cents: 700 },
+    { type: "credit_reversal" as SettlementTypeType, amount_cents: 700 },
+  ];
+  assertEquals(creditNoteRemainingFromJournal(700, rows), 700);
 });

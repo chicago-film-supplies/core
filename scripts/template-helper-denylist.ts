@@ -328,6 +328,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // targets as text. `tests/template-helpers.test.ts` now asserts every
     // entry resolves to a real export, so a rename breaks the build instead.
     "recomputeSettlementTotals", // settlement projection — a template reads STORED totals
+    "creditNoteRemainingFromJournal", // the credit-note twin — a template reads STORED remaining_credit_cents
     // ⚠️ **EDITABILITY predicates, not document facts.** `invoiceIsFrozen`
     // answers *"may an operator still change this invoice's organization or its
     // date?"* and `invoiceHasSettlement` is its money-only half. A rendered

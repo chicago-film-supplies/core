@@ -86,6 +86,14 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
     path: [{ uid: "AAAAAAAAAAAAAAAAAAAA", name: "Fixture Property" }],
     query_by_path: ["AAAAAAAAAAAAAAAAAAAA"],
   },
+  // ⚠️ **Fourth entry, added when a settlement could name a credit note instead
+  // of an invoice** (api-cloudrun#1207). `uid_invoice` became nullable and the
+  // refine ties it to the TYPE — an invoice-settling type must name one — so the
+  // walker's `null` for a nullable field is a payment with no invoice. Same
+  // class as the three above: a cross-field rule, not a structural one.
+  settlement: {
+    uid_invoice: "AAAAAAAAAAAAAAAAAAAA",
+  },
 };
 
 /** Distinct schemas from the registry, keyed by their first (singular) name. */
@@ -141,7 +149,7 @@ Deno.test("corpus gate — every registry schema has a minimal fixture that pars
   // The escape hatch is the measurement. Structural coverage is 58/60 without
   // it; if this grows for a reason OTHER than a new cross-field refinement, the
   // walker has stopped keeping up with the schemas.
-  assertEquals(Object.keys(OVERRIDES).length, 3, "a schema now needs hand-written fixture knowledge");
+  assertEquals(Object.keys(OVERRIDES).length, 4, "a schema now needs hand-written fixture knowledge");
 });
 
 Deno.test("corpus gate companion — an unsatisfiable invariant still throws, naming its path", () => {

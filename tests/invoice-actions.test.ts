@@ -334,6 +334,7 @@ Deno.test("credit-note actions sweep the status vocabulary", () => {
     offers.forEach((o) => seen.add(o.action));
     assertEquals(has(offers, "void_credit_note"), CREDIT_NOTE_STATUS_CONTRACTS[status].voidable, status);
     assertEquals(has(offers, "allocate_credit_note"), CREDIT_NOTE_STATUS_CONTRACTS[status].accepts_allocation, status);
+    assertEquals(has(offers, "record_refund"), CREDIT_NOTE_STATUS_CONTRACTS[status].accepts_allocation, status);
   }
   assertEquals(unreached("credit_note", seen), []);
 });
@@ -364,6 +365,27 @@ Deno.test("D5/D6 allocate_credit_note: credit left, an invoice that accepts paym
     "exceeds",
   );
   assertCreditNoteAction(cn("issued"), { allocations: [], invoice: target() }, { action: "allocate_credit_note", amount_cents: 3_000 });
+});
+
+Deno.test("void_credit_note: not while a refund is live (api-cloudrun#1207)", () => {
+  const live = [{ uid: "r1", type: "refund" as const, reverses: null }];
+  const reaped = [...live, { uid: "r1r", type: "refund_reversal" as const, reverses: "r1" }];
+  assertEquals(has(creditNoteActionsFor(cn("applied", 0), { allocations: live }), "void_credit_note"), false);
+  assertEquals(has(creditNoteActionsFor(cn("issued"), { allocations: reaped }), "void_credit_note"), true);
+  assertThrows(() => assertCreditNoteAction(cn("applied", 0), { allocations: live }, { action: "void_credit_note" }), InvoiceActionRefusal, "live refund");
+});
+
+Deno.test("record_refund: note-level, credit left, capped at the remaining credit", () => {
+  const offer = (n: OfferCreditNote, inv?: ReturnType<typeof target>) =>
+    creditNoteActionsFor(n, { allocations: [], invoice: inv }).find((o) => o.action === "record_refund");
+  assertEquals(offer(cn("issued"))?.max_cents, 5_000);
+  assertEquals(offer(cn("issued"), target()), undefined, "an invoice context is an allocation question");
+  assertEquals(offer(cn("issued", 0)), undefined, "nothing left");
+  assertEquals(offer(cn("issued", 5_000, null))?.max_cents, 5_000, "no Xero contact needed — a refund pays the customer");
+  assertThrows(() => assertCreditNoteAction(cn("issued"), { allocations: [] }, { action: "record_refund", amount_cents: 5_001 }), InvoiceActionRefusal, "exceeds");
+  assertThrows(() => assertCreditNoteAction(cn("issued"), { allocations: [] }, { action: "record_refund", amount_cents: 0 }), InvoiceActionRefusal, "more than $0");
+  assertThrows(() => assertCreditNoteAction(cn("applied", 0), { allocations: [] }, { action: "record_refund", amount_cents: 1 }), InvoiceActionRefusal);
+  assertCreditNoteAction(cn("issued"), { allocations: [] }, { action: "record_refund", amount_cents: 5_000 });
 });
 
 // ── orders (D7) ──────────────────────────────────────────────────────

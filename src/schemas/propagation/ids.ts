@@ -120,6 +120,9 @@ export type TransactionId =
   | "create-credit-note"
   | "allocate-credit-note"
   | "void-credit-note"
+  | "record-credit-note-refund"
+  | "sync-xero-credit-note-refunds"
+  | "reverse-credit-note-refund"
   // fulfillments.ts
   | "update-fulfillment-items"
   | "update-fulfillment-destinations"
@@ -309,6 +312,12 @@ export type RuleId =
   | "allocate-credit-note:settlements-to-invoices"
   | "allocate-credit-note:remaining-credit"
   | "void-credit-note:status"
+  | "record-credit-note-refund:refund-to-settlements"
+  | "record-credit-note-refund:settlements-to-credit-note"
+  | "sync-xero-credit-note-refunds:xero-to-settlements"
+  | "sync-xero-credit-note-refunds:settlements-to-credit-note"
+  | "reverse-credit-note-refund:reverser-to-settlements"
+  | "reverse-credit-note-refund:settlements-to-credit-note"
   // fulfillments.ts
   | "update-fulfillment-items:items-self"
   | "update-fulfillment-items:fulfillment-to-cards"

@@ -942,6 +942,8 @@ export {
   type UpdateOutOfServiceInputType,
 } from "./out-of-service.ts";
 export {
+  type InvoiceSettlement,
+  isInvoiceSettlement,
   type Settlement,
   SettlementSchema,
 } from "./settlement.ts";

@@ -441,6 +441,15 @@ export function recomputeSettlementTotals(
   for (const s of settlements) {
     const multiplier = getSettlementMultiplier(s.type);
     const contract = SETTLEMENT_CONTRACTS[s.type];
+    // A credit-note row (`refund`) feeds no invoice total, and one reaching an
+    // invoice fold means the caller read settlements by something other than
+    // `uid_invoice`. Its `null` buckets would skip it silently below, so refuse
+    // here instead (api-cloudrun#1207).
+    if (contract.settles !== "invoice") {
+      throw new Error(
+        `a "${s.type}" settles a credit note and cannot be folded into an invoice's totals`,
+      );
+    }
     // A COUNT row folds its multiplier, never its (zero) amount — see
     // `SettlementContract.counts_into`. Checked before the cents switch so the
     // switch's `null` arm is the only place a count row can reach.
@@ -483,6 +492,43 @@ export function recomputeSettlementTotals(
     closure_count: closureCount,
     breakdown: breakdownCents,
   };
+}
+
+/**
+ * A credit note's unconsumed credit, folded from the journal (api-cloudrun#1207):
+ * `total − Σ signed draws`, over every row that draws on the note's credit
+ * (`SettlementContract.draws_credit` — `credit`, `refund` and their reversals).
+ *
+ * This is what `CreditNote.remaining_credit_cents` is a projection of. It could
+ * not be, until refunds were rows: a cash refund consumed a note without
+ * appending anything, so CN-1013 and CN-1016 sat `applied` with zero rows naming
+ * them and a fold handed both their full credit back (api-cloudrun#469).
+ *
+ * **A voided note folds to whatever its rows say, which is `total`** — a note
+ * voids only with no live allocation and no live refund, so its draws net to 0.
+ * Voiding strands the balance rather than consuming it.
+ *
+ * Rows that do not draw credit are skipped, not refused: a caller reading by
+ * `uid_credit_note` sees only drawing rows anyway, and skipping lets a caller
+ * pass a mixed list. **Negative results are preserved, never clamped** — an
+ * over-allocated note must stay visible, as {@link recomputeSettlementTotals}
+ * preserves an over-credited invoice.
+ *
+ * @param totalCents - The note's `totals.total_cents`
+ * @param settlements - Every settlement naming the note, reversals included
+ */
+export function creditNoteRemainingFromJournal(
+  totalCents: number,
+  settlements: readonly { type: SettlementTypeType; amount_cents: number }[],
+): number {
+  let drawnCents = 0;
+  for (const s of settlements) {
+    const contract = SETTLEMENT_CONTRACTS[s.type];
+    if (!contract) throw new Error(`unknown settlement type: ${s.type}`);
+    if (!contract.draws_credit) continue;
+    drawnCents += s.amount_cents * getSettlementMultiplier(s.type);
+  }
+  return totalCents - drawnCents;
 }
 
 // ── Xero helpers ────────────────────────────────────────────────

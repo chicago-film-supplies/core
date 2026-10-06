@@ -1,7 +1,8 @@
 /**
  * Settlement document schema — Firestore collection: `settlements`
  *
- * One settlement event against an invoice. **The revenue-side twin of the
+ * One settlement event against an invoice — or, for a `refund`, against a credit
+ * note (api-cloudrun#1207; the contract's `settles` axis). **The revenue-side twin of the
  * `transactions` movement journal**: append-only, dated, reversible, and
  * type-blind by design — a cash payment and a credit-note allocation differ
  * only in `type` and `reason`.
@@ -51,7 +52,13 @@ import {
  */
 export interface Settlement {
   uid: string;
-  uid_invoice: string;
+  /**
+   * The invoice this row settles, or `null` on a row that settles a credit note
+   * (`SETTLEMENT_CONTRACTS[type].settles === "credit_note"` — a `refund`). The
+   * refine makes the two agree, so a reader filtering by `uid_invoice` can never
+   * receive a refund, and a refund can never be folded into an invoice.
+   */
+  uid_invoice: string | null;
   /** Denormalized so per-customer settlement reporting needs no join. */
   uid_organization: string;
 
@@ -124,6 +131,24 @@ export interface Settlement {
 }
 
 /**
+ * A settlement that settles an INVOICE — every type but `refund` and
+ * `refund_reversal` (api-cloudrun#1207). The refine makes `uid_invoice !== null`
+ * and `SETTLEMENT_CONTRACTS[type].settles === "invoice"` the same fact, so this
+ * is the type a reader holds once it has filtered.
+ */
+export type InvoiceSettlement = Settlement & { uid_invoice: string };
+
+/**
+ * Narrow a settlement to {@link InvoiceSettlement}. A reader that queried by
+ * `uid_invoice` already holds only these; a reader that scans the collection,
+ * or reads by `uid_credit_note`, holds refunds too and MUST filter — a refund
+ * folded into an invoice is money from nowhere.
+ */
+export function isInvoiceSettlement(s: Settlement): s is InvoiceSettlement {
+  return s.uid_invoice !== null;
+}
+
+/**
  * Contract enforcement — the same three-part rig `MOVEMENT_CONTRACTS` and
  * `ITEM_CONTRACTS` use, so a contradiction is a validation error rather than
  * something every consumer restates.
@@ -182,22 +207,51 @@ function checkSettlementContract(s: Settlement, ctx: z.RefinementCtx): void {
     });
   }
 
-  // Derived from `sums_into` rather than declared as a fifth contract axis: the
-  // credit bucket is the ONLY one whose value instrument is a credit note.
+  // Which document the row settles (api-cloudrun#1207). An invoice row names its
+  // invoice; a credit-note row (`refund`) names no invoice and MUST name its
+  // note — it is the note's projection that the row moves.
+  if (contract.settles === "invoice" && s.uid_invoice === null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_invoice"],
+      message: `a "${s.type}" settles an invoice and must name it in uid_invoice`,
+    });
+  }
+  if (contract.settles === "credit_note") {
+    if (s.uid_invoice !== null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["uid_invoice"],
+        message: `a "${s.type}" settles a credit note, not an invoice; uid_invoice must be null`,
+      });
+    }
+    if (s.uid_credit_note === null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["uid_credit_note"],
+        message: `a "${s.type}" settles a credit note and must name it in uid_credit_note`,
+      });
+    }
+  }
+
+  // Only a row that draws on a note's credit may name a credit note.
   //
-  // ⚠️ Written as `!== "amount_credited_cents"`, not `=== "amount_paid_cents"`.
-  // The positive form was correct while `sums_into` had two members and became
-  // silently permissive the moment it gained a third: a `void` row would have
-  // been exempted from the check and could have carried a `uid_credit_note`.
-  // Naming the ONE bucket the exemption belongs to is what makes a fourth
-  // bucket default to being checked rather than to being skipped.
-  if (contract.sums_into !== "amount_credited_cents") {
+  // ⚠️ This read `contract.sums_into !== "amount_credited_cents"` until the
+  // refund pair, and before that `=== "amount_paid_cents"`. The positive form was
+  // correct while `sums_into` had two members and became silently permissive the
+  // moment it gained a third: a `void` row would have been exempted from the
+  // check and could have carried a `uid_credit_note`. The bucket form then
+  // refused a refund, whose `sums_into` is `null`. `draws_credit` is the fact
+  // the rule was always about — the credit bucket was a proxy for it — and it is
+  // `false` by declaration on every type that is not a credit or refund, so a
+  // new type still defaults to being CHECKED.
+  if (!contract.draws_credit) {
     for (const field of ["uid_credit_note", "number_credit_note"] as const) {
       if (s[field] !== null) {
         ctx.addIssue({
           code: "custom",
           path: [field],
-          message: `a "${s.type}" feeds ${contract.sums_into} and cannot reference a credit note`,
+          message: `a "${s.type}" does not draw on a credit note and cannot reference one`,
         });
       }
     }
@@ -210,7 +264,7 @@ export const SettlementSchema: z.ZodType<Settlement> = z.strictObject({
   // `payments[].uid` used. The repo rule: every doc carries a `uid` property and
   // its ID is a Firestore auto-ID.
   uid: FirestoreId,
-  uid_invoice: FirestoreId,
+  uid_invoice: FirestoreId.nullable(),
   uid_organization: FirestoreId,
   type: SettlementTypeEnum.meta({ column: true, label: "Type" }),
   reason: SettlementReasonEnum.meta({ column: true, label: "Reason" }),

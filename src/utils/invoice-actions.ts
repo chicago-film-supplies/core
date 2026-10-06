@@ -298,6 +298,11 @@ function reversalRefusal(row: OfferSettlement, rows: readonly OfferSettlement[])
   if (row.type === "payment" && row.xero_payment_id !== null) {
     return `settlement ${row.uid} is a Xero payment; it is reversed in Xero, not here`;
   }
+  // A cash refund Xero has linked is a Xero payment on the note, for the same
+  // reason (api-cloudrun#1207). An UNLINKED one is the operator's own record.
+  if (row.type === "refund" && row.xero_payment_id !== null) {
+    return `settlement ${row.uid} is a Xero refund; it is removed in Xero, not here`;
+  }
   // Un-voiding is not an operator move (`operator_moves` for `void` is empty);
   // it is a recovery with two acts, never one row's reversal.
   if (row.type === "void") return `settlement ${row.uid} is a void; an invoice is un-voided by recovery, not by reversal`;
@@ -440,9 +445,9 @@ export interface OfferAllocationTarget {
 /** What {@link creditNoteActionsFor} needs that the note alone does not carry. */
 export interface CreditNoteOfferContext {
   /**
-   * Every settlement drawing on this note — its `credit` rows and their
-   * reversals. **Required**: a note voids only with no live allocation (D4), and
-   * an absent list cannot say that.
+   * Every settlement drawing on this note — its `credit` and `refund` rows and
+   * their reversals. **Required**: a note voids only with no live allocation
+   * and no live refund (D4), and an absent list cannot say that.
    */
   allocations: readonly Pick<Settlement, "uid" | "type" | "reverses">[];
   /**
@@ -457,10 +462,10 @@ function creditNoteContract(status: string): CreditNoteStatusContract | undefine
   return (CREDIT_NOTE_STATUS_CONTRACTS as Record<string, CreditNoteStatusContract | undefined>)[status];
 }
 
-/** Live credit rows: `credit` rows no `credit_reversal` names. */
-function liveAllocations(rows: CreditNoteOfferContext["allocations"]): number {
+/** Live rows of `type`: rows of that type no reversal names. */
+function liveRows(rows: CreditNoteOfferContext["allocations"], type: "credit" | "refund"): number {
   const reversed = new Set(rows.map((r) => r.reverses).filter((r): r is string => r !== null));
-  return rows.filter((r) => r.type === "credit" && !reversed.has(r.uid)).length;
+  return rows.filter((r) => r.type === type && !reversed.has(r.uid)).length;
 }
 
 function allocationRefusal(note: OfferCreditNote, ctx: CreditNoteOfferContext): string | null {
@@ -481,19 +486,39 @@ function allocationRefusal(note: OfferCreditNote, ctx: CreditNoteOfferContext): 
 
 function voidRefusal(note: OfferCreditNote, ctx: CreditNoteOfferContext): string | null {
   if (!creditNoteContract(note.status)?.voidable) return `a ${note.status} credit note cannot be voided`;
-  const live = liveAllocations(ctx.allocations);
+  const live = liveRows(ctx.allocations, "credit");
   if (live > 0) return `the credit note has ${live} live allocation(s); reverse them first`;
+  // Xero refuses to void a note that carries a payment, and a cash refund IS one
+  // (`ARCREDITPAYMENT`) — the same rule as an allocation, for the same reason
+  // (api-cloudrun#1207). The refund is removed in Xero, and the reap reverses it.
+  const refunds = liveRows(ctx.allocations, "refund");
+  if (refunds > 0) return `the credit note has ${refunds} live refund(s); remove them in Xero first`;
+  return null;
+}
+
+/**
+ * Is a refund recordable on this note? A refund spends credit exactly as an
+ * allocation does, so it is legal in exactly the statuses that accept one
+ * (`accepts_allocation`) and only while credit remains. No invoice and no Xero
+ * contact check: a refund pays the customer, not an invoice.
+ */
+function refundRefusal(note: OfferCreditNote): string | null {
+  if (!creditNoteContract(note.status)?.accepts_allocation) return `a ${note.status} credit note cannot be refunded`;
+  if (note.remaining_credit_cents <= 0) return "the credit note has no credit left";
   return null;
 }
 
 /**
  * Every action the UI may offer on this credit note.
  *
- * - `void_credit_note` (D4) — the status is voidable and no allocation is live.
+ * - `void_credit_note` (D4) — the status is voidable and no allocation or refund is live.
  * - `allocate_credit_note` (D5, D6) — credit left, and with an invoice in the
  *   context, an invoice that `accepts_payment`, owes something, and sits on the
  *   same Xero contact. `max_cents` is the remaining credit, capped by the
  *   invoice's amount due when one is given.
+ * - `record_refund` (api-cloudrun#1207) — note-level only (no invoice in the
+ *   context), a status that accepts allocation, and credit left; `max_cents` is
+ *   the remaining credit.
  */
 export function creditNoteActionsFor(note: OfferCreditNote, ctx: CreditNoteOfferContext): InvoiceActionOffer[] {
   if (!creditNoteContract(note.status)) return [];
@@ -505,13 +530,19 @@ export function creditNoteActionsFor(note: OfferCreditNote, ctx: CreditNoteOffer
       : note.remaining_credit_cents;
     offers.push({ key: "allocate_credit_note", action: "allocate_credit_note", max_cents: max });
   }
+  // Note-level only: a refund names no invoice, so an invoice in the context
+  // says nothing about it.
+  if (!ctx.invoice && refundRefusal(note) === null) {
+    offers.push({ key: "record_refund", action: "record_refund", max_cents: note.remaining_credit_cents });
+  }
   return offers;
 }
 
 /** What an operator route asks to do to a credit note. */
 export type CreditNoteActionRequest =
   | { action: "void_credit_note" }
-  | { action: "allocate_credit_note"; amount_cents: number };
+  | { action: "allocate_credit_note"; amount_cents: number }
+  | { action: "record_refund"; amount_cents: number };
 
 /** Refuse a credit-note action the ruleset does not offer. Operator routes only. */
 export function assertCreditNoteAction(
@@ -525,6 +556,15 @@ export function assertCreditNoteAction(
   if (request.action === "void_credit_note") {
     const why = voidRefusal(note, ctx);
     if (why !== null) refuse(why);
+    return;
+  }
+  if (request.action === "record_refund") {
+    if (request.amount_cents <= 0) refuse("a refund must be more than $0");
+    const why = refundRefusal(note);
+    if (why !== null) refuse(why);
+    if (request.amount_cents > note.remaining_credit_cents) {
+      refuse(`a refund of ${request.amount_cents} cents exceeds ${note.remaining_credit_cents} cents of remaining credit`);
+    }
     return;
   }
   if (request.amount_cents <= 0) refuse("an allocation must be more than $0");

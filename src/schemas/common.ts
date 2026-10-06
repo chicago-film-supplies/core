@@ -1796,6 +1796,16 @@ export const InvoiceStatusEnum: z.ZodType<InvoiceStatusType> = z.enum(INVOICE_ST
  * record of the fact, folded like every other row: close → reopen → close reads
  * 1, 0, 1 at every prefix, and a reversal is how it reopens. It feeds a COUNT
  * (`counts_into`), never a cents bucket — see {@link SettlementContract}.
+ *
+ * **`refund` is the fifth pair, and it settles a CREDIT NOTE, not an invoice**
+ * (api-cloudrun#1207). A cash refund pays a note's credit back to the customer
+ * without touching any invoice, so until this pair existed it had no row at all
+ * — a `Settlement` had to name an invoice — and `remaining_credit_cents` could
+ * not be rebuilt from the journal (api-cloudrun#469). Xero's own model is the
+ * precedent: a Payment targets an Invoice OR a CreditNote, and a credit-note
+ * refund is a Payment of type `ARCREDITPAYMENT`. The target is the contract's
+ * `settles` axis; a refund feeds no invoice total (`sums_into` and `counts_into`
+ * both `null`) and draws the note's credit (`draws_credit`).
  */
 const SETTLEMENT_TYPES = [
   "payment",
@@ -1806,6 +1816,8 @@ const SETTLEMENT_TYPES = [
   "void_reversal",
   "closure",
   "closure_reversal",
+  "refund",
+  "refund_reversal",
 ] as const;
 /** One settlement event's kind. @see {@link SETTLEMENT_CONTRACTS} */
 export type SettlementTypeType = typeof SETTLEMENT_TYPES[number];
@@ -1862,6 +1874,12 @@ const SETTLEMENT_REASONS = [
    * refused by the invoice refine, so this member cannot describe one.
    */
   "zero_total",
+  /**
+   * refund — a credit note's credit was paid back to the customer in cash
+   * (api-cloudrun#1207; CN-1013, CN-1016). Not `order_adjustment`: that says why
+   * the NOTE exists, and the refund row says what happened to its credit.
+   */
+  "credit_refunded",
   /** any — an operator fixing their own record. */
   "correction",
   /** backfilled history only — never written by new code. */
@@ -1876,6 +1894,25 @@ export const SettlementReasonEnum: z.ZodType<SettlementReasonType> = z.enum(SETT
 export interface SettlementContract {
   /** Which reasons are legal for this type. */
   reasons: readonly SettlementReasonType[];
+  /**
+   * Which document this type settles (api-cloudrun#1207). `"invoice"` rows name
+   * `uid_invoice` and feed exactly one invoice total; `"credit_note"` rows have a
+   * `null` `uid_invoice`, name `uid_credit_note`, and feed NO invoice total —
+   * both `sums_into` and `counts_into` are `null`.
+   *
+   * ⚠️ **Every invoice fold must refuse a `"credit_note"` row, never skip it.**
+   * `recomputeSettlementTotals` throws on one: such a row reaching it means a
+   * caller read settlements by something other than `uid_invoice`, and silently
+   * skipping would hide that.
+   */
+  settles: "invoice" | "credit_note";
+  /**
+   * Whether this type spends (or, as a reversal, restores) a credit note's
+   * credit — the rows `creditNoteRemainingFromJournal` folds, and the only
+   * rows that may name a credit note at all. `credit` and `refund` and their
+   * reversals.
+   */
+  draws_credit: boolean;
   /** Which external-id field this type may carry; `null` ⇒ neither. */
   xero_id_field: "xero_payment_id" | "xero_credit_note_id" | null;
   /**
@@ -1899,9 +1936,10 @@ export interface SettlementContract {
    */
   sums_into: "amount_paid_cents" | "amount_credited_cents" | "amount_void_cents" | null;
   /**
-   * Which invoice COUNT this type feeds, or `null` for a money type. **Exactly
-   * one of `sums_into` / `counts_into` is non-null** — asserted for every row by
-   * `tests/settlements.test.ts`.
+   * Which invoice COUNT this type feeds, or `null` for a money type. **On an
+   * invoice-settling type exactly one of `sums_into` / `counts_into` is
+   * non-null; on a credit-note-settling type both are `null`** — asserted for
+   * every row by `tests/settlements.test.ts`.
    *
    * ⭐ **A second axis rather than a fourth `sums_into` member**, because a
    * closure carries `amount_cents: 0`: folded through a cents bucket it would
@@ -1931,6 +1969,8 @@ export interface SettlementContract {
  */
 export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, SettlementContract>> = {
   payment: {
+    settles: "invoice",
+    draws_credit: false,
     reasons: ["payment_received", "correction", "unspecified"],
     xero_id_field: "xero_payment_id",
     sums_into: "amount_paid_cents",
@@ -1938,6 +1978,8 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
     reverses: "forbidden",
   },
   payment_reversal: {
+    settles: "invoice",
+    draws_credit: false,
     reasons: ["source_retracted", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_paid_cents",
@@ -1945,6 +1987,8 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
     reverses: "required",
   },
   credit: {
+    settles: "invoice",
+    draws_credit: true,
     reasons: [
       "bad_debt",
       "early_return",
@@ -1959,6 +2003,8 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
     reverses: "forbidden",
   },
   credit_reversal: {
+    settles: "invoice",
+    draws_credit: true,
     reasons: ["source_retracted", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_credited_cents",
@@ -1970,6 +2016,8 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   // payment or credit-note object for this row to name. The invoice's own
   // `xero_id` is the linkage, and it is already stored.
   void: {
+    settles: "invoice",
+    draws_credit: false,
     reasons: ["invoice_voided", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_void_cents",
@@ -1981,6 +2029,8 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   // `amount_void_cents` a fold rather than a latch: without it the only way back
   // would be to edit or delete the `void` row, and the journal is append-only.
   void_reversal: {
+    settles: "invoice",
+    draws_credit: false,
     reasons: ["source_retracted", "correction", "unspecified"],
     xero_id_field: null,
     sums_into: "amount_void_cents",
@@ -1991,6 +2041,8 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   // invoice PAID, so there is nothing to push. No `unspecified` — there is no
   // closure history to backfill, so the member would describe nothing.
   closure: {
+    settles: "invoice",
+    draws_credit: false,
     reasons: ["zero_total", "correction"],
     xero_id_field: null,
     sums_into: null,
@@ -2001,10 +2053,37 @@ export const SETTLEMENT_CONTRACTS: Readonly<Record<SettlementTypeType, Settlemen
   // keeps `closure_count` a fold rather than a latch, exactly as `void_reversal`
   // does for `amount_void_cents`.
   closure_reversal: {
+    settles: "invoice",
+    draws_credit: false,
     reasons: ["source_retracted", "correction"],
     xero_id_field: null,
     sums_into: null,
     counts_into: "closure_count",
+    reverses: "required",
+  },
+  // A cash refund of a credit note's credit (api-cloudrun#1207). It carries the
+  // Xero PaymentID of the `ARCREDITPAYMENT` when it came from Xero, and `null`
+  // when an operator recorded it first — the webhook then links it, exactly as
+  // an operator-recorded invoice payment is linked. No `unspecified`: the two
+  // historic refunds (CN-1013, CN-1016) are backfilled with their real reason.
+  refund: {
+    settles: "credit_note",
+    draws_credit: true,
+    reasons: ["credit_refunded", "correction"],
+    xero_id_field: "xero_payment_id",
+    sums_into: null,
+    counts_into: null,
+    reverses: "forbidden",
+  },
+  // The reap (Xero stopped reporting the refund payment) or an operator
+  // correction. Restores the note's credit.
+  refund_reversal: {
+    settles: "credit_note",
+    draws_credit: true,
+    reasons: ["source_retracted", "correction"],
+    xero_id_field: null,
+    sums_into: null,
+    counts_into: null,
     reverses: "required",
   },
 };
