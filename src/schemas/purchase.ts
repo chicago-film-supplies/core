@@ -16,7 +16,7 @@
  * The owner's real sequence is order → bill → delivery (days or weeks later,
  * possibly partial) → payment, and before this document nothing could hold
  * "billed, not received" — movement #3882 recorded three radios that had not
- * arrived. Plan: `api-cloudrun/.claude/plans/purchases.md`.
+ * arrived. Design: api-cloudrun#1210.
  *
  * ## The shape is the out-of-service record's, on purpose
  *

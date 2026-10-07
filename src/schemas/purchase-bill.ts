@@ -6,7 +6,7 @@
  * transaction — a bill born paid), and what it CREDITED back (an ACCPAYCREDIT).
  * Many bills per purchase, each its own document; each bill line bills some
  * quantity of one purchase line, and moves that line's `quantity_billed` in the
- * same transaction. Plan: `api-cloudrun/.claude/plans/purchases.md`.
+ * same transaction. Design: api-cloudrun#1210.
  *
  * ## Why not `invoices` with a direction
  *

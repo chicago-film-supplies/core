@@ -2,7 +2,7 @@
  * Purchase helpers — the cumulative share that prices every receipt and every
  * pushed bill line, the per-line headroom, and the status rule.
  *
- * Plan: `api-cloudrun/.claude/plans/purchases.md` (api-cloudrun#1210).
+ * Design: api-cloudrun#1210.
  *
  * @module
  */

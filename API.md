@@ -22296,7 +22296,7 @@ quantity and the amount agreed. It moves nothing. api-cloudrun#1210 split a
 The owner's real sequence is order → bill → delivery (days or weeks later,
 possibly partial) → payment, and before this document nothing could hold
 "billed, not received" — movement #3882 recorded three radios that had not
-arrived. Plan: `api-cloudrun/.claude/plans/purchases.md`.
+arrived. Design: api-cloudrun#1210.
 
 ## The shape is the out-of-service record's, on purpose
 
@@ -22669,7 +22669,7 @@ What a supplier BILLED CFS for a purchase (an ACCPAY bill, or a SPEND bank
 transaction — a bill born paid), and what it CREDITED back (an ACCPAYCREDIT).
 Many bills per purchase, each its own document; each bill line bills some
 quantity of one purchase line, and moves that line's `quantity_billed` in the
-same transaction. Plan: `api-cloudrun/.claude/plans/purchases.md`.
+same transaction. Design: api-cloudrun#1210.
 
 ## Why not `invoices` with a direction
 
@@ -39875,7 +39875,7 @@ sit in one must exclude them first, as {@link lineChargeableDays} does through
 Purchase helpers — the cumulative share that prices every receipt and every
 pushed bill line, the per-line headroom, and the status rule.
 
-Plan: `api-cloudrun/.claude/plans/purchases.md` (api-cloudrun#1210).
+Design: api-cloudrun#1210.
 
 ### `cumulativeShareCents(amountCents: number, quantity: number, before: number, after: number): number`
 
