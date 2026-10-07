@@ -116,6 +116,7 @@ import {
   type PriceObject,
   rederiveDocumentTotalsForAudit,
   type Tax,
+  validateItemUniqueness,
   validatePathsAgainst,
 } from "./orders.ts";
 
@@ -2283,41 +2284,22 @@ export function validateInvoiceItemPaths<T extends InvoiceItem>(items: T[]): Ite
 /**
  * Within-parent uniqueness check for invoice items.
  *
- * 🔴 **Keyed on the parent's full PATH, not its uid — unlike
- * {@link validateItemUniqueness}.** A date-extension section (api-cloudrun#680
+ * 🔴 **Keyed on the parent's full PATH, not its uid** — the same engine as
+ * {@link validateItemUniqueness}, which it delegates to. A date-extension section (api-cloudrun#680
  * R1) repeats the divider subtree of the order destination it extends under a
  * new section divider: `[O, D, G, L]` and `[O, E, G, L]` are two rows, and the
  * group `G` keeps its uid because alignment reads `[O, E, G]` as the order's
  * `[D, G]`. Keyed on the parent uid they collide. A doubled tree — the collapse
  * this guards — repeats the full path, so it is still refused.
  *
- * The scopes, by what the parent path ends in:
- *  - top-level destination/group/product under an order divider →
- *    parentUid is the order divider uid (first segment),
- *  - product under a destination → parentUid is the destination uid,
- *  - product under a group → parentUid is the group uid,
- *  - component → parentUid is the parent product line uid.
- *
- * So the `(parentUid, uid)` key naturally scopes per order divider for
- * top-level entries, and per parent product for nested ones.
+ * Because the key is the whole parent path, it scopes per order divider for
+ * top-level entries and per parent row (not per parent uid) for nested ones.
  *
  * Returns `[]` when uniqueness holds.
  */
 export function validateInvoiceItemUniqueness<T extends InvoiceItem>(items: T[]): ItemUniquenessIssue[] {
-  const seen = new Map<string, number>();
-  const issues: ItemUniquenessIssue[] = [];
-  for (let i = 0; i < items.length; i++) {
-    const path = items[i].path ?? [];
-    const parent = path.slice(0, -1);
-    const key = parent.join("/") + "\0" + items[i].uid;
-    const firstIndex = seen.get(key);
-    if (firstIndex !== undefined) {
-      issues.push({ index: i, uid: items[i].uid, parentUid: parent.at(-1) ?? null, firstIndex });
-    } else {
-      seen.set(key, i);
-    }
-  }
-  return issues;
+  // One engine for both grains: an invoice's `path` is self-included too.
+  return validateItemUniqueness(items);
 }
 
 // ── Order-scoped item sync ──────────────────────────────────────

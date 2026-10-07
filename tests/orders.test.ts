@@ -2405,7 +2405,7 @@ Deno.test("validateItemUniqueness flags duplicate products in same group", () =>
   ];
   const issues = validateItemUniqueness(items);
   assertEquals(issues, [
-    { index: 3, uid: "P", parentUid: "g1", firstIndex: 2 },
+    { index: 3, uid: "P", parentUid: "g1", parentPath: ["d1", "g1"], firstIndex: 2 },
   ]);
 });
 
@@ -2444,6 +2444,78 @@ Deno.test("validateItemUniqueness flags duplicate component under same parent", 
   assertEquals(issues[0].parentUid, "P");
   assertEquals(issues[0].index, 3);
   assertEquals(issues[0].firstIndex, 2);
+});
+
+// ── validateItemUniqueness keys on the parent PATH (rental extension, order 1056) ──
+// Paths are written by hand, never produced by `computeItemPaths`: the validator
+// is the guard, so it must not be tested against the normalizer's own output.
+
+/** The pre-fix key — `(path[-2] uid, uid)` — kept local to prove the fixtures bite. */
+function uidKeyedDuplicates(items: LineItem[]): number[] {
+  const seen = new Set<string>();
+  const dups: number[] = [];
+  items.forEach((it, i) => {
+    const key = (it.path.at(-2) ?? "\0root") + "\0" + it.uid;
+    if (seen.has(key)) dups.push(i);
+    else seen.add(key);
+  });
+  return dups;
+}
+
+/** A kit K with components a, b on two legs (pair 1 = dA/cA, pair 2 = dB/cB). */
+const kitOnTwoLegs: LineItem[] = [
+  { type: "destination", uid: "dA", name: "", path: ["dA"] },
+  makeItem({ uid: "K", path: ["dA", "K"] }),
+  makeItem({ uid: "a", path: ["dA", "K", "a"] }),
+  makeItem({ uid: "b", path: ["dA", "K", "b"] }),
+  { type: "destination", uid: "dB", name: "", path: ["dB"] },
+  makeItem({ uid: "K", path: ["dB", "K"] }),
+  makeItem({ uid: "a", path: ["dB", "K", "a"] }),
+  makeItem({ uid: "b", path: ["dB", "K", "b"] }),
+];
+
+/** The same kit split into a group within one leg (manager's `splitOrderItem`). */
+const kitSplitIntoGroup: LineItem[] = [
+  { type: "destination", uid: "d", name: "", path: ["d"] },
+  makeItem({ uid: "K", path: ["d", "K"] }),
+  makeItem({ uid: "a", path: ["d", "K", "a"] }),
+  { type: "group", uid: "G", name: "Split", path: ["d", "G"] },
+  makeItem({ uid: "K", path: ["d", "G", "K"] }),
+  makeItem({ uid: "a", path: ["d", "G", "K", "a"] }),
+];
+
+Deno.test("validateItemUniqueness allows the same kit on two legs", () => {
+  assertEquals(validateItemUniqueness(kitOnTwoLegs), []);
+});
+
+Deno.test("validateItemUniqueness allows a kit split into a group within one leg", () => {
+  assertEquals(validateItemUniqueness(kitSplitIntoGroup), []);
+});
+
+Deno.test("the parent-path fixtures DO collide under the old uid key (the fixtures can catch the regression)", () => {
+  // Components a, b of the second K collide with the first K's on `(K, a)` / `(K, b)`.
+  assertEquals(uidKeyedDuplicates(kitOnTwoLegs), [6, 7]);
+  assertEquals(uidKeyedDuplicates(kitSplitIntoGroup), [5]);
+});
+
+Deno.test("validateItemUniqueness flags the same path twice, with exact indexes", () => {
+  const items: LineItem[] = [
+    ...kitOnTwoLegs,
+    makeItem({ uid: "a", path: ["dB", "K", "a"] }),
+  ];
+  assertEquals(validateItemUniqueness(items), [
+    { index: 8, uid: "a", parentUid: "K", parentPath: ["dB", "K"], firstIndex: 6 },
+  ]);
+});
+
+Deno.test("validateItemUniqueness flags a top-level duplicate on the root key", () => {
+  const items: LineItem[] = [
+    { type: "destination", uid: "d", name: "", path: ["d"] },
+    { type: "destination", uid: "d", name: "", path: ["d"] },
+  ];
+  assertEquals(validateItemUniqueness(items), [
+    { index: 1, uid: "d", parentUid: null, parentPath: [], firstIndex: 0 },
+  ]);
 });
 
 // ── validateComponentUniqueness (products' self-EXCLUDED path convention) ──
@@ -2487,6 +2559,22 @@ Deno.test("validateComponentUniqueness flags a duplicate direct child (keyed on 
   assertEquals(issues.length, 1);
   assertEquals(issues[0].uid, "X");
   assertEquals(issues[0].parentUid, "K");
+});
+
+Deno.test("validateComponentUniqueness allows a sub-product WITH CHILDREN under two direct children", () => {
+  // X (with its own child Y) placed under both c1 and c2: Y's parent is X in
+  // both, so a uid key collides them; the parent paths [K,c1,X] / [K,c2,X] differ.
+  const items: LineItem[] = [
+    makeItem({ uid: "c1", path: ["K"] }),
+    makeItem({ uid: "X", path: ["K", "c1"] }),
+    makeItem({ uid: "Y", path: ["K", "c1", "X"] }),
+    makeItem({ uid: "c2", path: ["K"] }),
+    makeItem({ uid: "X", path: ["K", "c2"] }),
+    makeItem({ uid: "Y", path: ["K", "c2", "X"] }),
+  ];
+  assertEquals(validateComponentUniqueness(items), []);
+  const issues = validateComponentUniqueness([...items, makeItem({ uid: "Y", path: ["K", "c2", "X"] })]);
+  assertEquals(issues.map((i) => [i.index, i.firstIndex, i.parentPath]), [[6, 5, ["K", "c2", "X"]]]);
 });
 
 // ── getStructuralUids ───────────────────────────────────────────

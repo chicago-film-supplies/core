@@ -2472,41 +2472,46 @@ export interface ItemUniquenessIssue {
   /**
    * Uid of the immediate structural parent (group, destination, or order
    * divider) or — for components — the parent product line. `null` when the
-   * item is at the top level with no enclosing structural item.
+   * item is at the top level with no enclosing structural item. ⚠️ A uid is NOT
+   * a row identity (it repeats across legs and groups), so this names the
+   * parent for a MESSAGE only; the key is {@link ItemUniquenessIssue.parentPath}.
    */
   parentUid: string | null;
-  /** Index of the first occurrence sharing the same `(parentUid, uid)`. */
+  /**
+   * The immediate parent's full `path` (`[]` at the top level) — the row
+   * identity the uniqueness key is built from. Unique `(parentPath, uid)` is
+   * the same statement as unique `path`.
+   */
+  parentPath: string[];
+  /** Index of the first occurrence sharing the same `(parentPath, uid)`. */
   firstIndex: number;
 }
 
 /**
- * Shared engine for the two path-keyed uniqueness checks below.
- * `parentIndexFromEnd` selects which `path` segment names the immediate
- * structural parent:
+ * Shared engine for every path-keyed uniqueness check: orders, invoices,
+ * fulfillments and product components all key on `(parent PATH, uid)`.
  *
- *  - `2` — orders/invoices/fulfillments `items`, whose `path` is self-INCLUDED
- *    (`computeItemPaths` writes `[...ancestors, self]`), so the parent is `path[-2]`.
- *  - `1` — products' `components`, whose `path` is the ancestor chain and
- *    EXCLUDES self, so the immediate parent is `path[-1]`.
+ * 🔴 The key is the parent's PATH, never its uid. A uid repeats within one
+ * document (a kit on two legs, a kit split into a group within one leg), so a
+ * uid-keyed check collides the components of the second occurrence and refuses
+ * a legal save. Two rows with the same parent path and the same uid have the
+ * same `path`, which is the one thing that is genuinely a duplicate.
  *
- * Keying with the wrong index conflates the same sub-item placed under two
- * DIFFERENT parents at depth >= 2 — a legal multi-occupancy — into one key and
- * falsely reports it as a duplicate.
+ * `parentPathOf` is the only thing that differs per convention.
  */
 function collectUniquenessIssues<T extends LineItem>(
   items: T[],
-  parentIndexFromEnd: 1 | 2,
+  parentPathOf: (path: string[]) => string[],
 ): ItemUniquenessIssue[] {
   const seen = new Map<string, number>();
   const issues: ItemUniquenessIssue[] = [];
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    const path = item.path ?? [];
-    const parentUid = path.length >= parentIndexFromEnd ? path[path.length - parentIndexFromEnd] : null;
-    const key = (parentUid ?? "\0root") + "\0" + item.uid;
+    const parentPath = parentPathOf(item.path ?? []);
+    const key = parentPath.join("\0") + "\0\0" + item.uid;
     const firstIndex = seen.get(key);
     if (firstIndex !== undefined) {
-      issues.push({ index: i, uid: item.uid, parentUid, firstIndex });
+      issues.push({ index: i, uid: item.uid, parentUid: parentPath.at(-1) ?? null, parentPath, firstIndex });
     } else {
       seen.set(key, i);
     }
@@ -2515,15 +2520,22 @@ function collectUniquenessIssues<T extends LineItem>(
 }
 
 /**
+ * The parent path of a self-INCLUDED `path` (`computeItemPaths` writes
+ * `[...ancestors, self]`), shared by the order and invoice checks.
+ */
+const selfIncludedParentPath = (path: string[]): string[] => path.slice(0, -1);
+
+/**
  * Assert that within each items array, no two entries share the same `uid`
- * AND the same immediate structural parent. The immediate structural parent
- * is the second-to-last `path` segment (or `null` for items whose path is
- * just `[self.uid]`).
+ * AND the same immediate parent PATH (`path.slice(0, -1)`; `[]` for a
+ * top-level row).
  *
  * This is the uniqueness invariant orders/invoices rely on so that path-based
  * line identity is unambiguous. Violations indicate a duplicate that should
  * be merged — manager's `mergeStagedIntoOrder` (`manager/src/stores/orders.ts`)
- * and the migration script consolidate.
+ * and the migration script consolidate. The same kit on two legs, or split
+ * into a group within one leg, is legal: its components sit under different
+ * parent paths.
  *
  * Returns `[]` when uniqueness holds.
  *
@@ -2531,24 +2543,23 @@ function collectUniquenessIssues<T extends LineItem>(
  * exclude self from `path` — use {@link validateComponentUniqueness} for them.
  */
 export function validateItemUniqueness<T extends LineItem>(items: T[]): ItemUniquenessIssue[] {
-  return collectUniquenessIssues(items, 2);
+  return collectUniquenessIssues(items, selfIncludedParentPath);
 }
 
 /**
  * Products' `components` variant of {@link validateItemUniqueness}. A product
  * component `path` is the ancestor chain and EXCLUDES the component's own uid,
- * so the immediate parent is the LAST segment (`path[-1]`), not the
- * second-to-last. Reusing {@link validateItemUniqueness} here is off by one: it
- * keys a depth->=2 entry on its GRANDparent, so the same sub-product placed
- * under two different direct children — a placement the product editor supports
- * — collapses into one key and is falsely rejected (api-cloudrun#348).
+ * so the immediate parent's path is the WHOLE `path`. Reusing
+ * {@link validateItemUniqueness} here is off by one (api-cloudrun#348). Keying
+ * on the parent path rather than its uid additionally lets one sub-product sit
+ * under two direct children that themselves share a uid at different depths.
  * Exact-duplicate rows (identical full `path` + `uid`) still collide and are
  * still rejected.
  *
  * Returns `[]` when uniqueness holds.
  */
 export function validateComponentUniqueness<T extends LineItem>(items: T[]): ItemUniquenessIssue[] {
-  return collectUniquenessIssues(items, 1);
+  return collectUniquenessIssues(items, (path) => path);
 }
 
 /**

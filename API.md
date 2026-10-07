@@ -32919,6 +32919,7 @@ interface ItemUniquenessIssue {
   index: number;
   uid: string;
   parentUid: string | null;
+  parentPath: string[];
   firstIndex: number;
 }
 ```
@@ -34722,23 +34723,16 @@ Returns `[]` when every path is clean and order is canonical.
 
 Within-parent uniqueness check for invoice items.
 
-🔴 **Keyed on the parent's full PATH, not its uid — unlike
-{@link validateItemUniqueness}.** A date-extension section (api-cloudrun#680
+🔴 **Keyed on the parent's full PATH, not its uid** — the same engine as
+{@link validateItemUniqueness}, which it delegates to. A date-extension section (api-cloudrun#680
 R1) repeats the divider subtree of the order destination it extends under a
 new section divider: `[O, D, G, L]` and `[O, E, G, L]` are two rows, and the
 group `G` keeps its uid because alignment reads `[O, E, G]` as the order's
 `[D, G]`. Keyed on the parent uid they collide. A doubled tree — the collapse
 this guards — repeats the full path, so it is still refused.
 
-The scopes, by what the parent path ends in:
- - top-level destination/group/product under an order divider →
-   parentUid is the order divider uid (first segment),
- - product under a destination → parentUid is the destination uid,
- - product under a group → parentUid is the group uid,
- - component → parentUid is the parent product line uid.
-
-So the `(parentUid, uid)` key naturally scopes per order divider for
-top-level entries, and per parent product for nested ones.
+Because the key is the whole parent path, it scopes per order divider for
+top-level entries and per parent row (not per parent uid) for nested ones.
 
 Returns `[]` when uniqueness holds.
 
@@ -34763,14 +34757,15 @@ Returns `[]` when every path is clean and order is canonical.
 ### `validateItemUniqueness(items: T[]): ItemUniquenessIssue[]`
 
 Assert that within each items array, no two entries share the same `uid`
-AND the same immediate structural parent. The immediate structural parent
-is the second-to-last `path` segment (or `null` for items whose path is
-just `[self.uid]`).
+AND the same immediate parent PATH (`path.slice(0, -1)`; `[]` for a
+top-level row).
 
 This is the uniqueness invariant orders/invoices rely on so that path-based
 line identity is unambiguous. Violations indicate a duplicate that should
 be merged — manager's `mergeStagedIntoOrder` (`manager/src/stores/orders.ts`)
-and the migration script consolidate.
+and the migration script consolidate. The same kit on two legs, or split
+into a group within one leg, is legal: its components sit under different
+parent paths.
 
 Returns `[]` when uniqueness holds.
 
@@ -35361,6 +35356,7 @@ interface ItemUniquenessIssue {
   index: number;
   uid: string;
   parentUid: string | null;
+  parentPath: string[];
   firstIndex: number;
 }
 ```
@@ -38227,6 +38223,7 @@ interface ItemUniquenessIssue {
   index: number;
   uid: string;
   parentUid: string | null;
+  parentPath: string[];
   firstIndex: number;
 }
 ```
@@ -39570,11 +39567,10 @@ and `totals.transaction_fees` aggregates by NAME, so neither answers per row.
 
 Products' `components` variant of {@link validateItemUniqueness}. A product
 component `path` is the ancestor chain and EXCLUDES the component's own uid,
-so the immediate parent is the LAST segment (`path[-1]`), not the
-second-to-last. Reusing {@link validateItemUniqueness} here is off by one: it
-keys a depth->=2 entry on its GRANDparent, so the same sub-product placed
-under two different direct children — a placement the product editor supports
-— collapses into one key and is falsely rejected (api-cloudrun#348).
+so the immediate parent's path is the WHOLE `path`. Reusing
+{@link validateItemUniqueness} here is off by one (api-cloudrun#348). Keying
+on the parent path rather than its uid additionally lets one sub-product sit
+under two direct children that themselves share a uid at different depths.
 Exact-duplicate rows (identical full `path` + `uid`) still collide and are
 still rejected.
 
@@ -39630,14 +39626,15 @@ Returns `[]` when every path is clean and order is canonical.
 ### `validateItemUniqueness(items: T[]): ItemUniquenessIssue[]`
 
 Assert that within each items array, no two entries share the same `uid`
-AND the same immediate structural parent. The immediate structural parent
-is the second-to-last `path` segment (or `null` for items whose path is
-just `[self.uid]`).
+AND the same immediate parent PATH (`path.slice(0, -1)`; `[]` for a
+top-level row).
 
 This is the uniqueness invariant orders/invoices rely on so that path-based
 line identity is unambiguous. Violations indicate a duplicate that should
 be merged — manager's `mergeStagedIntoOrder` (`manager/src/stores/orders.ts`)
-and the migration script consolidate.
+and the migration script consolidate. The same kit on two legs, or split
+into a group within one leg, is legal: its components sit under different
+parent paths.
 
 Returns `[]` when uniqueness holds.
 
