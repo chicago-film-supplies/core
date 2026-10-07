@@ -652,7 +652,7 @@ const updateOrderRules: CollectionRule[] = [
     target: "bookings",
     mode: "co-write",
     invariant:
-      "Bookings are diffed — created, updated, or deleted based on item/status/date/destination changes. Orphan bookings (bookings whose {order,product,destination} composite id no longer appears in the order) are deleted and their `stock/{P}` projections zeroed.",
+      "Bookings are diffed — created, updated, or deleted based on item/status/date/destination changes. An orphan booking (one whose {order,product,destination[,signature]} composite id the order no longer implies) is deleted only while it is a PLAN (quoted/reserved), and its `stock/{P}` contribution goes with it. An orphan with any custody history is KEPT, rewritten from the stored booking with quoted = reserved = 0, quantity = Σ breakdown and quantity_ordered: 0, so its units keep consuming stock until they come back (api-cloudrun#1147, ruling Q4). The one delete of a booking with history is a repoint on a COMPLETE order, which moves the terminal history to the new id first (ruling Q3).",
     enforced_by: [
       BOOKING_ID_IS_THE_CARDINALITY,
       BOOKING_DIFF_TESTS,
