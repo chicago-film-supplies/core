@@ -1297,6 +1297,103 @@ const finalizeOrderTransaction: TransactionDefinition = {
   ],
 };
 
+// ── extend-rental ─────────────────────────────────────────────────
+//
+// POST /orders/{uid}/extensions — the customer keeps some of a leg's units
+// past its collection date. The units never move; only the BOOKING that holds
+// them does, because a booking's window IS its leg's dates. So the write is an
+// order edit (a new leg B, the kept quantity moved onto it) plus a custody
+// re-attribution that an ordinary order edit deliberately never makes
+// (api-cloudrun#1147: "an order edit never moves custody"). The operator action
+// is what makes the move explicit.
+//
+// ⚠️ Its own id rather than a borrowed `update-order`: a borrowed transaction id
+// turns the drift check off silently. It reuses the `update-order:*` rules the
+// write fires, as `bulk-*` reuse `update-booking:*`.
+
+const RENTAL_EXTENSION_TESTS =
+  "api-cloudrun/tests/integration/orders/rentalExtension.test.ts";
+
+const REBOOK_MOVES_CUSTODY_NOT_STOCK: EnforcementRef = {
+  kind: "test",
+  ref: `${RENTAL_EXTENSION_TESTS}::a partial kit extension moves custody, not stock`,
+  clause:
+    "A's booking falls by k and B's holds out: k, the fulfillment keeps no row at quantity_ordered: 0, and stock holds the physical count rather than double-holding it",
+  gates: true,
+};
+
+const REBOOK_JOURNAL: EnforcementRef = {
+  kind: "test",
+  ref: `${RENTAL_EXTENSION_TESTS}::one session holds rebook_out on A and rebook_in on B`,
+  clause:
+    "one rebook_out on A's booking and one rebook_in on B's per grain, in one session, rebook_out numbered first, rebook_in naming A in sources[]",
+  gates: true,
+};
+
+const extendRentalRules: CollectionRule[] = [
+  {
+    id: "extend-rental:rebook-to-bookings",
+    source: "orders",
+    target: "bookings",
+    mode: "co-write",
+    invariant:
+      "For each booking grain a moved row belongs to, A's booking gives up k units of `out` and leg B's booking (the same grain on the new leg, `buildBookingIdFromSignature`) is created holding `out: k`. The rebook is applied to the order's stored-booking view BEFORE the order-edit delta, the reconcile, the card gate and the fulfillment sync read it — so the edit keeps no `quantity_ordered: 0` row, B's booking carries its units forward rather than reserving fresh ones, and A at q−k to A's date plus B at k to B's date overlap to exactly q in the stock projection. k never exceeds A's live `out` at that grain. A grain whose every unit moved leaves A with no custody history, and its booking is deleted as a plan.",
+    enforced_by: [REBOOK_MOVES_CUSTODY_NOT_STOCK],
+    transaction: "extend-rental",
+    fields: [
+      {
+        source: ["items", "quantity"],
+        target: ["breakdown", "out"],
+        transform: "A: out − k; B: out = k (k summed over the moved rows of one grain)",
+      },
+      {
+        source: ["destinations", "dates"],
+        target: ["dates"],
+        transform: "B's booking takes leg B's window: A's delivery, the extension's collection",
+      },
+    ],
+  },
+  {
+    id: "extend-rental:bookings-to-transactions",
+    source: "bookings",
+    target: "transactions",
+    mode: "co-write",
+    invariant:
+      "The re-attribution is journaled as a PAIR in one session: `rebook_out` on A's booking (custody {out → null}) and `rebook_in` on B's (custody {null → out}, `sources[]` naming A exactly once). No lines and no ledger effect, since nothing moved physically. `rebook_out` takes the lower number, because replay folds by `created_at`, then `number`. Ids are `{session}|{type}|{booking}`, so the pair is idempotent under the order write's own retry.",
+    enforced_by: [REBOOK_JOURNAL, CUSTODY_REPLAY],
+    transaction: "extend-rental",
+    fields: [
+      { source: ["uid_product"], target: ["uid_product"] },
+      { source: ["uid"], target: ["uid_booking"] },
+      { source: ["breakdown", "out"], target: ["quantity"], transform: "k, the units re-attributed" },
+      {
+        source: [],
+        target: ["sources"],
+        transform: "[{orders}, {bookings: A}] on both halves",
+      },
+    ],
+  },
+];
+
+const extendRentalTransaction: TransactionDefinition = {
+  id: "extend-rental",
+  description:
+    "Extends part of a rental leg: mints leg B (A's delivery, a new collection), moves the chosen rows' quantities from A to B, reprices, and re-attributes the kept units' custody from A's bookings to B's with a `rebook_out`/`rebook_in` pair, all in the order write's one transaction. Otherwise runs the `update-order` cascade unchanged: bookings, `stock/{P}` via {@link STOCK_STEPS}, event cards, the fulfillment patch and the invoice three-way sync.",
+  steps: [
+    "update-order:order-self-derive",
+    "extend-rental:rebook-to-bookings",
+    "extend-rental:bookings-to-transactions",
+    "update-order:order-to-bookings",
+    "update-order:ledger-to-bookings",
+    ...STOCK_STEPS,
+    "update-order:fulfillment-to-cards",
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
+    "update-order:order-to-fulfillment",
+    "update-order:items-to-invoices",
+  ],
+};
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/orders.ts` contributes to the propagation catalog. */
 export const orders: PropagationModule = {
@@ -1304,6 +1401,7 @@ export const orders: PropagationModule = {
     ...createOrderRules,
     ...updateOrderRules,
     ...updateBookingRules,
+    ...extendRentalRules,
   ],
   transactions: [
     createOrderTransaction,
@@ -1314,5 +1412,6 @@ export const orders: PropagationModule = {
     bulkFulfillmentBookingsTransaction,
     crossOrderBookingsTransaction,
     finalizeOrderTransaction,
+    extendRentalTransaction,
   ],
 };
