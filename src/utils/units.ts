@@ -334,6 +334,12 @@ function destination(
  * `rebook_out` finds the unit already on B and refuses. That is deliberate, as
  * a half applied alone is then detectable: a `rebook_in` naming a unit not on
  * its counterpart, or a `rebook_out` whose units were moved by something else.
+ *
+ * An `unattributed_out` unit may be rebooked too, as a check-in may take one
+ * off any booking (`checkSource`): it is out on SOME booking, and nobody wrote
+ * down which (a conversion residue). Rebooking it is what writes the booking
+ * down — B — so the extension settles it the way a check-in does (owner,
+ * 2026-10-07). The writer caps how many it names at A's untracked `out`.
  */
 function foldRebook(next: RosterUnits, m: RosterMovement, once: (n: number) => void): RosterUnits {
   if (m.uid_booking === null) throw new RosterFoldError(`"${m.type}" names units but no booking`);
@@ -348,7 +354,8 @@ function foldRebook(next: RosterUnits, m: RosterMovement, once: (n: number) => v
   for (const { number: n } of m.units) {
     once(n);
     const entry = next[String(n)];
-    if (entry?.state !== "out" || entry.uid_booking !== from) {
+    const onFrom = entry?.state === "out" && entry.uid_booking === from;
+    if (!onFrom && entry?.state !== "unattributed_out") {
       throw new RosterFoldError(`"${m.type}" rebooks unit ${n} off ${from}, but the unit is ${describe(entry)}`, n);
     }
     if (m.type === "rebook_in") next[String(n)] = { state: "out", uid_booking: m.uid_booking };

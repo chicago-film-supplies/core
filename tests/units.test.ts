@@ -365,9 +365,19 @@ Deno.test("foldRosterUnits: the rebook pair folds A's half first, and refuses a 
   const shelf = shelfRoster([1001]);
   assertThrows(() => foldRosterUnits(shelf, rebook("rebook_out", [1001], BOOKING, LEG_B)), RosterFoldError, "on shelf");
   assertThrows(() => foldRosterUnits(shelf, rebook("rebook_in", [1001], LEG_B, BOOKING)), RosterFoldError, "on shelf");
-  // A conversion's unattributed_out unit is on no booking, so it cannot be rebooked off one.
-  const unattributed: RosterUnits = { "1001": { state: "unattributed_out" } };
-  assertThrows(() => foldRosterUnits(unattributed, rebook("rebook_in", [1001], LEG_B, BOOKING)), RosterFoldError);
+});
+
+Deno.test("foldRosterUnits: an unattributed_out unit (a conversion residue) rebooks onto B, as a check-in may take one off any booking", () => {
+  const start: RosterUnits = { "1001": { state: "unattributed_out" }, "1002": { state: "out", uid_booking: BOOKING } };
+  const afterOut = foldRosterUnits(start, rebook("rebook_out", [1001, 1002], BOOKING, LEG_B));
+  assertEquals(afterOut, start, "rebook_out only checks");
+  assertEquals(foldRosterUnits(afterOut, rebook("rebook_in", [1001, 1002], LEG_B, BOOKING)), {
+    "1001": { state: "out", uid_booking: LEG_B },
+    "1002": { state: "out", uid_booking: LEG_B },
+  });
+  // Still one order: B's half first writes the unit down on B, and A's half then refuses it.
+  const inFirst = foldRosterUnits(start, rebook("rebook_in", [1001], LEG_B, BOOKING));
+  assertThrows(() => foldRosterUnits(inFirst, rebook("rebook_out", [1001], BOOKING, LEG_B)), RosterFoldError, `out on ${LEG_B}`);
 });
 
 Deno.test("foldRosterUnits: rebook_in must name exactly one counterpart booking", () => {

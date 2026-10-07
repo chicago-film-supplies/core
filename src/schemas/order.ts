@@ -1909,7 +1909,10 @@ export interface ExtendRentalLineType {
   quantity: number;
   /**
    * Which units stay out, on a `serialized` product: a canonical `UnitSet` of
-   * exactly `quantity` numbers, each in leg A's booking `units.out`. Required
+   * exactly `quantity` numbers, each in leg A's booking `units.out` — or, up
+   * to A's untracked `out` count (`breakdown.out − units.out.length`, a
+   * conversion residue), a roster `unattributed_out` unit, as a check-in may
+   * name one. Required
    * for a serialized product and refused for any other — the operator picks,
    * the server never infers (`api-cloudrun/.claude/plans/serial-tracking.md` D3).
    * Rows sharing one booking grain must pick disjoint units.
