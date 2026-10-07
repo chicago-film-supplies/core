@@ -220,7 +220,7 @@ export const MOVEMENT_TYPES = [
   "mark_maintenance_undo",
   // ── the rebook pair: units that STAY out move to another booking ──
   //
-  // A rental extension (api-cloudrun `.claude/plans/rental-extension.md`): the
+  // A rental extension (`api-cloudrun/.claude/plans/rental-extension.md`): the
   // customer keeps k of a leg's units past its collection date. Nothing moves
   // physically; what changes is which booking records the k units as `out`,
   // because a booking's window IS its leg's dates. So `rebook_out` takes k off

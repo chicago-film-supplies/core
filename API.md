@@ -39452,7 +39452,7 @@ expected case, not a malformed document.
 ### `moveLinesToLeg(items: readonly T[], args: typeLiteral): T[]`
 
 Move some units of some rows from one leg (A) to a NEW leg (B) — the order
-half of a rental extension (api-cloudrun `.claude/plans/rental-extension.md`).
+half of a rental extension (`api-cloudrun/.claude/plans/rental-extension.md`).
 
 - **Every row states its own quantity.** Nothing is scaled here: a kit's
   components can be partly back already, so a ratio can exceed what is still
