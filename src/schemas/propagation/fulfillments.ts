@@ -34,6 +34,7 @@ import type {
   PropagationModule,
   TransactionDefinition,
 } from "./types.ts";
+import { STOCK_STEPS } from "./stock.ts";
 
 /**
  * The positive half — items merged, `version` bumped, a stale version 409s.
@@ -585,6 +586,72 @@ const reconcileFulfillmentCardsTransaction: TransactionDefinition = {
   ],
 };
 
+// ── reconcile-order-from-invoices ────────────────────────────────────
+
+// 🔴 Declared WITHOUT `enforced_by` on purpose: nothing in api-cloudrun emits or
+// tests this transaction yet (api-cloudrun#1188, Phase 2), and an `enforced_by`
+// names an assertion that must exist. Add them with the writer.
+
+const reconcileOrderFromInvoicesRules: CollectionRule[] = [
+  {
+    id: "reconcile-order-from-invoices:invoices-to-fulfillments",
+    source: "invoices",
+    target: "fulfillments",
+    mode: "derive",
+    invariant:
+      "A stock line an invoice bills at a path its order lacks is projected onto the " +
+      "order's fulfillment as a row at its order-relative path, so the warehouse can pick " +
+      "it. Applied with the same three-way rule as an order row (a picker-lowered row " +
+      "survives an invoice edit); a raised quantity on an order-sourced line is NOT " +
+      "projected and stays a surfaced `quantity` diff. Reads non-void, aligned invoices.",
+    transaction: "reconcile-order-from-invoices",
+    trigger: "an invoice that changes items or voids, enqueued post-commit per billed order",
+    fields: [
+      {
+        source: ["items"],
+        target: ["items"],
+        transform:
+          "invoiceOnlyLines(order, invoices) — lines at paths the order lacks, quantity summed across invoices, at their order-relative path",
+      },
+    ],
+  },
+  {
+    id: "reconcile-order-from-invoices:fulfillments-to-bookings",
+    source: "fulfillments",
+    target: "bookings",
+    mode: "derive",
+    invariant:
+      "Bookings follow the fulfillment, including rows only the fulfillment carries " +
+      "(a picker addition or an invoice-only row), at the row's ordered quantity with " +
+      "the picker's number as the physical one. A kept row (`quantity_ordered: 0`) is " +
+      "not re-projected: its booking is owned by custody history.",
+    transaction: "reconcile-order-from-invoices",
+    fields: [
+      {
+        source: ["items"],
+        target: ["quantity_ordered"],
+        transform: "fulfillmentOnlyBookingRows — `quantity_ordered ?? quantity` of each row the order lacks",
+      },
+      { source: ["items", "quantity"], target: ["quantity"] },
+    ],
+  },
+];
+
+const reconcileOrderFromInvoicesTransaction: TransactionDefinition = {
+  id: "reconcile-order-from-invoices",
+  description:
+    "Project an order's invoice-only stock lines onto its fulfillment, reconcile the " +
+    "bookings against the fulfillment's rows, and rebuild `stock/{P}`. Bumps no " +
+    "`order.version`, reprices nothing and propagates to no invoice, so it causes no " +
+    "loop and no Xero fan-out. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: " +
+    "a reconcile that changes a booking.",
+  steps: [
+    "reconcile-order-from-invoices:invoices-to-fulfillments",
+    "reconcile-order-from-invoices:fulfillments-to-bookings",
+    ...STOCK_STEPS,
+  ],
+};
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/fulfillments.ts` contributes to the propagation catalog. */
 export const fulfillments: PropagationModule = {
@@ -598,6 +665,7 @@ export const fulfillments: PropagationModule = {
     ...resetFulfillmentRules,
     ...resetFulfillmentCardRules,
     ...reconcileFulfillmentCardsRules,
+    ...reconcileOrderFromInvoicesRules,
   ],
   transactions: [
     updateFulfillmentItemsTransaction,
@@ -605,5 +673,6 @@ export const fulfillments: PropagationModule = {
     createFulfillmentExchangeTransaction,
     resetFulfillmentTransaction,
     reconcileFulfillmentCardsTransaction,
+    reconcileOrderFromInvoicesTransaction,
   ],
 };
