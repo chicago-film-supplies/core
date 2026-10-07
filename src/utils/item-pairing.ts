@@ -29,6 +29,11 @@
  *   alone paired a merge's survivor with the REMOVED occurrence
  *   (api-cloudrun#1147, repro A). {@link pairItemsByUidOccurrence} itself is
  *   unchanged and stays on `(uid, k)`.
+ * - **…and on an UNCHANGED path before either.** "Not `path`" above means a
+ *   path that CHANGED says nothing about identity; a path that did not change
+ *   is the same row by definition. Without that first pass, the same product on
+ *   two legs (one signature key) paired by document order, so a leg placed
+ *   ahead of another swapped their rows.
  *
  * ⚠️ **It lives here because the callers are in two repos**, exactly as
  * `utils/substitutions.ts` does. `adoptOrderDividerStructure`
@@ -222,6 +227,13 @@ export function mapPathsAcrossRebuild<A extends PathedItem, B extends PathedItem
   from: readonly A[],
   to: readonly B[],
 ): RebuildPathMap {
+  // Pass 0 pairs an UNCHANGED path with itself: a path is the row identity
+  // within one document, so a row whose path survived is the same row by
+  // definition. Without it the passes below decide by k-th occurrence among rows
+  // sharing a key, and the signature drops dividers — so the same product on two
+  // LEGS shares a key, and a leg placed ahead of another (a rental extension, or
+  // two legs reordered) paired each row with the other leg's
+  // (api-cloudrun rental-extension Phase 1.4).
   // Pass 1 pairs within a component SIGNATURE (the product ancestry, the same
   // chain a booking id hashes), so a kit component merged into a same-product
   // line elsewhere pairs the survivor with ITS OWN previous occurrence rather
@@ -229,12 +241,22 @@ export function mapPathsAcrossRebuild<A extends PathedItem, B extends PathedItem
   // repro A). Pass 2 pairs what is left by `(uid, k)`, which is what lets a row
   // that genuinely changed signature — a component dragged out of its kit — still
   // read as moved rather than as new.
-  const bySignature = pairByKeyOccurrence(from, to, signatureKey);
-  const fromRest = from.filter((it) => !bySignature.forward.has(it));
-  const toRest = to.filter((it) => !bySignature.matched.has(it));
+  const byPath = pairByKeyOccurrence(
+    from.filter((it) => it.path?.length),
+    to.filter((it) => it.path?.length),
+    (it) => pathKey(it.path),
+  );
+  const fromRest0 = from.filter((it) => !byPath.forward.has(it));
+  const toRest0 = to.filter((it) => !byPath.matched.has(it));
+  const bySignature = pairByKeyOccurrence(fromRest0, toRest0, signatureKey);
+  const fromRest = fromRest0.filter((it) => !bySignature.forward.has(it));
+  const toRest = toRest0.filter((it) => !bySignature.matched.has(it));
   const byUid = pairItemsByUidOccurrence(fromRest, toRest);
-  const forward = new Map<A, B>([...bySignature.forward, ...byUid.forward]);
-  const ambiguous = [...bySignature.ambiguous, ...byUid.ambiguous];
+  const forward = new Map<A, B>([...byPath.forward, ...bySignature.forward, ...byUid.forward]);
+  // A row paired on its exact path is not a guess, so it reports no ambiguity;
+  // the path pass reports one only for a path repeated on one side, which is an
+  // invalid document.
+  const ambiguous = [...byPath.ambiguous, ...bySignature.ambiguous, ...byUid.ambiguous];
 
   const toByFrom = new Map<string, readonly string[]>();
   const fromByTo = new Map<string, readonly string[]>();
