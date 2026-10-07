@@ -3540,3 +3540,172 @@ function buildPackingListFiltered(
 
   return result;
 }
+
+// ── Moving lines to another leg (rental extension) ──────────────
+
+/** One row to move, and how many of its units. @see {@link moveLinesToLeg} */
+export interface LegMoveLine {
+  /** The row's CURRENT path on the source leg. */
+  path: readonly string[];
+  /** Units to move; a positive integer, at most the row's quantity. */
+  quantity: number;
+}
+
+/** A move {@link moveLinesToLeg} cannot make. The API maps it to a 400. */
+export class LegMoveRefusal extends Error {
+  /** The requested path the refusal is about, when there is one. */
+  readonly path: readonly string[] | null;
+  constructor(message: string, path: readonly string[] | null = null) {
+    super(message);
+    this.name = "LegMoveRefusal";
+    this.path = path;
+  }
+}
+
+/** The shape {@link moveLinesToLeg} reads; deliberately narrower than an order item. */
+export interface LegMoveItem {
+  uid: string;
+  type: string;
+  path: string[];
+  quantity?: number;
+}
+
+const isLegMoveDivider = (it: LegMoveItem) => it.type === "destination" || it.type === "group";
+const legMoveKey = (path: readonly string[]) => path.join("\x1f");
+const isUnder = (path: readonly string[], prefix: readonly string[]) =>
+  path.length > prefix.length && prefix.every((seg, i) => path[i] === seg);
+
+/**
+ * Move some units of some rows from one leg (A) to a NEW leg (B) — the order
+ * half of a rental extension (api-cloudrun `.claude/plans/rental-extension.md`).
+ *
+ * - **Every row states its own quantity.** Nothing is scaled here: a kit's
+ *   components can be partly back already, so a ratio can exceed what is still
+ *   out. The caller (the API, from the operator's form) decides each number.
+ * - **A component needs its kit.** Every line-item ancestor of a moved row must
+ *   be moved too, or the row would land in B as a root, detached from its kit.
+ * - **Rentals only.** A sale's units left ownership and a service has none, so
+ *   neither has a collection date to extend.
+ * - **Groups are CLONED under B with newly minted uids.** A group uid is a row
+ *   identity the manager collapses on (`"group:" + uid`), so B's copy of a group
+ *   must not share A's.
+ * - **A's rows keep the remainder.** A row left at 0 is removed, unless a row
+ *   under it stays on A (a component whose units are still due back on A's
+ *   date), in which case it stays at 0 as their parent. A's groups stay as
+ *   they are, even if emptied.
+ * - **B's block goes right after A's**: the divider, then the rows directly under
+ *   the leg, then each cloned group with its rows, in A's order.
+ *
+ * ⚠️ **The output is NOT pathed.** Moved rows keep their OLD paths, which is
+ * deliberate: `computeItemPaths` resolves a parent from the last path segment
+ * naming another line in the same block, so the old chain is what carries the
+ * kit ancestry into B. The caller must run {@link computeItemPaths}, which stays
+ * the one author of a path, and then reprice.
+ *
+ * @param items - The order's items, pathed (as stored)
+ * @param args.divider - B's destination divider, from {@link buildDestinationPairWithDivider}
+ * @param args.lines - The rows to move, all on one leg
+ * @param args.mintUid - Group-uid minter; defaults to `crypto.randomUUID`
+ * @throws {LegMoveRefusal} on any request it cannot carry out
+ */
+export function moveLinesToLeg<T extends LegMoveItem>(
+  items: readonly T[],
+  args: { divider: T; lines: readonly LegMoveLine[]; mintUid?: () => string },
+): T[] {
+  const { divider, lines } = args;
+  const mint = args.mintUid ?? (() => crypto.randomUUID());
+  if (divider.type !== "destination") throw new LegMoveRefusal("the new leg's divider must be a destination divider");
+  if (items.some((it) => it.uid === divider.uid)) {
+    throw new LegMoveRefusal(`the new leg ${divider.uid} is already on the order`);
+  }
+  if (lines.length === 0) throw new LegMoveRefusal("nothing to move");
+
+  const leg = lines[0].path[0];
+  const legIdx = items.findIndex((it) => it.type === "destination" && it.uid === leg);
+  if (legIdx === -1) throw new LegMoveRefusal(`the source leg ${leg} is not on the order`, lines[0].path);
+  let blockEnd = items.length;
+  for (let i = legIdx + 1; i < items.length; i++) {
+    if (items[i].type === "destination") {
+      blockEnd = i;
+      break;
+    }
+  }
+
+  const indexByKey = new Map<string, number>();
+  for (let i = legIdx; i < blockEnd; i++) indexByKey.set(legMoveKey(items[i].path), i);
+
+  const moved = new Map<number, number>();
+  for (const line of lines) {
+    if (line.path[0] !== leg) throw new LegMoveRefusal("every moved row must be on the same leg", line.path);
+    const idx = indexByKey.get(legMoveKey(line.path));
+    if (idx === undefined) throw new LegMoveRefusal("no row on the source leg at this path", line.path);
+    const row = items[idx];
+    if (isLegMoveDivider(row)) throw new LegMoveRefusal("a divider is not a line", line.path);
+    if (row.type !== "rental") throw new LegMoveRefusal(`a ${row.type} line has no collection to extend`, line.path);
+    if (!Number.isInteger(line.quantity) || line.quantity <= 0) {
+      throw new LegMoveRefusal("a moved quantity must be a positive whole number", line.path);
+    }
+    if (line.quantity > (row.quantity ?? 0)) {
+      throw new LegMoveRefusal(`moves ${line.quantity}, but the row holds ${row.quantity ?? 0}`, line.path);
+    }
+    if (moved.has(idx)) throw new LegMoveRefusal("the same row is named twice", line.path);
+    moved.set(idx, line.quantity);
+  }
+
+  // A component needs its kit: every line-item ancestor moves too.
+  for (const idx of moved.keys()) {
+    const path = items[idx].path;
+    for (let d = 2; d < path.length; d++) {
+      const anc = indexByKey.get(legMoveKey(path.slice(0, d)));
+      if (anc === undefined || isLegMoveDivider(items[anc])) continue;
+      if (!moved.has(anc)) {
+        throw new LegMoveRefusal(`a component moves without its kit ${items[anc].uid}`, items[idx].path);
+      }
+    }
+  }
+
+  // A's side, bottom-up: a row at 0 stays only as the parent of a row that stays.
+  const aBlock: T[] = [];
+  const keptPaths: string[][] = [];
+  for (let i = blockEnd - 1; i > legIdx; i--) {
+    const row = items[i];
+    const k = moved.get(i);
+    if (isLegMoveDivider(row) || k === undefined) {
+      aBlock.push(row);
+      if (!isLegMoveDivider(row)) keptPaths.push(row.path);
+      continue;
+    }
+    const remaining = (row.quantity ?? 0) - k;
+    if (remaining > 0 || keptPaths.some((p) => isUnder(p, row.path))) {
+      aBlock.push({ ...row, quantity: remaining });
+      keptPaths.push(row.path);
+    }
+  }
+  aBlock.reverse();
+
+  // B's side, in A's order: rows directly under the leg, then each cloned group.
+  const roots: T[] = [];
+  const groups = new Map<string, { clone: T; rows: T[] }>();
+  for (let i = legIdx + 1; i < blockEnd; i++) {
+    const k = moved.get(i);
+    if (k === undefined) continue;
+    const row = items[i];
+    const clone: T = { ...row, quantity: k, path: [...row.path] };
+    const groupIdx = indexByKey.get(legMoveKey(row.path.slice(0, 2)));
+    const group = groupIdx === undefined ? undefined : items[groupIdx];
+    if (group === undefined || group.type !== "group") {
+      roots.push(clone);
+      continue;
+    }
+    let entry = groups.get(group.uid);
+    if (!entry) {
+      entry = { clone: { ...group, uid: mint(), path: [] }, rows: [] };
+      groups.set(group.uid, entry);
+    }
+    entry.rows.push(clone);
+  }
+  const bBlock: T[] = [{ ...divider, path: [] }, ...roots];
+  for (const { clone, rows } of groups.values()) bBlock.push(clone, ...rows);
+
+  return [...items.slice(0, legIdx + 1), ...aBlock, ...bBlock, ...items.slice(blockEnd)];
+}

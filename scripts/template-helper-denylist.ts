@@ -248,6 +248,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // (null = nothing to collect) off the document it renders.
     "normalizeCollectionLegs",
     "computeItemPaths", // canonical path computation — write-path only
+    // The rental-extension WRITER's item move (api-cloudrun rental-extension
+    // Phase 1.5). A template renders the legs the document already carries.
+    "moveLinesToLeg",
     // The totals AUDIT oracle (api-cloudrun#575): it re-derives totals from line
     // inputs to check stored ones. A template renders the stored totals.
     "rederiveDocumentTotalsForAudit",
