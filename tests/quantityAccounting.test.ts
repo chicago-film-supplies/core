@@ -19,6 +19,7 @@ import {
   type AccountedInvoice,
   accountLine,
   invoicedByPath,
+  invoiceOnlyLines,
   buildOverbillingCredits,
   buildRemainingInvoice,
   crmsAuthoredInvoices,
@@ -944,4 +945,103 @@ Deno.test("quantityAccounting: merging a kit into a kit the order carries bills 
     [2, 4, 1, 2],
   );
   assertEquals(remainingForOrder(O, order, [inv], pairs()).lines, []);
+});
+
+
+// ── invoiceOnlyLines (api-cloudrun#1188) ──
+//
+// Every expectation is worked out by hand: the order carries what `lightOrder`
+// names, an invoice adds a line at a path the order lacks, and the answer is that
+// line at its ORDER-relative path.
+
+const tripodAt = (path: string[], quantity: number, extra: Record<string, unknown> = {}) => line(TRIPOD, path, quantity, 3000, 5, extra);
+const summarize = (r: ReturnType<typeof invoiceOnlyLines>) => r.lines.map((l) => [l.path.join("/"), l.quantity]);
+
+Deno.test("invoiceOnlyLines: a line at a path the order lacks comes back at its order-relative path", () => {
+  const r = invoiceOnlyLines(O, lightOrder(2), [invoice("a", [...lightOrder(2), tripodAt([D, TRIPOD], 3)])]);
+  assertEquals(summarize(r), [[`${D}/${TRIPOD}`, 3]]);
+  assertEquals([r.dividers, r.compared, r.unaligned, r.skipped], [[], ["a"], [], []]);
+  assertEquals(r.invoiceUids.get(`${D}/${TRIPOD}`), ["a"]);
+});
+
+Deno.test("invoiceOnlyLines: the same path on two invoices is summed, and both are named", () => {
+  const r = invoiceOnlyLines(O, lightOrder(2), [
+    invoice("a", [...lightOrder(2), tripodAt([D, TRIPOD], 1)]),
+    invoice("b", [...lightOrder(2), tripodAt([D, TRIPOD], 2)]),
+  ]);
+  assertEquals(summarize(r), [[`${D}/${TRIPOD}`, 3]]);
+  assertEquals(r.invoiceUids.get(`${D}/${TRIPOD}`), ["a", "b"]);
+});
+
+Deno.test("invoiceOnlyLines: a raised quantity on a line the order carries is NOT invoice-only", () => {
+  // The order says 2, the invoice bills 5: a surfaced `quantity` diff, never a projected row.
+  assertEquals(invoiceOnlyLines(O, lightOrder(2), [invoice("a", lightOrder(5))]).lines, []);
+});
+
+Deno.test("invoiceOnlyLines: a line under a group the invoice authored brings the group's divider with it", () => {
+  const authored = { uid: "grp-x", type: "group", name: "Extras", description: "", path: [D, "grp-x"] } as unknown as LineItem;
+  const r = invoiceOnlyLines(O, lightOrder(2), [invoice("a", [...lightOrder(2), authored, tripodAt([D, "grp-x", TRIPOD], 2)])]);
+  assertEquals(summarize(r), [[`${D}/grp-x/${TRIPOD}`, 2]]);
+  assertEquals(r.dividers.map((d) => [d.type, d.path.join("/")]), [["group", `${D}/grp-x`]]);
+});
+
+Deno.test("invoiceOnlyLines: a MOVED row bills an order line and is not invoice-only (core#125)", () => {
+  // The invoice carries the Light at [D, LIGHT] pointing at the order's [D, G, LIGHT].
+  const moved = line(LIGHT, [D, LIGHT], 2, 1000, 5, { path_order_item: [D, G, LIGHT] });
+  assertEquals(invoiceOnlyLines(O, lightOrder(2), [invoice("a", [DEST_ITEM, moved])]).lines, []);
+});
+
+Deno.test("invoiceOnlyLines: a credit note reversing billing nets the row, and a full reversal removes it", () => {
+  const inv = invoice("a", [...lightOrder(2), tripodAt([D, TRIPOD], 3)], "issued");
+  const note = (quantity: number) => reversal("cn", "a", quantity, { path: [O, D, TRIPOD] });
+  assertEquals(summarize(invoiceOnlyLines(O, lightOrder(2), [inv], [note(2)])), [[`${D}/${TRIPOD}`, 1]]);
+  assertEquals(invoiceOnlyLines(O, lightOrder(2), [inv], [note(3)]).lines, []);
+  // A write-off (no `reverses_billing`) is not a return of the units.
+  assertEquals(summarize(invoiceOnlyLines(O, lightOrder(2), [inv], [reversal("cn", "a", 3, { path: [O, D, TRIPOD], reverses_billing: false })])), [[`${D}/${TRIPOD}`, 3]]);
+});
+
+Deno.test("invoiceOnlyLines: a void invoice contributes nothing and an unaligned one is named, not read", () => {
+  const extra = [...lightOrder(2), tripodAt([D, TRIPOD], 3)];
+  assertEquals(invoiceOnlyLines(O, lightOrder(2), [invoice("v", extra, "void")]).lines, []);
+  // Hung directly under the destination: no group divider, so a different skeleton.
+  const unaligned = invoice("u", [DEST_ITEM, line(LIGHT, [D, LIGHT], 2, 1000), tripodAt([D, TRIPOD], 3)]);
+  const r = invoiceOnlyLines(O, lightOrder(2), [unaligned]);
+  assertEquals([r.lines, r.compared, r.unaligned], [[], [], ["u"]]);
+});
+
+Deno.test("invoiceOnlyLines: replacement, transaction_fee, out-of-service and extension rows are not projected", () => {
+  const rows = [
+    line("rep", [D, "rep"], 1, 500, 5, { type: "replacement" }),
+    line("fee", [D, "fee"], 1, 500, 5, { type: "transaction_fee" }),
+    line("oos", [D, "oos"], 1, 500, 5, { type: "service" }),
+  ];
+  const inv = invoice("a", [...lightOrder(2), ...rows]);
+  // `buildOrderScopedItems` normalises the fixture, so the charge's record is stamped after it.
+  const stamped = { ...inv, items: inv.items.map((it) => it.uid === "oos" ? { ...it, uid_out_of_service: "OosRecord000000000000" } : it) };
+  assertEquals(invoiceOnlyLines(O, lightOrder(2), [stamped]).lines, []);
+  assertEquals(invoiceOnlyLines(O, lightOrder(2, 7), [invoice("a", lightOrder(2, 3)), extensionInvoice("b", 2, 2)]).lines, []);
+});
+
+Deno.test("invoiceOnlyLines: a component added under an order kit keeps its place under the kit", () => {
+  const r = invoiceOnlyLines(O, kitOrder(), [invoice("a", [...kitOrder(), line("prod-extra", [D, KIT, "prod-extra"], 2, 0)])]);
+  assertEquals(summarize(r), [[`${D}/${KIT}/prod-extra`, 2]]);
+  assertEquals(r.dividers, []);
+});
+
+Deno.test("invoiceOnlyLines: a row directly under the order divider takes the order's sole destination, or is skipped when there are several", () => {
+  const orphan = (inv: AccountedInvoice): AccountedInvoice => ({ ...inv, items: [...inv.items, tripodAt([O, TRIPOD], 1) as unknown as InvoiceItem] });
+  const one = invoiceOnlyLines(O, lightOrder(2), [orphan(invoice("a", lightOrder(2)))]);
+  assertEquals(summarize(one), [[`${D}/${TRIPOD}`, 1]]);
+
+  const D2 = "dest-2";
+  const twoDests = [...lightOrder(2), { uid: D2, type: "destination", name: "Other", description: "", path: [D2] } as unknown as LineItem];
+  const two = invoiceOnlyLines(O, twoDests, [orphan(invoice("a", lightOrder(2)))]);
+  assertEquals([two.lines, two.skipped.map((s) => [s.invoiceUid, s.reason])], [[], [["a", "no_leg"]]]);
+});
+
+Deno.test("invoiceOnlyLines: a row under a destination only the invoice has is skipped, never given a leg", () => {
+  const authoredDest = { uid: "dest-new", type: "destination", name: "New", description: "", path: ["dest-new"] } as unknown as LineItem;
+  const inv = invoice("a", [...lightOrder(2), authoredDest, tripodAt(["dest-new", TRIPOD], 1)]);
+  const r = invoiceOnlyLines(O, lightOrder(2), [inv]);
+  assertEquals([r.lines, r.skipped.map((s) => [s.path.join("/"), s.reason])], [[], [[`${O}/dest-new/${TRIPOD}`, "authored_destination"]]]);
 });

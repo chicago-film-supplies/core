@@ -547,6 +547,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   quantityAccounting: [
     "accountLine",
     "invoicedByPath",
+    // The invoice-only lines of one order across ALL its invoices
+    // (api-cloudrun#1188) — the input to a fulfillment projection, which a
+    // template never performs.
+    "invoiceOnlyLines",
     // Needs the order's CREDIT NOTES, which a render context holds even less
     // often than it holds the sibling invoices — and its whole output is a
     // key into `invoicedByPath`'s sum, which is denied directly above.
@@ -625,6 +629,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // `citations` and `template-lint` are.
   "fulfillment-items": [
     "rebuildFulfillmentItems",
+  ],
+  // `utils/fulfillment-booking-rows.ts` is the order → bookings projection's
+  // input for fulfillment rows the order lacks (api-cloudrun#1188): WRITE-PATH,
+  // and it needs a fulfillment's stored rows beside the order's. A template
+  // renders one document already written. Walked for drift only.
+  "fulfillment-booking-rows": [
+    "fulfillmentOnlyBookingRows",
+    "withFulfillmentOnlyRows",
   ],
   // `utils/stored-only-rows.ts` is WRITE-PATH sync machinery shared by the
   // order → fulfillment and order → invoice syncs (core#124): where a surviving

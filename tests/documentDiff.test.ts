@@ -276,6 +276,24 @@ Deno.test("documentDiff: a picker add and an invoice add of the same product are
   });
 });
 
+Deno.test("documentDiff: an invoice add projected onto the fulfillment is a row both documents carry, and only the order lacks it", () => {
+  // api-cloudrun#1188 Phase 2 stores the invoice-only line as a fulfillment row at its order-relative path.
+  const f = fulfillment();
+  (f.items as unknown as LineItem[]).push({ uid: `${TRIPOD}-extra`, type: "rental", name: TRIPOD, description: "", quantity: 1, path: [D, `${TRIPOD}-extra`] } as unknown as LineItem);
+  const inv = invoice("inv-1", [{ order: O, items: [...orderItems(), line(`${TRIPOD}-extra`, [D, `${TRIPOD}-extra`], 1, 3000)] }]);
+  const sources = { orders: [order()], fulfillments: [f], invoices: [inv] };
+  const key = `${D}/${TRIPOD}-extra`;
+
+  // The fulfillment now AGREES with the invoice: it is no longer `only_on_source` against it.
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT).lines), {
+    [key]: ["order#1001:not_on_source"],
+  });
+  // The order view still shows it as a row the order never quoted — one entry per other document.
+  assertEquals(summary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT).lines), {
+    [key]: ["fulfillment#1001:only_on_source", "invoice#2241:only_on_source"],
+  });
+});
+
 Deno.test("documentDiff: quantity against invoices is ONE quantity entry over the sum, never a differs per invoice", () => {
   // A bills the whole order; B bills the grip Light again. Both say 5 of it.
   const a = invoice("inv-a", [{ order: O, items: orderItems() }], 2241);

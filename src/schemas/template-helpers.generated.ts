@@ -97,6 +97,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "fixture-pii": [
 
   ],
+  "fulfillment-booking-rows": [
+
+  ],
   "fulfillment-items": [
 
   ],

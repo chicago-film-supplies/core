@@ -41,6 +41,7 @@ import * as invoiceUtils from "../src/utils/invoices.ts";
 import * as invoiceXeroSyncUtils from "../src/utils/invoice-xero-sync.ts";
 import * as fulfillmentUtils from "../src/utils/fulfillments.ts";
 import * as fulfillmentItemUtils from "../src/utils/fulfillment-items.ts";
+import * as fulfillmentBookingRowUtils from "../src/utils/fulfillment-booking-rows.ts";
 import * as fulfillmentStageUtils from "../src/utils/fulfillment-stage.ts";
 import * as locationUtils from "../src/utils/locations.ts";
 import * as moneyUtils from "../src/utils/money.ts";
@@ -142,6 +143,9 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // Listed so the drift guard sees its exports rather than the generator
   // emitting them into the editor's helper panel.
   "fulfillment-items": fulfillmentItemUtils,
+  // Same exception: `utils/fulfillment-booking-rows.ts` is write-path booking
+  // projection input (api-cloudrun#1188), not something a rendered document asks.
+  "fulfillment-booking-rows": fulfillmentBookingRowUtils,
   // Same exception: `utils/stored-only-rows.ts` places a projection's surviving
   // rows when an order edit RE-PROJECTS it (core#124) — a question about two
   // revisions and a write. A template renders one document already written.

@@ -494,6 +494,177 @@ export function invoicedByPath(
   return { byPath, compared, unaligned, credits_unkeyed: reversals.unkeyed };
 }
 
+/** Why {@link invoiceOnlyLines} could not place an invoice line on the order's legs. */
+export interface InvoiceOnlySkip {
+  invoiceUid: string;
+  /** The row's path on the INVOICE, order divider first. */
+  path: string[];
+  /**
+   * `no_leg` — the row hangs directly under the order divider and the order has
+   * not exactly one destination, so no leg is nameable. `authored_destination` —
+   * the row sits under a destination the invoice authored, which has no order
+   * pair to date or place a booking.
+   */
+  reason: "no_leg" | "authored_destination";
+}
+
+/** @see {@link invoiceOnlyLines} */
+export interface InvoiceOnlyLines {
+  /** One line per ORDER-relative path, quantity summed across invoices, in first-seen document order. */
+  lines: LineItem[];
+  /**
+   * The dividers the invoice authored that `lines` hang under (a group the order
+   * lacks), at their order-relative paths, ancestors before descendants. A line
+   * under an authored group is not placeable without its divider.
+   */
+  dividers: LineItem[];
+  /** Order-relative path key → the invoices that bill it, for a surface that labels a row's source. */
+  invoiceUids: Map<string, string[]>;
+  /** Non-void invoices whose scope was read. */
+  compared: string[];
+  /** Non-void invoices on a different divider skeleton. They contribute NOTHING. */
+  unaligned: string[];
+  /** Rows no leg could be named for. Never dropped silently. */
+  skipped: InvoiceOnlySkip[];
+  /** Credit notes this could not key, so nothing was netted for them. See {@link billingReversals}. */
+  credits_unkeyed: string[];
+}
+
+/** The line types an invoice-only row may project onto a fulfillment. `replacement` bills an out-of-service record and `transaction_fee` is document-level. */
+const INVOICE_ONLY_TYPES: ReadonlySet<string> = new Set(["rental", "sale", "service", "surcharge"]);
+
+/**
+ * **The lines the invoices bill that the order does not carry** (api-cloudrun#1188),
+ * as order-relative lines a fulfillment can hold.
+ *
+ * CFS deducts what was FULFILLED and Xero takes what was INVOICED, so a stock
+ * line an operator added on an invoice alone has to reach the fulfillment to
+ * reach the shelf. This is the INPUT to that projection; it decides nothing
+ * about it.
+ *
+ * ## Why it is its own pass
+ *
+ * It reads the same primitives as {@link invoicedByPath} and
+ * `computeOrderInvoiceCoverage` — alignment, extension sections, `path_order_item`
+ * claims, live substitution anchors, credit reversals — so it cannot disagree
+ * with either about which rows are the order's. It is not built ON either:
+ * `invoicedByPath` skips an invoice-authored subtree by design (it credits no
+ * order line) and coverage keeps one row per path rather than the sum, and this
+ * needs both the authored subtree and the sum.
+ *
+ * ## What is NOT invoice-only
+ *
+ * - a row at a path the order carries (a raised quantity is a surfaced diff, never projected);
+ * - a moved row — it bills order line X ({@link orderLineClaims}, core#125);
+ * - an extension row, a substitute (or its components), an out-of-service
+ *   charge, a `replacement` and a `transaction_fee`;
+ * - anything on a `void` or unaligned invoice.
+ *
+ * ## The leg
+ *
+ * A booking takes its pair — and so its dates — from the leg, which on an order
+ * is `path[0]`. A row directly under the order divider carries none; it is
+ * placed on the order's sole destination, and where the order has several it is
+ * reported in `skipped` rather than guessed at. A row under a destination the
+ * invoice authored is skipped for the same reason.
+ *
+ * @param orderUid - The order's uid, which is its divider's uid on every invoice that bills it
+ * @param orderItems - The order's `items`, dividers included
+ * @param invoices - Every invoice linked to the order, live or void
+ * @param creditNotes - Credit notes on those invoices; a `reverses_billing` line nets its row
+ */
+export function invoiceOnlyLines(
+  orderUid: string,
+  orderItems: readonly LineItem[],
+  invoices: readonly AccountedInvoice[],
+  creditNotes: readonly AccountedCreditNote[] = [],
+): InvoiceOnlyLines {
+  const orderPaths = new Set<string>();
+  const orderDestinations: string[] = [];
+  for (const it of orderItems) {
+    orderPaths.add(key(it.path ?? []));
+    if (it.type === "destination") orderDestinations.push(it.uid);
+  }
+  const reversals = billingReversals(creditNotes);
+
+  const compared: string[] = [];
+  const unaligned: string[] = [];
+  const skipped: InvoiceOnlySkip[] = [];
+  const summed = new Map<string, { line: LineItem; quantity: number; invoices: string[] }>();
+  const dividers = new Map<string, LineItem>();
+
+  for (const invoice of invoices) {
+    if (invoice.status === "void") continue;
+    const scoped = getOrderScopedItems(invoice.items ?? [], orderUid);
+    if (scoped.length > 0 && !invoiceScopeDividersMatch(scoped, orderItems as LineItem[], orderUid)) {
+      unaligned.push(invoice.uid);
+      continue;
+    }
+    compared.push(invoice.uid);
+    const anchors = liveInvoiceAnchors(scoped, orderItems, orderUid);
+    const extensionTargets = extensionSectionTargets(scoped, orderUid);
+    const claims = orderLineClaims(scoped, orderUid);
+    const scopedByKey = new Map(scoped.map((it) => [key(it.path ?? []), it] as const));
+
+    for (const item of scoped) {
+      if (!isLineItemType(item.type) || !INVOICE_ONLY_TYPES.has(item.type)) continue;
+      if ((item as { uid_out_of_service?: string | null }).uid_out_of_service != null) continue;
+      const path = item.path ?? [];
+      if (path[0] !== orderUid) continue;
+      if (isInExtensionSection(path, orderUid, extensionTargets)) continue;
+      const rel = path.slice(1);
+      if (claims.has(key(rel)) || orderPaths.has(key(rel))) continue;
+      if (anchors.some((a) => isAtOrBelow(rel, a.path))) continue;
+
+      let placed = rel;
+      if (rel.length === 1) {
+        if (orderDestinations.length !== 1) {
+          skipped.push({ invoiceUid: invoice.uid, path: [...path], reason: "no_leg" });
+          continue;
+        }
+        placed = [orderDestinations[0], ...rel];
+      } else if (!orderDestinations.includes(rel[0])) {
+        skipped.push({ invoiceUid: invoice.uid, path: [...path], reason: "authored_destination" });
+        continue;
+      }
+      if (orderPaths.has(key(placed))) continue;
+
+      const reversed = reversals.byRow.get(`${invoice.uid}|${key(path)}`) ?? 0;
+      const quantity = (item.quantity ?? 0) - Math.min(reversed, Math.max(item.quantity ?? 0, 0));
+      if (quantity <= 0) continue;
+
+      const k = key(placed);
+      const entry = summed.get(k);
+      if (entry) {
+        entry.quantity += quantity;
+        if (!entry.invoices.includes(invoice.uid)) entry.invoices.push(invoice.uid);
+      } else {
+        const { path_order_item: _pointer, ...row } = item;
+        summed.set(k, { line: { ...row, path: placed } as LineItem, quantity, invoices: [invoice.uid] });
+      }
+
+      // The authored groups this row hangs under, outermost first. The leg itself is the order's.
+      for (let depth = 2; depth < rel.length; depth++) {
+        const ancestor = rel.slice(0, depth);
+        const ak = key(ancestor);
+        if (orderPaths.has(ak) || dividers.has(ak)) continue;
+        const divider = scopedByKey.get(key([orderUid, ...ancestor]));
+        if (divider) dividers.set(ak, { ...divider, path: ancestor } as LineItem);
+      }
+    }
+  }
+
+  return {
+    lines: [...summed.values()].map((e) => ({ ...e.line, quantity: e.quantity })),
+    dividers: [...dividers.values()],
+    invoiceUids: new Map([...summed].map(([k, e]) => [k, e.invoices] as const)),
+    compared,
+    unaligned,
+    skipped,
+    credits_unkeyed: reversals.unkeyed,
+  };
+}
+
 /** @see {@link accountLine} */
 export interface LineAccount {
   /** The order line's quantity. */
