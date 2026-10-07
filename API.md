@@ -6342,7 +6342,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service" | "flag" | "send_away"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service" | "flag" | "send_away"[];
 ```
 
 ### `MSG_SCHEMA_REGISTRY`
@@ -24372,7 +24372,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service" | "flag" | "send_away"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service" | "flag" | "send_away"[];
 ```
 
 ### `Movement`
@@ -35736,6 +35736,11 @@ the ONE pairing, asked across two rebuilds by two repos.
   alone paired a merge's survivor with the REMOVED occurrence
   (api-cloudrun#1147, repro A). {@link pairItemsByUidOccurrence} itself is
   unchanged and stays on `(uid, k)`.
+- **…and on an UNCHANGED path before either.** "Not `path`" above means a
+  path that CHANGED says nothing about identity; a path that did not change
+  is the same row by definition. Without that first pass, the same product on
+  two legs (one signature key) paired by document order, so a leg placed
+  ahead of another swapped their rows.
 
 ⚠️ **It lives here because the callers are in two repos**, exactly as
 `utils/substitutions.ts` does. `adoptOrderDividerStructure`
@@ -37989,9 +37994,12 @@ The row and leg keep for one order edit.
 
 **Parameters**
 
-- `args.storedBookings` — The order's stored bookings by id — the COMPLETE
-set, read before the edit is decided. A booking whose id names another
-order, or does not parse, is ignored.
+- `args.storedBookings` — The order's bookings by id — the COMPLETE set,
+with custody as it will stand when this write lands. That is the stored
+set for a plain order edit; a write that also moves custody (a rental
+extension's `rebook_out` / `rebook_in`) applies its movements to this map
+first, so the delta never reads custody the same transaction is moving. A
+booking whose id names another order, or does not parse, is ignored.
 - `args.fulfillmentRows` — The stored fulfillment rows; a row's `before` is
 its physical quantity there, falling back to the previous order's.
 
@@ -38227,6 +38235,34 @@ interface ItemUniquenessIssue {
   firstIndex: number;
 }
 ```
+
+### `LegMoveItem`
+
+The shape {@link moveLinesToLeg} reads; deliberately narrower than an order item.
+
+```ts
+interface LegMoveItem {
+  uid: string;
+  type: string;
+  path: string[];
+  quantity?: number;
+}
+```
+
+### `LegMoveLine`
+
+One row to move, and how many of its units. @see {@link moveLinesToLeg}
+
+```ts
+interface LegMoveLine {
+  path: readonly string[];
+  quantity: number;
+}
+```
+
+### `LegMoveRefusal`
+
+_(class — see source)_
 
 ### `LineItem`
 
@@ -39412,6 +39448,41 @@ pricer here and deleted it. {@link priceTransactionFeeLine} is the caller.
 the whole point of the shape is to describe an item mid-construction. A
 caller reaching this predicate with the quantity not yet resolved is the
 expected case, not a malformed document.
+
+### `moveLinesToLeg(items: readonly T[], args: typeLiteral): T[]`
+
+Move some units of some rows from one leg (A) to a NEW leg (B) — the order
+half of a rental extension (api-cloudrun `.claude/plans/rental-extension.md`).
+
+- **Every row states its own quantity.** Nothing is scaled here: a kit's
+  components can be partly back already, so a ratio can exceed what is still
+  out. The caller (the API, from the operator's form) decides each number.
+- **A component needs its kit.** Every line-item ancestor of a moved row must
+  be moved too, or the row would land in B as a root, detached from its kit.
+- **Rentals only.** A sale's units left ownership and a service has none, so
+  neither has a collection date to extend.
+- **Groups are CLONED under B with newly minted uids.** A group uid is a row
+  identity the manager collapses on (`"group:" + uid`), so B's copy of a group
+  must not share A's.
+- **A's rows keep the remainder.** A row left at 0 is removed, unless a row
+  under it stays on A (a component whose units are still due back on A's
+  date), in which case it stays at 0 as their parent. A's groups stay as
+  they are, even if emptied.
+- **B's block goes right after A's**: the divider, then the rows directly under
+  the leg, then each cloned group with its rows, in A's order.
+
+⚠️ **The output is NOT pathed.** Moved rows keep their OLD paths, which is
+deliberate: `computeItemPaths` resolves a parent from the last path segment
+naming another line in the same block, so the old chain is what carries the
+kit ancestry into B. The caller must run {@link computeItemPaths}, which stays
+the one author of a path, and then reprice.
+
+**Parameters**
+
+- `items` — The order's items, pathed (as stored)
+- `args.divider` — B's destination divider, from {@link buildDestinationPairWithDivider}
+- `args.lines` — The rows to move, all on one leg
+- `args.mintUid` — Group-uid minter; defaults to `crypto.randomUUID`
 
 ### `normalizeCollectionLegs(order: O, holidays: readonly string[] | null): O`
 
@@ -43036,7 +43107,8 @@ and a reversal (lines negated, type kept) folds correctly:
 
 `prep` and `unprep` move nothing physically and have no lines: a prep turns
 an unflagged shelf unit `prepped` where it stands, and an unprep puts it
-back.
+back. `rebook_out` / `rebook_in` have no lines either: the unit stays at the
+customer and moves from one booking to another (see `foldRebook`).
 
 Every unit must be where the line's `from` side says — absent for a unit
 coming in, `out` on the booking (or `unattributed_out`) for one coming back,

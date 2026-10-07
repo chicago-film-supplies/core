@@ -318,6 +318,66 @@ Deno.test("foldRosterUnits: an unattributed_out unit (a conversion's) checks in 
   );
 });
 
+// ── the rebook pair (rental extension) ──
+
+const LEG_B = bookingId(fid("order1"), PRODUCT, legUid("leg2"));
+
+/** A rebook half as the api's extension route shapes it: no lines, the counterpart in `sources[]`. */
+function rebook(type: "rebook_out" | "rebook_in", numbers: number[], subject: string, counterpart: string): RosterMovement {
+  return {
+    uid: `${SESSION}|${type}|${subject}`,
+    type,
+    uid_booking: subject,
+    custody: type === "rebook_out" ? { from: "out", to: null } : { from: null, to: "out" },
+    service: null,
+    lines: [],
+    units: numbers.map((n) => ({ uid_unit: `unit-${n}`, number: n, serial_number: null })),
+    sources: [{ collection: "bookings", uid: counterpart }],
+  };
+}
+
+Deno.test("foldRosterUnits: a rebook pair re-points units that stay out from booking A to booking B", () => {
+  const start: RosterUnits = {
+    "1001": { state: "out", uid_booking: BOOKING },
+    "1002": { state: "out", uid_booking: BOOKING },
+    "1003": { state: "out", uid_booking: BOOKING },
+  };
+  const afterOut = foldRosterUnits(start, rebook("rebook_out", [1001, 1002], BOOKING, LEG_B));
+  assertEquals(afterOut, start, "rebook_out only checks; the unit is still on A until B takes it");
+  const afterIn = foldRosterUnits(afterOut, rebook("rebook_in", [1001, 1002], LEG_B, BOOKING));
+  assertEquals(afterIn, {
+    "1001": { state: "out", uid_booking: LEG_B },
+    "1002": { state: "out", uid_booking: LEG_B },
+    "1003": { state: "out", uid_booking: BOOKING },
+  });
+});
+
+Deno.test("foldRosterUnits: the rebook pair folds A's half first, and refuses a unit not out on the booking it leaves", () => {
+  const start: RosterUnits = { "1001": { state: "out", uid_booking: BOOKING } };
+  // B's half first moves the unit, so A's half then finds it on B.
+  const inFirst = foldRosterUnits(start, rebook("rebook_in", [1001], LEG_B, BOOKING));
+  assertThrows(
+    () => foldRosterUnits(inFirst, rebook("rebook_out", [1001], BOOKING, LEG_B)),
+    RosterFoldError,
+    `out on ${LEG_B}`,
+  );
+  // A returned unit is on a shelf, not out: neither half takes it.
+  const shelf = shelfRoster([1001]);
+  assertThrows(() => foldRosterUnits(shelf, rebook("rebook_out", [1001], BOOKING, LEG_B)), RosterFoldError, "on shelf");
+  assertThrows(() => foldRosterUnits(shelf, rebook("rebook_in", [1001], LEG_B, BOOKING)), RosterFoldError, "on shelf");
+  // A conversion's unattributed_out unit is on no booking, so it cannot be rebooked off one.
+  const unattributed: RosterUnits = { "1001": { state: "unattributed_out" } };
+  assertThrows(() => foldRosterUnits(unattributed, rebook("rebook_in", [1001], LEG_B, BOOKING)), RosterFoldError);
+});
+
+Deno.test("foldRosterUnits: rebook_in must name exactly one counterpart booking", () => {
+  const start: RosterUnits = { "1001": { state: "out", uid_booking: BOOKING } };
+  const none = { ...rebook("rebook_in", [1001], LEG_B, BOOKING), sources: [] };
+  assertThrows(() => foldRosterUnits(start, none), RosterFoldError, "found 0");
+  const self = { ...rebook("rebook_in", [1001], LEG_B, BOOKING), sources: [{ collection: "bookings" as const, uid: LEG_B }] };
+  assertThrows(() => foldRosterUnits(start, self), RosterFoldError, "found 0");
+});
+
 function ownership(type: RosterMovement["type"], numbers: number[], from: string | null, to: string | null): RosterMovement {
   return {
     uid: `${SESSION}|${type}|${PRODUCT}`,

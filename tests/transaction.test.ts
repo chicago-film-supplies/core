@@ -72,6 +72,9 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     mark_cleaning_undo: { from: "cleaning", to: "out" },
     mark_maintenance: { from: "out", to: "maintenance" },
     mark_maintenance_undo: { from: "maintenance", to: "out" },
+    // One-sided: each half of the pair is a transition on ONE booking.
+    rebook_out: { from: "out", to: null },
+    rebook_in: { from: null, to: "out" },
     sale: { from: "prepped", to: "out" },
     sale_return: { from: "out", to: "returned" },
     opening_balance: null,
@@ -110,6 +113,8 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     mark_cleaning_undo: null,
     mark_maintenance: null,
     mark_maintenance_undo: null,
+    rebook_out: null,
+    rebook_in: null,
     sale: null,
     sale_return: null,
     opening_balance: null,

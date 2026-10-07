@@ -325,6 +325,38 @@ function destination(
 }
 
 /**
+ * The rebook pair: a unit that stays at the customer moves from booking A's
+ * `out` to booking B's. `rebook_out` (subject A) only CHECKS that each named
+ * unit is `out` on A, and changes nothing. `rebook_in` (subject B) re-points
+ * each unit from A — the one `bookings` entry in its `sources[]` — to B.
+ *
+ * So the pair folds in ONE order, A's half first: the other way round,
+ * `rebook_out` finds the unit already on B and refuses. That is deliberate, as
+ * a half applied alone is then detectable: a `rebook_in` naming a unit not on
+ * its counterpart, or a `rebook_out` whose units were moved by something else.
+ */
+function foldRebook(next: RosterUnits, m: RosterMovement, once: (n: number) => void): RosterUnits {
+  if (m.uid_booking === null) throw new RosterFoldError(`"${m.type}" names units but no booking`);
+  let from = m.uid_booking;
+  if (m.type === "rebook_in") {
+    const counterparts = m.sources.filter((s) => s.collection === "bookings" && s.uid !== m.uid_booking);
+    if (counterparts.length !== 1) {
+      throw new RosterFoldError(`"rebook_in" must name exactly one counterpart booking in sources[], found ${counterparts.length}`);
+    }
+    from = counterparts[0].uid;
+  }
+  for (const { number: n } of m.units) {
+    once(n);
+    const entry = next[String(n)];
+    if (entry?.state !== "out" || entry.uid_booking !== from) {
+      throw new RosterFoldError(`"${m.type}" rebooks unit ${n} off ${from}, but the unit is ${describe(entry)}`, n);
+    }
+    if (m.type === "rebook_in") next[String(n)] = { state: "out", uid_booking: m.uid_booking };
+  }
+  return next;
+}
+
+/**
  * Fold one movement's units into a product's roster, returning the NEW map
  * (the input is not mutated, so a rejected group member's fold rolls back by
  * dropping the result).
@@ -347,7 +379,8 @@ function destination(
  *
  * `prep` and `unprep` move nothing physically and have no lines: a prep turns
  * an unflagged shelf unit `prepped` where it stands, and an unprep puts it
- * back.
+ * back. `rebook_out` / `rebook_in` have no lines either: the unit stays at the
+ * customer and moves from one booking to another (see `foldRebook`).
  *
  * Every unit must be where the line's `from` side says — absent for a unit
  * coming in, `out` on the booking (or `unattributed_out`) for one coming back,
@@ -362,6 +395,10 @@ export function foldRosterUnits(roster: RosterUnits, m: RosterMovement): RosterU
     if (moved.has(n)) throw new RosterFoldError(`"${m.type}" moves unit ${n} twice`, n);
     moved.add(n);
   };
+
+  if (m.lines.length === 0 && (m.type === "rebook_out" || m.type === "rebook_in")) {
+    return foldRebook(next, m, once);
+  }
 
   if (m.lines.length === 0) {
     const preps = m.custody?.to === "prepped" && m.custody.from === "reserved";

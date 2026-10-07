@@ -218,6 +218,30 @@ export const MOVEMENT_TYPES = [
   "mark_cleaning_undo",
   "mark_maintenance",
   "mark_maintenance_undo",
+  // ── the rebook pair: units that STAY out move to another booking ──
+  //
+  // A rental extension (api-cloudrun `.claude/plans/rental-extension.md`): the
+  // customer keeps k of a leg's units past its collection date. Nothing moves
+  // physically; what changes is which booking records the k units as `out`,
+  // because a booking's window IS its leg's dates. So `rebook_out` takes k off
+  // leg A's booking (`custody {out → null}`) and `rebook_in` puts them on leg
+  // B's (`{null → out}`), in ONE session.
+  //
+  // 🔴 **Two types, not one movement carrying a second booking.** A movement has
+  // exactly one subject and its id is `{session}|{type}|{subject}`; `custody` is
+  // a transition INSIDE that subject. One `out → out` movement would be a no-op
+  // on A and invisible on B, so a custody replay would read both bookings as
+  // diverged. The pair mirrors `reclass_out`/`reclass_in` below, and names its
+  // counterpart booking in `sources[]` the way the reclass names its twin.
+  //
+  // ⚠️ **No undo type.** The inverse of A → B is a rebook B → A, the same pair
+  // pointed the other way. The `*_undo` types exist only to walk DOWN the ladder.
+  //
+  // ⚠️ **Not a `CUSTODY_RULES` row** (`schemas/custody.ts`): a rule is a
+  // `from !== to` step within one booking and feeds the operator's action menu.
+  // So `custodyRuleForMovement` answers `null` for both, by design.
+  "rebook_out",
+  "rebook_in",
   // Custody + ownership + cost.
   "sale",
   "sale_return",
@@ -578,6 +602,13 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     units: "allowed",
     uncounted: "lineless",
   },
+  // ── the rebook pair ──
+  // `places: null` as `prep` has: the units are at the customer before and
+  // after, so no line exists to write and the multiplier is 0. The custody axis
+  // is one-sided on each half (`{out → null}`, `{null → out}`), which
+  // `MovementCustody` allows. No ledger, location or cost effect.
+  rebook_out: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed", uncounted: "lineless" },
+  rebook_in: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed", uncounted: "lineless" },
   // A one-sided line: the units leave both the shelf and ownership, and that is
   // what drops `quantity_held`.
   //

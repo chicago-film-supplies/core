@@ -151,9 +151,12 @@ export function bookingIdsByPath(
 /**
  * The row and leg keep for one order edit.
  *
- * @param args.storedBookings - The order's stored bookings by id — the COMPLETE
- *   set, read before the edit is decided. A booking whose id names another
- *   order, or does not parse, is ignored.
+ * @param args.storedBookings - The order's bookings by id — the COMPLETE set,
+ *   with custody as it will stand when this write lands. That is the stored
+ *   set for a plain order edit; a write that also moves custody (a rental
+ *   extension's `rebook_out` / `rebook_in`) applies its movements to this map
+ *   first, so the delta never reads custody the same transaction is moving. A
+ *   booking whose id names another order, or does not parse, is ignored.
  * @param args.fulfillmentRows - The stored fulfillment rows; a row's `before` is
  *   its physical quantity there, falling back to the previous order's.
  *
