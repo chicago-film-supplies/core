@@ -588,9 +588,23 @@ const reconcileFulfillmentCardsTransaction: TransactionDefinition = {
 
 // ── reconcile-order-from-invoices ────────────────────────────────────
 
-// 🔴 Declared WITHOUT `enforced_by` on purpose: nothing in api-cloudrun emits or
-// tests this transaction yet (api-cloudrun#1188, Phase 2), and an `enforced_by`
-// names an assertion that must exist. Add them with the writer.
+const INVOICE_ONLY_PROJECTS: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/invoices/invoiceOnlyFulfillment.test.ts::the line is projected onto the fulfillment and books at the invoiced quantity",
+  clause:
+    "the projection half — an invoice-only line becomes a fulfillment row stating the invoiced number as both `quantity` and `quantity_ordered`. The removal half is the step `a line that leaves the invoice loses its row and its booking`.",
+  gates: true,
+};
+
+const INVOICE_ONLY_KEEPS_PICKER: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/invoices/invoiceOnlyFulfillment.test.ts::a picker-lowered row keeps its number across an invoice edit; the booking follows the picker",
+  clause:
+    "the three-way rule — a picker-lowered row keeps its `quantity` across an invoice edit that moves `quantity_ordered`, and the booking carries the picker's number as the physical one.",
+  gates: true,
+};
 
 const reconcileOrderFromInvoicesRules: CollectionRule[] = [
   {
@@ -604,6 +618,7 @@ const reconcileOrderFromInvoicesRules: CollectionRule[] = [
       "it. Applied with the same three-way rule as an order row (a picker-lowered row " +
       "survives an invoice edit); a raised quantity on an order-sourced line is NOT " +
       "projected and stays a surfaced `quantity` diff. Reads non-void, aligned invoices.",
+    enforced_by: [INVOICE_ONLY_PROJECTS, INVOICE_ONLY_KEEPS_PICKER],
     transaction: "reconcile-order-from-invoices",
     trigger: "an invoice that changes items or voids, enqueued post-commit per billed order",
     fields: [
@@ -625,6 +640,7 @@ const reconcileOrderFromInvoicesRules: CollectionRule[] = [
       "(a picker addition or an invoice-only row), at the row's ordered quantity with " +
       "the picker's number as the physical one. A kept row (`quantity_ordered: 0`) is " +
       "not re-projected: its booking is owned by custody history.",
+    enforced_by: [INVOICE_ONLY_PROJECTS, INVOICE_ONLY_KEEPS_PICKER],
     transaction: "reconcile-order-from-invoices",
     fields: [
       {
