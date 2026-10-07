@@ -1952,6 +1952,24 @@
         },
         {
           "kind": "variable",
+          "name": "ExtendRentalInput",
+          "declaration": "const ExtendRentalInput: z.ZodType<ExtendRentalInputType>;",
+          "doc": "Zod schema for {@link ExtendRentalInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "ExtendRentalInputType",
+          "declaration": "interface ExtendRentalInputType {\n  uid_pair_from: string;\n  collection: DestinationEndpointType | null;\n  collection_start: string;\n  collection_end?: string | null;\n  lines: ExtendRentalLineType[];\n  version: number;\n}",
+          "doc": "The body of `POST /orders/{uid}/extensions` — the customer keeps some of a\nleg's rental units past its collection date\n(`api-cloudrun/.claude/plans/rental-extension.md`).\n\nA `z.object`, so an api older than a field STRIPS it: an api that does not\nread `units` yet refuses a serialized product rather than mis-moving it."
+        },
+        {
+          "kind": "interface",
+          "name": "ExtendRentalLineType",
+          "declaration": "interface ExtendRentalLineType {\n  path: string[];\n  quantity: number;\n  units?: number[];\n}",
+          "doc": "One row of a rental extension: the units of one leg-A row that stay out."
+        },
+        {
+          "kind": "variable",
           "name": "FIRESTORE_TIMESTAMP_META",
           "declaration": "const FIRESTORE_TIMESTAMP_META: \"firestoreTimestamp\";",
           "doc": "Meta key marking a node as the {@link FirestoreTimestamp} custom type.\n\n`isDateLikeNode` used to recognise it by **instance identity** — the only\nhandle a `z.custom()` offers, since its `def.type` is the uninformative\n`\"custom\"`. That was safe exactly as long as nobody annotated a timestamp\nfield, because **`.meta()` clones**: `FirestoreTimestamp.meta({ label })` is a\ndifferent instance, the identity test fails, and a `created_at` column\nsilently stops rendering as a date and starts printing a raw epoch. Declaring\ndisplay columns means annotating `created_at` / `updated_at` / `activity_at`,\nso the identity test had to go.\n\nA meta marker survives the clone because `.meta()` **merges**: the clone\ncarries both this key and whatever the annotation added."
@@ -9189,6 +9207,24 @@
           "name": "ExchangeDispositionType",
           "declaration": "type ExchangeDispositionType = indexedAccess;",
           "doc": "`same_trip` — the units taken back come back on the exchange's own trip.\n`send_now` — the replacement goes out now and the units come back at the\nnormal return (or, for a `lost` entry, never). A fact about the TRIP; why each\nunit comes back is the `exchanged_for` entry's `reason`.\n\n`same_trip` was stored as `exchange` until api-cloudrun#1147 renamed it\n(backfilled 2026-10-01; prod and dev held no exchange pair)."
+        },
+        {
+          "kind": "variable",
+          "name": "ExtendRentalInput",
+          "declaration": "const ExtendRentalInput: z.ZodType<ExtendRentalInputType>;",
+          "doc": "Zod schema for {@link ExtendRentalInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "ExtendRentalInputType",
+          "declaration": "interface ExtendRentalInputType {\n  uid_pair_from: string;\n  collection: DestinationEndpointType | null;\n  collection_start: string;\n  collection_end?: string | null;\n  lines: ExtendRentalLineType[];\n  version: number;\n}",
+          "doc": "The body of `POST /orders/{uid}/extensions` — the customer keeps some of a\nleg's rental units past its collection date\n(`api-cloudrun/.claude/plans/rental-extension.md`).\n\nA `z.object`, so an api older than a field STRIPS it: an api that does not\nread `units` yet refuses a serialized product rather than mis-moving it."
+        },
+        {
+          "kind": "interface",
+          "name": "ExtendRentalLineType",
+          "declaration": "interface ExtendRentalLineType {\n  path: string[];\n  quantity: number;\n  units?: number[];\n}",
+          "doc": "One row of a rental extension: the units of one leg-A row that stay out."
         },
         {
           "kind": "interface",

@@ -6,6 +6,7 @@ import { FirestoreId, isProductShapedUid, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoInstant, toChicagoYmd as toChicagoYmdForSchema } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { LineItemCore, LineTaxCore } from "./_items.ts";
+import { UnitSet } from "./unit.ts";
 import { type BookingBreakdown, breakdownObjectSchema } from "./_breakdown.ts";
 import {
   Address,
@@ -1895,6 +1896,65 @@ export const UpdateOrderInput: z.ZodType<UpdateOrderInputType> = z.object({
     .optional(),
   subject: z.string().optional(),
   reference: z.string().nullable().optional(),
+  version: z.int().min(0),
+});
+
+// ── Rental extension input ───────────────────────────────────────
+
+/** One row of a rental extension: the units of one leg-A row that stay out. */
+export interface ExtendRentalLineType {
+  /** The row's CURRENT path on leg A. */
+  path: string[];
+  /** Units to move onto leg B; at most the row's quantity, and at most what is out on A. */
+  quantity: number;
+  /**
+   * Which units stay out, on a `serialized` product: a canonical `UnitSet` of
+   * exactly `quantity` numbers, each in leg A's booking `units.out`. Required
+   * for a serialized product and refused for any other — the operator picks,
+   * the server never infers (`api-cloudrun/.claude/plans/serial-tracking.md` D3).
+   * Rows sharing one booking grain must pick disjoint units.
+   */
+  units?: number[];
+}
+
+/**
+ * The body of `POST /orders/{uid}/extensions` — the customer keeps some of a
+ * leg's rental units past its collection date
+ * (`api-cloudrun/.claude/plans/rental-extension.md`).
+ *
+ * A `z.object`, so an api older than a field STRIPS it: an api that does not
+ * read `units` yet refuses a serialized product rather than mis-moving it.
+ */
+export interface ExtendRentalInputType {
+  /** Leg A — the destination pair whose units the customer keeps. */
+  uid_pair_from: string;
+  /** Where the new leg is collected from; `null` is leg A's own collection endpoint. */
+  collection: DestinationEndpointType | null;
+  /** The new collection; it must be later than leg A's. */
+  collection_start: string;
+  /** Defaults to `collection_start`. */
+  collection_end?: string | null;
+  lines: ExtendRentalLineType[];
+  /** The order's version, as for `PUT /orders/{uid}`. */
+  version: number;
+}
+
+/** Zod schema for {@link ExtendRentalInputType}. */
+export const ExtendRentalInput: z.ZodType<ExtendRentalInputType> = z.object({
+  uid_pair_from: z.uuid(),
+  collection: DestinationEndpoint.nullable(),
+  collection_start: chicagoInstant(),
+  collection_end: chicagoInstant().nullable().optional(),
+  lines: z.array(
+    z.object({
+      path: z.array(z.string()).min(2),
+      quantity: z.int().min(1),
+      units: UnitSet.optional(),
+    }).refine((l) => l.units === undefined || l.units.length === l.quantity, {
+      message: "a line that names units names exactly `quantity` of them",
+      path: ["units"],
+    }),
+  ).min(1),
   version: z.int().min(0),
 });
 

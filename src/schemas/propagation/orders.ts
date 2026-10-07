@@ -1337,7 +1337,7 @@ const extendRentalRules: CollectionRule[] = [
     target: "bookings",
     mode: "co-write",
     invariant:
-      "For each booking grain a moved row belongs to, A's booking gives up k units of `out` and leg B's booking (the same grain on the new leg, `buildBookingIdFromSignature`) is created holding `out: k`. The rebook is applied to the order's stored-booking view BEFORE the order-edit delta, the reconcile, the card gate and the fulfillment sync read it — so the edit keeps no `quantity_ordered: 0` row, B's booking carries its units forward rather than reserving fresh ones, and A at q−k to A's date plus B at k to B's date overlap to exactly q in the stock projection. k never exceeds A's live `out` at that grain. A grain whose every unit moved leaves A with no custody history, and its booking is deleted as a plan.",
+      "For each booking grain a moved row belongs to, A's booking gives up k units of `out` and leg B's booking (the same grain on the new leg, `buildBookingIdFromSignature`) is created holding `out: k`. The rebook is applied to the order's stored-booking view BEFORE the order-edit delta, the reconcile, the card gate and the fulfillment sync read it — so the edit keeps no `quantity_ordered: 0` row, B's booking carries its units forward rather than reserving fresh ones, and A at q−k to A's date plus B at k to B's date overlap to exactly q in the stock projection. k never exceeds A's live `out` at that grain. On a serialized product the operator names the units (`lines[].units`, each in A's `units.out`): they leave A's `units.out` and form B's, so the booking unit sets move with the counts.",
     enforced_by: [REBOOK_MOVES_CUSTODY_NOT_STOCK],
     transaction: "extend-rental",
     fields: [
@@ -1359,7 +1359,7 @@ const extendRentalRules: CollectionRule[] = [
     target: "transactions",
     mode: "co-write",
     invariant:
-      "The re-attribution is journaled as a PAIR in one session: `rebook_out` on A's booking (custody {out → null}) and `rebook_in` on B's (custody {null → out}, `sources[]` naming A exactly once). No lines and no ledger effect, since nothing moved physically. `rebook_out` takes the lower number, because replay folds by `created_at`, then `number`. Ids are `{session}|{type}|{booking}`, so the pair is idempotent under the order write's own retry.",
+      "The re-attribution is journaled as a PAIR in one session: `rebook_out` on A's booking (custody {out → null}) and `rebook_in` on B's (custody {null → out}, `sources[]` naming A exactly once). No lines and no ledger effect, since nothing moved physically. On a serialized product both halves name the units, and the roster is folded and written IN the order transaction with the same `foldRosterUnits` the ledger writer runs (a classified exception to serial-tracking D5): `rebook_in` re-points each unit from A to B. `rebook_out` takes the lower number, because replay folds by `created_at`, then `number`. Ids are `{session}|{type}|{booking}`, so the pair is idempotent under the order write's own retry.",
     enforced_by: [REBOOK_JOURNAL, CUSTODY_REPLAY],
     transaction: "extend-rental",
     fields: [
@@ -1383,6 +1383,7 @@ const extendRentalTransaction: TransactionDefinition = {
     "update-order:order-self-derive",
     "extend-rental:rebook-to-bookings",
     "extend-rental:bookings-to-transactions",
+    "units:transactions-to-roster",
     "update-order:order-to-bookings",
     "update-order:ledger-to-bookings",
     ...STOCK_STEPS,

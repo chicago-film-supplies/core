@@ -4478,6 +4478,46 @@ pair; line facts live here.
 const ExchangedForList: z.ZodType<ExchangedForEntryType[]>;
 ```
 
+### `ExtendRentalInput`
+
+Zod schema for {@link ExtendRentalInputType}.
+
+```ts
+const ExtendRentalInput: z.ZodType<ExtendRentalInputType>;
+```
+
+### `ExtendRentalInputType`
+
+The body of `POST /orders/{uid}/extensions` — the customer keeps some of a
+leg's rental units past its collection date
+(`api-cloudrun/.claude/plans/rental-extension.md`).
+
+A `z.object`, so an api older than a field STRIPS it: an api that does not
+read `units` yet refuses a serialized product rather than mis-moving it.
+
+```ts
+interface ExtendRentalInputType {
+  uid_pair_from: string;
+  collection: DestinationEndpointType | null;
+  collection_start: string;
+  collection_end?: string | null;
+  lines: ExtendRentalLineType[];
+  version: number;
+}
+```
+
+### `ExtendRentalLineType`
+
+One row of a rental extension: the units of one leg-A row that stay out.
+
+```ts
+interface ExtendRentalLineType {
+  path: string[];
+  quantity: number;
+  units?: number[];
+}
+```
+
 ### `FIRESTORE_TIMESTAMP_META`
 
 Meta key marking a node as the {@link FirestoreTimestamp} custom type.
@@ -20194,6 +20234,46 @@ unit comes back is the `exchanged_for` entry's `reason`.
 
 ```ts
 type ExchangeDispositionType = indexedAccess;
+```
+
+### `ExtendRentalInput`
+
+Zod schema for {@link ExtendRentalInputType}.
+
+```ts
+const ExtendRentalInput: z.ZodType<ExtendRentalInputType>;
+```
+
+### `ExtendRentalInputType`
+
+The body of `POST /orders/{uid}/extensions` — the customer keeps some of a
+leg's rental units past its collection date
+(`api-cloudrun/.claude/plans/rental-extension.md`).
+
+A `z.object`, so an api older than a field STRIPS it: an api that does not
+read `units` yet refuses a serialized product rather than mis-moving it.
+
+```ts
+interface ExtendRentalInputType {
+  uid_pair_from: string;
+  collection: DestinationEndpointType | null;
+  collection_start: string;
+  collection_end?: string | null;
+  lines: ExtendRentalLineType[];
+  version: number;
+}
+```
+
+### `ExtendRentalLineType`
+
+One row of a rental extension: the units of one leg-A row that stay out.
+
+```ts
+interface ExtendRentalLineType {
+  path: string[];
+  quantity: number;
+  units?: number[];
+}
 ```
 
 ### `GroupPathType`
