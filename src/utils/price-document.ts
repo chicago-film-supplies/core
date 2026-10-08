@@ -41,7 +41,7 @@
  * The input items are not mutated. Items come back as copies with a new `price`
  * on every priced line; dividers are returned as they were.
  */
-import type { InvoiceStatusType, OrderStatusType, TaxRefType } from "../schemas/mod.ts";
+import { type InvoiceStatusType, type OrderStatusType, type TaxRefType, TERMINAL_ORDER_STATUSES } from "../schemas/mod.ts";
 import {
   assembleLinePrice,
   calculateReplacementTotals,
@@ -309,7 +309,7 @@ function daysFromWindows(item: LineItem): boolean {
  * outright.
  */
 function keepsStoredDays(document: PriceDocumentKind): boolean {
-  return document.kind === "order" && (document.status === "complete" || document.status === "canceled");
+  return document.kind === "order" && TERMINAL_ORDER_STATUSES.includes(document.status);
 }
 
 /**
@@ -420,7 +420,7 @@ export interface ChargeWindowPairViolation {
  * documents the campaign promised never to re-derive.
  */
 function keepsStoredLineDays(document: PriceDocumentKind): boolean {
-  if (document.kind === "order") return document.status === "complete" || document.status === "canceled";
+  if (document.kind === "order") return TERMINAL_ORDER_STATUSES.includes(document.status);
   return document.status === "void" || document.status === "paid" || document.has_settlement;
 }
 

@@ -8,6 +8,7 @@ import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { LineItemCore, LineTaxCore } from "./_items.ts";
 import { UnitSet } from "./unit.ts";
 import { type BookingBreakdown, breakdownObjectSchema } from "./_breakdown.ts";
+import type { BookingStatusType } from "./booking.ts";
 import {
   Address,
   DocumentOrganizationSnapshot,
@@ -76,14 +77,132 @@ export const ORDER_COMPUTED_STATUSES = ["active", "complete"] as const;
 export type OrderComputedStatusType = typeof ORDER_COMPUTED_STATUSES[number];
 
 /**
- * The statuses an operator can move to from the given current status.
- * Returns an empty list for computed statuses (`active`, `complete`) and
- * filters the current status out of the user-settable set.
+ * The statuses an operator can move to from the given current status — the
+ * user-settable set minus the current status.
+ *
+ * From a computed status only ONE manual move exists: `active → canceled`
+ * (stock campaign decision 13, owner 2026-10-08). It is legal as a TRANSITION;
+ * whether this particular order may take it is `cancelRefusal`'s question
+ * (`@cfs/core/utils/orders`), which refuses while any booking still holds
+ * units that have to come back or be undone first. `complete` has none: a
+ * complete order reopens through an edit, never a status write.
  */
 export function getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[] {
+  if (current === "active") return ["canceled"];
   if ((ORDER_COMPUTED_STATUSES as readonly string[]).includes(current)) return [];
   return ORDER_USER_STATUSES.filter((s) => s !== current);
 }
+
+// ── Status traits ───────────────────────────────────────────────────
+
+/**
+ * Everything the system decides from an order's status, as ONE row per status
+ * (stock campaign P1). Every status subset below is DERIVED from this table;
+ * about a dozen hand-written `["complete", "canceled"]`-style lists across the
+ * api, the manager and scripts had drifted (a "frozen" order meant two
+ * different sets in two audits; a card-bearing order meant two in two writers).
+ *
+ * - `authored` — an operator sets it ({@link ORDER_USER_STATUSES}); otherwise it
+ *   is read off the bookings ({@link ORDER_COMPUTED_STATUSES}).
+ * - `allocates` — bookings claim specific shelf units (the allocator runs).
+ * - `frozen` — the order is finished business: its stored days and taxes stand.
+ * - `repriceable` — a tax or rate change may reprice the order's lines.
+ * - `billable` — a Xero quote is live for it.
+ * - `planBucket` — where a booking's unstarted units sit; `null` books nothing.
+ * - `asBookingStatus` — the status a fresh booking takes; `null` writes none.
+ * - `cardBearing` — the order has live event cards.
+ * - `booksNothing` — the projection keeps no plan for it (custody stays).
+ */
+export interface OrderStatusTraits {
+  authored: boolean;
+  allocates: boolean;
+  frozen: boolean;
+  repriceable: boolean;
+  billable: boolean;
+  planBucket: "quoted" | "reserved" | null;
+  asBookingStatus: BookingStatusType | null;
+  cardBearing: boolean;
+  booksNothing: boolean;
+}
+
+/**
+ * The table. `Record<OrderStatusType, …>`, so a new status is a compile error
+ * here rather than a silent fall-through in a dozen sets.
+ *
+ * ⚠️ **`complete`'s plan bucket is `reserved`** (decision 2): a complete order
+ * reopened by a raise books the raise as reserved work, and the order re-derives
+ * `active`. Its stored custody is kept, never re-projected.
+ */
+export const ORDER_STATUS_TRAITS: Readonly<Record<OrderStatusType, OrderStatusTraits>> = {
+  draft: {
+    authored: true, allocates: false, frozen: false, repriceable: true, billable: false,
+    planBucket: null, asBookingStatus: "draft", cardBearing: false, booksNothing: true,
+  },
+  quoted: {
+    authored: true, allocates: false, frozen: false, repriceable: true, billable: true,
+    planBucket: "quoted", asBookingStatus: "quoted", cardBearing: true, booksNothing: false,
+  },
+  reserved: {
+    authored: true, allocates: false, frozen: false, repriceable: true, billable: true,
+    planBucket: "reserved", asBookingStatus: "reserved", cardBearing: true, booksNothing: false,
+  },
+  active: {
+    authored: false, allocates: true, frozen: false, repriceable: false, billable: true,
+    planBucket: "reserved", asBookingStatus: "active", cardBearing: true, booksNothing: false,
+  },
+  complete: {
+    authored: false, allocates: false, frozen: true, repriceable: false, billable: true,
+    planBucket: "reserved", asBookingStatus: "complete", cardBearing: true, booksNothing: false,
+  },
+  canceled: {
+    authored: true, allocates: false, frozen: true, repriceable: false, billable: false,
+    planBucket: null, asBookingStatus: null, cardBearing: false, booksNothing: true,
+  },
+};
+
+/** The statuses whose `trait` is true, in {@link ORDER_STATUSES} order. */
+function statusesWhere(trait: keyof OrderStatusTraits): OrderStatusType[] {
+  return ORDER_STATUSES.filter((s) => ORDER_STATUS_TRAITS[s][trait] === true);
+}
+
+/** Does a booking at this order status claim specific shelf units? (`allocates`) */
+export const ORDER_STATUS_ALLOCATES_STOCK: Readonly<Record<OrderStatusType, boolean>> = Object.freeze({
+  draft: ORDER_STATUS_TRAITS.draft.allocates,
+  quoted: ORDER_STATUS_TRAITS.quoted.allocates,
+  reserved: ORDER_STATUS_TRAITS.reserved.allocates,
+  active: ORDER_STATUS_TRAITS.active.allocates,
+  complete: ORDER_STATUS_TRAITS.complete.allocates,
+  canceled: ORDER_STATUS_TRAITS.canceled.allocates,
+});
+
+/**
+ * An order's status as a fresh booking's status (`asBookingStatus`). `canceled`
+ * maps to `null`: a booking has no canceled status, and a writer `continue`s.
+ */
+export const ORDER_STATUS_AS_BOOKING_STATUS: Readonly<Record<OrderStatusType, BookingStatusType | null>> = Object
+  .freeze({
+    draft: ORDER_STATUS_TRAITS.draft.asBookingStatus,
+    quoted: ORDER_STATUS_TRAITS.quoted.asBookingStatus,
+    reserved: ORDER_STATUS_TRAITS.reserved.asBookingStatus,
+    active: ORDER_STATUS_TRAITS.active.asBookingStatus,
+    complete: ORDER_STATUS_TRAITS.complete.asBookingStatus,
+    canceled: ORDER_STATUS_TRAITS.canceled.asBookingStatus,
+  });
+
+/** Finished business, `{complete, canceled}` (`frozen`): stored days and taxes stand. */
+export const TERMINAL_ORDER_STATUSES: readonly OrderStatusType[] = statusesWhere("frozen");
+
+/** A tax or rate change may reprice these (`repriceable`): `{draft, quoted, reserved}`. */
+export const REPRICEABLE_ORDER_STATUSES: readonly OrderStatusType[] = statusesWhere("repriceable");
+
+/** These carry live event cards (`cardBearing`): `{quoted, reserved, active, complete}`. */
+export const CARD_BEARING_ORDER_STATUSES: readonly OrderStatusType[] = statusesWhere("cardBearing");
+
+/** A Xero quote is live for these (`billable`): `{quoted, reserved, active, complete}`. */
+export const BILLABLE_ORDER_STATUSES: readonly OrderStatusType[] = statusesWhere("billable");
+
+/** The projection keeps no plan for these (`booksNothing`): `{draft, canceled}`. */
+export const BOOKS_NOTHING_ORDER_STATUSES: readonly OrderStatusType[] = statusesWhere("booksNothing");
 
 /**
  * Server-side gate for an order status write. `source: "manual"` rejects

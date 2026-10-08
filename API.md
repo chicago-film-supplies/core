@@ -648,6 +648,14 @@ interface AuthoredProductComponent {
 }
 ```
 
+### `BILLABLE_ORDER_STATUSES`
+
+A Xero quote is live for these (`billable`): `{quoted, reserved, active, complete}`.
+
+```ts
+const BILLABLE_ORDER_STATUSES: readonly OrderStatusType[];
+```
+
 ### `BOOKING_BREAKDOWN_KEYS`
 
 Every key of the booking custody breakdown, in lifecycle order (which is NOT
@@ -737,6 +745,14 @@ cannot say which units came back and which were lost.
 
 ```ts
 const BOOKING_UNIT_BUCKETS: "cleaning" | "damaged" | "lost" | "maintenance" | "out" | "prepped" | "returned"[];
+```
+
+### `BOOKS_NOTHING_ORDER_STATUSES`
+
+The projection keeps no plan for these (`booksNothing`): `{draft, canceled}`.
+
+```ts
+const BOOKS_NOTHING_ORDER_STATUSES: readonly OrderStatusType[];
 ```
 
 ### `BaseLogFields`
@@ -1205,6 +1221,14 @@ interface BulkBookingUpdateResponseType {
   failures: Array<typeLiteral>;
   chunks: number;
 }
+```
+
+### `CARD_BEARING_ORDER_STATUSES`
+
+These carry live event cards (`cardBearing`): `{quoted, reserved, active, complete}`.
+
+```ts
+const CARD_BEARING_ORDER_STATUSES: readonly OrderStatusType[];
 ```
 
 ### `CFS_SOURCE_COLLECTIONS`
@@ -7396,6 +7420,19 @@ The only status a client may ask for; the writer translates it into `canceled_at
 const OOS_USER_STATUSES: "canceled"[];
 ```
 
+### `OPEN_BOOKING_STATUSES`
+
+Every booking status but `complete` — the statuses whose booking may still
+consume stock (`unavailableFromBooking` drops a complete booking and nothing
+else). An ARRAY, because its main readers are Firestore
+`where("status", "in", …)` queries (core#110: the api's pick sheets and the
+manager's stock store each derived it by hand). Derived as the complement, so
+a new status is open until someone says otherwise.
+
+```ts
+const OPEN_BOOKING_STATUSES: readonly BookingStatusType[];
+```
+
 ### `ORDER_COMPUTED_STATUSES`
 
 Statuses derived from booking state — set only by the API's booking write
@@ -7410,6 +7447,36 @@ const ORDER_COMPUTED_STATUSES: "active" | "complete"[];
 
 ```ts
 const ORDER_STATUSES: "draft" | "quoted" | "reserved" | "active" | "complete" | "canceled"[];
+```
+
+### `ORDER_STATUS_ALLOCATES_STOCK`
+
+Does a booking at this order status claim specific shelf units? (`allocates`)
+
+```ts
+const ORDER_STATUS_ALLOCATES_STOCK: Readonly<Record<OrderStatusType, boolean>>;
+```
+
+### `ORDER_STATUS_AS_BOOKING_STATUS`
+
+An order's status as a fresh booking's status (`asBookingStatus`). `canceled`
+maps to `null`: a booking has no canceled status, and a writer `continue`s.
+
+```ts
+const ORDER_STATUS_AS_BOOKING_STATUS: Readonly<Record<OrderStatusType, BookingStatusType | null>>;
+```
+
+### `ORDER_STATUS_TRAITS`
+
+The table. `Record<OrderStatusType, …>`, so a new status is a compile error
+here rather than a silent fall-through in a dozen sets.
+
+⚠️ **`complete`'s plan bucket is `reserved`** (decision 2): a complete order
+reopened by a raise books the raise as reserved work, and the order re-derives
+`active`. Its stored custody is kept, never re-projected.
+
+```ts
+const ORDER_STATUS_TRAITS: Readonly<Record<OrderStatusType, OrderStatusTraits>>;
 ```
 
 ### `ORDER_USER_STATUSES`
@@ -7945,6 +8012,39 @@ const OrderSchema: z.ZodType<Order>;
 
 ```ts
 type OrderStatusChanged = EventEnvelope<Order> & typeLiteral;
+```
+
+### `OrderStatusTraits`
+
+Everything the system decides from an order's status, as ONE row per status
+(stock campaign P1). Every status subset below is DERIVED from this table;
+about a dozen hand-written `["complete", "canceled"]`-style lists across the
+api, the manager and scripts had drifted (a "frozen" order meant two
+different sets in two audits; a card-bearing order meant two in two writers).
+
+- `authored` — an operator sets it ({@link ORDER_USER_STATUSES}); otherwise it
+  is read off the bookings ({@link ORDER_COMPUTED_STATUSES}).
+- `allocates` — bookings claim specific shelf units (the allocator runs).
+- `frozen` — the order is finished business: its stored days and taxes stand.
+- `repriceable` — a tax or rate change may reprice the order's lines.
+- `billable` — a Xero quote is live for it.
+- `planBucket` — where a booking's unstarted units sit; `null` books nothing.
+- `asBookingStatus` — the status a fresh booking takes; `null` writes none.
+- `cardBearing` — the order has live event cards.
+- `booksNothing` — the projection keeps no plan for it (custody stays).
+
+```ts
+interface OrderStatusTraits {
+  authored: boolean;
+  allocates: boolean;
+  frozen: boolean;
+  repriceable: boolean;
+  billable: boolean;
+  planBucket: "quoted" | "reserved" | null;
+  asBookingStatus: BookingStatusType | null;
+  cardBearing: boolean;
+  booksNothing: boolean;
+}
 ```
 
 ### `OrderStatusType`
@@ -9608,6 +9708,14 @@ to prevent.
 
 ```ts
 const REACHED_XERO_STATUSES: readonly InvoiceStatusType[];
+```
+
+### `REPRICEABLE_ORDER_STATUSES`
+
+A tax or rate change may reprice these (`repriceable`): `{draft, quoted, reserved}`.
+
+```ts
+const REPRICEABLE_ORDER_STATUSES: readonly OrderStatusType[];
 ```
 
 ### `RateLimit`
@@ -11324,6 +11432,14 @@ Lifecycle status of a template version (mirrors the git lifecycle).
 
 ```ts
 const TEMPLATE_VERSION_STATUSES: "draft" | "published" | "archived"[];
+```
+
+### `TERMINAL_ORDER_STATUSES`
+
+Finished business, `{complete, canceled}` (`frozen`): stored days and taxes stand.
+
+```ts
+const TERMINAL_ORDER_STATUSES: readonly OrderStatusType[];
 ```
 
 ### `TYPESENSE_ROLLUP_COLUMNS`
@@ -14311,9 +14427,15 @@ node when reading field-level meta.
 
 ### `getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]`
 
-The statuses an operator can move to from the given current status.
-Returns an empty list for computed statuses (`active`, `complete`) and
-filters the current status out of the user-settable set.
+The statuses an operator can move to from the given current status — the
+user-settable set minus the current status.
+
+From a computed status only ONE manual move exists: `active → canceled`
+(stock campaign decision 13, owner 2026-10-08). It is legal as a TRANSITION;
+whether this particular order may take it is `cancelRefusal`'s question
+(`@cfs/core/utils/orders`), which refuses while any booking still holds
+units that have to come back or be undone first. `complete` has none: a
+complete order reopens through an edit, never a status write.
 
 ### `getServerSortableColumns(schema: z.ZodType): Record<string, string>`
 
@@ -17730,6 +17852,19 @@ carried set and the api's custody key lists were each a copy.
 const CUSTODY_HISTORY_KEYS: "prepped" | "out" | "returned" | "lost" | "damaged" | "cleaning" | "maintenance"[];
 ```
 
+### `OPEN_BOOKING_STATUSES`
+
+Every booking status but `complete` — the statuses whose booking may still
+consume stock (`unavailableFromBooking` drops a complete booking and nothing
+else). An ARRAY, because its main readers are Firestore
+`where("status", "in", …)` queries (core#110: the api's pick sheets and the
+manager's stock store each derived it by hand). Derived as the complement, so
+a new status is open until someone says otherwise.
+
+```ts
+const OPEN_BOOKING_STATUSES: readonly BookingStatusType[];
+```
+
 ### `OUT_OF_SERVICE_KEYS`
 
 The out-of-service keys: a unit back (or not) with a REASON. Each is an
@@ -20129,6 +20264,30 @@ interface UpdateLocationTypeInputType {
 
 ## `@cfs/core/schemas/order`
 
+### `BILLABLE_ORDER_STATUSES`
+
+A Xero quote is live for these (`billable`): `{quoted, reserved, active, complete}`.
+
+```ts
+const BILLABLE_ORDER_STATUSES: readonly OrderStatusType[];
+```
+
+### `BOOKS_NOTHING_ORDER_STATUSES`
+
+The projection keeps no plan for these (`booksNothing`): `{draft, canceled}`.
+
+```ts
+const BOOKS_NOTHING_ORDER_STATUSES: readonly OrderStatusType[];
+```
+
+### `CARD_BEARING_ORDER_STATUSES`
+
+These carry live event cards (`cardBearing`): `{quoted, reserved, active, complete}`.
+
+```ts
+const CARD_BEARING_ORDER_STATUSES: readonly OrderStatusType[];
+```
+
 ### `ChargeWindow`
 
 Zod schema for {@link ChargeWindowType}.
@@ -20703,6 +20862,36 @@ const ORDER_COMPUTED_STATUSES: "active" | "complete"[];
 const ORDER_STATUSES: "draft" | "quoted" | "reserved" | "active" | "complete" | "canceled"[];
 ```
 
+### `ORDER_STATUS_ALLOCATES_STOCK`
+
+Does a booking at this order status claim specific shelf units? (`allocates`)
+
+```ts
+const ORDER_STATUS_ALLOCATES_STOCK: Readonly<Record<OrderStatusType, boolean>>;
+```
+
+### `ORDER_STATUS_AS_BOOKING_STATUS`
+
+An order's status as a fresh booking's status (`asBookingStatus`). `canceled`
+maps to `null`: a booking has no canceled status, and a writer `continue`s.
+
+```ts
+const ORDER_STATUS_AS_BOOKING_STATUS: Readonly<Record<OrderStatusType, BookingStatusType | null>>;
+```
+
+### `ORDER_STATUS_TRAITS`
+
+The table. `Record<OrderStatusType, …>`, so a new status is a compile error
+here rather than a silent fall-through in a dozen sets.
+
+⚠️ **`complete`'s plan bucket is `reserved`** (decision 2): a complete order
+reopened by a raise books the raise as reserved work, and the order re-derives
+`active`. Its stored custody is kept, never re-projected.
+
+```ts
+const ORDER_STATUS_TRAITS: Readonly<Record<OrderStatusType, OrderStatusTraits>>;
+```
+
 ### `ORDER_USER_STATUSES`
 
 Statuses an operator may set directly via UpdateOrderInput.status.
@@ -21145,6 +21334,39 @@ Zod schema for the full order Firestore document.
 const OrderSchema: z.ZodType<Order>;
 ```
 
+### `OrderStatusTraits`
+
+Everything the system decides from an order's status, as ONE row per status
+(stock campaign P1). Every status subset below is DERIVED from this table;
+about a dozen hand-written `["complete", "canceled"]`-style lists across the
+api, the manager and scripts had drifted (a "frozen" order meant two
+different sets in two audits; a card-bearing order meant two in two writers).
+
+- `authored` — an operator sets it ({@link ORDER_USER_STATUSES}); otherwise it
+  is read off the bookings ({@link ORDER_COMPUTED_STATUSES}).
+- `allocates` — bookings claim specific shelf units (the allocator runs).
+- `frozen` — the order is finished business: its stored days and taxes stand.
+- `repriceable` — a tax or rate change may reprice the order's lines.
+- `billable` — a Xero quote is live for it.
+- `planBucket` — where a booking's unstarted units sit; `null` books nothing.
+- `asBookingStatus` — the status a fresh booking takes; `null` writes none.
+- `cardBearing` — the order has live event cards.
+- `booksNothing` — the projection keeps no plan for it (custody stays).
+
+```ts
+interface OrderStatusTraits {
+  authored: boolean;
+  allocates: boolean;
+  frozen: boolean;
+  repriceable: boolean;
+  billable: boolean;
+  planBucket: "quoted" | "reserved" | null;
+  asBookingStatus: BookingStatusType | null;
+  cardBearing: boolean;
+  booksNothing: boolean;
+}
+```
+
 ### `OrderStatusType`
 
 ```ts
@@ -21192,6 +21414,22 @@ interface PriceModifierType {
   type: RateType;
   amount_cents: number;
 }
+```
+
+### `REPRICEABLE_ORDER_STATUSES`
+
+A tax or rate change may reprice these (`repriceable`): `{draft, quoted, reserved}`.
+
+```ts
+const REPRICEABLE_ORDER_STATUSES: readonly OrderStatusType[];
+```
+
+### `TERMINAL_ORDER_STATUSES`
+
+Finished business, `{complete, canceled}` (`frozen`): stored days and taxes stand.
+
+```ts
+const TERMINAL_ORDER_STATUSES: readonly OrderStatusType[];
 ```
 
 ### `TaxRef`
@@ -21513,9 +21751,15 @@ rules and why existence is deliberately not one of them.
 
 ### `getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]`
 
-The statuses an operator can move to from the given current status.
-Returns an empty list for computed statuses (`active`, `complete`) and
-filters the current status out of the user-settable set.
+The statuses an operator can move to from the given current status — the
+user-settable set minus the current status.
+
+From a computed status only ONE manual move exists: `active → canceled`
+(stock campaign decision 13, owner 2026-10-08). It is legal as a TRANSITION;
+whether this particular order may take it is `cancelRefusal`'s question
+(`@cfs/core/utils/orders`), which refuses while any booking still holds
+units that have to come back or be undone first. `complete` has none: a
+complete order reopens through an edit, never a status write.
 
 ### `hasCollectionLine(items: ReadonlyArray<unknown>): boolean`
 
@@ -30508,6 +30752,18 @@ interface BookingCollectionPair {
 }
 ```
 
+### `CancelBlocker`
+
+One booking that blocks a cancel, and what it still holds.
+
+```ts
+interface CancelBlocker {
+  uid: string;
+  prepped: number;
+  out: number;
+}
+```
+
 ### `FullBookingBreakdown`
 
 A breakdown with every key stated. Since the keys' `feat!` this IS
@@ -30645,6 +30901,42 @@ Status rules:
   complete + sale   → out = quantity; zero everything else
   complete + service / surcharge → all zeros
 
+### `cancelRefusal(bookings: ReadonlyArray<Pick<Booking, "uid" | "type" | "breakdown">>): typeLiteral | null`
+
+Why an order may not be canceled yet, or `null` when it may (stock campaign
+decision 13). Refused while any booking holds LIVE custody (`liveCustody`:
+`prepped`, plus `out` where CFS still owns it), naming each one — the chain of
+events is respected by returning or undoing those units first, each an
+ordinary custody action with its movement, and only then canceling.
+Returned and out-of-service history stays on kept bookings, as it always has.
+
+The api enforces it on the bookings its order write already reads; the
+manager renders its prompt from the same list.
+
+### `deriveOrderStatus(stored: OrderStatusType, bookings: ReadonlyArray<Pick<Booking, "type" | "breakdown" | "quantity_ordered">>): OrderStatusType`
+
+An order's status as `authored ⊕ derived` (stock campaign decision 2): the
+operator's status where the operator owns it, otherwise the phase read off
+its bookings.
+
+| stored | status |
+|---|---|
+| `draft`, `quoted`, `canceled` | the stored status, always |
+| `reserved`, `active`, `complete`, and no booking the order asks for | the stored status: there is no work to read a phase off |
+| `reserved`, `active`, `complete` | `complete` when every booking is closed (`isBookingClosed`, a kept one included), else `active` when any custody is past the prep shelf, else `reserved` |
+
+So a complete order REOPENS when an edit raises a line (the raise lands
+`reserved` and the order reads `active`), and re-completes when the raise is
+lowered; a `reserved` order whose units went out reads `active` whichever
+writer moved them (census 6 found 11 stuck `reserved` in prod). It absorbs
+the api's `bookingsCompleteOrder`: a canceled order whose kept bookings close
+stays canceled, and kept bookings alone never complete an order — yet an OPEN
+kept booking still holds one open.
+
+⚠️ **The "no booking the order asks for" row is load-bearing.** An order of
+only service lines books nothing; without the row every such complete order
+would read `reserved` on its next save.
+
 ### `emptyBookingsBreakdown(): FullBookingBreakdown`
 
 The empty breakdown shape — every key at zero.
@@ -30702,6 +30994,12 @@ out and be closed.
 Sale items still expose Return/Lost/Damaged actions in the picker (a sold
 item *can* be returned for credit and lost/damaged-in-transit is real) —
 they're available, just not required for closure.
+
+### `isKeptBooking(b: Pick<Booking, "quantity_ordered">): boolean`
+
+A KEPT booking: one an order edit left in place only because units moved on it
+(api-cloudrun#1147). The order asks for none of it, so `quantity_ordered` is
+`0`; its custody is history, not work the order asked for.
 
 ### `isOrderBookingsClosed(bookings: ReadonlyArray<Pick<Booking, "type" | "breakdown">>): boolean`
 

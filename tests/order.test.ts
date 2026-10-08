@@ -995,10 +995,19 @@ Deno.test("OrderSchema accepts valid inclusion_type values", () => {
 // ── Status transition helpers ────────────────────────────────────
 
 import {
+  BILLABLE_ORDER_STATUSES,
+  BOOKS_NOTHING_ORDER_STATUSES,
+  CARD_BEARING_ORDER_STATUSES,
   getOrderStatusTransitions,
   isValidOrderStatusTransition,
-  ORDER_USER_STATUSES,
   ORDER_COMPUTED_STATUSES,
+  ORDER_STATUS_ALLOCATES_STOCK,
+  ORDER_STATUS_AS_BOOKING_STATUS,
+  ORDER_STATUS_TRAITS,
+  ORDER_STATUSES,
+  ORDER_USER_STATUSES,
+  REPRICEABLE_ORDER_STATUSES,
+  TERMINAL_ORDER_STATUSES,
 } from "../src/schemas/order.ts";
 
 Deno.test("getOrderStatusTransitions returns the other user statuses for a user status", () => {
@@ -1008,9 +1017,38 @@ Deno.test("getOrderStatusTransitions returns the other user statuses for a user 
   assertEquals(getOrderStatusTransitions("canceled"), ["draft", "quoted", "reserved"]);
 });
 
-Deno.test("getOrderStatusTransitions returns [] for computed statuses", () => {
-  for (const s of ORDER_COMPUTED_STATUSES) {
-    assertEquals(getOrderStatusTransitions(s), [], `expected no manual transitions out of "${s}"`);
+Deno.test("getOrderStatusTransitions: complete has none; active may only be canceled (decision 13)", () => {
+  assertEquals(getOrderStatusTransitions("complete"), []);
+  assertEquals(getOrderStatusTransitions("active"), ["canceled"]);
+  assertEquals(isValidOrderStatusTransition("active", "canceled", "manual"), true);
+  assertEquals(isValidOrderStatusTransition("active", "draft", "manual"), false);
+});
+
+Deno.test("order status traits: user and computed statuses partition ORDER_STATUSES, and `authored` is the user set", () => {
+  assertEquals([...ORDER_USER_STATUSES, ...ORDER_COMPUTED_STATUSES].sort(), [...ORDER_STATUSES].sort());
+  assertEquals(new Set(ORDER_USER_STATUSES).size + new Set(ORDER_COMPUTED_STATUSES).size, ORDER_STATUSES.length);
+  for (const s of ORDER_STATUSES) {
+    assertEquals(ORDER_STATUS_TRAITS[s].authored, (ORDER_USER_STATUSES as readonly string[]).includes(s), s);
+  }
+});
+
+Deno.test("order status traits: every derived subset equals the hand-written set it replaced (stock campaign P1)", () => {
+  // The literal each consumer spelled by hand, frozen here as the oracle.
+  assertEquals([...TERMINAL_ORDER_STATUSES], ["complete", "canceled"]);
+  assertEquals([...REPRICEABLE_ORDER_STATUSES], ["draft", "quoted", "reserved"]);
+  assertEquals([...CARD_BEARING_ORDER_STATUSES], ["quoted", "reserved", "active", "complete"]);
+  assertEquals([...BILLABLE_ORDER_STATUSES], ["quoted", "reserved", "active", "complete"]);
+  assertEquals([...BOOKS_NOTHING_ORDER_STATUSES], ["draft", "canceled"]);
+  // api-cloudrun src/lib/stockAllocation.ts and src/lib/stockSummary.ts, verbatim.
+  assertEquals({ ...ORDER_STATUS_ALLOCATES_STOCK }, {
+    draft: false, quoted: false, reserved: false, active: true, complete: false, canceled: false,
+  });
+  assertEquals({ ...ORDER_STATUS_AS_BOOKING_STATUS }, {
+    draft: "draft", quoted: "quoted", reserved: "reserved", active: "active", complete: "complete", canceled: null,
+  });
+  // A booking-less status has no plan bucket, and vice versa.
+  for (const s of ORDER_STATUSES) {
+    assertEquals(ORDER_STATUS_TRAITS[s].booksNothing, ORDER_STATUS_TRAITS[s].planBucket === null, s);
   }
 });
 

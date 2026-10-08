@@ -420,6 +420,94 @@ export function hasCustodyHistory(b: Pick<Booking, "breakdown">): boolean {
   return sumBreakdownKeys(b.breakdown, CUSTODY_HISTORY_KEYS) > 0;
 }
 
+/**
+ * A KEPT booking: one an order edit left in place only because units moved on it
+ * (api-cloudrun#1147). The order asks for none of it, so `quantity_ordered` is
+ * `0`; its custody is history, not work the order asked for.
+ */
+export function isKeptBooking(b: Pick<Booking, "quantity_ordered">): boolean {
+  return b.quantity_ordered === 0;
+}
+
+/** The order statuses an operator AUTHORS and the bookings never override. */
+const AUTHORED_PHASE_STATUSES: ReadonlySet<OrderStatusType> = new Set(["draft", "quoted", "canceled"]);
+
+/** Keys holding custody PAST the prep shelf: `out` and every terminal key. */
+const PAST_PREP_KEYS: readonly BookingBreakdownKeyType[] = CUSTODY_HISTORY_KEYS.filter((k) => k !== "prepped");
+
+/**
+ * An order's status as `authored ⊕ derived` (stock campaign decision 2): the
+ * operator's status where the operator owns it, otherwise the phase read off
+ * its bookings.
+ *
+ * | stored | status |
+ * |---|---|
+ * | `draft`, `quoted`, `canceled` | the stored status, always |
+ * | `reserved`, `active`, `complete`, and no booking the order asks for | the stored status: there is no work to read a phase off |
+ * | `reserved`, `active`, `complete` | `complete` when every booking is closed (`isBookingClosed`, a kept one included), else `active` when any custody is past the prep shelf, else `reserved` |
+ *
+ * So a complete order REOPENS when an edit raises a line (the raise lands
+ * `reserved` and the order reads `active`), and re-completes when the raise is
+ * lowered; a `reserved` order whose units went out reads `active` whichever
+ * writer moved them (census 6 found 11 stuck `reserved` in prod). It absorbs
+ * the api's `bookingsCompleteOrder`: a canceled order whose kept bookings close
+ * stays canceled, and kept bookings alone never complete an order — yet an OPEN
+ * kept booking still holds one open.
+ *
+ * ⚠️ **The "no booking the order asks for" row is load-bearing.** An order of
+ * only service lines books nothing; without the row every such complete order
+ * would read `reserved` on its next save.
+ */
+export function deriveOrderStatus(
+  stored: OrderStatusType,
+  bookings: ReadonlyArray<Pick<Booking, "type" | "breakdown" | "quantity_ordered">>,
+): OrderStatusType {
+  if (AUTHORED_PHASE_STATUSES.has(stored)) return stored;
+  if (!bookings.some((b) => !isKeptBooking(b))) return stored;
+  if (isOrderBookingsClosed(bookings)) return "complete";
+  if (bookings.some((b) => sumBreakdownKeys(b.breakdown, PAST_PREP_KEYS) > 0)) return "active";
+  return "reserved";
+}
+
+/** One booking that blocks a cancel, and what it still holds. */
+export interface CancelBlocker {
+  uid: string;
+  /** Units on the prep shelf: undo with `unprep`. */
+  prepped: number;
+  /** Units still out that CFS owns: return with `check_in`, or undo with `check_out_undo` then `unprep`. */
+  out: number;
+}
+
+/**
+ * Why an order may not be canceled yet, or `null` when it may (stock campaign
+ * decision 13). Refused while any booking holds LIVE custody (`liveCustody`:
+ * `prepped`, plus `out` where CFS still owns it), naming each one — the chain of
+ * events is respected by returning or undoing those units first, each an
+ * ordinary custody action with its movement, and only then canceling.
+ * Returned and out-of-service history stays on kept bookings, as it always has.
+ *
+ * The api enforces it on the bookings its order write already reads; the
+ * manager renders its prompt from the same list.
+ */
+export function cancelRefusal(
+  bookings: ReadonlyArray<Pick<Booking, "uid" | "type" | "breakdown">>,
+): { message: string; bookings: CancelBlocker[] } | null {
+  const blockers: CancelBlocker[] = [];
+  let units = 0;
+  for (const b of bookings) {
+    const live = liveCustody(b);
+    if (live === 0) continue;
+    units += live;
+    blockers.push({ uid: b.uid, prepped: b.breakdown.prepped, out: ownsKey(b.type, "out") ? b.breakdown.out : 0 });
+  }
+  if (blockers.length === 0) return null;
+  return {
+    message: `${units} unit(s) on ${blockers.length} booking(s) are prepped or out — return or undo them before canceling ` +
+      `(${blockers.map((b) => b.uid).join(", ")})`,
+    bookings: blockers,
+  };
+}
+
 /** One order row at a booking grain, before and after an order edit. */
 export interface GrainRow {
   /** Caller-chosen row key, returned in {@link GrainKeep.byRow}. */

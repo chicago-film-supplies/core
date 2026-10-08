@@ -3,6 +3,9 @@ import {
   apportionBreakdown,
   applyBookingBreakdownDelta,
   calculateBookingBreakdown,
+  cancelRefusal,
+  deriveOrderStatus,
+  isKeptBooking,
   emptyBookingsBreakdown,
   grainKeep,
   hasCustodyHistory,
@@ -503,4 +506,74 @@ Deno.test("apportionBreakdown: 100k draws — every bucket conserved, every reci
   // them, every one of which the sweep above passed. Reported, not floored.
   console.log(`apportionBreakdown sweep: ${multiBucketMultiRecipient} multi/multi draws, naive per-bucket broke ${naiveBroken}`);
   assertEquals(naiveBroken > 0, true, "the companion never fired — the corpus does not discriminate");
+});
+
+// ── deriveOrderStatus / cancelRefusal (stock campaign P1, decisions 2 and 13) ──
+
+const orderBk = (
+  b: Partial<Booking["breakdown"]>,
+  quantity_ordered: number,
+  type: Booking["type"] = "rental",
+  uid = "o:i:d",
+): Pick<Booking, "uid" | "type" | "breakdown" | "quantity_ordered"> => ({
+  uid,
+  type,
+  quantity_ordered,
+  breakdown: { ...emptyBookingsBreakdown(), ...b },
+});
+
+Deno.test("deriveOrderStatus: the authored statuses are never overridden by the bookings", () => {
+  for (const s of ["draft", "quoted", "canceled"] as const) {
+    assertEquals(deriveOrderStatus(s, [orderBk({ returned: 1 }, 1)]), s);
+    assertEquals(deriveOrderStatus(s, [orderBk({ out: 1 }, 1)]), s);
+  }
+});
+
+Deno.test("deriveOrderStatus: reserved, active and complete are read off the bookings", () => {
+  for (const s of ["reserved", "active", "complete"] as const) {
+    assertEquals(deriveOrderStatus(s, [orderBk({ reserved: 2 }, 2)]), "reserved", s);
+    assertEquals(deriveOrderStatus(s, [orderBk({ prepped: 2 }, 2)]), "reserved", s);
+    assertEquals(deriveOrderStatus(s, [orderBk({ out: 1, reserved: 1 }, 2)]), "active", s);
+    assertEquals(deriveOrderStatus(s, [orderBk({ returned: 1, reserved: 1 }, 2)]), "active", s);
+    assertEquals(deriveOrderStatus(s, [orderBk({ returned: 2 }, 2)]), "complete", s);
+  }
+  // A complete order reopens when an edit raises a line, and re-completes when lowered.
+  assertEquals(deriveOrderStatus("complete", [orderBk({ returned: 2, reserved: 1 }, 3)]), "active");
+  // A fully-out sale is closed (decision 9).
+  assertEquals(deriveOrderStatus("reserved", [orderBk({ out: 2 }, 2, "sale")]), "complete");
+});
+
+Deno.test("deriveOrderStatus: kept bookings — the api's bookingsCompleteOrder cases, carried over", () => {
+  // History alone is not work.
+  assertEquals(deriveOrderStatus("active", [orderBk({ returned: 1 }, 0)]), "active");
+  // An OPEN kept booking still holds the order open; a closed one does not.
+  assertEquals(deriveOrderStatus("active", [orderBk({ returned: 2 }, 2), orderBk({ out: 1 }, 0)]), "active");
+  assertEquals(deriveOrderStatus("active", [orderBk({ returned: 2 }, 2), orderBk({ returned: 1 }, 0)]), "complete");
+  // A canceled order whose kept bookings closed stays canceled.
+  assertEquals(deriveOrderStatus("canceled", [orderBk({ returned: 1 }, 0)]), "canceled");
+});
+
+Deno.test("deriveOrderStatus: an order with no booking it asks for keeps its stored status", () => {
+  // An order of only service lines books nothing; it must not reopen on a save.
+  assertEquals(deriveOrderStatus("complete", []), "complete");
+  assertEquals(deriveOrderStatus("active", []), "active");
+  assertEquals(deriveOrderStatus("complete", [orderBk({ returned: 1 }, 0)]), "complete");
+});
+
+Deno.test("isKeptBooking is quantity_ordered === 0", () => {
+  assertEquals(isKeptBooking({ quantity_ordered: 0 }), true);
+  assertEquals(isKeptBooking({ quantity_ordered: 1 }), false);
+});
+
+Deno.test("cancelRefusal: refused while any booking holds prepped or owned out, naming each (decision 13)", () => {
+  assertEquals(cancelRefusal([orderBk({ reserved: 2 }, 2), orderBk({ returned: 2 }, 2)]), null);
+  // A sale's out is the customer's, so it does not block.
+  assertEquals(cancelRefusal([orderBk({ out: 2 }, 2, "sale")]), null);
+  const r = cancelRefusal([
+    orderBk({ out: 1, returned: 1 }, 2, "rental", "a"),
+    orderBk({ prepped: 2 }, 2, "sale", "b"),
+    orderBk({ reserved: 3 }, 3, "rental", "c"),
+  ]);
+  assertEquals(r?.bookings, [{ uid: "a", prepped: 0, out: 1 }, { uid: "b", prepped: 2, out: 0 }]);
+  assertEquals(r?.message.includes("3 unit(s) on 2 booking(s)"), true);
 });

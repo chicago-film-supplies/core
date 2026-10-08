@@ -30,6 +30,16 @@ export const BOOKING_STATUSES = [
 export type BookingStatusType = typeof BOOKING_STATUSES[number];
 const BookingStatus: z.ZodType<BookingStatusType> = z.enum(BOOKING_STATUSES);
 
+/**
+ * Every booking status but `complete` — the statuses whose booking may still
+ * consume stock (`unavailableFromBooking` drops a complete booking and nothing
+ * else). An ARRAY, because its main readers are Firestore
+ * `where("status", "in", …)` queries (core#110: the api's pick sheets and the
+ * manager's stock store each derived it by hand). Derived as the complement, so
+ * a new status is open until someone says otherwise.
+ */
+export const OPEN_BOOKING_STATUSES: readonly BookingStatusType[] = BOOKING_STATUSES.filter((s) => s !== "complete");
+
 /** A reference to a destination with its address, used in booking delivery/collection. */
 export interface BookingDestinationRef {
   uid: string;

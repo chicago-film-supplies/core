@@ -37,6 +37,7 @@ import type {
 } from "../schemas/mod.ts";
 import isEqual from "lodash-es/isEqual";
 import {
+  TERMINAL_ORDER_STATUSES,
   DOC_LINE_ITEM_TYPES,
   hasCollectionLine,
   isCollectionLineType,
@@ -614,7 +615,7 @@ export function deriveNextEventDate(
     destinations: ReadonlyArray<Pick<DocDestinationType, "dates">>;
   },
 ): { iso: string | null; fs: FirestoreTimestampType | null } {
-  if (order.status === "complete" || order.status === "canceled") {
+  if (TERMINAL_ORDER_STATUSES.includes(order.status)) {
     return { iso: null, fs: null };
   }
   const leg = legDirectionFromBreakdown(order.bookings_breakdown);
