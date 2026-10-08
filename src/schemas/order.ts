@@ -1923,7 +1923,7 @@ export interface ExtendRentalLineType {
 /**
  * The body of `POST /orders/{uid}/extensions` — the customer keeps some of a
  * leg's rental units past its collection date
- * (`api-cloudrun/.claude/plans/rental-extension.md`).
+ * (api-cloudrun#1235).
  *
  * A `z.object`, so an api older than a field STRIPS it: an api that does not
  * read `units` yet refuses a serialized product rather than mis-moving it.

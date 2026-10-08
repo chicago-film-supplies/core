@@ -3577,7 +3577,7 @@ const isUnder = (path: readonly string[], prefix: readonly string[]) =>
 
 /**
  * Move some units of some rows from one leg (A) to a NEW leg (B) — the order
- * half of a rental extension (`api-cloudrun/.claude/plans/rental-extension.md`).
+ * half of a rental extension (api-cloudrun#1235).
  *
  * - **Every row states its own quantity.** Nothing is scaled here: a kit's
  *   components can be partly back already, so a ratio can exceed what is still
@@ -3718,7 +3718,7 @@ export interface LegMergeItem extends LegMoveItem {
 
 /**
  * Put leg B's rows back on leg A and drop leg B — the order half of UNDOING a
- * rental extension (`api-cloudrun/.claude/plans/rental-extension.md` Phase 4),
+ * rental extension (api-cloudrun#1235),
  * the inverse of {@link moveLinesToLeg}.
  *
  * - **A row B shares with A merges by quantity.** B's path maps onto A by

@@ -1,6 +1,6 @@
 /**
  * `mergeLegBack` — the order half of UNDOING a rental extension
- * (`api-cloudrun/.claude/plans/rental-extension.md` Phase 4). Inputs are written
+ * (api-cloudrun#1235). Inputs are written
  * by hand or produced by `moveLinesToLeg`; `computeItemPaths` runs only on the
  * OUTPUT, as the API route runs it.
  */

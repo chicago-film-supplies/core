@@ -1,6 +1,6 @@
 /**
  * `moveLinesToLeg` — the order half of a rental extension
- * (`api-cloudrun/.claude/plans/rental-extension.md` Phase 1.5). Every path is
+ * (api-cloudrun#1235). Every path is
  * written out by hand; `computeItemPaths` runs only on the OUTPUT, as the API
  * route will run it.
  */
