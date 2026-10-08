@@ -16470,6 +16470,23 @@
       "symbols": [
         {
           "kind": "function",
+          "name": "keepKitAncestors",
+          "signature": "keepKitAncestors(candidates: readonly T[], kept: readonly typeLiteral[]): Map<T, T>",
+          "doc": "**A KEPT fulfillment row keeps its PRODUCT ancestors** — the rows, among\n`candidates`, that sit strictly above some `kept` row, each in the form it\nsurvives as: `quantity: 0`, `quantity_ordered: 0` (structure, not units —\nruling Q2 of api-cloudrun#1147).\n\nA kit component's grain includes its kit, and `computeItemPaths` derives a\nrow's path from the rows above it, so a kept component whose kit parent went\nis re-rooted: its booking signature goes null, it detaches from its 4-segment\nbooking, and its stored `zero_priced: true` lands on a top-level line, which\n`FulfillmentSchema` refuses. A kit's OWN booking keeps it only when that\nbooking holds custody, and an operator who checked out only the components\nleft the kit's booking a plan — so custody alone does not keep the kit, and\nthis rule has to.\n\nONE rule for every writer that keeps rows by custody. It was `syncRows`'\nprivate loop (`api-cloudrun/src/lib/orderFulfillmentSync.ts`, kit review A)\nwhile the invoice-only projection\n(`api-cloudrun/src/lib/invoiceOnlyProjection.ts`) kept a component and\ndropped its kit.",
+          "paramTags": [
+            {
+              "name": "candidates",
+              "doc": "Line rows the writer would otherwise DROP. Which rows\nthose are is the writer's own rule; dividers are placed separately\n(`placeStoredOnlyRows`) and do not belong here."
+            },
+            {
+              "name": "kept",
+              "doc": "The rows being kept, by their (stored) path"
+            }
+          ],
+          "returnsTag": "Each candidate to keep, mapped to the row it survives as"
+        },
+        {
+          "kind": "function",
           "name": "rebuildFulfillmentItems",
           "signature": "rebuildFulfillmentItems(storedItems: readonly FulfillmentItemType[], submitted: readonly FulfillmentLineItemType[]): FulfillmentItemType[]",
           "doc": "Rebuild the items array from the stored document and a picker submission.\n\nStructure and sequence come from `storedItems`; membership, quantities and\nsubstitutions come from `submitted`. The result is a function of\n*(stored order, submitted set)* — **the order lines arrive in does not affect\nit**, which is the property the two previous implementations both lacked.\n\n- A stored line whose path the submission still carries is kept, in place,\n  carrying the submitted line's values.\n- A stored line the submission drops is removed.\n- A submitted line with no stored counterpart is a substitution: it is placed\n  immediately after the deepest ancestor the output still carries, which is\n  where its parentage comes from. Several substitutions against one ancestor\n  keep their submitted order relative to each other.\n- Structural items are never taken from the submission — the picker does not\n  own them, and the API strips them from the request body.\n\n`computeItemPaths` runs last and remains the ONE author of `path`; this\nfunction only decides the sequence it reads.",

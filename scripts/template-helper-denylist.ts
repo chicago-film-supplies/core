@@ -626,13 +626,15 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "overbilledOutOfService",
     "seedReplacementLines",
   ],
-  // `utils/fulfillment-items.ts` is a WRITE-PATH function shared by the API and
+  // `utils/fulfillment-items.ts` is WRITE-PATH machinery shared by the API and
   // the manager — it rebuilds a fulfillment's items array from a picker
-  // submission. A template renders a document that has already been written, so
-  // it has no submission to rebuild from and nothing to call this with. It is
+  // submission, and decides which kit ancestors a kept row keeps. A template
+  // renders a document that has already been written, so it has no submission
+  // to rebuild from and nothing to call these with. It is
   // listed in UTIL_MODULES only so the drift guard sees its exports, exactly as
   // `citations` and `template-lint` are.
   "fulfillment-items": [
+    "keepKitAncestors",
     "rebuildFulfillmentItems",
   ],
   // `utils/fulfillment-booking-rows.ts` is the order → bookings projection's

@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { rebuildFulfillmentItems } from "../src/utils/fulfillment-items.ts";
+import { keepKitAncestors, rebuildFulfillmentItems } from "../src/utils/fulfillment-items.ts";
 import type { FulfillmentItemType, FulfillmentLineItemType } from "../src/schemas/fulfillment.ts";
 
 const D = "dest-1", GA = "group-a", GB = "group-b";
@@ -190,4 +190,38 @@ Deno.test("a line whose ancestry no longer resolves goes to the ROOT, not the ta
   const out = rebuildFulfillmentItems(stored, submitted);
   assertEquals(out.map((i) => i.uid), [IX, DA]);
   assertEquals(pathOf(out, IX), [IX]);
+});
+
+// ── keepKitAncestors ──────────────────────────────────────────────
+
+Deno.test("keepKitAncestors: a kept component keeps every product ancestor, at quantity 0", () => {
+  const RIG = "prod-rig", CASE = "prod-case", BAR = "prod-bar", BULB = "prod-bulb";
+  const rig = line(RIG, [D, GA, RIG], 1, { quantity_ordered: 1, zero_priced: null });
+  const kase = line(CASE, [D, GA, RIG, CASE], 1, { quantity_ordered: 1, zero_priced: true });
+  const bar = line(BAR, [D, GA, RIG, CASE, BAR], 2, { quantity_ordered: 2, zero_priced: true });
+  const bulb = line(BULB, [D, GA, RIG, CASE, BAR, BULB], 4, { zero_priced: true });
+  const other = line(Z, [D, GA, Z], 3, { quantity_ordered: 3 });
+  const out = keepKitAncestors([rig, kase, bar, other], [bulb]);
+  assertEquals([...out.keys()].map((r) => r.uid), [RIG, CASE, BAR]);
+  assertEquals(
+    [...out.values()].map((r) => [r.uid, r.quantity, r.quantity_ordered, r.zero_priced]),
+    [[RIG, 0, 0, null], [CASE, 0, 0, true], [BAR, 0, 0, true]],
+  );
+});
+
+Deno.test("keepKitAncestors: matched by PATH — of two copies of one kit, only the kept row's own copy", () => {
+  // core#129's shape: the kit standalone and nested in a bigger kit, one group.
+  const BIG = "prod-big";
+  const standalone = line(PARENT, [D, GA, PARENT]);
+  const big = line(BIG, [D, GA, BIG]);
+  const nested = line(PARENT, [D, GA, BIG, PARENT], 1, { zero_priced: true });
+  const keptComponent = line(X, [D, GA, BIG, PARENT, X], 1, { zero_priced: true });
+  const out = keepKitAncestors([standalone, big, nested], [keptComponent]);
+  assertEquals([...out.keys()].map((r) => r.path), [[D, GA, BIG], [D, GA, BIG, PARENT]]);
+});
+
+Deno.test("keepKitAncestors: a row is not its own ancestor, and nothing kept keeps nothing", () => {
+  const kit = line(PARENT, [D, GA, PARENT]);
+  assertEquals(keepKitAncestors([kit], [kit]).size, 0);
+  assertEquals(keepKitAncestors([kit], []).size, 0);
 });

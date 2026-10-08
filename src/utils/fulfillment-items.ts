@@ -38,6 +38,7 @@
  * @module
  */
 import { computeItemPaths } from "./orders.ts";
+import { isStrictlyBelow } from "./substitutions.ts";
 import { isFulfillmentLineItem } from "../schemas/fulfillment.ts";
 import type {
   FulfillmentItemType,
@@ -143,4 +144,44 @@ export function rebuildFulfillmentItems(
   out.unshift(...rootless);
 
   return computeItemPaths(out);
+}
+
+/**
+ * **A KEPT fulfillment row keeps its PRODUCT ancestors** — the rows, among
+ * `candidates`, that sit strictly above some `kept` row, each in the form it
+ * survives as: `quantity: 0`, `quantity_ordered: 0` (structure, not units —
+ * ruling Q2 of api-cloudrun#1147).
+ *
+ * A kit component's grain includes its kit, and `computeItemPaths` derives a
+ * row's path from the rows above it, so a kept component whose kit parent went
+ * is re-rooted: its booking signature goes null, it detaches from its 4-segment
+ * booking, and its stored `zero_priced: true` lands on a top-level line, which
+ * `FulfillmentSchema` refuses. A kit's OWN booking keeps it only when that
+ * booking holds custody, and an operator who checked out only the components
+ * left the kit's booking a plan — so custody alone does not keep the kit, and
+ * this rule has to.
+ *
+ * ONE rule for every writer that keeps rows by custody. It was `syncRows`'
+ * private loop (`api-cloudrun/src/lib/orderFulfillmentSync.ts`, kit review A)
+ * while the invoice-only projection
+ * (`api-cloudrun/src/lib/invoiceOnlyProjection.ts`) kept a component and
+ * dropped its kit.
+ *
+ * @param candidates - Line rows the writer would otherwise DROP. Which rows
+ *   those are is the writer's own rule; dividers are placed separately
+ *   (`placeStoredOnlyRows`) and do not belong here.
+ * @param kept - The rows being kept, by their (stored) path
+ * @returns Each candidate to keep, mapped to the row it survives as
+ */
+export function keepKitAncestors<T extends FulfillmentLineItemType>(
+  candidates: readonly T[],
+  kept: readonly { readonly path: readonly string[] }[],
+): Map<T, T> {
+  const out = new Map<T, T>();
+  for (const row of candidates) {
+    if (kept.some((k) => isStrictlyBelow(k.path, row.path))) {
+      out.set(row, { ...row, quantity: 0, quantity_ordered: 0 });
+    }
+  }
+  return out;
 }
