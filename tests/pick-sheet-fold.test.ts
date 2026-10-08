@@ -32,7 +32,7 @@ import type {
   OrderDocDatesType,
   PickSheetScope,
 } from "../src/schemas/mod.ts";
-import { BookingSchema, pickSheetItemOwnsBooking } from "../src/schemas/mod.ts";
+import { BookingSchema, PickSheetBookingSchema, pickSheetItemOwnsBooking } from "../src/schemas/mod.ts";
 import {
   bookingOccurrencesByBooking,
   chooseBookingOwner,
@@ -1351,4 +1351,41 @@ Deno.test("bookingOccurrencesByBooking agrees with the fold, booking for booking
     compared++;
   }
   assertEquals(compared, 2, "both bookings must be compared, or the arm is narrower than it reads");
+});
+
+// ── Unit numbers (serial-tracking P5) ───────────────────────────────
+
+Deno.test("fold: a leg's bookings carry their unit NUMBERS verbatim, and an untracked one states null", () => {
+  const f = fulfillment({
+    destinations: [pair(LEG_1, STAGE)],
+    items: [divider(LEG_1, "Stage 4"), line(CAMERA, "Alexa 35", 3, [LEG_1, CAMERA]), line(TRIPOD, "Sachtler", 1, [LEG_1, TRIPOD])],
+  });
+  const units = { cleaning: [], damaged: [], lost: [], maintenance: [], out: [1001, 1002], prepped: [1040], returned: [] };
+  const radios = { ...booking(CAMERA, LEG_1, { quantity: 3, prepped: 1, out: 2 }), units };
+  const { orders } = foldPickSheet({
+    scope: DESTINATION_SCOPE,
+    gate: "all",
+    leg: null,
+    bookings: [radios, booking(TRIPOD, LEG_1, { quantity: 1 })],
+    fulfillments: docs(f),
+  });
+  const byProduct = new Map(orders[0].destinations[0].bookings.map((b) => [b.uid_product, b.units]));
+  assertEquals(byProduct.get(CAMERA), units);
+  assertEquals(byProduct.get(TRIPOD), null);
+});
+
+Deno.test("schema: a PickSheetBooking with no `units` key (a pre-P5 fixture) parses to null", () => {
+  const { units: _units, ...legacy } = { ...booking(CAMERA, LEG_1), units: null };
+  const parsed = PickSheetBookingSchema.parse({
+    uid: legacy.uid,
+    uid_product: legacy.uid_product,
+    name: legacy.name,
+    type: legacy.type,
+    status: legacy.status,
+    quantity: legacy.quantity,
+    shortage: legacy.shortage,
+    breakdown: legacy.breakdown,
+    stores: legacy.stores,
+  });
+  assertEquals(parsed.units, null);
 });

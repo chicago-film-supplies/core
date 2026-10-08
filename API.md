@@ -8475,6 +8475,7 @@ interface PickSheetBooking {
   shortage: number;
   breakdown: BookingBreakdown;
   stores: BookingStore[];
+  units: BookingUnitSetsType | null;
 }
 ```
 
@@ -41323,6 +41324,8 @@ interface ReplacementLineSeed {
   base_cents: number;
   uid_pair: string | null;
   reason: string;
+  units: number[];
+  description: string;
   warning: string | null;
 }
 ```
@@ -41363,7 +41366,17 @@ interface ReplacementSourceRecord {
   status: string;
   quantity: number;
   query_by_sources: readonly string[];
+  units: OOSUnitsType | null;
+  dates: typeLiteral;
 }
+```
+
+### `ReplacementSourceUnit`
+
+The fields of a unit the seed reads: the serial it carried when the record opened.
+
+```ts
+type ReplacementSourceUnit = Pick<UnitType, "number" | "serial_history">;
 ```
 
 ### `billedOutOfService(invoices: readonly ReplacementBillingInvoice[], excludeInvoiceUid?: string): Map<string, number>`
@@ -41416,7 +41429,7 @@ owed, a cleaning charge is only ever offered.
 Pure — same inputs as {@link seedReplacementLines} plus the settings map. The
 caller supplies the charge products and each record's rental in `products`.
 
-### `seedReplacementLines(order: ReplacementSourceOrder, records: readonly ReplacementSourceRecord[], invoices: readonly ReplacementBillingInvoice[], products: ReadonlyMap<string, ReplacementSourceProduct>): ReplacementLineSeed[]`
+### `seedReplacementLines(order: ReplacementSourceOrder, records: readonly ReplacementSourceRecord[], invoices: readonly ReplacementBillingInvoice[], products: ReadonlyMap<string, ReplacementSourceProduct>, units: ReadonlyMap<number, ReplacementSourceUnit>): ReplacementLineSeed[]`
 
 The replacement lines to offer for one order: one per billable record sourced
 from it with units left to bill.
@@ -41425,6 +41438,10 @@ Pure — the caller supplies the records (`query_by_sources` contains
 `orders:<uid>`), every invoice naming them, and the products (each record's
 rental plus its linked twin). A product missing from `products` is treated
 as having no twin.
+
+`units` is every unit the records name, keyed by number — the serials a
+line's description prints. A number missing from it prints without a serial,
+so a caller that cannot read `units` still gets the numbers.
 
 ## `@cfs/core/utils/reporting`
 
@@ -43668,6 +43685,24 @@ piece that is not a number or a run, a reversed run, a number named twice,
 and more than `max` units are each REFUSED, never repaired: the picker shows
 the error beside the text rather than guessing what was meant. Every error is
 reported, not just the first.
+
+### `serialAt(unit: Pick<UnitType, "serial_history">, instant: string | null): string | null`
+
+The serial of the physical unit that held a number at `instant` — or, with
+`instant` `null`, of the one that holds it now. `null` when no serial was
+ever recorded for that unit.
+
+🔴 **Not "the history entry open at `instant`".** A number changes PHYSICAL
+unit only at a `replaced` entry; `initial` and `corrected` entries restate the
+serial of the unit already there. So this finds the span of history between
+the `replaced` entries either side of `instant` and returns that span's
+LATEST serial. The open-entry reading is wrong both ways that matter: the
+walkie's serials were pasted (`initial`) on 2026-10-07, after most of its
+losses, so no entry is open at the loss; and a `corrected` entry after the
+loss fixes a typo in the same radio's serial.
+
+A closed span still answers — a write-off closes the open entry, and the
+written-off radio's serial is what an invoice for it names.
 
 ### `suggestUnits(available: Iterable<number>, count: number): number[] | null`
 

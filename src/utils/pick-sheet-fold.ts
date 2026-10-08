@@ -135,6 +135,7 @@ function toSheetBooking(b: Booking): PickSheetBooking {
     shortage: b.shortage,
     breakdown: b.breakdown,
     stores: b.stores,
+    units: b.units,
   };
 }
 

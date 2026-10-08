@@ -633,6 +633,7 @@ export const templateSchemaFields: Partial<
     { path: "orders[].destinations[].bookings[].shortage", type: "number" },
     { path: "orders[].destinations[].bookings[].breakdown", type: "object" },
     { path: "orders[].destinations[].bookings[].stores", type: "object[]" },
+    { path: "orders[].destinations[].bookings[].units", type: "object | null" },
     { path: "orders[].destinations[].items", type: "object[]" },
     { path: "orders[].destinations[].items[].item", type: "union" },
     { path: "orders[].destinations[].items[].uid_booking", type: "union | null" },

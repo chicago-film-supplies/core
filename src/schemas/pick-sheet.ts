@@ -69,6 +69,8 @@ import {
   type BookingStatusType,
   type BookingStore,
   BookingStoreSchema,
+  type BookingUnitSetsType,
+  BookingUnitSetsSchema,
 } from "./booking.ts";
 import {
   DocDestination,
@@ -357,6 +359,21 @@ export interface PickSheetBooking {
    * the question a pick sheet exists for. Carried verbatim off the booking.
    */
   stores: BookingStore[];
+  /**
+   * Which unit NUMBERS sit in each bucket, carried verbatim off the booking —
+   * `null` when the booking is not unit-tracked. A packing list prints these
+   * as ranges (`it.units.formatUnitRanges`).
+   *
+   * 🔴 **Numbers, never serials** (owner, 2026-10-08). A pick sheet is read on
+   * `fulfillment.read`, the permission that already reads `booking.units`;
+   * serials live on `units/unit-{n}` behind `units.read`, so carrying one here
+   * would widen who can read it.
+   *
+   * ⚠️ The schema defaults an absent key to `null` for the committed
+   * pick-sheet and packing-list fixtures that predate it, as
+   * {@link PickSheetItem.owner_path} does; the fold always states it.
+   */
+  units: BookingUnitSetsType | null;
 }
 
 /** Zod schema for {@link PickSheetBooking}. */
@@ -370,6 +387,7 @@ export const PickSheetBookingSchema: z.ZodType<PickSheetBooking> = z.strictObjec
   shortage: z.int(),
   breakdown: BookingBreakdownSchema,
   stores: z.array(BookingStoreSchema).default([]),
+  units: BookingUnitSetsSchema.nullable().default(null),
 });
 
 // ── A row ───────────────────────────────────────────────────────────

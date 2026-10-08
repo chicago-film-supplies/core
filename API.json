@@ -3669,7 +3669,7 @@
         {
           "kind": "interface",
           "name": "PickSheetBooking",
-          "declaration": "interface PickSheetBooking {\n  uid: string;\n  uid_product: string;\n  name: string;\n  type: ComponentTypeType;\n  status: BookingStatusType;\n  quantity: number;\n  shortage: number;\n  breakdown: BookingBreakdown;\n  stores: BookingStore[];\n}",
+          "declaration": "interface PickSheetBooking {\n  uid: string;\n  uid_product: string;\n  name: string;\n  type: ComponentTypeType;\n  status: BookingStatusType;\n  quantity: number;\n  shortage: number;\n  breakdown: BookingBreakdown;\n  stores: BookingStore[];\n  units: BookingUnitSetsType | null;\n}",
           "doc": "One aggregate booking on a leg — custody, and where the units live.\n\n🔴 **No money.** A booking carries `unit_price_cents` and `total_price_cents`;\na pick sheet is a warehouse document and the fulfillment projection it is\nbuilt from is *\"no price, no financial flags\"*. Projecting the fields a picker\nneeds, rather than the whole booking, is what keeps that true by construction\ninstead of by convention."
         },
         {
@@ -19124,7 +19124,7 @@
         {
           "kind": "interface",
           "name": "ReplacementLineSeed",
-          "declaration": "interface ReplacementLineSeed {\n  uid_out_of_service: string;\n  uid_rental_product: string;\n  uid_product: string | null;\n  name: string;\n  quantity: number;\n  base_cents: number;\n  uid_pair: string | null;\n  reason: string;\n  warning: string | null;\n}",
+          "declaration": "interface ReplacementLineSeed {\n  uid_out_of_service: string;\n  uid_rental_product: string;\n  uid_product: string | null;\n  name: string;\n  quantity: number;\n  base_cents: number;\n  uid_pair: string | null;\n  reason: string;\n  units: number[];\n  description: string;\n  warning: string | null;\n}",
           "doc": "One replacement line to offer, before it is placed on an invoice."
         },
         {
@@ -19142,8 +19142,14 @@
         {
           "kind": "interface",
           "name": "ReplacementSourceRecord",
-          "declaration": "interface ReplacementSourceRecord {\n  uid: string;\n  uid_product: string;\n  reason: string;\n  status: string;\n  quantity: number;\n  query_by_sources: readonly string[];\n}",
+          "declaration": "interface ReplacementSourceRecord {\n  uid: string;\n  uid_product: string;\n  reason: string;\n  status: string;\n  quantity: number;\n  query_by_sources: readonly string[];\n  units: OOSUnitsType | null;\n  dates: typeLiteral;\n}",
           "doc": "The fields of an `out-of-service` record the billing arithmetic reads."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ReplacementSourceUnit",
+          "declaration": "type ReplacementSourceUnit = Pick<UnitType, \"number\" | \"serial_history\">;",
+          "doc": "The fields of a unit the seed reads: the serial it carried when the record opened."
         },
         {
           "kind": "function",
@@ -19218,8 +19224,8 @@
         {
           "kind": "function",
           "name": "seedReplacementLines",
-          "signature": "seedReplacementLines(order: ReplacementSourceOrder, records: readonly ReplacementSourceRecord[], invoices: readonly ReplacementBillingInvoice[], products: ReadonlyMap<string, ReplacementSourceProduct>): ReplacementLineSeed[]",
-          "doc": "The replacement lines to offer for one order: one per billable record sourced\nfrom it with units left to bill.\n\nPure — the caller supplies the records (`query_by_sources` contains\n`orders:<uid>`), every invoice naming them, and the products (each record's\nrental plus its linked twin). A product missing from `products` is treated\nas having no twin.",
+          "signature": "seedReplacementLines(order: ReplacementSourceOrder, records: readonly ReplacementSourceRecord[], invoices: readonly ReplacementBillingInvoice[], products: ReadonlyMap<string, ReplacementSourceProduct>, units: ReadonlyMap<number, ReplacementSourceUnit>): ReplacementLineSeed[]",
+          "doc": "The replacement lines to offer for one order: one per billable record sourced\nfrom it with units left to bill.\n\nPure — the caller supplies the records (`query_by_sources` contains\n`orders:<uid>`), every invoice naming them, and the products (each record's\nrental plus its linked twin). A product missing from `products` is treated\nas having no twin.\n\n`units` is every unit the records name, keyed by number — the serials a\nline's description prints. A number missing from it prints without a serial,\nso a caller that cannot read `units` still gets the numbers.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -20090,6 +20096,14 @@
           "name": "parseUnitRanges",
           "signature": "parseUnitRanges(text: string, _: unknown): ParseUnitRangesResult",
           "doc": "Parse what an operator types — `\"1001-1040, 1045 1050–1052\"` — into a\ncanonical set.\n\nPieces are separated by commas, semicolons or whitespace; a run is\n`start-end` with a hyphen, en dash or em dash, spaces allowed around it. A\npiece that is not a number or a run, a reversed run, a number named twice,\nand more than `max` units are each REFUSED, never repaired: the picker shows\nthe error beside the text rather than guessing what was meant. Every error is\nreported, not just the first.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "serialAt",
+          "signature": "serialAt(unit: Pick<UnitType, \"serial_history\">, instant: string | null): string | null",
+          "doc": "The serial of the physical unit that held a number at `instant` — or, with\n`instant` `null`, of the one that holds it now. `null` when no serial was\never recorded for that unit.\n\n🔴 **Not \"the history entry open at `instant`\".** A number changes PHYSICAL\nunit only at a `replaced` entry; `initial` and `corrected` entries restate the\nserial of the unit already there. So this finds the span of history between\nthe `replaced` entries either side of `instant` and returns that span's\nLATEST serial. The open-entry reading is wrong both ways that matter: the\nwalkie's serials were pasted (`initial`) on 2026-10-07, after most of its\nlosses, so no entry is open at the loss; and a `corrected` entry after the\nloss fixes a typo in the same radio's serial.\n\nA closed span still answers — a write-off closes the open entry, and the\nwritten-off radio's serial is what an invoice for it names.",
           "paramTags": [],
           "returnsTag": null
         },
