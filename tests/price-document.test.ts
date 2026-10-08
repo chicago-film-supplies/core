@@ -14,6 +14,8 @@ import {
   priceCreditNote,
   priceDocument,
   sumPricedLines,
+  hasSettlement,
+  invoiceRepriceRefusal,
 } from "../src/utils/price-document.ts";
 import { linePairs } from "./helpers/charge-windows.ts";
 import { assignLineTaxes, type DocumentTaxContext, type TaxDestination } from "../src/utils/taxes.ts";
@@ -479,4 +481,18 @@ Deno.test("priceCreditNote: refuses a divider, a fee, and a non-positive or frac
   for (const quantity of [0, -1, 1.5]) {
     assertThrows(() => priceCreditNote([{ line: creditSource(), quantity }], taxes, []), Error, "positive integer");
   }
+});
+
+Deno.test("hasSettlement: paid or credited cents freeze; a void entry or a $0 closure does not (G16)", () => {
+  assertEquals(hasSettlement({ totals: { amount_paid_cents: 1, amount_credited_cents: 0 } }), true);
+  assertEquals(hasSettlement({ totals: { amount_paid_cents: 0, amount_credited_cents: 250 } }), true);
+  assertEquals(hasSettlement({ totals: { amount_paid_cents: 0, amount_credited_cents: 0 } }), false);
+  assertEquals(hasSettlement({}), false);
+});
+
+Deno.test("invoiceRepriceRefusal: void and settled invoices refuse, an order never does", () => {
+  assertEquals(invoiceRepriceRefusal({ kind: "order", status: "complete" } as never), null);
+  assertEquals(invoiceRepriceRefusal({ kind: "invoice", status: "draft", has_settlement: false } as never), null);
+  assert(invoiceRepriceRefusal({ kind: "invoice", status: "void", has_settlement: false } as never)?.includes("void"));
+  assert(invoiceRepriceRefusal({ kind: "invoice", status: "authorised", has_settlement: true } as never)?.includes("settled"));
 });

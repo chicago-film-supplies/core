@@ -19489,9 +19489,25 @@
         },
         {
           "kind": "function",
+          "name": "hasSettlement",
+          "signature": "hasSettlement(invoice: typeLiteral): boolean",
+          "doc": "Whether an invoice carries a settlement that freezes its money: cents PAID or\nCREDITED on its own stored totals, which are the projection of the\nsettlements journal (stock campaign P1, gap G16).\n\n⭐ **This definition wins over the manager's `settlements.length > 0`**, which\nalso counted void entries and $0 closures and so froze a reprice the server\nwould make: the manager then folded stale lines while the write repriced\nthem. A void is the invoice's `status`, not a settlement; a $0 closure moves\nno money. The api's write gate (`firestoreWrite.ts`) is this rule.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "invoiceExtensionSections",
           "signature": "invoiceExtensionSections(items: readonly typeLiteral[]): PriceDocumentExtension[]",
           "doc": "The date-extension sections of an invoice's items: one per destination\ndivider carrying `path_extension_for`.\n\nThe one derivation of {@link PriceDocumentContext.extensions}, shared by every\ninvoice writer and the manager's optimistic recompute — a caller that forgets\nto pass it re-prices extension lines at the one-week floor.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "invoiceRepriceRefusal",
+          "signature": "invoiceRepriceRefusal(document: PriceDocumentKind): string | null",
+          "doc": "Why a document's money may NOT move, or `null` when it may (D3): a void\ninvoice is retracted, and a paid or settled one is agreed. The rule\n`priceDocument` refuses on, exported so the manager reads it instead of\nrestating it (`invoiceIsRepriceable`). An order always reprices.",
           "paramTags": [],
           "returnsTag": null
         },

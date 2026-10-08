@@ -41882,6 +41882,18 @@ window is legacy CRMS divergence, which the 2026-09-16 census measured and the
 backfill resolved per owner decision; re-asserting it here would refuse
 documents the campaign deliberately left alone.
 
+### `hasSettlement(invoice: typeLiteral): boolean`
+
+Whether an invoice carries a settlement that freezes its money: cents PAID or
+CREDITED on its own stored totals, which are the projection of the
+settlements journal (stock campaign P1, gap G16).
+
+⭐ **This definition wins over the manager's `settlements.length > 0`**, which
+also counted void entries and $0 closures and so froze a reprice the server
+would make: the manager then folded stale lines while the write repriced
+them. A void is the invoice's `status`, not a settlement; a $0 closure moves
+no money. The api's write gate (`firestoreWrite.ts`) is this rule.
+
 ### `invoiceExtensionSections(items: readonly typeLiteral[]): PriceDocumentExtension[]`
 
 The date-extension sections of an invoice's items: one per destination
@@ -41890,6 +41902,13 @@ divider carrying `path_extension_for`.
 The one derivation of {@link PriceDocumentContext.extensions}, shared by every
 invoice writer and the manager's optimistic recompute — a caller that forgets
 to pass it re-prices extension lines at the one-week floor.
+
+### `invoiceRepriceRefusal(document: PriceDocumentKind): string | null`
+
+Why a document's money may NOT move, or `null` when it may (D3): a void
+invoice is retracted, and a paid or settled one is agreed. The rule
+`priceDocument` refuses on, exported so the manager reads it instead of
+restating it (`invoiceIsRepriceable`). An order always reprices.
 
 ### `lineChargeableDays(item: LineItem, ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">): typeLiteral`
 

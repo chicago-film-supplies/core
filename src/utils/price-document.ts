@@ -240,18 +240,43 @@ export interface PricedDocument<T extends LineItem> {
   warnings: UnreviewedTaxWarning[];
 }
 
+/**
+ * Whether an invoice carries a settlement that freezes its money: cents PAID or
+ * CREDITED on its own stored totals, which are the projection of the
+ * settlements journal (stock campaign P1, gap G16).
+ *
+ * ⭐ **This definition wins over the manager's `settlements.length > 0`**, which
+ * also counted void entries and $0 closures and so froze a reprice the server
+ * would make: the manager then folded stale lines while the write repriced
+ * them. A void is the invoice's `status`, not a settlement; a $0 closure moves
+ * no money. The api's write gate (`firestoreWrite.ts`) is this rule.
+ */
+export function hasSettlement(invoice: {
+  totals?: { amount_paid_cents?: number | null; amount_credited_cents?: number | null } | null;
+}): boolean {
+  return (invoice.totals?.amount_paid_cents ?? 0) > 0 || (invoice.totals?.amount_credited_cents ?? 0) > 0;
+}
+
+/**
+ * Why a document's money may NOT move, or `null` when it may (D3): a void
+ * invoice is retracted, and a paid or settled one is agreed. The rule
+ * `priceDocument` refuses on, exported so the manager reads it instead of
+ * restating it (`invoiceIsRepriceable`). An order always reprices.
+ */
+export function invoiceRepriceRefusal(document: PriceDocumentKind): string | null {
+  if (document.kind !== "invoice") return null;
+  if (document.status === "void") return "Cannot price a void invoice: its money is retracted, not re-priced";
+  if (document.status === "paid" || document.has_settlement) {
+    return `Cannot price a settled invoice (status "${document.status}"): its money is agreed. ` +
+      "Void it and issue a new one, or reverse the settlement first";
+  }
+  return null;
+}
+
 /** Refuse a document whose money may not move (D3). */
 function assertRepriceable(document: PriceDocumentKind): void {
-  if (document.kind !== "invoice") return;
-  if (document.status === "void") {
-    throw new Error("Cannot price a void invoice: its money is retracted, not re-priced");
-  }
-  if (document.status === "paid" || document.has_settlement) {
-    throw new Error(
-      `Cannot price a settled invoice (status "${document.status}"): its money is agreed. ` +
-        "Void it and issue a new one, or reverse the settlement first",
-    );
-  }
+  const refusal = invoiceRepriceRefusal(document);
+  if (refusal !== null) throw new Error(refusal);
 }
 
 /**
