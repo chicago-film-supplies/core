@@ -3825,7 +3825,7 @@
         {
           "kind": "interface",
           "name": "PickSheetItem",
-          "declaration": "interface PickSheetItem {\n  item: FulfillmentItemType;\n  uid_booking: string | null;\n  owner_path: string[] | null;\n}",
+          "declaration": "interface PickSheetItem {\n  item: FulfillmentItemType;\n  uid_booking: string | null;\n  owner_path: string[] | null;\n  booking_complete: boolean;\n}",
           "doc": "One line on a sheet — a fulfillment row, carried verbatim, plus the booking\nit resolves to.\n\n🔴 **`bookings` cannot be the row source, and this is the whole reason the\nsheet reads `fulfillments`.** There is no booking row for a `service` /\n`surcharge` / `transaction_fee` line, none for a `stock_method: \"none\"`\nproduct, and no dividers at all — so a bookings-derived sheet is silently\nshort, which is the one failure this surface refuses. Membership answers\n*which orders*; the sanitized fulfillment projection supplies every row."
         },
         {

@@ -304,10 +304,20 @@ export function foldPickSheet(input: {
   gate: PickSheetGateType;
   /** Which direction to admit; `null` admits both. See `pickSheetLegAdmits`. */
   leg: PickSheetLegType | null;
+  /**
+   * The open bookings of the sheet's orders, and optionally their `complete`
+   * ones: an order sheet shows a complete booking's units, a work list only
+   * marks its lines `booking_complete` (core#96).
+   */
   bookings: readonly Booking[];
   fulfillments: ReadonlyMap<string, Fulfillment>;
 }): PickSheetFoldResult {
   const { scope, gate, leg, bookings, fulfillments } = input;
+  // 🔴 core#96: an ORDER sheet is the whole of one order, so a finished line
+  // shows its units (and the totals count them); a work list shows only what is
+  // open. The caller may pass complete bookings for either: on a work list they
+  // only mark their lines `booking_complete`.
+  const showsComplete = scope.kind === "order";
 
   const byOrder = new Map<string, Booking[]>();
   for (const b of bookings) {
@@ -360,10 +370,14 @@ export function foldPickSheet(input: {
 
       for (let j = i + 1; j <= endIndex; j++) {
         const item = fulfillment.items[j];
-        const uidBooking = bookingUidForItem(orderUid, item, pair, bookingByUid);
+        const resolved = bookingUidForItem(orderUid, item, pair, bookingByUid);
+        // A complete booking is shown only on an ORDER sheet (core#96); on a
+        // work list its line keeps no booking, and says why.
+        const complete = resolved !== null && bookingByUid.get(resolved)!.status === "complete";
+        const uidBooking = complete && !showsComplete ? null : resolved;
         // `owner_path` is filled in after the walk: every occurrence has to be
         // known before any of them can be told which one owns.
-        items.push({ item, uid_booking: uidBooking, owner_path: null });
+        items.push({ item, uid_booking: uidBooking, owner_path: null, booking_complete: complete });
         // The type test is redundant with `uidBooking !== null` — a divider
         // resolves to no booking — and is written anyway because it is what
         // narrows `item` to the arm that HAS a `quantity`. Leaning on the
@@ -385,9 +399,10 @@ export function foldPickSheet(input: {
         else occurrences.set(uidBooking, [occurrence]);
       }
 
-      // A leg with nothing open in the membership slice is not on this sheet.
+      // A leg with nothing open in the membership slice is not on a work list.
       // For a destination scope that is a leg whose work is done; for an
-      // organization scope it is a leg whose bookings are all `complete`.
+      // organization scope it is a leg whose bookings are all `complete`. An
+      // ORDER sheet is the whole order, so it keeps a finished leg (core#96).
       if (legBookings.length === 0) continue;
 
       // ⚠️ **The leg filter sits BELOW the gate's, not beside it, and the order

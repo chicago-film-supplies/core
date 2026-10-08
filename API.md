@@ -8770,6 +8770,7 @@ interface PickSheetItem {
   item: FulfillmentItemType;
   uid_booking: string | null;
   owner_path: string[] | null;
+  booking_complete: boolean;
 }
 ```
 

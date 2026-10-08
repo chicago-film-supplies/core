@@ -1389,3 +1389,42 @@ Deno.test("schema: a PickSheetBooking with no `units` key (a pre-P5 fixture) par
   });
   assertEquals(parsed.units, null);
 });
+
+// ── core#96: a finished line is shown on an order sheet and explained on a work list ──
+
+Deno.test("fold: a complete booking's line is marked, and only an ORDER sheet shows its units (core#96)", () => {
+  const f = fulfillment({
+    destinations: [pair(LEG_1, STAGE)],
+    items: [
+      divider(LEG_1, "Stage 4"),
+      line(CAMERA, "Alexa 35", 2, [LEG_1, CAMERA]),
+      line(TRIPOD, "Sachtler", 1, [LEG_1, TRIPOD]),
+    ],
+  });
+  const bookings = [
+    booking(CAMERA, LEG_1, { status: "complete", returned: 2 }),
+    booking(TRIPOD, LEG_1, { quantity: 1 }),
+  ];
+  const ORDER_SCOPE: PickSheetScope = { kind: "order", uid: ORDER, name: "Order", uids: [ORDER] };
+
+  // A work list: the camera's units are not counted, and its row says why it is blank.
+  const work = foldPickSheet({ scope: DESTINATION_SCOPE, gate: "all", leg: null, bookings, fulfillments: docs(f) });
+  const workLeg = work.orders[0].destinations[0];
+  const camera = workLeg.items.find((it) => it.item.uid === CAMERA)!;
+  assertEquals([camera.uid_booking, camera.booking_complete], [null, true]);
+  assertEquals(workLeg.quantity, 1);
+  assertEquals(workLeg.items.find((it) => it.item.uid === TRIPOD)!.booking_complete, false);
+
+  // The order sheet is the whole order: the camera's units are there, flagged complete.
+  const sheet = foldPickSheet({ scope: ORDER_SCOPE, gate: "all", leg: null, bookings, fulfillments: docs(f) });
+  const leg = sheet.orders[0].destinations[0];
+  const shown = leg.items.find((it) => it.item.uid === CAMERA)!;
+  assertEquals([shown.uid_booking !== null, shown.booking_complete], [true, true]);
+  assertEquals(leg.quantity, 3);
+  assertEquals(leg.breakdown.returned, 2);
+
+  // A work list whose leg is all complete drops it; the order sheet keeps it.
+  const done = [booking(CAMERA, LEG_1, { status: "complete", returned: 2 }), booking(TRIPOD, LEG_1, { quantity: 1, status: "complete", returned: 1 })];
+  assertEquals(foldPickSheet({ scope: DESTINATION_SCOPE, gate: "all", leg: null, bookings: done, fulfillments: docs(f) }).orders.length, 0);
+  assertEquals(foldPickSheet({ scope: ORDER_SCOPE, gate: "all", leg: null, bookings: done, fulfillments: docs(f) }).orders.length, 1);
+});

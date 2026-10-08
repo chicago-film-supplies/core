@@ -459,6 +459,22 @@ export interface PickSheetItem {
    * assume no uid ever contains a `:`.
    */
   owner_path: string[] | null;
+  /**
+   * The line's booking is `complete` — its units are back, or (a sale) gone
+   * with the customer (core#96).
+   *
+   * 🔴 **It is what tells a blank row apart from a missing one.** A work-list
+   * sheet (a destination's, an organization's) carries only open bookings, so a
+   * finished line has no `uid_booking` and no numbers; without this a page of
+   * them read as data nobody wrote down (order #961: 45 of 64 rows). An ORDER
+   * sheet shows the finished line's units as well, and the flag lets a renderer
+   * grey it. `false` on a divider, a non-stock line and an open booking.
+   *
+   * `.default(false)`: a pick sheet is a response body and a template fixture,
+   * never a stored document, and a fixture captured before the field read false
+   * for every line, which it was.
+   */
+  booking_complete: boolean;
 }
 
 /** Zod schema for {@link PickSheetItem}. */
@@ -466,6 +482,7 @@ export const PickSheetItemSchema: z.ZodType<PickSheetItem> = z.strictObject({
   item: FulfillmentItem,
   uid_booking: AnyUid.nullable(),
   owner_path: z.array(ItemUid).nullable().default(null),
+  booking_complete: z.boolean().default(false),
 });
 
 /**
