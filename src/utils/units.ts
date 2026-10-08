@@ -20,6 +20,7 @@ import {
   OOS_FLAG_REASONS,
   type OOSFlagReasonType,
   type UnitRosterEntryType,
+  type UnitType,
 } from "../schemas/mod.ts";
 
 // ── Canonical sets ───────────────────────────────────────────────────
@@ -70,6 +71,44 @@ export function formatUnitRanges(numbers: Iterable<number>, opts: FormatUnitRang
   return toUnitRanges(numbers)
     .map((r) => r.start === r.end ? String(r.start) : `${r.start}${dash}${r.end}`)
     .join(separator);
+}
+
+// ── Serials ──────────────────────────────────────────────────────────
+
+/**
+ * The serial of the physical unit that held a number at `instant` — or, with
+ * `instant` `null`, of the one that holds it now. `null` when no serial was
+ * ever recorded for that unit.
+ *
+ * 🔴 **Not "the history entry open at `instant`".** A number changes PHYSICAL
+ * unit only at a `replaced` entry; `initial` and `corrected` entries restate the
+ * serial of the unit already there. So this finds the span of history between
+ * the `replaced` entries either side of `instant` and returns that span's
+ * LATEST serial. The open-entry reading is wrong both ways that matter: the
+ * walkie's serials were pasted (`initial`) on 2026-10-07, after most of its
+ * losses, so no entry is open at the loss; and a `corrected` entry after the
+ * loss fixes a typo in the same radio's serial.
+ *
+ * A closed span still answers — a write-off closes the open entry, and the
+ * written-off radio's serial is what an invoice for it names.
+ */
+export function serialAt(
+  unit: Pick<UnitType, "serial_history">,
+  instant: string | null,
+): string | null {
+  const at = instant === null ? Infinity : Date.parse(instant);
+  const history = [...unit.serial_history].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+  let from = 0;
+  let to = history.length;
+  for (let i = 0; i < history.length; i++) {
+    if (history[i].reason !== "replaced") continue;
+    if (Date.parse(history[i].start) <= at) from = i;
+    else {
+      to = i;
+      break;
+    }
+  }
+  return history.slice(from, to).at(-1)?.serial_number ?? null;
 }
 
 // ── Parsing ──────────────────────────────────────────────────────────

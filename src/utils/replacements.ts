@@ -40,7 +40,9 @@
  * @module
  */
 import { componentSignatureHash, parseBookingId } from "./booking-id.ts";
+import { formatUnitRanges, serialAt } from "./units.ts";
 import type { OOSReasonType } from "../schemas/common.ts";
+import type { OOSUnitsType, UnitType } from "../schemas/mod.ts";
 
 /** The `out-of-service` reasons a customer is billed for. */
 export const BILLABLE_OOS_REASONS: readonly ["lost", "damaged"] = ["lost", "damaged"] as const;
@@ -87,7 +89,14 @@ export interface ReplacementSourceRecord {
   status: string;
   quantity: number;
   query_by_sources: readonly string[];
+  /** The units the record names, or `null` when it names none (a bulk product, a historic loss). */
+  units: OOSUnitsType | null;
+  /** `start` is when the units went out of service — the instant whose serials a line names. */
+  dates: { start: string | null };
 }
+
+/** The fields of a unit the seed reads: the serial it carried when the record opened. */
+export type ReplacementSourceUnit = Pick<UnitType, "number" | "serial_history">;
 
 /** The fields of an invoice the billed sum reads. */
 export interface ReplacementBillingInvoice {
@@ -144,6 +153,17 @@ export interface ReplacementLineSeed {
    */
   uid_pair: string | null;
   reason: string;
+  /** Every unit the record names, ascending; `[]` when it names none. */
+  units: number[];
+  /**
+   * The line's description: the reason, then each unit with the serial it
+   * carried when it went out of service, where one was recorded —
+   * `"Lost: unit 1017 (S/N 902ZAE5968), unit 1042"`. With no serial to name it
+   * is the ranges alone (`"Lost: units 1017–1019"`), and with no units the
+   * reason alone (`"Lost"`). Owner, 2026-10-08: a replacement line names the
+   * serial of what it bills for.
+   */
+  description: string;
   warning: string | null;
 }
 
@@ -249,6 +269,35 @@ function bookingSourceOf(
   return { uid_pair, quoted };
 }
 
+/** Title-cased reason: "Lost" / "Damaged". */
+function reasonLabel(reason: string): string {
+  return reason.length === 0 ? reason : reason[0].toUpperCase() + reason.slice(1);
+}
+
+/** Every unit a record names, in any bucket, ascending. */
+function recordUnits(units: OOSUnitsType | null): number[] {
+  if (units === null) return [];
+  return [...units.away, ...units.flagged, ...units.returned_to_service, ...units.written_off].sort((a, b) => a - b);
+}
+
+/** See {@link ReplacementLineSeed.description}. */
+function replacementDescription(
+  record: Pick<ReplacementSourceRecord, "reason" | "dates">,
+  numbers: readonly number[],
+  units: ReadonlyMap<number, ReplacementSourceUnit>,
+): string {
+  const label = reasonLabel(record.reason);
+  if (numbers.length === 0) return label;
+  const serials = numbers.map((n) => {
+    const unit = units.get(n);
+    return unit ? serialAt(unit, record.dates.start) : null;
+  });
+  if (serials.every((s) => s === null)) {
+    return `${label}: ${numbers.length === 1 ? "unit" : "units"} ${formatUnitRanges(numbers)}`;
+  }
+  return `${label}: ${numbers.map((n, i) => serials[i] === null ? `unit ${n}` : `unit ${n} (S/N ${serials[i]})`).join(", ")}`;
+}
+
 /**
  * The replacement lines to offer for one order: one per billable record sourced
  * from it with units left to bill.
@@ -257,12 +306,17 @@ function bookingSourceOf(
  * `orders:<uid>`), every invoice naming them, and the products (each record's
  * rental plus its linked twin). A product missing from `products` is treated
  * as having no twin.
+ *
+ * `units` is every unit the records name, keyed by number — the serials a
+ * line's description prints. A number missing from it prints without a serial,
+ * so a caller that cannot read `units` still gets the numbers.
  */
 export function seedReplacementLines(
   order: ReplacementSourceOrder,
   records: readonly ReplacementSourceRecord[],
   invoices: readonly ReplacementBillingInvoice[],
   products: ReadonlyMap<string, ReplacementSourceProduct>,
+  units: ReadonlyMap<number, ReplacementSourceUnit>,
 ): ReplacementLineSeed[] {
   const billed = billedOutOfService(invoices);
   const orderKey = `orders:${order.uid}`;
@@ -281,6 +335,7 @@ export function seedReplacementLines(
     const twinCents = twin?.price?.base_cents;
     const base_cents = quoted ?? (typeof twinCents === "number" ? twinCents : 0);
     const rentalName = rental?.name ?? record.uid_product;
+    const numbers = recordUnits(record.units);
 
     seeds.push({
       uid_out_of_service: record.uid,
@@ -291,6 +346,8 @@ export function seedReplacementLines(
       base_cents,
       uid_pair,
       reason: record.reason,
+      units: numbers,
+      description: replacementDescription(record, numbers, units),
       warning: twin ? null : `${rentalName} has no linked replacement product; billed as a custom line`,
     });
   }

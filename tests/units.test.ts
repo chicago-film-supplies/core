@@ -23,6 +23,7 @@ import {
   RosterFoldError,
   type RosterMovement,
   type RosterUnits,
+  serialAt,
   suggestUnits,
   toUnitRanges,
 } from "../src/utils/units.ts";
@@ -434,4 +435,51 @@ Deno.test("foldRosterUnits does not mutate its input", () => {
   const snapshot = structuredClone(roster);
   foldRosterUnits(roster, ownership("adjustment_decrease", [1001], SHELF, null));
   assertEquals(roster, snapshot);
+});
+
+// ── serialAt ─────────────────────────────────────────────────────────
+
+type HistoryEntry = { serial_number: string; start: string; end: string | null; reason: "initial" | "replaced" | "corrected" };
+function history(...entries: HistoryEntry[]) {
+  return {
+    serial_history: entries.map((e) => ({ ...e, uid_movement: null, notes: "", changed_by: { uid: "u1", name: "Op" } })),
+  };
+}
+const LOSS = "2025-04-17T12:00:00.000-05:00";
+
+Deno.test("serialAt: a serial recorded AFTER the loss is still that radio's", () => {
+  // The walkie's serials were pasted 2026-10-07, after most of its losses.
+  const unit = history({ serial_number: "902ZAE5968", start: "2026-10-07T09:00:00.000-05:00", end: null, reason: "initial" });
+  assertEquals(serialAt(unit, LOSS), "902ZAE5968");
+});
+
+Deno.test("serialAt: a replacement after the loss does not rename the lost radio", () => {
+  const unit = history(
+    { serial_number: "902ZAE3358", start: "2024-01-05T09:00:00.000-06:00", end: "2025-10-16T16:00:00.000-05:00", reason: "initial" },
+    { serial_number: "902EBQP559", start: "2025-10-16T16:00:00.000-05:00", end: null, reason: "replaced" },
+  );
+  assertEquals(serialAt(unit, LOSS), "902ZAE3358");
+  assertEquals(serialAt(unit, "2025-11-01T09:00:00.000-05:00"), "902EBQP559");
+  assertEquals(serialAt(unit, null), "902EBQP559");
+});
+
+Deno.test("serialAt: a correction after the loss fixes the same radio's serial", () => {
+  const unit = history(
+    { serial_number: "902ZAE59G8", start: "2024-01-05T09:00:00.000-06:00", end: "2026-10-07T09:00:00.000-05:00", reason: "initial" },
+    { serial_number: "902ZAE5968", start: "2026-10-07T09:00:00.000-05:00", end: null, reason: "corrected" },
+  );
+  assertEquals(serialAt(unit, LOSS), "902ZAE5968");
+});
+
+Deno.test("serialAt: a written-off radio's closed entry still answers; no history answers null", () => {
+  const unit = history(
+    { serial_number: "902ZAE5968", start: "2024-01-05T09:00:00.000-06:00", end: "2026-01-02T09:00:00.000-06:00", reason: "initial" },
+  );
+  assertEquals(serialAt(unit, LOSS), "902ZAE5968");
+  assertEquals(serialAt(history(), LOSS), null);
+});
+
+Deno.test("serialAt: a number first minted for a replacement after the instant held no radio then", () => {
+  const unit = history({ serial_number: "902EBQP671", start: "2025-10-16T16:00:00.000-05:00", end: null, reason: "replaced" });
+  assertEquals(serialAt(unit, LOSS), null);
 });

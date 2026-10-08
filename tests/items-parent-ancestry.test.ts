@@ -324,7 +324,9 @@ Deno.test("seedReplacementLines: quotes the replacement value of the copy the bo
     status: "active",
     quantity: 1,
     query_by_sources: [`bookings:${ORDER}:${CORD}:${PAIR}:${hash}`, `orders:${ORDER}`],
-  }], [], products);
+    units: null,
+    dates: { start: null },
+  }], [], products, new Map());
   assertEquals(seeds.map((s) => s.base_cents), [2000]);
 });
 

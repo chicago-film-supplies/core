@@ -10,6 +10,7 @@ import {
   type ReplacementBillingInvoice,
   type ReplacementSourceProduct,
   type ReplacementSourceRecord,
+  type ReplacementSourceUnit,
   seedOnRequestLines,
   seedReplacementLines,
 } from "../src/utils/replacements.ts";
@@ -44,7 +45,20 @@ function record(uid: string, product: string, line: string, quantity: number, ex
     status: "active",
     quantity,
     query_by_sources: [`bookings:${ORDER}:${line}:${PAIR}`, `orders:${ORDER}`],
+    units: null,
+    dates: { start: "2026-03-02T10:00:00.000-06:00" },
     ...extra,
+  };
+}
+
+const noUnits = new Map<number, ReplacementSourceUnit>();
+
+function unitWith(number: number, entries: Array<[string, string, string | null, "initial" | "replaced" | "corrected"]>): ReplacementSourceUnit {
+  return {
+    number,
+    serial_history: entries.map(([serial_number, start, end, reason]) => ({
+      serial_number, start, end, reason, uid_movement: null, notes: "", changed_by: { uid: "u1", name: "Op" },
+    })),
   };
 }
 
@@ -56,7 +70,7 @@ function invoice(uid: string, status: string, lines: Array<[string, number]>): R
 }
 
 Deno.test("seed: 7 vests + 1 cone, at the quoted value and else the twin's price", () => {
-  const seeds = seedReplacementLines(order, [vests, cone], [], products);
+  const seeds = seedReplacementLines(order, [vests, cone], [], products, noUnits);
   assertEquals(seeds.map((s) => [s.name, s.quantity, s.base_cents, s.uid_pair, s.uid_product]), [
     ["Replacement: Safety Vest", 7, 2500, PAIR, "vest-r"],
     // The cone line quoted 0, which says nothing — fall back to the twin.
@@ -67,28 +81,59 @@ Deno.test("seed: 7 vests + 1 cone, at the quoted value and else the twin's price
 Deno.test("seed: billed units are subtracted, and a void invoice bills nothing", () => {
   const partly = invoice("inv1", "authorised", [["oosVest", 5]]);
   const voided = invoice("inv2", "void", [["oosVest", 2], ["oosCone", 1]]);
-  const seeds = seedReplacementLines(order, [vests, cone], [partly, voided], products);
+  const seeds = seedReplacementLines(order, [vests, cone], [partly, voided], products, noUnits);
   assertEquals(seeds.map((s) => [s.uid_out_of_service, s.quantity]), [["oosVest", 2], ["oosCone", 1]]);
 
   const fully = invoice("inv3", "draft", [["oosVest", 2], ["oosCone", 1]]);
-  assertEquals(seedReplacementLines(order, [vests, cone], [partly, voided, fully], products), []);
+  assertEquals(seedReplacementLines(order, [vests, cone], [partly, voided, fully], products, noUnits), []);
 });
 
 Deno.test("seed: skips canceled records, non-billable reasons and other orders' records", () => {
   const canceled = record("a", "vest", VEST_LINE, 1, { status: "canceled" });
   const cleaning = record("b", "vest", VEST_LINE, 1, { reason: "cleaning" });
   const elsewhere = record("c", "vest", VEST_LINE, 1, { query_by_sources: ["orders:Order000000000000009"] });
-  assertEquals(seedReplacementLines(order, [canceled, cleaning, elsewhere], [], products), []);
+  assertEquals(seedReplacementLines(order, [canceled, cleaning, elsewhere], [], products, noUnits), []);
 });
 
 Deno.test("seed: a rental with no twin is offered as a custom line with a warning, never dropped", () => {
   const stand = record("oosStand", "legacy", VEST_LINE, 1, { query_by_sources: [`orders:${ORDER}`] });
-  const [seed] = seedReplacementLines(order, [stand], [], products);
+  const [seed] = seedReplacementLines(order, [stand], [], products, noUnits);
   assertEquals(seed.uid_product, null);
   assertEquals(seed.name, "Replacement: Old Stand");
   assertEquals(seed.uid_pair, null);
   assertEquals(seed.base_cents, 0);
   assertEquals(typeof seed.warning, "string");
+});
+
+Deno.test("seed: the description names each unit with the serial it carried at the loss", () => {
+  const units = new Map<number, ReplacementSourceUnit>([
+    [1017, unitWith(1017, [["902ZAE5968", "2024-01-05T09:00:00.000-06:00", "2026-04-01T09:00:00.000-05:00", "initial"], ["902EBQP559", "2026-04-01T09:00:00.000-05:00", null, "replaced"]])],
+    [1042, unitWith(1042, [])],
+  ]);
+  const lost = record("oosVest", "vest", VEST_LINE, 2, {
+    units: { away: [1042, 1017].sort((a, b) => a - b), flagged: [], returned_to_service: [], written_off: [] },
+  });
+  const [seed] = seedReplacementLines(order, [lost], [], products, units);
+  assertEquals(seed.units, [1017, 1042]);
+  // 1017's number now carries a replacement radio; the line names the one lost.
+  assertEquals(seed.description, "Lost: unit 1017 (S/N 902ZAE5968), unit 1042");
+});
+
+Deno.test("seed: with no serial to name, the description is the ranges; with no units, the reason", () => {
+  const damaged = record("oosVest", "vest", VEST_LINE, 4, {
+    reason: "damaged",
+    units: { away: [], flagged: [1017, 1018], returned_to_service: [1019], written_off: [1030] },
+  });
+  const [ranged] = seedReplacementLines(order, [damaged], [], products, noUnits);
+  assertEquals(ranged.description, "Damaged: units 1017–1019, 1030");
+
+  const [one] = seedReplacementLines(order, [record("oosVest", "vest", VEST_LINE, 1, {
+    units: { away: [1017], flagged: [], returned_to_service: [], written_off: [] },
+  })], [], products, noUnits);
+  assertEquals(one.description, "Lost: unit 1017");
+
+  const [bulk] = seedReplacementLines(order, [vests], [], products, noUnits);
+  assertEquals([bulk.units, bulk.description], [[], "Lost"]);
 });
 
 Deno.test("billed sum excludes the invoice being rewritten", () => {
@@ -198,7 +243,7 @@ Deno.test("on-request seed: never offers lost/damaged, canceled or other orders'
   const elsewhere = record("d", "vest", VEST_LINE, 1, { reason: "cleaning", query_by_sources: ["orders:Order000000000000009"] });
   assertEquals(seedOnRequestLines(order, [lost, damaged, canceled, elsewhere], [], both, chargeProducts), []);
   // ...and the default seed never offers the on-request ones: the two partition the reasons.
-  assertEquals(seedReplacementLines(order, [cleaned, serviced], [], products), []);
+  assertEquals(seedReplacementLines(order, [cleaned, serviced], [], products, noUnits), []);
 });
 
 Deno.test("on-request seed: billed units are subtracted across service lines, and a void bills nothing", () => {

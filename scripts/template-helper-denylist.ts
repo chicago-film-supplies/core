@@ -793,11 +793,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // invoice and "Serialized item details" (P5). The rest is input and write-path
   // machinery: parsing what an operator types, canonicalizing a picker's set,
   // the picker's suggestion, and the roster fold that only the ledger writer and
-  // its audit run.
+  // its audit run. `serialAt` reads a unit's whole serial history to name what
+  // a replacement line bills (`seedReplacementLines`); a template holds no unit
+  // document, and a printed unit's CURRENT serial is its `serial_number`.
   units: [
     "foldRosterUnits",
     "normalizeUnitSet",
     "parseUnitRanges",
+    "serialAt",
     "suggestUnits",
   ],
 };
