@@ -31,6 +31,7 @@ import {
   custodyRule,
   isLossUndo,
   MOVEMENT_CONTRACTS,
+  MOVEMENT_UNDOES,
   type MovementTypeType,
   BOOKING_BREAKDOWN_KEYS,
   BOOKING_PLAN_KEYS,
@@ -155,7 +156,9 @@ Deno.test("custody - every row agrees with MOVEMENT_CONTRACTS", () => {
         assert(c.custody !== "required", `${where}: the contract requires a custody pair`);
         assert(c.booking !== "required", `${where}: the contract requires a booking`);
       }
-      if (c.places === null) {
+      if (c.places === null && !ownsKey(type, r.from) && !ownsKey(type, r.to)) {
+        // Both ends are the customer's (a sale's loss): nothing moves on a CFS shelf.
+      } else if (c.places === null) {
         assertEquals([...CUSTODY_PLACE_KINDS[r.from]], ["locations"], `${where}: nothing moves, so from must be a shelf`);
         assertEquals([...CUSTODY_PLACE_KINDS[r.to]], ["locations"], `${where}: nothing moves, so to must be a shelf`);
       } else {
@@ -216,6 +219,30 @@ Deno.test("custody - markReasonOf names every mark's reason and nothing else (G1
   assertEquals(named, { mark_lost: "lost", mark_damaged: "damaged", mark_cleaning: "cleaning", mark_maintenance: "maintenance" });
   // Every out-of-service key has its mark.
   assertEquals(new Set(Object.values(named)), new Set(OUT_OF_SERVICE_KEYS));
+});
+
+Deno.test("custody - MOVEMENT_UNDOES agrees with the rule table's inverses, arm for arm", () => {
+  // Every undo row's arm writes the undo of what its inverse's arm writes — the
+  // movement pair and the rule pair cannot disagree. A `flag` undoes a `flag`
+  // (its service axis swaps), so a same-type pair is skipped.
+  let checked = 0;
+  for (const r of CUSTODY_RULES) {
+    if (r.direction !== "undo" || r.inverse === null) continue;
+    const fwd = custodyRule(r.inverse);
+    for (const type of ["rental", "sale"] as const) {
+      const undo = (type === "rental" ? r.rental : r.sale)?.movement;
+      const forward = (type === "rental" ? fwd.rental : fwd.sale)?.movement;
+      if (!undo || !forward || undo === forward) continue;
+      assertEquals((MOVEMENT_UNDOES as Record<string, string>)[undo], forward, `${r.id} (${type})`);
+      checked++;
+    }
+  }
+  // And every undo type is reached by some row: none is declared for nothing.
+  const reached = new Set(
+    CUSTODY_RULES.flatMap((r) => [r.rental?.movement, r.sale?.movement]).filter((m) => m != null),
+  );
+  for (const undo of Object.keys(MOVEMENT_UNDOES)) assert(reached.has(undo as MovementTypeType), `${undo} has no rule`);
+  assertEquals(checked, 13);
 });
 
 Deno.test("custody - every inverse's places mirror its forward twin's", () => {
@@ -335,26 +362,38 @@ Deno.test("custody - PARITY: with canonical loss undos, over every loss-falling 
   assertEquals(undershoot, 1162);
 });
 
-Deno.test("custody - PARITY: sales agree on every MOVEMENT, and differ only where out → lost/damaged is now legal", () => {
+Deno.test("custody - a sale decomposes exactly as a rental does, through its own arms, wherever it has one (decision 5)", () => {
+  // The frozen api oracle refused every sale rewind; decision 5 made them typed
+  // reversals. So the oracle for a sale is now the RENTAL decomposition: same
+  // pairing, same steps, each step's movement read off the sale arm — and a
+  // delta that needs a rule the sale lacks (a shelf loss, a flag) is unmatched.
   const states = statesAt(3);
-  let newlyMatched = 0;
+  let same = 0;
+  let refused = 0;
   for (const prev of states) {
     for (const next of states) {
-      const old = oracle.deriveCustodyTransitions(prev, next, "sale");
-      const got = decomposeCustodyDelta(prev, next, "sale");
+      const rental = decomposeCustodyDelta(prev, next, "rental");
+      const sale = decomposeCustodyDelta(prev, next, "sale");
       const pair = `${JSON.stringify(prev)} → ${JSON.stringify(next)}`;
-      assertEquals(shape(got.transitions), shape(old), pair);
-      const exact = JSON.stringify(replay(prev, old)) === JSON.stringify(next);
-      if (got.matched !== exact) {
-        // The only permitted disagreement: the sale's out → lost/damaged steps,
-        // which write no movement and were unmatched before.
-        assert(got.matched && !exact, pair);
-        assert(got.steps.some((s) => s.rule === "mark_lost" || s.rule === "mark_damaged"), pair);
-        newlyMatched++;
+      if (rental.steps.some((st) => custodyRule(st.rule).sale === null)) {
+        assertEquals(sale.matched, false, pair);
+        refused++;
+        continue;
       }
+      assertEquals(sale.steps, rental.steps, pair);
+      assertEquals(sale.matched, rental.matched, pair);
+      assertEquals(
+        sale.transitions.map((t) => t.type),
+        sale.steps.map((st) => custodyRule(st.rule).sale!.movement).filter((m) => m !== null),
+        pair,
+      );
+      same++;
     }
   }
-  assert(newlyMatched > 0, "the sale arm of mark_lost/mark_damaged never fired");
+  assert(same > 1000 && refused > 100, `same ${same}, refused ${refused}`);
+  // The rewinds and losses that wrote nothing before now write their movements.
+  assertEquals(shape(decomposeCustodyDelta(bd({ out: 2 }), bd({ prepped: 2 }), "sale").transitions), ["sale_undo:out→prepped×2"]);
+  assertEquals(shape(decomposeCustodyDelta(bd({ out: 2 }), bd({ out: 1, lost: 1 }), "sale").transitions), ["sale_lost:out→lost×1"]);
 });
 
 Deno.test("custody - a service or surcharge booking decomposes to nothing", () => {
@@ -409,9 +448,9 @@ Deno.test("custody - apply refuses a short source bucket rather than clamping (t
   assertThrows(() => applyCustodyActions(b, [{ rule: "check_in", quantity: 2 }]), CustodyRefusal, "holds 1");
 });
 
-Deno.test("custody - apply refuses a sale rewind and a pre-departure loss", () => {
+Deno.test("custody - apply refuses a sale's shelf loss and a pre-departure loss", () => {
   assertThrows(
-    () => applyCustodyActions(booking(2, { out: 2 }, "active", "sale"), [{ rule: "check_out_undo", quantity: 1 }]),
+    () => applyCustodyActions(booking(2, { returned: 2 }, "active", "sale"), [{ rule: "mark_lost_returned", quantity: 1 }]),
     CustodyRefusal,
     "cannot take",
   );
@@ -422,10 +461,13 @@ Deno.test("custody - apply refuses a sale rewind and a pre-departure loss", () =
   );
 });
 
-Deno.test("custody - a sale's loss is legal and writes no movement", () => {
+Deno.test("custody - a sale's loss writes a custody-only movement, and its rewind a typed reversal (G6, decision 5)", () => {
   const r = applyCustodyActions(booking(2, { out: 2 }, "active", "sale"), [{ rule: "mark_lost", quantity: 1 }]);
   assertEquals(r.breakdown, bd({ out: 1, lost: 1 }));
-  assertEquals(r.transitions, []);
+  assertEquals(shape(r.transitions), ["sale_lost:out→lost×1"]);
+  const back = applyCustodyActions(booking(2, { out: 2 }, "active", "sale"), [{ rule: "check_out_undo", quantity: 2 }]);
+  assertEquals(shape(back.transitions), ["sale_undo:out→prepped×2"]);
+  assertEquals(back.status, "prepped");
 });
 
 Deno.test("custody - every row moves units between two breakdown keys", () => {
@@ -651,11 +693,12 @@ Deno.test("custody - offers: prep and check-out are gated on the fulfillment sta
   assert(open.includes("prep") && open.includes("check_out"));
 });
 
-Deno.test("custody - offers: a sale offers no rewind but unprep, and its return is not the natural action", () => {
+Deno.test("custody - offers: a sale offers its rewinds (decision 5), and its return is not the natural action", () => {
   const offers = custodyActionsFor(booking(2, { prepped: 1, out: 1 }, "active", "sale"), { canPrepCheckout: true });
   const keys = offers.map((o) => o.key);
-  assert(!keys.includes("check_out_undo"));
+  assert(keys.includes("check_out_undo"));
   assert(keys.includes("unprep"));
+  assert(!keys.includes("flag_damaged_returned"));
   assertEquals(offers.find((o) => o.natural)?.key, "check_out");
   assertEquals(custodyActionsFor(booking(1, { out: 1 }, "active", "sale"), { canPrepCheckout: true }).some((o) => o.natural), false);
 });
@@ -978,7 +1021,10 @@ Deno.test("custody - custodyMovementTypes: the rental set is the api's LADDER_MO
     "mark_lost_undo", "mark_damaged_undo", "mark_cleaning", "mark_cleaning_undo", "mark_maintenance",
     "mark_maintenance_undo", "flag",
   ]));
-  assertEquals(custodyMovementTypes("sale"), ["prep", "unprep", "sale", "sale_return"]);
+  assertEquals(custodyMovementTypes("sale"), [
+    "prep", "unprep", "sale", "sale_undo", "sale_return", "sale_return_undo",
+    "sale_lost", "sale_lost_undo", "sale_damaged", "sale_damaged_undo",
+  ]);
   assertEquals(custodyMovementTypes("service"), []);
 });
 
@@ -991,24 +1037,31 @@ Deno.test("custody - custodyPlaces: out is a booking for a rental and outside fo
 });
 
 Deno.test("custody - isReleasingRewind: every rule arm, as the api's line-netting form measured it (2026-10-08)", () => {
-  // Measured by running api-cloudrun's own isReleasingRewind over every arm: 32 compared, 0 disagree.
-  const releasing = new Set([
-    "unprep", "check_out_undo", "mark_lost_undo", "mark_lost_returned_undo",
-    "flag_damaged_returned_undo", "flag_cleaning_returned_undo", "flag_maintenance_returned_undo",
-  ]);
+  // The 32 pre-campaign arms were measured by running api-cloudrun's own
+  // isReleasingRewind over them: 32 compared, 0 disagree. The six sale arms
+  // added by decision 5 are read off their contracts: a sale_undo puts units
+  // back on a shelf, a sale_return_undo takes them off, and the custody-only
+  // loss undos move nothing.
+  const releasing: Record<"rental" | "sale", Set<string>> = {
+    rental: new Set([
+      "unprep", "check_out_undo", "mark_lost_undo", "mark_lost_returned_undo",
+      "flag_damaged_returned_undo", "flag_cleaning_returned_undo", "flag_maintenance_returned_undo",
+    ]),
+    sale: new Set(["unprep", "check_out_undo", "mark_lost_undo", "mark_damaged_undo"]),
+  };
   let checked = 0;
   for (const r of CUSTODY_RULES) {
-    for (const arm of [r.rental, r.sale]) {
+    for (const [type, arm] of [["rental", r.rental], ["sale", r.sale]] as const) {
       if (!arm?.movement) continue;
       assertEquals(
         isReleasingRewind({ rule: r.id, type: arm.movement, from: r.from, to: r.to, quantity: 2 }),
-        releasing.has(r.id),
+        releasing[type].has(r.id),
         `${r.id} (${arm.movement})`,
       );
       checked++;
     }
   }
-  assertEquals(checked, 32);
+  assertEquals(checked, 38);
 });
 
 Deno.test("custody - splitLeadingReleases stops at the first transition that is not a releasing rewind", () => {

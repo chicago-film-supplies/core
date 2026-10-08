@@ -184,7 +184,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "toCentsBig", expr: "it.money.toCentsBig(dollars)", desc: "The `bigint` flavour of {@linkcode toCents}, for factor arithmetic whose intermediates exceed `Number.MAX_SAFE_INTEGER`.", returns: "bigint" },
   ],
   "movements": [
-
+    { name: "isReversing", expr: "it.movements.isReversing(m)", desc: "Whether a movement walks back another: a `reverses` reversal (it keeps its original's type and negates its lines), or a TYPED reversal — an undo type whose contract is its forward's mirrored (`MOVEMENT_CONTRACTS[type].undoes`).", returns: "boolean" },
   ],
   "order-edit-delta": [
 

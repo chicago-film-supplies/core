@@ -672,9 +672,10 @@ export function canonicalLossUndos(prev: BookingBreakdown, next: BookingBreakdow
  * ⚠️ **What stays residue is a DECISION, not a gap in this function.**
  * `prepped → returned` is a forward multi-hop past `out`, which would record
  * units going out and coming back that nobody saw (api-cloudrun#1053); a
- * pre-departure key into `lost`/`damaged` has no row at all (gap G1); a sale
- * rewind is refused (api-cloudrun#1054); and a sale never takes `cleaning` or
- * `maintenance` (P2b ruling 4). A service or surcharge booking holds no
+ * pre-departure key into `lost`/`damaged` has no row at all (gap G1); and a
+ * sale never takes a shelf loss, a flag, `cleaning` or `maintenance` (P2b ruling
+ * 4). A sale's rewinds and its loss undos ARE matched since decision 5
+ * (`sale_undo`, `sale_return_undo`, `sale_lost_undo`, `sale_damaged_undo`). A service or surcharge booking holds no
  * stock, so its delta is always matched with no steps.
  */
 export function decomposeCustodyDelta(
@@ -693,17 +694,18 @@ export function decomposeCustodyDelta(
   };
 
   // ── the undone marks first, grouped per rule in input order ──
+  // A sale takes them too since decision 5 (`sale_lost_undo` / `sale_damaged_undo`);
+  // an undo whose rule the sale has no arm for stays unapplied, so its fall is residue.
   const mid = fullBookingBreakdown(prev);
-  if (!isSale) {
-    const grouped = new Map<CustodyRuleId, number>();
-    for (const u of undos) {
-      mid[u.reason] -= u.quantity;
-      mid[u.origin] += u.quantity;
-      const id = undoRuleFor(u.reason, u.origin);
-      grouped.set(id, (grouped.get(id) ?? 0) + u.quantity);
-    }
-    for (const [id, q] of grouped) add(id, q);
+  const grouped = new Map<CustodyRuleId, number>();
+  for (const u of undos) {
+    const id = undoRuleFor(u.reason, u.origin);
+    if (armFor(custodyRule(id), bookingType) === null) continue;
+    mid[u.reason] -= u.quantity;
+    mid[u.origin] += u.quantity;
+    grouped.set(id, (grouped.get(id) ?? 0) + u.quantity);
   }
+  for (const [id, q] of grouped) add(id, q);
 
   const falls = new Map<BookingBreakdownKeyType, number>();
   const rises = new Map<BookingBreakdownKeyType, number>();
@@ -728,14 +730,10 @@ export function decomposeCustodyDelta(
   add("prep", prepDirect + outFromReserved);
   add("check_out", outFromPrepped + outFromReserved);
   add("check_in", take("out", "returned"));
-  if (isSale) {
-    // Legal, and no movement: the units already left CFS ownership.
-    add("mark_damaged", take("out", "damaged"));
-    add("mark_lost", take("out", "lost"));
-    add("unprep", unprepDirect);
-  } else {
-    add("mark_damaged", take("out", "damaged"));
-    add("mark_lost", take("out", "lost"));
+  add("mark_damaged", take("out", "damaged"));
+  add("mark_lost", take("out", "lost"));
+  // A sale takes no shelf loss, no flag and no cleaning/maintenance (P2b ruling 4).
+  if (!isSale) {
     add("mark_lost_returned", take("returned", "lost"));
     add("flag_damaged_returned", take("returned", "damaged"));
     for (const r of ["cleaning", "maintenance"] as const) {
@@ -749,16 +747,17 @@ export function decomposeCustodyDelta(
         add(rule.id, take(rule.from, rule.to));
       }
     }
-
-    const outFromReturned = take("returned", "out");
-    const preppedFromOut = take("out", "prepped");
-    const reservedFromOut = take("out", "reserved");
-    const preppedFromReturned = take("returned", "prepped");
-    const reservedFromReturned = take("returned", "reserved");
-    add("check_in_undo", outFromReturned + preppedFromReturned + reservedFromReturned);
-    add("check_out_undo", preppedFromOut + reservedFromOut + preppedFromReturned + reservedFromReturned);
-    add("unprep", unprepDirect + reservedFromOut + reservedFromReturned);
   }
+
+  // ── rewinds, at every depth, for both types (a sale's are typed reversals) ──
+  const outFromReturned = take("returned", "out");
+  const preppedFromOut = take("out", "prepped");
+  const reservedFromOut = take("out", "reserved");
+  const preppedFromReturned = take("returned", "prepped");
+  const reservedFromReturned = take("returned", "reserved");
+  add("check_in_undo", outFromReturned + preppedFromReturned + reservedFromReturned);
+  add("check_out_undo", preppedFromOut + reservedFromOut + preppedFromReturned + reservedFromReturned);
+  add("unprep", unprepDirect + reservedFromOut + reservedFromReturned);
 
   const residue: CustodyDecomposition["residue"] = { falls: {}, rises: {} };
   for (const [k, q] of falls) if (q > 0) residue.falls[k] = q;

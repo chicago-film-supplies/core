@@ -15,8 +15,10 @@ import {
   costOfUnits,
   deriveServiceQuantities,
   heldDelta,
+  isReversing,
   movementHeldDelta,
   negateLines,
+  xeroPostingFor,
 } from "../src/utils/movements.ts";
 import { InventoryLedgerSchema, MOVEMENT_CONTRACTS, MOVEMENT_TYPES } from "../src/schemas/mod.ts";
 import type {
@@ -496,7 +498,16 @@ Deno.test("no contract pairs `places: null` with a required cost — the fold co
   // predicate that can never return true reports just as cleanly. Plant the
   // depreciation-shaped contract this exists to catch and assert it is caught.
   assertEquals(
-    costOnly({ custody: "forbidden", cost: "required", places: null, booking: "forbidden", service: "forbidden", units: "allowed", uncounted: "refused" }),
+    costOnly({
+      undoes: null,
+      custody: "forbidden",
+      cost: "required",
+      places: null,
+      booking: "forbidden",
+      service: "forbidden",
+      units: "allowed",
+      uncounted: "refused",
+    }),
     true,
     "a planted cost-only contract must be caught",
   );
@@ -1329,4 +1340,88 @@ Deno.test("lineless: the same document on a COUNTED ledger is reported, so the w
     mockTimestamp,
   );
   assertEquals(prep.linelessCountedQuantity, 0);
+});
+
+// ── Typed reversals (stock campaign decision 5) ──────────────────────
+
+Deno.test("a typed reversal relieves exactly: a no-refund return's undo relieves $0, not a weighted share", () => {
+  const cost = (cents: number) => ({ amount_cents: cents, unit_cost: 0, unit_costs_cents: [] });
+  // 4 units carrying $400 of basis; a no-refund sale_return added 1 unit at $0.
+  const start = ledger({ quantity_held: 5, total_cost_basis_cents: 40000, average_unit_cost: 80 });
+  const { ledger: next, costAppliedCents } = applyMovementToLedger(
+    start,
+    {
+      reverses: null,
+      service: null,
+      type: "sale_return_undo",
+      custody: { from: "returned", to: "out" },
+      quantity: 1,
+      lines: [line(1, at(LOC_A), null)],
+      cost: cost(0),
+    },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(next.quantity_held, 4);
+  assertEquals(costAppliedCents, 0, "the undo relieves exactly the $0 the return restored");
+  assertEquals(next.total_cost_basis_cents, 40000);
+  // A refunded return's undo carries the negated basis it restored, exactly.
+  const refunded = applyMovementToLedger(
+    start,
+    {
+      reverses: null,
+      service: null,
+      type: "sale_return_undo",
+      custody: { from: "returned", to: "out" },
+      quantity: 1,
+      lines: [line(1, at(LOC_A), null)],
+      cost: cost(-2500),
+    },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(refunded.costAppliedCents, -2500);
+});
+
+Deno.test("a `reverses` reversal of a $0 increase relieves $0 (the widening to <= 0)", () => {
+  const start = ledger({ quantity_held: 3, total_cost_basis_cents: 9000, average_unit_cost: 30 });
+  const { costAppliedCents } = applyMovementToLedger(
+    start,
+    {
+      reverses: "mFind",
+      service: null,
+      type: "find",
+      custody: null,
+      quantity: 1,
+      lines: [line(1, at(LOC_A), null)],
+      cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] },
+    },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(costAppliedCents, 0, "it used to relieve the $30 weighted share of a unit the find added for nothing");
+});
+
+Deno.test("isReversing: a `reverses` reversal or an undo type; never a forward movement", () => {
+  assertEquals(isReversing({ type: "purchase", reverses: "m1" }), true);
+  assertEquals(isReversing({ type: "sale_undo", reverses: null }), true);
+  assertEquals(isReversing({ type: "check_out_undo", reverses: null }), true);
+  assertEquals(isReversing({ type: "sale", reverses: null }), false);
+  assertEquals(isReversing({ type: "sale_lost", reverses: null }), false);
+});
+
+Deno.test("xeroPostingFor: a typed reversal posts as its forward would, negated — no new posting row", () => {
+  // A sale posts on accounts receivable, so its undo does too.
+  assertEquals(xeroPostingFor("sale_undo", "sale", 1500, 1), { kind: "skip", reason: "sale_posts_on_accrec" });
+  // A refunded return posts on accounts receivable; so does its undo, read as a magnitude.
+  assertEquals(xeroPostingFor("sale_return_undo", "sale", -2500, -1), { kind: "skip", reason: "refunded_return_posts_on_accrec" });
+  // A no-refund return of a retail unit bills DR retail / CR clearing; its undo is that bill, negated.
+  const forward = xeroPostingFor("sale_return", "sale", 0, 1);
+  const undo = xeroPostingFor("sale_return_undo", "sale", 0, -1);
+  assertEquals(forward.kind, "bill");
+  assertEquals(undo, { ...forward, direction: -1 } as typeof undo);
+  // Asked with no document, the undo's own direction is the forward's negated.
+  assertEquals(xeroPostingFor("sale_return_undo", "sale", 0, null), undo);
+  // The custody-only losses are not Xero's business.
+  assertEquals(xeroPostingFor("sale_lost", "sale", null, null), { kind: "skip", reason: "no_cost_contract" });
 });

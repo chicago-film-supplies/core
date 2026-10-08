@@ -483,3 +483,24 @@ Deno.test("serialAt: a number first minted for a replacement after the instant h
   const unit = history({ serial_number: "902EBQP671", start: "2025-10-16T16:00:00.000-05:00", end: null, reason: "replaced" });
   assertEquals(serialAt(unit, LOSS), null);
 });
+
+Deno.test("foldRosterUnits: a sale's unit lost in transit names a unit off the roster and changes nothing (decision 5)", () => {
+  const sale = { ...tracked({ out: 1 }, { out: [1001] }), type: "sale" as const };
+  const lost = applyCustodyActions(sale, [act("mark_lost", [1001])]).transitions[0];
+  assertEquals(lost.type, "sale_lost");
+  // The sale removed 1001 from the roster; the loss leaves it removed.
+  const roster: RosterUnits = { "1002": { state: "out", uid_booking: BOOKING } };
+  assertEquals(foldRosterUnits(roster, movementFor(lost)), roster);
+  // A unit still on the roster cannot be the customer's.
+  assertThrows(
+    () => foldRosterUnits({ "1001": { state: "out", uid_booking: BOOKING } }, movementFor(lost)),
+    RosterFoldError,
+    "roster still holds it",
+  );
+  // The rental's loss is NOT this arm: its unit is on the roster and moves.
+  const rentalLost = applyCustodyActions(tracked({ out: 1 }, { out: [1001] }), [act("mark_lost", [1001])]).transitions[0];
+  assertEquals(
+    foldRosterUnits({ "1001": { state: "out", uid_booking: BOOKING } }, movementFor(rentalLost))["1001"],
+    { state: "away", uid_out_of_service: RECORD },
+  );
+});

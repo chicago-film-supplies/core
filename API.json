@@ -325,6 +325,12 @@
           "doc": "TypeScript shape of {@link baseLogFields} — for use in archetype\ninterfaces that want to declare the envelope explicitly."
         },
         {
+          "kind": "typeAlias",
+          "name": "BaseMovementContract",
+          "declaration": "type BaseMovementContract = Omit<MovementContract, \"undoes\">;",
+          "doc": "A contract before its `undoes` is filled in."
+        },
+        {
           "kind": "interface",
           "name": "BillingSettings",
           "declaration": "interface BillingSettings {\n  uid: \"billing\";\n  oos_charge_products: OosChargeProducts;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
@@ -2096,6 +2102,12 @@
         },
         {
           "kind": "typeAlias",
+          "name": "ForwardMovementTypeType",
+          "declaration": "type ForwardMovementTypeType = Exclude<MovementTypeType, UndoMovementTypeType>;",
+          "doc": "Every movement type that is not an undo."
+        },
+        {
+          "kind": "typeAlias",
           "name": "FromTotalItemType",
           "declaration": "type FromTotalItemType = indexedAccess;",
           "doc": "The `pricing: \"from_total\"` members — priced FROM the document total rather\nthan into it, which is what makes a `percent_of_total` formula legal on them."
@@ -2854,13 +2866,19 @@
           "kind": "variable",
           "name": "MOVEMENT_CONTRACTS",
           "declaration": "const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContract>>;",
-          "doc": "The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member."
+          "doc": "The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member: every\nforward contract as written, and every undo derived by {@link mirrorContract}.\nMirroring rather than exempting the undos keeps the check real: an undo must\nstill name places of the RIGHT KIND, in the opposite order — the same\nreasoning `checkMovementContract` applies to a `reverses` reversal."
         },
         {
           "kind": "variable",
           "name": "MOVEMENT_TYPES",
-          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\"[];",
+          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost\" | \"sale_lost_undo\" | \"sale_damaged\" | \"sale_damaged_undo\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\"[];",
           "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    🔴 **The movement shape does NOT already exist.** This note claimed it\n    did — *\"`lines: []` + a negative `cost`, the same shape a late\n    landed-cost adjustment uses\"* — and that was wrong in three independent\n    ways, each measured (core#75):\n      1. **No contract permits it.** `places: null` means \"lines must be\n         empty\", and the only entry carrying it is `prep`, whose `cost` is\n         `forbidden`. Every cost-bearing type has `places` set, and\n         `checkMovementContract` then requires at least one line — so\n         `MovementSchema` rejects `lines: []` beside a cost on **every**\n         {@link MOVEMENT_TYPES} member. `places: null` + `cost: \"required\"`\n         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.\n      2. **The fold would ignore it anyway.** `applyMovementToLedger`\n         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside\n         `delta > 0` / `delta < 0`, where `delta` is\n         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at\n         0; the same cost on one `+10` line moves it to 50000.\n      3. **And it could not reach Xero.** `xeroPostingFor`\n         (`utils/movements.ts`) terminals a cost-bearing movement whose lines\n         net to zero as `no_ownership_direction`, deliberately, because a\n         document like that is malformed today.\n    So a cost-only event needs all three gates opened, in one change: a\n    contract entry pairing `places: null` with `cost: \"required\"`, a\n    `delta === 0` arm in the fold — which owes its own decision about\n    `average_unit_cost`, since the basis moves while the quantity does not —\n    and a posting decision that is not derived from an ownership direction\n    there is none of.\n    The \"late landed-cost adjustment\" cited as precedent is not writable\n    today either, by the same mechanism. (1) and (2) are pinned in\n    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the\n    day someone mints the contract entry is the day a pin goes red rather\n    than the day the ledger silently stops moving.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
+        },
+        {
+          "kind": "variable",
+          "name": "MOVEMENT_UNDOES",
+          "declaration": "const MOVEMENT_UNDOES: Readonly<Record<UndoMovementTypeType, ForwardMovementTypeType>>;",
+          "doc": "Each undo type's forward — see {@link UNDO_MOVEMENT_TYPES}. Explicitly typed for JSR's declaration emit."
         },
         {
           "kind": "variable",
@@ -2943,7 +2961,7 @@
         {
           "kind": "interface",
           "name": "MovementContract",
-          "declaration": "interface MovementContract {\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
+          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
           "doc": "How the three axes may be filled for one movement type.\n\nFixing this per type is what makes a missing axis a validation error rather\nthan a silent zero, a stray axis a validation error, and reversal a pure\nnegate-every-line transform. It is `hasCosts(type)` generalized to all three\naxes.\n\n`custody: \"with_booking\"` — required exactly when `uid_booking` is set. Sales\nare the only types that legitimately happen both ways: 247 stored rows are\norder-sourced (a booking's units being sold), and the manual transaction form\nlets an operator key an off-the-shelf sale with no order at all."
         },
         {
@@ -5402,6 +5420,12 @@
         },
         {
           "kind": "variable",
+          "name": "UNDO_MOVEMENT_TYPES",
+          "declaration": "const UNDO_MOVEMENT_TYPES: \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning_undo\" | \"mark_maintenance_undo\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost_undo\" | \"sale_damaged_undo\"[];",
+          "doc": "Every UNDO type and the forward type it says never happened — the one\ndeclaration the undo contracts are built from. Pinned against\n`CUSTODY_RULES[*].inverse` by `tests/custody.test.ts`, so a rule pair and its\nmovement pair cannot disagree.\n\n🔴 **`mark_lost_undo` mirrors `mark_lost` EXACTLY, including the widening on\nits origin.** A loss may come off the booking (`out → lost`) or off a shelf\n(`returned → lost`, api-cloudrun#1118), so its undo puts the unit back at\neither. The writer takes the destination from the consumed record's own mark\nlines — never re-derived from the breakdown.\n\n⚠️ **A rewind is an event in its own right, not a `reverses` reversal**\n(see {@link MOVEMENT_TYPES}): one un-prep can walk back part of each of\nseveral preps. What it shares with a reversal is the mirrored contract, and —\nfor the two that carry cost — the exact relief."
+        },
+        {
+          "kind": "variable",
           "name": "UNIT_ROSTER_STATES",
           "declaration": "const UNIT_ROSTER_STATES: \"shelf\" | \"prepped\" | \"out\" | \"away\" | \"unattributed_out\"[];",
           "doc": "The states a rostered unit can be in. See {@link UnitRosterEntryType}."
@@ -5447,6 +5471,12 @@
           "name": "UidNameRefType",
           "declaration": "interface UidNameRefType {\n  uid: string;\n  name: string;\n}",
           "doc": "Generic uid + name reference used across many collections."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UndoMovementTypeType",
+          "declaration": "type UndoMovementTypeType = indexedAccess;",
+          "doc": "A movement type that undoes another ({@link MOVEMENT_UNDOES})."
         },
         {
           "kind": "variable",
@@ -6518,6 +6548,14 @@
           "name": "isCollectionName",
           "signature": "isCollectionName(name: string): name is CollectionName",
           "doc": "Narrow a runtime string to a known collection name.\n\nThe bridge for the call sites that genuinely start from a string — a Firestore\npath segment, a route param, a Typesense alias. Most already ran a `if\n(!schema)` check and threw or returned a default; this lets that SAME check\nalso narrow the type, so the runtime guard they already had starts paying for\nitself at compile time instead of being duplicated by one.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isCustomerCustodyStep",
+          "signature": "isCustomerCustodyStep(type: MovementTypeType, custody: typeLiteral | null): boolean",
+          "doc": "Whether a movement of `type` carrying `custody` is a step that happens\nentirely on the CUSTOMER's side: some rule whose `{from, to}` it carries has\nan arm writing `type` for a booking type that owns NEITHER end (`ownsKey`).\nToday that is a sale's `sale_lost` / `sale_damaged` and their undos.\n\nKeyed on the property, not on type names, so a new custody-only step past\nthe ownership boundary is covered without an edit. The roster fold reads it:\nsuch a step names units that are no longer on any roster, and changes none.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -8156,7 +8194,7 @@
     },
     {
       "entrypoint": "@cfs/core/schemas/custody",
-      "moduleDoc": "The custody ruleset: which change to a booking's breakdown is LEGAL, and\nwhich movement records it.\n\nOne row per legal step. The api's booking lever refuses anything that is not\na sequence of these rows, the manager builds its menus from them, and a\nrepair script decomposes a breakdown delta into them. Before this table the\nrule lived in three places — the manager's menus and its breakdown flattening,\nthe alternates vocabulary in `utils/fulfillment-stage.ts`, and the api's\n`deriveCustodyTransitions`, which reverse-engineered movements from an\nabsolute breakdown — and they had drifted: the manager offered\n`reserved → lost` and the api accepted it with no movement and no record.\n\n## What a row does NOT restate\n\nPlaces, cost, booking, custody mode and service mode belong to\n{@link MOVEMENT_CONTRACTS}, and a row names only its movement TYPE. What the\ncontracts lack, and what this table adds, is the binding between a type and\nthe custody pair it carries: nothing checked that a `check_in` moves\n`out → returned` until this existed. `tests/custody.test.ts` cross-checks\nevery row against the contracts and {@link CUSTODY_PLACE_KINDS}.\n\n## Kept apart from the propagation catalog, on purpose\n\n`@cfs/core/schemas/propagation` says which DATA flows between collections;\nthis says which STATE CHANGE is legal and which EVENT records it. The two\nshare conventions (typed ids, `enforced_by`, one exported table) and nothing\nelse.\n\n## Sales\n\nA sale's rows are encoded as a sale behaves today, not as a sale might\nideally behave: `out → lost` and `out → damaged` are legal and emit NO\nmovement (the units left CFS ownership at the point of sale, so there is no\ninventory event), and every sale rewind is refused (api-cloudrun#1054).",
+      "moduleDoc": "The custody ruleset: which change to a booking's breakdown is LEGAL, and\nwhich movement records it.\n\nOne row per legal step. The api's booking lever refuses anything that is not\na sequence of these rows, the manager builds its menus from them, and a\nrepair script decomposes a breakdown delta into them. Before this table the\nrule lived in three places — the manager's menus and its breakdown flattening,\nthe alternates vocabulary in `utils/fulfillment-stage.ts`, and the api's\n`deriveCustodyTransitions`, which reverse-engineered movements from an\nabsolute breakdown — and they had drifted: the manager offered\n`reserved → lost` and the api accepted it with no movement and no record.\n\n## What a row does NOT restate\n\nPlaces, cost, booking, custody mode and service mode belong to\n{@link MOVEMENT_CONTRACTS}, and a row names only its movement TYPE. What the\ncontracts lack, and what this table adds, is the binding between a type and\nthe custody pair it carries: nothing checked that a `check_in` moves\n`out → returned` until this existed. `tests/custody.test.ts` cross-checks\nevery row against the contracts and {@link CUSTODY_PLACE_KINDS}.\n\n## Kept apart from the propagation catalog, on purpose\n\n`@cfs/core/schemas/propagation` says which DATA flows between collections;\nthis says which STATE CHANGE is legal and which EVENT records it. The two\nshare conventions (typed ids, `enforced_by`, one exported table) and nothing\nelse.\n\n## Sales (stock campaign decision 5)\n\nA sale's `out` is the customer's (`ownsKey`), so its rows split two ways:\n\n- `out → lost` / `out → damaged` and their undos write `sale_lost` /\n  `sale_damaged` (and `_undo`): CUSTODY-ONLY movements with no place and no\n  cost, so the journal replays. They wrote nothing until P1 (gap G6).\n- the rewinds `check_out_undo` / `check_in_undo` write `sale_undo` /\n  `sale_return_undo`: TYPED REVERSALS that move ownership and carry the exact\n  basis back (api-cloudrun#1054).\n\nA sale never takes a shelf loss or flag, nor `cleaning`/`maintenance` (P2b\nruling 4).",
       "symbols": [
         {
           "kind": "variable",
@@ -8275,6 +8313,14 @@
           "name": "duplicateCustodySlots",
           "signature": "duplicateCustodySlots(actions: readonly Pick<BookingActionType, \"rule\">[]): string[]",
           "doc": "Where two actions in one list would write the same movement id. Shared by the\nwire refine and by `applyCustodyActions`, so the two cannot disagree.\n\nThe slot is read off the RENTAL arm: a sale's arms are a subset whose\nmovements are distinct per rule, so the rental reading is the stricter one.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isCustomerCustodyStep",
+          "signature": "isCustomerCustodyStep(type: MovementTypeType, custody: typeLiteral | null): boolean",
+          "doc": "Whether a movement of `type` carrying `custody` is a step that happens\nentirely on the CUSTOMER's side: some rule whose `{from, to}` it carries has\nan arm writing `type` for a booking type that owns NEITHER end (`ownsKey`).\nToday that is a sale's `sale_lost` / `sale_damaged` and their undos.\n\nKeyed on the property, not on type names, so a new custody-only step past\nthe ownership boundary is covered without an edit. The roster fold reads it:\nsuch a step names units that are no longer on any roster, and changes none.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11298,6 +11344,12 @@
       "moduleDoc": "Movement document schema — Firestore collection: `transactions`\n\nAn append-only journal of inventory movement. Every event is **one subject**\n(a booking for custody events, a product for ownership events) plus a set of\nsigned lines, grouped with its siblings by a client-minted `uuid_session`.\n\nThe collection keeps its name — the journal was migrated in place — but the\ndocument is a `Movement`, not the old current-state `Transaction`.\n\n## Four axes\n\nEach answers an independent question about the same physical unit:\n\n| Axis       | Question                              | Lands on                                  |\n|------------|---------------------------------------|-------------------------------------------|\n| `custody`  | How far through this order is it?     | `booking.breakdown` — `BOOKING_BREAKDOWN_KEYS` |\n| `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |\n| `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |\n| `service`  | Is it out of service, and why?        | `out_of_service_breakdown`; per-shelf OOS |\n\n`service` is the newest and the only optional one: movements written before\nit existed carry no key, and read as \"no service change\" — see\n{@link MovementServiceType}.\n\n`cost` is **cost only, never revenue** — customer-facing money lives in Xero;\nthe only money here is inventory's carrying value.\n\n`custody` and `lines` are correlated but not derivable from each other:\ncustody implies the *kind* of place a unit is in ({@link CUSTODY_PLACE_KINDS})\nbut not *which* location, because where a returning unit goes back to is an\noperator's choice.\n\n## Conservation is structural, not checked\n\nA line's contribution to `quantity_held` is\n`(location.to ? +q : 0) + (location.from ? −q : 0)` — no cross-line\nsummation. `{from: null, to: L3}` reads \"entered ownership at L3\";\n`{from: L3, to: null}` reads \"left ownership from L3\"; both non-null is a\nmove that leaves ownership untouched. A half-move is inexpressible.\n\n`lines: []` means **nothing physically moved** — today only a `prep`, where\nreserved and prepped units sit on the same shelf. ⚠️ It *reads* like the shape\nfor a cost-only adjustment too, and that is the trap: no contract pairs\n`lines: []` with a cost, and `applyMovementToLedger` would fold one to nothing\nif one did. See the depreciation note on {@link MOVEMENT_TYPES} (core#75).",
       "symbols": [
         {
+          "kind": "typeAlias",
+          "name": "BaseMovementContract",
+          "declaration": "type BaseMovementContract = Omit<MovementContract, \"undoes\">;",
+          "doc": "A contract before its `undoes` is filled in."
+        },
+        {
           "kind": "variable",
           "name": "CUSTODY_PLACE_KINDS",
           "declaration": "const CUSTODY_PLACE_KINDS: Readonly<Record<BookingBreakdownKeyType, readonly PlaceKindType[]>>;",
@@ -11328,16 +11380,28 @@
           "doc": "Input for creating a manual movement."
         },
         {
+          "kind": "typeAlias",
+          "name": "ForwardMovementTypeType",
+          "declaration": "type ForwardMovementTypeType = Exclude<MovementTypeType, UndoMovementTypeType>;",
+          "doc": "Every movement type that is not an undo."
+        },
+        {
           "kind": "variable",
           "name": "MOVEMENT_CONTRACTS",
           "declaration": "const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContract>>;",
-          "doc": "The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member."
+          "doc": "The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member: every\nforward contract as written, and every undo derived by {@link mirrorContract}.\nMirroring rather than exempting the undos keeps the check real: an undo must\nstill name places of the RIGHT KIND, in the opposite order — the same\nreasoning `checkMovementContract` applies to a `reverses` reversal."
         },
         {
           "kind": "variable",
           "name": "MOVEMENT_TYPES",
-          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\"[];",
+          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost\" | \"sale_lost_undo\" | \"sale_damaged\" | \"sale_damaged_undo\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\"[];",
           "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    🔴 **The movement shape does NOT already exist.** This note claimed it\n    did — *\"`lines: []` + a negative `cost`, the same shape a late\n    landed-cost adjustment uses\"* — and that was wrong in three independent\n    ways, each measured (core#75):\n      1. **No contract permits it.** `places: null` means \"lines must be\n         empty\", and the only entry carrying it is `prep`, whose `cost` is\n         `forbidden`. Every cost-bearing type has `places` set, and\n         `checkMovementContract` then requires at least one line — so\n         `MovementSchema` rejects `lines: []` beside a cost on **every**\n         {@link MOVEMENT_TYPES} member. `places: null` + `cost: \"required\"`\n         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.\n      2. **The fold would ignore it anyway.** `applyMovementToLedger`\n         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside\n         `delta > 0` / `delta < 0`, where `delta` is\n         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at\n         0; the same cost on one `+10` line moves it to 50000.\n      3. **And it could not reach Xero.** `xeroPostingFor`\n         (`utils/movements.ts`) terminals a cost-bearing movement whose lines\n         net to zero as `no_ownership_direction`, deliberately, because a\n         document like that is malformed today.\n    So a cost-only event needs all three gates opened, in one change: a\n    contract entry pairing `places: null` with `cost: \"required\"`, a\n    `delta === 0` arm in the fold — which owes its own decision about\n    `average_unit_cost`, since the basis moves while the quantity does not —\n    and a posting decision that is not derived from an ownership direction\n    there is none of.\n    The \"late landed-cost adjustment\" cited as precedent is not writable\n    today either, by the same mechanism. (1) and (2) are pinned in\n    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the\n    day someone mints the contract entry is the day a pin goes red rather\n    than the day the ledger silently stops moving.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
+        },
+        {
+          "kind": "variable",
+          "name": "MOVEMENT_UNDOES",
+          "declaration": "const MOVEMENT_UNDOES: Readonly<Record<UndoMovementTypeType, ForwardMovementTypeType>>;",
+          "doc": "Each undo type's forward — see {@link UNDO_MOVEMENT_TYPES}. Explicitly typed for JSR's declaration emit."
         },
         {
           "kind": "interface",
@@ -11360,7 +11424,7 @@
         {
           "kind": "interface",
           "name": "MovementContract",
-          "declaration": "interface MovementContract {\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
+          "declaration": "interface MovementContract {\n  undoes: MovementTypeType | null;\n  custody: \"required\" | \"forbidden\" | \"with_booking\";\n  cost: \"required\" | \"forbidden\";\n  places: typeLiteral | null;\n  booking: \"required\" | \"forbidden\" | \"optional\";\n  service: \"required\" | \"forbidden\" | \"nullable\";\n  units: \"forbidden\" | \"allowed\";\n  uncounted: \"lineless\" | \"refused\";\n}",
           "doc": "How the three axes may be filled for one movement type.\n\nFixing this per type is what makes a missing axis a validation error rather\nthan a silent zero, a stray axis a validation error, and reversal a pure\nnegate-every-line transform. It is `hasCosts(type)` generalized to all three\naxes.\n\n`custody: \"with_booking\"` — required exactly when `uid_booking` is set. Sales\nare the only types that legitimately happen both ways: 247 stored rows are\norder-sourced (a booking's units being sold), and the manual transaction form\nlets an operator key an off-the-shelf sale with no order at all."
         },
         {
@@ -11491,9 +11555,21 @@
         },
         {
           "kind": "variable",
+          "name": "UNDO_MOVEMENT_TYPES",
+          "declaration": "const UNDO_MOVEMENT_TYPES: \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning_undo\" | \"mark_maintenance_undo\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost_undo\" | \"sale_damaged_undo\"[];",
+          "doc": "Every UNDO type and the forward type it says never happened — the one\ndeclaration the undo contracts are built from. Pinned against\n`CUSTODY_RULES[*].inverse` by `tests/custody.test.ts`, so a rule pair and its\nmovement pair cannot disagree.\n\n🔴 **`mark_lost_undo` mirrors `mark_lost` EXACTLY, including the widening on\nits origin.** A loss may come off the booking (`out → lost`) or off a shelf\n(`returned → lost`, api-cloudrun#1118), so its undo puts the unit back at\neither. The writer takes the destination from the consumed record's own mark\nlines — never re-derived from the breakdown.\n\n⚠️ **A rewind is an event in its own right, not a `reverses` reversal**\n(see {@link MOVEMENT_TYPES}): one un-prep can walk back part of each of\nseveral preps. What it shares with a reversal is the mirrored contract, and —\nfor the two that carry cost — the exact relief."
+        },
+        {
+          "kind": "variable",
           "name": "UNIT_SERIAL_IN_TYPES",
           "declaration": "const UNIT_SERIAL_IN_TYPES: \"purchase\" | \"find\" | \"make\" | \"opening_balance\" | \"adjustment_increase\"[];",
           "doc": "The manual types that bring a unit IN to CFS ownership, so may carry the\nserial it arrives with. Every other type names units by number only: a serial\nchanges on an existing number through `PUT /units/{uid}`, never by moving it."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UndoMovementTypeType",
+          "declaration": "type UndoMovementTypeType = indexedAccess;",
+          "doc": "A movement type that undoes another ({@link MOVEMENT_UNDOES})."
         },
         {
           "kind": "variable",
@@ -14134,7 +14210,7 @@
           "kind": "function",
           "name": "decomposeCustodyDelta",
           "signature": "decomposeCustodyDelta(prev: BookingBreakdown, next: BookingBreakdown, bookingType: indexedAccess, _: unknown): CustodyDecomposition",
-          "doc": "The rules an ABSOLUTE breakdown change represents — the successor to the\napi's `deriveCustodyTransitions` / `deriveWithLossUndos`, for repair scripts,\nthe parity sweeps and the transition window while the delta wire is still\naccepted.\n\n`undos` are the loss marks the caller is undoing, with the origin read off\neach consumed record. They apply first, and the ladder then decomposes the\nbreakdown in between. A fall of `lost`/`damaged` with no undo for it is\nresidue: the pure delta cannot say where the units go back to.\n\n## Pairing order, carried over unchanged\n\nRises are paired in order of how CONSTRAINED they are, not by direction:\n`reserved` can only be fed by `prepped`, so that pairing is resolved first,\nand only then the contested `prepped`/`out` rises. Take\n`{returned: 2, prepped: 2}` → `{out: 2, reserved: 2}`: forward-first pairs\n`prepped → out` and strands `returned → reserved`, while the forced reading\nis `unprep` + `check_in_undo`.\n\nA forward multi-hop (`reserved → out`) is `[prep, check_out]` with the\nimplicit prep counted once; a rewind is matched at every depth\n(`returned → reserved` is `check_in_undo`, `check_out_undo`, `unprep`).\n\n⚠️ **What stays residue is a DECISION, not a gap in this function.**\n`prepped → returned` is a forward multi-hop past `out`, which would record\nunits going out and coming back that nobody saw (api-cloudrun#1053); a\npre-departure key into `lost`/`damaged` has no row at all (gap G1); a sale\nrewind is refused (api-cloudrun#1054); and a sale never takes `cleaning` or\n`maintenance` (P2b ruling 4). A service or surcharge booking holds no\nstock, so its delta is always matched with no steps.",
+          "doc": "The rules an ABSOLUTE breakdown change represents — the successor to the\napi's `deriveCustodyTransitions` / `deriveWithLossUndos`, for repair scripts,\nthe parity sweeps and the transition window while the delta wire is still\naccepted.\n\n`undos` are the loss marks the caller is undoing, with the origin read off\neach consumed record. They apply first, and the ladder then decomposes the\nbreakdown in between. A fall of `lost`/`damaged` with no undo for it is\nresidue: the pure delta cannot say where the units go back to.\n\n## Pairing order, carried over unchanged\n\nRises are paired in order of how CONSTRAINED they are, not by direction:\n`reserved` can only be fed by `prepped`, so that pairing is resolved first,\nand only then the contested `prepped`/`out` rises. Take\n`{returned: 2, prepped: 2}` → `{out: 2, reserved: 2}`: forward-first pairs\n`prepped → out` and strands `returned → reserved`, while the forced reading\nis `unprep` + `check_in_undo`.\n\nA forward multi-hop (`reserved → out`) is `[prep, check_out]` with the\nimplicit prep counted once; a rewind is matched at every depth\n(`returned → reserved` is `check_in_undo`, `check_out_undo`, `unprep`).\n\n⚠️ **What stays residue is a DECISION, not a gap in this function.**\n`prepped → returned` is a forward multi-hop past `out`, which would record\nunits going out and coming back that nobody saw (api-cloudrun#1053); a\npre-departure key into `lost`/`damaged` has no row at all (gap G1); and a\nsale never takes a shelf loss, a flag, `cleaning` or `maintenance` (P2b ruling\n4). A sale's rewinds and its loss undos ARE matched since decision 5\n(`sale_undo`, `sale_return_undo`, `sale_lost_undo`, `sale_damaged_undo`). A service or surcharge booking holds no\nstock, so its delta is always matched with no steps.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -17925,6 +18001,14 @@
           "name": "heldDelta",
           "signature": "heldDelta(line: MovementLineType): number",
           "doc": "A line's contribution to `quantity_held`: `+q` if it lands somewhere, `−q` if\nit leaves from somewhere, and `0` when it does both.\n\nConservation is structural — no cross-line summation, and a half-move is\ninexpressible because a line with two nulls does not validate.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isReversing",
+          "signature": "isReversing(m: Pick<Movement, \"type\" | \"reverses\">): boolean",
+          "doc": "Whether a movement walks back another: a `reverses` reversal (it keeps its\noriginal's type and negates its lines), or a TYPED reversal — an undo type\nwhose contract is its forward's mirrored (`MOVEMENT_CONTRACTS[type].undoes`).\n\nThe cost-bearing readers treat both alike (stock campaign decision 5): the\nrelief is exact ({@link reversalReliefCents}), and a Xero posting takes the\nFORWARD's accounts ({@link xeroPostingFor}). On a custody-only undo — every\nrental rewind — there is no cost, so nothing reads differently.",
           "paramTags": [],
           "returnsTag": null
         },

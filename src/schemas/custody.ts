@@ -27,12 +27,19 @@
  * share conventions (typed ids, `enforced_by`, one exported table) and nothing
  * else.
  *
- * ## Sales
+ * ## Sales (stock campaign decision 5)
  *
- * A sale's rows are encoded as a sale behaves today, not as a sale might
- * ideally behave: `out → lost` and `out → damaged` are legal and emit NO
- * movement (the units left CFS ownership at the point of sale, so there is no
- * inventory event), and every sale rewind is refused (api-cloudrun#1054).
+ * A sale's `out` is the customer's (`ownsKey`), so its rows split two ways:
+ *
+ * - `out → lost` / `out → damaged` and their undos write `sale_lost` /
+ *   `sale_damaged` (and `_undo`): CUSTODY-ONLY movements with no place and no
+ *   cost, so the journal replays. They wrote nothing until P1 (gap G6).
+ * - the rewinds `check_out_undo` / `check_in_undo` write `sale_undo` /
+ *   `sale_return_undo`: TYPED REVERSALS that move ownership and carry the exact
+ *   basis back (api-cloudrun#1054).
+ *
+ * A sale never takes a shelf loss or flag, nor `cleaning`/`maintenance` (P2b
+ * ruling 4).
  *
  * @module
  */
@@ -280,7 +287,9 @@ export const CUSTODY_RULES: readonly CustodyRule[] = [
     id: "check_out_undo",
     from: "out",
     to: "prepped",
-    ...RENTAL_ONLY("check_out_undo"),
+    rental: { movement: "check_out_undo" },
+    // A typed reversal of the sale: ownership comes back with its exact basis.
+    sale: { movement: "sale_undo" },
     service: null,
     direction: "undo",
     stage: "checkout",
@@ -307,7 +316,9 @@ export const CUSTODY_RULES: readonly CustodyRule[] = [
     id: "check_in_undo",
     from: "returned",
     to: "out",
-    ...RENTAL_ONLY("check_in_undo"),
+    rental: { movement: "check_in_undo" },
+    // Relieves exactly what the return restored, refunded or not.
+    sale: { movement: "sale_return_undo" },
     service: null,
     direction: "undo",
     stage: "return",
@@ -322,8 +333,8 @@ export const CUSTODY_RULES: readonly CustodyRule[] = [
     from: "out",
     to: "lost",
     rental: { movement: "mark_lost" },
-    // Ownership left at the sale, so there is no inventory event to record.
-    sale: { movement: null },
+    // Ownership left at the sale: custody only, no place and no cost (gap G6).
+    sale: { movement: "sale_lost" },
     service: null,
     direction: "forward",
     stage: "return",
@@ -336,7 +347,8 @@ export const CUSTODY_RULES: readonly CustodyRule[] = [
     id: "mark_lost_undo",
     from: "lost",
     to: "out",
-    ...RENTAL_ONLY("mark_lost_undo"),
+    rental: { movement: "mark_lost_undo" },
+    sale: { movement: "sale_lost_undo" },
     service: null,
     direction: "undo",
     stage: "return",
@@ -351,7 +363,7 @@ export const CUSTODY_RULES: readonly CustodyRule[] = [
     from: "out",
     to: "damaged",
     rental: { movement: "mark_damaged" },
-    sale: { movement: null },
+    sale: { movement: "sale_damaged" },
     service: null,
     direction: "forward",
     stage: "return",
@@ -364,7 +376,8 @@ export const CUSTODY_RULES: readonly CustodyRule[] = [
     id: "mark_damaged_undo",
     from: "damaged",
     to: "out",
-    ...RENTAL_ONLY("mark_damaged_undo"),
+    rental: { movement: "mark_damaged_undo" },
+    sale: { movement: "sale_damaged_undo" },
     service: null,
     direction: "undo",
     stage: "return",
@@ -677,6 +690,30 @@ export function markReasonOf(type: MovementTypeType): OutOfServiceKeyType | null
     r.direction === "forward" && r.from === "out" && r.rental?.movement === type && OUT_OF_SERVICE_FROM.has(r.to)
   );
   return rule ? rule.to as OutOfServiceKeyType : null;
+}
+
+/**
+ * Whether a movement of `type` carrying `custody` is a step that happens
+ * entirely on the CUSTOMER's side: some rule whose `{from, to}` it carries has
+ * an arm writing `type` for a booking type that owns NEITHER end (`ownsKey`).
+ * Today that is a sale's `sale_lost` / `sale_damaged` and their undos.
+ *
+ * Keyed on the property, not on type names, so a new custody-only step past
+ * the ownership boundary is covered without an edit. The roster fold reads it:
+ * such a step names units that are no longer on any roster, and changes none.
+ */
+export function isCustomerCustodyStep(
+  type: MovementTypeType,
+  custody: { from: BookingBreakdownKeyType | null; to: BookingBreakdownKeyType | null } | null,
+): boolean {
+  if (custody === null || custody.from === null || custody.to === null) return false;
+  const { from, to } = custody;
+  return CUSTODY_RULES.some((rule) =>
+    rule.from === from && rule.to === to &&
+    (["rental", "sale"] as const).some((bt) =>
+      (bt === "rental" ? rule.rental : rule.sale)?.movement === type && !ownsKey(bt, from) && !ownsKey(bt, to)
+    )
+  );
 }
 
 // ── The wire ─────────────────────────────────────────────────────────

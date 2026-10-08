@@ -162,15 +162,13 @@ export const MOVEMENT_TYPES = [
   // `xeroPostingFor` skips them on `no_cost_contract` — both DERIVED from the
   // contract, so neither needed an arm.
   //
-  // ⭐ **There are FIVE — `mark_lost_undo` and `mark_damaged_undo` joined the
-  // three in api-cloudrun#1094 step 5**, and the discriminator for whether one
-  // belongs here is whether a writer can emit it, never whether the vocabulary
-  // looks symmetric. This comment said "THREE, not five" while
-  // `applyBookingUpdate` refused any decrease of `lost`/`damaged` outright, and
-  // that refusal was itself the live defect: the manager's `‹ Out` button fires
-  // `lost → out` / `damaged → out` in one pick and 400'd on any booking holding
-  // them. A mistaken mark ("it was never lost") is a rewind like the others — the
-  // breakdown moves back and the journal has to say so.
+  // ⭐ **Their contracts are DERIVED, not written** (stock campaign P1): every
+  // undo type is listed in `MOVEMENT_UNDOES` beside the forward it walks back,
+  // and its contract is that forward's mirrored. There are eleven today — the
+  // seven rental rewinds below and the four sale ones — and the discriminator
+  // for whether one belongs is whether a writer can emit it, never whether the
+  // vocabulary looks symmetric. (This comment said FIVE after api-cloudrun#1094
+  // step 5, while seven were declared.)
   //
   // 🔴 **A mark undo is NOT a way to get a unit back that WAS lost.** That is
   // `return_to_service` below, and the two claim different things: the undo
@@ -189,13 +187,9 @@ export const MOVEMENT_TYPES = [
   // either the type or the writer existed
   // (`schemas/propagation/out-of-service.ts`).
   //
-  // ⚠️ **And no `sale` rewind.** `sale`/`sale_return` move ownership and carry a
-  // required cost, so undoing one owes a basis and a posting decision the
-  // contract cannot derive — the two gates the depreciation note above keeps
-  // shut. No sale rewind exists in either corpus (all 23 measured divergences
-  // are `type: "rental"`), so the gap is recorded rather than guessed:
-  // api-cloudrun#1054. The forward direction has its own open question at the
-  // same spot — api-cloudrun#1053.
+  // ⭐ **A sale rewind exists since stock campaign decision 5** (api-cloudrun#1054):
+  // `sale_undo` / `sale_return_undo`, declared with the sale types below. They
+  // move ownership and carry a cost, so unlike these they are TYPED REVERSALS.
   "unprep",
   "check_out_undo",
   "check_in_undo",
@@ -251,6 +245,27 @@ export const MOVEMENT_TYPES = [
   // Custody + ownership + cost.
   "sale",
   "sale_return",
+  // ── a sale's rewinds and its losses (stock campaign decision 5, api-cloudrun#1054) ──
+  //
+  // `sale_undo` / `sale_return_undo` are TYPED REVERSALS: a check-out or a
+  // return that never happened, on a sale. Unlike the rental rewinds they move
+  // ownership and carry a cost, so their contract is the forward's MIRRORED
+  // (`MOVEMENT_UNDOES`) and they route through `isReversing` exactly where a
+  // `reverses` reversal does: `xeroPostingFor` takes the forward's accounts
+  // (no new posting rows) and the fold relieves exactly what the forward
+  // restored. The basis of a `sale_undo` is read from the booking's own journal,
+  // newest first (`consumeNewestFirst`).
+  //
+  // `sale_lost` / `sale_damaged` and their undos are CUSTODY ONLY: a sold unit
+  // lost or damaged in transit was already the customer's (`ownsKey`), so the
+  // event moves no place and no cost — lineless, `places: null`. Before them a
+  // sale's `out → lost` was legal and wrote NO movement (gap G6).
+  "sale_undo",
+  "sale_return_undo",
+  "sale_lost",
+  "sale_lost_undo",
+  "sale_damaged",
+  "sale_damaged_undo",
   // Ownership + cost, no order involved.
   "opening_balance",
   "purchase",
@@ -392,6 +407,12 @@ export const CUSTODY_PLACE_KINDS: Readonly<
  * lets an operator key an off-the-shelf sale with no order at all.
  */
 export interface MovementContract {
+  /**
+   * The forward type this one says never happened, or `null` for a forward
+   * type. An undo's contract is its forward's with `places` swapped
+   * ({@link MOVEMENT_UNDOES}); `isReversing` (`utils/movements.ts`) reads it.
+   */
+  undoes: MovementTypeType | null;
   /** Whether the custody axis must, must not, or conditionally appears. */
   custody: "required" | "forbidden" | "with_booking";
   /** Whether the cost axis must or must not appear. */
@@ -457,8 +478,11 @@ export interface MovementContract {
   uncounted: "lineless" | "refused";
 }
 
-/** The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member. */
-export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContract>> = {
+/**
+ * The hand-written half of {@link MOVEMENT_CONTRACTS}: every type that is not an
+ * undo. `undoes` is filled in for all of them as `null` when the table is built.
+ */
+const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementContract>> = {
   // Reserved and prepped units are both on the shelf, so nothing moves.
   prep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed", uncounted: "lineless" },
   check_out: {
@@ -518,60 +542,15 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     units: "allowed",
     uncounted: "lineless",
   },
-  // ── the reachable rewinds, mirrored ──
-  // Each is its forward twin's `places` swapped end for end. Mirroring here
-  // rather than exempting them keeps the check real: a rewind must still name
-  // places of the RIGHT KIND, just in the opposite order — the same reasoning
-  // `checkMovementContract` applies to a reversal, stated once per type instead
-  // of inferred from a `reverses` that a rewind has no business setting.
-  unprep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed", uncounted: "lineless" },
-  check_out_undo: {
-    custody: "required",
-    cost: "forbidden",
-    places: { from: ["bookings"], to: ["locations"] },
-    booking: "required",
-    service: "forbidden",
-    units: "allowed",
-    uncounted: "lineless",
-  },
-  check_in_undo: {
-    custody: "required",
-    cost: "forbidden",
-    places: { from: ["locations"], to: ["bookings"] },
-    booking: "required",
-    service: "forbidden",
-    units: "allowed",
-    uncounted: "lineless",
-  },
-  // 🔴 **Mirrored EXACTLY, including the widening on `mark_lost`'s origin.** A
-  // loss may come off the booking (`out → lost`) or off a shelf
-  // (`returned → lost`, api-cloudrun#1118 — the shelf rung shipped in
-  // api-cloudrun `5e50a9e5`), so its undo puts the unit back at either:
-  // `mark_lost_undo` and `mark_lost_returned_undo` in `schemas/custody.ts`. The
-  // writer takes the destination from the consumed record's own mark lines —
-  // never re-derived from the breakdown — so the kind always matches the one the
-  // loss left.
-  mark_lost_undo: {
-    custody: "required",
-    cost: "forbidden",
-    places: { from: ["out-of-service"], to: ["bookings", "locations"] },
-    booking: "required",
-    service: "forbidden",
-    units: "allowed",
-    uncounted: "lineless",
-  },
-  mark_damaged_undo: {
-    custody: "required",
-    cost: "forbidden",
-    places: { from: ["locations"], to: ["bookings"] },
-    booking: "required",
-    service: "forbidden",
-    units: "allowed",
-    uncounted: "lineless",
-  },
-  // `mark_damaged` and its undo, for the two other in-building reasons. The
-  // custody key carries the flag (`custody.to === "cleaning"`), so `service` is
-  // forbidden for the reason `MovementContract.service` gives.
+  // ── the reachable rewinds are NOT here ──
+  // Every `*_undo` contract (and `unprep`) is DERIVED below as its forward
+  // twin's contract with `places` swapped end for end — see `MOVEMENT_UNDOES`.
+  // They used to be seven hand-mirrored rows, of which only `places` was ever
+  // checked against the forward.
+  //
+  // `mark_damaged`, for the two other in-building reasons. The custody key
+  // carries the flag (`custody.to === "cleaning"`), so `service` is forbidden
+  // for the reason `MovementContract.service` gives.
   mark_cleaning: {
     custody: "required",
     cost: "forbidden",
@@ -581,28 +560,10 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     units: "allowed",
     uncounted: "lineless",
   },
-  mark_cleaning_undo: {
-    custody: "required",
-    cost: "forbidden",
-    places: { from: ["locations"], to: ["bookings"] },
-    booking: "required",
-    service: "forbidden",
-    units: "allowed",
-    uncounted: "lineless",
-  },
   mark_maintenance: {
     custody: "required",
     cost: "forbidden",
     places: { from: ["bookings"], to: ["locations"] },
-    booking: "required",
-    service: "forbidden",
-    units: "allowed",
-    uncounted: "lineless",
-  },
-  mark_maintenance_undo: {
-    custody: "required",
-    cost: "forbidden",
-    places: { from: ["locations"], to: ["bookings"] },
     booking: "required",
     service: "forbidden",
     units: "allowed",
@@ -811,6 +772,12 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     units: "allowed",
     uncounted: "lineless",
   },
+  // ── a sale's losses: custody only ──
+  // The units left CFS ownership at the sale, so a loss or damage in transit is
+  // the customer's: no place, no cost, no line. The custody pair (`out → lost`,
+  // `out → damaged`) is the whole event, which is what makes it replayable.
+  sale_lost: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed", uncounted: "lineless" },
+  sale_damaged: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed", uncounted: "lineless" },
   // Shelf → record. `booking: "forbidden"` for the reason `return_to_service`
   // gives: the trip belongs to the RECORD, not to whichever order happened to
   // surface it, and the booking (if any) is named in `sources[]`.
@@ -824,6 +791,89 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
     uncounted: "refused",
   },
 };
+
+/**
+ * Every UNDO type and the forward type it says never happened — the one
+ * declaration the undo contracts are built from. Pinned against
+ * `CUSTODY_RULES[*].inverse` by `tests/custody.test.ts`, so a rule pair and its
+ * movement pair cannot disagree.
+ *
+ * 🔴 **`mark_lost_undo` mirrors `mark_lost` EXACTLY, including the widening on
+ * its origin.** A loss may come off the booking (`out → lost`) or off a shelf
+ * (`returned → lost`, api-cloudrun#1118), so its undo puts the unit back at
+ * either. The writer takes the destination from the consumed record's own mark
+ * lines — never re-derived from the breakdown.
+ *
+ * ⚠️ **A rewind is an event in its own right, not a `reverses` reversal**
+ * (see {@link MOVEMENT_TYPES}): one un-prep can walk back part of each of
+ * several preps. What it shares with a reversal is the mirrored contract, and —
+ * for the two that carry cost — the exact relief.
+ */
+export const UNDO_MOVEMENT_TYPES = [
+  "unprep",
+  "check_out_undo",
+  "check_in_undo",
+  "mark_lost_undo",
+  "mark_damaged_undo",
+  "mark_cleaning_undo",
+  "mark_maintenance_undo",
+  "sale_undo",
+  "sale_return_undo",
+  "sale_lost_undo",
+  "sale_damaged_undo",
+] as const;
+
+/** A movement type that undoes another ({@link MOVEMENT_UNDOES}). */
+export type UndoMovementTypeType = typeof UNDO_MOVEMENT_TYPES[number];
+/** Every movement type that is not an undo. */
+export type ForwardMovementTypeType = Exclude<MovementTypeType, UndoMovementTypeType>;
+
+/** Each undo type's forward — see {@link UNDO_MOVEMENT_TYPES}. Explicitly typed for JSR's declaration emit. */
+export const MOVEMENT_UNDOES: Readonly<Record<UndoMovementTypeType, ForwardMovementTypeType>> = {
+  unprep: "prep",
+  check_out_undo: "check_out",
+  check_in_undo: "check_in",
+  mark_lost_undo: "mark_lost",
+  mark_damaged_undo: "mark_damaged",
+  mark_cleaning_undo: "mark_cleaning",
+  mark_maintenance_undo: "mark_maintenance",
+  sale_undo: "sale",
+  sale_return_undo: "sale_return",
+  sale_lost_undo: "sale_lost",
+  sale_damaged_undo: "sale_damaged",
+};
+
+/** A contract before its `undoes` is filled in. */
+export type BaseMovementContract = Omit<MovementContract, "undoes">;
+
+/** The forward contract mirrored: `places` swapped end for end, every other axis identical. */
+function mirrorContract(forward: BaseMovementContract, undoes: MovementTypeType): MovementContract {
+  return {
+    ...forward,
+    undoes,
+    places: forward.places === null ? null : { from: forward.places.to, to: forward.places.from },
+  };
+}
+
+/**
+ * The per-kind line contract, one entry per {@link MOVEMENT_TYPES} member: every
+ * forward contract as written, and every undo derived by {@link mirrorContract}.
+ * Mirroring rather than exempting the undos keeps the check real: an undo must
+ * still name places of the RIGHT KIND, in the opposite order — the same
+ * reasoning `checkMovementContract` applies to a `reverses` reversal.
+ */
+export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContract>> = (() => {
+  const table = {} as Record<MovementTypeType, MovementContract>;
+  for (const type of MOVEMENT_TYPES) {
+    if ((UNDO_MOVEMENT_TYPES as readonly string[]).includes(type)) {
+      const forward = MOVEMENT_UNDOES[type as UndoMovementTypeType];
+      table[type] = mirrorContract(FORWARD_CONTRACTS[forward], forward);
+    } else {
+      table[type] = { ...FORWARD_CONTRACTS[type as ForwardMovementTypeType], undoes: null };
+    }
+  }
+  return table;
+})();
 
 /**
  * Returns +1 for movements that increase owned quantity, -1 for those that

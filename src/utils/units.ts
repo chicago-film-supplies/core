@@ -15,6 +15,7 @@
  */
 import {
   type DocSourceType,
+  isCustomerCustodyStep,
   MAX_UNITS_PER_ROSTER,
   type Movement,
   OOS_FLAG_REASONS,
@@ -444,6 +445,22 @@ export function foldRosterUnits(roster: RosterUnits, m: RosterMovement): RosterU
 
   if (m.lines.length === 0 && (m.type === "rebook_out" || m.type === "rebook_in")) {
     return foldRebook(next, m, once);
+  }
+
+  // A step wholly on the customer's side (a sale's unit lost in transit, and its
+  // undo): the unit left the roster at the sale, so it must still be absent,
+  // and nothing changes (stock campaign decision 5).
+  if (m.lines.length === 0 && isCustomerCustodyStep(m.type, m.custody)) {
+    for (const { number: n } of m.units) {
+      once(n);
+      if (next[String(n)] !== undefined) {
+        throw new RosterFoldError(
+          `"${m.type}" names unit ${n} on the customer's side, but the roster still holds it: ${describe(next[String(n)])}`,
+          n,
+        );
+      }
+    }
+    return roster;
   }
 
   if (m.lines.length === 0) {

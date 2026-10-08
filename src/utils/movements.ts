@@ -95,15 +95,34 @@ export function costOfUnits(basisCents: bigint, heldUnits: number, quantity: num
  * Returns a MAGNITUDE, matching `costOfUnits`: the caller carries the sign.
  */
 function reversalReliefCents(
-  movement: Pick<Movement, "cost" | "reverses">,
+  movement: Pick<Movement, "type" | "cost" | "reverses">,
 ): bigint | null {
-  if (movement.reverses === null || movement.cost === null) return null;
+  if (!isReversing(movement) || movement.cost === null) return null;
   const stated = BigInt(movement.cost.amount_cents);
   // 🔴 A reversal of an INCREASE carries a negative amount, so the relief is
-  // its negation. A non-negative amount here means the reversal disagrees with
-  // its own direction — a stored-record defect, not a smaller relief — so fall
-  // back to the weighted-average share rather than ADDING basis on a decrease.
-  return stated < 0n ? -stated : null;
+  // its negation. A POSITIVE amount here means the reversal disagrees with its
+  // own direction — a stored-record defect, not a smaller relief — so fall back
+  // to the weighted-average share rather than ADDING basis on a decrease.
+  //
+  // ⭐ **ZERO is exact, not a defect** (widened from `< 0` in stock campaign P1):
+  // undoing a no-refund `sale_return`, or reversing a $0 increase, relieves
+  // exactly the $0 its forward restored. The weighted-average share it fell
+  // back to before would relieve basis the forward never added.
+  return stated <= 0n ? -stated : null;
+}
+
+/**
+ * Whether a movement walks back another: a `reverses` reversal (it keeps its
+ * original's type and negates its lines), or a TYPED reversal — an undo type
+ * whose contract is its forward's mirrored (`MOVEMENT_CONTRACTS[type].undoes`).
+ *
+ * The cost-bearing readers treat both alike (stock campaign decision 5): the
+ * relief is exact ({@link reversalReliefCents}), and a Xero posting takes the
+ * FORWARD's accounts ({@link xeroPostingFor}). On a custody-only undo — every
+ * rental rewind — there is no cost, so nothing reads differently.
+ */
+export function isReversing(m: Pick<Movement, "type" | "reverses">): boolean {
+  return m.reverses !== null || MOVEMENT_CONTRACTS[m.type].undoes !== null;
 }
 
 // ── Placement ───────────────────────────────────────────────────────
@@ -862,16 +881,23 @@ export function xeroPostingFor(
   costAmountCents: number | null,
   heldDelta: number | null,
 ): XeroPostingDecision {
+  // A TYPED reversal (`sale_undo`, `sale_return_undo`) posts as its forward
+  // would, negated by the document's own direction — exactly as a `reverses`
+  // reversal, which keeps its original's type. So every account and refusal
+  // below reads `forward`; only the document direction reads `type`. For every
+  // forward type `forward === type`, which `tests/movement-contract-pins.test.ts`
+  // pins byte for byte. No new posting row exists for a sale's rewinds.
+  const forward = MOVEMENT_CONTRACTS[type].undoes ?? type;
   // Custody-only steps and `transfer` carry no cost object at all.
-  if (!hasCosts(type)) return { kind: "skip", reason: "no_cost_contract" };
-  if (type === "opening_balance") return { kind: "skip", reason: "opening_balance" };
-  if (type === "sale") return { kind: "skip", reason: "sale_posts_on_accrec" };
+  if (!hasCosts(forward)) return { kind: "skip", reason: "no_cost_contract" };
+  if (forward === "opening_balance") return { kind: "skip", reason: "opening_balance" };
+  if (forward === "sale") return { kind: "skip", reason: "sale_posts_on_accrec" };
   // 🔴 Before any account derivation: a reclass has no ACCPAY document of any
   // kind, whichever direction it runs and whatever the product type. Placing
   // this after the `asset_account` switch would make a reclass on a
   // non-stock-bearing product terminal instead of manual, i.e. a 500 on a
   // movement that is simply not Xero's business.
-  if (type === "reclass_out" || type === "reclass_in") {
+  if (forward === "reclass_out" || forward === "reclass_in") {
     return { kind: "manual", reason: "reclass_between_products" };
   }
 
@@ -883,7 +909,7 @@ export function xeroPostingFor(
   // a reversal carries the negated cost, so a `> 0` test on the stored value
   // answers `false` for the reversal of a refunded return and would let it post
   // an ACCPAY bill where the event it undoes posted nothing at all.
-  if (type === "sale_return" && Math.abs(costAmountCents ?? 0) > 0) {
+  if (forward === "sale_return" && Math.abs(costAmountCents ?? 0) > 0) {
     return { kind: "skip", reason: "refunded_return_posts_on_accrec" };
   }
 
@@ -898,13 +924,13 @@ export function xeroPostingFor(
 
   // The TYPE's own direction. It picks the ACCOUNTS — what kind of event this
   // is — and nothing else.
-  const natural = getTransactionMultiplier(type);
+  const natural = getTransactionMultiplier(forward);
   if (natural === 0) return { kind: "terminal", reason: "no_ownership_direction" };
 
   // The DOCUMENT's direction. Equal to `natural` for an ordinary movement and
   // its negation for a reversal, which is the whole of the distinction.
   const direction = heldDelta === null
-    ? natural
+    ? getTransactionMultiplier(type)
     : heldDelta > 0
     ? 1
     : heldDelta < 0
@@ -918,12 +944,12 @@ export function xeroPostingFor(
 
   // ── Accounts, from `natural` ──────────────────────────────────────────
   const offset_account = natural === 1
-    ? (type === "purchase"
+    ? (forward === "purchase"
       // Only a real purchase moves a payable; every other increase nets to zero.
       ? XERO_OFFSET_ACCOUNTS.accounts_payable
       : XERO_OFFSET_ACCOUNTS.adjustment_clearing)
     : XERO_OFFSET_ACCOUNTS.inventory_shrink;
-  const zero_total = !(natural === 1 && type === "purchase");
+  const zero_total = !(natural === 1 && forward === "purchase");
 
   // ── The refusals ──────────────────────────────────────────────────────
   //
