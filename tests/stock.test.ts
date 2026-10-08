@@ -15,9 +15,11 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 
 import {
   availableFrom,
+  availableSetsOf,
   type AvailabilityWindow,
   boundMs,
   bookingHoldsStock,
+  checkoutUnits,
   computeStockAvailability,
   heldByBooking,
   intervalsOverlap,
@@ -659,4 +661,18 @@ Deno.test("property: nulling quantity_held changes ONLY quantity_available, in b
   }
   // Non-degeneracy: a corpus with no demand would pass the peak half vacuously.
   assert(peaksWithDemand > 0, "no generated case had any demand — the peak half proved nothing");
+});
+
+Deno.test("checkoutUnits: what a booking still takes off a shelf — reserved + prepped", () => {
+  assertEquals(checkoutUnits({ breakdown: bd({ reserved: 2, prepped: 1, out: 4, returned: 3 }) }), 3);
+  assertEquals(unitsClaimedOnShelves({ breakdown: bd({ reserved: 2, prepped: 1, out: 4, returned: 3 }) }), 7);
+});
+
+Deno.test("availableSetsOf: min of the parent and floor(component ÷ per-set), null when a term has not loaded", () => {
+  const term = (n: number | null) => ({ quantity_available: n });
+  assertEquals(availableSetsOf(term(10), [{ quantity: 3, availability: term(7) }]), 2);
+  assertEquals(availableSetsOf("unbounded", [{ quantity: 2, availability: term(9) }]), 4);
+  assertEquals(availableSetsOf(term(null), [{ quantity: 2, availability: term(null) }]), null, "nothing bounded");
+  assertEquals(availableSetsOf(term(5), [{ quantity: 1, availability: null }]), null, "a term still loading");
+  assertEquals(availableSetsOf(null, []), null);
 });

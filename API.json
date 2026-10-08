@@ -14258,6 +14258,14 @@
         },
         {
           "kind": "function",
+          "name": "custodyOfferSources",
+          "signature": "custodyOfferSources(rule: CustodyRuleId): BookingBreakdownKeyType[]",
+          "doc": "The breakdown buckets an offer draws from: a `check_out` preps `reserved`\nunits on the way, so it reads both; every other rule its own `from`. The\nmanager's `sourcesOf` restated it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "custodyPlaces",
           "signature": "custodyPlaces(type: MovementTypeType, custody: typeLiteral): CustodyPlaces | null",
           "doc": "The kind of place each end of a custody movement's lines stands in, or `null`\nwhen the movement writes no lines (`places: null` — a prep, a rebook).\n\nEach end is the kind its custody key implies (`CUSTODY_PLACE_KINDS`) that the\nmovement's contract allows on that side: `out` is a `bookings` place for a\nrental and `outside` for a sale, and a `lost` unit stands at its\n`out-of-service` record. A flag is `locations → locations`: in place.",
@@ -14291,8 +14299,8 @@
         {
           "kind": "function",
           "name": "expandCustodyOffer",
-          "signature": "expandCustodyOffer(booking: CustodyBooking, offer: Pick<CustodyOffer, \"rule\">, quantity: number): BookingActionType[]",
-          "doc": "The actions an offer sends for `quantity` units.\n\nEvery offer is one action except `check_out` over units still `reserved`:\nthose are prepped on the way, so the offer sends `[prep, check_out]`. It\ndraws the already-prepped units FIRST — the ones on the prep shelf are the\nones going out — and preps only the shortfall.",
+          "signature": "expandCustodyOffer(booking: CustodyBooking, offer: Pick<CustodyOffer, \"rule\">, quantity: number, units?: readonly number[]): BookingActionType[]",
+          "doc": "The actions an offer sends for `quantity` units.\n\nEvery offer is one action except `check_out` over units still `reserved`:\nthose are prepped on the way, so the offer sends `[prep, check_out]`. It\ndraws the already-prepped units FIRST — the ones on the prep shelf are the\nones going out — and preps only the shortfall.\n\n**With `units`** (a unit-tracked booking, the operator's pick): a\n`check_out` sends every picked unit the booking holds in `prepped` straight\nout, lets up to its UNTRACKED prepped count (a conversion's leftover) go out\nas well, and preps exactly the rest, naming them. An `unprep` with no units\npicked drains an untracked count and names none. This is the manager's\n`wireActions` for one dispatch, so the menu and the wire cannot disagree.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -17599,6 +17607,12 @@
           "doc": "{@link peakStockConsumption}'s answer: the numbers, plus where they occur."
         },
         {
+          "kind": "typeAlias",
+          "name": "SetAvailabilityTerm",
+          "declaration": "type SetAvailabilityTerm = typeLiteral | null;",
+          "doc": "One term of {@link availableSetsOf}: an availability answer, or `null` while it has not loaded."
+        },
+        {
           "kind": "interface",
           "name": "StockAvailability",
           "declaration": "interface StockAvailability {\n  quantity_held: number | null;\n  quantity_booked: number;\n  quantity_out_of_service: number;\n  quantity_available: number | null;\n}",
@@ -17638,6 +17652,14 @@
         },
         {
           "kind": "function",
+          "name": "availableSetsOf",
+          "signature": "availableSetsOf(parent: SetAvailabilityTerm | \"unbounded\", components: ReadonlyArray<typeLiteral>): number | null",
+          "doc": "How many whole SETS a window can supply: the parent's own availability and\n`floor(component available ÷ per-set quantity)` per component, minimised —\nmoved from the manager's `availableSetsOf` (stock campaign P1).\n\n`quantity_available: null` from the engine means UNBOUNDED, never 0, so an\nuncounted term places no ceiling and drops out of the min. A `none` parent\npasses `\"unbounded\"`. A term that has not loaded (`null`) makes the whole\nanswer `null`, because a partial min would read too high. With nothing\nbounded at all the answer is `null`, which renders as no number.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "bookingHoldsStock",
           "signature": "bookingHoldsStock(b: typeLiteral): boolean",
           "doc": "Does this booking hold any physical stock at all? The shelf-side liveness\npredicate — `unitsClaimedOnShelves(b) > 0`.\n\nDeliberately the shelf definition rather than {@link heldByBooking}: every\ncurrent caller is asking \"is this booking still physically live\", which a\nfully-checked-out sale still is until it completes.",
@@ -17649,6 +17671,14 @@
           "name": "boundMs",
           "signature": "boundMs(fs: FirestoreTimestampType | null, iso: string | null): number | null",
           "doc": "Resolve an interval bound to epoch millis, or `null` for open-ended.\n\nPrefers the `_fs` twin — that is the field Firestore itself orders by, so it\nis the bound of record — and falls back to parsing the paired ISO string when\n`_fs` isn't a real Timestamp (a plain-JSON fixture, a REST read, a write-time\n`FieldValue` sentinel). `null` on both sides means genuinely open-ended.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "checkoutUnits",
+          "signature": "checkoutUnits(b: typeLiteral): number",
+          "doc": "Units a booking still has to take OFF a shelf — `reserved + prepped`, the\ndemand a check-out will draw (stock campaign P1). The api's staged-units\nsum, the unsourceable-bookings audit and the manager's shelf aggregation\n(`onShelfDemand`) each spelled it by hand.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -17805,6 +17835,22 @@
         },
         {
           "kind": "function",
+          "name": "exchangeClaimedOn",
+          "signature": "exchangeClaimedOn(rows: ReadonlyArray<Omit<ExchangeRow, \"path\">>, path: readonly string[]): number",
+          "doc": "Σ `exchanged_for[].quantity` claimed against `path` across the document's rows.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "exchangeClaimsByPath",
+          "signature": "exchangeClaimsByPath(rows: ReadonlyArray<Omit<ExchangeRow, \"path\">>): Map<string, number>",
+          "doc": "Σ `exchanged_for[].quantity` claimed against each row path, over every row of\nONE document — the claims {@link overclaimedExchanges} compares, exposed so\nthe manager's exchange offer reads the same sum (it kept `claimedOn`). Keyed\nby an internal path key; read one path with {@link exchangeClaimedOn}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "findSubtreeAnchor",
           "signature": "findSubtreeAnchor(path: readonly string[], anchors: readonly SubstitutionAnchor[]): SubstitutionAnchor | undefined",
           "doc": "The anchor whose subtree `path` falls in, or `undefined`.\n\nThe caller needs the anchor itself and not merely a boolean, because deriving\na component's unauthorable fields means reading the REPLACEMENT product —\nwhich is addressed by the anchor's own `path.at(-1)`.",
@@ -17909,17 +17955,8 @@
           "kind": "function",
           "name": "overclaimedExchanges",
           "signature": "overclaimedExchanges(prev: ReadonlyArray<ExchangeRow>, next: ReadonlyArray<ExchangeRow & typeLiteral>): OverclaimedRow[]",
-          "doc": "The rows THIS write pushes past their quantity by what exchanges take back from\nthem (api-cloudrun#1116, owner 2026-09-26: the cap is checked at AUTHORING).\n\n🔴 **Deliberately NOT a stored refinement.** A warehouse-staged exchange lives on\nthe fulfillment alone, so a sales edit that lowers X on the order would make\nthe merged fulfillment over-claim and fail its write — refused because of a\ndocument the sender never saw, the trap api-cloudrun#1114 ruled out for\nexistence. So a row is reported only when its claimed total GREW in this\nwrite and now exceeds its quantity; a row the write merely shrank is a\ndifference to surface, not refuse, and the checkout rider's `min(…, out)`\nstill bounds what physically moves.\n\nA row the document does not carry is skipped: that entry dangles, which\n`checkExchangedFor` already allows.\n\nPure, shared by the API's writers and the manager's pre-submit check.",
-          "paramTags": [
-            {
-              "name": "prev",
-              "doc": "The document's rows before the write (`[]` for a new document)"
-            },
-            {
-              "name": "next",
-              "doc": "The document's rows as they will be stored"
-            }
-          ],
+          "doc": "",
+          "paramTags": [],
           "returnsTag": null
         },
         {
@@ -20818,6 +20855,14 @@
         },
         {
           "kind": "function",
+          "name": "rosterUnitsForBucket",
+          "signature": "rosterUnitsForBucket(roster: RosterUnits, bucket: BookingBreakdownKeyType, _: unknown): number[]",
+          "doc": "The roster units an UNTRACKED count in booking bucket `bucket` may be drawn\nfrom — what a conversion left there physically with no number written down\n— narrowed to where the movement will say they are, so a pick the picker\noffers is one the roster fold accepts (gap G11 (g)). Moved from the\nmanager's `untrackedPool`, which offered another record's away units and any\nshelf's flagged ones.\n\n| bucket | units |\n|---|---|\n| `reserved`, `prepped`, `returned` | unflagged on a shelf (`scope.location`, when given) |\n| `out` | `unattributed_out` |\n| `lost` | `away` at one of `scope.records` |\n| `damaged`, `cleaning`, `maintenance` | flagged that reason, on one of `scope.records` (and `scope.location`) |\n\nWithout `scope.records` the loss buckets offer nothing: a unit away or flagged\nbelongs to a record, and the fold refuses one the movement does not name.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "serialAt",
           "signature": "serialAt(unit: Pick<UnitType, \"serial_history\">, instant: string | null): string | null",
           "doc": "The serial of the physical unit that held a number at `instant` — or, with\n`instant` `null`, of the one that holds it now. `null` when no serial was\never recorded for that unit.\n\n🔴 **Not \"the history entry open at `instant`\".** A number changes PHYSICAL\nunit only at a `replaced` entry; `initial` and `corrected` entries restate the\nserial of the unit already there. So this finds the span of history between\nthe `replaced` entries either side of `instant` and returns that span's\nLATEST serial. The open-entry reading is wrong both ways that matter: the\nwalkie's serials were pasted (`initial`) on 2026-10-07, after most of its\nlosses, so no entry is open at the loss; and a `corrected` entry after the\nloss fixes a typo in the same radio's serial.\n\nA closed span still answers — a write-off closes the open entry, and the\nwritten-off radio's serial is what an invoice for it names.",
@@ -20837,6 +20882,14 @@
           "name": "toUnitRanges",
           "signature": "toUnitRanges(numbers: Iterable<number>): UnitRange[]",
           "doc": "The fewest inclusive runs covering `numbers`, ascending.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "unflaggedShelfUnits",
+          "signature": "unflaggedShelfUnits(roster: RosterUnits, uid_location?: string): number[]",
+          "doc": "Unflagged shelf units, ascending — optionally on one location. The manager\nfiltered the roster this way in three places (`recordActions`,\n`OOSBreakdownEditor`, `unitPicks`).",
           "paramTags": [],
           "returnsTag": null
         }

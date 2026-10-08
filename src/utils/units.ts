@@ -14,6 +14,7 @@
  * @module
  */
 import {
+  type BookingBreakdownKeyType,
   type DocSourceType,
   isCustomerCustodyStep,
   MAX_UNITS_PER_ROSTER,
@@ -248,6 +249,69 @@ export type RosterMovement = Pick<
   Movement,
   "uid" | "type" | "uid_booking" | "custody" | "service" | "lines" | "units" | "sources"
 >;
+
+/**
+ * Unflagged shelf units, ascending — optionally on one location. The manager
+ * filtered the roster this way in three places (`recordActions`,
+ * `OOSBreakdownEditor`, `unitPicks`).
+ */
+export function unflaggedShelfUnits(roster: RosterUnits, uid_location?: string): number[] {
+  const out: number[] = [];
+  for (const [key, e] of Object.entries(roster)) {
+    if (e.state !== "shelf" || e.flag !== null) continue;
+    if (uid_location !== undefined && e.uid_location !== uid_location) continue;
+    out.push(Number(key));
+  }
+  return out.sort((a, b) => a - b);
+}
+
+/**
+ * The roster units an UNTRACKED count in booking bucket `bucket` may be drawn
+ * from — what a conversion left there physically with no number written down
+ * — narrowed to where the movement will say they are, so a pick the picker
+ * offers is one the roster fold accepts (gap G11 (g)). Moved from the
+ * manager's `untrackedPool`, which offered another record's away units and any
+ * shelf's flagged ones.
+ *
+ * | bucket | units |
+ * |---|---|
+ * | `reserved`, `prepped`, `returned` | unflagged on a shelf (`scope.location`, when given) |
+ * | `out` | `unattributed_out` |
+ * | `lost` | `away` at one of `scope.records` |
+ * | `damaged`, `cleaning`, `maintenance` | flagged that reason, on one of `scope.records` (and `scope.location`) |
+ *
+ * Without `scope.records` the loss buckets offer nothing: a unit away or flagged
+ * belongs to a record, and the fold refuses one the movement does not name.
+ */
+export function rosterUnitsForBucket(
+  roster: RosterUnits,
+  bucket: BookingBreakdownKeyType,
+  scope: { records?: ReadonlySet<string>; location?: string } = {},
+): number[] {
+  const pick = (keep: (e: UnitRosterEntryType) => boolean) =>
+    Object.entries(roster).filter(([, e]) => keep(e)).map(([k]) => Number(k)).sort((a, b) => a - b);
+  const atLocation = (e: UnitRosterEntryType) =>
+    scope.location === undefined || (e.state === "shelf" && e.uid_location === scope.location);
+  switch (bucket) {
+    case "reserved":
+    case "prepped":
+    case "returned":
+      return unflaggedShelfUnits(roster, scope.location);
+    case "out":
+      return pick((e) => e.state === "unattributed_out");
+    case "lost":
+      return pick((e) => e.state === "away" && scope.records?.has(e.uid_out_of_service) === true);
+    case "damaged":
+    case "cleaning":
+    case "maintenance":
+      return pick((e) =>
+        e.state === "shelf" && e.flag === bucket && e.uid_out_of_service !== null &&
+        scope.records?.has(e.uid_out_of_service) === true && atLocation(e)
+      );
+    default:
+      return [];
+  }
+}
 
 /**
  * A movement that does not fit the roster it is folded into: a unit that is

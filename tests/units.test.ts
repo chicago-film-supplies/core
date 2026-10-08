@@ -17,6 +17,8 @@ import { applyCustodyActions, CustodyRefusal, type CustodyTransition } from "../
 import { untrackedUnitCount } from "../src/utils/bookings.ts";
 import {
   foldRosterUnits,
+  rosterUnitsForBucket,
+  unflaggedShelfUnits,
   formatUnitRanges,
   normalizeUnitSet,
   parseUnitRanges,
@@ -503,4 +505,25 @@ Deno.test("foldRosterUnits: a sale's unit lost in transit names a unit off the r
     foldRosterUnits({ "1001": { state: "out", uid_booking: BOOKING } }, movementFor(rentalLost))["1001"],
     { state: "away", uid_out_of_service: RECORD },
   );
+});
+
+Deno.test("rosterUnitsForBucket: a loss bucket offers only the named records' units, a shelf bucket only unflagged units (G11 (g))", () => {
+  const roster: RosterUnits = {
+    "1": { state: "shelf", uid_location: SHELF, flag: null, uid_out_of_service: null },
+    "2": { state: "shelf", uid_location: OTHER_SHELF, flag: null, uid_out_of_service: null },
+    "3": { state: "shelf", uid_location: SHELF, flag: "damaged", uid_out_of_service: RECORD },
+    "4": { state: "shelf", uid_location: SHELF, flag: "damaged", uid_out_of_service: "another" },
+    "5": { state: "away", uid_out_of_service: RECORD },
+    "6": { state: "away", uid_out_of_service: "another" },
+    "7": { state: "unattributed_out" },
+  };
+  assertEquals(unflaggedShelfUnits(roster), [1, 2]);
+  assertEquals(unflaggedShelfUnits(roster, SHELF), [1]);
+  assertEquals(rosterUnitsForBucket(roster, "reserved"), [1, 2]);
+  assertEquals(rosterUnitsForBucket(roster, "out"), [7]);
+  const records = new Set([RECORD]);
+  assertEquals(rosterUnitsForBucket(roster, "lost", { records }), [5], "another record's away unit is not offered");
+  assertEquals(rosterUnitsForBucket(roster, "damaged", { records }), [3]);
+  assertEquals(rosterUnitsForBucket(roster, "damaged", { records, location: OTHER_SHELF }), []);
+  assertEquals(rosterUnitsForBucket(roster, "lost"), [], "no record named, nothing offered");
 });

@@ -150,7 +150,54 @@ export function heldByBooking(b: StockConsumingBooking): number {
  * re-measuring that — the convergence job may be what is holding it up.
  */
 export function unitsClaimedOnShelves(b: { breakdown: BookingBreakdown }): number {
-  return (b.breakdown?.reserved ?? 0) + (b.breakdown?.prepped ?? 0) + (b.breakdown?.out ?? 0);
+  return sumBreakdownKeys(b.breakdown ?? {}, SHELF_CLAIM_KEYS);
+}
+
+/** The keys a booking claims shelf units in, type-blind: {@link unitsClaimedOnShelves}. */
+const SHELF_CLAIM_KEYS: readonly BookingBreakdownKeyType[] = ["reserved", "prepped", "out"];
+
+/**
+ * Units a booking still has to take OFF a shelf — `reserved + prepped`, the
+ * demand a check-out will draw (stock campaign P1). The api's staged-units
+ * sum, the unsourceable-bookings audit and the manager's shelf aggregation
+ * (`onShelfDemand`) each spelled it by hand.
+ */
+export function checkoutUnits(b: { breakdown: BookingBreakdown }): number {
+  return sumBreakdownKeys(b.breakdown ?? {}, CHECKOUT_KEYS);
+}
+
+/** The keys {@link checkoutUnits} reads. */
+const CHECKOUT_KEYS: readonly BookingBreakdownKeyType[] = ["reserved", "prepped"];
+
+/** One term of {@link availableSetsOf}: an availability answer, or `null` while it has not loaded. */
+export type SetAvailabilityTerm = { quantity_available: number | null } | null;
+
+/**
+ * How many whole SETS a window can supply: the parent's own availability and
+ * `floor(component available ÷ per-set quantity)` per component, minimised —
+ * moved from the manager's `availableSetsOf` (stock campaign P1).
+ *
+ * `quantity_available: null` from the engine means UNBOUNDED, never 0, so an
+ * uncounted term places no ceiling and drops out of the min. A `none` parent
+ * passes `"unbounded"`. A term that has not loaded (`null`) makes the whole
+ * answer `null`, because a partial min would read too high. With nothing
+ * bounded at all the answer is `null`, which renders as no number.
+ */
+export function availableSetsOf(
+  parent: SetAvailabilityTerm | "unbounded",
+  components: ReadonlyArray<{ quantity: number; availability: SetAvailabilityTerm }>,
+): number | null {
+  let min = Infinity;
+  if (parent !== "unbounded") {
+    if (!parent) return null;
+    if (parent.quantity_available !== null) min = parent.quantity_available;
+  }
+  for (const comp of components) {
+    if (!comp.availability) return null;
+    const available = comp.availability.quantity_available;
+    if (available !== null) min = Math.min(min, Math.floor(available / comp.quantity));
+  }
+  return min === Infinity ? null : min;
 }
 
 /**

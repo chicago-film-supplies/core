@@ -31610,6 +31610,12 @@ in table order, each once — read off {@link CUSTODY_RULES}'s arms, so a new
 rule's movement is included without an edit. `[]` for a type that holds no
 stock. The api's `LADDER_MOVEMENT_TYPES` (rental) was a hand-kept copy.
 
+### `custodyOfferSources(rule: CustodyRuleId): BookingBreakdownKeyType[]`
+
+The breakdown buckets an offer draws from: a `check_out` preps `reserved`
+units on the way, so it reads both; every other rule its own `from`. The
+manager's `sourcesOf` restated it.
+
 ### `custodyPlaces(type: MovementTypeType, custody: typeLiteral): CustodyPlaces | null`
 
 The kind of place each end of a custody movement's lines stands in, or `null`
@@ -31688,7 +31694,7 @@ reserved keep whatever status it was written with. Such a booking is
 `active` now: custody moved past prepped and is not settled, which is the
 order-level rule too.
 
-### `expandCustodyOffer(booking: CustodyBooking, offer: Pick<CustodyOffer, "rule">, quantity: number): BookingActionType[]`
+### `expandCustodyOffer(booking: CustodyBooking, offer: Pick<CustodyOffer, "rule">, quantity: number, units?: readonly number[]): BookingActionType[]`
 
 The actions an offer sends for `quantity` units.
 
@@ -31696,6 +31702,13 @@ Every offer is one action except `check_out` over units still `reserved`:
 those are prepped on the way, so the offer sends `[prep, check_out]`. It
 draws the already-prepped units FIRST — the ones on the prep shelf are the
 ones going out — and preps only the shortfall.
+
+**With `units`** (a unit-tracked booking, the operator's pick): a
+`check_out` sends every picked unit the booking holds in `prepped` straight
+out, lets up to its UNTRACKED prepped count (a conversion's leftover) go out
+as well, and preps exactly the rest, naming them. An `unprep` with no units
+picked drains an untracked count and names none. This is the manager's
+`wireActions` for one dispatch, so the menu and the wire cannot disagree.
 
 ### `extensionUndoRefusal(args: typeLiteral): ExtensionUndoPlan`
 
@@ -38027,6 +38040,14 @@ interface PeakStockConsumption {
 }
 ```
 
+### `SetAvailabilityTerm`
+
+One term of {@link availableSetsOf}: an availability answer, or `null` while it has not loaded.
+
+```ts
+type SetAvailabilityTerm = typeLiteral | null;
+```
+
 ### `StockAvailability`
 
 Everything a consumer needs from one product over one window.
@@ -38104,6 +38125,18 @@ const TERMINAL_OOS_STATUSES: ReadonlySet<string>;
 `held − consumed`, or `null` (unbounded) when `held` is — the one place the
 uncounted arm of the availability arithmetic is written.
 
+### `availableSetsOf(parent: SetAvailabilityTerm | "unbounded", components: ReadonlyArray<typeLiteral>): number | null`
+
+How many whole SETS a window can supply: the parent's own availability and
+`floor(component available ÷ per-set quantity)` per component, minimised —
+moved from the manager's `availableSetsOf` (stock campaign P1).
+
+`quantity_available: null` from the engine means UNBOUNDED, never 0, so an
+uncounted term places no ceiling and drops out of the min. A `none` parent
+passes `"unbounded"`. A term that has not loaded (`null`) makes the whole
+answer `null`, because a partial min would read too high. With nothing
+bounded at all the answer is `null`, which renders as no number.
+
 ### `bookingHoldsStock(b: typeLiteral): boolean`
 
 Does this booking hold any physical stock at all? The shelf-side liveness
@@ -38121,6 +38154,13 @@ Prefers the `_fs` twin — that is the field Firestore itself orders by, so it
 is the bound of record — and falls back to parsing the paired ISO string when
 `_fs` isn't a real Timestamp (a plain-JSON fixture, a REST read, a write-time
 `FieldValue` sentinel). `null` on both sides means genuinely open-ended.
+
+### `checkoutUnits(b: typeLiteral): number`
+
+Units a booking still has to take OFF a shelf — `reserved + prepped`, the
+demand a check-out will draw (stock campaign P1). The api's staged-units
+sum, the unsourceable-bookings audit and the manager's shelf aggregation
+(`onShelfDemand`) each spelled it by hand.
 
 ### `computeStockAvailability(stock: Pick<Stock, "quantity_held" | "unavailable">, window: AvailabilityWindow): StockAvailability`
 
@@ -38583,6 +38623,17 @@ it is that `[]` must not LICENSE anything.
 
 **Returns** — One anchor per (subtree root, X), with a non-empty path on both sides
 
+### `exchangeClaimedOn(rows: ReadonlyArray<Omit<ExchangeRow, "path">>, path: readonly string[]): number`
+
+Σ `exchanged_for[].quantity` claimed against `path` across the document's rows.
+
+### `exchangeClaimsByPath(rows: ReadonlyArray<Omit<ExchangeRow, "path">>): Map<string, number>`
+
+Σ `exchanged_for[].quantity` claimed against each row path, over every row of
+ONE document — the claims {@link overclaimedExchanges} compares, exposed so
+the manager's exchange offer reads the same sum (it kept `claimedOn`). Keyed
+by an internal path key; read one path with {@link exchangeClaimedOn}.
+
 ### `findSubtreeAnchor(path: readonly string[], anchors: readonly SubstitutionAnchor[]): SubstitutionAnchor | undefined`
 
 The anchor whose subtree `path` falls in, or `undefined`.
@@ -38679,28 +38730,6 @@ wire boundary, use {@link isInSubstitutedSubtree} and check Y separately.
 **Returns** — Whether the row is a substitution's own row or one of its components
 
 ### `overclaimedExchanges(prev: ReadonlyArray<ExchangeRow>, next: ReadonlyArray<ExchangeRow & typeLiteral>): OverclaimedRow[]`
-
-The rows THIS write pushes past their quantity by what exchanges take back from
-them (api-cloudrun#1116, owner 2026-09-26: the cap is checked at AUTHORING).
-
-🔴 **Deliberately NOT a stored refinement.** A warehouse-staged exchange lives on
-the fulfillment alone, so a sales edit that lowers X on the order would make
-the merged fulfillment over-claim and fail its write — refused because of a
-document the sender never saw, the trap api-cloudrun#1114 ruled out for
-existence. So a row is reported only when its claimed total GREW in this
-write and now exceeds its quantity; a row the write merely shrank is a
-difference to surface, not refuse, and the checkout rider's `min(…, out)`
-still bounds what physically moves.
-
-A row the document does not carry is skipped: that entry dangles, which
-`checkExchangedFor` already allows.
-
-Pure, shared by the API's writers and the manager's pre-submit check.
-
-**Parameters**
-
-- `prev` — The document's rows before the write (`[]` for a new document)
-- `next` — The document's rows as they will be stored
 
 ### `repointExchangedFor(entries: readonly ExchangeEntry[], rows: ReadonlyArray<typeLiteral>, _: unknown): Array<typeLiteral>`
 
@@ -44986,6 +45015,25 @@ and more than `max` units are each REFUSED, never repaired: the picker shows
 the error beside the text rather than guessing what was meant. Every error is
 reported, not just the first.
 
+### `rosterUnitsForBucket(roster: RosterUnits, bucket: BookingBreakdownKeyType, _: unknown): number[]`
+
+The roster units an UNTRACKED count in booking bucket `bucket` may be drawn
+from — what a conversion left there physically with no number written down
+— narrowed to where the movement will say they are, so a pick the picker
+offers is one the roster fold accepts (gap G11 (g)). Moved from the
+manager's `untrackedPool`, which offered another record's away units and any
+shelf's flagged ones.
+
+| bucket | units |
+|---|---|
+| `reserved`, `prepped`, `returned` | unflagged on a shelf (`scope.location`, when given) |
+| `out` | `unattributed_out` |
+| `lost` | `away` at one of `scope.records` |
+| `damaged`, `cleaning`, `maintenance` | flagged that reason, on one of `scope.records` (and `scope.location`) |
+
+Without `scope.records` the loss buckets offer nothing: a unit away or flagged
+belongs to a record, and the fold refuses one the movement does not name.
+
 ### `serialAt(unit: Pick<UnitType, "serial_history">, instant: string | null): string | null`
 
 The serial of the physical unit that held a number at `instant` — or, with
@@ -45022,6 +45070,12 @@ prep — and need not be sorted.
 ### `toUnitRanges(numbers: Iterable<number>): UnitRange[]`
 
 The fewest inclusive runs covering `numbers`, ascending.
+
+### `unflaggedShelfUnits(roster: RosterUnits, uid_location?: string): number[]`
+
+Unflagged shelf units, ascending — optionally on one location. The manager
+filtered the roster this way in three places (`recordActions`,
+`OOSBreakdownEditor`, `unitPicks`).
 
 ## `@cfs/core/utils/templates`
 

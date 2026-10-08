@@ -572,26 +572,59 @@ export function custodyActionsFor(booking: CustodyBooking, ctx: CustodyOfferCont
 }
 
 /**
+ * The breakdown buckets an offer draws from: a `check_out` preps `reserved`
+ * units on the way, so it reads both; every other rule its own `from`. The
+ * manager's `sourcesOf` restated it.
+ */
+export function custodyOfferSources(rule: CustodyRuleId): BookingBreakdownKeyType[] {
+  return rule === "check_out" ? ["reserved", "prepped"] : [custodyRule(rule).from];
+}
+
+/**
  * The actions an offer sends for `quantity` units.
  *
  * Every offer is one action except `check_out` over units still `reserved`:
  * those are prepped on the way, so the offer sends `[prep, check_out]`. It
  * draws the already-prepped units FIRST — the ones on the prep shelf are the
  * ones going out — and preps only the shortfall.
+ *
+ * **With `units`** (a unit-tracked booking, the operator's pick): a
+ * `check_out` sends every picked unit the booking holds in `prepped` straight
+ * out, lets up to its UNTRACKED prepped count (a conversion's leftover) go out
+ * as well, and preps exactly the rest, naming them. An `unprep` with no units
+ * picked drains an untracked count and names none. This is the manager's
+ * `wireActions` for one dispatch, so the menu and the wire cannot disagree.
  */
 export function expandCustodyOffer(
   booking: CustodyBooking,
   offer: Pick<CustodyOffer, "rule">,
   quantity: number,
+  units?: readonly number[],
 ): BookingActionType[] {
+  if (units === undefined) {
+    if (offer.rule === "check_out") {
+      const toPrep = Math.max(0, quantity - booking.breakdown.prepped);
+      return [
+        ...(toPrep > 0 ? [{ rule: "prep" as const, quantity: toPrep }] : []),
+        { rule: "check_out", quantity },
+      ];
+    }
+    return [{ rule: offer.rule, quantity }];
+  }
+  const picked = [...units].sort((a, b) => a - b);
   if (offer.rule === "check_out") {
-    const toPrep = Math.max(0, quantity - booking.breakdown.prepped);
+    const prepped = new Set(booking.units?.prepped ?? []);
+    const shelf = picked.filter((n) => !prepped.has(n));
+    const untrackedPrepped = Math.max(0, booking.breakdown.prepped - (booking.units?.prepped.length ?? 0));
+    const viaUntracked = Math.min(untrackedPrepped, shelf.length);
+    const toPrep = shelf.slice(viaUntracked);
     return [
-      ...(toPrep > 0 ? [{ rule: "prep" as const, quantity: toPrep }] : []),
-      { rule: "check_out", quantity },
+      ...(toPrep.length > 0 ? [{ rule: "prep" as const, quantity: toPrep.length, units: toPrep }] : []),
+      { rule: "check_out", quantity, units: picked },
     ];
   }
-  return [{ rule: offer.rule, quantity }];
+  if (offer.rule === "unprep" && picked.length === 0) return [{ rule: "unprep", quantity }];
+  return [{ rule: offer.rule, quantity, units: picked }];
 }
 
 // ── decomposing a delta ──────────────────────────────────────────────

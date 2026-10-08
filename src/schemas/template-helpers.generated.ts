@@ -66,6 +66,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "custody": [
     { name: "custodyMovementTypes", expr: "it.custody.custodyMovementTypes(bookingType)", desc: "Every movement type the custody ladder can write for a booking of this type, in table order, each once — read off {@link CUSTODY_RULES}'s arms, so a new rule's movement is included without an edit. `[]` for a type that holds no stock. The api's `LADDER_MOVEMENT_TYPES` (rental) was a hand-kept copy.", returns: "MovementTypeType[]" },
+    { name: "custodyOfferSources", expr: "it.custody.custodyOfferSources(rule)", desc: "The breakdown buckets an offer draws from: a `check_out` preps `reserved` units on the way, so it reads both; every other rule its own `from`. The manager's `sourcesOf` restated it.", returns: "BookingBreakdownKeyType[]" },
     { name: "custodyPlaces", expr: "it.custody.custodyPlaces(type, custody)", desc: "The kind of place each end of a custody movement's lines stands in, or `null` when the movement writes no lines (`places: null` — a prep, a rebook).", returns: "CustodyPlaces | null" },
     { name: "extensionUndoRefusal", expr: "it.custody.extensionUndoRefusal(args)", desc: "Whether leg `pairUid` is an extension leg that can still be undone — the one rule behind the api route's journal check, its in-transaction `assertUntouched`, and the manager's offer (which skipped the unit and leg-A checks, gap G11 (d)). No stored marker says a leg came from an extension; the journal does.", returns: "ExtensionUndoPlan" },
     { name: "isReleasingRewind", expr: "it.custody.isReleasingRewind(t)", desc: "Whether a transition is a RELEASING rewind: an undo that takes no units off a shelf — it adds shelf units (`check_out_undo`, a shelf loss undone), clears a flag in place, or moves nothing physical (`unprep`, a booking-side loss undone). Moved from the api's `bookingMovements.ts`, where it netted the lines its own line builder produced; here it reads the contracts directly ({@link shelfNet}), the same answer for every rule.", returns: "boolean" },
@@ -307,13 +308,15 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "deriveProjectionCollection", expr: "it.shared-fields.deriveProjectionCollection(merged, stored, projectionItems)", desc: "**Settle a projection pair's collection leg after the three-way merge** — the fulfillment's or invoice's answer to what the order's `normalizeCollectionLegs` (`@cfs/core/utils/orders`) decides on the order.", returns: "P" },
   ],
   "stock": [
-
+    { name: "availableSetsOf", expr: "it.stock.availableSetsOf(parent, components)", desc: "How many whole SETS a window can supply: the parent's own availability and `floor(component available ÷ per-set quantity)` per component, minimised — moved from the manager's `availableSetsOf` (stock campaign P1).", returns: "number | null" },
+    { name: "checkoutUnits", expr: "it.stock.checkoutUnits(b)", desc: "Units a booking still has to take OFF a shelf — `reserved + prepped`, the demand a check-out will draw (stock campaign P1). The api's staged-units sum, the unsourceable-bookings audit and the manager's shelf aggregation (`onShelfDemand`) each spelled it by hand.", returns: "number" },
   ],
   "stored-only-rows": [
 
   ],
   "substitutions": [
-
+    { name: "exchangeClaimedOn", expr: "it.substitutions.exchangeClaimedOn(rows, path)", desc: "Σ `exchanged_for[].quantity` claimed against `path` across the document's rows.", returns: "number" },
+    { name: "exchangeClaimsByPath", expr: "it.substitutions.exchangeClaimsByPath(rows)", desc: "Σ `exchanged_for[].quantity` claimed against each row path, over every row of ONE document — the claims {@link overclaimedExchanges} compares, exposed so the manager's exchange offer reads the same sum (it kept `claimedOn`). Keyed by an internal path key; read one path with {@link exchangeClaimedOn}.", returns: "Map<string, number>" },
   ],
   "tax-classes": [
 
@@ -349,6 +352,8 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "units": [
     { name: "formatUnitRanges", expr: "it.units.formatUnitRanges(numbers, arg2)", desc: "Unit numbers as the fewest runs a reader can scan: `\"1001–1040, 1045\"`. The form printed on packing lists and invoices, which customers read (owner, 2026-09-21). An empty set is `\"\"`.", returns: "string" },
+    { name: "rosterUnitsForBucket", expr: "it.units.rosterUnitsForBucket(roster, bucket, arg3)", desc: "The roster units an UNTRACKED count in booking bucket `bucket` may be drawn from — what a conversion left there physically with no number written down — narrowed to where the movement will say they are, so a pick the picker offers is one the roster fold accepts (gap G11 (g)). Moved from the manager's `untrackedPool`, which offered another record's away units and any shelf's flagged ones.", returns: "number[]" },
     { name: "toUnitRanges", expr: "it.units.toUnitRanges(numbers)", desc: "The fewest inclusive runs covering `numbers`, ascending.", returns: "UnitRange[]" },
+    { name: "unflaggedShelfUnits", expr: "it.units.unflaggedShelfUnits(roster, uid_location)", desc: "Unflagged shelf units, ascending — optionally on one location. The manager filtered the roster this way in three places (`recordActions`, `OOSBreakdownEditor`, `unitPicks`).", returns: "number[]" },
   ],
 };

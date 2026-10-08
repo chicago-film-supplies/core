@@ -55,6 +55,7 @@ import {
   CustodyRefusal,
   custodyActionsFor,
   custodyMovementTypes,
+  custodyOfferSources,
   custodyPlaces,
   isReleasingRewind,
   type LossRecordView,
@@ -1389,4 +1390,24 @@ Deno.test("custody - substitutionCapacity: prepped units move; anything past the
   assertEquals(substitutionCapacity({ uid: "x", breakdown: bd({ prepped: 2, reserved: 1 }) }), { prepped: 2, refusal: null });
   assert(substitutionCapacity({ uid: "x", breakdown: bd({ out: 1, prepped: 1 }) }).refusal?.includes("past the prep shelf"));
   assert(substitutionCapacity({ uid: "x", breakdown: bd({ prepped: 1 }), units: { cleaning: [], damaged: [], lost: [], maintenance: [], out: [], prepped: [5], returned: [] } }).refusal?.includes("tracked by number"));
+});
+
+// ── offers on a tracked booking ──────────────────────────────────────
+
+Deno.test("custody - custodyOfferSources and a unit-aware expandCustodyOffer", () => {
+  assertEquals(custodyOfferSources("check_out"), ["reserved", "prepped"]);
+  assertEquals(custodyOfferSources("check_in"), ["out"]);
+  const sets = (prepped: number[]) => ({ cleaning: [], damaged: [], lost: [], maintenance: [], out: [], prepped, returned: [] });
+  // 2 prepped and named (3, 4), 1 prepped untracked, 1 reserved: picking 3, 7, 8 sends 3 out,
+  // lets 7 stand for the untracked prepped unit, and preps 8 on the way.
+  const b = { type: "rental" as const, quantity: 4, status: "part-prepped" as const, breakdown: bd({ prepped: 3, reserved: 1 }), units: sets([3, 4]) };
+  assertEquals(expandCustodyOffer(b, { rule: "check_out" }, 3, [8, 3, 7]), [
+    { rule: "prep", quantity: 1, units: [8] },
+    { rule: "check_out", quantity: 3, units: [3, 7, 8] },
+  ]);
+  assertEquals(expandCustodyOffer(b, { rule: "unprep" }, 1, []), [{ rule: "unprep", quantity: 1 }]);
+  assertEquals(expandCustodyOffer(b, { rule: "unprep" }, 1, [4]), [{ rule: "unprep", quantity: 1, units: [4] }]);
+  // And what it sends applies.
+  const applied = applyCustodyActions(b, expandCustodyOffer(b, { rule: "check_out" }, 3, [8, 3, 7]));
+  assertEquals(applied.units?.out, [3, 7, 8]);
 });

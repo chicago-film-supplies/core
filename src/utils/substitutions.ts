@@ -631,20 +631,32 @@ export interface OverclaimedRow {
  * @param prev - The document's rows before the write (`[]` for a new document)
  * @param next - The document's rows as they will be stored
  */
+/**
+ * Σ `exchanged_for[].quantity` claimed against each row path, over every row of
+ * ONE document — the claims {@link overclaimedExchanges} compares, exposed so
+ * the manager's exchange offer reads the same sum (it kept `claimedOn`). Keyed
+ * by an internal path key; read one path with {@link exchangeClaimedOn}.
+ */
+export function exchangeClaimsByPath(rows: ReadonlyArray<Omit<ExchangeRow, "path">>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const row of rows) {
+    for (const e of row.exchanged_for ?? []) out.set(pathKey(e.path), (out.get(pathKey(e.path)) ?? 0) + e.quantity);
+  }
+  return out;
+}
+
+/** Σ `exchanged_for[].quantity` claimed against `path` across the document's rows. */
+export function exchangeClaimedOn(rows: ReadonlyArray<Omit<ExchangeRow, "path">>, path: readonly string[]): number {
+  return exchangeClaimsByPath(rows).get(pathKey(path)) ?? 0;
+}
+
 export function overclaimedExchanges(
   prev: ReadonlyArray<ExchangeRow>,
   next: ReadonlyArray<ExchangeRow & { readonly quantity?: number | null }>,
 ): OverclaimedRow[] {
   const key = pathKey;
-  const claims = (rows: ReadonlyArray<Omit<ExchangeRow, "path">>) => {
-    const out = new Map<string, number>();
-    for (const row of rows) {
-      for (const e of row.exchanged_for ?? []) out.set(key(e.path), (out.get(key(e.path)) ?? 0) + e.quantity);
-    }
-    return out;
-  };
-  const before = claims(prev);
-  const after = claims(next);
+  const before = exchangeClaimsByPath(prev);
+  const after = exchangeClaimsByPath(next);
   const result: OverclaimedRow[] = [];
   for (const row of next) {
     const k = key(row.path);
