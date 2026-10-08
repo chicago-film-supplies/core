@@ -31415,6 +31415,34 @@ interface CustodyTransition {
 }
 ```
 
+### `LossRecordView`
+
+One out-of-service record as a loss undo reads it, with the mark that opened it.
+
+```ts
+interface LossRecordView {
+  record: Pick<OutOfService, "uid" | "number" | "reason" | "quantity" | "breakdown" | "status" | "canceled_at" | "query_by_sources">;
+  mark: Pick<Movement, "type" | "uid_booking" | "quantity" | "custody" | "lines"> | null;
+  billed: number | null;
+}
+```
+
+### `LossUndoRefusalCode`
+
+Why a loss undo may not consume a record.
+
+```ts
+type LossUndoRefusalCode = "canceled" | "other_booking" | "reclassified" | "split_sibling" | "no_mark" | "pre_journal_model" | "resolved" | "billed" | "split_original" | "quantity_mismatch";
+```
+
+### `ReclassificationPlan`
+
+What a reason edit writes, or why it may not.
+
+```ts
+type ReclassificationPlan = typeLiteral | typeLiteral;
+```
+
 ### `ServiceBucketBounds`
 
 The range an editor may put one of a record's buckets in. `max: null` is unbounded.
@@ -31606,6 +31634,61 @@ B: check_in_undo 5]` against an empty shelf works only because A refills it
 first. Moving such a rewind earlier could refuse a request that passes in row
 order, so it holds its place.
 
+### `lossRecordOrigin(view: LossRecordView): "out" | "returned" | null`
+
+Where a consumable record's mark took its units from: `out` or `returned`, or `null` when unreadable.
+
+### `lossUndoRefusal(view: LossRecordView, uid_booking: string, reason: CustodyLossKey): typeLiteral | null`
+
+Why `view`'s record may NOT be consumed by an undo of `reason` on booking
+`uid_booking`, or `null` when it may — the one rule behind the api's
+`assertUndoable` and the manager's revert offer, which had drifted on billed
+units (gap G11 (e)). Each message names the route that owns the record
+instead, and is the api's 400 sentence verbatim.
+
+Checked in the api's order: a reclassified record (gap G3) and a split
+sibling (api-cloudrun#1164) first, then a missing or wrong mark (the six
+legacy auto-id records, #985), the pre-journal damaged model, any
+written-off / returned-to-service progress, billed units, and a record a
+reason edit split smaller than its mark.
+
+⚠️ A PARTIAL undo of a record that passes is legal (api-cloudrun#1218): the
+api cancels the record and re-opens the remainder with the original's
+details and shelf, `flag_*_returned_undo` and unit-tracked bookings
+included. A sale's loss writes no record (`sale_lost` is custody-only), so
+this question never arises for one.
+
+### `planReclassification(args: typeLiteral): ReclassificationPlan`
+
+The reason edit `to` on a record, or why it is refused — the one rule behind
+the api's `planReclassification` and the manager's reason dropdown, which
+offered edits the api refused (gap G11 (b)).
+
+Only the units still FLAGGED take the new reason (api-cloudrun#1164): the
+movement is a `flag` in place, so a unit already cleared, written off or away
+stays on the original as history and the flagged ones SPLIT onto a sibling.
+On an UNCOUNTED product the units stand `away` and the whole record is
+relabelled, or refused once any is resolved (api-cloudrun#1205 item 3).
+
+`booking` is the owning booking for a `booking`-owned record and `null`
+otherwise. The record's VERSION is the api's precondition, not this rule.
+
+### `reclassifyRefusal(args: indexedAccess): string | null`
+
+{@link planReclassification}'s refusal sentence, or `null` when the edit is legal.
+
+### `recordOwner(record: Pick<OutOfService, "query_by_sources">, mark: Pick<Movement, "uid_booking" | "custody"> | null): typeLiteral | typeLiteral | typeLiteral`
+
+Who owns a record's reason, read off its mark movement (the movement whose id
+the record shares). Lifted from api-cloudrun `src/lib/recordReclassify.ts`.
+
+- `booking` — the mark carries custody on a booking the record's sources
+  name: a reason edit moves that booking's bucket.
+- `standalone` — POSTed on its own; its mark names no booking, so the edit is
+  the record's alone.
+- `legacy` — no mark, and the sources name a booking: units in a bucket no
+  movement raised. Refused, as its undo is.
+
 ### `serviceBreakdownViolation(record: BoundsRecord, next: OOSBreakdown): string | null`
 
 The first rule `next` breaks, as the sentence the operator reads: a bucket
@@ -31658,6 +31741,14 @@ row's `rest`, so units a rewind frees are free before any forward step looks
 for them — which is what lets a two-order swap (a cycle no row order
 resolves) go in one request. The prefix stops at the first transition that is
 not a releasing rewind, so a row's own steps keep their order.
+
+### `undoableFromRecords(uid_booking: string, views: readonly LossRecordView[]): Partial<Record<CustodyRuleId, number>>`
+
+How many units each loss-mark undo may take back on one booking — core's
+{@link CustodyOfferContext.undoable}, read off the booking's records through
+{@link lossUndoRefusal}, so the menu offers exactly what the api accepts.
+Replaces the manager's `undoableFromRecords`, which restated the rule and
+skipped billed units.
 
 ## `@cfs/core/utils/cards`
 

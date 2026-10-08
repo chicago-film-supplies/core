@@ -56,7 +56,13 @@ import {
   custodyMovementTypes,
   custodyPlaces,
   isReleasingRewind,
+  type LossRecordView,
+  planReclassification,
+  reclassifyRefusal,
+  recordOwner,
+  lossUndoRefusal,
   splitLeadingReleases,
+  undoableFromRecords,
   custodyRuleForMovement,
   decomposeCustodyDelta,
   deriveCustodyStatus,
@@ -1072,4 +1078,125 @@ Deno.test("custody - splitLeadingReleases stops at the first transition that is 
   const { first, rest } = splitLeadingReleases([t("check_out_undo"), t("unprep"), t("prep"), t("unprep")]);
   assertEquals(first.map((x) => x.rule), ["check_out_undo", "unprep"]);
   assertEquals(rest.map((x) => x.rule), ["prep", "unprep"]);
+});
+
+// ── loss-undo eligibility ────────────────────────────────────────────
+
+function lossView(over: {
+  reason?: "lost" | "damaged" | "cleaning" | "maintenance";
+  quantity?: number;
+  markFrom?: "out" | "returned";
+  markType?: MovementTypeType;
+  markTo?: string;
+  markQuantity?: number;
+  booking?: string;
+  written_off?: number;
+  billed?: number | null;
+  noMark?: boolean;
+  toRecord?: boolean;
+} = {}): LossRecordView {
+  const reason = over.reason ?? "damaged";
+  const quantity = over.quantity ?? 2;
+  const from = over.markFrom ?? "out";
+  return {
+    record: {
+      uid: "r1",
+      number: 7,
+      reason,
+      quantity,
+      breakdown: { flagged: quantity, away: 0, written_off: over.written_off ?? 0, returned_to_service: 0 },
+      status: "active",
+      canceled_at: null,
+      query_by_sources: ["bookings:b1"],
+    } as LossRecordView["record"],
+    mark: over.noMark ? null : {
+      type: over.markType ?? (reason === "lost" ? "mark_lost" : from === "returned" ? "flag" : `mark_${reason}` as MovementTypeType),
+      uid_booking: over.booking ?? "b1",
+      quantity: over.markQuantity ?? quantity,
+      custody: { from, to: (over.markTo ?? reason) as BookingBreakdownKeyType },
+      lines: [{
+        quantity,
+        location: {
+          from: null,
+          to: over.toRecord ? { collection: "out-of-service", uid: "r1" } : { collection: "locations", uid: "L1" },
+        },
+      }],
+    } as LossRecordView["mark"],
+    billed: over.billed === undefined ? 0 : over.billed,
+  };
+}
+
+Deno.test("custody - lossUndoRefusal: one code per refusal, in the api's order, and null when consumable", () => {
+  const code = (v: LossRecordView, reason: "lost" | "damaged" | "cleaning" | "maintenance" = "damaged") =>
+    lossUndoRefusal(v, "b1", reason)?.code ?? null;
+  assertEquals(code(lossView()), null);
+  assertEquals(code(lossView({ markTo: "cleaning" })), "reclassified");
+  assertEquals(code(lossView({ markType: "flag", markFrom: "returned", markTo: "cleaning" }), "damaged"), "reclassified");
+  assertEquals(code(lossView({ noMark: true })), "no_mark");
+  assertEquals(code(lossView({ toRecord: true })), "pre_journal_model");
+  assertEquals(code(lossView({ written_off: 1 })), "resolved");
+  assertEquals(code(lossView({ billed: 1 })), "billed");
+  // Billing unknown (the warehouse role): not refused here, the server decides.
+  assertEquals(code(lossView({ billed: null })), null);
+  assertEquals(code(lossView({ quantity: 1, markQuantity: 2 })), "split_original");
+  assertEquals(code(lossView({ quantity: 3, markQuantity: 2 })), "quantity_mismatch");
+  assertEquals(lossUndoRefusal(lossView(), "b2", "damaged")?.code, "other_booking");
+  // The api's sentence, verbatim, so the 400 wrapper passes it through.
+  assertEquals(
+    lossUndoRefusal(lossView({ billed: 2 }), "b1", "damaged")?.message,
+    "Cannot undo out-of-service record #7: 2 unit(s) of it are billed on an invoice. " +
+      "Credit the invoice, then return the units to service through the record (PUT /out-of-service-records/r1).",
+  );
+});
+
+Deno.test("custody - undoableFromRecords: offers exactly what lossUndoRefusal lets through, by origin", () => {
+  assertEquals(
+    undoableFromRecords("b1", [
+      lossView({ quantity: 2 }),
+      { ...lossView({ quantity: 1, markFrom: "returned" }), record: { ...lossView().record, uid: "r2", quantity: 1 } },
+      lossView({ billed: 1 }),
+      lossView({ reason: "lost", quantity: 1 }),
+    ]),
+    { mark_damaged_undo: 2, flag_damaged_returned_undo: 1, mark_lost_undo: 1 },
+  );
+});
+
+// ── reclassifying a record (gap G3 / G11 (b)) ────────────────────────
+
+Deno.test("custody - planReclassification: the flagged units move, the rest split off, and every api refusal holds", () => {
+  const record = (b: Partial<OOSBreakdown>, over: Partial<{ reason: OOSReasonType; status: string; quantity: number }> = {}) => ({
+    number: 4,
+    reason: over.reason ?? "damaged" as OOSReasonType,
+    status: (over.status ?? "active") as "active",
+    quantity: over.quantity ?? 3,
+    breakdown: { flagged: 0, away: 0, written_off: 0, returned_to_service: 0, ...b },
+    units: null,
+  });
+  const rental = { type: "rental" as const, name: "Light", breakdown: bd({ damaged: 3 }) };
+  const ok = planReclassification({ record: record({ flagged: 2, away: 1 }), owner: "booking", booking: rental, to: "cleaning", uncounted: false });
+  assertEquals(ok.ok && [ok.transition.rule, ok.transition.quantity, ok.split], ["reclassify_damaged_to_cleaning", 2, true]);
+  const refused = (args: Parameters<typeof reclassifyRefusal>[0]) => reclassifyRefusal(args) ?? "";
+  const base = { record: record({ flagged: 3 }), owner: "booking" as const, booking: rental, to: "cleaning" as OOSReasonType, uncounted: false };
+  assertEquals(refused(base), "");
+  assert(refused({ ...base, record: record({ flagged: 3 }, { status: "complete" }) }).includes("it is complete"));
+  assert(refused({ ...base, to: "lost" }).includes("from damaged to lost"));
+  assert(refused({ ...base, record: record({ away: 3 }, { reason: "lost" }) }).includes("from lost to cleaning"));
+  assert(refused({ ...base, owner: "legacy" }).includes("no mark movement"));
+  assert(refused({ ...base, booking: { ...rental, type: "sale" } }).includes("a sale booking takes no cleaning"));
+  assert(refused({ ...base, record: record({ away: 3 }) }).includes("nothing to re-describe"));
+  assert(refused({ ...base, booking: { ...rental, breakdown: bd({ damaged: 1 }) } }).includes("holds 1 damaged"));
+  // Uncounted: the away units are relabelled whole, or not at all.
+  const uncounted = planReclassification({ ...base, record: record({ away: 3 }), uncounted: true });
+  assertEquals(uncounted.ok && [uncounted.transition.quantity, uncounted.split], [3, false]);
+  assert(refused({ ...base, record: record({ away: 2, written_off: 1 }), uncounted: true }).includes("relabelled whole"));
+  // A standalone record's edit needs no booking.
+  assertEquals(refused({ ...base, owner: "standalone", booking: null }), "");
+});
+
+Deno.test("custody - recordOwner reads the mark", () => {
+  const rec = { query_by_sources: ["bookings:b1"] };
+  assertEquals(recordOwner(rec, { uid_booking: "b1", custody: { from: "out", to: "damaged" } }), { kind: "booking", uid_booking: "b1" });
+  assertEquals(recordOwner(rec, null), { kind: "legacy" });
+  assertEquals(recordOwner({ query_by_sources: [] }, null), { kind: "standalone" });
+  assertEquals(recordOwner(rec, { uid_booking: null, custody: null }), { kind: "standalone" });
 });

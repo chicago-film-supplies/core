@@ -39,7 +39,9 @@ import {
   custodyRule,
   duplicateCustodySlots,
   isLossUndo,
+  type Movement,
   type MovementTypeType,
+  OOS_FLAG_REASONS,
   type OOSBreakdown,
   type OOSBreakdownKeyType,
   OOS_BREAKDOWN_KEYS,
@@ -1011,4 +1013,295 @@ export function getCustodyRulesMarkdown(): string {
     ),
   ];
   return lines.join("\n") + "\n";
+}
+
+// ── loss-undo eligibility (stock campaign P1, api-cloudrun#1218) ─────
+
+/** One out-of-service record as a loss undo reads it, with the mark that opened it. */
+export interface LossRecordView {
+  record: Pick<
+    OutOfService,
+    "uid" | "number" | "reason" | "quantity" | "breakdown" | "status" | "canceled_at" | "query_by_sources"
+  >;
+  /** The record's mark movement — the movement whose id the record carries — or `null` when none exists. */
+  mark: Pick<Movement, "type" | "uid_booking" | "quantity" | "custody" | "lines"> | null;
+  /**
+   * Units of the record billed on an invoice, or `null` when the caller cannot
+   * read invoices (the warehouse role): the refusal is then the server's alone.
+   */
+  billed: number | null;
+}
+
+/** Why a loss undo may not consume a record. */
+export type LossUndoRefusalCode =
+  | "canceled"
+  | "other_booking"
+  | "reclassified"
+  | "split_sibling"
+  | "no_mark"
+  | "pre_journal_model"
+  | "resolved"
+  | "billed"
+  | "split_original"
+  | "quantity_mismatch";
+
+/**
+ * Why `view`'s record may NOT be consumed by an undo of `reason` on booking
+ * `uid_booking`, or `null` when it may — the one rule behind the api's
+ * `assertUndoable` and the manager's revert offer, which had drifted on billed
+ * units (gap G11 (e)). Each message names the route that owns the record
+ * instead, and is the api's 400 sentence verbatim.
+ *
+ * Checked in the api's order: a reclassified record (gap G3) and a split
+ * sibling (api-cloudrun#1164) first, then a missing or wrong mark (the six
+ * legacy auto-id records, #985), the pre-journal damaged model, any
+ * written-off / returned-to-service progress, billed units, and a record a
+ * reason edit split smaller than its mark.
+ *
+ * ⚠️ A PARTIAL undo of a record that passes is legal (api-cloudrun#1218): the
+ * api cancels the record and re-opens the remainder with the original's
+ * details and shelf, `flag_*_returned_undo` and unit-tracked bookings
+ * included. A sale's loss writes no record (`sale_lost` is custody-only), so
+ * this question never arises for one.
+ */
+export function lossUndoRefusal(
+  view: LossRecordView,
+  uid_booking: string,
+  reason: CustodyLossKey,
+): { code: LossUndoRefusalCode; message: string } | null {
+  const { record, mark } = view;
+  const label = `out-of-service record #${record.number}`;
+  const at = `PUT /out-of-service-records/${record.uid}`;
+  const refuse = (code: LossUndoRefusalCode, message: string) => ({ code, message });
+  if (record.canceled_at != null || record.status === "canceled") {
+    return refuse("canceled", `Cannot undo ${label}: it is already canceled.`);
+  }
+  if (!record.query_by_sources.includes(`bookings:${uid_booking}`)) {
+    return refuse("other_booking", `Cannot undo ${label}: it was not raised from this booking.`);
+  }
+  if (mark?.custody && mark.uid_booking === uid_booking && mark.custody.to !== record.reason) {
+    return refuse(
+      "reclassified",
+      `Cannot decrease breakdown.${reason} via PUT /bookings — ${label} was reclassified from ` +
+        `${mark.custody.to} to ${record.reason}; change it on the record (${at}).`,
+    );
+  }
+  if (
+    mark?.type === "flag" && mark.uid_booking === uid_booking && mark.custody?.from != null &&
+    (OOS_FLAG_REASONS as readonly string[]).includes(mark.custody.from)
+  ) {
+    return refuse(
+      "split_sibling",
+      `Cannot decrease breakdown.${reason} via PUT /bookings — ${label} was split off another ` +
+        `record when its reason changed, so it has no mark of its own to undo; adjust it on the record (${at}).`,
+    );
+  }
+  // An in-building mark off `returned` is a `flag`; every other mark is its own type.
+  const expectedType = reason === "lost"
+    ? "mark_lost"
+    : mark?.type === "flag" && mark.custody?.from === "returned"
+    ? "flag"
+    : `mark_${reason}`;
+  if (
+    mark === null || mark.type !== expectedType || mark.uid_booking !== uid_booking ||
+    mark.custody === null || mark.custody.from === null
+  ) {
+    return refuse(
+      "no_mark",
+      `Cannot decrease breakdown.${reason} via PUT /bookings — ${label} has no mark movement ` +
+        `to undo; adjust the OOS record itself (${at}).`,
+    );
+  }
+  if (reason !== "lost" && mark.lines.some((l) => l.location.to?.collection !== "locations")) {
+    return refuse(
+      "pre_journal_model",
+      `Cannot decrease breakdown.${reason} via PUT /bookings — ${label} predates the shelf-side ` +
+        `damaged model; adjust the OOS record itself (${at}).`,
+    );
+  }
+  if (record.breakdown.written_off > 0 || record.breakdown.returned_to_service > 0) {
+    return refuse(
+      "resolved",
+      `Cannot undo ${label}: it already has units written off or returned to service. ` +
+        `A unit that was lost and has turned up goes back through the record (${at}).`,
+    );
+  }
+  if (view.billed !== null && view.billed > 0) {
+    return refuse(
+      "billed",
+      `Cannot undo ${label}: ${view.billed} unit(s) of it are billed on an invoice. ` +
+        `Credit the invoice, then return the units to service through the record (${at}).`,
+    );
+  }
+  if (record.quantity < mark.quantity) {
+    return refuse(
+      "split_original",
+      `Cannot undo ${label}: ${mark.quantity - record.quantity} of the ${mark.quantity} unit(s) its mark ` +
+        `moved were split onto another record when the reason changed. Adjust it on the record (${at}).`,
+    );
+  }
+  // More units on the record than its mark moved is a corrupt pair, not a state
+  // any writer produces; refuse rather than negate a mark that undercounts.
+  if (record.quantity !== mark.quantity) {
+    return refuse("quantity_mismatch", `Cannot undo ${label}: it holds ${record.quantity} but its mark moved ${mark.quantity}.`);
+  }
+  return null;
+}
+
+/** Where a consumable record's mark took its units from: `out` or `returned`, or `null` when unreadable. */
+export function lossRecordOrigin(view: LossRecordView): "out" | "returned" | null {
+  const from = view.mark?.custody?.from;
+  return from === "out" || from === "returned" ? from : null;
+}
+
+/**
+ * How many units each loss-mark undo may take back on one booking — core's
+ * {@link CustodyOfferContext.undoable}, read off the booking's records through
+ * {@link lossUndoRefusal}, so the menu offers exactly what the api accepts.
+ * Replaces the manager's `undoableFromRecords`, which restated the rule and
+ * skipped billed units.
+ */
+export function undoableFromRecords(
+  uid_booking: string,
+  views: readonly LossRecordView[],
+): Partial<Record<CustodyRuleId, number>> {
+  const out: Partial<Record<CustodyRuleId, number>> = {};
+  for (const view of views) {
+    const reason = view.record.reason;
+    if (!(OUT_OF_SERVICE_KEYS as readonly string[]).includes(reason)) continue;
+    if (lossUndoRefusal(view, uid_booking, reason as CustodyLossKey) !== null) continue;
+    const origin = lossRecordOrigin(view);
+    if (origin === null) continue;
+    const rule = undoRuleFor(reason as CustodyLossKey, origin);
+    out[rule] = (out[rule] ?? 0) + view.record.quantity;
+  }
+  return out;
+}
+
+// ── reclassifying a record's reason (gap G3, api-cloudrun#1164) ──────
+
+/**
+ * Who owns a record's reason, read off its mark movement (the movement whose id
+ * the record shares). Lifted from api-cloudrun `src/lib/recordReclassify.ts`.
+ *
+ * - `booking` — the mark carries custody on a booking the record's sources
+ *   name: a reason edit moves that booking's bucket.
+ * - `standalone` — POSTed on its own; its mark names no booking, so the edit is
+ *   the record's alone.
+ * - `legacy` — no mark, and the sources name a booking: units in a bucket no
+ *   movement raised. Refused, as its undo is.
+ */
+export function recordOwner(
+  record: Pick<OutOfService, "query_by_sources">,
+  mark: Pick<Movement, "uid_booking" | "custody"> | null,
+): { kind: "booking"; uid_booking: string } | { kind: "standalone" } | { kind: "legacy" } {
+  if (mark === null) {
+    return record.query_by_sources.some((s) => s.startsWith("bookings:")) ? { kind: "legacy" } : { kind: "standalone" };
+  }
+  if (mark.uid_booking && mark.custody && record.query_by_sources.includes(`bookings:${mark.uid_booking}`)) {
+    return { kind: "booking", uid_booking: mark.uid_booking };
+  }
+  return { kind: "standalone" };
+}
+
+/** What a reason edit writes, or why it may not. */
+export type ReclassificationPlan =
+  | {
+    ok: true;
+    /** The one `flag {old → new}`; on a booking-raised record it carries custody `{old → new}`. */
+    transition: CustodyTransition;
+    /** Some units are away, written off or returned to service: they stay on the original, and a sibling takes the flagged ones. */
+    split: boolean;
+  }
+  | { ok: false; message: string };
+
+/**
+ * The reason edit `to` on a record, or why it is refused — the one rule behind
+ * the api's `planReclassification` and the manager's reason dropdown, which
+ * offered edits the api refused (gap G11 (b)).
+ *
+ * Only the units still FLAGGED take the new reason (api-cloudrun#1164): the
+ * movement is a `flag` in place, so a unit already cleared, written off or away
+ * stays on the original as history and the flagged ones SPLIT onto a sibling.
+ * On an UNCOUNTED product the units stand `away` and the whole record is
+ * relabelled, or refused once any is resolved (api-cloudrun#1205 item 3).
+ *
+ * `booking` is the owning booking for a `booking`-owned record and `null`
+ * otherwise. The record's VERSION is the api's precondition, not this rule.
+ */
+export function planReclassification(args: {
+  record: Pick<OutOfService, "number" | "reason" | "status" | "quantity" | "breakdown" | "units">;
+  owner: ReturnType<typeof recordOwner>["kind"];
+  booking: Pick<Booking, "type" | "name" | "breakdown"> | null;
+  to: OOSReasonType;
+  uncounted: boolean;
+}): ReclassificationPlan {
+  const { record, owner, booking, to, uncounted } = args;
+  const label = `out-of-service record #${record.number}`;
+  const refuse = (message: string): ReclassificationPlan => ({ ok: false, message });
+  if (TERMINAL_OOS_STATUSES.has(record.status)) {
+    return refuse(`Cannot change the reason of ${label}: it is ${record.status}.`);
+  }
+  const flagReasons = OOS_FLAG_REASONS as readonly string[];
+  const from = record.reason;
+  if (!flagReasons.includes(from) || !flagReasons.includes(to) || from === to) {
+    return refuse(`Cannot change ${label} from ${from} to ${to}.`);
+  }
+  if (owner === "legacy") {
+    return refuse(
+      `Cannot change the reason of ${label}: it has no mark movement, so the booking's bucket was never raised by one. Adjust the booking by hand.`,
+    );
+  }
+  // Only a line that comes back carries cleaning and maintenance buckets (P2b ruling 4).
+  if (owner === "booking" && (booking === null || !ownsKey(booking.type, "out"))) {
+    return refuse(
+      `Cannot change the reason of ${label}: a ${booking?.type ?? "missing"} booking takes no cleaning or maintenance.`,
+    );
+  }
+  if (uncounted) {
+    const resolved = record.breakdown.written_off + record.breakdown.returned_to_service;
+    if (resolved > 0) {
+      return refuse(
+        `Cannot change the reason of ${label}: its product is uncounted, so the record is relabelled whole, ` +
+          `and ${resolved} of its units are already written off or returned to service. Open a new record ` +
+          "for the units still away instead.",
+      );
+    }
+  }
+  const flagged = uncounted ? record.breakdown.away : record.breakdown.flagged;
+  if (flagged === 0) {
+    return refuse(
+      `Cannot change the reason of ${label}: none of its units is flagged on a shelf, so there is ` +
+        "nothing to re-describe.",
+    );
+  }
+  if (owner === "booking" && booking !== null) {
+    const held = breakdownQuantity(booking.breakdown, from as OutOfServiceKeyType);
+    if (held < flagged) {
+      return refuse(
+        `Cannot change the reason of ${label}: ${booking.name} holds ${held} ${from}, ` +
+          `not the ${flagged} this record has flagged. Reconcile the booking by hand.`,
+      );
+    }
+  }
+  const rule = custodyRule(`reclassify_${from}_to_${to}` as CustodyRuleId);
+  return {
+    ok: true,
+    transition: {
+      rule: rule.id,
+      type: "flag",
+      from: rule.from,
+      to: rule.to,
+      quantity: flagged,
+      service: serviceFor(rule),
+      units: record.units?.flagged ?? [],
+    },
+    split: !uncounted && flagged < record.quantity,
+  };
+}
+
+/** {@link planReclassification}'s refusal sentence, or `null` when the edit is legal. */
+export function reclassifyRefusal(args: Parameters<typeof planReclassification>[0]): string | null {
+  const plan = planReclassification(args);
+  return plan.ok ? null : plan.message;
 }
