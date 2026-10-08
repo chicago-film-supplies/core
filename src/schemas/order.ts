@@ -1961,6 +1961,21 @@ export const ExtendRentalInput: z.ZodType<ExtendRentalInputType> = z.object({
   version: z.int().min(0),
 });
 
+/**
+ * Body of `POST /orders/{uid}/extensions/{uid_pair}/undo` — undo a rental
+ * extension while leg B is still exactly what it made. The server derives leg A
+ * from B's `rebook_in` movements, never from the client.
+ */
+export interface UndoRentalExtensionInputType {
+  /** The order's version, as for `PUT /orders/{uid}`. */
+  version: number;
+}
+
+/** Zod schema for {@link UndoRentalExtensionInputType}. */
+export const UndoRentalExtensionInput: z.ZodType<UndoRentalExtensionInputType> = z.object({
+  version: z.int().min(0),
+});
+
 // ── Full document schemas ────────────────────────────────────────
 
 /**

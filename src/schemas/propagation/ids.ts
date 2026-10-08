@@ -59,6 +59,7 @@ export type TransactionId =
   | "cross-order-bookings"
   | "finalize-order"
   | "extend-rental"
+  | "undo-extend-rental"
   // out-of-service.ts
   | "create-out-of-service-record"
   | "update-out-of-service-record"
@@ -215,6 +216,8 @@ export type RuleId =
   | "update-booking:booking-to-cards"
   | "extend-rental:rebook-to-bookings"
   | "extend-rental:bookings-to-transactions"
+  | "undo-extend-rental:rebook-to-bookings"
+  | "undo-extend-rental:bookings-to-transactions"
   // purchases.ts
   | "receive-purchase:receipt-to-purchase"
   | "reverse-purchase-receipt:receipt-to-purchase"

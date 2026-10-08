@@ -3709,3 +3709,150 @@ export function moveLinesToLeg<T extends LegMoveItem>(
 
   return [...items.slice(0, legIdx + 1), ...aBlock, ...bBlock, ...items.slice(blockEnd)];
 }
+
+/** The shape {@link mergeLegBack} reads: a {@link LegMoveItem} plus the two fields its placement needs. */
+export interface LegMergeItem extends LegMoveItem {
+  name?: string | null;
+  zero_priced?: boolean | null;
+}
+
+/**
+ * Put leg B's rows back on leg A and drop leg B — the order half of UNDOING a
+ * rental extension (`api-cloudrun/.claude/plans/rental-extension.md` Phase 4),
+ * the inverse of {@link moveLinesToLeg}.
+ *
+ * - **A row B shares with A merges by quantity.** B's path maps onto A by
+ *   swapping the leg and mapping each of B's groups onto A's group of the same
+ *   NAME ({@link moveLinesToLeg} cloned it under a fresh uid, keeping the name;
+ *   among same-named groups the one already holding most of its rows wins). A
+ *   row A still has (a remainder, or a kit kept at 0 for a component that
+ *   stayed) gains B's quantity.
+ * - **A row A no longer has is re-inserted** under its mapped parent: a
+ *   zero-priced row after its parent's last zero-priced child, any other row at
+ *   the end of its parent's block, and a row directly under the leg before the
+ *   leg's first group. So the zero-priced-first and contiguity invariants hold;
+ *   the original position among priced siblings is not recoverable and is not
+ *   attempted. A group A no longer has is recreated at the end of A's block.
+ * - **B's divider and every row in B's block are removed.**
+ * - **Rentals only**, as on the way out: anything else on B was not put there
+ *   by an extension.
+ *
+ * ⚠️ **The output is pathed with the MAPPED paths but must still go through
+ * {@link computeItemPaths}**, which stays the one author of a path, and then be
+ * repriced.
+ *
+ * @param items - The order's items, pathed (as stored)
+ * @param args.from - Leg B, the leg being merged away
+ * @param args.into - Leg A, the leg the rows return to
+ * @throws {LegMoveRefusal} on any request it cannot carry out
+ */
+export function mergeLegBack<T extends LegMergeItem>(
+  items: readonly T[],
+  args: { from: string; into: string },
+): T[] {
+  const { from, into } = args;
+  if (from === into) throw new LegMoveRefusal("a leg cannot be merged into itself");
+  const block = (leg: string) => {
+    const start = items.findIndex((it) => it.type === "destination" && it.uid === leg);
+    if (start === -1) return null;
+    let end = items.length;
+    for (let i = start + 1; i < items.length; i++) {
+      if (items[i].type === "destination") {
+        end = i;
+        break;
+      }
+    }
+    return { start, end };
+  };
+  const a = block(into);
+  const b = block(from);
+  if (a === null) throw new LegMoveRefusal(`the leg ${into} is not on the order`);
+  if (b === null) throw new LegMoveRefusal(`the leg ${from} is not on the order`);
+
+  const aRows: T[] = items.slice(a.start + 1, a.end).map((it) => ({ ...it, path: [...it.path] }));
+  const bRows = items.slice(b.start + 1, b.end);
+  for (const row of bRows) {
+    if (row.type !== "rental" && !isLegMoveDivider(row)) {
+      throw new LegMoveRefusal(`a ${row.type} line on leg ${from} was not put there by an extension`, row.path);
+    }
+  }
+
+  // Map each of B's groups onto one of A's, by name.
+  const remap = (path: readonly string[], groupMap: ReadonlyMap<string, string>) =>
+    [into, ...path.slice(1).map((seg, i) => (i === 0 ? groupMap.get(seg) ?? seg : seg))];
+  const aKeys = () => new Set(aRows.map((r) => legMoveKey(r.path)));
+  const groupMap = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const g of bRows.filter((r) => r.type === "group")) {
+    const keys = aKeys();
+    const candidates = aRows.filter((r) => r.type === "group" && !taken.has(r.uid) && (r.name ?? "") === (g.name ?? ""));
+    let best: T | undefined;
+    let bestScore = -1;
+    for (const c of candidates) {
+      const trial = new Map([[g.uid, c.uid]]);
+      const score = bRows.filter((r) => r.path[1] === g.uid && keys.has(legMoveKey(remap(r.path, trial)))).length;
+      if (score > bestScore) [best, bestScore] = [c, score];
+    }
+    if (best !== undefined) {
+      groupMap.set(g.uid, best.uid);
+      taken.add(best.uid);
+    } else {
+      // A has no such group any more: recreate it at the end of A's block.
+      aRows.push({ ...g, path: [into, g.uid] });
+      groupMap.set(g.uid, g.uid);
+      taken.add(g.uid);
+    }
+  }
+
+  const subtreeEnd = (idx: number) => {
+    const p = aRows[idx].path;
+    let i = idx + 1;
+    while (i < aRows.length && isUnder(aRows[i].path, p)) i++;
+    return i;
+  };
+  for (const row of bRows) {
+    if (row.type === "group") continue;
+    const target = remap(row.path, groupMap);
+    const existing = aRows.findIndex((r) => legMoveKey(r.path) === legMoveKey(target));
+    if (existing !== -1) {
+      aRows[existing] = { ...aRows[existing], quantity: (aRows[existing].quantity ?? 0) + (row.quantity ?? 0) };
+      continue;
+    }
+    const parent = target.slice(0, -1);
+    const zero = row.zero_priced === true;
+    let lo: number;
+    let hi: number;
+    if (parent.length === 1) {
+      lo = 0;
+      const firstGroup = aRows.findIndex((r) => r.type === "group");
+      hi = firstGroup === -1 ? aRows.length : firstGroup;
+    } else {
+      const p = aRows.findIndex((r) => legMoveKey(r.path) === legMoveKey(parent));
+      if (p === -1) throw new LegMoveRefusal("a row's parent is on neither leg", row.path);
+      lo = p + 1;
+      hi = subtreeEnd(p);
+    }
+    let at = hi;
+    if (zero) {
+      at = lo;
+      for (let i = lo; i < hi; i++) {
+        const r = aRows[i];
+        if (r.path.length === target.length && r.zero_priced === true) at = subtreeEnd(i);
+      }
+    }
+    aRows.splice(at, 0, { ...row, path: target });
+  }
+
+  const out: T[] = [];
+  for (let i = 0; i < items.length; i++) {
+    if (i > b.start && i < b.end) continue;
+    if (i === b.start) continue;
+    if (i === a.start) {
+      out.push(items[i], ...aRows);
+      continue;
+    }
+    if (i > a.start && i < a.end) continue;
+    out.push(items[i]);
+  }
+  return out;
+}

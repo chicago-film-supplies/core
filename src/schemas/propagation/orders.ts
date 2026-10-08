@@ -1395,6 +1395,89 @@ const extendRentalTransaction: TransactionDefinition = {
   ],
 };
 
+// ── undo-extend-rental ────────────────────────────────────────────
+//
+// POST /orders/{uid}/extensions/{uid_pair}/undo — a mistaken extension, taken
+// back while leg B is still exactly what the extension made (no custody step on
+// B's bookings, none added, removed or re-quantified, no invoice billing B). The
+// inverse of extend-rental: B's rows merge back onto A, B is deleted, and B's
+// custody is re-attributed to A's bookings with the reverse rebook pair. A plain
+// order edit moving the rows back would never move the custody (api-cloudrun#1147).
+
+const UNDO_TESTS = "api-cloudrun/tests/integration/orders/rentalExtensionUndo.test.ts";
+
+const UNDO_ROUND_TRIP: EnforcementRef = {
+  kind: "test",
+  ref: `${UNDO_TESTS}::extend then undo restores the order, its bookings and stock`,
+  clause:
+    "after an extension and its undo, A's bookings hold the pre-extension out counts, B's bookings and pair are gone, stock holds the physical count, and the order's rows and prices equal the pre-extension order",
+  gates: true,
+};
+
+const UNDO_JOURNAL: EnforcementRef = {
+  kind: "test",
+  ref: `${UNDO_TESTS}::the undo journals rebook_out on B and rebook_in on A`,
+  clause:
+    "one rebook_out on B's booking and one rebook_in on A's per grain, in one session, rebook_out numbered first, rebook_in naming B in sources[]",
+  gates: true,
+};
+
+const undoExtendRentalRules: CollectionRule[] = [
+  {
+    id: "undo-extend-rental:rebook-to-bookings",
+    source: "orders",
+    target: "bookings",
+    mode: "co-write",
+    invariant:
+      "For each booking on leg B, its `out` (every unit it holds; nothing else may be non-zero) returns to leg A's booking at the same grain: A's booking gains it, or is re-created holding it when the extension had emptied and deleted it, and B's falls to zero and is deleted by the reconcile as plan-only. Applied to the stored-booking view BEFORE the delta, the reconcile, the card gate and the fulfillment sync read it, as for the extension. On a serialized product B's `units.out` joins A's, unattributed units included: they stay written down, on A now.",
+    enforced_by: [UNDO_ROUND_TRIP],
+    transaction: "undo-extend-rental",
+    fields: [
+      {
+        source: ["items", "quantity"],
+        target: ["breakdown", "out"],
+        transform: "A: out + k; B: deleted (k = B's out at that grain)",
+      },
+    ],
+  },
+  {
+    id: "undo-extend-rental:bookings-to-transactions",
+    source: "bookings",
+    target: "transactions",
+    mode: "co-write",
+    invariant:
+      "The return is journaled as the reverse PAIR in one session: `rebook_out` on B's booking (custody {out → null}) and `rebook_in` on A's (custody {null → out}, `sources[]` naming B exactly once). No lines and no ledger effect. On a serialized product both halves name the units and the roster is folded in the order transaction, `rebook_in` re-pointing each unit from B to A. `rebook_out` takes the lower number.",
+    enforced_by: [UNDO_JOURNAL, CUSTODY_REPLAY],
+    transaction: "undo-extend-rental",
+    fields: [
+      { source: ["uid_product"], target: ["uid_product"] },
+      { source: ["uid"], target: ["uid_booking"] },
+      { source: ["breakdown", "out"], target: ["quantity"], transform: "k, the units returned to A" },
+      { source: [], target: ["sources"], transform: "[{orders}, {bookings: the other leg's}] on both halves" },
+    ],
+  },
+];
+
+const undoExtendRentalTransaction: TransactionDefinition = {
+  id: "undo-extend-rental",
+  description:
+    "Undoes a rental extension: merges leg B's rows back onto leg A (core `mergeLegBack`), deletes B, reprices, and re-attributes B's custody to A's bookings with the reverse `rebook_out`/`rebook_in` pair, in the order write's one transaction. Refused unless B is still exactly what the extension made. Otherwise runs the `update-order` cascade unchanged.",
+  steps: [
+    "update-order:order-self-derive",
+    "undo-extend-rental:rebook-to-bookings",
+    "undo-extend-rental:bookings-to-transactions",
+    "units:transactions-to-roster",
+    "update-order:order-to-bookings",
+    "update-order:ledger-to-bookings",
+    ...STOCK_STEPS,
+    "update-order:fulfillment-to-cards",
+    "cowrite-thread:cards-to-thread",
+    "cowrite-thread:thread-to-cards",
+    "update-order:order-to-fulfillment",
+    "update-order:items-to-invoices",
+  ],
+};
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/orders.ts` contributes to the propagation catalog. */
 export const orders: PropagationModule = {
@@ -1403,6 +1486,7 @@ export const orders: PropagationModule = {
     ...updateOrderRules,
     ...updateBookingRules,
     ...extendRentalRules,
+    ...undoExtendRentalRules,
   ],
   transactions: [
     createOrderTransaction,
@@ -1414,5 +1498,6 @@ export const orders: PropagationModule = {
     crossOrderBookingsTransaction,
     finalizeOrderTransaction,
     extendRentalTransaction,
+    undoExtendRentalTransaction,
   ],
 };
