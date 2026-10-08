@@ -41774,6 +41774,7 @@ interface SharedField {
   path: string;
   kind: SharedFieldKind;
   derived_keys?: readonly string[];
+  keys?: readonly string[];
 }
 ```
 

@@ -721,8 +721,11 @@ function docSummary(map: DocumentDiffMap): string[] {
   );
 }
 
-const ORG_A = { uid: "org-a", name: "Acme Films", path: [{ uid: "org-a", name: "Acme Films" }] };
-const ORG_B = { uid: "org-b", name: "Acme Films — Lighting", path: [{ uid: "org-b", name: "Acme Films — Lighting" }] };
+// No composed `name`: `DocumentOrganizationSnapshot` dropped it in `beta.309`, and
+// the comparison now reads only the keys both schemas declare, so a key no
+// schema carries would vanish from the report rather than test anything.
+const ORG_A = { uid: "org-a", path: [{ uid: "org-a", name: "Acme Films" }] };
+const ORG_B = { uid: "org-b", path: [{ uid: "org-b", name: "Acme Films — Lighting" }] };
 
 Deno.test("documentDiff: a doc-level shared field that differs reports ONE doc_field entry (G13)", () => {
   // Before this there was nowhere for these to go. `computeDocumentDiffs`
@@ -746,7 +749,7 @@ Deno.test("documentDiff: a doc-level shared field that differs reports ONE doc_f
 
   const sources = { orders: [ord], invoices: [inv] };
   assertEquals(docSummary(computeDocumentDiffs(sources, { kind: "invoice", uid: "inv-1" }, CONTEXT)), [
-    'order#1001:doc_field(organization={"uid":"org-b","name":"Acme Films — Lighting","path":[{"uid":"org-b","name":"Acme Films — Lighting"}]}→{"uid":"org-a","name":"Acme Films","path":[{"uid":"org-a","name":"Acme Films"}]},tax_exempt=true→false,reference="PO-78"→"PO-77")',
+    'order#1001:doc_field(organization={"uid":"org-b","path":[{"uid":"org-b","name":"Acme Films — Lighting"}]}→{"uid":"org-a","path":[{"uid":"org-a","name":"Acme Films"}]},tax_exempt=true→false,reference="PO-78"→"PO-77")',
   ]);
   // …and the order view reports the same difference the other way round.
   assertEquals(docSummary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT)).length, 1);
@@ -805,6 +808,42 @@ Deno.test("documentDiff: an invoice and a fulfillment have NO doc-level relation
   ).doc;
   assertEquals(entries.length, 1, "exactly one entry — against the ORDER, not against the fulfillment");
   assertEquals(entries[0].kind === "doc_field" && entries[0].source.kind, "order");
+});
+
+Deno.test("documentDiff: the order's organization does NOT differ from its fulfillment's over keys only the order can carry", () => {
+  // The fulfillment's organization is `{uid, path}`; the order's snapshot also
+  // carries `crms_id`, `tax_exempt`, `jurisdiction_claim`, `billing_address` and `xero_id`. Compared whole,
+  // every prod fulfillment reported its organization as a difference (all
+  // carry a non-null `crms_id` and a boolean `tax_exempt`, and `false` is not
+  // nullish). An atom is compared over the keys BOTH schemas declare.
+  const ord = order();
+  (ord as unknown as Record<string, unknown>).organization = { ...ORG_A, crms_id: 552, tax_exempt: false, jurisdiction_claim: null };
+  const f = fulfillment();
+  (f as unknown as Record<string, unknown>).organization = { ...ORG_A };
+  const sources = { orders: [ord], fulfillments: [f] };
+
+  assertEquals(docSummary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT)), []);
+  assertEquals(docSummary(computeDocumentDiffs(sources, { kind: "order", uid: O }, CONTEXT)), []);
+
+  // Mutation control: a MOVED organization still reports, as one entry naming
+  // only the keys that were compared.
+  (f as unknown as Record<string, unknown>).organization = { ...ORG_B };
+  assertEquals(docSummary(computeDocumentDiffs(sources, { kind: "fulfillment", uid: O }, CONTEXT)), [
+    'order#1001:doc_field(organization={"uid":"org-b","path":[{"uid":"org-b","name":"Acme Films — Lighting"}]}→{"uid":"org-a","path":[{"uid":"org-a","name":"Acme Films"}]})',
+  ]);
+});
+
+Deno.test("documentDiff: an order ↔ invoice organization still compares the tax axes both carry", () => {
+  // The other half: the intersection must not be narrowed to `{uid, path}`.
+  // Order and invoice share `DocumentOrganizationSnapshot`, so an invoice whose
+  // organization's `tax_exempt` was overridden is a real difference.
+  const ord = order();
+  (ord as unknown as Record<string, unknown>).organization = { ...ORG_A, crms_id: 552, tax_exempt: false };
+  const inv = invoice("inv-1", [{ order: O, items: orderItems() }]);
+  (inv as unknown as Record<string, unknown>).organization = { ...ORG_A, crms_id: 552, tax_exempt: true };
+  assertEquals(docSummary(computeDocumentDiffs({ orders: [ord], invoices: [inv] }, { kind: "invoice", uid: "inv-1" }, CONTEXT)), [
+    'order#1001:doc_field(organization={"uid":"org-a","path":[{"uid":"org-a","name":"Acme Films"}],"crms_id":552,"tax_exempt":true}→{"uid":"org-a","path":[{"uid":"org-a","name":"Acme Films"}],"crms_id":552,"tax_exempt":false})',
+  ]);
 });
 
 // ── substituted_for: merges (manager#414, Track S1) ──────────────────────────

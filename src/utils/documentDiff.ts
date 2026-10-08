@@ -851,7 +851,12 @@ function docFieldsFor(a: DocumentKind, b: DocumentKind): readonly SharedField[] 
  *
  * An `atom` is compared WHOLE — it is a snapshot of another document, and
  * comparing it leaf by leaf would report a chimera as several small differences
- * rather than one moved reference.
+ * rather than one moved reference. Whole over the keys BOTH schemas declare
+ * (`SharedField.keys`), though: the order's organization snapshot carries
+ * `crms_id` and `tax_exempt` and the fulfillment's carries `uid` and `path`
+ * alone, so a raw comparison reported every fulfillment's organization as a
+ * difference. The sync never had that defect because it projects the order
+ * into the fulfillment's shape before merging; this is the same projection.
  */
 function compareDocFields(out: DocumentDiffMap, viewed: Side, source: Side): void {
   const shared = docFieldsFor(viewed.kind, source.kind);
@@ -863,12 +868,21 @@ function compareDocFields(out: DocumentDiffMap, viewed: Side, source: Side): voi
   const fields: DocumentDiffField[] = [];
   for (const f of shared) {
     if (f.kind !== "propagated" && f.kind !== "atom") continue;
-    const here = readField(viewed.doc, f.path);
-    const there = readField(source.doc, f.path);
+    const here = pickSharedKeys(readField(viewed.doc, f.path), f);
+    const there = pickSharedKeys(readField(source.doc, f.path), f);
     if (JSON.stringify(canonicalizePayload(here)) === JSON.stringify(canonicalizePayload(there))) continue;
     fields.push({ field: f.path, here, there });
   }
   if (fields.length > 0) out.doc.push({ kind: "doc_field", source: sourceRef, fields });
+}
+
+/** An `atom` restricted to the keys both documents declare; any other value unchanged. */
+function pickSharedKeys(value: unknown, field: SharedField): unknown {
+  if (field.kind !== "atom" || field.keys === undefined) return value;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+  // The document's own key order, so the reported value reads as stored.
+  const shared = new Set(field.keys);
+  return Object.fromEntries(Object.entries(value).filter(([k]) => shared.has(k)));
 }
 
 /** A line's `exchanged_for` is non-empty: it is an exchange unit, shown but never owed (see {@link computeDocumentDiffs}). */

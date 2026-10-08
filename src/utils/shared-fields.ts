@@ -87,6 +87,15 @@ export interface SharedField {
    * compares. `charge_windows[].days` is the one case.
    */
   derived_keys?: readonly string[];
+  /**
+   * Set on an `atom`: the keys BOTH schemas declare on the snapshot, sorted. A
+   * key only one side can hold is not a difference — the order's organization
+   * carries `crms_id` and `tax_exempt`, the fulfillment's carries `uid` and
+   * `path` alone, and comparing the two whole read every fulfillment as
+   * overridden. The merge does not need it (its callers project to the
+   * downstream shape first); a comparator over raw documents does.
+   */
+  keys?: readonly string[];
 }
 
 /** Result of {@link classifySharedFields}. */
@@ -309,7 +318,7 @@ export function classifySharedFields(
       // a chimera — another org's uid beside this org's tax axes.
       if (ra.shape.has("uid") && rb.shape.has("uid")) {
         if (!declared) undeclared.push(path);
-        else fields.push({ path, kind: "atom" });
+        else fields.push({ path, kind: "atom", keys: [...ra.shape.keys()].filter((k) => rb.shape.has(k)).sort() });
         return;
       }
       walkObject(ra.shape, rb.shape, path, false);

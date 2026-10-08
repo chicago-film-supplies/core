@@ -10,7 +10,7 @@ import {
 } from "../src/schemas/mod.ts";
 import type { LineItem } from "../src/utils/orders.ts";
 import { type PriceDocumentContext, priceDocument } from "../src/utils/price-document.ts";
-import { projectOrderItemToInvoiceItem } from "../src/utils/invoices.ts";
+import { orderInvoiceSharedFields, projectOrderItemToInvoiceItem } from "../src/utils/invoices.ts";
 import {
   classifySharedFields,
   fieldsUnder,
@@ -160,6 +160,26 @@ Deno.test("classifySharedFields: order → fulfillment, every shared key and its
     "homonym updated_by",
     "homonym created_at",
     "homonym updated_at",
+  ]);
+});
+
+Deno.test("an atom records the keys BOTH schemas declare — what a raw-document comparator may compare", () => {
+  // The fulfillment's organization is `{uid, path}`; the order's snapshot
+  // carries five more keys. `computeDocumentDiffs` compares the atom over THIS
+  // list; comparing it whole reported every fulfillment's organization as a
+  // difference. Order ↔ invoice share one snapshot schema, so their list is the
+  // whole snapshot and an overridden tax axis still reports.
+  const keysOf = (fields: readonly { path: string; keys?: readonly string[] }[], path: string) =>
+    fields.find((f) => f.path === path)?.keys;
+  assertEquals(keysOf(orderFulfillmentSharedFields().doc, "organization"), ["path", "uid"]);
+  assertEquals(keysOf(orderInvoiceSharedFields().doc, "organization"), [
+    "billing_address",
+    "crms_id",
+    "jurisdiction_claim",
+    "path",
+    "tax_exempt",
+    "uid",
+    "xero_id",
   ]);
 });
 

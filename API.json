@@ -19370,7 +19370,7 @@
         {
           "kind": "interface",
           "name": "SharedField",
-          "declaration": "interface SharedField {\n  path: string;\n  kind: SharedFieldKind;\n  derived_keys?: readonly string[];\n}",
+          "declaration": "interface SharedField {\n  path: string;\n  kind: SharedFieldKind;\n  derived_keys?: readonly string[];\n  keys?: readonly string[];\n}",
           "doc": "One shared field."
         },
         {
