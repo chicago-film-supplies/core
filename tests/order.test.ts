@@ -103,6 +103,22 @@ Deno.test("CreateOrderInput validates a complete input", () => {
   assertEquals(CreateOrderInput.safeParse(input).success, true);
 });
 
+Deno.test("CreateOrderInput: a new order starts in a plan status — never active, complete or canceled (G5)", () => {
+  const input = (status: string) => ({
+    uid: "testorder10000000000",
+    organization: { uid: "testorg1000000000000" },
+    status,
+    destinations: [validDestination],
+    items: [
+      { uid: "dest1000000000000000", type: "destination", name: "Chicago", path: [] },
+      { uid: "testitem100000000000", type: "rental", name: "Camera", quantity: 2, path: ["dest1000000000000000"] },
+    ],
+    subject: "Film shoot",
+  });
+  for (const status of ["draft", "quoted", "reserved"]) assertEquals(CreateOrderInput.safeParse(input(status)).success, true, status);
+  for (const status of ["active", "complete", "canceled"]) assertEquals(CreateOrderInput.safeParse(input(status)).success, false, status);
+});
+
 Deno.test("CreateOrderInput rejects empty destinations", () => {
   const input = {
     uid: "testorder10000000000",

@@ -68,6 +68,11 @@ const OrderStatus: z.ZodType<OrderStatusType> = z.enum(ORDER_STATUSES);
 export const ORDER_USER_STATUSES = ["draft", "quoted", "reserved", "canceled"] as const;
 export type OrderUserStatusType = typeof ORDER_USER_STATUSES[number];
 
+/** The statuses an order may be CREATED in: the plan statuses (stock campaign gap G5). */
+export const CREATE_ORDER_STATUSES = ["draft", "quoted", "reserved"] as const;
+/** One status a create may carry. */
+export type CreateOrderStatusType = typeof CREATE_ORDER_STATUSES[number];
+
 /**
  * Statuses derived from booking state — set only by the API's booking write
  * path (reserved → active when a booking moves quantity into out;
@@ -1936,7 +1941,13 @@ export const OrderItem: z.ZodType<OrderItemType> = z.discriminatedUnion("type", 
 export interface CreateOrderInputType {
   uid: string;
   organization: { uid: string };
-  status: OrderStatusType;
+  /**
+   * A new order starts in a PLAN status: `draft`, `quoted` or `reserved`
+   * ({@link CREATE_ORDER_STATUSES}). `active`/`complete` are read off custody,
+   * which a new order has none of — a create at `complete` minted custody with no
+   * movement (stock campaign gap G5) — and a `canceled` create has nothing to cancel.
+   */
+  status: CreateOrderStatusType;
   /**
    * **The document's only tax lever, and the only exemption channel there is**
    * — `tax_profile` left this input at api-cloudrun#596 item 2, so a create
@@ -1974,7 +1985,7 @@ export interface CreateOrderInputType {
 export const CreateOrderInput: z.ZodType<CreateOrderInputType> = z.object({
   uid: FirestoreId,
   organization: z.object({ uid: FirestoreId }),
-  status: OrderStatus,
+  status: z.enum(CREATE_ORDER_STATUSES),
   tax_exempt: z.boolean().optional(),
   uid_store: FirestoreId.nullable().optional(),
   destinations: z.array(Destination).min(1, "At least one destination is required"),

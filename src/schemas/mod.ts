@@ -225,6 +225,8 @@ export {
   ORDER_COMPUTED_STATUSES,
   type OrderComputedStatusType,
   getOrderStatusTransitions,
+  CREATE_ORDER_STATUSES,
+  type CreateOrderStatusType,
   BILLABLE_ORDER_STATUSES,
   BOOKS_NOTHING_ORDER_STATUSES,
   CARD_BEARING_ORDER_STATUSES,

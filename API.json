@@ -620,6 +620,12 @@
         },
         {
           "kind": "variable",
+          "name": "CREATE_ORDER_STATUSES",
+          "declaration": "const CREATE_ORDER_STATUSES: \"draft\" | \"quoted\" | \"reserved\"[];",
+          "doc": "The statuses an order may be CREATED in: the plan statuses (stock campaign gap G5)."
+        },
+        {
+          "kind": "variable",
           "name": "CREDIT_NOTE_REASONS",
           "declaration": "const CREDIT_NOTE_REASONS: readonly SettlementReasonType[];",
           "doc": "Why this credit was issued — the `credit` arm of {@link SETTLEMENT_CONTRACTS},\n**derived rather than re-listed**, so the document and the settlements it\nspawns can never offer different reasons.\n\nThe reason lives on the *document* and is denormalized onto each settlement:\none credit note allocated across three invoices has one reason, and authoring\nit three times invites three answers."
@@ -1263,8 +1269,14 @@
         {
           "kind": "interface",
           "name": "CreateOrderInputType",
-          "declaration": "interface CreateOrderInputType {\n  uid: string;\n  organization: typeLiteral;\n  status: OrderStatusType;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  destinations: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n}",
+          "declaration": "interface CreateOrderInputType {\n  uid: string;\n  organization: typeLiteral;\n  status: CreateOrderStatusType;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  destinations: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n}",
           "doc": "Input schema for POST /orders — what the endpoint accepts."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CreateOrderStatusType",
+          "declaration": "type CreateOrderStatusType = indexedAccess;",
+          "doc": "One status a create may carry."
         },
         {
           "kind": "variable",
@@ -9326,6 +9338,12 @@
         },
         {
           "kind": "variable",
+          "name": "CREATE_ORDER_STATUSES",
+          "declaration": "const CREATE_ORDER_STATUSES: \"draft\" | \"quoted\" | \"reserved\"[];",
+          "doc": "The statuses an order may be CREATED in: the plan statuses (stock campaign gap G5)."
+        },
+        {
+          "kind": "variable",
           "name": "ChargeWindow",
           "declaration": "const ChargeWindow: z.ZodType<ChargeWindowType>;",
           "doc": "Zod schema for {@link ChargeWindowType}."
@@ -9363,8 +9381,14 @@
         {
           "kind": "interface",
           "name": "CreateOrderInputType",
-          "declaration": "interface CreateOrderInputType {\n  uid: string;\n  organization: typeLiteral;\n  status: OrderStatusType;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  destinations: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n}",
+          "declaration": "interface CreateOrderInputType {\n  uid: string;\n  organization: typeLiteral;\n  status: CreateOrderStatusType;\n  tax_exempt?: boolean;\n  uid_store?: string | null;\n  destinations: DestinationType[];\n  items?: OrderItemType[];\n  subject?: string;\n  reference?: string | null;\n}",
           "doc": "Input schema for POST /orders — what the endpoint accepts."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CreateOrderStatusType",
+          "declaration": "type CreateOrderStatusType = indexedAccess;",
+          "doc": "One status a create may carry."
         },
         {
           "kind": "variable",

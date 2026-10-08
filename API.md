@@ -1378,6 +1378,14 @@ could see it.
 const COMPONENT_PRICE_KEYS: "base_cents" | "base_percent" | "replacement_cents" | "coa_revenue" | "formula" | "discountable"[];
 ```
 
+### `CREATE_ORDER_STATUSES`
+
+The statuses an order may be CREATED in: the plan statuses (stock campaign gap G5).
+
+```ts
+const CREATE_ORDER_STATUSES: "draft" | "quoted" | "reserved"[];
+```
+
 ### `CREDIT_NOTE_REASONS`
 
 Why this credit was issued — the `credit` arm of {@link SETTLEMENT_CONTRACTS},
@@ -2861,7 +2869,7 @@ Input schema for POST /orders — what the endpoint accepts.
 interface CreateOrderInputType {
   uid: string;
   organization: typeLiteral;
-  status: OrderStatusType;
+  status: CreateOrderStatusType;
   tax_exempt?: boolean;
   uid_store?: string | null;
   destinations: DestinationType[];
@@ -2869,6 +2877,14 @@ interface CreateOrderInputType {
   subject?: string;
   reference?: string | null;
 }
+```
+
+### `CreateOrderStatusType`
+
+One status a create may carry.
+
+```ts
+type CreateOrderStatusType = indexedAccess;
 ```
 
 ### `CreateOrganizationInput`
@@ -20378,6 +20394,14 @@ These carry live event cards (`cardBearing`): `{quoted, reserved, active, comple
 const CARD_BEARING_ORDER_STATUSES: readonly OrderStatusType[];
 ```
 
+### `CREATE_ORDER_STATUSES`
+
+The statuses an order may be CREATED in: the plan statuses (stock campaign gap G5).
+
+```ts
+const CREATE_ORDER_STATUSES: "draft" | "quoted" | "reserved"[];
+```
+
 ### `ChargeWindow`
 
 Zod schema for {@link ChargeWindowType}.
@@ -20471,7 +20495,7 @@ Input schema for POST /orders — what the endpoint accepts.
 interface CreateOrderInputType {
   uid: string;
   organization: typeLiteral;
-  status: OrderStatusType;
+  status: CreateOrderStatusType;
   tax_exempt?: boolean;
   uid_store?: string | null;
   destinations: DestinationType[];
@@ -20479,6 +20503,14 @@ interface CreateOrderInputType {
   subject?: string;
   reference?: string | null;
 }
+```
+
+### `CreateOrderStatusType`
+
+One status a create may carry.
+
+```ts
+type CreateOrderStatusType = indexedAccess;
 ```
 
 ### `Destination`
