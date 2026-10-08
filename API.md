@@ -30886,20 +30886,35 @@ fixture). An absent key reads 0. A stored breakdown states every key
 Project a booking's breakdown for a given **order** status, item type, and
 total quantity. Pure sync — no I/O.
 
+ONE rule for every status (stock campaign P1): carry every custody key as it
+stands and put the rest of the quantity in the status's plan bucket
+(`ORDER_STATUS_TRAITS[status].planBucket`).
+
+| order status | breakdown |
+|---|---|
+| `quoted` | `quoted` = quantity − carried |
+| `reserved` / `active` / `complete` | `reserved` = quantity − carried |
+| `draft` / `canceled` | custody kept, no plan (decision 10) |
+| `complete`, a `service`/`surcharge` line | all zeros |
+
+🔴 **`complete` no longer SETTLES a booking.** It used to rewrite a rental to
+`returned = quantity − out-of-service` and a sale to `out = quantity`, which on
+any re-save of a complete order dropped `prepped`/`out`, could drive
+`returned` negative, and erased a sale's returns and losses — custody changing
+with no movement (gap G3). Now a complete order's stored custody stands, and
+a raise books as `reserved` work, which reopens the order (decision 2). A
+settled breakdown for a fixture is a test helper, not a projection.
+
+⚠️ `draft`/`canceled` used to zero the WHOLE breakdown (gap G7), the last arm
+that could drop custody.
+
 ⚠️ `status` is an `OrderStatusType`, **not** a `BookingStatusType`. The two
 vocabularies overlap but are not the same set: an order can be `canceled`
 (a booking cannot) and a booking can be `part-prepped`/`prepped` (an order
-cannot). The projection is driven by the parent order, so a caller holding a
-`booking.status` must read through to the order rather than pass it here —
-that mismatch is what the narrowing exists to make a compile error.
+cannot). The projection is driven by the parent order.
 
-Status rules:
-  draft / canceled  → all zeros (cleared on cancel/draft)
-  quoted            → quoted = quantity − carry; preserves prepped/out/terminals
-  reserved / active → reserved = quantity − carry; preserves prepped/out/terminals
-  complete + rental → keeps every out-of-service key; returned = quantity − their sum
-  complete + sale   → out = quantity; zero everything else
-  complete + service / surcharge → all zeros
+The open bucket is floored at zero — see `openBucket` — so the result sums to
+`max(quantity, carried)`, the PHYSICAL number.
 
 ### `cancelRefusal(bookings: ReadonlyArray<Pick<Booking, "uid" | "type" | "breakdown">>): typeLiteral | null`
 

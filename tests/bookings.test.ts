@@ -171,10 +171,11 @@ Deno.test("isOrderBookingsClosed: empty bookings → false", () => {
   assertEquals(isOrderBookingsClosed([]), false);
 });
 
-Deno.test("calculateBookingBreakdown: draft/canceled → all zeros", () => {
-  const prev = sample({ reserved: 5, prepped: 5 });
-  assertEquals(calculateBookingBreakdown("draft", "rental", 10, prev), emptyBookingsBreakdown());
-  assertEquals(calculateBookingBreakdown("canceled", "rental", 10, prev), emptyBookingsBreakdown());
+Deno.test("calculateBookingBreakdown: draft/canceled book no plan and KEEP custody (decision 10, gap G7)", () => {
+  const prev = sample({ reserved: 5, prepped: 3, out: 2 });
+  assertEquals(calculateBookingBreakdown("draft", "rental", 10, prev), full({ prepped: 3, out: 2 }));
+  assertEquals(calculateBookingBreakdown("canceled", "rental", 10, prev), full({ prepped: 3, out: 2 }));
+  assertEquals(calculateBookingBreakdown("canceled", "rental", 10, sample({ reserved: 5 })), emptyBookingsBreakdown());
 });
 
 Deno.test("calculateBookingBreakdown: quoted from fresh", () => {
@@ -247,17 +248,51 @@ Deno.test("calculateBookingBreakdown: a shrink to exactly the carry still emptie
   assertEquals(sumBookingBreakdown(next), 4);
 });
 
-Deno.test("calculateBookingBreakdown: complete rental → returned + the out-of-service keys sum to quantity", () => {
-  const prev = sample({ out: 8, lost: 1, damaged: 1 });
-  const next = calculateBookingBreakdown("complete", "rental", 10, prev);
-  assertEquals(next, full({ returned: 8, lost: 1, damaged: 1 }));
-  assertEquals(sumBookingBreakdown(next), 10);
+Deno.test("calculateBookingBreakdown: complete keeps stored custody and books a raise as reserved (gap G3, decision 2)", () => {
+  // A re-save of a complete rental changes nothing — it used to rewrite out into returned.
+  assertEquals(calculateBookingBreakdown("complete", "rental", 10, sample({ out: 8, lost: 1, damaged: 1 })), full({
+    out: 8,
+    lost: 1,
+    damaged: 1,
+  }));
+  // A sale's return and loss survive — the old arm rewrote them all to `out`.
+  assertEquals(calculateBookingBreakdown("complete", "sale", 5, sample({ out: 3, returned: 1, lost: 1 })), full({
+    out: 3,
+    returned: 1,
+    lost: 1,
+  }));
+  // A raise on a complete order lands in `reserved`; the order reads active again.
+  assertEquals(calculateBookingBreakdown("complete", "rental", 12, sample({ returned: 10 })), full({
+    returned: 10,
+    reserved: 2,
+  }));
 });
 
-Deno.test("calculateBookingBreakdown: complete sale → all qty in out", () => {
-  const prev = sample({ reserved: 5 });
-  const next = calculateBookingBreakdown("complete", "sale", 5, prev);
-  assertEquals(next, full({ out: 5 }));
+Deno.test("calculateBookingBreakdown: no order status changes a custody key, over every breakdown at 4", () => {
+  const KEYS = BOOKING_BREAKDOWN_KEYS;
+  const states: Booking["breakdown"][] = [];
+  const walk = (i: number, left: number, acc: Partial<Booking["breakdown"]>) => {
+    if (i === KEYS.length) {
+      if (left === 0) states.push(full(acc));
+      return;
+    }
+    for (let n = 0; n <= left; n++) walk(i + 1, left - n, { ...acc, [KEYS[i]]: n });
+  };
+  walk(0, 4, {});
+  const history = ["prepped", "out", "returned", "lost", "damaged", "cleaning", "maintenance"] as const;
+  let checked = 0;
+  for (const status of ["draft", "quoted", "reserved", "active", "complete", "canceled"] as const) {
+    for (const type of ["rental", "sale"] as const) {
+      for (const prev of states) {
+        for (const q of [0, 2, 4, 6]) {
+          const next = calculateBookingBreakdown(status, type, q, prev);
+          for (const k of history) assertEquals(next[k], prev[k], `${status} ${type} q=${q} ${k} ${JSON.stringify(prev)}`);
+          checked++;
+        }
+      }
+    }
+  }
+  assertEquals(checked, 6 * 2 * 495 * 4);
 });
 
 Deno.test("calculateBookingBreakdown: complete service/surcharge → all zeros, NOT quantity", () => {
@@ -356,10 +391,10 @@ Deno.test("P2b: calculateBookingBreakdown carries cleaning and maintenance forwa
     calculateBookingBreakdown("reserved", "rental", 6, prev),
     full({ returned: 2, cleaning: 3, maintenance: 1 }),
   );
-  // Completion keeps every out-of-service key and gives `returned` only the rest.
+  // Completion no longer settles anything: the stored custody stands.
   assertEquals(
     calculateBookingBreakdown("complete", "rental", 10, full({ out: 4, cleaning: 3, maintenance: 1, lost: 2 })),
-    full({ returned: 4, cleaning: 3, maintenance: 1, lost: 2 }),
+    full({ out: 4, cleaning: 3, maintenance: 1, lost: 2 }),
   );
 });
 

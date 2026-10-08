@@ -30,7 +30,7 @@ import {
   BOOKING_BREAKDOWN_TERMINAL_KEYS,
   CUSTODY_HISTORY_KEYS,
   isCollectionLineType,
-  OUT_OF_SERVICE_KEYS,
+  ORDER_STATUS_TRAITS,
   ownsKey,
 } from "../schemas/mod.ts";
 
@@ -248,83 +248,54 @@ function openBucket(
   return { ...carried, [key]: open };
 }
 
-/**
- * How a `complete` order settles a booking, per item type.
- *
- * **`service` and `surcharge` settle to all-zeros, and that is load-bearing** —
- * `api-cloudrun/scripts/repair-booking-breakdowns.ts` derives its own
- * `expectedSumAfter` from this table (0 for a `complete` service/surcharge line,
- * `quantity` otherwise) and ABORTS the whole run when the projection disagrees.
- * Prod holds ~439 service/surcharge bookings. The `Record` annotation is what
- * stops a new `ComponentTypeType` member from silently acquiring the rental
- * treatment.
- *
- * ⚠️ The downstream enforcer named here used to be `complete-stale-bookings.ts`,
- * deleted on 2026-08-30. The rule did not move with it — it lives here, and the
- * test below pins it independently of any script.
- */
 function pickKeys(b: Partial<BookingBreakdown>, keys: readonly BookingBreakdownKeyType[]): Partial<BookingBreakdown> {
   const out: Partial<BookingBreakdown> = {};
   for (const key of keys) out[key] = breakdownQuantity(b, key);
   return out;
 }
 
-const COMPLETE_BY_TYPE: Readonly<
-  Record<ComponentTypeType, (quantity: number, prev: Booking["breakdown"]) => Booking["breakdown"]>
-> = {
-  // Every out-of-service key is HISTORY and is kept; `returned` takes the rest.
-  rental: (quantity, prev) => {
-    const kept = { ...emptyBookingsBreakdown(), ...pickKeys(prev, OUT_OF_SERVICE_KEYS) };
-    return { ...kept, returned: quantity - sumBookingBreakdown(kept) };
-  },
-  sale: (quantity) => ({ ...emptyBookingsBreakdown(), out: quantity }),
-  service: () => emptyBookingsBreakdown(),
-  surcharge: () => emptyBookingsBreakdown(),
-};
-
 /**
- * The projection rule, one entry per **order** status.
- *
- * Same shape as `MOVEMENT_CONTRACTS` (`schemas/transaction.ts`): the
- * `Record<OrderStatusType, …>` annotation makes an incomplete literal a compile
- * error at the declaration, so a new `ORDER_STATUSES` member cannot silently
- * fall through to an all-zero breakdown the way the previous if-chain let it.
- *
- * The values are projector functions rather than plain data because the arms
- * need `prev`, `quantity` and — for `complete` — the item `type`.
+ * A draft or canceled order books no PLAN (decision 10): the plan keys go to
+ * zero and every key custody history reached is kept exactly as stored. Units
+ * that moved are still where they are; an order status cannot un-move them.
  */
-const BREAKDOWN_PROJECTIONS: Readonly<
-  Record<
-    OrderStatusType,
-    (quantity: number, prev: Booking["breakdown"], type: ComponentTypeType) => Booking["breakdown"]
-  >
-> = {
-  draft: () => emptyBookingsBreakdown(),
-  canceled: () => emptyBookingsBreakdown(),
-  quoted: (quantity, prev) => openBucket("quoted", quantity, prev),
-  reserved: (quantity, prev) => openBucket("reserved", quantity, prev),
-  active: (quantity, prev) => openBucket("reserved", quantity, prev),
-  complete: (quantity, prev, type) => COMPLETE_BY_TYPE[type]?.(quantity, prev) ?? emptyBookingsBreakdown(),
-};
+function keepCustodyOnly(prev: Booking["breakdown"]): Booking["breakdown"] {
+  return { ...emptyBookingsBreakdown(), ...pickKeys(prev, CUSTODY_HISTORY_KEYS) };
+}
 
 /**
  * Project a booking's breakdown for a given **order** status, item type, and
  * total quantity. Pure sync — no I/O.
  *
+ * ONE rule for every status (stock campaign P1): carry every custody key as it
+ * stands and put the rest of the quantity in the status's plan bucket
+ * (`ORDER_STATUS_TRAITS[status].planBucket`).
+ *
+ * | order status | breakdown |
+ * |---|---|
+ * | `quoted` | `quoted` = quantity − carried |
+ * | `reserved` / `active` / `complete` | `reserved` = quantity − carried |
+ * | `draft` / `canceled` | custody kept, no plan (decision 10) |
+ * | `complete`, a `service`/`surcharge` line | all zeros |
+ *
+ * 🔴 **`complete` no longer SETTLES a booking.** It used to rewrite a rental to
+ * `returned = quantity − out-of-service` and a sale to `out = quantity`, which on
+ * any re-save of a complete order dropped `prepped`/`out`, could drive
+ * `returned` negative, and erased a sale's returns and losses — custody changing
+ * with no movement (gap G3). Now a complete order's stored custody stands, and
+ * a raise books as `reserved` work, which reopens the order (decision 2). A
+ * settled breakdown for a fixture is a test helper, not a projection.
+ *
+ * ⚠️ `draft`/`canceled` used to zero the WHOLE breakdown (gap G7), the last arm
+ * that could drop custody.
+ *
  * ⚠️ `status` is an `OrderStatusType`, **not** a `BookingStatusType`. The two
  * vocabularies overlap but are not the same set: an order can be `canceled`
  * (a booking cannot) and a booking can be `part-prepped`/`prepped` (an order
- * cannot). The projection is driven by the parent order, so a caller holding a
- * `booking.status` must read through to the order rather than pass it here —
- * that mismatch is what the narrowing exists to make a compile error.
+ * cannot). The projection is driven by the parent order.
  *
- * Status rules:
- *   draft / canceled  → all zeros (cleared on cancel/draft)
- *   quoted            → quoted = quantity − carry; preserves prepped/out/terminals
- *   reserved / active → reserved = quantity − carry; preserves prepped/out/terminals
- *   complete + rental → keeps every out-of-service key; returned = quantity − their sum
- *   complete + sale   → out = quantity; zero everything else
- *   complete + service / surcharge → all zeros
+ * The open bucket is floored at zero — see `openBucket` — so the result sums to
+ * `max(quantity, carried)`, the PHYSICAL number.
  */
 export function calculateBookingBreakdown(
   status: OrderStatusType,
@@ -333,11 +304,20 @@ export function calculateBookingBreakdown(
   existingBreakdown?: Booking["breakdown"],
 ): Booking["breakdown"] {
   const prev = existingBreakdown ?? emptyBookingsBreakdown();
-  // Indexed defensively, not as `TABLE[status](…)`: `template-helpers.generated.ts`
+  // Indexed defensively, not as `TABLE[status]`: `template-helpers.generated.ts`
   // exposes this function to Eta templates with runtime-unchecked arguments, so an
-  // out-of-vocabulary status must keep returning `base` rather than start throwing
-  // on `undefined` in the PDF render path.
-  return BREAKDOWN_PROJECTIONS[status]?.(quantity, prev, type) ?? emptyBookingsBreakdown();
+  // out-of-vocabulary status must keep returning a breakdown rather than throw in
+  // the PDF render path.
+  const traits = (ORDER_STATUS_TRAITS as Partial<typeof ORDER_STATUS_TRAITS>)[status];
+  if (traits === undefined) return emptyBookingsBreakdown();
+  if (status === "complete" && !isStockLineType(type)) return emptyBookingsBreakdown();
+  if (traits.planBucket === null) return keepCustodyOnly(prev);
+  return openBucket(traits.planBucket, quantity, prev);
+}
+
+/** The line types a booking carries custody for: `rental` and `sale`. */
+function isStockLineType(type: string): boolean {
+  return type === "rental" || type === "sale";
 }
 
 /**
