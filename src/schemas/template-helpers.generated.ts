@@ -29,6 +29,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "bookings": [
     { name: "applyBookingBreakdownDelta", expr: "it.bookings.applyBookingBreakdownDelta(orderBreakdown, prev, next)", desc: "Apply a per-key delta to an order's bookings_breakdown roll-up in place.", returns: "void" },
+    { name: "apportionBreakdown", expr: "it.bookings.apportionBreakdown(breakdown, quantities)", desc: "Split one grain's custody across several bookings by quantity — every bucket conserved exactly, and every recipient summing to its own quantity (api-cloudrun#1204). Returns one full breakdown per entry of `quantities`, in the same order.", returns: "FullBookingBreakdown[]" },
     { name: "breakdownQuantity", expr: "it.bookings.breakdownQuantity(b, key)", desc: "The units in one bucket of a possibly PARTIAL map (a delta, an override, a fixture). An absent key reads 0. A stored breakdown states every key (`schemas/_breakdown.ts`), so on one this is a plain lookup.", returns: "number" },
     { name: "calculateBookingBreakdown", expr: "it.bookings.calculateBookingBreakdown(status, type, quantity, existingBreakdown)", desc: "Project a booking's breakdown for a given **order** status, item type, and total quantity. Pure sync — no I/O.", returns: "indexedAccess" },
     { name: "emptyBookingsBreakdown", expr: "it.bookings.emptyBookingsBreakdown()", desc: "The empty breakdown shape — every key at zero.", returns: "FullBookingBreakdown" },

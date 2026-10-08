@@ -472,6 +472,145 @@ export function grainKeep(live: number, rows: readonly GrainRow[]): GrainKeep {
   return { kept, byRow };
 }
 
+/**
+ * Split one grain's custody across several bookings by quantity — every bucket
+ * conserved exactly, and every recipient summing to its own quantity
+ * (api-cloudrun#1204). Returns one full breakdown per entry of `quantities`, in
+ * the same order.
+ *
+ * Each cell is `breakdown[k] × quantities[j] ÷ Σ quantities` rounded to the
+ * floor or the ceiling, never further. The floors come first; the units they
+ * leave go to the cells with the LARGEST remainder, exactly as
+ * {@link https://en.wikipedia.org/wiki/Largest_remainder_method largest remainder}
+ * would for one bucket.
+ *
+ * 🔴 **Rounding each bucket on its own is NOT enough, and that is why this
+ * exists.** It conserves each bucket and breaks the recipients: `{ returned: 1,
+ * lost: 1 }` over `[1, 1]` ties every remainder at ½, and an independent
+ * per-bucket pass gives both units to the first recipient — a booking of 1
+ * holding 2. Here the remainder pass also respects each recipient's leftover
+ * capacity, and where the greedy order strands a unit, an augmenting path moves
+ * one earlier choice aside. A solution always exists: the exact fractional
+ * split is one, so an integral one within floor/ceiling of it does too.
+ *
+ * Deterministic: ties break by bucket order (`BOOKING_BREAKDOWN_KEYS`), then by
+ * recipient index.
+ *
+ * ```ts
+ * apportionBreakdown({ ...emptyBookingsBreakdown(), returned: 96, lost: 4 }, [64, 36]);
+ * // [{ returned: 61, lost: 3, … }, { returned: 35, lost: 1, … }]
+ * ```
+ *
+ * @throws RangeError when `quantities` is empty or holds anything but a
+ *   positive safe integer, when a bucket is not a non-negative safe integer, or
+ *   when `Σ breakdown !== Σ quantities` — there is no split that conserves both,
+ *   so the honest answer is a refusal (the `distributeCents` rule).
+ */
+export function apportionBreakdown(
+  breakdown: Partial<BookingBreakdown>,
+  quantities: readonly number[],
+): FullBookingBreakdown[] {
+  if (quantities.length === 0) throw new RangeError("apportionBreakdown needs at least one recipient");
+  for (const q of quantities) {
+    if (!Number.isSafeInteger(q) || q <= 0) {
+      throw new RangeError(`apportionBreakdown needs positive integer quantities, got ${q}`);
+    }
+  }
+  const full = fullBookingBreakdown(breakdown);
+  for (const key of BOOKING_BREAKDOWN_KEYS) {
+    if (!Number.isSafeInteger(full[key]) || full[key] < 0) {
+      throw new RangeError(`apportionBreakdown needs non-negative integer buckets, got ${key}: ${full[key]}`);
+    }
+  }
+  const total = quantities.reduce((n, q) => n + q, 0);
+  const units = sumBookingBreakdown(full);
+  if (units !== total || !Number.isSafeInteger(total)) {
+    throw new RangeError(
+      `apportionBreakdown: the breakdown holds ${units} unit(s) and the quantities sum to ${total} — ` +
+        `no split conserves both`,
+    );
+  }
+
+  const out = quantities.map(() => emptyBookingsBreakdown());
+  // Units each recipient still needs, and each bucket still has, after the floors.
+  const capacity = [...quantities];
+  const supply = new Map<BookingBreakdownKeyType, number>();
+  // A cell eligible for one extra unit: its share had a fractional part. The
+  // remainder is kept as the integer numerator over `total`, so it compares exactly.
+  const cells: { key: BookingBreakdownKeyType; k: number; j: number; remainder: number }[] = [];
+  BOOKING_BREAKDOWN_KEYS.forEach((key, k) => {
+    let left = full[key];
+    quantities.forEach((q, j) => {
+      // BigInt so `bucket × quantity` cannot leave the safe range.
+      const product = BigInt(full[key]) * BigInt(q);
+      const floor = Number(product / BigInt(total));
+      const remainder = Number(product % BigInt(total));
+      out[j][key] = floor;
+      capacity[j] -= floor;
+      left -= floor;
+      if (remainder > 0) cells.push({ key, k, j, remainder });
+    });
+    if (left > 0) supply.set(key, left);
+  });
+
+  // Greedy: the largest remainders first. `extra` records which cells took one.
+  cells.sort((a, b) => b.remainder - a.remainder || a.k - b.k || a.j - b.j);
+  const extra = new Set<(typeof cells)[number]>();
+  const stranded: BookingBreakdownKeyType[] = [];
+  for (const cell of cells) {
+    if ((supply.get(cell.key) ?? 0) === 0 || capacity[cell.j] === 0) continue;
+    extra.add(cell);
+    supply.set(cell.key, supply.get(cell.key)! - 1);
+    capacity[cell.j] -= 1;
+  }
+  for (const [key, n] of supply) for (let i = 0; i < n; i++) stranded.push(key);
+
+  // Repair: route each stranded unit along an alternating path — an unused
+  // cell into a recipient, and if that recipient is full, one of its used cells
+  // back out to another bucket — until a recipient with spare capacity is hit.
+  for (const start of stranded) {
+    const seenBucket = new Set<BookingBreakdownKeyType>([start]);
+    const seenRecipient = new Set<number>();
+    const via = new Map<BookingBreakdownKeyType, (typeof cells)[number]>();
+    const viaRecipient = new Map<number, (typeof cells)[number]>();
+    const queue: BookingBreakdownKeyType[] = [start];
+    let end: number | null = null;
+    search: while (queue.length > 0) {
+      const bucket = queue.shift()!;
+      for (const cell of cells) {
+        if (cell.key !== bucket || extra.has(cell) || seenRecipient.has(cell.j)) continue;
+        seenRecipient.add(cell.j);
+        viaRecipient.set(cell.j, cell);
+        if (capacity[cell.j] > 0) {
+          end = cell.j;
+          break search;
+        }
+        for (const used of extra) {
+          if (used.j !== cell.j || seenBucket.has(used.key)) continue;
+          seenBucket.add(used.key);
+          via.set(used.key, used);
+          queue.push(used.key);
+        }
+      }
+    }
+    if (end === null) throw new Error("apportionBreakdown: no feasible split — this is a bug, not an input error");
+    capacity[end] -= 1;
+    // Walk back: take each entering cell, release each leaving one.
+    let recipient: number = end;
+    for (;;) {
+      const entering = viaRecipient.get(recipient)!;
+      extra.add(entering);
+      if (entering.key === start) break;
+      const leaving = via.get(entering.key)!;
+      extra.delete(leaving);
+      recipient = leaving.j;
+    }
+  }
+
+  for (const cell of extra) out[cell.j][cell.key] += 1;
+  return out;
+}
+
 /** A destination pair as far as {@link bookingCollectionFor} reads it. */
 export interface BookingCollectionPair {
   delivery: { uid: string | null; address: AddressType | null };

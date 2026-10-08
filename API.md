@@ -5276,8 +5276,21 @@ interface InventoryLedger {
   store_breakdown: StoreBreakdownEntry[];
   query_by_uid_store: string[];
   query_by_uid_location: string[];
+  counted_from?: InventoryLedgerCountedFrom;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
+}
+```
+
+### `InventoryLedgerCountedFrom`
+
+The seed a counting flip stamps. See {@link InventoryLedger.counted_from}.
+
+```ts
+interface InventoryLedgerCountedFrom {
+  at: FirestoreTimestampType;
+  quantity_held: number;
+  out_of_service_breakdown: indexedAccess;
 }
 ```
 
@@ -18901,8 +18914,21 @@ interface InventoryLedger {
   store_breakdown: StoreBreakdownEntry[];
   query_by_uid_store: string[];
   query_by_uid_location: string[];
+  counted_from?: InventoryLedgerCountedFrom;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
+}
+```
+
+### `InventoryLedgerCountedFrom`
+
+The seed a counting flip stamps. See {@link InventoryLedger.counted_from}.
+
+```ts
+interface InventoryLedgerCountedFrom {
+  at: FirestoreTimestampType;
+  quantity_held: number;
+  out_of_service_breakdown: indexedAccess;
 }
 ```
 
@@ -30281,6 +30307,36 @@ Two live consumer classes remain, and neither is the cascade:
 So it is kept deliberately. **Do not reach for it to maintain a roll-up in a
 writer** — a delta is lossy the moment one is dropped, which is the failure
 `sumBookingsBreakdown` exists to make unrepresentable.
+
+### `apportionBreakdown(breakdown: Partial<BookingBreakdown>, quantities: readonly number[]): FullBookingBreakdown[]`
+
+Split one grain's custody across several bookings by quantity — every bucket
+conserved exactly, and every recipient summing to its own quantity
+(api-cloudrun#1204). Returns one full breakdown per entry of `quantities`, in
+the same order.
+
+Each cell is `breakdown[k] × quantities[j] ÷ Σ quantities` rounded to the
+floor or the ceiling, never further. The floors come first; the units they
+leave go to the cells with the LARGEST remainder, exactly as
+{@link https://en.wikipedia.org/wiki/Largest_remainder_method largest remainder}
+would for one bucket.
+
+🔴 **Rounding each bucket on its own is NOT enough, and that is why this
+exists.** It conserves each bucket and breaks the recipients: `{ returned: 1,
+lost: 1 }` over `[1, 1]` ties every remainder at ½, and an independent
+per-bucket pass gives both units to the first recipient — a booking of 1
+holding 2. Here the remainder pass also respects each recipient's leftover
+capacity, and where the greedy order strands a unit, an augmenting path moves
+one earlier choice aside. A solution always exists: the exact fractional
+split is one, so an integral one within floor/ceiling of it does too.
+
+Deterministic: ties break by bucket order (`BOOKING_BREAKDOWN_KEYS`), then by
+recipient index.
+
+```ts
+apportionBreakdown({ ...emptyBookingsBreakdown(), returned: 96, lost: 4 }, [64, 36]);
+// [{ returned: 61, lost: 3, … }, { returned: 35, lost: 1, … }]
+```
 
 ### `bookingCollectionFor(type: string, pair: BookingCollectionPair): BookingCollection`
 

@@ -2307,8 +2307,14 @@
         {
           "kind": "interface",
           "name": "InventoryLedger",
-          "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number | null;\n  quantity_in_service: number | null;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis_cents: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number | null;\n  quantity_in_service: number | null;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis_cents: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  counted_from?: InventoryLedgerCountedFrom;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An inventory ledger document tracking stock quantities and costs per product."
+        },
+        {
+          "kind": "interface",
+          "name": "InventoryLedgerCountedFrom",
+          "declaration": "interface InventoryLedgerCountedFrom {\n  at: FirestoreTimestampType;\n  quantity_held: number;\n  out_of_service_breakdown: indexedAccess;\n}",
+          "doc": "The seed a counting flip stamps. See {@link InventoryLedger.counted_from}."
         },
         {
           "kind": "typeAlias",
@@ -8603,8 +8609,14 @@
         {
           "kind": "interface",
           "name": "InventoryLedger",
-          "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number | null;\n  quantity_in_service: number | null;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis_cents: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number | null;\n  quantity_in_service: number | null;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis_cents: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  counted_from?: InventoryLedgerCountedFrom;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An inventory ledger document tracking stock quantities and costs per product."
+        },
+        {
+          "kind": "interface",
+          "name": "InventoryLedgerCountedFrom",
+          "declaration": "interface InventoryLedgerCountedFrom {\n  at: FirestoreTimestampType;\n  quantity_held: number;\n  out_of_service_breakdown: indexedAccess;\n}",
+          "doc": "The seed a counting flip stamps. See {@link InventoryLedger.counted_from}."
         },
         {
           "kind": "variable",
@@ -13537,6 +13549,14 @@
           "name": "applyBookingBreakdownDelta",
           "signature": "applyBookingBreakdownDelta(orderBreakdown: indexedAccess, prev: indexedAccess, next: indexedAccess): void",
           "doc": "Apply a per-key delta to an order's bookings_breakdown roll-up in place.\n\nGiven a booking's previous and next breakdown, mutate the order roll-up by\n`+= next[k] - prev[k]` for each key.\n\n⚠️ **This is NOT how the server maintains the roll-up, and has not been since\n`finalizeOrderBookings` landed.** The docblock used to say it was — *\"useful\nserver-side, where `updateBooking` applies a single-doc delta to avoid reading\nevery sibling booking\"* — and that is precisely the mechanism the API replaced\nwith a fold over the order's full booking set, on the house rule *\"recompute,\nnever a delta\"*. `applyBookingBreakdownDelta` has **zero call sites** in\n`api-cloudrun/src/`.\n\nTwo live consumer classes remain, and neither is the cascade:\n\n- **The manager's optimistic UI**, which applies the delta locally for instant\n  feedback and lets the server's authoritative fold land after.\n- **api-cloudrun's operational repair script**\n  `api-cloudrun/scripts/repair-booking-breakdowns.ts`, which moves one booking\n  and adjusts its parent by exactly that booking's delta rather than re-folding\n  the whole order. (Its former sibling `complete-stale-bookings.ts` was the\n  other, and was deleted on 2026-08-30 — its successor drives\n  `applyBookingUpdates` and so gets the whole-order fold instead.)\n\nSo it is kept deliberately. **Do not reach for it to maintain a roll-up in a\nwriter** — a delta is lossy the moment one is dropped, which is the failure\n`sumBookingsBreakdown` exists to make unrepresentable.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "apportionBreakdown",
+          "signature": "apportionBreakdown(breakdown: Partial<BookingBreakdown>, quantities: readonly number[]): FullBookingBreakdown[]",
+          "doc": "Split one grain's custody across several bookings by quantity — every bucket\nconserved exactly, and every recipient summing to its own quantity\n(api-cloudrun#1204). Returns one full breakdown per entry of `quantities`, in\nthe same order.\n\nEach cell is `breakdown[k] × quantities[j] ÷ Σ quantities` rounded to the\nfloor or the ceiling, never further. The floors come first; the units they\nleave go to the cells with the LARGEST remainder, exactly as\n{@link https://en.wikipedia.org/wiki/Largest_remainder_method largest remainder}\nwould for one bucket.\n\n🔴 **Rounding each bucket on its own is NOT enough, and that is why this\nexists.** It conserves each bucket and breaks the recipients: `{ returned: 1,\nlost: 1 }` over `[1, 1]` ties every remainder at ½, and an independent\nper-bucket pass gives both units to the first recipient — a booking of 1\nholding 2. Here the remainder pass also respects each recipient's leftover\ncapacity, and where the greedy order strands a unit, an augmenting path moves\none earlier choice aside. A solution always exists: the exact fractional\nsplit is one, so an integral one within floor/ceiling of it does too.\n\nDeterministic: ties break by bucket order (`BOOKING_BREAKDOWN_KEYS`), then by\nrecipient index.\n\n```ts\napportionBreakdown({ ...emptyBookingsBreakdown(), returned: 96, lost: 4 }, [64, 36]);\n// [{ returned: 61, lost: 3, … }, { returned: 35, lost: 1, … }]\n```",
           "paramTags": [],
           "returnsTag": null
         },

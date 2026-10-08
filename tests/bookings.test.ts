@@ -1,5 +1,6 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
+  apportionBreakdown,
   applyBookingBreakdownDelta,
   calculateBookingBreakdown,
   emptyBookingsBreakdown,
@@ -13,6 +14,7 @@ import {
   sumBookingsBreakdown,
   sumBreakdownKeys,
   terminalQuantity,
+  BOOKING_BREAKDOWN_KEYS,
 } from "../src/utils/bookings.ts";
 import type { Booking, OrderStatusType } from "../src/schemas/mod.ts";
 
@@ -382,4 +384,123 @@ Deno.test("P2b: terminalQuantity and sumBreakdownKeys reach every terminal key",
   assertEquals(terminalQuantity(sample({ returned: 1, lost: 1, damaged: 1 })), 3);
   assertEquals(terminalQuantity(full({ returned: 1, cleaning: 2, maintenance: 3 })), 6);
   assertEquals(sumBreakdownKeys(sample(), ["cleaning", "maintenance"]), 0);
+});
+
+// ── apportionBreakdown (api-cloudrun#1204) ──
+
+/** Seeded LCG — deterministic, never `Math.random()`. */
+function lcg(seed: number): () => number {
+  let s = seed;
+  return () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+}
+
+/** A random breakdown over a random subset of buckets, and quantities summing to it. */
+function draw(rand: () => number): { breakdown: Booking["breakdown"]; quantities: number[] } {
+  const recipients = 1 + Math.floor(rand() * 5);
+  const quantities = Array.from({ length: recipients }, () => 1 + Math.floor(rand() * (rand() < 0.5 ? 5 : 120)));
+  const total = quantities.reduce((n, q) => n + q, 0);
+  const buckets = BOOKING_BREAKDOWN_KEYS.filter(() => rand() < 0.4);
+  if (buckets.length === 0) buckets.push("returned");
+  const breakdown = sample();
+  let left = total;
+  buckets.forEach((key, i) => {
+    const n = i === buckets.length - 1 ? left : Math.floor(rand() * (left + 1));
+    breakdown[key] = n;
+    left -= n;
+  });
+  return { breakdown, quantities };
+}
+
+/**
+ * Per-bucket largest remainder with NO regard for the recipients — the obvious
+ * implementation, and the one this function exists to not be.
+ */
+function naivePerBucket(breakdown: Booking["breakdown"], quantities: number[]): Booking["breakdown"][] {
+  const total = quantities.reduce((n, q) => n + q, 0);
+  const out = quantities.map(() => sample());
+  for (const key of BOOKING_BREAKDOWN_KEYS) {
+    const shares = quantities.map((q, j) => ({ j, floor: Math.floor(breakdown[key] * q / total), rem: (breakdown[key] * q) % total }));
+    let left = breakdown[key] - shares.reduce((n, s) => n + s.floor, 0);
+    for (const s of shares) out[s.j][key] = s.floor;
+    for (const s of [...shares].sort((a, b) => b.rem - a.rem || a.j - b.j)) {
+      if (left-- <= 0) break;
+      out[s.j][key] += 1;
+    }
+  }
+  return out;
+}
+
+Deno.test("apportionBreakdown: the #1204 shape — 96 returned + 4 lost over 64/36", () => {
+  const [a, b] = apportionBreakdown(sample({ returned: 96, lost: 4 }), [64, 36]);
+  assertEquals(a, sample({ returned: 61, lost: 3 }));
+  assertEquals(b, sample({ returned: 35, lost: 1 }));
+});
+
+Deno.test("apportionBreakdown: the tie that breaks per-bucket rounding", () => {
+  const input = sample({ returned: 1, lost: 1 });
+  // The naive pass gives both units to recipient 0: a booking of 1 holding 2.
+  assertEquals(naivePerBucket(input, [1, 1]).map(sumBookingBreakdown), [2, 0]);
+  const out = apportionBreakdown(input, [1, 1]);
+  assertEquals(out.map(sumBookingBreakdown), [1, 1]);
+  assertEquals(sumBookingsBreakdown(out.map((breakdown) => ({ breakdown }))), input);
+});
+
+Deno.test("apportionBreakdown: the greedy pass strands a unit and the repair re-routes it", () => {
+  // Every cell is ⅔ and every remainder ties. Largest-remainder-with-capacity
+  // fills recipients 0 and 1 with returned + lost and leaves damaged two units
+  // and one recipient — the smallest such case (searched exhaustively to 8
+  // units). Only the augmenting path finishes it.
+  const out = apportionBreakdown(sample({ returned: 2, lost: 2, damaged: 2 }), [2, 2, 2]);
+  assertEquals(out, [sample({ lost: 1, damaged: 1 }), sample({ returned: 1, lost: 1 }), sample({ returned: 1, damaged: 1 })]);
+});
+
+Deno.test("apportionBreakdown: one recipient takes the whole breakdown", () => {
+  const input = sample({ returned: 7, lost: 2, damaged: 1 });
+  assertEquals(apportionBreakdown(input, [10]), [input]);
+});
+
+Deno.test("apportionBreakdown: refuses what cannot be conserved", () => {
+  assertThrows(() => apportionBreakdown(sample({ returned: 5 }), []), RangeError, "at least one");
+  assertThrows(() => apportionBreakdown(sample({ returned: 5 }), [5, 0]), RangeError, "positive integer");
+  assertThrows(() => apportionBreakdown(sample({ returned: 5 }), [2.5, 2.5]), RangeError, "positive integer");
+  assertThrows(() => apportionBreakdown(sample({ returned: 5 }), [3, 3]), RangeError, "no split conserves both");
+  assertThrows(() => apportionBreakdown(sample({ returned: 6, lost: -1 }), [5]), RangeError, "non-negative");
+  assertThrows(() => apportionBreakdown(sample({ returned: 4.5, lost: 0.5 }), [5]), RangeError, "non-negative integer");
+});
+
+Deno.test("apportionBreakdown: 100k draws — every bucket conserved, every recipient sums, every cell within floor/ceil", () => {
+  const rand = lcg(20261007);
+  let checked = 0, multiBucketMultiRecipient = 0, naiveBroken = 0;
+  for (let i = 0; i < 100_000; i++) {
+    const { breakdown, quantities } = draw(rand);
+    const total = quantities.reduce((n, q) => n + q, 0);
+    const out = apportionBreakdown(breakdown, quantities);
+    assertEquals(out.length, quantities.length);
+    // Conservation per bucket, summed independently of the implementation.
+    for (const key of BOOKING_BREAKDOWN_KEYS) {
+      assertEquals(out.reduce((n, b) => n + b[key], 0), breakdown[key], `draw ${i} bucket ${key}`);
+    }
+    out.forEach((b, j) => {
+      assertEquals(sumBookingBreakdown(b), quantities[j], `draw ${i} recipient ${j}`);
+      for (const key of BOOKING_BREAKDOWN_KEYS) {
+        // By the definition: |cell − bucket·q/total| < 1, cross-multiplied.
+        const ideal = breakdown[key] * quantities[j];
+        assertEquals(Number.isInteger(b[key]) && b[key] >= 0, true);
+        assertEquals(Math.abs(b[key] * total - ideal) < total, true, `draw ${i} cell ${key}/${j}`);
+      }
+    });
+    assertEquals(apportionBreakdown(breakdown, quantities), out, `draw ${i} deterministic`);
+    checked++;
+    const nonEmpty = BOOKING_BREAKDOWN_KEYS.filter((k) => breakdown[k] > 0).length;
+    if (nonEmpty >= 2 && quantities.length >= 2) multiBucketMultiRecipient++;
+    const naive = naivePerBucket(breakdown, quantities);
+    if (naive.some((b, j) => sumBookingBreakdown(b) !== quantities[j])) naiveBroken++;
+  }
+  assertEquals(checked, 100_000);
+  // The domain was exercised: most draws split several buckets several ways…
+  assertEquals(multiBucketMultiRecipient > 30_000, true, `only ${multiBucketMultiRecipient} hard draws`);
+  // …and the companion bites: the per-bucket pass breaks a recipient on some of
+  // them, every one of which the sweep above passed. Reported, not floored.
+  console.log(`apportionBreakdown sweep: ${multiBucketMultiRecipient} multi/multi draws, naive per-bucket broke ${naiveBroken}`);
+  assertEquals(naiveBroken > 0, true, "the companion never fired — the corpus does not discriminate");
 });
