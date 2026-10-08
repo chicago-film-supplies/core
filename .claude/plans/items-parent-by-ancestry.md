@@ -6,10 +6,10 @@
 
 ## START HERE
 
-> ## ⚠️ STATUS UPDATE 2026-10-07 — Phase 2 landed except its dev check (item 12)
+> ## ⚠️ STATUS UPDATE 2026-10-07 — Phase 2 is DONE; Phase 3 (manager) is next
 >
-> **Core** is at `10.0.0-beta.632`: Phase 1 (`beta.631`) plus `575d83b` `fulfillmentRowSources`, the one classifier of why a stored fulfillment row exists (`order | substitution | exchange | kept | invoice_projected | unexplained`). It was added in Phase 2 because item 11 turned out to be a real defect caused by three private copies of that classification.
-> **api-cloudrun** carries `9df8dd8f` (items 1–6), `5df957f1` (G1, G2, D, E) and `904552ad` (item 11, pin `beta.632`). See *Done — Phase 2* below. **Left:** item 12 on dev once api-cloudrun's push deploys there, then Phase 3.
+> **Core** is at `10.0.0-beta.632`: Phase 1 (`beta.631`) plus `575d83b` `fulfillmentRowSources`, the one classifier of why a stored fulfillment row exists. It was added in Phase 2 because item 11 turned out to be a real defect caused by three private copies of that classification.
+> **api-cloudrun** `main` carries `9df8dd8f`, `5df957f1`, `904552ad` (pin `beta.632`) and `44db1b33` (the end-to-end mirror-pair test), all pushed through the pre-push suite. See *Done — Phase 2* below.
 
 To confirm the latest beta before bumping a pin:
 
@@ -61,13 +61,8 @@ Verified: `deno task check`, `lint`, `gate`, `test:units` (2442) green; the touc
 - **8 / G2** `rebaseSubstitution` moves a substitution's subtree to X's new parent and re-derives the root's `zero_priced`. ⚠️ **G2 was a MISPLACEMENT, not the predicted 500:** the old output was a legal array with the substitute inside the kit X left, or outside the one X joined. `substituted_for` is NOT re-pointed there — `substitutionResync` honours only an entry naming X's previous path and re-points it itself.
 - **9 / D** The stager unit tests' shared helpers assert `itemArrayIssues(…, "fulfillment")` on every output. `rebuildFulfillmentItems` has no api unit test; its output goes through the write guard in `api-cloudrun/tests/integration/fulfillment/fulfillmentEdits.test.ts`.
 - **10 / E** `assertLegalFulfillmentItems` (`api-cloudrun/src/lib/itemArrayGuard.ts`) in all five stagers throws `IllegalItemsArrayError` (`ILLEGAL_ITEMS_ARRAY`): 400 for the picker save and exchange creation, 500 for the sync, the projection and reset. It refuses nothing the write boundary does not.
+- **12** `api-cloudrun/tests/integration/orders/repeatedSubKit.test.ts`: two seeded kits in one group, each holding a seeded sub-kit with a crate under it, POST 201 with each copy under its own parent. With `@cfs/core/utils/orders` pinned back to `beta.630` it 400s "items array violates uniqueness" — the original defect. A durable test replaced the one-off dev save the plan asked for.
 - **11** 🔴 **A real defect, reproduced** (`api-cloudrun/tests/integration/orders/orderEditCustody.test.ts`): a fulfillment holding a kept or invoice-projected row could not be saved from the picker — carrying the row 400'd "no counterpart", and omitting it 409s. The cause was three private copies of *why a stored row is on no order line*: the picker licences, `invoiceProjectedRows` and `api-cloudrun/scripts/audit-fulfillment-diff.ts`, the last of which lacked the invoice-projected arm and was **red on prod** (exit 2, fulfillment `bWqBt9pZnIMLrxTEOHYe`). All three now read core's `fulfillmentRowSources` (`beta.632`); the audit is clean on both projects. `syncRows` is not a copy — it decides stored-only rows by previous vs next order, not by provenance.
-
-### Remaining — Phase 2
-
-**Launch from:** `api-cloudrun/` · **Skills:** `cfs-testing`
-
-12. Once the api-cloudrun push has deployed to dev: `pgrep -fl 'deno.*test'` first; then save both mirror variants in one group on dev. Proof: 200 and distinct stored paths.
 
 ### Phase 3 — manager (pin bump, client paths, verdict, collapse)
 
