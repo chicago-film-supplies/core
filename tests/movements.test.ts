@@ -12,6 +12,7 @@ import {
   allocationSide,
   applyMovementToLedger,
   applyOutOfServiceReason,
+  consumeNewestFirst,
   costOfUnits,
   deriveServiceQuantities,
   heldDelta,
@@ -1424,4 +1425,71 @@ Deno.test("xeroPostingFor: a typed reversal posts as its forward would, negated 
   assertEquals(xeroPostingFor("sale_return_undo", "sale", 0, null), undo);
   // The custody-only losses are not Xero's business.
   assertEquals(xeroPostingFor("sale_lost", "sale", null, null), { kind: "skip", reason: "no_cost_contract" });
+});
+
+// ── consumeNewestFirst (stock campaign P1, decision 6) ──────────────
+
+/** Round `num / den` half up BY DEFINITION — floor, then compare the doubled remainder. Not the implementation's identity. */
+function roundHalfUpByDefinition(num: bigint, den: bigint): bigint {
+  const floor = num / den;
+  const rem = num - floor * den;
+  return rem * 2n >= den ? floor + 1n : floor;
+}
+
+Deno.test("consumeNewestFirst: newest first, partial, prior undos respected, and a shortfall refused", () => {
+  const forwards = [
+    { id: "old", quantity: 2, amount_cents: 1000, origin: "out" },
+    { id: "new", quantity: 3, amount_cents: 900, origin: "returned" },
+  ];
+  assertEquals(consumeNewestFirst(forwards, [], 2), [{ original: "new", quantity: 2, amount_cents: 600, origin: "returned" }]);
+  assertEquals(consumeNewestFirst(forwards, [{ original: "new", quantity: 2 }], 2), [
+    { original: "new", quantity: 1, amount_cents: 300, origin: "returned" },
+    { original: "old", quantity: 1, amount_cents: 500, origin: "out" },
+  ]);
+  let threw = false;
+  try {
+    consumeNewestFirst(forwards, [], 6);
+  } catch (e) {
+    threw = e instanceof RangeError;
+  }
+  assertEquals(threw, true);
+});
+
+Deno.test("consumeNewestFirst: however a forward is consumed, its shares sum to EXACTLY its amount — 200k draws", () => {
+  // Seeded LCG, never Math.random (cfs-money).
+  let seed = 0x5eed1218;
+  const rand = (n: number) => {
+    seed = (seed * 1103515245 + 12345) >>> 0;
+    return seed % n;
+  };
+  let partial = 0;
+  let naiveWrong = 0;
+  for (let draw = 0; draw < 200_000; draw++) {
+    const q = rand(20) + 1;
+    const A = rand(1_000_000);
+    const forwards = [{ id: "f", quantity: q, amount_cents: A, origin: null }];
+    const prior: { original: string; quantity: number }[] = [];
+    let sum = 0n;
+    let naive = 0n;
+    let consumed = 0;
+    while (consumed < q) {
+      const k = rand(q - consumed) + 1;
+      if (k < q) partial++;
+      const [share] = consumeNewestFirst(forwards, prior, k);
+      // The oracle, by definition, at this share's cumulative bounds.
+      const expected = roundHalfUpByDefinition(BigInt(A) * BigInt(consumed + k), BigInt(q)) -
+        roundHalfUpByDefinition(BigInt(A) * BigInt(consumed), BigInt(q));
+      assertEquals(BigInt(share.amount_cents), expected, `A=${A} q=${q} c=${consumed} k=${k}`);
+      sum += BigInt(share.amount_cents);
+      naive += roundHalfUpByDefinition(BigInt(A) * BigInt(k), BigInt(q));
+      prior.push({ original: "f", quantity: k });
+      consumed += k;
+    }
+    assertEquals(sum, BigInt(A), `A=${A} q=${q}`);
+    if (naive !== BigInt(A)) naiveWrong++;
+  }
+  // The domain was exercised: most draws split a forward across several undos.
+  assertEquals(partial > 150_000, true, `only ${partial} partial shares`);
+  // Fail-closed companion: rounding each share on its own does NOT conserve the amount.
+  assertEquals(naiveWrong > 10_000, true, `per-share rounding disagreed on only ${naiveWrong} draws`);
 });

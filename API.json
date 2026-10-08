@@ -17891,6 +17891,18 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "ConsumableForward",
+          "declaration": "interface ConsumableForward {\n  id: string;\n  quantity: number;\n  amount_cents: number;\n  origin: O;\n}",
+          "doc": "One forward event an undo can consume part of: a movement, or a loss record."
+        },
+        {
+          "kind": "interface",
+          "name": "ForwardConsumption",
+          "declaration": "interface ForwardConsumption {\n  original: string;\n  quantity: number;\n  amount_cents: number;\n  origin: O;\n}",
+          "doc": "One forward's share of an undo."
+        },
+        {
+          "kind": "interface",
           "name": "LedgerFoldResult",
           "declaration": "interface LedgerFoldResult {\n  ledger: InventoryLedger;\n  costAppliedCents: number;\n  unitCost: number;\n  basisUnderflowCents: number;\n  oosUnattributedDelta: number;\n  uncountedCostCents: number;\n  linelessCountedQuantity: number;\n}",
           "doc": "What a movement did to a ledger, and the cost it actually consumed."
@@ -17900,6 +17912,12 @@
           "name": "LocationPlacement",
           "declaration": "interface LocationPlacement {\n  uid_store: string;\n  store_name: string;\n  store_default: boolean;\n  name: string;\n  default: boolean;\n  max: number | null;\n}",
           "doc": "Where a `locations`-kind DocSource sits, resolved by the caller.\n\nEvery field is read from the `locations` / `stores` documents, never from\nclient input — that is what makes a cross-store placement inexpressible\n(#307). It carries the store's identity as well as the location's because the\nledger's `store_breakdown` denormalizes both, and `allocateBookingToStores`\nsorts on `store.default`, `store.name` and `location.default`: a placement\nthat left them at `\"\"`/`false` would silently cost the allocator its\ndefault-store-first and default-location-first ordering."
+        },
+        {
+          "kind": "interface",
+          "name": "PriorUndo",
+          "declaration": "interface PriorUndo {\n  original: string;\n  quantity: number;\n}",
+          "doc": "An undo already recorded against a forward: how many of its units are spoken for."
         },
         {
           "kind": "variable",
@@ -17964,6 +17982,14 @@
           "name": "applyOutOfServiceReason",
           "signature": "applyOutOfServiceReason(breakdown: indexedAccess, reason: keyof indexedAccess, delta: number): indexedAccess",
           "doc": "Apply an OOS record's reason to the per-reason breakdown. Split from\n`deriveServiceQuantities` because the reason lives on the OOS document, which\nonly the caller can read.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "consumeNewestFirst",
+          "signature": "consumeNewestFirst(forwards: readonly ConsumableForward<O>[], priorUndos: readonly PriorUndo[], quantity: number): ForwardConsumption<O>[]",
+          "doc": "Which forwards an undo of `quantity` units takes back, NEWEST FIRST — the one\nallocator behind the loss-undo records (api-cloudrun#1218), the `sale_undo`\nbasis and the refunded-return basis (stock campaign decision 6).\n\n`forwards` are in journal order, oldest first (`journalOrder`); `priorUndos`\nare what earlier undos already took from each. The newest forward with units\nleft goes first, and partial consumption is allowed: a share of `k` of a\nforward's `q` units, `c` of which were already taken, carries\n\n    round(A·(c + k) / q) − round(A·c / q)   (half up, integer cents)\n\nso however a forward is consumed — in one undo or across many — its shares sum\nto EXACTLY its amount, and the last unit carries the remainder. That is the\n\"an undo relieves exactly what its forward restored\" rule at unit grain.",
           "paramTags": [],
           "returnsTag": null
         },

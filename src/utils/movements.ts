@@ -1000,3 +1000,87 @@ export function xeroPostingFor(
   // remaining half of api-cloudrun#755.
   return { kind: "bill", asset_account, offset_account, direction, zero_total };
 }
+
+// ── Consuming forwards newest first ─────────────────────────────────
+
+/** One forward event an undo can consume part of: a movement, or a loss record. */
+export interface ConsumableForward<O = string> {
+  /** The forward's id (a movement id, or a record uid). */
+  id: string;
+  /** Units it moved. A positive whole number. */
+  quantity: number;
+  /** The basis it moved, in cents, as a MAGNITUDE (`0` for a custody-only event or a no-refund return). */
+  amount_cents: number;
+  /** The caller's tag carried through to each share — the origin a mark took units from, say. */
+  origin: O;
+}
+
+/** An undo already recorded against a forward: how many of its units are spoken for. */
+export interface PriorUndo {
+  /** The forward it consumed ({@link ConsumableForward.id}). */
+  original: string;
+  quantity: number;
+}
+
+/** One forward's share of an undo. */
+export interface ForwardConsumption<O = string> {
+  original: string;
+  quantity: number;
+  /** This share's basis, in cents: the forward's amount pro rata, rounded so every share of one forward sums to exactly its amount. */
+  amount_cents: number;
+  origin: O;
+}
+
+/**
+ * Which forwards an undo of `quantity` units takes back, NEWEST FIRST — the one
+ * allocator behind the loss-undo records (api-cloudrun#1218), the `sale_undo`
+ * basis and the refunded-return basis (stock campaign decision 6).
+ *
+ * `forwards` are in journal order, oldest first (`journalOrder`); `priorUndos`
+ * are what earlier undos already took from each. The newest forward with units
+ * left goes first, and partial consumption is allowed: a share of `k` of a
+ * forward's `q` units, `c` of which were already taken, carries
+ *
+ *     round(A·(c + k) / q) − round(A·c / q)   (half up, integer cents)
+ *
+ * so however a forward is consumed — in one undo or across many — its shares sum
+ * to EXACTLY its amount, and the last unit carries the remainder. That is the
+ * "an undo relieves exactly what its forward restored" rule at unit grain.
+ *
+ * @throws RangeError when `quantity` exceeds what the forwards have left, or an
+ *   input is not a whole non-negative number — refuse, never clamp: the caller
+ *   maps it to a 400 naming the shortfall.
+ */
+export function consumeNewestFirst<O>(
+  forwards: readonly ConsumableForward<O>[],
+  priorUndos: readonly PriorUndo[],
+  quantity: number,
+): ForwardConsumption<O>[] {
+  if (!Number.isSafeInteger(quantity) || quantity < 0) {
+    throw new RangeError(`consumeNewestFirst needs a whole non-negative quantity, got ${quantity}`);
+  }
+  const taken = new Map<string, number>();
+  for (const u of priorUndos) taken.set(u.original, (taken.get(u.original) ?? 0) + u.quantity);
+  const shares: ForwardConsumption<O>[] = [];
+  let left = quantity;
+  for (let i = forwards.length - 1; i >= 0 && left > 0; i--) {
+    const f = forwards[i];
+    if (!Number.isSafeInteger(f.quantity) || f.quantity <= 0 || !Number.isSafeInteger(f.amount_cents) || f.amount_cents < 0) {
+      throw new RangeError(`forward ${f.id}: quantity and amount_cents must be whole, quantity positive, amount non-negative`);
+    }
+    const before = Math.min(taken.get(f.id) ?? 0, f.quantity);
+    const k = Math.min(f.quantity - before, left);
+    if (k <= 0) continue;
+    const A = BigInt(f.amount_cents);
+    const q = BigInt(f.quantity);
+    const upTo = (n: number) => roundDivHalfUp(A * BigInt(n), q);
+    shares.push({ original: f.id, quantity: k, amount_cents: Number(upTo(before + k) - upTo(before)), origin: f.origin });
+    left -= k;
+  }
+  if (left > 0) {
+    throw new RangeError(
+      `consumeNewestFirst: an undo of ${quantity} unit(s) finds only ${quantity - left} left on its forwards`,
+    );
+  }
+  return shares;
+}

@@ -38670,6 +38670,32 @@ The contract tables themselves (`MOVEMENT_CONTRACTS`, `CUSTODY_PLACE_KINDS`)
 live in `schemas/transaction.ts`, not here — the document schema validates
 against them, and schema modules cannot import utils.
 
+### `ConsumableForward`
+
+One forward event an undo can consume part of: a movement, or a loss record.
+
+```ts
+interface ConsumableForward {
+  id: string;
+  quantity: number;
+  amount_cents: number;
+  origin: O;
+}
+```
+
+### `ForwardConsumption`
+
+One forward's share of an undo.
+
+```ts
+interface ForwardConsumption {
+  original: string;
+  quantity: number;
+  amount_cents: number;
+  origin: O;
+}
+```
+
 ### `LedgerFoldResult`
 
 What a movement did to a ledger, and the cost it actually consumed.
@@ -38706,6 +38732,17 @@ interface LocationPlacement {
   name: string;
   default: boolean;
   max: number | null;
+}
+```
+
+### `PriorUndo`
+
+An undo already recorded against a forward: how many of its units are spoken for.
+
+```ts
+interface PriorUndo {
+  original: string;
+  quantity: number;
 }
 ```
 
@@ -38855,6 +38892,23 @@ reported as `linelessCountedQuantity`.
 Apply an OOS record's reason to the per-reason breakdown. Split from
 `deriveServiceQuantities` because the reason lives on the OOS document, which
 only the caller can read.
+
+### `consumeNewestFirst(forwards: readonly ConsumableForward<O>[], priorUndos: readonly PriorUndo[], quantity: number): ForwardConsumption<O>[]`
+
+Which forwards an undo of `quantity` units takes back, NEWEST FIRST — the one
+allocator behind the loss-undo records (api-cloudrun#1218), the `sale_undo`
+basis and the refunded-return basis (stock campaign decision 6).
+
+`forwards` are in journal order, oldest first (`journalOrder`); `priorUndos`
+are what earlier undos already took from each. The newest forward with units
+left goes first, and partial consumption is allowed: a share of `k` of a
+forward's `q` units, `c` of which were already taken, carries
+
+    round(A·(c + k) / q) − round(A·c / q)   (half up, integer cents)
+
+so however a forward is consumed — in one undo or across many — its shares sum
+to EXACTLY its amount, and the last unit carries the remainder. That is the
+"an undo relieves exactly what its forward restored" rule at unit grain.
 
 ### `costOfUnits(basisCents: bigint, heldUnits: number, quantity: number): bigint`
 

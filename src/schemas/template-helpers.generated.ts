@@ -184,6 +184,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "toCentsBig", expr: "it.money.toCentsBig(dollars)", desc: "The `bigint` flavour of {@linkcode toCents}, for factor arithmetic whose intermediates exceed `Number.MAX_SAFE_INTEGER`.", returns: "bigint" },
   ],
   "movements": [
+    { name: "consumeNewestFirst", expr: "it.movements.consumeNewestFirst(forwards, priorUndos, quantity)", desc: "Which forwards an undo of `quantity` units takes back, NEWEST FIRST — the one allocator behind the loss-undo records (api-cloudrun#1218), the `sale_undo` basis and the refunded-return basis (stock campaign decision 6).", returns: "ForwardConsumption<O>[]" },
     { name: "isReversing", expr: "it.movements.isReversing(m)", desc: "Whether a movement walks back another: a `reverses` reversal (it keeps its original's type and negates its lines), or a TYPED reversal — an undo type whose contract is its forward's mirrored (`MOVEMENT_CONTRACTS[type].undoes`).", returns: "boolean" },
   ],
   "order-edit-delta": [
