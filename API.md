@@ -38514,6 +38514,14 @@ interface CreditableRow {
 }
 ```
 
+### `ExchangeEligibility`
+
+Where an exchange of a line's out units would be staged, or why none can be.
+
+```ts
+type ExchangeEligibility = typeLiteral | typeLiteral;
+```
+
 ### `ExchangeEntry`
 
 One `exchanged_for` entry, as an exchange's replacement row carries it.
@@ -38666,6 +38674,20 @@ it is that `[]` must not LICENSE anything.
 ONE document — the claims {@link overclaimedExchanges} compares, exposed so
 the manager's exchange offer reads the same sum (it kept `claimedOn`). Keyed
 by an internal path key; read one path with {@link exchangeClaimedOn}.
+
+### `exchangeEligibility(args: typeLiteral): ExchangeEligibility`
+
+Whether a line's booking can be EXCHANGED — a unit on set swapped for another
+— and against which leg: the api's staging refusals, which the manager's
+exchange offer did not all check (gap G11 (f)).
+
+- Only a line that comes BACK (`ownsKey(type, "out")`): a sale's out units
+  are the customer's, so there is nothing to take back.
+- Only units that are out.
+- Staged against the ORIGINAL leg: an exchange leg's own parent (flat
+  chaining, api-cloudrun#1116).
+- Only a leg with a return trip (`collection !== null`): the replaced units
+  come back on it (api-cloudrun#1154).
 
 ### `findSubtreeAnchor(path: readonly string[], anchors: readonly SubstitutionAnchor[]): SubstitutionAnchor | undefined`
 
@@ -39607,6 +39629,14 @@ The old `number` parameter is gone: it existed only to tell `draft` from
 ### `emptyOOSBreakdown(): OOSBreakdown`
 
 A breakdown with every bucket at zero.
+
+### `oosCancelRefusal(record: Pick<OutOfService, "quantity" | "breakdown" | "canceled_at">): string | null`
+
+Why a record may not be canceled, or `null` when it may — the api's refusal,
+which the manager's Cancel Record button did not check (gap G11 (a)). A record
+with units still flagged on a shelf or away at a vendor describes units that
+are out of service now; canceling it would put them back into service with no
+movement. Return them to service or write them off first.
 
 ### `sumOOSBreakdown(breakdown: OOSBreakdown): number`
 

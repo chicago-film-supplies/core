@@ -66,7 +66,7 @@ import {
   terminalQuantity,
 } from "./bookings.ts";
 import { parseBookingId } from "./booking-id.ts";
-import { sumOOSBreakdown } from "./out-of-service.ts";
+import { deriveOOSStatus, sumOOSBreakdown } from "./out-of-service.ts";
 import { TERMINAL_OOS_STATUSES } from "./stock.ts";
 
 /**
@@ -1238,7 +1238,7 @@ export function lossUndoRefusal(
   const label = `out-of-service record #${record.number}`;
   const at = `PUT /out-of-service-records/${record.uid}`;
   const refuse = (code: LossUndoRefusalCode, message: string) => ({ code, message });
-  if (record.canceled_at != null || record.status === "canceled") {
+  if (deriveOOSStatus(record) === "canceled") {
     return refuse("canceled", `Cannot undo ${label}: it is already canceled.`);
   }
   if (!record.query_by_sources.includes(`bookings:${uid_booking}`)) {

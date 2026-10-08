@@ -75,6 +75,7 @@
  */
 
 import { exchangedForKey, isLineItemType, type OOSReasonType } from "../schemas/common.ts";
+import { ownsKey } from "../schemas/custody.ts";
 
 /**
  * A substitution row, reduced to what the predicates need.
@@ -667,4 +668,45 @@ export function overclaimedExchanges(
     }
   }
   return result;
+}
+
+/** Where an exchange of a line's out units would be staged, or why none can be. */
+export type ExchangeEligibility =
+  | { ok: true; /** The ORIGINAL leg the exchange is staged against. */ uid_pair: string; /** Units out now. */ out: number }
+  | { ok: false; message: string };
+
+/**
+ * Whether a line's booking can be EXCHANGED — a unit on set swapped for another
+ * — and against which leg: the api's staging refusals, which the manager's
+ * exchange offer did not all check (gap G11 (f)).
+ *
+ * - Only a line that comes BACK (`ownsKey(type, "out")`): a sale's out units
+ *   are the customer's, so there is nothing to take back.
+ * - Only units that are out.
+ * - Staged against the ORIGINAL leg: an exchange leg's own parent (flat
+ *   chaining, api-cloudrun#1116).
+ * - Only a leg with a return trip (`collection !== null`): the replaced units
+ *   come back on it (api-cloudrun#1154).
+ */
+export function exchangeEligibility(args: {
+  booking: { type: string; breakdown: { out: number } };
+  /** The leg the line sits on. */
+  leg: { uid: string; exchange: { uid_pair: string } | null };
+  /** Every pair on the document, to resolve an exchange leg's parent. */
+  pairs: ReadonlyArray<{ uid: string; exchange: { uid_pair: string } | null; collection: unknown | null }>;
+}): ExchangeEligibility {
+  const { booking, leg, pairs } = args;
+  if (!ownsKey(booking.type, "out")) {
+    return { ok: false, message: `A ${booking.type} line's units are the customer's once out, so there is nothing to exchange.` };
+  }
+  if (booking.breakdown.out <= 0) return { ok: false, message: "No units are out on this line to exchange." };
+  const root = leg.exchange === null ? leg.uid : leg.exchange.uid_pair;
+  const parent = pairs.find((p) => p.uid === root);
+  if (!parent || parent.exchange !== null) {
+    return { ok: false, message: `The leg an exchange is staged against (${root}) is not an original leg of this document.` };
+  }
+  if (parent.collection === null) {
+    return { ok: false, message: "This leg collects nothing — only a leg with a return trip can stage an exchange." };
+  }
+  return { ok: true, uid_pair: root, out: booking.breakdown.out };
 }

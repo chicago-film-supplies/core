@@ -239,7 +239,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "composeOrgName", expr: "it.organizations.composeOrgName(path, arg2)", desc: "Render an organization node's display name from its `path`.", returns: "string" },
   ],
   "out-of-service": [
-
+    { name: "oosCancelRefusal", expr: "it.out-of-service.oosCancelRefusal(record)", desc: "Why a record may not be canceled, or `null` when it may — the api's refusal, which the manager's Cancel Record button did not check (gap G11 (a)). A record with units still flagged on a shelf or away at a vendor describes units that are out of service now; canceling it would put them back into service with no movement. Return them to service or write them off first.", returns: "string | null" },
   ],
   "pick-sheet-fold": [
     { name: "chooseBookingOwner", expr: "it.pick-sheet-fold.chooseBookingOwner(occurrences)", desc: "Which of an aggregate booking's occurrences carries its quantities.", returns: "T | null" },
@@ -317,6 +317,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "substitutions": [
     { name: "exchangeClaimedOn", expr: "it.substitutions.exchangeClaimedOn(rows, path)", desc: "Σ `exchanged_for[].quantity` claimed against `path` across the document's rows.", returns: "number" },
     { name: "exchangeClaimsByPath", expr: "it.substitutions.exchangeClaimsByPath(rows)", desc: "Σ `exchanged_for[].quantity` claimed against each row path, over every row of ONE document — the claims {@link overclaimedExchanges} compares, exposed so the manager's exchange offer reads the same sum (it kept `claimedOn`). Keyed by an internal path key; read one path with {@link exchangeClaimedOn}.", returns: "Map<string, number>" },
+    { name: "exchangeEligibility", expr: "it.substitutions.exchangeEligibility(args)", desc: "Whether a line's booking can be EXCHANGED — a unit on set swapped for another — and against which leg: the api's staging refusals, which the manager's exchange offer did not all check (gap G11 (f)).", returns: "ExchangeEligibility" },
   ],
   "tax-classes": [
 

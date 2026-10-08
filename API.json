@@ -17791,6 +17791,12 @@
           "doc": "An order row, reduced to what {@link substitutionCredit} reads."
         },
         {
+          "kind": "typeAlias",
+          "name": "ExchangeEligibility",
+          "declaration": "type ExchangeEligibility = typeLiteral | typeLiteral;",
+          "doc": "Where an exchange of a line's out units would be staged, or why none can be."
+        },
+        {
           "kind": "interface",
           "name": "ExchangeEntry",
           "declaration": "interface ExchangeEntry {\n  readonly path: readonly string[];\n  readonly quantity: number;\n  readonly reason: OOSReasonType;\n}",
@@ -17870,6 +17876,14 @@
           "name": "exchangeClaimsByPath",
           "signature": "exchangeClaimsByPath(rows: ReadonlyArray<Omit<ExchangeRow, \"path\">>): Map<string, number>",
           "doc": "Σ `exchanged_for[].quantity` claimed against each row path, over every row of\nONE document — the claims {@link overclaimedExchanges} compares, exposed so\nthe manager's exchange offer reads the same sum (it kept `claimedOn`). Keyed\nby an internal path key; read one path with {@link exchangeClaimedOn}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "exchangeEligibility",
+          "signature": "exchangeEligibility(args: typeLiteral): ExchangeEligibility",
+          "doc": "Whether a line's booking can be EXCHANGED — a unit on set swapped for another\n— and against which leg: the api's staging refusals, which the manager's\nexchange offer did not all check (gap G11 (f)).\n\n- Only a line that comes BACK (`ownsKey(type, \"out\")`): a sale's out units\n  are the customer's, so there is nothing to take back.\n- Only units that are out.\n- Staged against the ORIGINAL leg: an exchange leg's own parent (flat\n  chaining, api-cloudrun#1116).\n- Only a leg with a return trip (`collection !== null`): the replaced units\n  come back on it (api-cloudrun#1154).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -18442,6 +18456,14 @@
           "name": "emptyOOSBreakdown",
           "signature": "emptyOOSBreakdown(): OOSBreakdown",
           "doc": "A breakdown with every bucket at zero.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "oosCancelRefusal",
+          "signature": "oosCancelRefusal(record: Pick<OutOfService, \"quantity\" | \"breakdown\" | \"canceled_at\">): string | null",
+          "doc": "Why a record may not be canceled, or `null` when it may — the api's refusal,\nwhich the manager's Cancel Record button did not check (gap G11 (a)). A record\nwith units still flagged on a shelf or away at a vendor describes units that\nare out of service now; canceling it would put them back into service with no\nmovement. Return them to service or write them off first.",
           "paramTags": [],
           "returnsTag": null
         },

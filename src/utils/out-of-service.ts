@@ -48,3 +48,21 @@ export function deriveOOSStatus(
   }
   return "active";
 }
+
+/**
+ * Why a record may not be canceled, or `null` when it may — the api's refusal,
+ * which the manager's Cancel Record button did not check (gap G11 (a)). A record
+ * with units still flagged on a shelf or away at a vendor describes units that
+ * are out of service now; canceling it would put them back into service with no
+ * movement. Return them to service or write them off first.
+ */
+export function oosCancelRefusal(
+  record: Pick<OutOfService, "quantity" | "breakdown" | "canceled_at">,
+): string | null {
+  if (deriveOOSStatus(record) === "canceled") return "This out-of-service record is already canceled.";
+  const held = record.breakdown.flagged + record.breakdown.away;
+  if (held > 0) {
+    return `Cannot cancel: ${held} unit(s) are still out of service. Return them to service or write them off first.`;
+  }
+  return null;
+}

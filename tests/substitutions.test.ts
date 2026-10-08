@@ -12,6 +12,7 @@ import {
   standInUnits,
   substitutionResync,
   unresolvedExchangedFor,
+  exchangeEligibility,
 } from "../src/utils/substitutions.ts";
 import {
   SubstitutedForList,
@@ -431,4 +432,20 @@ Deno.test("S8c-5: the exchange readers read `exchanged_for` only — an old-name
   assertEquals(unresolvedExchangedFor(rows).map((u) => u.path.join("/")), ["S/Y"], "only the new name's dangling entry is found");
   // Only Y's claim of 2 counts against X, which holds 1.
   assertEquals(overclaimedExchanges([], rows).map((r) => r.claimed), [2]);
+});
+
+Deno.test("exchangeEligibility: a rental with units out, on an original leg with a return trip (G11 (f))", () => {
+  const pairs = [
+    { uid: "A", exchange: null, collection: { uid: "ret" } },
+    { uid: "X", exchange: { uid_pair: "A" }, collection: { uid: "ret" } },
+    { uid: "N", exchange: null, collection: null },
+  ];
+  const rental = { type: "rental", breakdown: { out: 2 } };
+  assertEquals(exchangeEligibility({ booking: rental, leg: { uid: "A", exchange: null }, pairs }), { ok: true, uid_pair: "A", out: 2 });
+  // An exchange leg stages against its parent (flat chaining).
+  assertEquals(exchangeEligibility({ booking: rental, leg: { uid: "X", exchange: { uid_pair: "A" } }, pairs }), { ok: true, uid_pair: "A", out: 2 });
+  const why = (r: ReturnType<typeof exchangeEligibility>) => (r.ok ? "" : r.message);
+  assertEquals(why(exchangeEligibility({ booking: { type: "sale", breakdown: { out: 2 } }, leg: { uid: "A", exchange: null }, pairs })).includes("customer's"), true);
+  assertEquals(why(exchangeEligibility({ booking: rental, leg: { uid: "N", exchange: null }, pairs })).includes("return trip"), true);
+  assertEquals(why(exchangeEligibility({ booking: { type: "rental", breakdown: { out: 0 } }, leg: { uid: "A", exchange: null }, pairs })).includes("No units are out"), true);
 });
