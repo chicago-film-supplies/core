@@ -51,6 +51,7 @@ import {
   OUT_OF_SERVICE_KEYS,
   type OutOfServiceKeyType,
   ownsKey,
+  CUSTODY_HISTORY_KEYS,
   CUSTODY_PLACE_KINDS,
   MOVEMENT_CONTRACTS,
   type PlaceKindType,
@@ -1525,4 +1526,165 @@ export function extensionUndoRefusal(args: {
   }
   if (units === 0) return refuse("This leg holds no units an extension moved");
   return { ok: true, pairFrom, units };
+}
+
+// ── custody moving between bookings (stock campaign decisions 1 and 11) ──
+
+/** One booking in a custody transfer: its breakdown (and unit sets) before and after the write. */
+export interface CustodyTransferMember {
+  uid: string;
+  /** `null` for a booking the write creates. */
+  before: BookingBreakdown | null;
+  /** `null` for a booking the write deletes. */
+  after: BookingBreakdown | null;
+  /** Unit sets before and after, on a unit-tracked booking; absent or `null` on a bulk one. */
+  unitsBefore?: BookingUnitSetsType | null;
+  unitsAfter?: BookingUnitSetsType | null;
+}
+
+/** One movement half a transfer journals. */
+export interface CustodyTransferHalf {
+  type: "rebook_out" | "rebook_in" | "unprep" | "prep";
+  uid_booking: string;
+  quantity: number;
+  custody: { from: BookingBreakdownKeyType | null; to: BookingBreakdownKeyType | null };
+  /** The booking on the other side, named in the movement's `sources[]`. */
+  counterpart: string;
+  /** The units it names, ascending; `[]` on a bulk booking. */
+  units: number[];
+}
+
+/** One bucket's worth of a transfer: its halves, outs before ins, in apply order. */
+export interface CustodyTransferStep {
+  bucket: BookingBreakdownKeyType;
+  halves: CustodyTransferHalf[];
+}
+
+/** What a transfer journals, or why it may not happen. */
+export type CustodyTransferPlan = { ok: true; steps: CustodyTransferStep[] } | { ok: false; message: string };
+
+/**
+ * The movements that journal custody moving BETWEEN bookings — the one planner
+ * behind the complete-order grain carry (api-cloudrun#1204), the rental
+ * extension's rebook pair (decision 11), a substitution's prepped units
+ * (decision 1) and a complete-order repoint. The caller decides each member's
+ * `after`; this says whether that is a legal transfer and what records it.
+ *
+ * **Same product** (carry, extension, repoint): per custody-history bucket, a
+ * lineless `rebook_out` `{bucket → null}` on every booking that gives units and
+ * a `rebook_in` `{null → bucket}` on every one that takes them, outs before
+ * ins. A `rebook_in` names the LARGEST giver as its counterpart (the legacy
+ * booking, in every measured carry) and a `rebook_out` the FIRST taker, so a
+ * caller minting ids from these reproduces the grain carry's byte for byte. On
+ * unit-tracked members each half names the units that left or joined the
+ * bucket, and the two sides must name the same ones.
+ *
+ * **Different products** (a substitution): only `prepped` may move, as an
+ * `unprep` `{prepped → reserved}` on each giver and a `prep`
+ * `{reserved → prepped}` on each taker. Refused when any custody past prepped
+ * would move, or when a member is unit-tracked (its units cannot be renamed
+ * onto another product). A sale has no rewind path here: the operator adds a
+ * line.
+ *
+ * Refused in both modes when a custody bucket does not net to zero across the
+ * members: a transfer moves custody, it never creates or destroys it. The plan
+ * keys (`quoted`, `reserved`) are the order's and are not compared, except
+ * that a cross-product `unprep`/`prep` lands in them.
+ */
+export function planCustodyTransfer(args: {
+  members: readonly CustodyTransferMember[];
+  sameProduct: boolean;
+}): CustodyTransferPlan {
+  const refuse = (message: string): CustodyTransferPlan => ({ ok: false, message });
+  const { members, sameProduct } = args;
+  const tracked = members.filter((m) => m.unitsBefore != null || m.unitsAfter != null);
+  if (tracked.length > 0 && tracked.length !== members.length) {
+    return refuse("Custody cannot move between a booking that tracks units and one that does not");
+  }
+  const steps: CustodyTransferStep[] = [];
+  for (const bucket of CUSTODY_HISTORY_KEYS) {
+    const deltas = members
+      .map((m) => ({
+        m,
+        delta: (m.after ? fullBookingBreakdown(m.after)[bucket] : 0) - (m.before ? fullBookingBreakdown(m.before)[bucket] : 0),
+      }))
+      .filter((d) => d.delta !== 0);
+    if (deltas.length === 0) continue;
+    const net = deltas.reduce((n, d) => n + d.delta, 0);
+    if (net !== 0) {
+      return refuse(`The ${bucket} units on these bookings change by ${net} in total: a transfer cannot create or remove custody`);
+    }
+    if (!sameProduct) {
+      if (bucket !== "prepped") {
+        return refuse(
+          `${deltas[0].m.uid}: ${bucket} units cannot move to another product. Only prepped units move with a substitution; ` +
+            "add a line for the rest.",
+        );
+      }
+      if (tracked.length > 0) {
+        return refuse(
+          `${tracked[0].uid}: its units are tracked by number, so prepped units cannot move to another product. ` +
+            "Unprep them, and prep the substitute's units.",
+        );
+      }
+    }
+    const givers = deltas.filter((d) => d.delta < 0);
+    const takers = deltas.filter((d) => d.delta > 0);
+    const moved = (m: CustodyTransferMember, sign: 1 | -1): number[] => {
+      if (m.unitsBefore == null && m.unitsAfter == null) return [];
+      const key = bucket as BookingUnitBucketType;
+      const before = new Set(m.unitsBefore?.[key] ?? []);
+      const after = new Set(m.unitsAfter?.[key] ?? []);
+      const [from, to] = sign < 0 ? [before, after] : [after, before];
+      return [...from].filter((n) => !to.has(n)).sort((a, b) => a - b);
+    };
+    if (tracked.length > 0) {
+      const out = givers.flatMap((g) => moved(g.m, -1)).sort((a, b) => a - b);
+      const inn = takers.flatMap((t) => moved(t.m, 1)).sort((a, b) => a - b);
+      if (JSON.stringify(out) !== JSON.stringify(inn) || out.length !== -givers.reduce((n, g) => n + g.delta, 0)) {
+        return refuse(`The ${bucket} units leaving and joining these bookings are not the same units`);
+      }
+    }
+    const main = [...givers].sort((a, b) => a.delta - b.delta)[0].m;
+    const halves: CustodyTransferHalf[] = [];
+    for (const g of givers) {
+      halves.push(
+        sameProduct
+          ? { type: "rebook_out", uid_booking: g.m.uid, quantity: -g.delta, custody: { from: bucket, to: null }, counterpart: takers[0].m.uid, units: moved(g.m, -1) }
+          : { type: "unprep", uid_booking: g.m.uid, quantity: -g.delta, custody: { from: "prepped", to: "reserved" }, counterpart: takers[0].m.uid, units: [] },
+      );
+    }
+    for (const t of takers) {
+      halves.push(
+        sameProduct
+          ? { type: "rebook_in", uid_booking: t.m.uid, quantity: t.delta, custody: { from: null, to: bucket }, counterpart: main.uid, units: moved(t.m, 1) }
+          : { type: "prep", uid_booking: t.m.uid, quantity: t.delta, custody: { from: "reserved", to: "prepped" }, counterpart: main.uid, units: [] },
+      );
+    }
+    steps.push({ bucket, halves });
+  }
+  return { ok: true, steps };
+}
+
+/**
+ * How many of X's units a substitution may carry onto another product, or why
+ * it may carry none — the picker's offer, from the same rule
+ * {@link planCustodyTransfer} enforces (decision 1).
+ */
+export function substitutionCapacity(
+  x: Pick<Booking, "uid" | "breakdown"> & Partial<Pick<Booking, "units">>,
+): { prepped: number; refusal: string | null } {
+  const b = fullBookingBreakdown(x.breakdown);
+  const past = sumBreakdownKeys(b, CUSTODY_HISTORY_KEYS.filter((k) => k !== "prepped"));
+  if (past > 0) {
+    return {
+      prepped: 0,
+      refusal: `${past} unit(s) are already past the prep shelf (out, back or out of service), so this line cannot be ` +
+        "substituted. Add a line for the replacement instead.",
+    };
+  }
+  if (x.units != null && b.prepped > 0) {
+    return { prepped: 0, refusal: "Its units are tracked by number: unprep them, then prep the substitute's units." };
+  }
+  return { prepped: b.prepped, refusal: null };
 }

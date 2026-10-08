@@ -69,6 +69,8 @@ import {
   deriveCustodyStatus,
   expandCustodyOffer,
   extensionUndoRefusal,
+  planCustodyTransfer,
+  substitutionCapacity,
   getCustodyRulesMarkdown,
   serviceBreakdownViolation,
   serviceBucketBounds,
@@ -1302,4 +1304,89 @@ Deno.test("custody - extensionUndoRefusal: one rule for the route, the transacti
   // Renamed units — the manager offered it.
   assertEquals(extensionUndoRefusal({ ...base, bookings: [bookingB({ units: [3, 4] })], movements: [rebookIn([3, 4])] }).ok, true);
   assert(why({ ...base, bookings: [bookingB({ units: [3, 5] })], movements: [rebookIn([3, 4])] }).includes("units changed"));
+});
+
+// ── custody transfer between bookings (decisions 1 and 11) ───────────
+
+/**
+ * api-cloudrun `buildCarryMovements`' output on three carry shapes, MEASURED by
+ * running it (2026-10-08): `[type, booking, quantity, custody, counterpart]` in
+ * order. The api mints each half's id from these, so matching them is what
+ * keeps the grain carry's ids byte-identical once it adopts the planner.
+ */
+const API_CARRY = {"legacyShapeA": [["rebook_out", "o:p:l", 96, {"from": "returned", "to": null}, "o:p:l:s1"], ["rebook_in", "o:p:l:s1", 61, {"from": null, "to": "returned"}, "o:p:l"], ["rebook_in", "o:p:l:s2", 35, {"from": null, "to": "returned"}, "o:p:l"], ["rebook_out", "o:p:l", 4, {"from": "lost", "to": null}, "o:p:l:s1"], ["rebook_in", "o:p:l:s1", 3, {"from": null, "to": "lost"}, "o:p:l"], ["rebook_in", "o:p:l:s2", 1, {"from": null, "to": "lost"}, "o:p:l"]], "legacyShapeB": [["rebook_out", "o:p:l", 6, {"from": "returned", "to": null}, "o:p:l:s1"], ["rebook_in", "o:p:l:s1", 6, {"from": null, "to": "returned"}, "o:p:l"]], "twoGivers": [["rebook_out", "o:p:l", 2, {"from": "out", "to": null}, "o:p:l:s2"], ["rebook_out", "o:p:l:s1", 2, {"from": "out", "to": null}, "o:p:l:s2"], ["rebook_in", "o:p:l:s2", 4, {"from": null, "to": "out"}, "o:p:l"], ["rebook_out", "o:p:l", 2, {"from": "returned", "to": null}, "o:p:l:s2"], ["rebook_in", "o:p:l:s2", 2, {"from": null, "to": "returned"}, "o:p:l"]]} as Record<string, unknown[]>;
+
+Deno.test("custody - planCustodyTransfer reproduces the api grain carry's halves, in order, on every measured shape", () => {
+  const cases: Record<string, Parameters<typeof planCustodyTransfer>[0]["members"]> = {
+    legacyShapeA: [
+      { uid: "o:p:l", before: bd({ returned: 96, lost: 4 }), after: null },
+      { uid: "o:p:l:s1", before: null, after: bd({ returned: 61, lost: 3 }) },
+      { uid: "o:p:l:s2", before: null, after: bd({ returned: 35, lost: 1 }) },
+    ],
+    legacyShapeB: [
+      { uid: "o:p:l", before: bd({ returned: 10 }), after: bd({ returned: 4 }) },
+      { uid: "o:p:l:s1", before: null, after: bd({ returned: 6 }) },
+    ],
+    twoGivers: [
+      { uid: "o:p:l", before: bd({ out: 3, returned: 2 }), after: bd({ out: 1 }) },
+      { uid: "o:p:l:s1", before: bd({ out: 2 }), after: null },
+      { uid: "o:p:l:s2", before: null, after: bd({ out: 4, returned: 2 }) },
+    ],
+  };
+  for (const [name, members] of Object.entries(cases)) {
+    const plan = planCustodyTransfer({ members, sameProduct: true });
+    assert(plan.ok, name);
+    const got = plan.ok
+      ? plan.steps.flatMap((st) => st.halves.map((h) => [h.type, h.uid_booking, h.quantity, h.custody, h.counterpart]))
+      : [];
+    assertEquals(got, API_CARRY[name], name);
+  }
+});
+
+Deno.test("custody - planCustodyTransfer: never creates custody; cross-product moves prepped only, bulk only", () => {
+  const unbalanced = planCustodyTransfer({
+    members: [{ uid: "a", before: bd({ returned: 2 }), after: bd({ returned: 1 }) }, { uid: "b", before: null, after: bd({ returned: 2 }) }],
+    sameProduct: true,
+  });
+  assert(!unbalanced.ok && unbalanced.message.includes("cannot create or remove custody"));
+  // A substitution after prep: X unpreps, Y preps (decision 1).
+  const sub = planCustodyTransfer({
+    members: [{ uid: "x", before: bd({ prepped: 2, reserved: 1 }), after: bd({ reserved: 3 }) }, { uid: "y", before: bd({ reserved: 2 }), after: bd({ prepped: 2 }) }],
+    sameProduct: false,
+  });
+  assertEquals(sub.ok && sub.steps.flatMap((st) => st.halves.map((h) => [h.type, h.uid_booking, h.quantity])), [
+    ["unprep", "x", 2],
+    ["prep", "y", 2],
+  ]);
+  // After check-out it is refused.
+  const late = planCustodyTransfer({
+    members: [{ uid: "x", before: bd({ out: 2 }), after: null }, { uid: "y", before: null, after: bd({ out: 2 }) }],
+    sameProduct: false,
+  });
+  assert(!late.ok && late.message.includes("Only prepped units move"));
+  // A serialized substitution is refused.
+  const sets = (prepped: number[]) => ({ cleaning: [], damaged: [], lost: [], maintenance: [], out: [], prepped, returned: [] });
+  const serial = planCustodyTransfer({
+    members: [
+      { uid: "x", before: bd({ prepped: 1 }), after: bd({ reserved: 1 }), unitsBefore: sets([5]), unitsAfter: sets([]) },
+      { uid: "y", before: bd({ reserved: 1 }), after: bd({ prepped: 1 }), unitsBefore: sets([]), unitsAfter: sets([5]) },
+    ],
+    sameProduct: false,
+  });
+  assert(!serial.ok && serial.message.includes("tracked by number"));
+  // A same-product rebook of named units carries them, and mismatched units are refused.
+  const ext = planCustodyTransfer({
+    members: [
+      { uid: "a", before: bd({ out: 2 }), after: bd({}), unitsBefore: { ...sets([]), out: [3, 4] }, unitsAfter: sets([]) },
+      { uid: "b", before: null, after: bd({ out: 2 }), unitsBefore: null, unitsAfter: { ...sets([]), out: [3, 4] } },
+    ],
+    sameProduct: true,
+  });
+  assertEquals(ext.ok && ext.steps[0].halves.map((h) => h.units), [[3, 4], [3, 4]]);
+});
+
+Deno.test("custody - substitutionCapacity: prepped units move; anything past the prep shelf, or a tracked unit, refuses", () => {
+  assertEquals(substitutionCapacity({ uid: "x", breakdown: bd({ prepped: 2, reserved: 1 }) }), { prepped: 2, refusal: null });
+  assert(substitutionCapacity({ uid: "x", breakdown: bd({ out: 1, prepped: 1 }) }).refusal?.includes("past the prep shelf"));
+  assert(substitutionCapacity({ uid: "x", breakdown: bd({ prepped: 1 }), units: { cleaning: [], damaged: [], lost: [], maintenance: [], out: [], prepped: [5], returned: [] } }).refusal?.includes("tracked by number"));
 });

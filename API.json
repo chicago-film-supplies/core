@@ -14122,6 +14122,30 @@
         },
         {
           "kind": "interface",
+          "name": "CustodyTransferHalf",
+          "declaration": "interface CustodyTransferHalf {\n  type: \"rebook_out\" | \"rebook_in\" | \"unprep\" | \"prep\";\n  uid_booking: string;\n  quantity: number;\n  custody: typeLiteral;\n  counterpart: string;\n  units: number[];\n}",
+          "doc": "One movement half a transfer journals."
+        },
+        {
+          "kind": "interface",
+          "name": "CustodyTransferMember",
+          "declaration": "interface CustodyTransferMember {\n  uid: string;\n  before: BookingBreakdown | null;\n  after: BookingBreakdown | null;\n  unitsBefore?: BookingUnitSetsType | null;\n  unitsAfter?: BookingUnitSetsType | null;\n}",
+          "doc": "One booking in a custody transfer: its breakdown (and unit sets) before and after the write."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CustodyTransferPlan",
+          "declaration": "type CustodyTransferPlan = typeLiteral | typeLiteral;",
+          "doc": "What a transfer journals, or why it may not happen."
+        },
+        {
+          "kind": "interface",
+          "name": "CustodyTransferStep",
+          "declaration": "interface CustodyTransferStep {\n  bucket: BookingBreakdownKeyType;\n  halves: CustodyTransferHalf[];\n}",
+          "doc": "One bucket's worth of a transfer: its halves, outs before ins, in apply order."
+        },
+        {
+          "kind": "interface",
           "name": "CustodyTransition",
           "declaration": "interface CustodyTransition {\n  rule: CustodyRuleId;\n  type: MovementTypeType;\n  from: BookingBreakdownKeyType;\n  to: BookingBreakdownKeyType;\n  quantity: number;\n  service: typeLiteral | null;\n  units: number[];\n}",
           "doc": "One movement's worth of custody change, as the journal will record it."
@@ -14314,6 +14338,14 @@
         },
         {
           "kind": "function",
+          "name": "planCustodyTransfer",
+          "signature": "planCustodyTransfer(args: typeLiteral): CustodyTransferPlan",
+          "doc": "The movements that journal custody moving BETWEEN bookings — the one planner\nbehind the complete-order grain carry (api-cloudrun#1204), the rental\nextension's rebook pair (decision 11), a substitution's prepped units\n(decision 1) and a complete-order repoint. The caller decides each member's\n`after`; this says whether that is a legal transfer and what records it.\n\n**Same product** (carry, extension, repoint): per custody-history bucket, a\nlineless `rebook_out` `{bucket → null}` on every booking that gives units and\na `rebook_in` `{null → bucket}` on every one that takes them, outs before\nins. A `rebook_in` names the LARGEST giver as its counterpart (the legacy\nbooking, in every measured carry) and a `rebook_out` the FIRST taker, so a\ncaller minting ids from these reproduces the grain carry's byte for byte. On\nunit-tracked members each half names the units that left or joined the\nbucket, and the two sides must name the same ones.\n\n**Different products** (a substitution): only `prepped` may move, as an\n`unprep` `{prepped → reserved}` on each giver and a `prep`\n`{reserved → prepped}` on each taker. Refused when any custody past prepped\nwould move, or when a member is unit-tracked (its units cannot be renamed\nonto another product). A sale has no rewind path here: the operator adds a\nline.\n\nRefused in both modes when a custody bucket does not net to zero across the\nmembers: a transfer moves custody, it never creates or destroys it. The plan\nkeys (`quoted`, `reserved`) are the order's and are not compared, except\nthat a cross-product `unprep`/`prep` lands in them.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "planReclassification",
           "signature": "planReclassification(args: typeLiteral): ReclassificationPlan",
           "doc": "The reason edit `to` on a record, or why it is refused — the one rule behind\nthe api's `planReclassification` and the manager's reason dropdown, which\noffered edits the api refused (gap G11 (b)).\n\nOnly the units still FLAGGED take the new reason (api-cloudrun#1164): the\nmovement is a `flag` in place, so a unit already cleared, written off or away\nstays on the original as history and the flagged ones SPLIT onto a sibling.\nOn an UNCOUNTED product the units stand `away` and the whole record is\nrelabelled, or refused once any is resolved (api-cloudrun#1205 item 3).\n\n`booking` is the owning booking for a `booking`-owned record and `null`\notherwise. The record's VERSION is the api's precondition, not this rule.",
@@ -14381,6 +14413,14 @@
           "name": "splitLeadingReleases",
           "signature": "splitLeadingReleases(transitions: readonly T[]): typeLiteral",
           "doc": "Split one row's transitions into the leading run of releasing rewinds and\nthe rest (serial-tracking D7). The chunk folds every row's `first` before any\nrow's `rest`, so units a rewind frees are free before any forward step looks\nfor them — which is what lets a two-order swap (a cycle no row order\nresolves) go in one request. The prefix stops at the first transition that is\nnot a releasing rewind, so a row's own steps keep their order.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "substitutionCapacity",
+          "signature": "substitutionCapacity(x: Pick<Booking, \"uid\" | \"breakdown\"> & Partial<Pick<Booking, \"units\">>): typeLiteral",
+          "doc": "How many of X's units a substitution may carry onto another product, or why\nit may carry none — the picker's offer, from the same rule\n{@link planCustodyTransfer} enforces (decision 1).",
           "paramTags": [],
           "returnsTag": null
         },

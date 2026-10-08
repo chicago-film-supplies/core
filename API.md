@@ -31399,6 +31399,54 @@ interface CustodyStep {
 }
 ```
 
+### `CustodyTransferHalf`
+
+One movement half a transfer journals.
+
+```ts
+interface CustodyTransferHalf {
+  type: "rebook_out" | "rebook_in" | "unprep" | "prep";
+  uid_booking: string;
+  quantity: number;
+  custody: typeLiteral;
+  counterpart: string;
+  units: number[];
+}
+```
+
+### `CustodyTransferMember`
+
+One booking in a custody transfer: its breakdown (and unit sets) before and after the write.
+
+```ts
+interface CustodyTransferMember {
+  uid: string;
+  before: BookingBreakdown | null;
+  after: BookingBreakdown | null;
+  unitsBefore?: BookingUnitSetsType | null;
+  unitsAfter?: BookingUnitSetsType | null;
+}
+```
+
+### `CustodyTransferPlan`
+
+What a transfer journals, or why it may not happen.
+
+```ts
+type CustodyTransferPlan = typeLiteral | typeLiteral;
+```
+
+### `CustodyTransferStep`
+
+One bucket's worth of a transfer: its halves, outs before ins, in apply order.
+
+```ts
+interface CustodyTransferStep {
+  bucket: BookingBreakdownKeyType;
+  halves: CustodyTransferHalf[];
+}
+```
+
 ### `CustodyTransition`
 
 One movement's worth of custody change, as the journal will record it.
@@ -31715,6 +31763,35 @@ details and shelf, `flag_*_returned_undo` and unit-tracked bookings
 included. A sale's loss writes no record (`sale_lost` is custody-only), so
 this question never arises for one.
 
+### `planCustodyTransfer(args: typeLiteral): CustodyTransferPlan`
+
+The movements that journal custody moving BETWEEN bookings — the one planner
+behind the complete-order grain carry (api-cloudrun#1204), the rental
+extension's rebook pair (decision 11), a substitution's prepped units
+(decision 1) and a complete-order repoint. The caller decides each member's
+`after`; this says whether that is a legal transfer and what records it.
+
+**Same product** (carry, extension, repoint): per custody-history bucket, a
+lineless `rebook_out` `{bucket → null}` on every booking that gives units and
+a `rebook_in` `{null → bucket}` on every one that takes them, outs before
+ins. A `rebook_in` names the LARGEST giver as its counterpart (the legacy
+booking, in every measured carry) and a `rebook_out` the FIRST taker, so a
+caller minting ids from these reproduces the grain carry's byte for byte. On
+unit-tracked members each half names the units that left or joined the
+bucket, and the two sides must name the same ones.
+
+**Different products** (a substitution): only `prepped` may move, as an
+`unprep` `{prepped → reserved}` on each giver and a `prep`
+`{reserved → prepped}` on each taker. Refused when any custody past prepped
+would move, or when a member is unit-tracked (its units cannot be renamed
+onto another product). A sale has no rewind path here: the operator adds a
+line.
+
+Refused in both modes when a custody bucket does not net to zero across the
+members: a transfer moves custody, it never creates or destroys it. The plan
+keys (`quoted`, `reserved`) are the order's and are not compared, except
+that a cross-product `unprep`/`prep` lands in them.
+
 ### `planReclassification(args: typeLiteral): ReclassificationPlan`
 
 The reason edit `to` on a record, or why it is refused — the one rule behind
@@ -31820,6 +31897,12 @@ row's `rest`, so units a rewind frees are free before any forward step looks
 for them — which is what lets a two-order swap (a cycle no row order
 resolves) go in one request. The prefix stops at the first transition that is
 not a releasing rewind, so a row's own steps keep their order.
+
+### `substitutionCapacity(x: Pick<Booking, "uid" | "breakdown"> & Partial<Pick<Booking, "units">>): typeLiteral`
+
+How many of X's units a substitution may carry onto another product, or why
+it may carry none — the picker's offer, from the same rule
+{@link planCustodyTransfer} enforces (decision 1).
 
 ### `undoableFromRecords(uid_booking: string, views: readonly LossRecordView[]): Partial<Record<CustodyRuleId, number>>`
 
