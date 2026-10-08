@@ -6,14 +6,19 @@
 
 ## START HERE
 
-Phase 1 (core) is **published as `10.0.0-beta.631`** (core#129 closed): `3fc5b66` (`fix(items)`, closes #129), `c1d77a5` (`feat(items)`, `itemArrayIssues`) and `bedac9a` (`feat(items)`, `keepKitAncestors`). To confirm the latest beta before bumping a pin:
+> ## ⚠️ STATUS UPDATE 2026-10-07 — Phase 2 landed except its dev check (item 12)
+>
+> **Core** is at `10.0.0-beta.632`: Phase 1 (`beta.631`) plus `575d83b` `fulfillmentRowSources`, the one classifier of why a stored fulfillment row exists (`order | substitution | exchange | kept | invoice_projected | unexplained`). It was added in Phase 2 because item 11 turned out to be a real defect caused by three private copies of that classification.
+> **api-cloudrun** carries `9df8dd8f` (items 1–6), `5df957f1` (G1, G2, D, E) and `904552ad` (item 11, pin `beta.632`). See *Done — Phase 2* below. **Left:** item 12 on dev once api-cloudrun's push deploys there, then Phase 3.
+
+To confirm the latest beta before bumping a pin:
 
 ```sh
 git -C core log --oneline origin/beta -5
 curl -s https://jsr.io/@cfs/core/meta.json | python3 -c "import json,sys;d=json.load(sys.stdin);b=sorted([v for v in d['versions'] if 'beta' in v],key=lambda s:int(s.split('beta.')[1]));print(b[-1])"
 ```
 
-Once published: Phase 2 (api-cloudrun) and Phase 3 (manager) bump the pin and consume it. **Release order does not matter** — 1a changes paths only on blocks that are refused today, 1b is additive, and the API recomputes paths before it validates, so an old manager's collapsed paths still resolve to the standalone copy and 400 exactly as today.
+**Release order does not matter** — 1a changes paths only on blocks that are refused today, 1b and `fulfillmentRowSources` are additive, and the API recomputes paths before it validates, so an old manager's collapsed paths still resolve to the standalone copy and 400 exactly as today.
 
 ## The defect, in one paragraph
 
@@ -33,7 +38,7 @@ Verified: `deno task check`, `lint`, `check:declarations`, `check:generated`, `t
 - **1c `keepKitAncestors`** (`utils/fulfillment-items.ts`): *a kept fulfillment row keeps its product ancestors* at `quantity: 0` / `quantity_ordered: 0`, matched by PATH. Lifted from `syncRows`' private loop so the invoice-only projection can share it (gap G1 below).
 - Tests: `tests/items-parent-ancestry.test.ts` (1a, hand-written expectations), `tests/item-rules.test.ts` (1b, hand-written per-grain rule set), `tests/fulfillment-items.test.ts` (1c).
 - Also fixed: `rebuildFulfillmentItems`' docstring no longer claims a fulfillment lacks `zero_priced` (it has carried it since 2026-09-10).
-- Docs: the `cfs-order-projections` skill's `path_order_item` paragraph restated (the real reason is that the resync rebuilds at the order's own paths, so a carried pointer is a self-claim under any pairing key) — **edited in `claude-plugins`, not yet committed there**.
+- Docs: the `cfs-order-projections` skill's `path_order_item` paragraph restated (the real reason is that the resync rebuilds at the order's own paths, so a carried pointer is a self-claim under any pairing key) — committed in `claude-plugins` as `1eddcaa` (1.40.4).
 
 ### Decisions taken while building
 
@@ -43,22 +48,26 @@ Verified: `deno task check`, `lint`, `check:declarations`, `check:generated`, `t
 
 ## Remaining
 
-### Phase 2 — api-cloudrun (pin bump)
+### Done — Phase 2 (api-cloudrun)
 
-**Launch from:** `api-cloudrun/` · **Skills:** `write-path-invariants`, `cfs-testing`, `cfs-order-projections`, `cfs-release-order`, `fulfillment-ladder` · **Read (not auto-loaded from here):** `core/CLAUDE.md`, `manager/.claude/skills/order-items/SKILL.md`
+Verified: `deno task check`, `lint`, `gate`, `test:units` (2442) green; the touched integration files (`orderEditCustody`, `fulfillmentEdits`, `fulfillmentExchangeLeg`, `fulfillmentExchanges`, `exchangeCheckout`, `invoiceOnlyFulfillment`) green on dev. Each new test was run red against the pre-fix code.
 
-1. Bump the `@cfs/core` pin (by pattern) to `10.0.0-beta.631` or later. ⚠️ This machine's minimum-dependency-age gate refuses a beta published within the window ("A newer matching version was found, but it was not used") — that is not a failed publish. Proof: `deno task test:units`.
-2. **Validation consumes `itemArrayIssues`.** `validateOrderInvoiceItemPaths` (`api-cloudrun/src/lib/validate.ts`) and the item arm of `assertArrayUniqueness` (`api-cloudrun/src/lib/firestoreWrite.ts`) report from the one composition; map each `rule` onto the existing `ItemPathIssue` / uniqueness error shapes so log and 400 bodies do not change (`path_empty` → `expected: ["<non-empty path>"]`, `parentage` → the `<type under parentType …>` string, etc.). Leave the schema refinements in place. The fulfillment `uid_order` check, `orderLineClaimIssues` and the charge-window check stay API checks. Proof: the existing validation integration tests stay green with **no fixture edits**.
-3. **Delete `nestComponentOnlyItems`** (`api-cloudrun/src/lib/itemNesting.ts`) — zero callers, and it rebuilds chains from in-scope uids, which would undo 1a. Grep citations and ratchet entries first. Proof: `grep -rn nestComponentOnlyItems` empty.
-4. **`carryForwardRowField`** (`api-cloudrun/src/lib/itemNesting.ts`, backs `preserveStoredCoaRevenue` / `preserveStoredZeroPriced`): pair ancestry-first — core's `pairItemsAcrossRebuild` now does exactly this. Proof: a unit test where a client reorder of the two `a` rows keeps each stored value.
-5. **`parentUidOf`** in `api-cloudrun/src/lib/activityRow.ts`: compare parent PATHS, so a move between two Ks is reported. Proof: unit test.
-6. Fix the stale comment in `api-cloudrun/src/services/fulfillmentEdits.ts` (≈231–234). Update the `write-path-invariants` skill's carry-forwards table: `carryForwardRowField` and core's `carryForwardOverrides` now pair ancestry-first, as instances of *"pair on what the field is a fact ABOUT"*.
-7. **Gap G1 — the invoice-only projection detaches a kept component from its kit.** `projectInvoiceOnlyRows` (`api-cloudrun/src/lib/invoiceOnlyProjection.ts`) drops a no-longer-invoiced kit whose OWN booking has nothing out, while keeping a component under it that has units out; `computeItemPaths` then re-roots the component (a stored `zero_priced: true` makes the write 500; `false` stores a detached row). Verified by reading 2026-10-07; not yet reproduced. **Fix (agreed): call core's `keepKitAncestors`** with the dropped rows as candidates and the kept rows as `kept`, and replace `syncRows`' private loop (`api-cloudrun/src/lib/orderFulfillmentSync.ts`, "kit review A") with the same call. Proof: a unit test in `api-cloudrun/tests/unit/invoiceOnlyProjection.test.ts` (kit + component, component out, kit invoice line removed) red before, green after; `orderFulfillmentSync.test.ts`'s kit-ancestor test unchanged and green.
-8. **Gap G2 — a substitution whose X the admin moved is emitted verbatim.** `relocatedSubstitutions` / `substitutionAt` in `stageOrderFulfillmentSync` place Y's subtree at X's NEW position but keep its OLD paths and Y's old root `zero_priced`, so `computeItemPaths` re-roots it (or, after 1a, may hang it under the wrong copy) and a component ↔ top-level move leaves the flag wrong (write 500). Verified by reading; not yet reproduced. **Fix (agreed, option A): rebase the subtree** — rewrite each row's path prefix from X's old parent to X's new parent, re-derive the root's flag with `substitutionRootZeroPriced(projected X)` (`api-cloudrun/src/lib/fulfillmentLine.ts`, as the picker writer does), and re-point `substituted_for` at X's new path. Proof: unit tests for X moved component → top-level and top-level → component, red before.
-9. **D — every fulfillment writer's OUTPUT is checked against `itemArrayIssues(…, "fulfillment")` in its unit tests**: `stageOrderFulfillmentSync`, `projectInvoiceOnlyRows`, `rebuildFulfillmentItems` (existing fixtures + the G1/G2 shapes), so the next gap of this class is a red test rather than a prod 500.
-10. **E — each fulfillment stager asserts `itemArrayIssues` before returning** (`stageOrderFulfillmentSync`, `projectInvoiceOnlyRows`, the picker's `updateFulfillmentItems`, exchange creation, reset), throwing a NAMED error that lists the rules, rather than surfacing as a generic validation 500 at the write boundary. Owner asked for it alongside D (2026-10-07). Proof: a test planting each of G1/G2 sees the named error, not `ValidationError`.
-11. **Side issue — reproduce first, then decide.** The picker PUT (`api-cloudrun/src/services/fulfillmentEdits.ts`, ≈560–580) appears to 400 any submitted line with no order counterpart that is not a substitution or exchange row — which would include KEPT rows (`quantity_ordered: 0`) — while omitting them 409s. If an integration test (remove an order line whose units are out, then picker-save) reproduces it, it is a real conflict between the picker save and the custody keep and gets its own fix; if not, close the question.
-12. `pgrep -fl 'deno.*test'` first; then on dev, save both mirror variants in one group. Proof: 200 and distinct stored paths.
+- **1–2** Pin bumped; `validateOrderInvoiceItemPaths` (the four path rules) and `assertArrayUniqueness` (the `uniqueness` rule) read `itemArrayIssues`, mapped onto the shapes they already threw. The other rules stay with the pre-parse guards and the schema, which answer first, so no status code moved.
+- **3** `nestComponentOnlyItems` and its catalog walkers deleted.
+- **4** `carryForwardRowField` pairs through core's `pairItemsAcrossRebuild` (unit test: a reorder of two kits keeps each cord's value; a re-keyed group still pairs by ancestry).
+- **5** ⚠️ **Not as planned.** `parentUidOf`'s move check compares the parent ROW's pairing key (`uid#k`), not its path, because a group rename re-keys the divider (`reuseMemberUids`) and a path compare reports every component under it as moved. A move between two copies of one kit is reported (unit test).
+- **6** Comment fixed; the `write-path-invariants` carry-forward table updated.
+- **7 / G1** `projectInvoiceOnlyRows` keeps a kit above a kept component via `keepKitAncestors`, which also replaced `syncRows`' loop.
+- **8 / G2** `rebaseSubstitution` moves a substitution's subtree to X's new parent and re-derives the root's `zero_priced`. ⚠️ **G2 was a MISPLACEMENT, not the predicted 500:** the old output was a legal array with the substitute inside the kit X left, or outside the one X joined. `substituted_for` is NOT re-pointed there — `substitutionResync` honours only an entry naming X's previous path and re-points it itself.
+- **9 / D** The stager unit tests' shared helpers assert `itemArrayIssues(…, "fulfillment")` on every output. `rebuildFulfillmentItems` has no api unit test; its output goes through the write guard in `api-cloudrun/tests/integration/fulfillment/fulfillmentEdits.test.ts`.
+- **10 / E** `assertLegalFulfillmentItems` (`api-cloudrun/src/lib/itemArrayGuard.ts`) in all five stagers throws `IllegalItemsArrayError` (`ILLEGAL_ITEMS_ARRAY`): 400 for the picker save and exchange creation, 500 for the sync, the projection and reset. It refuses nothing the write boundary does not.
+- **11** 🔴 **A real defect, reproduced** (`api-cloudrun/tests/integration/orders/orderEditCustody.test.ts`): a fulfillment holding a kept or invoice-projected row could not be saved from the picker — carrying the row 400'd "no counterpart", and omitting it 409s. The cause was three private copies of *why a stored row is on no order line*: the picker licences, `invoiceProjectedRows` and `api-cloudrun/scripts/audit-fulfillment-diff.ts`, the last of which lacked the invoice-projected arm and was **red on prod** (exit 2, fulfillment `bWqBt9pZnIMLrxTEOHYe`). All three now read core's `fulfillmentRowSources` (`beta.632`); the audit is clean on both projects. `syncRows` is not a copy — it decides stored-only rows by previous vs next order, not by provenance.
+
+### Remaining — Phase 2
+
+**Launch from:** `api-cloudrun/` · **Skills:** `cfs-testing`
+
+12. Once the api-cloudrun push has deployed to dev: `pgrep -fl 'deno.*test'` first; then save both mirror variants in one group on dev. Proof: 200 and distinct stored paths.
 
 ### Phase 3 — manager (pin bump, client paths, verdict, collapse)
 
@@ -68,6 +77,7 @@ Verified: `deno task check`, `lint`, `check:declarations`, `check:generated`, `t
 2. `manager/src/utils/itemOrderRules.ts` becomes a thin wrapper: `acceptsOrderItems` / `acceptsInvoiceItems` count `itemArrayIssues(…, { recompute: true })` and accept when the reordered count ≤ the original. Keep the explicit zero-priced row guard (`e5c2aff0`). Proof: one refused reorder per newly covered rule (mixed booking grain, zero-priced at root, exchanged_for).
 3. **Audit the client path authors** — the API cannot check a client's ancestry; a `[K, a]` sent without X silently resolves to the standalone K. Confirm each sends the full chain, with a store test on the mirror-pair shape: `mergeStagedIntoOrder` / `mergeStagedIntoInvoice`, `splitOrderItem` (and `splitQuantities`, now in core), adding a component under an existing nested K, `rescaleKitSubtree` / `kitRootPos`, `inheritedAncestry` in `manager/src/stores/fulfillment.ts`.
 4. **Collapse keys:** `manager/src/stores/orderCollapse.ts` `isCollapsed` finds an ancestor as "nearest preceding row with that uid" — move to a path-prefix lookup and key `product:` collapse on `getGroupPath().productPath`. Same in `manager/src/stores/invoiceCollapse.ts` (its own `getGroupPath`/`getProductKey`). Today collapsing one K can hide the other's subtree.
+5a. **The picker save sends kept and invoice-projected rows** — the API admits them since `904552ad` (they used to 400, and omitting them 409s). Confirm `manager/src/stores/fulfillment.ts` sends every stored line, those included, and that nothing in the manager classifies a stored row's provenance by hand; if something does, read core's `fulfillmentRowSources` instead (a 2026-10-07 grep for `quantity_ordered === 0` / `keptRow` found none).
 5. Fix the stale "at most one match" comment in `findInvoiceMatch` (`manager/src/stores/invoices.ts`). (The `components_collide` refusal is already gone — rental-extension removed it.)
 6. Docs: the `order-items` skill and the `cfs-items` skill (claude-plugins): the parent is resolved by ancestry chain, why, and that `itemArrayIssues` is the one composition.
 
