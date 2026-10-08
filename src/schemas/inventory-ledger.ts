@@ -64,8 +64,41 @@ export interface InventoryLedger {
   store_breakdown: StoreBreakdownEntry[];
   query_by_uid_store: string[];
   query_by_uid_location: string[];
+  /**
+   * Where a replay of this ledger's journal STARTS, when the ledger became
+   * counted by a `stock_method` flip rather than by a movement
+   * (api-cloudrun#1205 item 1; owner ruling 2026-10-07).
+   *
+   * A flip to a counted method seeds `quantity_held` (the units owned off any
+   * shelf) and `out_of_service_breakdown` (the open records' away units) with
+   * NO movement, because a flip changes what the ledger claims to know, not
+   * where any unit is. A replay that starts at zero therefore cannot reach the
+   * stored state, and reads every flipped product as diverged. This records the
+   * seed so the replay can fold onto it instead.
+   *
+   * - **Stamped** by the counting flip, **cleared** (key absent) by the
+   *   un-counting one, and carried unchanged by every movement.
+   * - **Absent** on a ledger that was counted from its first movement, which is
+   *   every ledger written before this field existed. Optional rather than
+   *   nullable for that reason: the stored corpus has no key to state.
+   * - 🔴 **The cut is `created_at`, not `date_fs`.** A movement's business date
+   *   is operator-supplied and may be backdated, so a receipt recorded after the
+   *   flip and dated before it would be dropped by a date cut. A replay folds
+   *   exactly the movements whose `created_at` is after `at`.
+   */
+  counted_from?: InventoryLedgerCountedFrom;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
+}
+
+/** The seed a counting flip stamps. See {@link InventoryLedger.counted_from}. */
+export interface InventoryLedgerCountedFrom {
+  /** When the flip ran — compared against each movement's `created_at`. */
+  at: FirestoreTimestampType;
+  /** `quantity_held` as the flip seeded it. */
+  quantity_held: number;
+  /** `out_of_service_breakdown` as the flip seeded it. */
+  out_of_service_breakdown: InventoryLedger["out_of_service_breakdown"];
 }
 
 /** Zod schema for an InventoryLedger document. */
@@ -97,6 +130,17 @@ export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject(
   store_breakdown: z.array(StoreBreakdownEntrySchema).meta({ label: "Store" }),
   query_by_uid_store: z.array(FirestoreId),
   query_by_uid_location: z.array(FirestoreId),
+  // Absent on every ledger counted from its first movement — see the interface.
+  counted_from: z.strictObject({
+    at: FirestoreTimestamp,
+    quantity_held: z.int().min(0),
+    out_of_service_breakdown: z.strictObject({
+      cleaning: z.int().min(0),
+      damaged: z.int().min(0),
+      maintenance: z.int().min(0),
+      lost: z.int().min(0),
+    }),
+  }).optional(),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
   updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
 }).superRefine((ledger, ctx) => {
@@ -120,6 +164,15 @@ export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject(
       code: "custom",
       path: ["quantity_in_service"],
       message: "quantity_in_service is null exactly when quantity_held is",
+    });
+  }
+  // A marker records how a COUNTED ledger began; an uncounted one has no count
+  // to have begun, so the un-counting flip must clear it.
+  if (uncounted && ledger.counted_from !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["counted_from"],
+      message: "an uncounted ledger (quantity_held: null) carries no counted_from marker",
     });
   }
   if (!uncounted) return;
