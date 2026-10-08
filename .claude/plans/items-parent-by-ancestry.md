@@ -6,7 +6,7 @@
 
 ## START HERE
 
-Phase 1 (core) is **built and committed on `beta`**: `3fc5b66` (`fix(items)`, closes #129), `c1d77a5` (`feat(items)`, `itemArrayIssues`) and `bedac9a` (`feat(items)`, `keepKitAncestors`). Check whether they are pushed and which beta they published:
+Phase 1 (core) is **published as `10.0.0-beta.631`** (core#129 closed): `3fc5b66` (`fix(items)`, closes #129), `c1d77a5` (`feat(items)`, `itemArrayIssues`) and `bedac9a` (`feat(items)`, `keepKitAncestors`). To confirm the latest beta before bumping a pin:
 
 ```sh
 git -C core log --oneline origin/beta -5
@@ -47,7 +47,7 @@ Verified: `deno task check`, `lint`, `check:declarations`, `check:generated`, `t
 
 **Launch from:** `api-cloudrun/` · **Skills:** `write-path-invariants`, `cfs-testing`, `cfs-order-projections`, `cfs-release-order`, `fulfillment-ladder` · **Read (not auto-loaded from here):** `core/CLAUDE.md`, `manager/.claude/skills/order-items/SKILL.md`
 
-1. Bump the `@cfs/core` pin (by pattern). Proof: `deno task test:units`.
+1. Bump the `@cfs/core` pin (by pattern) to `10.0.0-beta.631` or later. ⚠️ This machine's minimum-dependency-age gate refuses a beta published within the window ("A newer matching version was found, but it was not used") — that is not a failed publish. Proof: `deno task test:units`.
 2. **Validation consumes `itemArrayIssues`.** `validateOrderInvoiceItemPaths` (`api-cloudrun/src/lib/validate.ts`) and the item arm of `assertArrayUniqueness` (`api-cloudrun/src/lib/firestoreWrite.ts`) report from the one composition; map each `rule` onto the existing `ItemPathIssue` / uniqueness error shapes so log and 400 bodies do not change (`path_empty` → `expected: ["<non-empty path>"]`, `parentage` → the `<type under parentType …>` string, etc.). Leave the schema refinements in place. The fulfillment `uid_order` check, `orderLineClaimIssues` and the charge-window check stay API checks. Proof: the existing validation integration tests stay green with **no fixture edits**.
 3. **Delete `nestComponentOnlyItems`** (`api-cloudrun/src/lib/itemNesting.ts`) — zero callers, and it rebuilds chains from in-scope uids, which would undo 1a. Grep citations and ratchet entries first. Proof: `grep -rn nestComponentOnlyItems` empty.
 4. **`carryForwardRowField`** (`api-cloudrun/src/lib/itemNesting.ts`, backs `preserveStoredCoaRevenue` / `preserveStoredZeroPriced`): pair ancestry-first — core's `pairItemsAcrossRebuild` now does exactly this. Proof: a unit test where a client reorder of the two `a` rows keeps each stored value.
@@ -73,7 +73,7 @@ Verified: `deno task check`, `lint`, `check:declarations`, `check:generated`, `t
 
 ## Verification still owed
 
-1. **Needs the owner's permission:** `api-cloudrun/scripts/audit-item-paths.ts` against dev and prod, before and after the API pin. Expect 0 fixed-point diffs on stored orders, invoices and fulfillments — proof that no valid document's paths move — and the same run answers whether any stored document already has this shape.
+1. ✅ **Corpus audit — done 2026-10-07, owner-approved.** `api-cloudrun/scripts/audit-item-paths.ts`, read-only, against `beta.630` and then against this change (an api-cloudrun worktree repointed at the local core, controlled by resolving `utils/item-rules`, which `beta.630` lacks): **identical in both projects** — prod 3,188 docs / 44,300 items, dev 3,193 / 44,363; 0 fixed-point, empty, self-uid or parentage violations both times; the same 52 pre-existing alignment findings (api-cloudrun#538 §2). No stored document's paths move. A shape scan found exactly one stored instance in each project: order #993 (`HPEOd2oOKdlNbExrPOgS`), its fulfillment, and invoice #2383 — "Magliner Gemini Jr w/ Basket" inside two floor-mat kits in one group, components under the first copy only, so a fixed point under old and new resolution alike. Re-running after Phase 2's pin bump is optional: the pinned run now IS the "after".
 2. Manager: `npm run lint` → `npm run gate` → `test:unit`; on preview, the mirror pair in one group, collapse each K independently, and a disallowed reorder no longer offered.
 
 **Delete this doc in the commit that lands Phase 3**; leftovers become issues.
