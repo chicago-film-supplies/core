@@ -1422,7 +1422,7 @@ const extendRentalRules: CollectionRule[] = [
     target: "transactions",
     mode: "co-write",
     invariant:
-      "The re-attribution is journaled as a PAIR in one session: `rebook_out` on A's booking (custody {out → null}) and `rebook_in` on B's (custody {null → out}, `sources[]` naming A exactly once). No lines and no ledger effect, since nothing moved physically. On a serialized product both halves name the units, and the roster is folded and written IN the order transaction with the same `foldRosterUnits` the ledger writer runs (a classified exception to serial-tracking D5): `rebook_in` re-points each unit from A to B. `rebook_out` takes the lower number, because replay folds by `created_at`, then `number`. Ids are `{session}|{type}|{booking}`, so the pair is idempotent under the order write's own retry.",
+      "The re-attribution is journaled as a PAIR in one session: `rebook_out` on A's booking (custody {out → null}) and `rebook_in` on B's (custody {null → out}, `sources[]` naming A exactly once). No lines and no ledger effect, since nothing moved physically. On a serialized product both halves name the units, and the roster is folded and written IN the order transaction with the same `foldRosterUnits` the ledger writer runs (a classified exception to serial-tracking D5): `rebook_in` re-points each unit from A to B. `rebook_out` takes the lower number, because every fold orders the journal by `date`, then `number` (`journalOrder`, `@cfs/core/utils/journal`). Ids are `{session}|{type}|{booking}`, so the pair is idempotent under the order write's own retry.",
     enforced_by: [REBOOK_JOURNAL, CUSTODY_REPLAY],
     transaction: "extend-rental",
     fields: [

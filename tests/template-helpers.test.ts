@@ -35,6 +35,7 @@ import * as contactNameUtils from "../src/utils/contact-name.ts";
 import * as dateUtils from "../src/utils/dates.ts";
 import * as destinationUtils from "../src/utils/destinations.ts";
 import * as documentDiffUtils from "../src/utils/documentDiff.ts";
+import * as journalUtils from "../src/utils/journal.ts";
 import * as quantityAccountingUtils from "../src/utils/quantityAccounting.ts";
 import * as iconUtils from "../src/utils/icons.ts";
 import * as invoiceUtils from "../src/utils/invoices.ts";
@@ -114,6 +115,7 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // views. A template renders one document and holds no second side to compare.
   // Listed so the drift guard sees its exports.
   documentDiff: documentDiffUtils,
+  journal: journalUtils,
   // Same exception as `documentDiff`: `utils/quantityAccounting.ts` sums an
   // order's sibling invoices, and a template renders one document.
   quantityAccounting: quantityAccountingUtils,

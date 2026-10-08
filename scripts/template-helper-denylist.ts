@@ -511,6 +511,19 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   documentDiff: [
     "computeDocumentDiffs",
   ],
+  // `utils/journal.ts` folds the MOVEMENT JOURNAL — the custody replay and its
+  // projections (stock campaign P1). A template renders one document and is
+  // handed no journal. Listed in UTIL_MODULES only so the drift guard sees its exports.
+  journal: [
+    "classifyReplay",
+    "custodyByBooking",
+    "custodyByGrain",
+    "foldJournal",
+    "journalOrder",
+    "orphanedCustody",
+    "replayCustody",
+    "unitsByBooking",
+  ],
   // `utils/contentHash.ts` fingerprints a document — the API's content-addressed
   // task names and Xero push watermark, and the manager's "saved version is out
   // of date" flag (`documentSourceHash` / `isSourceHashStale`). A template

@@ -166,6 +166,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "item-rules": [
 
   ],
+  "journal": [
+
+  ],
   "locations": [
     { name: "normalizeLocationName", expr: "it.locations.normalizeLocationName(name)", desc: "Canonical uniqueness key for a location name, scoped within its store.", returns: "string" },
   ],

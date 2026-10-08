@@ -37133,6 +37133,198 @@ certified clean).
 
 Returns `[]` for a legal array.
 
+## `@cfs/core/utils/journal`
+
+The movement journal, folded: ONE order for every fold, and the custody
+replay as projections over it (stock campaign P1, api-cloudrun/.claude/plans/stock-campaign.md).
+
+```ts
+import { foldJournal, journalOrder, custodyByBooking } from "@cfs/core/utils/journal";
+```
+
+## Why one order
+
+Three folds each ordered the journal their own way: the custody replay
+grouped by `date` instant with no tiebreak and said "never `created_at`"; the
+ledger replay sorted `date_fs` then `number`; and the grain carry, the rental
+extension and the propagation catalog said "`created_at`, then `number`". A
+rebook pair is numbered `rebook_out` first precisely so that a fold takes it
+first — which holds only if every fold breaks a tie the same way.
+{@link journalOrder} is that one way: the movement's own `date` instant, then
+its `number`. Never `created_at`: 569 prod movements store it as a raw map
+(api-cloudrun#1146), so it cannot even be compared.
+
+## The replay identity, and why it covers exactly the history keys
+
+`calculateBookingBreakdown` carries every custody-history key forward
+verbatim and re-derives only the plan keys, so the order path never
+ORIGINATES a unit in a history key; only the fulfillment ladder does, and it
+writes a movement for every step. Hence
+
+    net[k] = Σ(movements with custody.to === k) − Σ(movements with custody.from === k)
+    net[k] === booking.breakdown[k]        for k in CUSTODY_HISTORY_KEYS
+
+The plan keys move with an order's status, a planning act with no event, so
+they are deliberately outside the identity. **The stored breakdown wins on
+disagreement**: a divergence is a bug report about the journal, never a
+licence to rewrite the booking.
+
+Lifted from api-cloudrun `src/lib/custodyReplay.ts` (`replayCustody`,
+`classifyReplay`), unchanged in behaviour. How the audit judges each verdict
+(the cutover instant, `booking.created_at`) stays in the audit.
+
+### `CustodyEvent`
+
+One event's custody transition and when it happened: the parts of a movement the replay reads.
+
+```ts
+interface CustodyEvent {
+  custody: typeLiteral | null;
+  quantity: number;
+  date: string;
+}
+```
+
+### `CustodyNet`
+
+Net units per custody-history key, all keys stated.
+
+```ts
+type CustodyNet = Record<BookingBreakdownKeyType, number>;
+```
+
+### `JournalMovement`
+
+A movement as the projections read it.
+
+```ts
+interface JournalMovement {
+  uid: string;
+  uid_booking: string | null;
+  custody: typeLiteral | null;
+  quantity: number;
+  units: ReadonlyArray<typeLiteral>;
+}
+```
+
+### `JournalOrdered`
+
+The fields {@link journalOrder} reads.
+
+```ts
+interface JournalOrdered {
+  date: string;
+  number: number;
+}
+```
+
+### `JournalProjection`
+
+One thing a journal fold accumulates.
+
+```ts
+interface JournalProjection {
+  init(): S;
+  step(state: S, movement: JournalMovement): void;
+}
+```
+
+### `ProjectionStates`
+
+The states a list of projections produce, in the same order.
+
+```ts
+type ProjectionStates = mapped;
+```
+
+### `ReplayDeltas`
+
+Per-key disagreement, present only for the keys that differ.
+
+```ts
+type ReplayDeltas = Record<string, typeLiteral>;
+```
+
+### `ReplayVerdict`
+
+How a booking's events compare with its stored breakdown.
+
+```ts
+type ReplayVerdict = "ok" | "no_events" | "substitution_seeded" | "partial_history" | "sale_untracked_loss" | "service_surcharge" | "diverged";
+```
+
+### `UnitSetsByKey`
+
+Each booking's named units per history key, as the journal leaves them.
+
+```ts
+type UnitSetsByKey = Partial<Record<BookingBreakdownKeyType, Set<number>>>;
+```
+
+### `classifyReplay(booking: typeLiteral, events: readonly CustodyEvent[], orderProducts: ReadonlySet<string>): typeLiteral`
+
+Judge one booking's events against its stored breakdown.
+
+- `no_events` — no events, real stored keys, and the booking's product IS on
+  its order: fulfilled before the writers existed.
+- `substitution_seeded` — no events, and the product is NOT on its order: a
+  substitution seeded it from another booking's custody.
+- `partial_history` — some prefix of the log goes negative: events missing
+  from its front, the cutover boundary.
+- `sale_untracked_loss` — {@link isUntrackedSaleLoss}.
+- `service_surcharge` — a type that holds no stock (`ownsKey` owns none of
+  its departed keys and it takes no custody action).
+
+**Parameters**
+
+- `orderProducts` — every product uid on the booking's order, REQUIRED: an
+empty set is not a stand-in for an unresolved order, since it would read
+every `no_events` booking as a substitution (api-cloudrun#887).
+
+### `custodyByBooking(): JournalProjection<Map<string, CustodyNet>>`
+
+Net custody per booking id — the replay of every booking at once.
+
+### `custodyByGrain(): JournalProjection<Map<string, CustodyNet>>`
+
+Net custody per GRAIN — `(order, product, leg)`, every component signature
+pooled. A grain carry or a re-key moves custody between the bookings of one
+grain, so a booking can diverge while its grain conserves.
+
+### `foldJournal(movements: readonly JournalMovement[], projections: P): ProjectionStates<P>`
+
+Fold `movements` once, in {@link journalOrder}, through every projection,
+and return each projection's state. The input is not mutated or assumed
+sorted.
+
+### `journalOrder(a: JournalOrdered, b: JournalOrdered): number`
+
+The journal's order: `Date.parse(date)` ascending, then `number`.
+
+Instants are compared parsed, never as strings: Chicago-offset text does not
+sort as time across a DST change. Within one instant the number decides,
+which is what puts a rebook pair's `rebook_out` before its `rebook_in` and a
+reconstructed ladder's legs in the order they happened.
+
+### `orphanedCustody(existing: ReadonlySet<string>): JournalProjection<Map<string, CustodyNet>>`
+
+Net custody on movements whose booking no longer exists: per booking id, the
+net its movements leave. A grain carry or a deleted plan-only booking nets to
+zero or below; a positive bucket is custody nothing holds any more.
+
+### `replayCustody(events: readonly CustodyEvent[]): CustodyNet`
+
+Net units the events place in each custody-history key. A `reverses`
+reversal carries its custody swapped and nets itself out; a planning key on
+one end contributes only through the other.
+
+### `unitsByBooking(since: string): JournalProjection<Map<string, UnitSetsByKey>>`
+
+Which units each booking holds per history key, folded from the movements
+dated at or after `since` — a roster's seeding instant, before which no
+movement named a unit. A unit leaves `custody.from`'s set and joins
+`custody.to`'s.
+
 ## `@cfs/core/utils/fulfillment-stage`
 
 The **custody model** — where a booking's units are right now, what may move

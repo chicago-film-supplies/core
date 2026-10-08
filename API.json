@@ -17099,6 +17099,135 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/utils/journal",
+      "moduleDoc": "The movement journal, folded: ONE order for every fold, and the custody\nreplay as projections over it (stock campaign P1, api-cloudrun/.claude/plans/stock-campaign.md).\n\n```ts\nimport { foldJournal, journalOrder, custodyByBooking } from \"@cfs/core/utils/journal\";\n```\n\n## Why one order\n\nThree folds each ordered the journal their own way: the custody replay\ngrouped by `date` instant with no tiebreak and said \"never `created_at`\"; the\nledger replay sorted `date_fs` then `number`; and the grain carry, the rental\nextension and the propagation catalog said \"`created_at`, then `number`\". A\nrebook pair is numbered `rebook_out` first precisely so that a fold takes it\nfirst — which holds only if every fold breaks a tie the same way.\n{@link journalOrder} is that one way: the movement's own `date` instant, then\nits `number`. Never `created_at`: 569 prod movements store it as a raw map\n(api-cloudrun#1146), so it cannot even be compared.\n\n## The replay identity, and why it covers exactly the history keys\n\n`calculateBookingBreakdown` carries every custody-history key forward\nverbatim and re-derives only the plan keys, so the order path never\nORIGINATES a unit in a history key; only the fulfillment ladder does, and it\nwrites a movement for every step. Hence\n\n    net[k] = Σ(movements with custody.to === k) − Σ(movements with custody.from === k)\n    net[k] === booking.breakdown[k]        for k in CUSTODY_HISTORY_KEYS\n\nThe plan keys move with an order's status, a planning act with no event, so\nthey are deliberately outside the identity. **The stored breakdown wins on\ndisagreement**: a divergence is a bug report about the journal, never a\nlicence to rewrite the booking.\n\nLifted from api-cloudrun `src/lib/custodyReplay.ts` (`replayCustody`,\n`classifyReplay`), unchanged in behaviour. How the audit judges each verdict\n(the cutover instant, `booking.created_at`) stays in the audit.",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "CustodyEvent",
+          "declaration": "interface CustodyEvent {\n  custody: typeLiteral | null;\n  quantity: number;\n  date: string;\n}",
+          "doc": "One event's custody transition and when it happened: the parts of a movement the replay reads."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CustodyNet",
+          "declaration": "type CustodyNet = Record<BookingBreakdownKeyType, number>;",
+          "doc": "Net units per custody-history key, all keys stated."
+        },
+        {
+          "kind": "interface",
+          "name": "JournalMovement",
+          "declaration": "interface JournalMovement {\n  uid: string;\n  uid_booking: string | null;\n  custody: typeLiteral | null;\n  quantity: number;\n  units: ReadonlyArray<typeLiteral>;\n}",
+          "doc": "A movement as the projections read it."
+        },
+        {
+          "kind": "interface",
+          "name": "JournalOrdered",
+          "declaration": "interface JournalOrdered {\n  date: string;\n  number: number;\n}",
+          "doc": "The fields {@link journalOrder} reads."
+        },
+        {
+          "kind": "interface",
+          "name": "JournalProjection",
+          "declaration": "interface JournalProjection {\n  init(): S;\n  step(state: S, movement: JournalMovement): void;\n}",
+          "doc": "One thing a journal fold accumulates."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ProjectionStates",
+          "declaration": "type ProjectionStates = mapped;",
+          "doc": "The states a list of projections produce, in the same order."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ReplayDeltas",
+          "declaration": "type ReplayDeltas = Record<string, typeLiteral>;",
+          "doc": "Per-key disagreement, present only for the keys that differ."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ReplayVerdict",
+          "declaration": "type ReplayVerdict = \"ok\" | \"no_events\" | \"substitution_seeded\" | \"partial_history\" | \"sale_untracked_loss\" | \"service_surcharge\" | \"diverged\";",
+          "doc": "How a booking's events compare with its stored breakdown."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitSetsByKey",
+          "declaration": "type UnitSetsByKey = Partial<Record<BookingBreakdownKeyType, Set<number>>>;",
+          "doc": "Each booking's named units per history key, as the journal leaves them."
+        },
+        {
+          "kind": "function",
+          "name": "classifyReplay",
+          "signature": "classifyReplay(booking: typeLiteral, events: readonly CustodyEvent[], orderProducts: ReadonlySet<string>): typeLiteral",
+          "doc": "Judge one booking's events against its stored breakdown.\n\n- `no_events` — no events, real stored keys, and the booking's product IS on\n  its order: fulfilled before the writers existed.\n- `substitution_seeded` — no events, and the product is NOT on its order: a\n  substitution seeded it from another booking's custody.\n- `partial_history` — some prefix of the log goes negative: events missing\n  from its front, the cutover boundary.\n- `sale_untracked_loss` — {@link isUntrackedSaleLoss}.\n- `service_surcharge` — a type that holds no stock (`ownsKey` owns none of\n  its departed keys and it takes no custody action).",
+          "paramTags": [
+            {
+              "name": "orderProducts",
+              "doc": "every product uid on the booking's order, REQUIRED: an\nempty set is not a stand-in for an unresolved order, since it would read\nevery `no_events` booking as a substitution (api-cloudrun#887)."
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "custodyByBooking",
+          "signature": "custodyByBooking(): JournalProjection<Map<string, CustodyNet>>",
+          "doc": "Net custody per booking id — the replay of every booking at once.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "custodyByGrain",
+          "signature": "custodyByGrain(): JournalProjection<Map<string, CustodyNet>>",
+          "doc": "Net custody per GRAIN — `(order, product, leg)`, every component signature\npooled. A grain carry or a re-key moves custody between the bookings of one\ngrain, so a booking can diverge while its grain conserves.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "foldJournal",
+          "signature": "foldJournal(movements: readonly JournalMovement[], projections: P): ProjectionStates<P>",
+          "doc": "Fold `movements` once, in {@link journalOrder}, through every projection,\nand return each projection's state. The input is not mutated or assumed\nsorted.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "journalOrder",
+          "signature": "journalOrder(a: JournalOrdered, b: JournalOrdered): number",
+          "doc": "The journal's order: `Date.parse(date)` ascending, then `number`.\n\nInstants are compared parsed, never as strings: Chicago-offset text does not\nsort as time across a DST change. Within one instant the number decides,\nwhich is what puts a rebook pair's `rebook_out` before its `rebook_in` and a\nreconstructed ladder's legs in the order they happened.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "orphanedCustody",
+          "signature": "orphanedCustody(existing: ReadonlySet<string>): JournalProjection<Map<string, CustodyNet>>",
+          "doc": "Net custody on movements whose booking no longer exists: per booking id, the\nnet its movements leave. A grain carry or a deleted plan-only booking nets to\nzero or below; a positive bucket is custody nothing holds any more.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "replayCustody",
+          "signature": "replayCustody(events: readonly CustodyEvent[]): CustodyNet",
+          "doc": "Net units the events place in each custody-history key. A `reverses`\nreversal carries its custody swapped and nets itself out; a planning key on\none end contributes only through the other.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "unitsByBooking",
+          "signature": "unitsByBooking(since: string): JournalProjection<Map<string, UnitSetsByKey>>",
+          "doc": "Which units each booking holds per history key, folded from the movements\ndated at or after `since` — a roster's seeding instant, before which no\nmovement named a unit. A unit leaves `custody.from`'s set and joins\n`custody.to`'s.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/utils/fulfillment-stage",
       "moduleDoc": "The **custody model** — where a booking's units are right now, what may move\nthem next, and which transitions are legal.\n\n```ts\nimport {\n  checkoutableQuantity,\n  getStageForBookings,\n  qtyOnStageSide,\n} from \"@cfs/core/utils/fulfillment-stage\";\n```\n\n## Why this is in core rather than in the picker\n\nMoved here from `manager/src/utils/fulfillmentStage.ts`, now deleted — ~430\nlines of pure domain logic over `Booking`/`Fulfillment` with no Firestore and\nno Solid in it, which used to live in `manager` only because it was first\nwritten for the picker's two-column surface. Meanwhile the **terminal** end of\nthe same model was already shared (`isBookingClosed` / `isOrderBookingsClosed`\nin `./bookings.ts`, imported by `api-cloudrun/src/services/orderFinalize.ts`)\nand the **in-flight** end was stated twice, in two vocabularies: the API said\nit in *status* terms (`isCheckoutable`), the picker in *bucket* terms\n(`checkoutableQuantity`). {@link checkoutableQuantity} is now the one author\nand both sides call it.\n\n⚠️ **This area already has the scar.** `rebuildFulfillmentItems`\n(`./fulfillment-items.ts`) lives in core *because a copy drifted*, and\n`isFulfillmentLineItem` was a character-for-character twin\n(api-cloudrun#674). The next consumer is the server's freeze predicate — a\ncustody question — and a server-authored copy of it would drift from the one\nthe picker uses to decide what is editable.\n\n## `source` / `target`, not `col1` / `col2`\n\nThe vocabulary this module was written in named a LAYOUT (\"column 1\", \"column\n2\"), which is why the model read as UI code. The concept is\n**current-state vs target-state for a stage** — exactly {@link STAGE_SOURCE}\nand {@link STAGE_TARGET} restated — so it is spelled that way here. Deciding\nhow many columns to draw, and which of them to hide, stays in `manager`\n(`visibleBucketsForColumn`, `rollUpColumn`).",
       "symbols": [
