@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { keepKitAncestors, rebuildFulfillmentItems } from "../src/utils/fulfillment-items.ts";
+import { fulfillmentRowSources, keepKitAncestors, rebuildFulfillmentItems } from "../src/utils/fulfillment-items.ts";
 import type { FulfillmentItemType, FulfillmentLineItemType } from "../src/schemas/fulfillment.ts";
 
 const D = "dest-1", GA = "group-a", GB = "group-b";
@@ -224,4 +224,47 @@ Deno.test("keepKitAncestors: a row is not its own ancestor, and nothing kept kee
   const kit = line(PARENT, [D, GA, PARENT]);
   assertEquals(keepKitAncestors([kit], [kit]).size, 0);
   assertEquals(keepKitAncestors([kit], []).size, 0);
+});
+
+// ── fulfillmentRowSources ─────────────────────────────────────────
+
+Deno.test("fulfillmentRowSources: each kind of stored row, by its own signature", () => {
+  const EX = "exchange-leg";
+  const order = {
+    items: [dest(D), group(GA, D), line(PARENT, [D, GA, PARENT]), line(X, [D, GA, PARENT, X])],
+    destinations: [{ uid: D }],
+  };
+  const ordered = line(PARENT, [D, GA, PARENT], 1, { quantity_ordered: 1 });
+  const y = line(ALT, [D, GA, ALT], 1, { quantity_ordered: null, substituted_for: [{ path: [D, GA, PARENT, X], quantity: 1 }] });
+  const yComponent = line(Z, [D, GA, ALT, Z], 1, { quantity_ordered: null });
+  const kept = line("prod-kept", [D, GA, "prod-kept"], 1, { quantity_ordered: 0 });
+  const invoiced = line("prod-inv", [D, GA, "prod-inv"], 2, { quantity_ordered: 2 });
+  const exchangeUnit = line("prod-ex", [EX, "prod-ex"], 1, { quantity_ordered: null });
+  const stray = line("prod-stray", [D, GA, "prod-stray"], 1, { quantity_ordered: null });
+  const fulfillment = {
+    items: [dest(D), group(GA, D), ordered, y, yComponent, kept, invoiced, dest(EX), exchangeUnit, stray],
+    destinations: [{ uid: D, exchange: null }, { uid: EX, exchange: "same_trip" }],
+  };
+  const sources = fulfillmentRowSources(fulfillment, order);
+  assertEquals(
+    [ordered, y, yComponent, kept, invoiced, exchangeUnit, stray].map((r) => sources.get(r)),
+    ["order", "substitution", "substitution", "kept", "invoice_projected", "exchange", "unexplained"],
+  );
+  assertEquals(sources.size, 7, "dividers are not classified");
+});
+
+Deno.test("fulfillmentRowSources: an order path wins over every other signature", () => {
+  // A merged Y is the order's own row; a stale stored `quantity_ordered: 0` on
+  // a row the order carries again is still the order's.
+  const order = { items: [dest(D), line(X, [D, X])], destinations: [{ uid: D }] };
+  const merged = line(X, [D, X], 2, { quantity_ordered: 0, substituted_for: [{ path: [D, PARENT], quantity: 1 }] });
+  assertEquals(fulfillmentRowSources({ items: [dest(D), merged], destinations: [{ uid: D }] }, order).get(merged), "order");
+});
+
+Deno.test("fulfillmentRowSources: an exchange leg the ORDER carries is the order's, not the warehouse's", () => {
+  const EX = "sales-exchange";
+  const unit = line("prod-ex", [EX, "prod-ex"], 1, { quantity_ordered: null });
+  const order = { items: [dest(D), dest(EX)], destinations: [{ uid: D }, { uid: EX }] };
+  const f = { items: [dest(D), dest(EX), unit], destinations: [{ uid: D }, { uid: EX, exchange: "same_trip" }] };
+  assertEquals(fulfillmentRowSources(f, order).get(unit), "unexplained");
 });

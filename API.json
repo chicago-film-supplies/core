@@ -16469,6 +16469,41 @@
       "moduleDoc": "Rebuilding a fulfillment's `items[]` from a picker submission.\n\nONE function, called by both writers — `api-cloudrun`'s\n`PUT /fulfillments/{uid}/items` and the manager's optimistic\n`applySubstitution`. It lives here because a copy drifted: the manager\nnormalized with a bare `computeItemPaths` while the API bucketed by carried\npath, and the manager's comment asserted they used the same function while\nthey did not. That divergence shipped a real defect — a substitution appended\nat the array tail was re-parented to the LAST divider in the document and\nlost its line-item parent, so substituting into any order with more than one\ngroup failed at the API's in-place check.\n\n## Sequence is NOT the picker's to author\n\n🔴 **The order of `items[]` comes from the STORED document, never from the\nsubmission.** A picker authors which lines exist, their quantities, and\nsubstitutions — nothing else. The fulfillment surface has no drag-reorder\n(dnd-kit is wired on orders, invoices and products; not here), so a\nsubmission's sequence carries no operator intent to preserve.\n\n⚠️ **The zero-priced-first invariant is no longer part of the reason.** This\nused to say a fulfillment line carried no `zero_priced` and so could only\ninherit its order's sequence. It has carried the flag since 2026-09-10\n(emitted by `projectItem`, corpus backfilled, and checked by\n`checkZeroPricedComponents` on `FulfillmentSchema`), so a fulfillment can\nevaluate the invariant itself. What stands is the sentence above: sequence\nis not the picker's to author, so the stored order is kept.\n\n## Why keyed on `path`, never `uid`\n\n⚠️ `item.uid` is not a row identity — it repeats within one document, in 18%\nof prod orders (a priced principal beside zero-priced accessory copies, a\n`splitItem`, or a product appearing standalone and as a kit component). Only\n`path` identifies a row within a document, which is why the submission is\nmatched on it.",
       "symbols": [
         {
+          "kind": "typeAlias",
+          "name": "FulfillmentRowSource",
+          "declaration": "type FulfillmentRowSource = \"order\" | \"substitution\" | \"exchange\" | \"kept\" | \"invoice_projected\" | \"unexplained\";",
+          "doc": "Why a stored fulfillment LINE row exists — {@link fulfillmentRowSources}.\n\n| source | the row is | how it is told |\n|---|---|---|\n| `order` | the order's own line | an order line is at its path |\n| `substitution` | a substitute Y, or one of Y's components | a `substituted_for` entry, or at/below an anchor |\n| `exchange` | a unit of a warehouse-staged exchange | under an exchange pair the ORDER does not carry |\n| `kept` | a line an order edit removed while its units were out (api-cloudrun#1147) | `quantity_ordered: 0` |\n| `invoice_projected` | an invoice-only line projected to reach the shelf (api-cloudrun#1188) | a positive `quantity_ordered` |\n| `unexplained` | none of these — a finding | — |"
+        },
+        {
+          "kind": "interface",
+          "name": "RowSourceFulfillment",
+          "declaration": "interface RowSourceFulfillment {\n  items: ReadonlyArray<FulfillmentItemType | T>;\n  destinations: ReadonlyArray<typeLiteral>;\n}",
+          "doc": "The fulfillment fields {@link fulfillmentRowSources} reads."
+        },
+        {
+          "kind": "interface",
+          "name": "RowSourceOrder",
+          "declaration": "interface RowSourceOrder {\n  items: ReadonlyArray<typeLiteral>;\n  destinations: ReadonlyArray<typeLiteral>;\n}",
+          "doc": "The order fields {@link fulfillmentRowSources} reads."
+        },
+        {
+          "kind": "function",
+          "name": "fulfillmentRowSources",
+          "signature": "fulfillmentRowSources(fulfillment: RowSourceFulfillment<T>, order: RowSourceOrder): Map<T, FulfillmentRowSource>",
+          "doc": "Classify every LINE row of a stored fulfillment by why it exists (core#129).\n\n🔴 **ONE classifier, because each consumer kept its own and they drifted.** A\nfulfillment row the order does not carry has a small, closed set of\nlegitimate reasons, and every new one (kept rows, then invoice-projected rows)\nwas taught to some of the places that ask and not others. The picker save\nrefused a kept row as \"no counterpart\" while refusing its omission as a stale\nview, so a fulfillment holding one could not be saved at all; the drift audit\nreported every invoice-projected row as unexplained.\n\n**Precedence is the table's order**, top first: a row at an order path is\n`order` whatever else it carries (a merged Y is the order's own row), and the\nsubstitution and exchange licences are structural, so they outrank the\n`quantity_ordered` reading. `null` there is what a substitute, an exchange\nunit and a picker addition all state, which is why a NUMBER is the\nserver's signature.\n\n⚠️ **Dividers are not classified** — their survival is a placement question\n(`placeStoredOnlyRows`), not a provenance one.",
+          "paramTags": [
+            {
+              "name": "fulfillment",
+              "doc": "The stored fulfillment"
+            },
+            {
+              "name": "order",
+              "doc": "The order it projects (only fulfillable lines are counted)"
+            }
+          ],
+          "returnsTag": "Each line row, by object identity, mapped to its source"
+        },
+        {
           "kind": "function",
           "name": "keepKitAncestors",
           "signature": "keepKitAncestors(candidates: readonly T[], kept: readonly typeLiteral[]): Map<T, T>",

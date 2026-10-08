@@ -35862,6 +35862,74 @@ of prod orders (a priced principal beside zero-priced accessory copies, a
 `path` identifies a row within a document, which is why the submission is
 matched on it.
 
+### `FulfillmentRowSource`
+
+Why a stored fulfillment LINE row exists — {@link fulfillmentRowSources}.
+
+| source | the row is | how it is told |
+|---|---|---|
+| `order` | the order's own line | an order line is at its path |
+| `substitution` | a substitute Y, or one of Y's components | a `substituted_for` entry, or at/below an anchor |
+| `exchange` | a unit of a warehouse-staged exchange | under an exchange pair the ORDER does not carry |
+| `kept` | a line an order edit removed while its units were out (api-cloudrun#1147) | `quantity_ordered: 0` |
+| `invoice_projected` | an invoice-only line projected to reach the shelf (api-cloudrun#1188) | a positive `quantity_ordered` |
+| `unexplained` | none of these — a finding | — |
+
+```ts
+type FulfillmentRowSource = "order" | "substitution" | "exchange" | "kept" | "invoice_projected" | "unexplained";
+```
+
+### `RowSourceFulfillment`
+
+The fulfillment fields {@link fulfillmentRowSources} reads.
+
+```ts
+interface RowSourceFulfillment {
+  items: ReadonlyArray<FulfillmentItemType | T>;
+  destinations: ReadonlyArray<typeLiteral>;
+}
+```
+
+### `RowSourceOrder`
+
+The order fields {@link fulfillmentRowSources} reads.
+
+```ts
+interface RowSourceOrder {
+  items: ReadonlyArray<typeLiteral>;
+  destinations: ReadonlyArray<typeLiteral>;
+}
+```
+
+### `fulfillmentRowSources(fulfillment: RowSourceFulfillment<T>, order: RowSourceOrder): Map<T, FulfillmentRowSource>`
+
+Classify every LINE row of a stored fulfillment by why it exists (core#129).
+
+🔴 **ONE classifier, because each consumer kept its own and they drifted.** A
+fulfillment row the order does not carry has a small, closed set of
+legitimate reasons, and every new one (kept rows, then invoice-projected rows)
+was taught to some of the places that ask and not others. The picker save
+refused a kept row as "no counterpart" while refusing its omission as a stale
+view, so a fulfillment holding one could not be saved at all; the drift audit
+reported every invoice-projected row as unexplained.
+
+**Precedence is the table's order**, top first: a row at an order path is
+`order` whatever else it carries (a merged Y is the order's own row), and the
+substitution and exchange licences are structural, so they outrank the
+`quantity_ordered` reading. `null` there is what a substitute, an exchange
+unit and a picker addition all state, which is why a NUMBER is the
+server's signature.
+
+⚠️ **Dividers are not classified** — their survival is a placement question
+(`placeStoredOnlyRows`), not a provenance one.
+
+**Parameters**
+
+- `fulfillment` — The stored fulfillment
+- `order` — The order it projects (only fulfillable lines are counted)
+
+**Returns** — Each line row, by object identity, mapped to its source
+
 ### `keepKitAncestors(candidates: readonly T[], kept: readonly typeLiteral[]): Map<T, T>`
 
 **A KEPT fulfillment row keeps its PRODUCT ancestors** — the rows, among

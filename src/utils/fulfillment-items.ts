@@ -38,8 +38,9 @@
  * @module
  */
 import { computeItemPaths } from "./orders.ts";
-import { isStrictlyBelow } from "./substitutions.ts";
+import { collectSubstitutionAnchors, isStrictlyBelow, isSubstitutionRow } from "./substitutions.ts";
 import { isFulfillmentLineItem } from "../schemas/fulfillment.ts";
+import { isFulfillableItemType } from "../schemas/common.ts";
 import type {
   FulfillmentItemType,
   FulfillmentLineItemType,
@@ -182,6 +183,96 @@ export function keepKitAncestors<T extends FulfillmentLineItemType>(
     if (kept.some((k) => isStrictlyBelow(k.path, row.path))) {
       out.set(row, { ...row, quantity: 0, quantity_ordered: 0 });
     }
+  }
+  return out;
+}
+
+/**
+ * Why a stored fulfillment LINE row exists — {@link fulfillmentRowSources}.
+ *
+ * | source | the row is | how it is told |
+ * |---|---|---|
+ * | `order` | the order's own line | an order line is at its path |
+ * | `substitution` | a substitute Y, or one of Y's components | a `substituted_for` entry, or at/below an anchor |
+ * | `exchange` | a unit of a warehouse-staged exchange | under an exchange pair the ORDER does not carry |
+ * | `kept` | a line an order edit removed while its units were out (api-cloudrun#1147) | `quantity_ordered: 0` |
+ * | `invoice_projected` | an invoice-only line projected to reach the shelf (api-cloudrun#1188) | a positive `quantity_ordered` |
+ * | `unexplained` | none of these — a finding | — |
+ */
+export type FulfillmentRowSource =
+  | "order"
+  | "substitution"
+  | "exchange"
+  | "kept"
+  | "invoice_projected"
+  | "unexplained";
+
+/** The order fields {@link fulfillmentRowSources} reads. */
+export interface RowSourceOrder {
+  items: ReadonlyArray<{ readonly type: string; readonly path: readonly string[] }>;
+  destinations: ReadonlyArray<{ readonly uid: string }>;
+}
+
+/** The fulfillment fields {@link fulfillmentRowSources} reads. */
+export interface RowSourceFulfillment<T extends FulfillmentLineItemType> {
+  items: ReadonlyArray<FulfillmentItemType | T>;
+  destinations: ReadonlyArray<{ readonly uid: string; readonly exchange?: unknown }>;
+}
+
+/**
+ * Classify every LINE row of a stored fulfillment by why it exists (core#129).
+ *
+ * 🔴 **ONE classifier, because each consumer kept its own and they drifted.** A
+ * fulfillment row the order does not carry has a small, closed set of
+ * legitimate reasons, and every new one (kept rows, then invoice-projected rows)
+ * was taught to some of the places that ask and not others. The picker save
+ * refused a kept row as "no counterpart" while refusing its omission as a stale
+ * view, so a fulfillment holding one could not be saved at all; the drift audit
+ * reported every invoice-projected row as unexplained.
+ *
+ * **Precedence is the table's order**, top first: a row at an order path is
+ * `order` whatever else it carries (a merged Y is the order's own row), and the
+ * substitution and exchange licences are structural, so they outrank the
+ * `quantity_ordered` reading. `null` there is what a substitute, an exchange
+ * unit and a picker addition all state, which is why a NUMBER is the
+ * server's signature.
+ *
+ * ⚠️ **Dividers are not classified** — their survival is a placement question
+ * (`placeStoredOnlyRows`), not a provenance one.
+ *
+ * @param fulfillment - The stored fulfillment
+ * @param order - The order it projects (only fulfillable lines are counted)
+ * @returns Each line row, by object identity, mapped to its source
+ */
+export function fulfillmentRowSources<T extends FulfillmentLineItemType>(
+  fulfillment: RowSourceFulfillment<T>,
+  order: RowSourceOrder,
+): Map<T, FulfillmentRowSource> {
+  const orderPaths = new Set(
+    order.items.filter((i) => isFulfillableItemType(i.type)).map((i) => pathKey(i.path)),
+  );
+  const orderPairs = new Set(order.destinations.map((p) => p.uid));
+  const exchangeLegs = new Set(
+    fulfillment.destinations.filter((p) => p.exchange != null && !orderPairs.has(p.uid)).map((p) => p.uid),
+  );
+  const lines = fulfillment.items.filter((i): i is T => isFulfillmentLineItem(i as FulfillmentItemType));
+  const anchors = collectSubstitutionAnchors(lines);
+
+  const out = new Map<T, FulfillmentRowSource>();
+  for (const row of lines) {
+    const q = row.quantity_ordered;
+    const source: FulfillmentRowSource = orderPaths.has(pathKey(row.path))
+      ? "order"
+      : (row.substituted_for?.length ?? 0) > 0 || isSubstitutionRow(row.path, anchors)
+      ? "substitution"
+      : row.path[0] !== undefined && exchangeLegs.has(row.path[0])
+      ? "exchange"
+      : q === 0
+      ? "kept"
+      : typeof q === "number" && q > 0
+      ? "invoice_projected"
+      : "unexplained";
+    out.set(row, source);
   }
   return out;
 }

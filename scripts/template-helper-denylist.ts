@@ -634,6 +634,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // listed in UTIL_MODULES only so the drift guard sees its exports, exactly as
   // `citations` and `template-lint` are.
   "fulfillment-items": [
+    "fulfillmentRowSources",
     "keepKitAncestors",
     "rebuildFulfillmentItems",
   ],
