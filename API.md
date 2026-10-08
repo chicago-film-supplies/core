@@ -9852,6 +9852,7 @@ ambiguous.
 interface RenderParamsContext {
   uid_template_version: string;
   params: TemplateParam[];
+  uid_component_versions?: string[];
 }
 ```
 
@@ -9861,7 +9862,8 @@ Zod schema for a RenderParamsContext.
 
 Required-when-present: the members inside are not optional, so an artifact is
 in one of TWO states (`null` = not recorded, or a complete snapshot) rather
-than four.
+than four — except `uid_component_versions`, which arrived later and is
+absent on every snapshot taken before it (absent = current).
 
 ```ts
 const RenderParamsContextSchema: z.ZodType<RenderParamsContext>;

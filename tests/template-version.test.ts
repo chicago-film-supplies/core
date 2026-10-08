@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import {
   GOLDEN_DIFF_VERDICTS,
   GoldenDiffSchema,
+  RenderParamsContextSchema,
   TemplateVersionSchema,
   UpdateTemplateVersionInput,
 } from "../src/schemas/template-version.ts";
@@ -267,4 +268,32 @@ Deno.test("TemplateVersionSchema: archived keeps whatever it had, hash or not", 
     draftDoc({ status: "archived", committed_content_hash: undefined }),
   );
   assertEquals(res.success, true);
+});
+
+// ── RenderParamsContext.uid_component_versions (api-cloudrun#1130) ──
+// A component release counts like a template release for "this saved PDF is
+// out of date", so a render records the component versions it resolved. Every
+// artifact written before that lacks the key and cannot be backfilled, so the
+// stored strict object must still accept its ABSENCE — which reads as current.
+Deno.test("RenderParamsContext: a pre-#1130 snapshot with no component versions still parses", () => {
+  const legacy = { uid_template_version: "testtplversion000001", params: [] };
+  assertEquals(RenderParamsContextSchema.safeParse(legacy).success, true);
+});
+
+Deno.test("RenderParamsContext: component version uids are recorded, and an empty list is a real answer", () => {
+  const ctx = { uid_template_version: "testtplversion000001", params: [] };
+  assertEquals(
+    RenderParamsContextSchema.safeParse({ ...ctx, uid_component_versions: ["testcmpversion000001"] }).success,
+    true,
+  );
+  assertEquals(RenderParamsContextSchema.safeParse({ ...ctx, uid_component_versions: [] }).success, true);
+});
+
+Deno.test("RenderParamsContext: a component version that is not a document id is refused", () => {
+  const res = RenderParamsContextSchema.safeParse({
+    uid_template_version: "testtplversion000001",
+    params: [],
+    uid_component_versions: ["base"],
+  });
+  assertEquals(res.success, false);
 });

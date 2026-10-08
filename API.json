@@ -4329,14 +4329,14 @@
         {
           "kind": "interface",
           "name": "RenderParamsContext",
-          "declaration": "interface RenderParamsContext {\n  uid_template_version: string;\n  params: TemplateParam[];\n}",
+          "declaration": "interface RenderParamsContext {\n  uid_template_version: string;\n  params: TemplateParam[];\n  uid_component_versions?: string[];\n}",
           "doc": "The param DECLARATION a stored render-params map was resolved against,\nsnapshotted at render time (core#74).\n\nA stored params map is a bag of `{key: boolean}`; everything human-readable\nabout it — the label, and the default a value is compared against to decide\nwhether a row says anything at all — comes from the family's `params[]`. That\ndeclaration is a projection of the family's ACTIVE version and moves whenever\na template renames a param, removes one, or changes a default, so a reader\nresolving against it re-labels every past artifact. The sharp direction is a\nchanged default: the annotation is the only thing on screen distinguishing\n\"the operator hid the component rows\" from the ordinary rendering.\n\n⭐ **Denormalizing is right here, where it usually is not.** This is a\nHISTORICAL fact, so it cannot go stale — the whole point is that it must NOT\ntrack the family's later edits. Same shape as api-cloudrun#853's ruling.\n\nNamed `params_context` rather than `uid_version`: `Invoice` already uses\n\"version\" for `pdf_versions[]`, and the collision would be genuinely\nambiguous."
         },
         {
           "kind": "variable",
           "name": "RenderParamsContextSchema",
           "declaration": "const RenderParamsContextSchema: z.ZodType<RenderParamsContext>;",
-          "doc": "Zod schema for a RenderParamsContext.\n\nRequired-when-present: the members inside are not optional, so an artifact is\nin one of TWO states (`null` = not recorded, or a complete snapshot) rather\nthan four."
+          "doc": "Zod schema for a RenderParamsContext.\n\nRequired-when-present: the members inside are not optional, so an artifact is\nin one of TWO states (`null` = not recorded, or a complete snapshot) rather\nthan four — except `uid_component_versions`, which arrived later and is\nabsent on every snapshot taken before it (absent = current)."
         },
         {
           "kind": "interface",

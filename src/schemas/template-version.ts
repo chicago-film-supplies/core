@@ -123,6 +123,25 @@ export interface RenderParamsContext {
   uid_template_version: string;
   /** That version's `params[]`, verbatim. Reuses `TemplateParam` — no second shape to sync. */
   params: TemplateParam[];
+  /**
+   * The version uid of each `depends_on` COMPONENT the render resolved — the
+   * shared layout, styles and partials the bytes were produced with
+   * (api-cloudrun#1130).
+   *
+   * ⭐ Owner ruling 2026-10-08: **a component release counts exactly like a
+   * template release** for "this saved PDF is out of date". So a reader flags an
+   * artifact whose `uid_template_version` is not its family's `uid_active` OR
+   * any of whose component uids is not that component's `uid_active`.
+   *
+   * ⚠️ **Optional, and ABSENT reads as CURRENT** — the same rule
+   * `uid_template_version` follows for an artifact that predates it. Every
+   * artifact written before this field existed lacks it and cannot be
+   * backfilled (which component versions rendered a PDF last month is not
+   * recoverable), so `.nullable()` is not an option here: the stored
+   * `z.strictObject` must accept the key's absence. An EMPTY array means the
+   * family depends on no component, which is a real answer.
+   */
+  uid_component_versions?: string[];
 }
 
 /**
@@ -130,11 +149,15 @@ export interface RenderParamsContext {
  *
  * Required-when-present: the members inside are not optional, so an artifact is
  * in one of TWO states (`null` = not recorded, or a complete snapshot) rather
- * than four.
+ * than four — except `uid_component_versions`, which arrived later and is
+ * absent on every snapshot taken before it (absent = current).
  */
 export const RenderParamsContextSchema: z.ZodType<RenderParamsContext> = z.strictObject({
   uid_template_version: FirestoreId,
   params: z.array(TemplateParamSchema),
+  // Optional because every artifact rendered before api-cloudrun#1130 lacks it
+  // and none can be backfilled; absent reads as current (see the interface).
+  uid_component_versions: z.array(FirestoreId).optional(),
 });
 
 /** Conventional-commit metadata captured at release/publish time. */
