@@ -33,7 +33,7 @@
  * disagreement**: a divergence is a bug report about the journal, never a
  * licence to rewrite the booking.
  *
- * Lifted from api-cloudrun `src/lib/custodyReplay.ts` (`replayCustody`,
+ * Lifted from `api-cloudrun/src/lib/custodyReplay.ts` (`replayCustody`,
  * `classifyReplay`), unchanged in behaviour. How the audit judges each verdict
  * (the cutover instant, `booking.created_at`) stays in the audit.
  *

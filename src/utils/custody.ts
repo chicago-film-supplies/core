@@ -986,7 +986,7 @@ const FOUND_LANDINGS: readonly ServicePlace[] = ["away", "flagged", "returned_to
 /**
  * The moves a UNIT-TRACKED record makes from its stored breakdown and unit sets
  * to `next` / `nextUnits`, each naming its units, in the journal's order —
- * lifted from api-cloudrun `src/lib/oosUnits.ts` `planUnitMoves`, with the
+ * lifted from `api-cloudrun/src/lib/oosUnits.ts` `planUnitMoves`, with the
  * manager editor's own checks folded in, so the editor offers exactly what the
  * api accepts (gap G11 (c)).
  *
@@ -1347,7 +1347,7 @@ export function undoableFromRecords(
 
 /**
  * Who owns a record's reason, read off its mark movement (the movement whose id
- * the record shares). Lifted from api-cloudrun `src/lib/recordReclassify.ts`.
+ * the record shares). Lifted from `api-cloudrun/src/lib/recordReclassify.ts`.
  *
  * - `booking` — the mark carries custody on a booking the record's sources
  *   name: a reason edit moves that booking's bucket.

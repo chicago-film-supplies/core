@@ -31860,7 +31860,7 @@ otherwise. The record's VERSION is the api's precondition, not this rule.
 ### `recordOwner(record: Pick<OutOfService, "query_by_sources">, mark: Pick<Movement, "uid_booking" | "custody"> | null): typeLiteral | typeLiteral | typeLiteral`
 
 Who owns a record's reason, read off its mark movement (the movement whose id
-the record shares). Lifted from api-cloudrun `src/lib/recordReclassify.ts`.
+the record shares). Lifted from `api-cloudrun/src/lib/recordReclassify.ts`.
 
 - `booking` — the mark carries custody on a booking the record's sources
   name: a reason edit moves that booking's bucket.
@@ -31911,7 +31911,7 @@ record's units into `flagged` (lost is a place, not a flag — R3).
 
 The moves a UNIT-TRACKED record makes from its stored breakdown and unit sets
 to `next` / `nextUnits`, each naming its units, in the journal's order —
-lifted from api-cloudrun `src/lib/oosUnits.ts` `planUnitMoves`, with the
+lifted from `api-cloudrun/src/lib/oosUnits.ts` `planUnitMoves`, with the
 manager editor's own checks folded in, so the editor offers exactly what the
 api accepts (gap G11 (c)).
 
@@ -37468,7 +37468,7 @@ they are deliberately outside the identity. **The stored breakdown wins on
 disagreement**: a divergence is a bug report about the journal, never a
 licence to rewrite the booking.
 
-Lifted from api-cloudrun `src/lib/custodyReplay.ts` (`replayCustody`,
+Lifted from `api-cloudrun/src/lib/custodyReplay.ts` (`replayCustody`,
 `classifyReplay`), unchanged in behaviour. How the audit judges each verdict
 (the cutover instant, `booking.created_at`) stays in the audit.
 
