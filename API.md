@@ -14781,14 +14781,16 @@ over non-negative buckets, so the two agree everywhere the per-booking
 predicate can be evaluated at all.
 
 ⚠️ **One asymmetry, and it is contained rather than absent.** This has no
-`type` axis, so `inFlight` reads any `out > 0` as in-flight — including a
-SALE's, which the per-booking predicate excludes. It cannot bite: a
-non-rental `out` is terminal (`isBookingClosed`,
-`@cfs/core/utils/bookings`), so an order whose only `out` is a sale has
-already completed and returns `null` before this runs (see
-{@link deriveNextEventDate}). The defence depends on that status invariant
-— pin it against {@link pickSheetLegDirection} over constructed bookings,
-never re-derive an oracle from this function itself.
+`type` axis, so `inFlight` reads any `out > 0` as in flight — including a
+SALE's, which the per-booking predicate excludes (`ownsKey`). On an order that
+is not complete, though, any unit left is either a rental `out` (both read
+`collection`) or pending work — `quoted`, `reserved` or `prepped` — which both
+read as `delivery` first. Counting `quoted` as pending is what closed gap G14
+(stock campaign P1): a sale fully out beside a still-`quoted` rental read
+`collection` here and `delivery` per booking. A complete or canceled order
+returns `null` before this runs ({@link deriveNextEventDate}). Pinned against
+{@link pickSheetLegDirection} over constructed bookings — never re-derive an
+oracle from this function itself.
 
 ### `markReasonOf(type: MovementTypeType): OutOfServiceKeyType | null`
 

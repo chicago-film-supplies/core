@@ -24,6 +24,7 @@ import {
   PickSheetSchema,
 } from "../src/schemas/pick-sheet.ts";
 import type { BookingBreakdown } from "../src/schemas/booking.ts";
+import { isBookingClosed } from "../src/utils/bookings.ts";
 
 /** A leg's custody, spelled as the seven buckets so a zero is stated. */
 function custody(
@@ -248,6 +249,35 @@ Deno.test("breakdown leg: DISAGREES on a sale-only `out`, and the disagreement i
   const quantity = bd.quoted + bd.reserved + bd.prepped + bd.out + bd.returned + bd.lost + bd.damaged;
   assertEquals(bd.returned + bd.lost + bd.damaged === quantity, false, "not terminal by the RENTAL rule");
   assertEquals(bd.out === quantity, true, "terminal by the SALE rule — the order is already complete");
+});
+
+Deno.test("breakdown leg: agrees with the per-booking rule on EVERY order that is not complete — a sale beside a rental (G14)", () => {
+  // Every 9-key breakdown summing to 2, for a sale booking and a rental booking on
+  // one leg. Where both bookings are closed the order is complete and
+  // `deriveNextEventDate` never asks; everywhere else the two rules must agree.
+  const KEYS = ["quoted", "reserved", "prepped", "out", "returned", "lost", "damaged", "cleaning", "maintenance"] as const;
+  const states: BookingBreakdown[] = [];
+  const walk = (i: number, left: number, acc: Partial<BookingBreakdown>) => {
+    if (i === KEYS.length) {
+      if (left === 0) states.push({ ...breakdown({}), ...acc });
+      return;
+    }
+    for (let n = 0; n <= left; n++) walk(i + 1, left - n, { ...acc, [KEYS[i]]: n });
+  };
+  walk(0, 2, {});
+  let compared = 0;
+  for (const sale of states) {
+    for (const rental of states) {
+      const bookings = [{ type: "sale" as const, breakdown: sale }, { type: "rental" as const, breakdown: rental }];
+      if (bookings.every((b) => isBookingClosed(b))) continue;
+      const rolled = Object.fromEntries(KEYS.map((k) => [k, sale[k] + rental[k]])) as unknown as BookingBreakdown;
+      assertEquals(legDirectionFromBreakdown(rolled), pickSheetLegDirection(bookings), JSON.stringify({ sale, rental }));
+      compared++;
+    }
+  }
+  assert(compared > 1500, `only ${compared} open pairs compared`);
+  // The G14 case itself: a sale fully out beside a still-quoted rental.
+  assertEquals(legDirectionFromBreakdown(breakdown({ out: 2, quoted: 1 })), "delivery");
 });
 
 Deno.test("schema: `leg` is a required key, so `null` is a STATED both-directions", () => {

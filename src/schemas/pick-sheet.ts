@@ -185,6 +185,15 @@ export const PickSheetLegEnum: z.ZodType<PickSheetLegType> = z.enum(PICK_SHEET_L
 export type PickSheetLegCustody = Pick<PickSheetBooking, "type" | "breakdown">;
 
 /**
+ * Units on this leg that have not departed yet: planned (`quoted`, `reserved`)
+ * or on the prep shelf. Both direction rules read it, so they cannot disagree
+ * about what "still to deliver" means.
+ */
+function isPendingBefore(bd: BookingBreakdown): boolean {
+  return bd.quoted > 0 || bd.reserved > 0 || bd.prepped > 0;
+}
+
+/**
  * Which way this leg's work is going, from its bookings' custody.
  *
  * ⚠️ **The predicate is `getStageForBookings(…) === "return"`, spelled out.**
@@ -209,9 +218,7 @@ export type PickSheetLegCustody = Pick<PickSheetBooking, "type" | "breakdown">;
 export function pickSheetLegDirection(
   bookings: readonly PickSheetLegCustody[],
 ): PickSheetLegType {
-  const pendingBefore = bookings.some(
-    (b) => b.breakdown.reserved > 0 || b.breakdown.prepped > 0,
-  );
+  const pendingBefore = bookings.some((b) => isPendingBefore(b.breakdown));
   const inFlight = bookings.some((b) => ownsKey(b.type, "out") && b.breakdown.out > 0);
   return !pendingBefore && inFlight ? "collection" : "delivery";
 }
@@ -223,17 +230,19 @@ export function pickSheetLegDirection(
  * predicate can be evaluated at all.
  *
  * ⚠️ **One asymmetry, and it is contained rather than absent.** This has no
- * `type` axis, so `inFlight` reads any `out > 0` as in-flight — including a
- * SALE's, which the per-booking predicate excludes. It cannot bite: a
- * non-rental `out` is terminal (`isBookingClosed`,
- * `@cfs/core/utils/bookings`), so an order whose only `out` is a sale has
- * already completed and returns `null` before this runs (see
- * {@link deriveNextEventDate}). The defence depends on that status invariant
- * — pin it against {@link pickSheetLegDirection} over constructed bookings,
- * never re-derive an oracle from this function itself.
+ * `type` axis, so `inFlight` reads any `out > 0` as in flight — including a
+ * SALE's, which the per-booking predicate excludes (`ownsKey`). On an order that
+ * is not complete, though, any unit left is either a rental `out` (both read
+ * `collection`) or pending work — `quoted`, `reserved` or `prepped` — which both
+ * read as `delivery` first. Counting `quoted` as pending is what closed gap G14
+ * (stock campaign P1): a sale fully out beside a still-`quoted` rental read
+ * `collection` here and `delivery` per booking. A complete or canceled order
+ * returns `null` before this runs ({@link deriveNextEventDate}). Pinned against
+ * {@link pickSheetLegDirection} over constructed bookings — never re-derive an
+ * oracle from this function itself.
  */
 export function legDirectionFromBreakdown(bd: BookingBreakdown): PickSheetLegType {
-  const pendingBefore = bd.reserved > 0 || bd.prepped > 0;
+  const pendingBefore = isPendingBefore(bd);
   const inFlight = bd.out > 0;
   return !pendingBefore && inFlight ? "collection" : "delivery";
 }
