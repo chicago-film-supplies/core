@@ -68,6 +68,7 @@ import {
   decomposeCustodyDelta,
   deriveCustodyStatus,
   expandCustodyOffer,
+  extensionUndoRefusal,
   getCustodyRulesMarkdown,
   serviceBreakdownViolation,
   serviceBucketBounds,
@@ -1261,4 +1262,44 @@ Deno.test("serviceUnitMovesFor: every api refusal, and the editor's own (G11 (c)
   refusedWith(unitPlan(ob({}), ou({}), ob({ flagged: 1 }), ou({ flagged: [5] }), 1, "damaged", [6]), "not on the unflagged shelf");
   // A unit new to the record when none is unplaced (an unnamed historic `away` count holds the rest).
   refusedWith(unitPlan(ob({ flagged: 1, away: 1 }), ou({ flagged: [5] }), ob({ flagged: 2 }), ou({ flagged: [5, 6] }), 2, "damaged"), "not yet in effect");
+});
+
+// ── extension undo (G11 (d)) ─────────────────────────────────────────
+
+Deno.test("custody - extensionUndoRefusal: one rule for the route, the transaction and the manager's offer", () => {
+  const A = "ord:prod:legA";
+  const B = "ord:prod:legB";
+  const bookingB = (over: Partial<{ breakdown: Partial<BookingBreakdown>; quantity_ordered: number; units: number[] | null }> = {}) => ({
+    uid: B,
+    name: "Light",
+    breakdown: bd(over.breakdown ?? { out: 2 }),
+    quantity_ordered: over.quantity_ordered ?? 2,
+    units: over.units === undefined || over.units === null
+      ? null
+      : { cleaning: [], damaged: [], lost: [], maintenance: [], out: over.units, prepped: [], returned: [] },
+  });
+  const rebookIn = (units: number[] = []) => ({
+    uid: "m1",
+    type: "rebook_in" as const,
+    uid_booking: B,
+    sources: [{ collection: "bookings" as const, uid: A }],
+    quantity: 2,
+    units: units.map((n) => ({ uid_unit: `u${n}`, number: n, serial_number: null })),
+  });
+  const base = { pairUid: "legB", orderPairUids: ["legA", "legB"], bookings: [bookingB()], movements: [rebookIn()] };
+  assertEquals(extensionUndoRefusal(base), { ok: true, pairFrom: "legA", units: 2 });
+  const why = (args: Parameters<typeof extensionUndoRefusal>[0]) => {
+    const r = extensionUndoRefusal(args);
+    return r.ok ? "" : r.message;
+  };
+  assert(why({ ...base, bookings: [] }).includes("holds no units"));
+  assert(why({ ...base, movements: [] }).includes("not made by an extension"));
+  assert(why({ ...base, movements: [rebookIn(), { ...rebookIn(), uid: "m2", type: "check_in" as const }] }).includes("check in since"));
+  assert(why({ ...base, bookings: [bookingB({ breakdown: { out: 1, returned: 1 } })] }).includes("have moved since"));
+  assert(why({ ...base, bookings: [bookingB({ quantity_ordered: 1 })] }).includes("have moved since"));
+  // Leg A gone from the order — the manager offered it.
+  assert(why({ ...base, orderPairUids: ["legB"] }).includes("no longer on the order"));
+  // Renamed units — the manager offered it.
+  assertEquals(extensionUndoRefusal({ ...base, bookings: [bookingB({ units: [3, 4] })], movements: [rebookIn([3, 4])] }).ok, true);
+  assert(why({ ...base, bookings: [bookingB({ units: [3, 5] })], movements: [rebookIn([3, 4])] }).includes("units changed"));
 });

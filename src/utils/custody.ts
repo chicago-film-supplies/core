@@ -60,9 +60,11 @@ import {
   type FullBookingBreakdown,
   fullBookingBreakdown,
   isBookingClosed,
+  sumBookingBreakdown,
   sumBreakdownKeys,
   terminalQuantity,
 } from "./bookings.ts";
+import { parseBookingId } from "./booking-id.ts";
 import { sumOOSBreakdown } from "./out-of-service.ts";
 import { TERMINAL_OOS_STATUSES } from "./stock.ts";
 
@@ -1433,4 +1435,94 @@ export function planReclassification(args: {
 export function reclassifyRefusal(args: Parameters<typeof planReclassification>[0]): string | null {
   const plan = planReclassification(args);
   return plan.ok ? null : plan.message;
+}
+
+// ── undoing a rental extension (api-cloudrun#1235, gap G11 (d)) ──────
+
+/** What an extension undo returns, or why it may not. */
+export type ExtensionUndoPlan =
+  | {
+    ok: true;
+    /** Leg A, the pair the units go back to. */
+    pairFrom: string;
+    /** The units out on leg B, all of which return to A. */
+    units: number;
+  }
+  | { ok: false; message: string };
+
+/**
+ * Whether leg `pairUid` is an extension leg that can still be undone — the one
+ * rule behind the api route's journal check, its in-transaction
+ * `assertUntouched`, and the manager's offer (which skipped the unit and leg-A
+ * checks, gap G11 (d)). No stored marker says a leg came from an extension; the
+ * journal does.
+ *
+ * Refused unless:
+ * - the leg holds bookings, and every movement on them is the `rebook_in` that
+ *   put their units there (a check-in, mark or prep since refuses);
+ * - every booking on the leg holds nothing but the `out` the order still asks
+ *   for (`quantity_ordered`), exactly the quantity its `rebook_in`s brought,
+ *   and on a serialized booking exactly the units they named;
+ * - the `rebook_in`s name bookings on ONE other leg, A, which the order still
+ *   carries.
+ *
+ * A live invoice billing leg B is the api's refusal alone: it needs invoices.
+ * The api must evaluate this on bookings read INSIDE its transaction.
+ */
+export function extensionUndoRefusal(args: {
+  pairUid: string;
+  /** Every destination pair uid the order carries now. */
+  orderPairUids: readonly string[];
+  /** The order's bookings; those on leg B are picked by their id's leg segment. */
+  bookings: readonly Pick<Booking, "uid" | "name" | "breakdown" | "quantity_ordered" | "units">[];
+  /** Every movement on leg B's bookings. */
+  movements: readonly Pick<Movement, "uid" | "type" | "uid_booking" | "sources" | "quantity" | "units">[];
+}): ExtensionUndoPlan {
+  const refuse = (message: string): ExtensionUndoPlan => ({ ok: false, message });
+  const onLeg = args.bookings.filter((b) => parseBookingId(b.uid)?.destUid === args.pairUid);
+  if (onLeg.length === 0) return refuse("This leg holds no units an extension moved");
+  const ids = new Set(onLeg.map((b) => b.uid));
+  const moves = args.movements.filter((m) => m.uid_booking != null && ids.has(m.uid_booking));
+  const rebooksIn = moves.filter((m) => m.type === "rebook_in");
+  if (rebooksIn.length === 0) return refuse("This leg was not made by an extension, so there is nothing to undo");
+  const later = moves.find((m) => m.type !== "rebook_in");
+  if (later !== undefined) {
+    return refuse(`This leg has had a ${later.type.replaceAll("_", " ")} since the extension, so it cannot be undone`);
+  }
+  const legs = new Set(
+    rebooksIn.flatMap((m) =>
+      m.sources.filter((s) => s.collection === "bookings").map((s) => parseBookingId(s.uid)?.destUid ?? "")
+    ),
+  );
+  const [pairFrom] = legs;
+  if (legs.size !== 1 || !pairFrom || pairFrom === args.pairUid) {
+    return refuse("This leg's units came from more than one leg, so it cannot be undone in one step");
+  }
+  if (!args.orderPairUids.includes(pairFrom)) return refuse("The leg this one was extended from is no longer on the order");
+
+  let units = 0;
+  for (const b of onLeg) {
+    const out = b.breakdown.out;
+    const brought = rebooksIn.filter((m) => m.uid_booking === b.uid);
+    if (brought.length === 0) {
+      if (sumBookingBreakdown(b.breakdown) === 0) continue;
+      return refuse(`${b.name}: this leg's booking was changed after the extension, so it cannot be undone`);
+    }
+    if (sumBookingBreakdown(b.breakdown) !== out || b.quantity_ordered !== out) {
+      return refuse(
+        `${b.name}: units on this leg have moved since the extension (checked in, marked or re-ordered), so it cannot be undone`,
+      );
+    }
+    const quantity = brought.reduce((n, m) => n + m.quantity, 0);
+    if (quantity !== out) return refuse(`${b.name}: the undo returns ${quantity} of the ${out} out on this leg`);
+    if (b.units != null) {
+      const named = new Set(brought.flatMap((m) => m.units.map((u) => u.number)));
+      if (b.units.out.length !== out || b.units.out.some((n) => !named.has(n)) || named.size !== out) {
+        return refuse(`${b.name}: this leg's units changed since the extension, so it cannot be undone`);
+      }
+    }
+    units += out;
+  }
+  if (units === 0) return refuse("This leg holds no units an extension moved");
+  return { ok: true, pairFrom, units };
 }

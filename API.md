@@ -31415,6 +31415,14 @@ interface CustodyTransition {
 }
 ```
 
+### `ExtensionUndoPlan`
+
+What an extension undo returns, or why it may not.
+
+```ts
+type ExtensionUndoPlan = typeLiteral | typeLiteral;
+```
+
 ### `LossRecordView`
 
 One out-of-service record as a loss undo reads it, with the mark that opened it.
@@ -31640,6 +31648,26 @@ Every offer is one action except `check_out` over units still `reserved`:
 those are prepped on the way, so the offer sends `[prep, check_out]`. It
 draws the already-prepped units FIRST — the ones on the prep shelf are the
 ones going out — and preps only the shortfall.
+
+### `extensionUndoRefusal(args: typeLiteral): ExtensionUndoPlan`
+
+Whether leg `pairUid` is an extension leg that can still be undone — the one
+rule behind the api route's journal check, its in-transaction
+`assertUntouched`, and the manager's offer (which skipped the unit and leg-A
+checks, gap G11 (d)). No stored marker says a leg came from an extension; the
+journal does.
+
+Refused unless:
+- the leg holds bookings, and every movement on them is the `rebook_in` that
+  put their units there (a check-in, mark or prep since refuses);
+- every booking on the leg holds nothing but the `out` the order still asks
+  for (`quantity_ordered`), exactly the quantity its `rebook_in`s brought,
+  and on a serialized booking exactly the units they named;
+- the `rebook_in`s name bookings on ONE other leg, A, which the order still
+  carries.
+
+A live invoice billing leg B is the api's refusal alone: it needs invoices.
+The api must evaluate this on bookings read INSIDE its transaction.
 
 ### `getCustodyRulesMarkdown(): string`
 

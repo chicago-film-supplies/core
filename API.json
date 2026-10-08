@@ -14127,6 +14127,12 @@
           "doc": "One movement's worth of custody change, as the journal will record it."
         },
         {
+          "kind": "typeAlias",
+          "name": "ExtensionUndoPlan",
+          "declaration": "type ExtensionUndoPlan = typeLiteral | typeLiteral;",
+          "doc": "What an extension undo returns, or why it may not."
+        },
+        {
           "kind": "interface",
           "name": "LossRecordView",
           "declaration": "interface LossRecordView {\n  record: Pick<OutOfService, \"uid\" | \"number\" | \"reason\" | \"quantity\" | \"breakdown\" | \"status\" | \"canceled_at\" | \"query_by_sources\">;\n  mark: Pick<Movement, \"type\" | \"uid_booking\" | \"quantity\" | \"custody\" | \"lines\"> | null;\n  billed: number | null;\n}",
@@ -14263,6 +14269,14 @@
           "name": "expandCustodyOffer",
           "signature": "expandCustodyOffer(booking: CustodyBooking, offer: Pick<CustodyOffer, \"rule\">, quantity: number): BookingActionType[]",
           "doc": "The actions an offer sends for `quantity` units.\n\nEvery offer is one action except `check_out` over units still `reserved`:\nthose are prepped on the way, so the offer sends `[prep, check_out]`. It\ndraws the already-prepped units FIRST — the ones on the prep shelf are the\nones going out — and preps only the shortfall.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "extensionUndoRefusal",
+          "signature": "extensionUndoRefusal(args: typeLiteral): ExtensionUndoPlan",
+          "doc": "Whether leg `pairUid` is an extension leg that can still be undone — the one\nrule behind the api route's journal check, its in-transaction\n`assertUntouched`, and the manager's offer (which skipped the unit and leg-A\nchecks, gap G11 (d)). No stored marker says a leg came from an extension; the\njournal does.\n\nRefused unless:\n- the leg holds bookings, and every movement on them is the `rebook_in` that\n  put their units there (a check-in, mark or prep since refuses);\n- every booking on the leg holds nothing but the `out` the order still asks\n  for (`quantity_ordered`), exactly the quantity its `rebook_in`s brought,\n  and on a serialized booking exactly the units they named;\n- the `rebook_in`s name bookings on ONE other leg, A, which the order still\n  carries.\n\nA live invoice billing leg B is the api's refusal alone: it needs invoices.\nThe api must evaluate this on bookings read INSIDE its transaction.",
           "paramTags": [],
           "returnsTag": null
         },
