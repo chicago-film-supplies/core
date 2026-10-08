@@ -42365,6 +42365,12 @@ occurrences with the SAME signature (including two top-level ones, both
 `null`) still merge, which is what keeps a priced principal and its own
 zero-priced accessories, or a `splitItem` clone, on one row.
 
+### `formatUnitRanges(numbers: Iterable<number>, _: unknown): string`
+
+Unit numbers as the fewest runs a reader can scan: `"1001–1040, 1045"`.
+The form printed on packing lists and invoices, which customers read
+(owner, 2026-09-21). An empty set is `""`.
+
 ### `getDestinationsLegend(destinations: readonly Pick<DestinationType, "customer_collecting" | "customer_returning">[] | undefined | null): typeLiteral`
 
 Pair-derived legend strings for the order's start/end dates.

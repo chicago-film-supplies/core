@@ -19601,6 +19601,14 @@
         },
         {
           "kind": "function",
+          "name": "formatUnitRanges",
+          "signature": "formatUnitRanges(numbers: Iterable<number>, _: unknown): string",
+          "doc": "Unit numbers as the fewest runs a reader can scan: `\"1001–1040, 1045\"`.\nThe form printed on packing lists and invoices, which customers read\n(owner, 2026-09-21). An empty set is `\"\"`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "getDestinationsLegend",
           "signature": "getDestinationsLegend(destinations: readonly Pick<DestinationType, \"customer_collecting\" | \"customer_returning\">[] | undefined | null): typeLiteral",
           "doc": "Pair-derived legend strings for the order's start/end dates.\n\nEach pair contributes a label based on its `customer_collecting` /\n`customer_returning` flags. Labels are deduped and joined with \" / \", so\na mixed-mode order (one pair we deliver, one pair the customer picks up)\nrenders as \"In Store Pickup / Delivery\".\n\nMapping:\n  start: customer_collecting === true → \"In Store Pickup\", else → \"Delivery\"\n  end:   customer_returning  === true → \"In Store Return\", false → \"Pickup\",\n         null (no collection leg) → nothing\n\nEmpty input returns empty strings.",

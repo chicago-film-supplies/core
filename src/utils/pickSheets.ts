@@ -208,3 +208,19 @@ export function pickSheetLineBooking(
   if (!pickSheetItemOwnsBooking(item)) return null;
   return destination.bookings.find((b) => b.uid === item.uid_booking) ?? null;
 }
+
+/**
+ * Unit numbers as the fewest runs a reader can scan — `"1001–1040, 1045"` — for
+ * a serialized booking's {@link PickSheetBooking.units} buckets.
+ *
+ * Re-exported here because a `pick-sheets`-sourced template resolves to
+ * `it.pickSheets` and to no `it.units`: {@link TEMPLATE_COLLECTION_UTILS} maps a
+ * collection to ONE namespace, and `units` is not a source collection. Same
+ * reason the `orders` helpers above are re-exported rather than mapped. The
+ * implementation stays in `utils/units.ts`, so the pick sheet, the packing list
+ * and an invoice's replacement-line description print one form.
+ *
+ * Numbers only, never serials (owner, 2026-10-08) — see
+ * {@link PickSheetBooking.units}.
+ */
+export { formatUnitRanges } from "./units.ts";

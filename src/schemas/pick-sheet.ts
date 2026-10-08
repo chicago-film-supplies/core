@@ -362,7 +362,7 @@ export interface PickSheetBooking {
   /**
    * Which unit NUMBERS sit in each bucket, carried verbatim off the booking —
    * `null` when the booking is not unit-tracked. A packing list prints these
-   * as ranges (`it.units.formatUnitRanges`).
+   * as ranges (`it.pickSheets.formatUnitRanges`).
    *
    * 🔴 **Numbers, never serials** (owner, 2026-10-08). A pick sheet is read on
    * `fulfillment.read`, the permission that already reads `booking.units`;

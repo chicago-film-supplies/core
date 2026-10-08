@@ -620,3 +620,15 @@ Deno.test("every shared helper is reachable from a real family's resolved namesp
 // The byte-compare against a fresh render lives in `deno task check:generated`,
 // not here — see the module doc for why it cannot run under this suite's
 // permissions. The lockstep test above is the in-suite arm.
+
+Deno.test("a pick-sheets family reaches formatUnitRanges through it.pickSheets, the units module's own binding", () => {
+  // `it.units` is not injected for any family: TEMPLATE_COLLECTION_UTILS maps a
+  // collection to one namespace and `units` is no collection. So the pick sheet
+  // and the packing list print unit ranges through this re-export, and identity
+  // keeps them on the form an invoice's replacement-line description prints.
+  const resolved = availableUtilNamespaces(["pick-sheets"], ["packing_lists"]);
+  assert(resolved.includes("pickSheets"));
+  assert(!resolved.includes("units"));
+  assertEquals(pickSheetUtils.formatUnitRanges, unitUtils.formatUnitRanges);
+  assertEquals(pickSheetUtils.formatUnitRanges([1003, 1001, 1002, 1045]), "1001–1003, 1045");
+});
