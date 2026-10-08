@@ -30,6 +30,7 @@
  */
 import { z } from "zod";
 import { UnitSet } from "./unit.ts";
+import type { OOSReasonType } from "./common.ts";
 
 /**
  * Per-status quantity breakdown for a booking.
@@ -143,6 +144,39 @@ export const BOOKING_BREAKDOWN_TERMINAL_KEYS = [
   "returned", "lost", "damaged", "cleaning", "maintenance",
 ] as const;
 
+/**
+ * The PLAN keys: what an order asks for before any unit is touched. Every other
+ * key is custody HISTORY ({@link CUSTODY_HISTORY_KEYS}).
+ */
+export const BOOKING_PLAN_KEYS = ["quoted", "reserved"] as const;
+
+/**
+ * Every key but the plan: units something physically happened to — prepped,
+ * out, back, or out of service. A booking holding any is part of what happened,
+ * so an order edit keeps it (api-cloudrun#1147), and it is the set a serialized
+ * booking names units in ({@link BOOKING_UNIT_BUCKETS}, the same keys
+ * alphabetized — pinned below).
+ *
+ * The ONE spelling: `hasCustodyHistory`'s private list, the projection's
+ * carried set and the api's custody key lists were each a copy.
+ */
+export const CUSTODY_HISTORY_KEYS = [
+  "prepped", "out", "returned", "lost", "damaged", "cleaning", "maintenance",
+] as const;
+
+/**
+ * The out-of-service keys: a unit back (or not) with a REASON. Each is an
+ * `OOSReasonType` and every reason is one of them (pinned below), so a fifth
+ * reason cannot arrive without its bucket.
+ *
+ * These are HISTORY on a booking — the condition a unit came back in — and the
+ * terminal keys are `returned` plus these.
+ */
+export const OUT_OF_SERVICE_KEYS = ["lost", "damaged", "cleaning", "maintenance"] as const;
+
+/** One out-of-service key. */
+export type OutOfServiceKeyType = typeof OUT_OF_SERVICE_KEYS[number];
+
 /** One key of the booking lifecycle breakdown. */
 export type BookingBreakdownKeyType = typeof BOOKING_BREAKDOWN_KEYS[number];
 
@@ -158,6 +192,17 @@ type _KeysCoverBreakdown = BookingBreakdownKeyType extends keyof BookingBreakdow
 type _BreakdownCoversKeys = keyof BookingBreakdown extends BookingBreakdownKeyType ? true : never;
 const _keyParity: [_KeysCoverBreakdown, _BreakdownCoversKeys] = [true, true];
 void _keyParity;
+
+// The key subsets and their partitions, both directions, at compile time.
+type _Both<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+type _PlanOrHistory = typeof BOOKING_PLAN_KEYS[number] | typeof CUSTODY_HISTORY_KEYS[number];
+type _TerminalKey = typeof BOOKING_BREAKDOWN_TERMINAL_KEYS[number];
+const _subsetParity: [
+  _Both<_PlanOrHistory, BookingBreakdownKeyType>,
+  _Both<OutOfServiceKeyType, OOSReasonType>,
+  _Both<_TerminalKey, "returned" | OutOfServiceKeyType>,
+] = [true, true, true];
+void _subsetParity;
 
 /**
  * A breakdown object schema DERIVED from {@link BOOKING_BREAKDOWN_KEYS}, for the
@@ -199,10 +244,9 @@ export const BOOKING_UNIT_BUCKETS = [
 /** One bucket that holds named units. */
 export type BookingUnitBucketType = typeof BOOKING_UNIT_BUCKETS[number];
 
-// Compile-time guard: every unit bucket is a breakdown key.
-type _UnitBucketsAreKeys = BookingUnitBucketType extends BookingBreakdownKeyType ? true : never;
-const _unitBucketSubset: _UnitBucketsAreKeys = true;
-void _unitBucketSubset;
+// Compile-time guard: the unit buckets ARE the history keys, both directions.
+const _unitBucketParity: _Both<BookingUnitBucketType, typeof CUSTODY_HISTORY_KEYS[number]> = true;
+void _unitBucketParity;
 
 /**
  * Which units sit in each bucket of a booking. Each set is a canonical

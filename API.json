@@ -290,6 +290,12 @@
         },
         {
           "kind": "variable",
+          "name": "BOOKING_PLAN_KEYS",
+          "declaration": "const BOOKING_PLAN_KEYS: \"quoted\" | \"reserved\"[];",
+          "doc": "The PLAN keys: what an order asks for before any unit is touched. Every other\nkey is custody HISTORY ({@link CUSTODY_HISTORY_KEYS})."
+        },
+        {
+          "kind": "variable",
           "name": "BOOKING_STATUSES",
           "declaration": "const BOOKING_STATUSES: \"draft\" | \"quoted\" | \"reserved\" | \"part-prepped\" | \"prepped\" | \"active\" | \"complete\"[];",
           "doc": ""
@@ -599,6 +605,12 @@
           "name": "CREDIT_NOTE_STATUS_CONTRACTS",
           "declaration": "const CREDIT_NOTE_STATUS_CONTRACTS: Readonly<Record<CreditNoteStatusType, CreditNoteStatusContract>>;",
           "doc": "The per-status credit-note contract. `Readonly<Record<CreditNoteStatusType, …>>`\nmakes a fifth status a type error here, at the declaration — the same\ntotality `INVOICE_STATUS_CONTRACTS` relies on."
+        },
+        {
+          "kind": "variable",
+          "name": "CUSTODY_HISTORY_KEYS",
+          "declaration": "const CUSTODY_HISTORY_KEYS: \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "Every key but the plan: units something physically happened to — prepped,\nout, back, or out of service. A booking holding any is part of what happened,\nso an order edit keeps it (api-cloudrun#1147), and it is the set a serialized\nbooking names units in ({@link BOOKING_UNIT_BUCKETS}, the same keys\nalphabetized — pinned below).\n\nThe ONE spelling: `hasCustodyHistory`'s private list, the projection's\ncarried set and the api's custody key lists were each a copy."
         },
         {
           "kind": "variable",
@@ -1982,6 +1994,12 @@
         },
         {
           "kind": "variable",
+          "name": "FLAG_SLOT_REASONS",
+          "declaration": "const FLAG_SLOT_REASONS: \"cleaning\" | \"maintenance\"[];",
+          "doc": "The reasons whose `flag` takes its own movement id — see\n{@link custodyMovementSlot}. Exported so the api's movement-id minting reads\nthe same list (it restated it as `FLAG_ID_REASONS`)."
+        },
+        {
+          "kind": "variable",
           "name": "FULFILLMENT_LINE_ITEM_TYPES",
           "declaration": "const FULFILLMENT_LINE_ITEM_TYPES: \"rental\" | \"replacement\" | \"sale\" | \"service\" | \"surcharge\"[];",
           "doc": "Line item types a fulfillment carries — the `fulfillable: true` members.\n`transaction_fee` is excluded because a fee has no stock and is never picked\noff a shelf, so this is NOT a narrower spelling of {@link DOC_LINE_ITEM_TYPES}\nwaiting to be collapsed into it; the exclusion IS the contract.\n\nLives here rather than in `fulfillment.ts` so the list, the table it must\nagree with, and the assertion below are one thing to read."
@@ -3254,6 +3272,12 @@
         },
         {
           "kind": "variable",
+          "name": "OUT_OF_SERVICE_KEYS",
+          "declaration": "const OUT_OF_SERVICE_KEYS: \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "The out-of-service keys: a unit back (or not) with a REASON. Each is an\n`OOSReasonType` and every reason is one of them (pinned below), so a fifth\nreason cannot arrive without its bucket.\n\nThese are HISTORY on a booking — the condition a unit came back in — and the\nterminal keys are `returned` plus these."
+        },
+        {
+          "kind": "variable",
           "name": "OWNED_KEYS_BY_TYPE",
           "declaration": "const OWNED_KEYS_BY_TYPE: Readonly<Record<ComponentTypeType, readonly BookingBreakdownKeyType[]>>;",
           "doc": "{@link ownsKey}, tabulated per booking type in breakdown order — for a reader\nthat wants the key list rather than the predicate. Derived, so it cannot\ndrift from the predicate."
@@ -3551,6 +3575,12 @@
           "name": "OutOfServiceId",
           "declaration": "const OutOfServiceId: z.ZodType<string>;",
           "doc": "`out-of-service.uid` — **two populations, and the union is the point.**\n\n| population | shape | minted by |\n|---|---|---|\n| a LOSS event | {@link MovementId} | `api-cloudrun/src/services/bookings.ts` — the record IS its `mark_lost` / `mark_damaged` movement, seen from the inventory side, so it takes that movement's id AND its number |\n| anything else | {@link FirestoreId} | `POST /out-of-service` (an operator taking units out of service for cleaning or maintenance — no movement, so nothing to derive from), plus every record written before api-cloudrun#1094 |\n\n⭐ **Why this is a new id ROLE and not a bent derivation.** The module note\nabove says to bend the derivation rather than the schema, and its reasoning is\nthat widening {@link FirestoreId} would weaken a guard covering 41 document\ntypes for the sake of two. Nothing is widened here: `FirestoreId` is\nuntouched, and ONE field gains a second named shape, exactly as `bookings`,\n`quotes` and `transactions` each carry their own. The alternative — 20 hex\nchars of SHA-256 over the movement id, the `templates` family trick — would\nsatisfy the existing validator and make the pairing **unreadable**, which is\nthe property this module already regrets for template families. Owner ruling,\n2026-09-22.\n\n⚠️ **A shared id across two collections is NOT a shared document.** The record\nand the movement are separate documents with separate schemas and separate\nwriters; the id says they describe one event. Do not infer that reading one\ngives you the other, and do not \"resolve\" a record by fetching\n`transactions/{uid}` — the record's own fields are authoritative for the\nrecord.\n\n🔴 **A loss record is therefore addressable by derivation and a manual one is\nnot**, so `out-of-service` has no single \"find the record for X\" rule. Query\n`query_by_sources` for that, exactly as before."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "OutOfServiceKeyType",
+          "declaration": "type OutOfServiceKeyType = indexedAccess;",
+          "doc": "One out-of-service key."
         },
         {
           "kind": "variable",
@@ -4841,6 +4871,12 @@
           "name": "SyncErrorLogRecordSchema",
           "declaration": "const SyncErrorLogRecordSchema: z.ZodType<SyncErrorLogRecord>;",
           "doc": "Zod schema for {@link SyncErrorLogRecord}."
+        },
+        {
+          "kind": "variable",
+          "name": "TAKE_BACK_ORDER",
+          "declaration": "const TAKE_BACK_ORDER: \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "The flag reasons in the order an exchange's checkout takes units back off\n`out` (the api's swap rider). `damaged` first: it is the billable state, so\nunder-recording it is the costly miss. Every flag reason, once — pinned\nagainst `OOS_FLAG_REASONS` at compile time."
         },
         {
           "kind": "variable",
@@ -6600,6 +6636,14 @@
         },
         {
           "kind": "function",
+          "name": "markReasonOf",
+          "signature": "markReasonOf(type: MovementTypeType): OutOfServiceKeyType | null",
+          "doc": "The out-of-service reason a MARK movement puts units into — `mark_lost` →\n`lost`, `mark_cleaning` → `cleaning`, … — or `null` for any other type.\n\nRead off {@link CUSTODY_RULES}: the forward row off `out` whose rental arm\nwrites `type`. A script that hand-mapped only `mark_damaged`/`mark_lost`\nattributed every cleaning and maintenance mark to nothing (api-cloudrun\n`_ledgerReplayRebuild.ts`, gap G15). A `flag` carries its reason on the\nservice axis, not here.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "mixedBookingGrains",
           "signature": "mixedBookingGrains(items: ReadonlyArray<unknown>): MixedBookingGrain[]",
           "doc": "Lines that would consolidate into ONE booking while disagreeing on `type`.\n\nA booking is an aggregate per `(order, product, LEG, component ancestry)`\n(`@cfs/core/utils/booking-id`) and its id carries no type, so two lines of one\nproduct under one destination — in two different GROUPS, which path\nuniqueness allows — with the same product ancestry are one booking. If one is\na `rental` and the other a `sale`, `consolidateItems` keeps whichever came\nfirst and the booking's return leg, stock claim and pick sheet follow that\naccident.\n\nThe manager cannot produce it — a catalog line's type is not editable, and a\ncustom line has its own uid — so this closes it for the API and MCP callers.\n0 of 9,370 booking grains mixed in either project (measured 2026-09-28).\n\nThe grain key mirrors `componentAncestry` exactly: the leg is `path[0]` (an\norder's top divider), the ancestry is `path`'s product-shaped segments minus\nthe line's own.",
@@ -7850,6 +7894,12 @@
         },
         {
           "kind": "variable",
+          "name": "BOOKING_PLAN_KEYS",
+          "declaration": "const BOOKING_PLAN_KEYS: \"quoted\" | \"reserved\"[];",
+          "doc": "The PLAN keys: what an order asks for before any unit is touched. Every other\nkey is custody HISTORY ({@link CUSTODY_HISTORY_KEYS})."
+        },
+        {
+          "kind": "variable",
           "name": "BOOKING_STATUSES",
           "declaration": "const BOOKING_STATUSES: \"draft\" | \"quoted\" | \"reserved\" | \"part-prepped\" | \"prepped\" | \"active\" | \"complete\"[];",
           "doc": ""
@@ -7988,6 +8038,24 @@
         },
         {
           "kind": "variable",
+          "name": "CUSTODY_HISTORY_KEYS",
+          "declaration": "const CUSTODY_HISTORY_KEYS: \"prepped\" | \"out\" | \"returned\" | \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "Every key but the plan: units something physically happened to — prepped,\nout, back, or out of service. A booking holding any is part of what happened,\nso an order edit keeps it (api-cloudrun#1147), and it is the set a serialized\nbooking names units in ({@link BOOKING_UNIT_BUCKETS}, the same keys\nalphabetized — pinned below).\n\nThe ONE spelling: `hasCustodyHistory`'s private list, the projection's\ncarried set and the api's custody key lists were each a copy."
+        },
+        {
+          "kind": "variable",
+          "name": "OUT_OF_SERVICE_KEYS",
+          "declaration": "const OUT_OF_SERVICE_KEYS: \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "The out-of-service keys: a unit back (or not) with a REASON. Each is an\n`OOSReasonType` and every reason is one of them (pinned below), so a fifth\nreason cannot arrive without its bucket.\n\nThese are HISTORY on a booking — the condition a unit came back in — and the\nterminal keys are `returned` plus these."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "OutOfServiceKeyType",
+          "declaration": "type OutOfServiceKeyType = indexedAccess;",
+          "doc": "One out-of-service key."
+        },
+        {
+          "kind": "variable",
           "name": "UpdateBookingInput",
           "declaration": "const UpdateBookingInput: z.ZodType<UpdateBookingInputType>;",
           "doc": "Zod schema for UpdateBookingInput."
@@ -8104,9 +8172,21 @@
         },
         {
           "kind": "variable",
+          "name": "FLAG_SLOT_REASONS",
+          "declaration": "const FLAG_SLOT_REASONS: \"cleaning\" | \"maintenance\"[];",
+          "doc": "The reasons whose `flag` takes its own movement id — see\n{@link custodyMovementSlot}. Exported so the api's movement-id minting reads\nthe same list (it restated it as `FLAG_ID_REASONS`)."
+        },
+        {
+          "kind": "variable",
           "name": "OWNED_KEYS_BY_TYPE",
           "declaration": "const OWNED_KEYS_BY_TYPE: Readonly<Record<ComponentTypeType, readonly BookingBreakdownKeyType[]>>;",
           "doc": "{@link ownsKey}, tabulated per booking type in breakdown order — for a reader\nthat wants the key list rather than the predicate. Derived, so it cannot\ndrift from the predicate."
+        },
+        {
+          "kind": "variable",
+          "name": "TAKE_BACK_ORDER",
+          "declaration": "const TAKE_BACK_ORDER: \"damaged\" | \"cleaning\" | \"maintenance\"[];",
+          "doc": "The flag reasons in the order an exchange's checkout takes units back off\n`out` (the api's swap rider). `damaged` first: it is the billable state, so\nunder-recording it is the costly miss. Every flag reason, once — pinned\nagainst `OOS_FLAG_REASONS` at compile time."
         },
         {
           "kind": "function",
@@ -8137,6 +8217,14 @@
           "name": "isLossUndo",
           "signature": "isLossUndo(id: CustodyRuleId): boolean",
           "doc": "The out-of-service-mark undos — every undo OUT OF `lost`, `damaged`,\n`cleaning` or `maintenance` — which the lever applies before anything else in\na save: an undo returns units to wherever THAT mark took them from, a fact\nabout the record rather than the breakdown, so the ladder steps must read the\nbreakdown the undos leave.\n\nRead off the table rather than listed, so the P2b rows joined without an edit\nhere; the name predates them.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "markReasonOf",
+          "signature": "markReasonOf(type: MovementTypeType): OutOfServiceKeyType | null",
+          "doc": "The out-of-service reason a MARK movement puts units into — `mark_lost` →\n`lost`, `mark_cleaning` → `cleaning`, … — or `null` for any other type.\n\nRead off {@link CUSTODY_RULES}: the forward row off `out` whose rental arm\nwrites `type`. A script that hand-mapped only `mark_damaged`/`mark_lost`\nattributed every cleaning and maintenance mark to nothing (api-cloudrun\n`_ledgerReplayRebuild.ts`, gap G15). A `flag` carries its reason on the\nservice axis, not here.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -13738,7 +13826,7 @@
           "kind": "variable",
           "name": "CUSTODY_LOSS_KEYS",
           "declaration": "const CUSTODY_LOSS_KEYS: readonly CustodyLossKey[];",
-          "doc": "Every {@link CustodyLossKey}, in breakdown order."
+          "doc": "Every {@link CustodyLossKey}, in breakdown order — `OUT_OF_SERVICE_KEYS`\n(`@cfs/core/schemas`) under the name existing importers use."
         },
         {
           "kind": "interface",
@@ -13767,8 +13855,8 @@
         {
           "kind": "typeAlias",
           "name": "CustodyLossKey",
-          "declaration": "type CustodyLossKey = \"lost\" | \"damaged\" | \"cleaning\" | \"maintenance\";",
-          "doc": "The breakdown keys a mark puts units in, and an undo takes them out of."
+          "declaration": "type CustodyLossKey = OutOfServiceKeyType;",
+          "doc": "The breakdown keys a mark puts units in, and an undo takes them out of: `OutOfServiceKeyType`."
         },
         {
           "kind": "interface",
@@ -19128,8 +19216,8 @@
         {
           "kind": "variable",
           "name": "BILLABLE_OOS_REASONS",
-          "declaration": "const BILLABLE_OOS_REASONS: readonly [\"lost\", \"damaged\"];",
-          "doc": "The `out-of-service` reasons a customer is billed for."
+          "declaration": "const BILLABLE_OOS_REASONS: readonly OOSReasonType[];",
+          "doc": "The `out-of-service` reasons a customer is billed for by default — `lost`\nand `damaged` today, read off `CUSTODY_RULES[*].billable` (stock campaign P1)."
         },
         {
           "kind": "variable",

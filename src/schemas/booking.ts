@@ -49,6 +49,10 @@ export {
   type BookingUnitSetsType,
   BookingUnitSetsSchema,
   emptyBookingUnitSets,
+  BOOKING_PLAN_KEYS,
+  CUSTODY_HISTORY_KEYS,
+  OUT_OF_SERVICE_KEYS,
+  type OutOfServiceKeyType,
 } from "./_breakdown.ts";
 
 /** A specific location within a store allocated for a booking. */

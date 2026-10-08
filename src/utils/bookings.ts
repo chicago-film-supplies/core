@@ -25,7 +25,14 @@ import type {
   Order,
   OrderStatusType,
 } from "../schemas/mod.ts";
-import { BOOKING_BREAKDOWN_KEYS, BOOKING_BREAKDOWN_TERMINAL_KEYS, isCollectionLineType, ownsKey } from "../schemas/mod.ts";
+import {
+  BOOKING_BREAKDOWN_KEYS,
+  BOOKING_BREAKDOWN_TERMINAL_KEYS,
+  CUSTODY_HISTORY_KEYS,
+  isCollectionLineType,
+  OUT_OF_SERVICE_KEYS,
+  ownsKey,
+} from "../schemas/mod.ts";
 
 /**
  * The breakdown key constants and their display labels live beside
@@ -236,7 +243,7 @@ function openBucket(
   quantity: number,
   prev: Booking["breakdown"],
 ): Booking["breakdown"] {
-  const carried = { ...fullBookingBreakdown(prev), quoted: 0, reserved: 0 };
+  const carried = { ...emptyBookingsBreakdown(), ...pickKeys(prev, CUSTODY_HISTORY_KEYS) };
   const open = Math.max(0, quantity - sumBookingBreakdown(carried));
   return { ...carried, [key]: open };
 }
@@ -256,11 +263,6 @@ function openBucket(
  * deleted on 2026-08-30. The rule did not move with it — it lives here, and the
  * test below pins it independently of any script.
  */
-/** The terminal keys that are not `returned`: a unit out of service, with its reason. */
-const OUT_OF_SERVICE_KEYS: readonly BookingBreakdownKeyType[] = BOOKING_BREAKDOWN_TERMINAL_KEYS.filter(
-  (k) => k !== "returned",
-);
-
 function pickKeys(b: Partial<BookingBreakdown>, keys: readonly BookingBreakdownKeyType[]): Partial<BookingBreakdown> {
   const out: Partial<BookingBreakdown> = {};
   for (const key of keys) out[key] = breakdownQuantity(b, key);
@@ -402,11 +404,6 @@ export function liveCustody(b: Pick<Booking, "type" | "breakdown">): number {
 /** The keys holding physical custody that has not come back: {@link liveCustody} reads the owned ones. */
 const LIVE_CUSTODY_KEYS: readonly BookingBreakdownKeyType[] = ["prepped", "out"];
 
-/** Every key but the plan-only `quoted`/`reserved`. */
-const HISTORY_KEYS: readonly BookingBreakdownKeyType[] = BOOKING_BREAKDOWN_KEYS.filter(
-  (k) => k !== "quoted" && k !== "reserved",
-);
-
 /**
  * Whether custody ever moved on a booking: any of `prepped`, `out` or a terminal
  * key. Such a booking is part of what happened, and an order
@@ -420,7 +417,7 @@ const HISTORY_KEYS: readonly BookingBreakdownKeyType[] = BOOKING_BREAKDOWN_KEYS.
 export function hasCustodyHistory(b: Pick<Booking, "breakdown">): boolean {
   // Everything but the plan-only keys. A cleaning-only booking has history, and
   // an order edit that read it as custody-free would DELETE it.
-  return sumBreakdownKeys(b.breakdown, HISTORY_KEYS) > 0;
+  return sumBreakdownKeys(b.breakdown, CUSTODY_HISTORY_KEYS) > 0;
 }
 
 /** One order row at a booking grain, before and after an order edit. */

@@ -32,6 +32,13 @@ import {
   isLossUndo,
   MOVEMENT_CONTRACTS,
   type MovementTypeType,
+  BOOKING_BREAKDOWN_KEYS,
+  BOOKING_PLAN_KEYS,
+  BOOKING_UNIT_BUCKETS,
+  CUSTODY_HISTORY_KEYS,
+  markReasonOf,
+  MOVEMENT_TYPES,
+  OUT_OF_SERVICE_KEYS,
   OWNED_KEYS_BY_TYPE,
   ownsKey,
   OOS_BREAKDOWN_KEYS,
@@ -191,6 +198,20 @@ Deno.test("custody - a movement draws cost exactly when its custody pair crosses
   // `sale` and `sale_return` are the two crossings today; zero means the walk stopped reaching them.
   assert(crossing >= 2, `only ${crossing} crossing arms — the cross-check is vacuous`);
   assert(checked >= 20, `only ${checked} arms checked`);
+});
+
+Deno.test("custody - the plan and history keys partition the breakdown, and the unit buckets are the history keys", () => {
+  assertEquals([...BOOKING_PLAN_KEYS, ...CUSTODY_HISTORY_KEYS].sort(), [...BOOKING_BREAKDOWN_KEYS].sort());
+  assertEquals([...CUSTODY_HISTORY_KEYS].sort(), [...BOOKING_UNIT_BUCKETS]);
+});
+
+Deno.test("custody - markReasonOf names every mark's reason and nothing else (G15)", () => {
+  const named = Object.fromEntries(
+    MOVEMENT_TYPES.filter((t) => markReasonOf(t) !== null).map((t) => [t, markReasonOf(t)]),
+  );
+  assertEquals(named, { mark_lost: "lost", mark_damaged: "damaged", mark_cleaning: "cleaning", mark_maintenance: "maintenance" });
+  // Every out-of-service key has its mark.
+  assertEquals(new Set(Object.values(named)), new Set(OUT_OF_SERVICE_KEYS));
 });
 
 Deno.test("custody - every inverse's places mirror its forward twin's", () => {

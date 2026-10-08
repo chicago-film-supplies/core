@@ -45,6 +45,8 @@ import {
   OOS_BREAKDOWN_KEYS,
   type OOSReasonType,
   type OutOfService,
+  OUT_OF_SERVICE_KEYS,
+  type OutOfServiceKeyType,
   ownsKey,
 } from "../schemas/mod.ts";
 import {
@@ -55,6 +57,8 @@ import {
   sumBreakdownKeys,
   terminalQuantity,
 } from "./bookings.ts";
+import { sumOOSBreakdown } from "./out-of-service.ts";
+import { TERMINAL_OOS_STATUSES } from "./stock.ts";
 
 /**
  * A booking as the ruleset reads it. `units` is read when present: `null` or
@@ -491,11 +495,14 @@ export interface CustodyLossUndo {
   quantity: number;
 }
 
-/** The breakdown keys a mark puts units in, and an undo takes them out of. */
-export type CustodyLossKey = "lost" | "damaged" | "cleaning" | "maintenance";
+/** The breakdown keys a mark puts units in, and an undo takes them out of: `OutOfServiceKeyType`. */
+export type CustodyLossKey = OutOfServiceKeyType;
 
-/** Every {@link CustodyLossKey}, in breakdown order. */
-export const CUSTODY_LOSS_KEYS: readonly CustodyLossKey[] = ["lost", "damaged", "cleaning", "maintenance"];
+/**
+ * Every {@link CustodyLossKey}, in breakdown order — `OUT_OF_SERVICE_KEYS`
+ * (`@cfs/core/schemas`) under the name existing importers use.
+ */
+export const CUSTODY_LOSS_KEYS: readonly CustodyLossKey[] = OUT_OF_SERVICE_KEYS;
 
 /** One step of a decomposition: a rule and its quantity. */
 export interface CustodyStep {
@@ -753,7 +760,7 @@ export function serviceMovesFor(
   next: OOSBreakdown,
 ): ServiceMovePlan {
   const { quantity, reason } = record;
-  const placed = (b: OOSBreakdown) => b.flagged + b.away + b.written_off + b.returned_to_service;
+  const placed = sumOOSBreakdown;
   const level = (b: OOSBreakdown): Record<ServicePlace, number> => ({
     unplaced: quantity - placed(b),
     flagged: b.flagged,
@@ -841,7 +848,7 @@ export function serviceBucketBounds(
   key: OOSBreakdownKeyType,
 ): ServiceBucketBounds {
   const stored = record.breakdown[key];
-  const closed = record.status === "complete" || record.status === "canceled";
+  const closed = TERMINAL_OOS_STATUSES.has(record.status);
   if (key === "flagged" && record.reason === "lost") return { min: 0, max: 0 };
   if (closed) return key === "written_off" ? { min: 0, max: stored } : { min: stored, max: null };
   if (key === "returned_to_service") return { min: stored, max: null };
@@ -850,7 +857,7 @@ export function serviceBucketBounds(
 
 /** Whether a record's breakdown can be edited at all. A closed record with nothing written off cannot. */
 export function canEditServiceBreakdown(record: Pick<OutOfService, "status" | "breakdown">): boolean {
-  const closed = record.status === "complete" || record.status === "canceled";
+  const closed = TERMINAL_OOS_STATUSES.has(record.status);
   return !closed || record.breakdown.written_off > 0;
 }
 
@@ -874,7 +881,7 @@ export function serviceBreakdownViolation(record: BoundsRecord, next: OOSBreakdo
         : `${key.replace(/_/g, " ")} can only go down on a closed record`;
     }
   }
-  const sum = (b: OOSBreakdown) => b.flagged + b.away + b.written_off + b.returned_to_service;
+  const sum = sumOOSBreakdown;
   if (sum(next) > record.quantity) return `Buckets place ${sum(next)} units but the record holds ${record.quantity}`;
   if (sum(next) < sum(record.breakdown)) {
     return "Units that went out of service cannot go back to 'not yet in effect' — return them to service, or cancel the record";

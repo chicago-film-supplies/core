@@ -39,10 +39,15 @@
 import { z } from "zod";
 import { BookingId, OutOfServiceId } from "./_uid.ts";
 import { UnitSet } from "./unit.ts";
-import { BOOKING_BREAKDOWN_KEYS, type BookingBreakdownKeyType } from "./_breakdown.ts";
+import {
+  BOOKING_BREAKDOWN_KEYS,
+  type BookingBreakdownKeyType,
+  OUT_OF_SERVICE_KEYS,
+  type OutOfServiceKeyType,
+} from "./_breakdown.ts";
 import type { MovementTypeType } from "./transaction.ts";
 import type { EnforcementRef } from "./propagation/types.ts";
-import { COMPONENT_TYPES, type ComponentTypeType } from "./common.ts";
+import { COMPONENT_TYPES, type ComponentTypeType, type OOSFlagReasonType } from "./common.ts";
 import { isCollectionLineType } from "./order.ts";
 
 // ── Ownership ────────────────────────────────────────────────────────
@@ -637,8 +642,42 @@ export function custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "
   return own === undefined ? movement : `${movement}:${own}`;
 }
 
-/** The reasons whose `flag` takes its own movement id — see {@link custodyMovementSlot}. */
-const FLAG_SLOT_REASONS = ["cleaning", "maintenance"] as const;
+/**
+ * The reasons whose `flag` takes its own movement id — see
+ * {@link custodyMovementSlot}. Exported so the api's movement-id minting reads
+ * the same list (it restated it as `FLAG_ID_REASONS`).
+ */
+export const FLAG_SLOT_REASONS = ["cleaning", "maintenance"] as const;
+
+/**
+ * The flag reasons in the order an exchange's checkout takes units back off
+ * `out` (the api's swap rider). `damaged` first: it is the billable state, so
+ * under-recording it is the costly miss. Every flag reason, once — pinned
+ * against `OOS_FLAG_REASONS` at compile time.
+ */
+export const TAKE_BACK_ORDER = ["damaged", "cleaning", "maintenance"] as const;
+type _TakeBackCoversFlags = [OOSFlagReasonType] extends [typeof TAKE_BACK_ORDER[number]]
+  ? ([typeof TAKE_BACK_ORDER[number]] extends [OOSFlagReasonType] ? true : never)
+  : never;
+const _takeBackParity: _TakeBackCoversFlags = true;
+void _takeBackParity;
+
+/**
+ * The out-of-service reason a MARK movement puts units into — `mark_lost` →
+ * `lost`, `mark_cleaning` → `cleaning`, … — or `null` for any other type.
+ *
+ * Read off {@link CUSTODY_RULES}: the forward row off `out` whose rental arm
+ * writes `type`. A script that hand-mapped only `mark_damaged`/`mark_lost`
+ * attributed every cleaning and maintenance mark to nothing (api-cloudrun
+ * `_ledgerReplayRebuild.ts`, gap G15). A `flag` carries its reason on the
+ * service axis, not here.
+ */
+export function markReasonOf(type: MovementTypeType): OutOfServiceKeyType | null {
+  const rule = CUSTODY_RULES.find((r) =>
+    r.direction === "forward" && r.from === "out" && r.rental?.movement === type && OUT_OF_SERVICE_FROM.has(r.to)
+  );
+  return rule ? rule.to as OutOfServiceKeyType : null;
+}
 
 // ── The wire ─────────────────────────────────────────────────────────
 
@@ -750,7 +789,7 @@ export function isLossUndo(id: CustodyRuleId): boolean {
   return rule !== undefined && rule.direction === "undo" && OUT_OF_SERVICE_FROM.has(rule.from);
 }
 
-const OUT_OF_SERVICE_FROM: ReadonlySet<BookingBreakdownKeyType> = new Set(["lost", "damaged", "cleaning", "maintenance"]);
+const OUT_OF_SERVICE_FROM: ReadonlySet<BookingBreakdownKeyType> = new Set(OUT_OF_SERVICE_KEYS);
 
 /**
  * One booking's actions in a bulk write — the action-shaped twin of

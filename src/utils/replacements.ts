@@ -42,10 +42,25 @@
 import { componentSignatureHash, parseBookingId } from "./booking-id.ts";
 import { formatUnitRanges, serialAt } from "./units.ts";
 import type { OOSReasonType } from "../schemas/common.ts";
-import type { OOSUnitsType, UnitType } from "../schemas/mod.ts";
+import { CUSTODY_RULES, OUT_OF_SERVICE_KEYS, type OOSUnitsType, type UnitType } from "../schemas/mod.ts";
 
-/** The `out-of-service` reasons a customer is billed for. */
-export const BILLABLE_OOS_REASONS: readonly ["lost", "damaged"] = ["lost", "damaged"] as const;
+/**
+ * Whether a unit marked into `reason` off `out` may be billed to the customer:
+ * the `billable` flag of that MARK row in `CUSTODY_RULES`. The one source both
+ * billing constants below derive from, so the custody table, the offer and the
+ * document diff cannot disagree about which reasons are charged.
+ */
+function markIsBillable(reason: OOSReasonType): boolean {
+  const mark = CUSTODY_RULES.find((r) => r.direction === "forward" && r.from === "out" && r.to === reason);
+  if (!mark) throw new Error(`no custody rule marks units off out into "${reason}"`);
+  return mark.billable;
+}
+
+/**
+ * The `out-of-service` reasons a customer is billed for by default — `lost`
+ * and `damaged` today, read off `CUSTODY_RULES[*].billable` (stock campaign P1).
+ */
+export const BILLABLE_OOS_REASONS: readonly OOSReasonType[] = OUT_OF_SERVICE_KEYS.filter(markIsBillable);
 
 /** How one out-of-service reason is billed. */
 export interface OosBillingPolicy {
@@ -70,11 +85,16 @@ export interface OosBillingPolicy {
  * widening it would flag every cleaning record as unbilled.
  */
 export const OOS_BILLING_POLICY: Record<OOSReasonType, OosBillingPolicy> = {
-  lost: { line_type: "replacement", offer: "default" },
-  damaged: { line_type: "replacement", offer: "default" },
-  cleaning: { line_type: "service", offer: "on_request" },
-  maintenance: { line_type: "service", offer: "on_request" },
+  lost: { line_type: "replacement", offer: offerFor("lost") },
+  damaged: { line_type: "replacement", offer: offerFor("damaged") },
+  cleaning: { line_type: "service", offer: offerFor("cleaning") },
+  maintenance: { line_type: "service", offer: offerFor("maintenance") },
 };
+
+/** A billable mark is offered unasked; anything else only on request. */
+function offerFor(reason: OOSReasonType): OosBillingPolicy["offer"] {
+  return markIsBillable(reason) ? "default" : "on_request";
+}
 
 /** The invoice line `type` that bills a record of this reason. */
 export function oosLineTypeFor(reason: OOSReasonType): "replacement" | "service" {

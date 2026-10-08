@@ -828,6 +828,10 @@ export {
   type BookingUnitSetsType,
   BookingUnitSetsSchema,
   emptyBookingUnitSets,
+  BOOKING_PLAN_KEYS,
+  CUSTODY_HISTORY_KEYS,
+  OUT_OF_SERVICE_KEYS,
+  type OutOfServiceKeyType,
   type Booking,
   type BookingBreakdown,
   type BookingDestinationRef,
@@ -863,9 +867,12 @@ export {
   custodyMovementSlot,
   custodyRule,
   duplicateCustodySlots,
+  FLAG_SLOT_REASONS,
   isLossUndo,
+  markReasonOf,
   OWNED_KEYS_BY_TYPE,
   ownsKey,
+  TAKE_BACK_ORDER,
 } from "./custody.ts";
 export {
   INVOICE_ACTION_IDS,
