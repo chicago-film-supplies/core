@@ -31443,6 +31443,17 @@ What a reason edit writes, or why it may not.
 type ReclassificationPlan = typeLiteral | typeLiteral;
 ```
 
+### `SERVICE_MOVE_PREFERENCE`
+
+Each record bucket an increase lands in, and the buckets that feed it, in
+preference order — {@link serviceMovesFor}'s table, exported so the api's
+planner and a manager editor read the same one (api-cloudrun `serviceFlag.ts`
+restated it as `BUCKET_MOVE_PREFERENCE`).
+
+```ts
+const SERVICE_MOVE_PREFERENCE: ReadonlyArray<readonly [ServicePlace, readonly ServicePlace[]]>;
+```
+
 ### `ServiceBucketBounds`
 
 The range an editor may put one of a record's buckets in. `max: null` is unbounded.
@@ -31480,6 +31491,24 @@ A bucket a record's units can move between. `unplaced` is quantity − Σ breakd
 
 ```ts
 type ServicePlace = "unplaced" | OOSBreakdownKeyType;
+```
+
+### `ServiceUnitMove`
+
+One bucket move naming its units (`[]` only for an unnamed resolve).
+
+```ts
+interface ServiceUnitMove {
+  units: number[];
+}
+```
+
+### `ServiceUnitMovePlan`
+
+The moves a unit-tracked record's change makes, or why it cannot be made.
+
+```ts
+type ServiceUnitMovePlan = typeLiteral | typeLiteral;
 ```
 
 ### `applyCustodyActions(booking: CustodyBooking, actions: readonly BookingActionType[], _: unknown): CustodyApplication`
@@ -31726,6 +31755,28 @@ Refused: leaving `returned_to_service` (out of service again is a NEW
 record); leaving `written_off` (resolve found units into a reversal first);
 going back to `unplaced` (an effect that happened cannot un-happen); a `lost`
 record's units into `flagged` (lost is a place, not a flag — R3).
+
+### `serviceUnitMovesFor(record: Pick<OutOfService, "quantity" | "reason" | "breakdown"> & typeLiteral, next: OOSBreakdown, nextUnits: OOSUnitsType, _: unknown): ServiceUnitMovePlan`
+
+The moves a UNIT-TRACKED record makes from its stored breakdown and unit sets
+to `next` / `nextUnits`, each naming its units, in the journal's order —
+lifted from api-cloudrun `src/lib/oosUnits.ts` `planUnitMoves`, with the
+manager editor's own checks folded in, so the editor offers exactly what the
+api accepts (gap G11 (c)).
+
+Refused, beside everything {@link serviceMovesFor} refuses:
+- a unit in two buckets, or a unit the record holds left in none — an
+  effect cannot un-happen;
+- a unit new to the record that is not on the unflagged shelf (`shelf`, when
+  the caller has it), or more new units than the record has not placed;
+- a unit whose move is no row of {@link SERVICE_MOVE_PREFERENCE} — so out of
+  `returned_to_service` is refused;
+- a FOUND unit (leaving `written_off`) landing anywhere but `away`,
+  `flagged` or `returned_to_service`. Found moves come FIRST, for the writer
+  to resolve into reversals of the write-off that named each unit;
+- a count change the named units do not account for, other than the unnamed
+  `unplaced → returned_to_service` (a scheduled record resolved before it
+  took effect).
 
 ### `shelfNet(t: Pick<CustodyTransition, "type" | "from" | "to" | "quantity">): number`
 

@@ -45,6 +45,7 @@ import {
   type OOSBreakdown,
   type OOSBreakdownKeyType,
   OOS_BREAKDOWN_KEYS,
+  type OOSUnitsType,
   type OOSReasonType,
   type OutOfService,
   OUT_OF_SERVICE_KEYS,
@@ -905,14 +906,8 @@ export function serviceMovesFor(
     spare[p] = d < 0 ? -d : 0;
     need[p] = d > 0 ? d : 0;
   }
-  const PREFERENCE: ReadonlyArray<[ServicePlace, readonly ServicePlace[]]> = [
-    ["written_off", ["away", "flagged", "unplaced"]],
-    ["returned_to_service", ["away", "flagged", "unplaced"]],
-    ["away", ["flagged", "unplaced"]],
-    ["flagged", ["away", "unplaced"]],
-  ];
   const moves: ServiceBucketMove[] = [];
-  for (const [to, sources] of PREFERENCE) {
+  for (const [to, sources] of SERVICE_MOVE_PREFERENCE) {
     for (const from of sources) {
       const q = Math.min(need[to], spare[from]);
       if (q <= 0) continue;
@@ -926,6 +921,140 @@ export function serviceMovesFor(
     return refuse(`This breakdown change is not a move the record can make (${stuck.join(", ")} would have nowhere to go)`);
   }
   return { ok: true, moves };
+}
+
+/**
+ * Each record bucket an increase lands in, and the buckets that feed it, in
+ * preference order — {@link serviceMovesFor}'s table, exported so the api's
+ * planner and a manager editor read the same one (api-cloudrun `serviceFlag.ts`
+ * restated it as `BUCKET_MOVE_PREFERENCE`).
+ */
+export const SERVICE_MOVE_PREFERENCE: ReadonlyArray<readonly [ServicePlace, readonly ServicePlace[]]> = [
+  ["written_off", ["away", "flagged", "unplaced"]],
+  ["returned_to_service", ["away", "flagged", "unplaced"]],
+  ["away", ["flagged", "unplaced"]],
+  ["flagged", ["away", "unplaced"]],
+];
+
+/** One bucket move naming its units (`[]` only for an unnamed resolve). */
+export interface ServiceUnitMove extends ServiceBucketMove {
+  units: number[];
+}
+
+/** The moves a unit-tracked record's change makes, or why it cannot be made. */
+export type ServiceUnitMovePlan = { ok: true; moves: ServiceUnitMove[] } | { ok: false; message: string };
+
+/** Where a found unit lands: back where its write-off took it from. */
+const FOUND_LANDINGS: readonly ServicePlace[] = ["away", "flagged", "returned_to_service"];
+
+/**
+ * The moves a UNIT-TRACKED record makes from its stored breakdown and unit sets
+ * to `next` / `nextUnits`, each naming its units, in the journal's order —
+ * lifted from api-cloudrun `src/lib/oosUnits.ts` `planUnitMoves`, with the
+ * manager editor's own checks folded in, so the editor offers exactly what the
+ * api accepts (gap G11 (c)).
+ *
+ * Refused, beside everything {@link serviceMovesFor} refuses:
+ * - a unit in two buckets, or a unit the record holds left in none — an
+ *   effect cannot un-happen;
+ * - a unit new to the record that is not on the unflagged shelf (`shelf`, when
+ *   the caller has it), or more new units than the record has not placed;
+ * - a unit whose move is no row of {@link SERVICE_MOVE_PREFERENCE} — so out of
+ *   `returned_to_service` is refused;
+ * - a FOUND unit (leaving `written_off`) landing anywhere but `away`,
+ *   `flagged` or `returned_to_service`. Found moves come FIRST, for the writer
+ *   to resolve into reversals of the write-off that named each unit;
+ * - a count change the named units do not account for, other than the unnamed
+ *   `unplaced → returned_to_service` (a scheduled record resolved before it
+ *   took effect).
+ */
+export function serviceUnitMovesFor(
+  record: Pick<OutOfService, "quantity" | "reason" | "breakdown"> & { units: OOSUnitsType },
+  next: OOSBreakdown,
+  nextUnits: OOSUnitsType,
+  options: { shelf?: readonly number[] } = {},
+): ServiceUnitMovePlan {
+  const refuse = (message: string): ServiceUnitMovePlan => ({ ok: false, message });
+  if (next.written_off >= record.breakdown.written_off) {
+    const counts = serviceMovesFor(record, next);
+    if (!counts.ok) return refuse(counts.message);
+  }
+  const placements = new Map<number, number>();
+  for (const key of OOS_BREAKDOWN_KEYS) for (const n of nextUnits[key]) placements.set(n, (placements.get(n) ?? 0) + 1);
+  const twice = [...placements].filter(([, c]) => c > 1).map(([n]) => n);
+  if (twice.length > 0) return refuse(`Unit ${twice[0]} is in two of this record's buckets; a unit is in one at a time.`);
+  const held = new Set(OOS_BREAKDOWN_KEYS.flatMap((k) => record.units[k]));
+  const added = [...placements.keys()].filter((n) => !held.has(n));
+  if (options.shelf !== undefined) {
+    const shelf = new Set(options.shelf);
+    const stray = added.find((n) => !shelf.has(n));
+    if (stray !== undefined) return refuse(`Unit ${stray} is not on the unflagged shelf, so this record cannot take it.`);
+  }
+  const unplaced = record.quantity - sumOOSBreakdown(record.breakdown);
+  if (added.length > unplaced) {
+    return refuse(`${added.length} unit(s) are new to this record, but only ${unplaced} of its units are not yet in effect.`);
+  }
+
+  const bucketOf = (sets: OOSUnitsType, n: number): ServicePlace =>
+    OOS_BREAKDOWN_KEYS.find((k) => sets[k].includes(n)) ?? "unplaced";
+  const allowed = new Set(SERVICE_MOVE_PREFERENCE.flatMap(([to, froms]) => froms.map((from) => `${from}>${to}`)));
+  const groups = new Map<string, number[]>();
+  for (const n of [...new Set([...held, ...placements.keys()])].sort((a, b) => a - b)) {
+    const from = bucketOf(record.units, n);
+    const to = bucketOf(nextUnits, n);
+    if (from === to) continue;
+    if (to === "unplaced") {
+      return refuse(
+        `Unit ${n} cannot leave this record's buckets: an effect that happened cannot un-happen. ` +
+          "Return it to service, or write it off.",
+      );
+    }
+    if (from === "written_off" && !FOUND_LANDINGS.includes(to)) {
+      return refuse(
+        `Unit ${n} was written off, so it comes back to where its write-off took it from — away, ` +
+          `flagged or returned to service — never to ${to}`,
+      );
+    }
+    if (from !== "written_off" && !allowed.has(`${from}>${to}`)) {
+      return refuse(`Unit ${n} cannot move from ${from} to ${to} on an out-of-service record`);
+    }
+    groups.set(`${from}>${to}`, [...(groups.get(`${from}>${to}`) ?? []), n]);
+  }
+
+  const named: ServiceUnitMove[] = [];
+  const level: OOSBreakdown = { ...record.breakdown };
+  for (const to of FOUND_LANDINGS) {
+    const units = groups.get(`written_off>${to}`);
+    if (!units || to === "unplaced" || to === "written_off") continue;
+    named.push({ from: "written_off", to, quantity: units.length, units });
+    level.written_off -= units.length;
+    level[to] += units.length;
+  }
+  for (const [to, froms] of SERVICE_MOVE_PREFERENCE) {
+    for (const from of froms) {
+      const units = groups.get(`${from}>${to}`);
+      if (!units) continue;
+      named.push({ from, to, quantity: units.length, units });
+      if (from !== "unplaced") level[from] -= units.length;
+      if (to !== "unplaced") level[to] += units.length;
+    }
+  }
+  if (OOS_BREAKDOWN_KEYS.some((k) => level[k] < 0)) {
+    return refuse("The named units move more units out of a bucket than the record holds there");
+  }
+  if (next.written_off < level.written_off) {
+    return refuse("This product tracks units, so bringing written-off units back must name the units that were found");
+  }
+  const residual = serviceMovesFor({ quantity: record.quantity, reason: record.reason, breakdown: level }, next);
+  if (!residual.ok) return refuse(residual.message);
+  const unnamed = residual.moves.find((m) => !(m.from === "unplaced" && m.to === "returned_to_service"));
+  if (unnamed) {
+    return refuse(
+      `This product tracks units, so "${unnamed.from} → ${unnamed.to}" must name the ${unnamed.quantity} ` +
+        "unit(s) it moves",
+    );
+  }
+  return { ok: true, moves: [...named, ...residual.moves.map((m) => ({ ...m, units: [] }))] };
 }
 
 /** The range an editor may put one of a record's buckets in. `max: null` is unbounded. */

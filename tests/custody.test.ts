@@ -45,6 +45,7 @@ import {
   OOS_BREAKDOWN_KEYS,
   type OOSBreakdown,
   type OOSReasonType,
+  type OOSUnitsType,
   UpdateBookingInput,
 } from "../src/schemas/mod.ts";
 import {
@@ -71,6 +72,7 @@ import {
   serviceBreakdownViolation,
   serviceBucketBounds,
   serviceMovesFor,
+  serviceUnitMovesFor,
 } from "../src/utils/custody.ts";
 import * as oracle from "./helpers/custody-oracle.ts";
 
@@ -1199,4 +1201,64 @@ Deno.test("custody - recordOwner reads the mark", () => {
   assertEquals(recordOwner(rec, null), { kind: "legacy" });
   assertEquals(recordOwner({ query_by_sources: [] }, null), { kind: "standalone" });
   assertEquals(recordOwner(rec, { uid_booking: null, custody: null }), { kind: "standalone" });
+});
+
+// ── serviceUnitMovesFor: api-cloudrun tests/unit/oosUnits.test.ts, carried over, plus the editor's checks ──
+
+const ob = (over: Partial<OOSBreakdown>): OOSBreakdown => ({ flagged: 0, away: 0, written_off: 0, returned_to_service: 0, ...over });
+const ou = (over: Partial<OOSUnitsType>): OOSUnitsType => ({ away: [], flagged: [], returned_to_service: [], written_off: [], ...over });
+const unitPlan = (prevB: OOSBreakdown, prevU: OOSUnitsType, next: OOSBreakdown, nextU: OOSUnitsType, quantity: number, reason: OOSReasonType, shelf?: number[]) =>
+  serviceUnitMovesFor({ quantity, reason, breakdown: prevB, units: prevU }, next, nextU, shelf ? { shelf } : {});
+const refusedWith = (plan: ReturnType<typeof unitPlan>, text: string) => {
+  assert(!plan.ok, "expected a refusal");
+  assert(!plan.ok && plan.message.includes(text), !plan.ok ? plan.message : "");
+};
+
+Deno.test("serviceUnitMovesFor: each unit's own move, journaled in the table's order", () => {
+  assertEquals(unitPlan(ob({ flagged: 3 }), ou({ flagged: [1, 2, 3] }), ob({ flagged: 1, away: 1, written_off: 1 }), ou({ flagged: [2], away: [3], written_off: [1] }), 3, "damaged"), {
+    ok: true,
+    moves: [
+      { from: "flagged", to: "written_off", quantity: 1, units: [1] },
+      { from: "flagged", to: "away", quantity: 1, units: [3] },
+    ],
+  });
+  // A swap a count-only plan nets to nothing is two moves.
+  assertEquals(unitPlan(ob({ flagged: 1, away: 1 }), ou({ flagged: [2], away: [1] }), ob({ flagged: 1, away: 1 }), ou({ flagged: [1], away: [2] }), 2, "damaged"), {
+    ok: true,
+    moves: [
+      { from: "flagged", to: "away", quantity: 1, units: [2] },
+      { from: "away", to: "flagged", quantity: 1, units: [1] },
+    ],
+  });
+  assertEquals(unitPlan(ob({}), ou({}), ob({ flagged: 2 }), ou({ flagged: [7, 9] }), 2, "cleaning"), {
+    ok: true,
+    moves: [{ from: "unplaced", to: "flagged", quantity: 2, units: [7, 9] }],
+  });
+  assertEquals(unitPlan(ob({}), ou({}), ob({ returned_to_service: 2 }), ou({}), 2, "maintenance"), {
+    ok: true,
+    moves: [{ from: "unplaced", to: "returned_to_service", quantity: 2, units: [] }],
+  });
+  // A found unit is a written_off → X move, first (D8).
+  assertEquals(unitPlan(ob({ written_off: 2 }), ou({ written_off: [1, 2] }), ob({ away: 1, returned_to_service: 1 }), ou({ away: [1], returned_to_service: [2] }), 2, "lost"), {
+    ok: true,
+    moves: [
+      { from: "written_off", to: "away", quantity: 1, units: [1] },
+      { from: "written_off", to: "returned_to_service", quantity: 1, units: [2] },
+    ],
+  });
+});
+
+Deno.test("serviceUnitMovesFor: every api refusal, and the editor's own (G11 (c))", () => {
+  refusedWith(unitPlan(ob({ flagged: 2 }), ou({ flagged: [1, 2] }), ob({ returned_to_service: 2 }), ou({ flagged: [1, 2] }), 2, "damaged"), '"flagged → returned_to_service" must name the 2 unit(s)');
+  refusedWith(unitPlan(ob({ flagged: 2 }), ou({ flagged: [1, 2] }), ob({ flagged: 2 }), ou({ flagged: [1] }), 2, "damaged"), "cannot leave this record's buckets");
+  refusedWith(unitPlan(ob({ written_off: 1 }), ou({}), ob({ away: 1 }), ou({}), 1, "lost"), "written-off units back");
+  // Out of returned_to_service: the manager offered it, the api refused it.
+  refusedWith(unitPlan(ob({ returned_to_service: 1 }), ou({ returned_to_service: [1] }), ob({ flagged: 1 }), ou({ flagged: [1] }), 1, "damaged"), "cannot be taken back out");
+  refusedWith(unitPlan(ob({ away: 1 }), ou({ away: [1] }), ob({ flagged: 1 }), ou({ flagged: [1] }), 1, "lost"), "lost unit");
+  refusedWith(unitPlan(ob({ written_off: 1 }), ou({ written_off: [1] }), ob({}), ou({}), 1, "lost"), "cannot leave this record's buckets");
+  // The editor's checks, now the api's too.
+  refusedWith(unitPlan(ob({}), ou({}), ob({ flagged: 1, away: 1 }), ou({ flagged: [5], away: [5] }), 2, "damaged"), "in two of this record's buckets");
+  refusedWith(unitPlan(ob({}), ou({}), ob({ flagged: 1 }), ou({ flagged: [5] }), 1, "damaged", [6]), "not on the unflagged shelf");
+  // A unit new to the record when none is unplaced (an unnamed historic `away` count holds the rest).
+  refusedWith(unitPlan(ob({ flagged: 1, away: 1 }), ou({ flagged: [5] }), ob({ flagged: 2 }), ou({ flagged: [5, 6] }), 2, "damaged"), "not yet in effect");
 });

@@ -14145,6 +14145,12 @@
           "doc": "What a reason edit writes, or why it may not."
         },
         {
+          "kind": "variable",
+          "name": "SERVICE_MOVE_PREFERENCE",
+          "declaration": "const SERVICE_MOVE_PREFERENCE: ReadonlyArray<readonly [ServicePlace, readonly ServicePlace[]]>;",
+          "doc": "Each record bucket an increase lands in, and the buckets that feed it, in\npreference order — {@link serviceMovesFor}'s table, exported so the api's\nplanner and a manager editor read the same one (api-cloudrun `serviceFlag.ts`\nrestated it as `BUCKET_MOVE_PREFERENCE`)."
+        },
+        {
           "kind": "interface",
           "name": "ServiceBucketBounds",
           "declaration": "interface ServiceBucketBounds {\n  min: number;\n  max: number | null;\n}",
@@ -14167,6 +14173,18 @@
           "name": "ServicePlace",
           "declaration": "type ServicePlace = \"unplaced\" | OOSBreakdownKeyType;",
           "doc": "A bucket a record's units can move between. `unplaced` is quantity − Σ breakdown."
+        },
+        {
+          "kind": "interface",
+          "name": "ServiceUnitMove",
+          "declaration": "interface ServiceUnitMove {\n  units: number[];\n}",
+          "doc": "One bucket move naming its units (`[]` only for an unnamed resolve)."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ServiceUnitMovePlan",
+          "declaration": "type ServiceUnitMovePlan = typeLiteral | typeLiteral;",
+          "doc": "The moves a unit-tracked record's change makes, or why it cannot be made."
         },
         {
           "kind": "function",
@@ -14325,6 +14343,14 @@
           "name": "serviceMovesFor",
           "signature": "serviceMovesFor(record: Pick<OutOfService, \"quantity\" | \"reason\" | \"breakdown\">, next: OOSBreakdown): ServiceMovePlan",
           "doc": "The moves that take an out-of-service record from its stored breakdown to\n`next` — lifted from the api's `planBucketMoves`, which was already a\ntable-driven, refusing planner. The record PUT stays target-shaped because\nthis is deterministic: there is nothing to infer.\n\nEach INCREASE is fed from the buckets that DECREASED, in a fixed preference:\n\n| into                  | drawn from, in order   |\n|-----------------------|------------------------|\n| `written_off`         | `away`, `flagged`, then `unplaced` |\n| `returned_to_service` | `away`, `flagged`, then `unplaced` |\n| `away`                | `flagged`, then `unplaced` |\n| `flagged`             | `away`, then `unplaced` |\n\nRefused: leaving `returned_to_service` (out of service again is a NEW\nrecord); leaving `written_off` (resolve found units into a reversal first);\ngoing back to `unplaced` (an effect that happened cannot un-happen); a `lost`\nrecord's units into `flagged` (lost is a place, not a flag — R3).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "serviceUnitMovesFor",
+          "signature": "serviceUnitMovesFor(record: Pick<OutOfService, \"quantity\" | \"reason\" | \"breakdown\"> & typeLiteral, next: OOSBreakdown, nextUnits: OOSUnitsType, _: unknown): ServiceUnitMovePlan",
+          "doc": "The moves a UNIT-TRACKED record makes from its stored breakdown and unit sets\nto `next` / `nextUnits`, each naming its units, in the journal's order —\nlifted from api-cloudrun `src/lib/oosUnits.ts` `planUnitMoves`, with the\nmanager editor's own checks folded in, so the editor offers exactly what the\napi accepts (gap G11 (c)).\n\nRefused, beside everything {@link serviceMovesFor} refuses:\n- a unit in two buckets, or a unit the record holds left in none — an\n  effect cannot un-happen;\n- a unit new to the record that is not on the unflagged shelf (`shelf`, when\n  the caller has it), or more new units than the record has not placed;\n- a unit whose move is no row of {@link SERVICE_MOVE_PREFERENCE} — so out of\n  `returned_to_service` is refused;\n- a FOUND unit (leaving `written_off`) landing anywhere but `away`,\n  `flagged` or `returned_to_service`. Found moves come FIRST, for the writer\n  to resolve into reversals of the write-off that named each unit;\n- a count change the named units do not account for, other than the unnamed\n  `unplaced → returned_to_service` (a scheduled record resolved before it\n  took effect).",
           "paramTags": [],
           "returnsTag": null
         },
