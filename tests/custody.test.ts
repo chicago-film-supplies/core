@@ -52,6 +52,10 @@ import {
   canEditServiceBreakdown,
   CustodyRefusal,
   custodyActionsFor,
+  custodyMovementTypes,
+  custodyPlaces,
+  isReleasingRewind,
+  splitLeadingReleases,
   custodyRuleForMovement,
   decomposeCustodyDelta,
   deriveCustodyStatus,
@@ -964,3 +968,55 @@ Deno.test("custody P2b - stored movements find their rows; the R2 no-custody fla
   assertEquals(custodyRuleForMovement("flag", { from: "returned", to: "cleaning" }, { from: null, to: "maintenance" }, "rental"), null);
 });
 
+
+// ── the ladder's movements and where they put units ──────────────────
+
+Deno.test("custody - custodyMovementTypes: the rental set is the api's LADDER_MOVEMENT_TYPES, the sale set its four", () => {
+  // api-cloudrun src/lib/bookingMovements.ts LADDER_MOVEMENT_TYPES, frozen here as the oracle.
+  assertEquals(new Set(custodyMovementTypes("rental")), new Set([
+    "prep", "check_out", "check_in", "mark_damaged", "mark_lost", "unprep", "check_out_undo", "check_in_undo",
+    "mark_lost_undo", "mark_damaged_undo", "mark_cleaning", "mark_cleaning_undo", "mark_maintenance",
+    "mark_maintenance_undo", "flag",
+  ]));
+  assertEquals(custodyMovementTypes("sale"), ["prep", "unprep", "sale", "sale_return"]);
+  assertEquals(custodyMovementTypes("service"), []);
+});
+
+Deno.test("custody - custodyPlaces: out is a booking for a rental and outside for a sale; a flag stays in place", () => {
+  assertEquals(custodyPlaces("check_out", { from: "prepped", to: "out" }), { from: "locations", to: "bookings" });
+  assertEquals(custodyPlaces("sale", { from: "prepped", to: "out" }), { from: "locations", to: "outside" });
+  assertEquals(custodyPlaces("mark_lost_undo", { from: "lost", to: "returned" }), { from: "out-of-service", to: "locations" });
+  assertEquals(custodyPlaces("flag", { from: "returned", to: "damaged" }), { from: "locations", to: "locations" });
+  assertEquals(custodyPlaces("prep", { from: "reserved", to: "prepped" }), null);
+});
+
+Deno.test("custody - isReleasingRewind: every rule arm, as the api's line-netting form measured it (2026-10-08)", () => {
+  // Measured by running api-cloudrun's own isReleasingRewind over every arm: 32 compared, 0 disagree.
+  const releasing = new Set([
+    "unprep", "check_out_undo", "mark_lost_undo", "mark_lost_returned_undo",
+    "flag_damaged_returned_undo", "flag_cleaning_returned_undo", "flag_maintenance_returned_undo",
+  ]);
+  let checked = 0;
+  for (const r of CUSTODY_RULES) {
+    for (const arm of [r.rental, r.sale]) {
+      if (!arm?.movement) continue;
+      assertEquals(
+        isReleasingRewind({ rule: r.id, type: arm.movement, from: r.from, to: r.to, quantity: 2 }),
+        releasing.has(r.id),
+        `${r.id} (${arm.movement})`,
+      );
+      checked++;
+    }
+  }
+  assertEquals(checked, 32);
+});
+
+Deno.test("custody - splitLeadingReleases stops at the first transition that is not a releasing rewind", () => {
+  const t = (rule: CustodyRuleId) => {
+    const r = custodyRule(rule);
+    return { rule, type: r.rental!.movement!, from: r.from, to: r.to, quantity: 1 };
+  };
+  const { first, rest } = splitLeadingReleases([t("check_out_undo"), t("unprep"), t("prep"), t("unprep")]);
+  assertEquals(first.map((x) => x.rule), ["check_out_undo", "unprep"]);
+  assertEquals(rest.map((x) => x.rule), ["prep", "unprep"]);
+});

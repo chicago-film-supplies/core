@@ -14027,6 +14027,12 @@
           "doc": "What an offer list needs that the booking alone does not carry."
         },
         {
+          "kind": "interface",
+          "name": "CustodyPlaces",
+          "declaration": "interface CustodyPlaces {\n  from: PlaceKindType;\n  to: PlaceKindType;\n}",
+          "doc": "The two places a custody movement's lines run between."
+        },
+        {
           "kind": "other",
           "name": "CustodyRefusal",
           "declaredKind": "class",
@@ -14102,6 +14108,22 @@
         },
         {
           "kind": "function",
+          "name": "custodyMovementTypes",
+          "signature": "custodyMovementTypes(bookingType: indexedAccess): MovementTypeType[]",
+          "doc": "Every movement type the custody ladder can write for a booking of this type,\nin table order, each once — read off {@link CUSTODY_RULES}'s arms, so a new\nrule's movement is included without an edit. `[]` for a type that holds no\nstock. The api's `LADDER_MOVEMENT_TYPES` (rental) was a hand-kept copy.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "custodyPlaces",
+          "signature": "custodyPlaces(type: MovementTypeType, custody: typeLiteral): CustodyPlaces | null",
+          "doc": "The kind of place each end of a custody movement's lines stands in, or `null`\nwhen the movement writes no lines (`places: null` — a prep, a rebook).\n\nEach end is the kind its custody key implies (`CUSTODY_PLACE_KINDS`) that the\nmovement's contract allows on that side: `out` is a `bookings` place for a\nrental and `outside` for a sale, and a `lost` unit stands at its\n`out-of-service` record. A flag is `locations → locations`: in place.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "custodyRuleForMovement",
           "signature": "custodyRuleForMovement(type: MovementTypeType, custody: typeLiteral | null, service: typeLiteral | null | undefined, bookingType: \"rental\" | \"sale\"): CustodyRule | null",
           "doc": "The rule a STORED movement's `(type, custody, service)` is an instance of, or\n`null` — the population assertion's lookup (`audit-custody-rules` in the api\nreplays every stored custody movement through it).\n\n⚠️ A `flag` with NO custody pair maps to nothing. That was R2's check-in\nflag (`flag_returned`), retired in P4 after the audit found none stored in\neither project (2026-09-30), so one appearing now is a finding.",
@@ -14142,6 +14164,14 @@
         },
         {
           "kind": "function",
+          "name": "isReleasingRewind",
+          "signature": "isReleasingRewind(t: Pick<CustodyTransition, \"rule\" | \"type\" | \"from\" | \"to\" | \"quantity\">): boolean",
+          "doc": "Whether a transition is a RELEASING rewind: an undo that takes no units off\na shelf — it adds shelf units (`check_out_undo`, a shelf loss undone), clears\na flag in place, or moves nothing physical (`unprep`, a booking-side loss\nundone). Moved from the api's `bookingMovements.ts`, where it netted the\nlines its own line builder produced; here it reads the contracts directly\n({@link shelfNet}), the same answer for every rule.\n\n⚠️ Not every undo releases. `check_in_undo` and the damaged-family mark undos\n(`mark_{damaged,cleaning,maintenance}_undo`) take units OFF a shelf back to\nthe booking, and on a bulk product the shelf is fungible: `[A: check_in 5,\nB: check_in_undo 5]` against an empty shelf works only because A refills it\nfirst. Moving such a rewind earlier could refuse a request that passes in row\norder, so it holds its place.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "serviceBreakdownViolation",
           "signature": "serviceBreakdownViolation(record: BoundsRecord, next: OOSBreakdown): string | null",
           "doc": "The first rule `next` breaks, as the sentence the operator reads: a bucket\noutside its bounds first, then the sum against the record. `null` when\n`next` is within bounds (the planner may still refuse the MOVE).",
@@ -14161,6 +14191,22 @@
           "name": "serviceMovesFor",
           "signature": "serviceMovesFor(record: Pick<OutOfService, \"quantity\" | \"reason\" | \"breakdown\">, next: OOSBreakdown): ServiceMovePlan",
           "doc": "The moves that take an out-of-service record from its stored breakdown to\n`next` — lifted from the api's `planBucketMoves`, which was already a\ntable-driven, refusing planner. The record PUT stays target-shaped because\nthis is deterministic: there is nothing to infer.\n\nEach INCREASE is fed from the buckets that DECREASED, in a fixed preference:\n\n| into                  | drawn from, in order   |\n|-----------------------|------------------------|\n| `written_off`         | `away`, `flagged`, then `unplaced` |\n| `returned_to_service` | `away`, `flagged`, then `unplaced` |\n| `away`                | `flagged`, then `unplaced` |\n| `flagged`             | `away`, then `unplaced` |\n\nRefused: leaving `returned_to_service` (out of service again is a NEW\nrecord); leaving `written_off` (resolve found units into a reversal first);\ngoing back to `unplaced` (an effect that happened cannot un-happen); a `lost`\nrecord's units into `flagged` (lost is a place, not a flag — R3).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "shelfNet",
+          "signature": "shelfNet(t: Pick<CustodyTransition, \"type\" | \"from\" | \"to\" | \"quantity\">): number",
+          "doc": "Units a custody movement puts ON shelves, net: `+1` per unit landing on a\n`locations` place, `−1` per unit leaving one, `0` for a flag in place or a\nmovement with no lines. Times `quantity`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "splitLeadingReleases",
+          "signature": "splitLeadingReleases(transitions: readonly T[]): typeLiteral",
+          "doc": "Split one row's transitions into the leading run of releasing rewinds and\nthe rest (serial-tracking D7). The chunk folds every row's `first` before any\nrow's `rest`, so units a rewind frees are free before any forward step looks\nfor them — which is what lets a two-order swap (a cycle no row order\nresolves) go in one request. The prefix stops at the first transition that is\nnot a releasing rewind, so a row's own steps keep their order.",
           "paramTags": [],
           "returnsTag": null
         }

@@ -65,7 +65,11 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
 
   ],
   "custody": [
-
+    { name: "custodyMovementTypes", expr: "it.custody.custodyMovementTypes(bookingType)", desc: "Every movement type the custody ladder can write for a booking of this type, in table order, each once — read off {@link CUSTODY_RULES}'s arms, so a new rule's movement is included without an edit. `[]` for a type that holds no stock. The api's `LADDER_MOVEMENT_TYPES` (rental) was a hand-kept copy.", returns: "MovementTypeType[]" },
+    { name: "custodyPlaces", expr: "it.custody.custodyPlaces(type, custody)", desc: "The kind of place each end of a custody movement's lines stands in, or `null` when the movement writes no lines (`places: null` — a prep, a rebook).", returns: "CustodyPlaces | null" },
+    { name: "isReleasingRewind", expr: "it.custody.isReleasingRewind(t)", desc: "Whether a transition is a RELEASING rewind: an undo that takes no units off a shelf — it adds shelf units (`check_out_undo`, a shelf loss undone), clears a flag in place, or moves nothing physical (`unprep`, a booking-side loss undone). Moved from the api's `bookingMovements.ts`, where it netted the lines its own line builder produced; here it reads the contracts directly ({@link shelfNet}), the same answer for every rule.", returns: "boolean" },
+    { name: "shelfNet", expr: "it.custody.shelfNet(t)", desc: "Units a custody movement puts ON shelves, net: `+1` per unit landing on a `locations` place, `−1` per unit leaving one, `0` for a flag in place or a movement with no lines. Times `quantity`.", returns: "number" },
+    { name: "splitLeadingReleases", expr: "it.custody.splitLeadingReleases(transitions)", desc: "Split one row's transitions into the leading run of releasing rewinds and the rest (serial-tracking D7). The chunk folds every row's `first` before any row's `rest`, so units a rewind frees are free before any forward step looks for them — which is what lets a two-order swap (a cycle no row order resolves) go in one request. The prefix stops at the first transition that is not a releasing rewind, so a row's own steps keep their order.", returns: "typeLiteral" },
   ],
   "dates": [
     { name: "billableDays", expr: "it.dates.billableDays(days)", desc: "**The days a set of windows bills: Σ `max(days, 5)`.** Every window carries the one-week minimum, a 0-day window included (charge-windows decision 2).", returns: "number" },

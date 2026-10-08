@@ -48,6 +48,9 @@ import {
   OUT_OF_SERVICE_KEYS,
   type OutOfServiceKeyType,
   ownsKey,
+  CUSTODY_PLACE_KINDS,
+  MOVEMENT_CONTRACTS,
+  type PlaceKindType,
 } from "../schemas/mod.ts";
 import {
   breakdownQuantity,
@@ -353,6 +356,105 @@ function moveUnits(
 /** A row that puts a flag on units carrying none: every `flag_*_returned`. */
 function addsFlag(rule: CustodyRule): boolean {
   return rule.from === "returned" && rule.service !== null && rule.service.from === "none";
+}
+
+// ── the ladder's movements and where they put units ──────────────────
+
+/**
+ * Every movement type the custody ladder can write for a booking of this type,
+ * in table order, each once — read off {@link CUSTODY_RULES}'s arms, so a new
+ * rule's movement is included without an edit. `[]` for a type that holds no
+ * stock. The api's `LADDER_MOVEMENT_TYPES` (rental) was a hand-kept copy.
+ */
+export function custodyMovementTypes(bookingType: Booking["type"]): MovementTypeType[] {
+  const types: MovementTypeType[] = [];
+  for (const rule of CUSTODY_RULES) {
+    const movement = armFor(rule, bookingType)?.movement ?? null;
+    if (movement !== null && !types.includes(movement)) types.push(movement);
+  }
+  return types;
+}
+
+/** The two places a custody movement's lines run between. */
+export interface CustodyPlaces {
+  from: PlaceKindType;
+  to: PlaceKindType;
+}
+
+/**
+ * The kind of place each end of a custody movement's lines stands in, or `null`
+ * when the movement writes no lines (`places: null` — a prep, a rebook).
+ *
+ * Each end is the kind its custody key implies (`CUSTODY_PLACE_KINDS`) that the
+ * movement's contract allows on that side: `out` is a `bookings` place for a
+ * rental and `outside` for a sale, and a `lost` unit stands at its
+ * `out-of-service` record. A flag is `locations → locations`: in place.
+ *
+ * @throws Error when the custody pair names no place the contract allows — a
+ *   row the table test would already have refused.
+ */
+export function custodyPlaces(
+  type: MovementTypeType,
+  custody: { from: BookingBreakdownKeyType; to: BookingBreakdownKeyType },
+): CustodyPlaces | null {
+  const places = MOVEMENT_CONTRACTS[type].places;
+  if (places === null) return null;
+  const pick = (key: BookingBreakdownKeyType, allowed: readonly PlaceKindType[]): PlaceKindType => {
+    const kind = CUSTODY_PLACE_KINDS[key].find((k) => allowed.includes(k));
+    if (kind === undefined) throw new Error(`"${type}" cannot carry ${key}: none of its places is one ${key} stands in`);
+    return kind;
+  };
+  return { from: pick(custody.from, places.from), to: pick(custody.to, places.to) };
+}
+
+/**
+ * Units a custody movement puts ON shelves, net: `+1` per unit landing on a
+ * `locations` place, `−1` per unit leaving one, `0` for a flag in place or a
+ * movement with no lines. Times `quantity`.
+ */
+export function shelfNet(
+  t: Pick<CustodyTransition, "type" | "from" | "to" | "quantity">,
+): number {
+  const places = custodyPlaces(t.type, t);
+  if (places === null) return 0;
+  return ((places.to === "locations" ? 1 : 0) - (places.from === "locations" ? 1 : 0)) * t.quantity;
+}
+
+/**
+ * Whether a transition is a RELEASING rewind: an undo that takes no units off
+ * a shelf — it adds shelf units (`check_out_undo`, a shelf loss undone), clears
+ * a flag in place, or moves nothing physical (`unprep`, a booking-side loss
+ * undone). Moved from the api's `bookingMovements.ts`, where it netted the
+ * lines its own line builder produced; here it reads the contracts directly
+ * ({@link shelfNet}), the same answer for every rule.
+ *
+ * ⚠️ Not every undo releases. `check_in_undo` and the damaged-family mark undos
+ * (`mark_{damaged,cleaning,maintenance}_undo`) take units OFF a shelf back to
+ * the booking, and on a bulk product the shelf is fungible: `[A: check_in 5,
+ * B: check_in_undo 5]` against an empty shelf works only because A refills it
+ * first. Moving such a rewind earlier could refuse a request that passes in row
+ * order, so it holds its place.
+ */
+export function isReleasingRewind(
+  t: Pick<CustodyTransition, "rule" | "type" | "from" | "to" | "quantity">,
+): boolean {
+  return custodyRule(t.rule).direction === "undo" && shelfNet(t) >= 0;
+}
+
+/**
+ * Split one row's transitions into the leading run of releasing rewinds and
+ * the rest (serial-tracking D7). The chunk folds every row's `first` before any
+ * row's `rest`, so units a rewind frees are free before any forward step looks
+ * for them — which is what lets a two-order swap (a cycle no row order
+ * resolves) go in one request. The prefix stops at the first transition that is
+ * not a releasing rewind, so a row's own steps keep their order.
+ */
+export function splitLeadingReleases<T extends Pick<CustodyTransition, "rule" | "type" | "from" | "to" | "quantity">>(
+  transitions: readonly T[],
+): { first: T[]; rest: T[] } {
+  let i = 0;
+  while (i < transitions.length && isReleasingRewind(transitions[i])) i++;
+  return { first: transitions.slice(0, i), rest: transitions.slice(i) };
 }
 
 // ── offers ───────────────────────────────────────────────────────────

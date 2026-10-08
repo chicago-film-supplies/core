@@ -31224,6 +31224,17 @@ interface CustodyOfferContext {
 }
 ```
 
+### `CustodyPlaces`
+
+The two places a custody movement's lines run between.
+
+```ts
+interface CustodyPlaces {
+  from: PlaceKindType;
+  to: PlaceKindType;
+}
+```
+
 ### `CustodyRefusal`
 
 _(class — see source)_
@@ -31330,6 +31341,23 @@ change, both by owner ruling (2026-09-29):
   Cleaning and Maintenance off `returned`, so `‹ Out` is no longer the only
   way to reach them. Since P2b those are the `flag_*_returned` rows.
 
+### `custodyMovementTypes(bookingType: indexedAccess): MovementTypeType[]`
+
+Every movement type the custody ladder can write for a booking of this type,
+in table order, each once — read off {@link CUSTODY_RULES}'s arms, so a new
+rule's movement is included without an edit. `[]` for a type that holds no
+stock. The api's `LADDER_MOVEMENT_TYPES` (rental) was a hand-kept copy.
+
+### `custodyPlaces(type: MovementTypeType, custody: typeLiteral): CustodyPlaces | null`
+
+The kind of place each end of a custody movement's lines stands in, or `null`
+when the movement writes no lines (`places: null` — a prep, a rebook).
+
+Each end is the kind its custody key implies (`CUSTODY_PLACE_KINDS`) that the
+movement's contract allows on that side: `out` is a `bookings` place for a
+rental and `outside` for a sale, and a `lost` unit stands at its
+`out-of-service` record. A flag is `locations → locations`: in place.
+
 ### `custodyRuleForMovement(type: MovementTypeType, custody: typeLiteral | null, service: typeLiteral | null | undefined, bookingType: "rental" | "sale"): CustodyRule | null`
 
 The rule a STORED movement's `(type, custody, service)` is an instance of, or
@@ -31412,6 +31440,22 @@ The rule table as a markdown rung table — the source for the api's
 `fulfillment-ladder` skill and the booking-action input's `/openapi.json`
 description, so neither restates the table by hand.
 
+### `isReleasingRewind(t: Pick<CustodyTransition, "rule" | "type" | "from" | "to" | "quantity">): boolean`
+
+Whether a transition is a RELEASING rewind: an undo that takes no units off
+a shelf — it adds shelf units (`check_out_undo`, a shelf loss undone), clears
+a flag in place, or moves nothing physical (`unprep`, a booking-side loss
+undone). Moved from the api's `bookingMovements.ts`, where it netted the
+lines its own line builder produced; here it reads the contracts directly
+({@link shelfNet}), the same answer for every rule.
+
+⚠️ Not every undo releases. `check_in_undo` and the damaged-family mark undos
+(`mark_{damaged,cleaning,maintenance}_undo`) take units OFF a shelf back to
+the booking, and on a bulk product the shelf is fungible: `[A: check_in 5,
+B: check_in_undo 5]` against an empty shelf works only because A refills it
+first. Moving such a rewind earlier could refuse a request that passes in row
+order, so it holds its place.
+
 ### `serviceBreakdownViolation(record: BoundsRecord, next: OOSBreakdown): string | null`
 
 The first rule `next` breaks, as the sentence the operator reads: a bucket
@@ -31449,6 +31493,21 @@ Refused: leaving `returned_to_service` (out of service again is a NEW
 record); leaving `written_off` (resolve found units into a reversal first);
 going back to `unplaced` (an effect that happened cannot un-happen); a `lost`
 record's units into `flagged` (lost is a place, not a flag — R3).
+
+### `shelfNet(t: Pick<CustodyTransition, "type" | "from" | "to" | "quantity">): number`
+
+Units a custody movement puts ON shelves, net: `+1` per unit landing on a
+`locations` place, `−1` per unit leaving one, `0` for a flag in place or a
+movement with no lines. Times `quantity`.
+
+### `splitLeadingReleases(transitions: readonly T[]): typeLiteral`
+
+Split one row's transitions into the leading run of releasing rewinds and
+the rest (serial-tracking D7). The chunk folds every row's `first` before any
+row's `rest`, so units a rewind frees are free before any forward step looks
+for them — which is what lets a two-order swap (a cycle no row order
+resolves) go in one request. The prefix stops at the first transition that is
+not a releasing rewind, so a row's own steps keep their order.
 
 ## `@cfs/core/utils/cards`
 
