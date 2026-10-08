@@ -234,6 +234,12 @@ export const MOVEMENT_TYPES = [
   // diverged. The pair mirrors `reclass_out`/`reclass_in` below, and names its
   // counterpart booking in `sources[]` the way the reclass names its twin.
   //
+  // ⭐ **A second use, any bucket:** the complete-order GRAIN CARRY
+  // (api-cloudrun#1204) re-attributes a terminal history (`returned`, `lost`, …)
+  // off a pre-#1145 3-segment booking id onto the ids the order now implies. Same
+  // shape, `{X → null}` / `{null → X}` for the bucket X it moves, one sub-session
+  // per bucket. Nothing in the contract below restricts the bucket.
+  //
   // ⚠️ **No undo type.** The inverse of A → B is a rebook B → A, the same pair
   // pointed the other way. The `*_undo` types exist only to walk DOWN the ladder.
   //

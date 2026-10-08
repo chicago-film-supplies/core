@@ -797,6 +797,67 @@ const updateOrderRules: CollectionRule[] = [
   },
 ];
 
+// ── the complete-order grain carry (api-cloudrun#1204) ──────────────
+//
+// Fired by `update-order`, and logged single-rule by `recomputeOrderBookings`,
+// which runs the same reconcile (`reconcile-order-from-invoices` skips a complete
+// order, so it never carries). A complete order whose
+// custody still sits under a pre-#1145 3-segment booking id has that custody
+// re-apportioned across every id the order implies, and the move is journaled.
+
+const GRAIN_CARRY_TESTS = "api-cloudrun/tests/integration/orders/orderEditCustody.test.ts";
+
+const GRAIN_CARRY_APPORTIONS: EnforcementRef = {
+  kind: "test",
+  ref: `${GRAIN_CARRY_TESTS}::a pending collision on a COMPLETE order is apportioned across every implied id (#1204)`,
+  clause:
+    "shape A (an orphan 3-segment id) and shape B (a still-implied 3-segment id beside a missing nested successor): each bucket is conserved across the grain, every implied booking sums to its quantity, no booking is kept, and the order's bookings_breakdown total is unchanged",
+  gates: true,
+};
+
+const GRAIN_CARRY_JOURNAL: EnforcementRef = {
+  kind: "test",
+  ref: `${GRAIN_CARRY_TESTS}::the carry journals a rebook pair per bucket that replays every booking (#1204)`,
+  clause:
+    "per bucket, a lineless rebook_out on each booking that fell and a rebook_in on each that rose, each bucket in its own sub-session, netting to exactly the change in every booking's breakdown",
+  gates: true,
+};
+
+const grainCarryRules: CollectionRule[] = [
+  {
+    id: "update-order:grain-carry-to-bookings",
+    source: "orders",
+    target: "bookings",
+    mode: "co-write",
+    invariant:
+      "On a COMPLETE order, a booking grain (order, product, leg) in the LEGACY shape — a 3-segment booking holds custody while the order implies a 4-segment id in the grain, and either some implied id has no document or an un-implied booking that is not KEPT (quantity_ordered: 0) holds custody — whose pooled custody sums to exactly the implied ids' physical quantities has that custody re-apportioned across every implied id (`apportionBreakdown`: each bucket conserved, each booking summing to its quantity). A carried orphan is deleted, since its history moved. A grain that is not legacy, or does not balance, is left to the ordinary rules, so a modern edit of a complete order (removing a kit occurrence, adding a nested one) is unchanged. Refused (400) only on a unit-tracked booking. Never on a live order: an order edit does not move custody there (api-cloudrun#1147).",
+    enforced_by: [GRAIN_CARRY_APPORTIONS],
+    transaction: "update-order",
+    fields: [
+      {
+        source: ["items", "quantity"],
+        target: ["breakdown"],
+        transform: "apportionBreakdown(Σ the grain's stored custody, the implied ids' physical quantities)",
+      },
+    ],
+  },
+  {
+    id: "update-order:grain-carry-to-transactions",
+    source: "bookings",
+    target: "transactions",
+    mode: "co-write",
+    invariant:
+      "What the carry moves is journaled as the rental extension's pair, per bucket: a lineless `rebook_out` (custody {bucket → null}) on each booking whose bucket fell and a `rebook_in` ({null → bucket}) on each whose bucket rose, each bucket in its own sub-session (a movement id is {session}|{type}|{booking}), outs numbered before ins. No lines, no ledger effect. A bucket that does not net to zero across the grain is a thrown error, never journaled, since the carry creates no custody.",
+    enforced_by: [GRAIN_CARRY_JOURNAL],
+    transaction: "update-order",
+    fields: [
+      { source: ["uid_product"], target: ["uid_product"] },
+      { source: ["uid"], target: ["uid_booking"] },
+      { source: ["breakdown"], target: ["quantity"], transform: "the bucket's change on that booking" },
+    ],
+  },
+];
+
 const updateOrderTransaction: TransactionDefinition = {
   id: "update-order",
   description:
@@ -805,6 +866,8 @@ const updateOrderTransaction: TransactionDefinition = {
     "update-order:org-to-order",
     "update-order:order-self-derive",
     "update-order:order-to-bookings",
+    "update-order:grain-carry-to-bookings",
+    "update-order:grain-carry-to-transactions",
     "update-order:ledger-to-bookings",
     ...STOCK_STEPS,
     "update-order:fulfillment-to-cards",
@@ -1484,6 +1547,7 @@ export const orders: PropagationModule = {
   rules: [
     ...createOrderRules,
     ...updateOrderRules,
+    ...grainCarryRules,
     ...updateBookingRules,
     ...extendRentalRules,
     ...undoExtendRentalRules,
