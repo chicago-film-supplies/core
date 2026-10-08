@@ -35,7 +35,7 @@ import {
   type DocSourceType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
-  OrderDerivedOrgPath,
+  OrgSnapshotCore,
   type OrgPathNodeType,
   TimestampFields,
 } from "./common.ts";
@@ -205,10 +205,7 @@ export interface CardOrganizationType {
 }
 
 /** Zod schema for CardOrganizationType. */
-export const CardOrganization: z.ZodType<CardOrganizationType> = z.strictObject({
-  uid: FirestoreId.nullable(),
-  path: OrderDerivedOrgPath,
-});
+export const CardOrganization: z.ZodType<CardOrganizationType> = z.strictObject(OrgSnapshotCore);
 
 /**
  * `sources[]` on a card and on a recurrence's `prototype`: any

@@ -34,7 +34,7 @@ import {
   type FulfillableItemType,
   FULFILLMENT_LINE_ITEM_TYPES,
   isLineItemType,
-  OrderDerivedOrgPath,
+  OrgSnapshotCore,
   type OrgPathNodeType,
   StockMethodEnum,
   type StockMethodType,
@@ -454,10 +454,7 @@ export function isFulfillmentLineItem(
  * operator-facing account number is neither — but nobody has written that down,
  * so it reads as an omission. core#94 asks for the ruling.
  */
-const FulfillmentOrganization = z.strictObject({
-  uid: FirestoreId.nullable(),
-  path: OrderDerivedOrgPath,
-});
+const FulfillmentOrganization = z.strictObject(OrgSnapshotCore);
 
 /**
  * Sanitized order document for the fulfillment client view.

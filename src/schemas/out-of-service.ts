@@ -62,7 +62,7 @@ import {
   type OOSFlagReasonType,
   OOSReasonEnum,
   type OOSReasonType,
-  OrderDerivedOrgPath,
+  OrgSnapshotCore,
   type OrgPathNodeType,
   TimestampFields,
   UidNameRef,
@@ -316,8 +316,7 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   units: OOSUnitsSchema.nullable(),
   canceled_at: FirestoreTimestamp.nullable().meta({ column: true, label: "Canceled" }),
   organization: z.strictObject({
-    uid: FirestoreId.nullable(),
-    path: OrderDerivedOrgPath,
+    ...OrgSnapshotCore,
     crms_id: z.int().nullable(),
   }).nullable().meta({ label: "Organization" }),
   dates: OOSDatesSchema,

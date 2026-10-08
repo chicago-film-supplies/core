@@ -16224,6 +16224,31 @@ interface OrgPathNodeType {
 }
 ```
 
+### `OrgSnapshotCore`
+
+The two keys EVERY organization snapshot carries, each declared exactly once —
+the organization's id and the order's chain.
+
+{@link DocumentOrganizationSnapshot} (orders, invoices, credit notes)
+spreads it and adds the account and tax axes; the fulfillment and card
+snapshots are it exactly; the booking and out-of-service ones add `crms_id`.
+Until this existed each re-declared the pair, and the document snapshot
+declared its own `path` — a second node structurally identical to
+{@link OrderDerivedOrgPath}, which `z.globalRegistry` (keyed on the INSTANCE)
+treats as unrelated. So "the fulfillment's organization is a subset of the
+order's" held by coincidence of two literals rather than by declaration.
+
+⚠️ It is the subset the diff relies on, not the merge: `classifySharedFields`
+records an atom's shared keys and `computeDocumentDiffs` compares over them,
+so a key only the order can carry is never a difference. Instance identity
+of every member's `uid`/`path` with these nodes is asserted in
+`tests/org-snapshot-parity.test.ts` — a spread cannot see a member that
+shadows one of them.
+
+```ts
+const OrgSnapshotCore: typeLiteral;
+```
+
 ### `OutOfServiceId`
 
 `out-of-service.uid` — **two populations, and the union is the point.**

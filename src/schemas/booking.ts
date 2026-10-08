@@ -20,7 +20,7 @@ import {
   type ComponentTypeType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
-  OrderDerivedOrgPath,
+  OrgSnapshotCore,
   type OrgPathNodeType,
 } from "./common.ts";
 
@@ -560,8 +560,7 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
     collection: BookingDestinationRefSchema.nullable().meta({ label: "Collection" }),
   }),
   organization: z.strictObject({
-    uid: FirestoreId.nullable(),
-    path: OrderDerivedOrgPath,
+    ...OrgSnapshotCore,
     crms_id: z.int().nullable(),
   }).meta({ label: "Organization" }),
   stores: z.array(BookingStoreSchema).meta({ label: "Store" }),

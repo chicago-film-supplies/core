@@ -2666,6 +2666,34 @@ export const OrderDerivedOrgPath: z.ZodType<OrgPathNodeType[]> = z.array(OrgPath
   .meta({ column: true, label: "Organization" });
 
 /**
+ * The two keys EVERY organization snapshot carries, each declared exactly once —
+ * the organization's id and the order's chain.
+ *
+ * {@link DocumentOrganizationSnapshot} (orders, invoices, credit notes)
+ * spreads it and adds the account and tax axes; the fulfillment and card
+ * snapshots are it exactly; the booking and out-of-service ones add `crms_id`.
+ * Until this existed each re-declared the pair, and the document snapshot
+ * declared its own `path` — a second node structurally identical to
+ * {@link OrderDerivedOrgPath}, which `z.globalRegistry` (keyed on the INSTANCE)
+ * treats as unrelated. So "the fulfillment's organization is a subset of the
+ * order's" held by coincidence of two literals rather than by declaration.
+ *
+ * ⚠️ It is the subset the diff relies on, not the merge: `classifySharedFields`
+ * records an atom's shared keys and `computeDocumentDiffs` compares over them,
+ * so a key only the order can carry is never a difference. Instance identity
+ * of every member's `uid`/`path` with these nodes is asserted in
+ * `tests/org-snapshot-parity.test.ts` — a spread cannot see a member that
+ * shadows one of them.
+ */
+export const OrgSnapshotCore: {
+  uid: z.ZodType<string | null>;
+  path: z.ZodType<OrgPathNodeType[]>;
+} = {
+  uid: FirestoreId.nullable(),
+  path: OrderDerivedOrgPath,
+};
+
+/**
  * The customer-organization snapshot embedded on an order, an invoice and a
  * credit note.
  *
@@ -2701,7 +2729,9 @@ export const OrderDerivedOrgPath: z.ZodType<OrgPathNodeType[]> = z.array(OrgPath
  */
 export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapshotType> = z
   .strictObject({
-    uid: FirestoreId.nullable(),
+    // `uid` and `path` — see `OrgSnapshotCore`. Spread FIRST so the key order,
+    // and so the Firestore column order, is the one this literal always had.
+    ...OrgSnapshotCore,
     // `name` was DELETED here — the contract third of its removal
     // (api-cloudrun#782, api-cloudrun#780).
     // It was the composed label stored beside the `path` it composes from, so
@@ -2720,12 +2750,12 @@ export const DocumentOrganizationSnapshot: z.ZodType<DocumentOrganizationSnapsho
     // dev 2,223 documents re-scanned to 0 on 2026-09-02 — and nothing has minted
     // the field since `beta.306`. A stored document carrying it now fails this
     // parse, which is the point.
-    // ⚠️ `column: true` so the FIRESTORE-side table has something to lead with
+    // ⚠️ `path` carries `column: true` (on `OrderDerivedOrgPath`, the node it now
+    // shares) so the FIRESTORE-side table has something to lead with
     // now that the composed scalar is gone — the same swap `OrganizationSchema`
     // made at api-cloudrun#709. A Firestore reader holds the chain and composes
     // for itself; the composed label survives only on the Typesense side, where
     // `TYPESENSE_ROLLUP_COLUMNS` declares it.
-    path: z.array(OrgPathNode).min(1).max(3).meta({ column: true, label: "Organization" }),
     crms_id: z.int().nullable().optional(),
     // REQUIRED as of api-cloudrun#489 — the contract third of
     // expand/migrate/contract, and the reason it took three steps is worth
