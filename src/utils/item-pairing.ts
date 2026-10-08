@@ -192,6 +192,49 @@ function pairByKeyOccurrence<A extends PairableItem, B extends PairableItem>(
   return { forward, matched, ambiguous };
 }
 
+/**
+ * Which of several rows sharing the parent's uid IS a line's parent, within one
+ * document? (core#129) A uid repeats within one block — the same sub-kit
+ * standalone and inside a kit, or inside two kits — so "the row with this uid"
+ * is ambiguous, and picking the first collapsed every copy's children onto it.
+ *
+ * Each candidate is given as its IDENTITY (its ancestry chain ending in its own
+ * uid); the line as its CHAIN (its ancestry, own uid excluded). The candidate
+ * sharing the LONGEST common suffix with the chain wins; among equals, one
+ * exactly as long as the chain; then the first. Both sides must be in one path
+ * space — filter the same segments out of each.
+ *
+ * Used by `computeItemPaths` (parent resolution) and
+ * `adoptOrderDividerStructure` (re-hanging unpaired invoice lines), so the two
+ * cannot disagree about which copy a line belongs to.
+ *
+ * @param chain - The line's ancestry, nearest ancestor last
+ * @param candidates - Each candidate parent's identity, own uid last
+ * @returns The index of the chosen candidate, or -1 when there are none
+ */
+export function closestAncestor(
+  chain: readonly string[],
+  candidates: readonly (readonly string[])[],
+): number {
+  let best = -1;
+  let bestSuffix = -1;
+  let bestExact = false;
+  candidates.forEach((identity, idx) => {
+    let suffix = 0;
+    while (
+      suffix < identity.length && suffix < chain.length &&
+      identity[identity.length - 1 - suffix] === chain[chain.length - 1 - suffix]
+    ) suffix++;
+    const exact = identity.length === chain.length;
+    if (suffix > bestSuffix || (suffix === bestSuffix && exact && !bestExact)) {
+      best = idx;
+      bestSuffix = suffix;
+      bestExact = exact;
+    }
+  });
+  return best;
+}
+
 /** @see {@link mapPathsAcrossRebuild} */
 export interface RebuildPathMap {
   /** Where a row that sat at `fromPath` sits in the `to` array, if it survived. */
@@ -227,6 +270,45 @@ export function mapPathsAcrossRebuild<A extends PathedItem, B extends PathedItem
   from: readonly A[],
   to: readonly B[],
 ): RebuildPathMap {
+  const { forward, ambiguous } = pairItemsAcrossRebuild(from, to);
+
+  const toByFrom = new Map<string, readonly string[]>();
+  const fromByTo = new Map<string, readonly string[]>();
+  for (const [fromRow, toRow] of forward) {
+    // A row with no path on either side pairs, but states no correspondence —
+    // `[]` is not a location, and admitting it would map every unpathed row onto
+    // whichever other unpathed row happened to pair last.
+    if (!fromRow.path?.length || !toRow.path?.length) continue;
+    toByFrom.set(pathKey(fromRow.path), toRow.path);
+    fromByTo.set(pathKey(toRow.path), fromRow.path);
+  }
+
+  return {
+    toPath: (p) => (p?.length ? toByFrom.get(pathKey(p)) : undefined),
+    fromPath: (p) => (p?.length ? fromByTo.get(pathKey(p)) : undefined),
+    ambiguous,
+  };
+}
+
+/**
+ * The row-level pairing behind {@link mapPathsAcrossRebuild}: exact path, then
+ * `(uid, component ancestry, k)`, then `(uid, k)` — handed back by OBJECT
+ * identity, for a caller that carries values from one row onto its counterpart
+ * rather than translating paths (`carryForwardOverrides`,
+ * `adoptOrderDividerStructure`, core#129).
+ *
+ * ⚠️ **Both sides' paths must be in ONE path space.** The signature is a filter
+ * of the path by uid SHAPE, and an invoice's `order` divider uid is the order's
+ * `FirestoreId` — product-shaped — so an invoice path paired against an order
+ * path must have its order prefix stripped first, or no signature ever matches.
+ *
+ * @param from - The driving array, walked in document order
+ * @param to - The pool paired against
+ */
+export function pairItemsAcrossRebuild<A extends PathedItem, B extends PathedItem>(
+  from: readonly A[],
+  to: readonly B[],
+): UidOccurrencePairing<A, B> {
   // Pass 0 pairs an UNCHANGED path with itself: a path is the row identity
   // within one document, so a row whose path survived is the same row by
   // definition. Without it the passes below decide by k-th occurrence among rows
@@ -253,25 +335,10 @@ export function mapPathsAcrossRebuild<A extends PathedItem, B extends PathedItem
   const toRest = toRest0.filter((it) => !bySignature.matched.has(it));
   const byUid = pairItemsByUidOccurrence(fromRest, toRest);
   const forward = new Map<A, B>([...byPath.forward, ...bySignature.forward, ...byUid.forward]);
+  const matched = new Set<B>([...byPath.matched, ...bySignature.matched, ...byUid.matched]);
   // A row paired on its exact path is not a guess, so it reports no ambiguity;
   // the path pass reports one only for a path repeated on one side, which is an
   // invalid document.
   const ambiguous = [...byPath.ambiguous, ...bySignature.ambiguous, ...byUid.ambiguous];
-
-  const toByFrom = new Map<string, readonly string[]>();
-  const fromByTo = new Map<string, readonly string[]>();
-  for (const [fromRow, toRow] of forward) {
-    // A row with no path on either side pairs, but states no correspondence —
-    // `[]` is not a location, and admitting it would map every unpathed row onto
-    // whichever other unpathed row happened to pair last.
-    if (!fromRow.path?.length || !toRow.path?.length) continue;
-    toByFrom.set(pathKey(fromRow.path), toRow.path);
-    fromByTo.set(pathKey(toRow.path), fromRow.path);
-  }
-
-  return {
-    toPath: (p) => (p?.length ? toByFrom.get(pathKey(p)) : undefined),
-    fromPath: (p) => (p?.length ? fromByTo.get(pathKey(p)) : undefined),
-    ambiguous,
-  };
+  return { forward, matched, ambiguous };
 }

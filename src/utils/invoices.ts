@@ -86,7 +86,7 @@ import {
   type SubstitutionAnchor,
   substitutionResync,
 } from "./substitutions.ts";
-import { mapPathsAcrossRebuild, pairItemsByUidOccurrence } from "./item-pairing.ts";
+import { closestAncestor, mapPathsAcrossRebuild, pairItemsAcrossRebuild } from "./item-pairing.ts";
 import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
 import type { COARevenueType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType } from "../schemas/mod.ts";
 import {
@@ -758,11 +758,14 @@ const INVOICE_ONLY_ITEM_FIELDS = [
  * are never carried by uid (core#125).
  *
  * 🔴 Kept out of {@link INVOICE_ONLY_ITEM_FIELDS} on purpose. That tuple drives
- * {@link carryForwardOverrides}, which matches by `uid` — and a uid repeats
- * within one document, so a moved row's `path_order_item` would be stamped
- * onto the rebuilt row at the order line's own path (a self-claim) or onto a
- * different occurrence of the same product (a false one). The comparator still
- * has to ignore it, which is the only thing this list is for.
+ * {@link carryForwardOverrides}, the hard resync's carry-forward, and the
+ * resync rebuilds every row AT ITS ORDER LINE'S OWN PATH. A pointer is a fact
+ * about a row that sat ELSEWHERE, so after the rebuild there is no such row:
+ * the moved row's pair — ancestry-first since core#129, but the same answer by
+ * any key — is order line X's own row, and carrying the pointer onto it writes
+ * a self-claim (or, where a uid falls back to `(uid, k)`, a false claim on
+ * another occurrence). The comparator still has to ignore it, which is the only
+ * thing this list is for.
  */
 const INVOICE_ROW_POINTER_FIELDS = ["path_order_item"] as const satisfies readonly (keyof InvoiceDocLineItemType)[];
 
@@ -2409,11 +2412,13 @@ export interface AdoptedDividerStructure {
  * - **Passes any `order` divider row through at the head**, and never mints one:
  *   its identity is the source order's uid and only the caller knows it.
  *
- * Pairing is by `uid`; where a uid repeats, the k-th invoice occurrence pairs
- * with the k-th order occurrence in document order. `uid` is NOT a row identity
- * (it repeats within one document on 18% of prod orders), so those pairings are
- * returned in `ambiguous` for the caller to surface rather than being trusted
- * silently.
+ * Pairing is exact order-relative path, then `(uid, component ancestry, k)`,
+ * then `(uid, k)` ({@link pairItemsAcrossRebuild}); an unpaired line re-hangs
+ * under the copy of its claimed parent whose ancestry matches its own
+ * ({@link closestAncestor}) — never under the first row with that uid
+ * (core#129). `uid` is NOT a row identity (it repeats within one document on
+ * 18% of prod orders), so a pairing that fell to a guess is returned in
+ * `ambiguous` for the caller to surface rather than being trusted silently.
  *
  * The result is a fixed point of {@link computeInvoiceItemPaths}: callers still
  * run it (and {@link validateInvoiceItemUniqueness}) before writing.
@@ -2435,35 +2440,55 @@ export function adoptOrderDividerStructure(
   const invoiceDividerByUid = new Map<string, InvoiceDocItemType>();
   for (const it of rest) if (!isLineItemType(it.type)) invoiceDividerByUid.set(it.uid, it);
 
-  // ── pair lines by (uid, k-th occurrence) ──
-  // The pairing itself is `pairItemsByUidOccurrence` (`utils/item-pairing.ts`),
+  // ── pair lines: exact path, then (uid, component ancestry, k), then (uid, k) ──
+  // The pairing itself is `pairItemsAcrossRebuild` (`utils/item-pairing.ts`),
   // which is where the argument for the key lives. It moved there when
   // `syncItems` (`api-cloudrun/src/lib/orderFulfillmentSync.ts`) needed the same
   // question answered across two ORDERS: two copies of one pairing rule in one
-  // domain is what api-cloudrun#593 was.
+  // domain is what api-cloudrun#593 was. Plain `(uid, k)` paired the k-th `a`
+  // with the k-th `a` whichever kit each sat in (core#129). Invoice paths are
+  // compared with their order prefix stripped, so both sides share one path
+  // space — the order divider's uid is product-shaped and would otherwise sit in
+  // every invoice line's signature.
   // {@link AmbiguousItemPairing} stays declared here rather than being replaced
   // by the generic `AmbiguousPairing`, because its field names name the two
   // SIDES — which a function paired over anything cannot.
   const orderLines = orderItems.filter((it) => isLineItemType(it.type));
-  const { forward: pairedFor, matched: paired, ambiguous: guessed } = pairItemsByUidOccurrence(
-    orderLines,
-    invoiceLines,
+  const relOf = new Map<InvoiceDocItemType, string[]>(
+    invoiceLines.map((it) => [it, stripOrderPrefix(it.path ?? [], orderDividerUid)]),
   );
-  const ambiguous: AmbiguousItemPairing[] = guessed.map((a) => ({
+  const views = invoiceLines.map((it) => ({ uid: it.uid, path: relOf.get(it)!, row: it }));
+  const pairing = pairItemsAcrossRebuild(orderLines, views);
+  const pairedFor = new Map<LineItem, InvoiceDocItemType>(
+    [...pairing.forward].map(([orderLine, view]) => [orderLine, view.row]),
+  );
+  const paired = new Set<InvoiceDocItemType>([...pairing.matched].map((v) => v.row));
+  const ambiguous: AmbiguousItemPairing[] = pairing.ambiguous.map((a) => ({
     uid: a.uid,
     invoiceOccurrences: a.toOccurrences,
     orderOccurrences: a.fromOccurrences,
   }));
 
   // ── where does each unpaired invoice line hang? ──
+  // A parent is a ROW, not a uid: the candidates are every surviving row whose
+  // uid the line claims, each with its identity (its order-relative path), and
+  // `closestAncestor` picks the copy whose ancestry matches the line's — the
+  // same rule `computeItemPaths` resolves parents by. Bucketing by the claimed
+  // uid drained every copy's children at the FIRST copy (core#129).
   const unpaired = invoiceLines.filter((it) => !paired.has(it));
-  const surviving = new Set<string>();
-  for (const it of orderItems) if (isDividerItemType(it.type)) surviving.add(it.uid);
-  for (const orderLine of pairedFor.keys()) surviving.add(orderLine.uid);
-  for (const it of unpaired) surviving.add(it.uid);
+  type Parent = LineItem | InvoiceDocItemType;
+  const candidatesByUid = new Map<string, { row: Parent; identity: readonly string[] }[]>();
+  const addCandidate = (row: Parent, identity: readonly string[]) => {
+    const bucket = candidatesByUid.get(row.uid);
+    if (bucket) bucket.push({ row, identity });
+    else candidatesByUid.set(row.uid, [{ row, identity }]);
+  };
+  for (const it of orderItems) if (isDividerItemType(it.type)) addCandidate(it, it.path ?? []);
+  for (const orderLine of pairedFor.keys()) addCandidate(orderLine, orderLine.path ?? []);
+  for (const it of unpaired) addCandidate(it, relOf.get(it)!);
 
-  /** Key `""` is the root of the order scope. */
-  const unpairedByParent = new Map<string, InvoiceDocItemType[]>();
+  /** Key `null` is the root of the order scope. */
+  const unpairedByParent = new Map<Parent | null, InvoiceDocItemType[]>();
   for (const it of unpaired) {
     // The last segment that is not the item's own uid. Deliberately NOT
     // `path.at(-2)`: that reads a parent only from a SELF-INCLUSIVE path, and a
@@ -2478,14 +2503,16 @@ export function adoptOrderDividerStructure(
     // pre-normalized case is exercised by `tests/invoices.test.ts` alone. Kept
     // because a repair script is exactly where an unnormalized tree turns up.
     const rel = stripOrderPrefix(it.path ?? [], orderDividerUid);
-    let claimed = "";
+    let at = -1;
     for (let k = rel.length - 1; k >= 0; k--) {
       if (rel[k] !== it.uid) {
-        claimed = rel[k];
+        at = k;
         break;
       }
     }
-    const parent = claimed !== "" && surviving.has(claimed) ? claimed : "";
+    const candidates = at === -1 ? [] : candidatesByUid.get(rel[at]) ?? [];
+    const pick = closestAncestor(rel.slice(0, at + 1), candidates.map((c) => c.identity));
+    const parent = pick === -1 ? null : candidates[pick].row;
     const bucket = unpairedByParent.get(parent);
     if (bucket) bucket.push(it);
     else unpairedByParent.set(parent, [it]);
@@ -2494,20 +2521,20 @@ export function adoptOrderDividerStructure(
   // ── emit ──
   const out: InvoiceDocItemType[] = orderDividerRows.map((d) => ({ ...d, path: [d.uid] }));
   const emitted = new Set<InvoiceDocItemType>();
-  const emitUnpairedChildren = (parentUid: string, parentPath: string[]) => {
-    for (const child of unpairedByParent.get(parentUid) ?? []) {
+  const emitUnpairedChildren = (parent: Parent | null, parentPath: string[]) => {
+    for (const child of unpairedByParent.get(parent) ?? []) {
       if (emitted.has(child)) continue;
       emitted.add(child);
       const childPath = [...parentPath, child.uid];
       out.push({ ...child, path: childPath } as InvoiceDocItemType);
-      emitUnpairedChildren(child.uid, childPath);
+      emitUnpairedChildren(child, childPath);
     }
   };
 
   // Root-level invoice-only lines head the scope. Appending them instead would
   // drop them inside whichever divider happened to be last, silently changing
   // the parent of the one population this function promises not to move.
-  emitUnpairedChildren("", [orderDividerUid]);
+  emitUnpairedChildren(null, [orderDividerUid]);
 
   for (const orderItem of orderItems) {
     const path = [orderDividerUid, ...(orderItem.path ?? [])];
@@ -2518,13 +2545,13 @@ export function adoptOrderDividerStructure(
           ? ({ ...existing, path } as InvoiceDocItemType)
           : projectOrderItemToInvoiceItem(orderItem, orderDividerUid),
       );
-      emitUnpairedChildren(orderItem.uid, path);
+      emitUnpairedChildren(orderItem, path);
       continue;
     }
     const match = pairedFor.get(orderItem);
     if (!match) continue; // an order line the invoice does not bill — not added
     out.push({ ...match, path } as InvoiceDocItemType);
-    emitUnpairedChildren(orderItem.uid, path);
+    emitUnpairedChildren(orderItem, path);
   }
 
   return { items: out, ambiguous };
@@ -2807,24 +2834,31 @@ export function isInInvoiceAuthoredSubtree(
 
 /**
  * Carry forward invoice-specific overrides from existing items to rebuilt items.
- * Matches by uid — if a rebuilt item has the same uid as an existing invoice
- * item, the {@link INVOICE_ONLY_ITEM_FIELDS} are preserved from the existing
- * item. The field list is not restated here on purpose; this delegates to
- * {@link pickInvoiceOnlyFields} so there is one place to change.
+ * A rebuilt row takes the {@link INVOICE_ONLY_ITEM_FIELDS} of the existing row it
+ * PAIRS with — exact path, then `(uid, component ancestry, k)`, then `(uid, k)`
+ * ({@link pairItemsAcrossRebuild}). The field list is not restated here on
+ * purpose; this delegates to {@link pickInvoiceOnlyFields} so there is one place
+ * to change.
+ *
+ * 🔴 **Never by uid alone** (core#129). A uid repeats within one scope — the
+ * same component standalone and inside a kit, or one sub-kit inside two kits —
+ * and a uid-keyed map let the LAST occurrence win, stamping one row's
+ * `xero_id`, `substituted_for`, `coa_revenue` and `tracking_category` onto every
+ * row sharing its uid: duplicate Xero LineItemIDs and a doubled substitution
+ * offset.
  *
  * @param rebuiltItems - Items rebuilt from the order
  * @param existingItems - Current invoice items (to carry forward overrides from)
  * @returns Rebuilt items with invoice-specific overrides applied
  */
 export function carryForwardOverrides(rebuiltItems: InvoiceDocItemType[], existingItems: InvoiceItem[]): InvoiceDocItemType[] {
-  const existingByUid = new Map<string, InvoiceItem>();
-  for (const item of existingItems) {
-    if (item.uid) existingByUid.set(item.uid, item);
-  }
+  const { forward } = pairItemsAcrossRebuild(
+    rebuiltItems.filter((it) => it.uid),
+    existingItems.filter((it) => it.uid),
+  );
 
   return rebuiltItems.map((item) => {
-    if (!item.uid) return item;
-    const existing = existingByUid.get(item.uid);
+    const existing = forward.get(item);
     if (!existing) return item;
 
     // What the four hand-inlined conditional spreads were doing, expressed once.

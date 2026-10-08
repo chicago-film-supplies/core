@@ -39,7 +39,7 @@
  *
  * @module
  */
-import { parseBookingId } from "./booking-id.ts";
+import { componentSignatureHash, parseBookingId } from "./booking-id.ts";
 import type { OOSReasonType } from "../schemas/common.ts";
 
 /** The `out-of-service` reasons a customer is billed for. */
@@ -234,7 +234,14 @@ function bookingSourceOf(
     const parsed = parseBookingId(source.slice("bookings:".length));
     if (!parsed || parsed.orderUid !== order.uid) continue;
     uid_pair = parsed.destUid;
-    const line = order.items.find((i) => i.uid === parsed.itemUid && i.path[0] === parsed.destUid);
+    // The signature too, not just (uid, leg): one product standalone and inside
+    // a kit on one leg are two bookings and two lines, and only the signature
+    // tells them apart — matching on uid quoted the first copy's replacement
+    // value for the other's record (core#129).
+    const line = order.items.find((i) =>
+      i.uid === parsed.itemUid && i.path[0] === parsed.destUid &&
+      componentSignatureHash(i.path) === parsed.signatureHash
+    );
     const cents = line?.price?.replacement_cents;
     if (typeof cents === "number" && cents > 0) quoted = cents;
     break;

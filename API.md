@@ -5022,6 +5022,7 @@ interface GroupPathType {
   destination: string | null;
   group: string | null;
   product: string | null;
+  productPath: string[] | null;
 }
 ```
 
@@ -20306,6 +20307,7 @@ interface GroupPathType {
   destination: string | null;
   group: string | null;
   product: string | null;
+  productPath: string[] | null;
 }
 ```
 
@@ -33382,11 +33384,13 @@ What it does:
 - **Passes any `order` divider row through at the head**, and never mints one:
   its identity is the source order's uid and only the caller knows it.
 
-Pairing is by `uid`; where a uid repeats, the k-th invoice occurrence pairs
-with the k-th order occurrence in document order. `uid` is NOT a row identity
-(it repeats within one document on 18% of prod orders), so those pairings are
-returned in `ambiguous` for the caller to surface rather than being trusted
-silently.
+Pairing is exact order-relative path, then `(uid, component ancestry, k)`,
+then `(uid, k)` ({@link pairItemsAcrossRebuild}); an unpaired line re-hangs
+under the copy of its claimed parent whose ancestry matches its own
+({@link closestAncestor}) — never under the first row with that uid
+(core#129). `uid` is NOT a row identity (it repeats within one document on
+18% of prod orders), so a pairing that fell to a guess is returned in
+`ambiguous` for the caller to surface rather than being trusted silently.
 
 The result is a fixed point of {@link computeInvoiceItemPaths}: callers still
 run it (and {@link validateInvoiceItemUniqueness}) before writing.
@@ -33513,10 +33517,18 @@ because the check is all-or-nothing for the whole pair.
 ### `carryForwardOverrides(rebuiltItems: InvoiceDocItemType[], existingItems: InvoiceItem[]): InvoiceDocItemType[]`
 
 Carry forward invoice-specific overrides from existing items to rebuilt items.
-Matches by uid — if a rebuilt item has the same uid as an existing invoice
-item, the {@link INVOICE_ONLY_ITEM_FIELDS} are preserved from the existing
-item. The field list is not restated here on purpose; this delegates to
-{@link pickInvoiceOnlyFields} so there is one place to change.
+A rebuilt row takes the {@link INVOICE_ONLY_ITEM_FIELDS} of the existing row it
+PAIRS with — exact path, then `(uid, component ancestry, k)`, then `(uid, k)`
+({@link pairItemsAcrossRebuild}). The field list is not restated here on
+purpose; this delegates to {@link pickInvoiceOnlyFields} so there is one place
+to change.
+
+🔴 **Never by uid alone** (core#129). A uid repeats within one scope — the
+same component standalone and inside a kit, or one sub-kit inside two kits —
+and a uid-keyed map let the LAST occurrence win, stamping one row's
+`xero_id`, `substituted_for`, `coa_revenue` and `tracking_category` onto every
+row sharing its uid: duplicate Xero LineItemIDs and a doubled substitution
+offset.
 
 **Parameters**
 
@@ -33650,11 +33662,14 @@ This function prepends structural context (dest/group) and appends self uid.
 
 `path` has exactly ONE author: the resolved parent. Per (destination, group)
 block, in order:
- 1. Resolve each line item's parent — the last segment of the client-supplied
-    path that names another line item IN THE SAME BLOCK (structural uids and
-    the item's own uid are skipped, as are orphan segments that resolve to no
-    item in the block, e.g. catalog-only intermediate kit uids). No parent
-    resolves to a block root. Parent cycles are broken deterministically.
+ 1. Resolve each line item's parent — a row named by the last segment of the
+    client-supplied path that names another line item IN THE SAME BLOCK
+    (structural uids and the item's own uid are skipped, as are orphan
+    segments that resolve to no item in the block, e.g. catalog-only
+    intermediate kit uids). When that uid occurs more than once in the block,
+    the copy whose own ancestry best matches the item's chain wins — see
+    `resolveBlock` (core#129). No parent resolves to a block root. Parent
+    cycles are broken deterministically.
  2. Derive `path` as `[...parent.path, self uid]`, or `[...structural prefix,
     self uid]` at a block root. Deriving from the parent's own path rather
     than from the client's chain is what makes ancestry transitively
@@ -33677,10 +33692,12 @@ safe to pass items that originate from a Solid store proxy (the manager app
 routes reordered arrays through this function inside `setEntity` updaters).
 Callers should replace their working array with the return value.
 
-Post-condition (under the within-parent uniqueness invariant): a parent and
-its full subtree occupy a contiguous index range, so `getItemSubtreeRange`
-and `getGroupItems` can rely on path-prefix matching alone. Unconditionally:
-every returned `path` is non-empty and ends in the item's own uid.
+Post-condition (under the within-parent uniqueness invariant — `path` unique,
+keyed on the parent's PATH, so one uid MAY repeat in a block under different
+parents): a parent and its full subtree occupy a contiguous index range, so
+`getItemSubtreeRange` and `getGroupItems` can rely on path-prefix matching
+alone. A correctly-pathed document is a fixed point. Unconditionally: every
+returned `path` is non-empty and ends in the item's own uid.
 
 ### `computeOrderInvoiceCoverage(orderUid: string, orderItems: LineItem[], invoices: ReadonlyArray<typeLiteral>): OrderInvoiceCoverage`
 
@@ -35940,6 +35957,30 @@ interface UidOccurrencePairing {
 }
 ```
 
+### `closestAncestor(chain: readonly string[], candidates: readonly parenthesized[]): number`
+
+Which of several rows sharing the parent's uid IS a line's parent, within one
+document? (core#129) A uid repeats within one block — the same sub-kit
+standalone and inside a kit, or inside two kits — so "the row with this uid"
+is ambiguous, and picking the first collapsed every copy's children onto it.
+
+Each candidate is given as its IDENTITY (its ancestry chain ending in its own
+uid); the line as its CHAIN (its ancestry, own uid excluded). The candidate
+sharing the LONGEST common suffix with the chain wins; among equals, one
+exactly as long as the chain; then the first. Both sides must be in one path
+space — filter the same segments out of each.
+
+Used by `computeItemPaths` (parent resolution) and
+`adoptOrderDividerStructure` (re-hanging unpaired invoice lines), so the two
+cannot disagree about which copy a line belongs to.
+
+**Parameters**
+
+- `chain` — The line's ancestry, nearest ancestor last
+- `candidates` — Each candidate parent's identity, own uid last
+
+**Returns** — The index of the chosen candidate, or -1 when there are none
+
 ### `mapPathsAcrossRebuild(from: readonly A[], to: readonly B[]): RebuildPathMap`
 
 The prev → next path correspondence across a rebuild, both directions.
@@ -35964,6 +36005,24 @@ degrades to the pre-#897 behaviour rather than to something new.
 - `to` — The next array, already filtered the same way
 
 **Returns** — Both lookups plus the ambiguity report
+
+### `pairItemsAcrossRebuild(from: readonly A[], to: readonly B[]): UidOccurrencePairing<A, B>`
+
+The row-level pairing behind {@link mapPathsAcrossRebuild}: exact path, then
+`(uid, component ancestry, k)`, then `(uid, k)` — handed back by OBJECT
+identity, for a caller that carries values from one row onto its counterpart
+rather than translating paths (`carryForwardOverrides`,
+`adoptOrderDividerStructure`, core#129).
+
+⚠️ **Both sides' paths must be in ONE path space.** The signature is a filter
+of the path by uid SHAPE, and an invoice's `order` divider uid is the order's
+`FirestoreId` — product-shaped — so an invoice path paired against an order
+path must have its order prefix stripped first, or no signature ever matches.
+
+**Parameters**
+
+- `from` — The driving array, walked in document order
+- `to` — The pool paired against
 
 ### `pairItemsByUidOccurrence(from: readonly A[], to: readonly B[]): UidOccurrencePairing<A, B>`
 
@@ -39168,11 +39227,14 @@ This function prepends structural context (dest/group) and appends self uid.
 
 `path` has exactly ONE author: the resolved parent. Per (destination, group)
 block, in order:
- 1. Resolve each line item's parent — the last segment of the client-supplied
-    path that names another line item IN THE SAME BLOCK (structural uids and
-    the item's own uid are skipped, as are orphan segments that resolve to no
-    item in the block, e.g. catalog-only intermediate kit uids). No parent
-    resolves to a block root. Parent cycles are broken deterministically.
+ 1. Resolve each line item's parent — a row named by the last segment of the
+    client-supplied path that names another line item IN THE SAME BLOCK
+    (structural uids and the item's own uid are skipped, as are orphan
+    segments that resolve to no item in the block, e.g. catalog-only
+    intermediate kit uids). When that uid occurs more than once in the block,
+    the copy whose own ancestry best matches the item's chain wins — see
+    `resolveBlock` (core#129). No parent resolves to a block root. Parent
+    cycles are broken deterministically.
  2. Derive `path` as `[...parent.path, self uid]`, or `[...structural prefix,
     self uid]` at a block root. Deriving from the parent's own path rather
     than from the client's chain is what makes ancestry transitively
@@ -39195,10 +39257,12 @@ safe to pass items that originate from a Solid store proxy (the manager app
 routes reordered arrays through this function inside `setEntity` updaters).
 Callers should replace their working array with the return value.
 
-Post-condition (under the within-parent uniqueness invariant): a parent and
-its full subtree occupy a contiguous index range, so `getItemSubtreeRange`
-and `getGroupItems` can rely on path-prefix matching alone. Unconditionally:
-every returned `path` is non-empty and ends in the item's own uid.
+Post-condition (under the within-parent uniqueness invariant — `path` unique,
+keyed on the parent's PATH, so one uid MAY repeat in a block under different
+parents): a parent and its full subtree occupy a contiguous index range, so
+`getItemSubtreeRange` and `getGroupItems` can rely on path-prefix matching
+alone. A correctly-pathed document is a fixed point. Unconditionally: every
+returned `path` is non-empty and ends in the item's own uid.
 
 ### `computeItemTaxAmountCents(tax: Pick<Tax, "rate" | "type">, subtotalDiscountedCents: number, quantity: number): number`
 
@@ -39402,6 +39466,10 @@ deliver to one address from sharing a collapse key.
 field itself is deleted from the divider at the end of that campaign. This
 value is only ever a UI collapse key, so nothing durable was keyed on the
 old spelling.
+
+`product` is the parent product's UID and `productPath` its full path. Key
+anything per-parent on `productPath`: a uid repeats within one group (a kit
+standalone and nested in another kit), so `product` names both (core#129).
 
 ### `getItemSubtreeRange(items: T[], index: number): typeLiteral`
 

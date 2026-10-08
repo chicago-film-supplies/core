@@ -114,11 +114,15 @@ export function rebuildFulfillmentItems(
     consumed.add(key);
 
     // The deepest ancestor the output still carries, so the line keeps as much
-    // of its parentage as survives.
+    // of its parentage as survives. Matched on the ancestor's PATH, never its
+    // uid: one kit on two legs (or standalone and nested in one group) is two
+    // rows sharing a uid, and a uid match took the first — another leg's copy —
+    // so the substitution landed on the wrong leg (core#129).
     let at = -1;
-    const ancestry = (li.path ?? []).slice(0, -1);
-    for (let d = ancestry.length - 1; d >= 0 && at === -1; d--) {
-      at = out.findIndex((i) => (i.uid ?? "") === ancestry[d]);
+    const path = li.path ?? [];
+    for (let d = path.length - 2; d >= 0 && at === -1; d--) {
+      const ancestorKey = pathKey(path.slice(0, d + 1));
+      at = out.findIndex((i) => pathKey(i.path) === ancestorKey);
     }
 
     if (at === -1) {

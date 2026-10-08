@@ -722,11 +722,15 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // `fulfillment-items` above: the module is walked so the drift guard sees its
   // exports, not because a template can use them.
   // `utils/item-pairing.ts` pairs one revision of an items array against another
-  // by `(uid, k-th occurrence)`. Both of its exports need TWO documents; a
-  // template renders one. Walked for drift, unreachable from a template — same
-  // reasoning as `substitutions` below.
+  // by `(uid, k-th occurrence)`. Its pairing exports need TWO documents; a
+  // template renders one. `closestAncestor` reads one document but is the
+  // parent RESOLVER behind `computeItemPaths`, whose output a template already
+  // reads as `path` — it has nothing to ask it. Walked for drift, unreachable
+  // from a template — same reasoning as `substitutions` below.
   "item-pairing": [
+    "closestAncestor",
     "mapPathsAcrossRebuild",
+    "pairItemsAcrossRebuild",
     "pairItemsByUidOccurrence",
   ],
   substitutions: [

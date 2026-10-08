@@ -2707,5 +2707,13 @@ export interface ConsolidatedItemType {
 export interface GroupPathType {
   destination: string | null;
   group: string | null;
+  /** The parent product's UID — `null` for a non-component. Not a row identity: two copies of one kit share it. */
   product: string | null;
+  /**
+   * The parent product's full `path` — `null` for a non-component. The row
+   * identity `product` is not: one kit standalone and nested in another kit in
+   * one group are two parents with one uid (core#129), so a collapse or lookup
+   * keyed on `product` treats them as one.
+   */
+  productPath: string[] | null;
 }

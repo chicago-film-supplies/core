@@ -45,6 +45,7 @@ import {
   zeroPricedFlaggedNonComponents,
 } from "../schemas/mod.ts";
 import { componentSignatureHash } from "./booking-id.ts";
+import { closestAncestor } from "./item-pairing.ts";
 import { applyDateEdit, canonicalChargeWindows, type ChargeDates, chargedDays, chargeWindowsOf, toChicagoYmd } from "./dates.ts";
 import {
   fromCents,
@@ -2574,11 +2575,14 @@ export function validateComponentUniqueness<T extends LineItem>(items: T[]): Ite
  *
  * `path` has exactly ONE author: the resolved parent. Per (destination, group)
  * block, in order:
- *  1. Resolve each line item's parent — the last segment of the client-supplied
- *     path that names another line item IN THE SAME BLOCK (structural uids and
- *     the item's own uid are skipped, as are orphan segments that resolve to no
- *     item in the block, e.g. catalog-only intermediate kit uids). No parent
- *     resolves to a block root. Parent cycles are broken deterministically.
+ *  1. Resolve each line item's parent — a row named by the last segment of the
+ *     client-supplied path that names another line item IN THE SAME BLOCK
+ *     (structural uids and the item's own uid are skipped, as are orphan
+ *     segments that resolve to no item in the block, e.g. catalog-only
+ *     intermediate kit uids). When that uid occurs more than once in the block,
+ *     the copy whose own ancestry best matches the item's chain wins — see
+ *     `resolveBlock` (core#129). No parent resolves to a block root. Parent
+ *     cycles are broken deterministically.
  *  2. Derive `path` as `[...parent.path, self uid]`, or `[...structural prefix,
  *     self uid]` at a block root. Deriving from the parent's own path rather
  *     than from the client's chain is what makes ancestry transitively
@@ -2601,10 +2605,12 @@ export function validateComponentUniqueness<T extends LineItem>(items: T[]): Ite
  * routes reordered arrays through this function inside `setEntity` updaters).
  * Callers should replace their working array with the return value.
  *
- * Post-condition (under the within-parent uniqueness invariant): a parent and
- * its full subtree occupy a contiguous index range, so `getItemSubtreeRange`
- * and `getGroupItems` can rely on path-prefix matching alone. Unconditionally:
- * every returned `path` is non-empty and ends in the item's own uid.
+ * Post-condition (under the within-parent uniqueness invariant — `path` unique,
+ * keyed on the parent's PATH, so one uid MAY repeat in a block under different
+ * parents): a parent and its full subtree occupy a contiguous index range, so
+ * `getItemSubtreeRange` and `getGroupItems` can rely on path-prefix matching
+ * alone. A correctly-pathed document is a fixed point. Unconditionally: every
+ * returned `path` is non-empty and ends in the item's own uid.
  */
 export function computeItemPaths<T extends LineItem>(
   items: T[],
@@ -2645,33 +2651,48 @@ export function computeItemPaths<T extends LineItem>(
  * Resolve parents, derive paths, and depth-first linearize one contiguous run
  * of line items inside a single (destination, group) block.
  *
- * Parent references are by uid, so when two items in the block share a uid the
- * reference is ambiguous; the FIRST occurrence in input order wins, for both
- * the derived path and the emission position (they read the same map, so they
- * agree). This is a graceful-degradation path — the within-parent uniqueness
- * invariant rules the case out in steady state. Every input item appears in the
- * output exactly once regardless.
+ * **A parent is resolved by ANCESTRY, not by uid alone** (core#129). An item's
+ * *line chain* is its input path with its own uid, the structural uids and any
+ * uid not in the block filtered out. Its parent is a row whose uid is the
+ * chain's last segment — and since a uid legitimately repeats within one block
+ * (the 25' Extension Cord standalone and inside a Hair & Makeup Mirror; one
+ * sub-kit inside two different kits), the candidate chosen is the one whose own
+ * identity — `[...its line chain, its uid]` — shares the LONGEST common suffix
+ * with the item's chain; among equals, one whose identity is exactly as long as
+ * the chain, then the first in input order. Resolving by uid alone collapsed
+ * every copy's components onto the first copy, which `validateItemUniqueness`
+ * then refused, and rewrote a correct stored document — so the API's
+ * fixed-point check refused that too.
+ *
+ * This needs the FULL line ancestry on the input, which every path author
+ * supplies: a stored path, `buildOrderComponentLines`' threaded chain,
+ * `moveLinesToLeg`'s kept stored paths. A short `[K, a]` chain against two
+ * nested Ks is genuinely ambiguous and falls to the first occurrence. Both the
+ * derived path and the emission position read the same resolved parent, so they
+ * agree, and every input item appears in the output exactly once regardless.
  */
 function resolveBlock<T extends LineItem>(block: T[], prefix: string[], structuralUids: Set<string>): T[] {
   if (block.length === 0) return [];
 
   const blockUids = new Set(block.map((it) => it.uid));
-  // A parent uid resolves to its FIRST occurrence in the block.
-  const indexByUid = new Map<string, number>();
+  const indicesByUid = new Map<string, number[]>();
   for (let idx = 0; idx < block.length; idx++) {
-    if (!indexByUid.has(block[idx].uid)) indexByUid.set(block[idx].uid, idx);
+    const bucket = indicesByUid.get(block[idx].uid);
+    if (bucket) bucket.push(idx);
+    else indicesByUid.set(block[idx].uid, [idx]);
   }
+  const chainOf: string[][] = block.map((item) =>
+    (item.path ?? []).filter((seg) => seg !== item.uid && !structuralUids.has(seg) && blockUids.has(seg))
+  );
 
   // Step 1: resolve each item's parent index (-1 = block root).
-  const parentIdx: number[] = block.map((item, idx) => {
-    const segs = item.path ?? [];
-    for (let k = segs.length - 1; k >= 0; k--) {
-      const seg = segs[k];
-      if (seg === item.uid || structuralUids.has(seg) || !blockUids.has(seg)) continue;
-      const resolved = indexByUid.get(seg);
-      return resolved === undefined || resolved === idx ? -1 : resolved;
-    }
-    return -1;
+  const parentIdx: number[] = block.map((_, idx) => {
+    const chain = chainOf[idx];
+    const parentUid = chain.at(-1);
+    if (parentUid === undefined) return -1;
+    const candidates = indicesByUid.get(parentUid) ?? [];
+    const pick = closestAncestor(chain, candidates.map((c) => [...chainOf[c], block[c].uid]));
+    return pick === -1 ? -1 : candidates[pick];
   });
 
   // Break parent cycles (only reachable via duplicate uids): the first member
@@ -2774,14 +2795,20 @@ const COLLECTION_TYPES: ReadonlySet<string> = new Set(DOC_LINE_ITEM_TYPES.filter
  * field itself is deleted from the divider at the end of that campaign. This
  * value is only ever a UI collapse key, so nothing durable was keyed on the
  * old spelling.
+ *
+ * `product` is the parent product's UID and `productPath` its full path. Key
+ * anything per-parent on `productPath`: a uid repeats within one group (a kit
+ * standalone and nested in another kit), so `product` names both (core#129).
  */
 export function getGroupPath(items: LineItem[], index: number): GroupPath {
   const item = items[index];
   const structuralUids = getStructuralUids(items);
+  const product = getParentProductUid(item, structuralUids);
   const result: GroupPath = {
     destination: null,
     group: null,
-    product: getParentProductUid(item, structuralUids),
+    product,
+    productPath: product === null ? null : (item.path ?? []).slice(0, -1),
   };
 
   for (let i = index - 1; i >= 0; i--) {
