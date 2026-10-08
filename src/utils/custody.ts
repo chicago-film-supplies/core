@@ -45,8 +45,16 @@ import {
   OOS_BREAKDOWN_KEYS,
   type OOSReasonType,
   type OutOfService,
+  ownsKey,
 } from "../schemas/mod.ts";
-import { breakdownQuantity, type FullBookingBreakdown, fullBookingBreakdown, sumBreakdownKeys, terminalQuantity } from "./bookings.ts";
+import {
+  breakdownQuantity,
+  type FullBookingBreakdown,
+  fullBookingBreakdown,
+  isBookingClosed,
+  sumBreakdownKeys,
+  terminalQuantity,
+} from "./bookings.ts";
 
 /**
  * A booking as the ruleset reads it. `units` is read when present: `null` or
@@ -99,35 +107,37 @@ function serviceFor(rule: CustodyRule): CustodyTransition["service"] {
 // ── status ───────────────────────────────────────────────────────────
 
 /**
- * A booking's status, read off its breakdown. ONE rule for every custody
- * write; the manager had two (a forward one and a regression one), and this is
- * the regression one, because it is a function of the state alone.
+ * A booking's status, read off its breakdown — ONE rule for every custody write,
+ * and TOTAL: every breakdown reads one status, whatever mix of keys it holds.
  *
- * | breakdown                        | status          |
- * |----------------------------------|-----------------|
- * | every terminal key sums to qty   | `complete`      |
- * | out > 0                          | `active`        |
- * | prepped = qty                    | `prepped`       |
- * | prepped > 0 and reserved > 0     | `part-prepped`  |
- * | reserved = qty                   | `reserved`      |
- * | anything else                    | unchanged       |
+ * | breakdown (first row that holds)                       | status         |
+ * |--------------------------------------------------------|----------------|
+ * | no unit in a key that is still work (`isBookingClosed`) | `complete`     |
+ * | any unit past `prepped` (`out` or a terminal key)       | `active`       |
+ * | prepped = qty                                           | `prepped`      |
+ * | prepped > 0                                             | `part-prepped` |
+ * | reserved > 0                                            | `reserved`     |
+ * | otherwise (only `quoted` is left)                       | `quoted`       |
  *
- * ⚠️ A sale fully `out` reads `active`, not `complete`, exactly as the manager's
- * check-out has always sent it. Whether a sale's `out` closes the booking is
- * `isBookingClosed`'s question (`utils/bookings.ts`), and it answers per order,
- * at finalize.
+ * 🔴 **A sale fully `out` reads `complete`** (stock campaign decision 9): its
+ * units are the customer's (`ownsKey`), so nothing about it is still work. It
+ * read `active` until P1, while `isBookingClosed` read the same booking closed.
+ *
+ * ⚠️ **Total, so it no longer takes the stored status.** The old last row,
+ * "anything else → unchanged", let a rental with units back and units still
+ * reserved keep whatever status it was written with. Such a booking is
+ * `active` now: custody moved past prepped and is not settled, which is the
+ * order-level rule too.
  */
 export function deriveCustodyStatus(
-  breakdown: BookingBreakdown,
-  quantity: number,
-  current: Booking["status"],
+  booking: Pick<Booking, "type" | "breakdown" | "quantity">,
 ): Booking["status"] {
-  if (terminalQuantity(breakdown) === quantity) return "complete";
-  if (breakdown.out > 0) return "active";
-  if (breakdown.prepped === quantity) return "prepped";
-  if (breakdown.prepped > 0 && breakdown.reserved > 0) return "part-prepped";
-  if (breakdown.reserved === quantity) return "reserved";
-  return current;
+  const b = fullBookingBreakdown(booking.breakdown);
+  if (isBookingClosed({ type: booking.type, breakdown: b })) return "complete";
+  if (b.out > 0 || terminalQuantity(b) > 0) return "active";
+  if (b.prepped > 0) return b.prepped === booking.quantity ? "prepped" : "part-prepped";
+  if (b.reserved > 0) return "reserved";
+  return "quoted";
 }
 
 // ── apply ────────────────────────────────────────────────────────────
@@ -245,7 +255,7 @@ export function applyCustodyActions(
   }
   return {
     breakdown,
-    status: deriveCustodyStatus(breakdown, booking.quantity, booking.status),
+    status: deriveCustodyStatus({ type: booking.type, breakdown, quantity: booking.quantity }),
     transitions,
     units,
   };
@@ -412,7 +422,7 @@ export function custodyActionsFor(booking: CustodyBooking, ctx: CustodyOfferCont
     ? "prep"
     : b.prepped > 0
     ? "check_out"
-    : b.out > 0 && booking.type === "rental"
+    : b.out > 0 && ownsKey(booking.type, "out")
     ? "check_in"
     : null;
 

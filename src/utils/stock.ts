@@ -56,26 +56,16 @@
  * double-subtract a sale's units. Both directions are bugs. Keep them separate,
  * keep them named, and keep this table.
  *
- * ## The `sale` / `rental` axis reads like a disagreement and is NOT one
+ * ## The `sale` / `rental` axis is ONE predicate now
  *
- * {@link heldByBooking} keys on `type === "sale"` while `isBookingClosed`
- * (`utils/bookings.ts`) keys on `type === "rental"`, so on paper they differ
- * about `service`/`surcharge`. **Only `rental` and `sale` bookings can reach
- * this function**, so the two agree everywhere it is evaluated.
- *
- * Measured 2026-08-13, both environments, and worth keeping because the naive
- * version of this claim is false: 439 `service` bookings DO exist (over 15
- * products), so "services have no bookings" is not what makes this safe. What
- * makes it safe is that **0 of those 15 products carry an inventory ledger** — a
- * ledger exists only for a `rental` or `sale` product, so a service has no
- * ledger, therefore no stock projection, therefore nothing to evaluate here.
- * (This used to say "a service product is `stock_method: "none"`, so it has no
- * ledger". Since the uncounted ledger, a `none` RENTAL or SALE product does carry
- * one — `quantity_held: null` — so the type, not the stock method, is what keeps
- * services out.)
- *
- * So do NOT "align" the two predicates. They are answering different questions
- * about the only two types that arrive, and each is right about its own.
+ * {@link heldByBooking} keyed on `type === "sale"` while `isBookingClosed`
+ * (`utils/bookings.ts`) keyed on `type === "rental"`, so they disagreed about
+ * `service`/`surcharge`. Both now read `ownsKey` (`@cfs/core/schemas`), which
+ * settles the split the way `isBookingClosed` had it: a service's `out` is not
+ * held (stock campaign P1). No availability answer moved, because **0 of the 15
+ * products behind prod's 439 `service` bookings carry an inventory ledger**
+ * (measured 2026-08-13) — a ledger exists only for a `rental` or `sale` product,
+ * so a service never reaches this function.
  *
  * ## What IS open: a sale can come back
  *
@@ -90,8 +80,10 @@
  * `returned > 0`**, i.e. the path has never been exercised end to end, and
  * fulfillment support for it is incomplete (api-cloudrun#513).
  */
+import { ownsKey } from "../schemas/mod.ts";
 import type {
   BookingBreakdown,
+  BookingBreakdownKeyType,
   BookingStatusType,
   ComponentTypeType,
   FirestoreTimestampType,
@@ -104,6 +96,9 @@ import type {
 import { toChicagoEndOfDay, toChicagoStartOfDay } from "./dates.ts";
 import { sumBreakdownKeys } from "./bookings.ts";
 
+/** The keys a booking holds units out of `quantity_held` in, before ownership is read. */
+const HELD_KEYS: readonly BookingBreakdownKeyType[] = ["reserved", "prepped", "out"];
+
 /** Just enough of a booking to answer either consumption question. */
 export interface StockConsumingBooking {
   breakdown: BookingBreakdown;
@@ -114,8 +109,8 @@ export interface StockConsumingBooking {
  * Units this booking still consumes from **`quantity_held`** — the definition of
  * `quantity_booked`, and deliberately narrower than `sumBookingBreakdown`.
  *
- * `reserved + prepped`, plus `out` **unless the booking is a sale**. For a sale
- * the checkout is also the moment ownership ends: the movement drops
+ * `reserved + prepped`, plus `out` **where CFS still owns it** ({@link ownsKey}).
+ * For a sale the checkout is also the moment ownership ends: the movement drops
  * `quantity_held`, so counting the booking's `out` as well would subtract the
  * same units twice.
  *
@@ -131,7 +126,7 @@ export function heldByBooking(b: StockConsumingBooking): number {
   // `cleaning`/`maintenance` are NOT held here, as `damaged` is not: the
   // out-of-service record's flag already holds those units out of stock, so
   // counting them again would subtract them twice (P2b ruling 5).
-  return sumBreakdownKeys(b.breakdown, b.type === "sale" ? ["reserved", "prepped"] : ["reserved", "prepped", "out"]);
+  return sumBreakdownKeys(b.breakdown, HELD_KEYS.filter((k) => ownsKey(b.type, k)));
 }
 
 /**

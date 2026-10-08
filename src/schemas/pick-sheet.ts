@@ -79,6 +79,7 @@ import {
   type OrderStatusType,
 } from "./order.ts";
 import { FulfillmentItem, type FulfillmentItemType } from "./fulfillment.ts";
+import { ownsKey } from "./custody.ts";
 
 // ── The gate ────────────────────────────────────────────────────────
 
@@ -211,7 +212,7 @@ export function pickSheetLegDirection(
   const pendingBefore = bookings.some(
     (b) => b.breakdown.reserved > 0 || b.breakdown.prepped > 0,
   );
-  const inFlight = bookings.some((b) => b.type === "rental" && b.breakdown.out > 0);
+  const inFlight = bookings.some((b) => ownsKey(b.type, "out") && b.breakdown.out > 0);
   return !pendingBefore && inFlight ? "collection" : "delivery";
 }
 

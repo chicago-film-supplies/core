@@ -46,6 +46,7 @@ import {
   BOOKING_BREAKDOWN_TERMINAL_KEYS,
   type BookingBreakdownKeyType,
   type Fulfillment,
+  ownsKey,
 } from "../schemas/mod.ts";
 import { isOrderBookingsClosed, sumBreakdownKeys } from "./bookings.ts";
 
@@ -135,7 +136,7 @@ export type StageSide = "source" | "target";
 
 /** True iff this booking's `out` bucket is in-flight (rental) vs terminal. */
 function outIsInFlight(b: Pick<Booking, "type">): boolean {
-  return b.type === "rental";
+  return ownsKey(b.type, "out");
 }
 
 /**

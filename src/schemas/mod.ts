@@ -864,6 +864,8 @@ export {
   custodyRule,
   duplicateCustodySlots,
   isLossUndo,
+  OWNED_KEYS_BY_TYPE,
+  ownsKey,
 } from "./custody.ts";
 export {
   INVOICE_ACTION_IDS,

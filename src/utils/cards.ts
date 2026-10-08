@@ -10,7 +10,7 @@
  *
  * @module
  */
-import type { Booking, Card, CardAction, CardStatus } from "../schemas/mod.ts";
+import { type Booking, type Card, type CardAction, type CardStatus, ownsKey } from "../schemas/mod.ts";
 import { sumBreakdownKeys, terminalQuantity } from "./bookings.ts";
 
 /**
@@ -102,7 +102,7 @@ export type CardSiblingBooking = Pick<Booking, "type" | "quantity" | "breakdown"
  *   warehouse but some legs are still mid-cycle. No live incidence today;
  *   tracked as a low-priority follow-up, not a code change.
  *
- * **End card (collection)** — the leg's bookings, filtered to **rentals only** (`b.type === "rental"`). Only a rental has a
+ * **End card (collection)** — the leg's bookings, filtered to **rentals only** (`ownsKey(b.type, "out")`: the lines that come back). Only a rental has a
  *   collection event — checked out (`breakdown.out > 0`) and later returned —
  *   so only a rental can drive the card to `complete`. Sale, service, and
  *   surcharge lines are all excluded:
@@ -150,7 +150,7 @@ export function computeCardStatusFromBookings(
   }
 
   // side === "end" — rentals only; sale/service/surcharge have no return event.
-  const rentals = siblings.filter((b) => b.type === "rental");
+  const rentals = siblings.filter((b) => ownsKey(b.type, "out"));
   if (rentals.length === 0) return "complete";
 
   let terminal = 0;
@@ -186,7 +186,7 @@ export function computeCardStatusFromBookings(
  *   - else `prepped > 0` → `checkout` (prepped, awaiting check-out)
  *   - else → `null`               (nothing reserved/prepped; quote-only or fully out)
  *
- * **End side (collection)** — **rentals only** (`b.type === "rental"`),
+ * **End side (collection)** — **rentals only** (`ownsKey(b.type, "out")`: the lines that come back),
  * mirroring the end-card status formula. Sale, service, and surcharge lines
  * have no collection event.
  *   - `out > 0` → `return`        (checked-out rental quantity awaiting return)
@@ -228,7 +228,7 @@ export function computeCardActionFromBookings(
   // side === "end" — rentals only; sale/service/surcharge have no return event.
   let out = 0;
   for (const b of siblings) {
-    if (b.type !== "rental") continue;
+    if (!ownsKey(b.type, "out")) continue;
     out += b.breakdown.out;
   }
   if (out > 0) return { source: "fulfillment", value: "return" };

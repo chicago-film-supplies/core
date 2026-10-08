@@ -32,6 +32,8 @@ import {
   isLossUndo,
   MOVEMENT_CONTRACTS,
   type MovementTypeType,
+  OWNED_KEYS_BY_TYPE,
+  ownsKey,
   OOS_BREAKDOWN_KEYS,
   type OOSBreakdown,
   type OOSReasonType,
@@ -154,6 +156,41 @@ Deno.test("custody - every row agrees with MOVEMENT_CONTRACTS", () => {
     }
   }
   assert(checked >= 20, `only ${checked} arms checked — the walk stopped reaching the table`);
+});
+
+Deno.test("custody - ownership: a line that comes back owns every key, anything else never owns what left with the customer", () => {
+  assertEquals(OWNED_KEYS_BY_TYPE.rental, [
+    "quoted", "reserved", "prepped", "out", "returned", "lost", "damaged", "cleaning", "maintenance",
+  ]);
+  for (const t of ["sale", "service", "surcharge"] as const) {
+    assertEquals(OWNED_KEYS_BY_TYPE[t], ["quoted", "reserved", "prepped", "returned"], t);
+  }
+  // The predicate and the table are one answer.
+  for (const [t, keys] of Object.entries(OWNED_KEYS_BY_TYPE)) {
+    for (const k of keys) assert(ownsKey(t, k), `${t}.${k}`);
+  }
+});
+
+Deno.test("custody - a movement draws cost exactly when its custody pair crosses ownership, and moves nothing when both ends are unowned", () => {
+  let crossing = 0;
+  let checked = 0;
+  for (const r of CUSTODY_RULES) {
+    for (const [type, arm] of [["rental", r.rental], ["sale", r.sale]] as const) {
+      if (!arm?.movement) continue;
+      checked++;
+      const c = MOVEMENT_CONTRACTS[arm.movement];
+      const where = `${r.id} (${type}, ${arm.movement})`;
+      const crosses = ownsKey(type, r.from) !== ownsKey(type, r.to);
+      if (crosses) crossing++;
+      assertEquals(c.cost === "required", crosses, `${where}: cost is required iff ownership changes hands`);
+      if (!ownsKey(type, r.from) && !ownsKey(type, r.to)) {
+        assertEquals(c.places, null, `${where}: units the customer owns are on no CFS shelf`);
+      }
+    }
+  }
+  // `sale` and `sale_return` are the two crossings today; zero means the walk stopped reaching them.
+  assert(crossing >= 2, `only ${crossing} crossing arms — the cross-check is vacuous`);
+  assert(checked >= 20, `only ${checked} arms checked`);
 });
 
 Deno.test("custody - every inverse's places mirror its forward twin's", () => {
@@ -520,9 +557,45 @@ Deno.test("custody - manager cases: regression", async (t) => {
 });
 
 Deno.test("custody - ONE status rule: a mixed booking reads off its breakdown, not the action taken", () => {
+  const status = (breakdown: Partial<BookingBreakdown>, quantity: number, type: Booking["type"] = "rental") =>
+    deriveCustodyStatus({ type, quantity, breakdown: bd(breakdown) });
   // The manager's forward rule said part-prepped here; the breakdown says units are out.
-  assertEquals(deriveCustodyStatus(bd({ reserved: 1, prepped: 1, out: 1 }), 3, "part-prepped"), "active");
-  assertEquals(deriveCustodyStatus(bd({ quoted: 1, reserved: 1 }), 2, "draft"), "draft");
+  assertEquals(status({ reserved: 1, prepped: 1, out: 1 }, 3), "active");
+  // Mixed plan keys read as the further one.
+  assertEquals(status({ quoted: 1, reserved: 1 }, 2), "reserved");
+  assertEquals(status({ quoted: 2 }, 2), "quoted");
+  // Units back while others were never prepped: custody moved and is not settled.
+  assertEquals(status({ returned: 2, reserved: 2 }, 4), "active");
+  // Decision 9: a sale fully out is the customer's, so nothing is left to do.
+  assertEquals(status({ out: 3 }, 3, "sale"), "complete");
+  assertEquals(status({ out: 3 }, 3, "rental"), "active");
+  assertEquals(status({ out: 2, reserved: 1 }, 3, "sale"), "active");
+});
+
+Deno.test("custody - deriveCustodyStatus is total over every breakdown at quantity 3, and agrees with a by-definition oracle", () => {
+  const KEYS = ["quoted", "reserved", "prepped", "out", "returned", "lost", "damaged", "cleaning", "maintenance"] as const;
+  let checked = 0;
+  for (const type of ["rental", "sale"] as const) {
+    for (const b of statesAt(3, KEYS)) {
+      // The oracle states each row from its own definition, not through isBookingClosed.
+      const work = b.quoted + b.reserved + b.prepped + (type === "rental" ? b.out : 0);
+      const pastPrep = b.out + b.returned + b.lost + b.damaged + b.cleaning + b.maintenance;
+      const expected = work === 0
+        ? "complete"
+        : pastPrep > 0
+        ? "active"
+        : b.prepped === 3
+        ? "prepped"
+        : b.prepped > 0
+        ? "part-prepped"
+        : b.reserved > 0
+        ? "reserved"
+        : "quoted";
+      assertEquals(deriveCustodyStatus({ type, quantity: 3, breakdown: b }), expected, `${type} ${JSON.stringify(b)}`);
+      checked++;
+    }
+  }
+  assertEquals(checked, 2 * 165, "every 9-key breakdown summing to 3, per type");
 });
 
 // ── offers ───────────────────────────────────────────────────────────

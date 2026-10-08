@@ -7406,6 +7406,16 @@ rather than policed. Same for root, parent and the composed display name.
 const ORG_LEVELS: readonly ["organization", "project", "department"];
 ```
 
+### `OWNED_KEYS_BY_TYPE`
+
+{@link ownsKey}, tabulated per booking type in breakdown order — for a reader
+that wants the key list rather than the predicate. Derived, so it cannot
+drift from the predicate.
+
+```ts
+const OWNED_KEYS_BY_TYPE: Readonly<Record<ComponentTypeType, readonly BookingBreakdownKeyType[]>>;
+```
+
 ### `OosChargeProducts`
 
 The on-request out-of-service reasons that have a charge product.
@@ -14612,6 +14622,31 @@ The grain key mirrors `componentAncestry` exactly: the leg is `path[0]` (an
 order's top divider), the ancestry is `path`'s product-shaped segments minus
 the line's own.
 
+### `ownsKey(bookingType: string, key: BookingBreakdownKeyType): boolean`
+
+Whether CFS still OWNS a booking's units in `key` — **the one author of "a
+sale's `out` is no longer CFS's"** (stock campaign, P1).
+
+| booking type | owns |
+|---|---|
+| a line that comes back (`rental`, {@link isCollectionLineType}) | every key |
+| anything else (`sale`, `service`, `surcharge`) | the plan keys, `prepped` and `returned` — never `out` or an out-of-service key |
+
+A sale's units leave CFS ownership at the check-out (the `sale` movement
+draws cost) and re-enter it only on a `sale_return`, so the units a sale
+holds in `out`, or in `lost`/`damaged` after leaving, are the customer's.
+
+Everything that asks "is this `out` in flight?", "does this booking still
+hold units?", "is it closed?" reads this predicate rather than testing
+`type === "rental"` or `type === "sale"`: about twenty hand-written copies
+of that test had drifted (core `deriveCustodyStatus` read a fully-out sale
+as `active` while `isBookingClosed` read it closed).
+
+⚠️ **`service` and `surcharge` read like a sale, and that settles a split.**
+`heldByBooking` used to keep their `out` held while `isBookingClosed` and
+`liveCustody` read it terminal. Neither type carries an inventory ledger, so
+no availability answer moves; the rule just stops having two answers.
+
 ### `pickSheetGateAdmits(pair: PickSheetGatePair, gate: PickSheetGateType): boolean`
 
 Does this leg have work on a sheet gated this way? See {@link PICK_SHEET_GATES}.
@@ -15344,6 +15379,14 @@ Allowed values for chart-of-accounts revenue code.
 
 ```ts
 type COARevenueType = indexedAccess;
+```
+
+### `COMPONENT_TYPES`
+
+Every component (line) type a booking can carry.
+
+```ts
+const COMPONENT_TYPES: "rental" | "sale" | "service" | "surcharge"[];
 ```
 
 ### `CardId`
@@ -17848,6 +17891,16 @@ One side of a flag row's service axis.
 type CustodyServiceSide = "none" | "damaged" | "cleaning" | "maintenance";
 ```
 
+### `OWNED_KEYS_BY_TYPE`
+
+{@link ownsKey}, tabulated per booking type in breakdown order — for a reader
+that wants the key list rather than the predicate. Derived, so it cannot
+drift from the predicate.
+
+```ts
+const OWNED_KEYS_BY_TYPE: Readonly<Record<ComponentTypeType, readonly BookingBreakdownKeyType[]>>;
+```
+
 ### `custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale"): string | null`
 
 The movement-id slot an action occupies in one save, or `null` when it writes
@@ -17881,6 +17934,31 @@ breakdown the undos leave.
 
 Read off the table rather than listed, so the P2b rows joined without an edit
 here; the name predates them.
+
+### `ownsKey(bookingType: string, key: BookingBreakdownKeyType): boolean`
+
+Whether CFS still OWNS a booking's units in `key` — **the one author of "a
+sale's `out` is no longer CFS's"** (stock campaign, P1).
+
+| booking type | owns |
+|---|---|
+| a line that comes back (`rental`, {@link isCollectionLineType}) | every key |
+| anything else (`sale`, `service`, `surcharge`) | the plan keys, `prepped` and `returned` — never `out` or an out-of-service key |
+
+A sale's units leave CFS ownership at the check-out (the `sale` movement
+draws cost) and re-enter it only on a `sale_return`, so the units a sale
+holds in `out`, or in `lost`/`damaged` after leaving, are the customer's.
+
+Everything that asks "is this `out` in flight?", "does this booking still
+hold units?", "is it closed?" reads this predicate rather than testing
+`type === "rental"` or `type === "sale"`: about twenty hand-written copies
+of that test had drifted (core `deriveCustodyStatus` read a fully-out sale
+as `active` while `isBookingClosed` read it closed).
+
+⚠️ **`service` and `surcharge` read like a sale, and that settles a split.**
+`heldByBooking` used to keep their `out` held while `isBookingClosed` and
+`liveCustody` read it terminal. Neither type carries an inventory ledger, so
+no availability answer moves; the rule just stops having two answers.
 
 ## `@cfs/core/schemas/cache-geocodes`
 
@@ -30460,16 +30538,12 @@ back keeps its booking and loses its row.
 
 ### `isBookingClosed(b: Pick<Booking, "type" | "breakdown">): boolean`
 
-Per-booking closure rule.
+Per-booking closure rule: no unit left in a key that is still work.
 
-`quoted + reserved + prepped` must always be zero. The treatment of `out`
-depends on `booking.type`:
-
-- `rental`: `out` is in-flight — units must be returned (or lost/damaged)
-  before the booking is closed.
-- any other type (`sale`, defensively `service`/`surcharge`): `out` is
-  terminal — checkout is delivery and the units don't come back. The
-  booking can sit in `out` indefinitely without blocking completion.
+`quoted + reserved + prepped` must be zero, and so must `out` where CFS still
+owns it ({@link ownsKey}): a rental's `out` is in flight and must come back
+(or be marked) first; a sale's `out` is delivered, so a sale can sit fully
+out and be closed.
 
 Sale items still expose Return/Lost/Damaged actions in the picker (a sold
 item *can* be returned for credit and lost/damaged-in-transit is real) —
@@ -30490,8 +30564,8 @@ flips to true after applying booking deltas, the order's status is set to
 ### `liveCustody(b: Pick<Booking, "type" | "breakdown">): number`
 
 Units a booking physically holds that have not come back: `prepped`, plus
-`out` on a rental. A sale's `out` is delivered and never comes back, the same
-split {@link isBookingClosed} makes.
+`out` where CFS still owns it ({@link ownsKey}). A sale's `out` is delivered
+and never comes back, the same split {@link isBookingClosed} makes.
 
 ⚠️ **Not `custodyMovedQuantity`.** That counts `returned`/`lost`/`damaged`
 too — it answers "did custody ever move?", which decides whether a booking
@@ -30831,25 +30905,29 @@ rewind is refused (api-cloudrun#1054); and a sale never takes `cleaning` or
 `maintenance` (P2b ruling 4). A service or surcharge booking holds no
 stock, so its delta is always matched with no steps.
 
-### `deriveCustodyStatus(breakdown: BookingBreakdown, quantity: number, current: indexedAccess): indexedAccess`
+### `deriveCustodyStatus(booking: Pick<Booking, "type" | "breakdown" | "quantity">): indexedAccess`
 
-A booking's status, read off its breakdown. ONE rule for every custody
-write; the manager had two (a forward one and a regression one), and this is
-the regression one, because it is a function of the state alone.
+A booking's status, read off its breakdown — ONE rule for every custody write,
+and TOTAL: every breakdown reads one status, whatever mix of keys it holds.
 
-| breakdown                        | status          |
-|----------------------------------|-----------------|
-| every terminal key sums to qty   | `complete`      |
-| out > 0                          | `active`        |
-| prepped = qty                    | `prepped`       |
-| prepped > 0 and reserved > 0     | `part-prepped`  |
-| reserved = qty                   | `reserved`      |
-| anything else                    | unchanged       |
+| breakdown (first row that holds)                       | status         |
+|--------------------------------------------------------|----------------|
+| no unit in a key that is still work (`isBookingClosed`) | `complete`     |
+| any unit past `prepped` (`out` or a terminal key)       | `active`       |
+| prepped = qty                                           | `prepped`      |
+| prepped > 0                                             | `part-prepped` |
+| reserved > 0                                            | `reserved`     |
+| otherwise (only `quoted` is left)                       | `quoted`       |
 
-⚠️ A sale fully `out` reads `active`, not `complete`, exactly as the manager's
-check-out has always sent it. Whether a sale's `out` closes the booking is
-`isBookingClosed`'s question (`utils/bookings.ts`), and it answers per order,
-at finalize.
+🔴 **A sale fully `out` reads `complete`** (stock campaign decision 9): its
+units are the customer's (`ownsKey`), so nothing about it is still work. It
+read `active` until P1, while `isBookingClosed` read the same booking closed.
+
+⚠️ **Total, so it no longer takes the stored status.** The old last row,
+"anything else → unchanged", let a rental with units back and units still
+reserved keep whatever status it was written with. Such a booking is
+`active` now: custody moved past prepped and is not settled, which is the
+order-level rule too.
 
 ### `expandCustodyOffer(booking: CustodyBooking, offer: Pick<CustodyOffer, "rule">, quantity: number): BookingActionType[]`
 
@@ -31004,7 +31082,7 @@ No sale filter: sale lines are genuinely prepped + checked out on delivery.
   - else `prepped > 0` → `checkout` (prepped, awaiting check-out)
   - else → `null`               (nothing reserved/prepped; quote-only or fully out)
 
-**End side (collection)** — **rentals only** (`b.type === "rental"`),
+**End side (collection)** — **rentals only** (`ownsKey(b.type, "out")`: the lines that come back),
 mirroring the end-card status formula. Sale, service, and surcharge lines
 have no collection event.
   - `out > 0` → `return`        (checked-out rental quantity awaiting return)
@@ -31051,7 +31129,7 @@ Otherwise, applies per-side roll-up rules:
   warehouse but some legs are still mid-cycle. No live incidence today;
   tracked as a low-priority follow-up, not a code change.
 
-**End card (collection)** — the leg's bookings, filtered to **rentals only** (`b.type === "rental"`). Only a rental has a
+**End card (collection)** — the leg's bookings, filtered to **rentals only** (`ownsKey(b.type, "out")`: the lines that come back). Only a rental has a
   collection event — checked out (`breakdown.out > 0`) and later returned —
   so only a rental can drive the card to `complete`. Sale, service, and
   surcharge lines are all excluded:
@@ -36953,8 +37031,8 @@ the exact answer; a daily curve does not.
 Units this booking still consumes from **`quantity_held`** — the definition of
 `quantity_booked`, and deliberately narrower than `sumBookingBreakdown`.
 
-`reserved + prepped`, plus `out` **unless the booking is a sale**. For a sale
-the checkout is also the moment ownership ends: the movement drops
+`reserved + prepped`, plus `out` **where CFS still owns it** ({@link ownsKey}).
+For a sale the checkout is also the moment ownership ends: the movement drops
 `quantity_held`, so counting the booking's `out` as well would subtract the
 same units twice.
 

@@ -39,9 +39,62 @@
 import { z } from "zod";
 import { BookingId, OutOfServiceId } from "./_uid.ts";
 import { UnitSet } from "./unit.ts";
-import type { BookingBreakdownKeyType } from "./booking.ts";
+import { BOOKING_BREAKDOWN_KEYS, type BookingBreakdownKeyType } from "./_breakdown.ts";
 import type { MovementTypeType } from "./transaction.ts";
 import type { EnforcementRef } from "./propagation/types.ts";
+import { COMPONENT_TYPES, type ComponentTypeType } from "./common.ts";
+import { isCollectionLineType } from "./order.ts";
+
+// ── Ownership ────────────────────────────────────────────────────────
+
+/**
+ * The breakdown keys a booking's units reach only by LEAVING the building with
+ * the customer: `out`, and every out-of-service key a unit can only reach from
+ * `out` or from a return of it. Whether CFS still owns units there depends on
+ * whether the line comes back.
+ */
+const LEFT_WITH_THE_CUSTOMER: ReadonlySet<BookingBreakdownKeyType> = new Set([
+  "out", "lost", "damaged", "cleaning", "maintenance",
+]);
+
+/**
+ * Whether CFS still OWNS a booking's units in `key` — **the one author of "a
+ * sale's `out` is no longer CFS's"** (stock campaign, P1).
+ *
+ * | booking type | owns |
+ * |---|---|
+ * | a line that comes back (`rental`, {@link isCollectionLineType}) | every key |
+ * | anything else (`sale`, `service`, `surcharge`) | the plan keys, `prepped` and `returned` — never `out` or an out-of-service key |
+ *
+ * A sale's units leave CFS ownership at the check-out (the `sale` movement
+ * draws cost) and re-enter it only on a `sale_return`, so the units a sale
+ * holds in `out`, or in `lost`/`damaged` after leaving, are the customer's.
+ *
+ * Everything that asks "is this `out` in flight?", "does this booking still
+ * hold units?", "is it closed?" reads this predicate rather than testing
+ * `type === "rental"` or `type === "sale"`: about twenty hand-written copies
+ * of that test had drifted (core `deriveCustodyStatus` read a fully-out sale
+ * as `active` while `isBookingClosed` read it closed).
+ *
+ * ⚠️ **`service` and `surcharge` read like a sale, and that settles a split.**
+ * `heldByBooking` used to keep their `out` held while `isBookingClosed` and
+ * `liveCustody` read it terminal. Neither type carries an inventory ledger, so
+ * no availability answer moves; the rule just stops having two answers.
+ */
+export function ownsKey(bookingType: string, key: BookingBreakdownKeyType): boolean {
+  return isCollectionLineType(bookingType) || !LEFT_WITH_THE_CUSTOMER.has(key);
+}
+
+/**
+ * {@link ownsKey}, tabulated per booking type in breakdown order — for a reader
+ * that wants the key list rather than the predicate. Derived, so it cannot
+ * drift from the predicate.
+ */
+export const OWNED_KEYS_BY_TYPE: Readonly<Record<ComponentTypeType, readonly BookingBreakdownKeyType[]>> = (() => {
+  const table = {} as Record<ComponentTypeType, readonly BookingBreakdownKeyType[]>;
+  for (const t of COMPONENT_TYPES) table[t] = BOOKING_BREAKDOWN_KEYS.filter((k) => ownsKey(t, k));
+  return table;
+})();
 
 // ── Rule ids ─────────────────────────────────────────────────────────
 

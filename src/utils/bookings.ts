@@ -25,7 +25,7 @@ import type {
   Order,
   OrderStatusType,
 } from "../schemas/mod.ts";
-import { BOOKING_BREAKDOWN_KEYS, BOOKING_BREAKDOWN_TERMINAL_KEYS, isCollectionLineType } from "../schemas/mod.ts";
+import { BOOKING_BREAKDOWN_KEYS, BOOKING_BREAKDOWN_TERMINAL_KEYS, isCollectionLineType, ownsKey } from "../schemas/mod.ts";
 
 /**
  * The breakdown key constants and their display labels live beside
@@ -339,25 +339,31 @@ export function calculateBookingBreakdown(
 }
 
 /**
- * Per-booking closure rule.
+ * The keys whose units are still WORK: the plan (`quoted`, `reserved`), the prep
+ * shelf, and `out` while CFS still owns it. A booking is closed when none of the
+ * keys it owns here holds a unit.
+ */
+const OPEN_KEYS: readonly BookingBreakdownKeyType[] = ["quoted", "reserved", "prepped", "out"];
+
+/** The {@link OPEN_KEYS} a booking of `type` owns ({@link ownsKey}). */
+function openKeysFor(type: string): readonly BookingBreakdownKeyType[] {
+  return OPEN_KEYS.filter((k) => ownsKey(type, k));
+}
+
+/**
+ * Per-booking closure rule: no unit left in a key that is still work.
  *
- * `quoted + reserved + prepped` must always be zero. The treatment of `out`
- * depends on `booking.type`:
- *
- * - `rental`: `out` is in-flight — units must be returned (or lost/damaged)
- *   before the booking is closed.
- * - any other type (`sale`, defensively `service`/`surcharge`): `out` is
- *   terminal — checkout is delivery and the units don't come back. The
- *   booking can sit in `out` indefinitely without blocking completion.
+ * `quoted + reserved + prepped` must be zero, and so must `out` where CFS still
+ * owns it ({@link ownsKey}): a rental's `out` is in flight and must come back
+ * (or be marked) first; a sale's `out` is delivered, so a sale can sit fully
+ * out and be closed.
  *
  * Sale items still expose Return/Lost/Damaged actions in the picker (a sold
  * item *can* be returned for credit and lost/damaged-in-transit is real) —
  * they're available, just not required for closure.
  */
 export function isBookingClosed(b: Pick<Booking, "type" | "breakdown">): boolean {
-  if (sumBreakdownKeys(b.breakdown, ["quoted", "reserved", "prepped"]) !== 0) return false;
-  if (b.type === "rental" && b.breakdown.out !== 0) return false;
-  return true;
+  return sumBreakdownKeys(b.breakdown, openKeysFor(b.type)) === 0;
 }
 
 /**
@@ -380,8 +386,8 @@ export function isOrderBookingsClosed(
 
 /**
  * Units a booking physically holds that have not come back: `prepped`, plus
- * `out` on a rental. A sale's `out` is delivered and never comes back, the same
- * split {@link isBookingClosed} makes.
+ * `out` where CFS still owns it ({@link ownsKey}). A sale's `out` is delivered
+ * and never comes back, the same split {@link isBookingClosed} makes.
  *
  * ⚠️ **Not `custodyMovedQuantity`.** That counts `returned`/`lost`/`damaged`
  * too — it answers "did custody ever move?", which decides whether a booking
@@ -390,8 +396,11 @@ export function isOrderBookingsClosed(
  * or shrunk fulfillment row an order edit must KEEP (decision 3).
  */
 export function liveCustody(b: Pick<Booking, "type" | "breakdown">): number {
-  return sumBreakdownKeys(b.breakdown, b.type === "rental" ? ["prepped", "out"] : ["prepped"]);
+  return sumBreakdownKeys(b.breakdown, LIVE_CUSTODY_KEYS.filter((k) => ownsKey(b.type, k)));
 }
+
+/** The keys holding physical custody that has not come back: {@link liveCustody} reads the owned ones. */
+const LIVE_CUSTODY_KEYS: readonly BookingBreakdownKeyType[] = ["prepped", "out"];
 
 /** Every key but the plan-only `quoted`/`reserved`. */
 const HISTORY_KEYS: readonly BookingBreakdownKeyType[] = BOOKING_BREAKDOWN_KEYS.filter(

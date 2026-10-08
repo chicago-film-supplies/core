@@ -965,7 +965,8 @@ export type InclusionTypeType = typeof INCLUSION_TYPES[number];
 /** Zod schema for InclusionTypeType. */
 export const InclusionTypeEnum: z.ZodType<InclusionTypeType> = z.enum(INCLUSION_TYPES);
 
-const COMPONENT_TYPES = ["rental", "sale", "service", "surcharge"] as const;
+/** Every component (line) type a booking can carry. */
+export const COMPONENT_TYPES = ["rental", "sale", "service", "surcharge"] as const;
 /** Allowed values for component type. */
 export type ComponentTypeType = typeof COMPONENT_TYPES[number];
 /** Zod schema for ComponentTypeType. */
