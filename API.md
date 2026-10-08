@@ -35846,12 +35846,13 @@ substitutions — nothing else. The fulfillment surface has no drag-reorder
 (dnd-kit is wired on orders, invoices and products; not here), so a
 submission's sequence carries no operator intent to preserve.
 
-Taking sequence from the stored document is also the only way the
-zero-priced-first invariant survives: `zero_priced` is one of the six fields
-stripped from a fulfillment line, so a fulfillment **cannot evaluate that
-invariant about itself**. It can only inherit the sequence its order
-projection already satisfies. A rebuild that honoured submission order would
-be free to break it, silently and unverifiably.
+⚠️ **The zero-priced-first invariant is no longer part of the reason.** This
+used to say a fulfillment line carried no `zero_priced` and so could only
+inherit its order's sequence. It has carried the flag since 2026-09-10
+(emitted by `projectItem`, corpus backfilled, and checked by
+`checkZeroPricedComponents` on `FulfillmentSchema`), so a fulfillment can
+evaluate the invariant itself. What stands is the sentence above: sequence
+is not the picker's to author, so the stored order is kept.
 
 ## Why keyed on `path`, never `uid`
 
