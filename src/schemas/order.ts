@@ -595,20 +595,52 @@ export function checkExchangedFor(
   },
   ctx: z.RefinementCtx,
 ): void {
+  for (const v of exchangedForViolations(doc)) {
+    ctx.addIssue({
+      code: "custom",
+      path: v.entry === null ? ["items", v.index, "exchanged_for"] : ["items", v.index, "exchanged_for", v.entry, v.field],
+      message: v.message,
+    });
+  }
+}
+
+/** One way an `exchanged_for` entry breaks {@link checkExchangedFor}'s rules. */
+export interface ExchangedForViolation {
+  /** The row's position in `items`. */
+  index: number;
+  /** The entry's position in `exchanged_for`; `null` when the whole field is misplaced. */
+  entry: number | null;
+  /** What is wrong: the row carrying it, an entry's `path`, or an entry's `reason`. */
+  field: "exchanged_for" | "path" | "reason";
+  message: string;
+}
+
+/**
+ * {@link checkExchangedFor}'s rules as DATA, so a writer or a client can ask the
+ * same question without a Zod context — the refinement is this function plus an
+ * `addIssue` per entry, as {@link checkDestinationJoin} is for
+ * {@link destinationJoinViolations}. Read {@link checkExchangedFor} for the three
+ * rules and why existence is deliberately not one of them.
+ */
+export function exchangedForViolations(doc: {
+  destinations: ReadonlyArray<{ uid: string; exchange?: DestinationExchangeType | null }>;
+  items: ReadonlyArray<{ path: readonly string[] }>;
+}): ExchangedForViolation[] {
   const exchangeByPair = new Map(
     doc.destinations.filter((p) => p.exchange != null).map((p) => [p.uid, p.exchange!]),
   );
+  const out: ExchangedForViolation[] = [];
 
   doc.items.forEach((item, i) => {
     const entries = (item as { exchanged_for?: ExchangedForEntryType[] }).exchanged_for;
     if (entries === undefined) return;
-    const key = "exchanged_for";
     const leg = item.path[0];
     const exchange = leg === undefined ? undefined : exchangeByPair.get(leg);
     if (exchange === undefined) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["items", i, key],
+      out.push({
+        index: i,
+        entry: null,
+        field: "exchanged_for",
         message: "exchanged_for is valid only on a row under a destination pair marked as an exchange",
       });
       return;
@@ -621,22 +653,25 @@ export function checkExchangedFor(
       const onFamily = target === parentLeg ||
         (target !== leg && target !== undefined && exchangeByPair.get(target)?.uid_pair === parentLeg);
       if (!onFamily) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["items", i, key, j, "path"],
-          message: `${key} names ${entry.path.join("/")}, which is neither the leg this exchange is ` +
+        out.push({
+          index: i,
+          entry: j,
+          field: "path",
+          message: `exchanged_for names ${entry.path.join("/")}, which is neither the leg this exchange is ` +
             `against nor another exchange on it`,
         });
       }
       if (entry.reason === "lost" && exchange.disposition !== "send_now") {
-        ctx.addIssue({
-          code: "custom",
-          path: ["items", i, key, j, "reason"],
+        out.push({
+          index: i,
+          entry: j,
+          field: "reason",
           message: "a lost unit cannot be collected on the exchange's trip — use disposition send_now",
         });
       }
     });
   });
+  return out;
 }
 
 /** One way the destination dividers and the destination pairs fail to join. */

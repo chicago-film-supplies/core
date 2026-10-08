@@ -733,6 +733,12 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "pairItemsAcrossRebuild",
     "pairItemsByUidOccurrence",
   ],
+  // `utils/item-rules.ts` judges an items array a WRITER or an editor is about
+  // to commit. A template renders a document that has already passed it, so
+  // there is nothing left for it to report. Walked for drift only.
+  "item-rules": [
+    "itemArrayIssues",
+  ],
   substitutions: [
     "collectSubstitutionAnchors",
     "findSubtreeAnchor",

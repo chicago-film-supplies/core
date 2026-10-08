@@ -229,6 +229,8 @@ export {
   type PlaceablePair,
   checkDestinationJoin,
   destinationJoinViolations,
+  exchangedForViolations,
+  type ExchangedForViolation,
   type DestinationJoinViolation,
   checkCollectionLegs,
   checkMixedBookingGrains,

@@ -64,6 +64,7 @@ import * as fixturePiiUtils from "../src/utils/fixture-pii.ts";
 import * as templateLintUtils from "../src/utils/template-lint.ts";
 import * as substitutionUtils from "../src/utils/substitutions.ts";
 import * as itemPairingUtils from "../src/utils/item-pairing.ts";
+import * as itemRulesUtils from "../src/utils/item-rules.ts";
 import * as taxClassUtils from "../src/utils/tax-classes.ts";
 import * as unitUtils from "../src/utils/units.ts";
 import * as priceDocumentUtils from "../src/utils/price-document.ts";
@@ -181,6 +182,7 @@ const UTIL_MODULES: Record<string, Record<string, unknown>> = {
   // revisions of a document. A template is handed one. Listed so the drift guard
   // sees its exports.
   "item-pairing": itemPairingUtils,
+  "item-rules": itemRulesUtils,
   invoices: invoiceUtils,
   locations: locationUtils,
   money: moneyUtils,

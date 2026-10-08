@@ -1951,6 +1951,12 @@
           "doc": "`exchanged_for` on an exchange's replacement line: the rows this row is going out\nagainst, with how many units each and why they come back.\n\n⭐ **The shape of {@link SubstitutedForList} plus a `reason`, deliberately,\nand a different meaning.** Both say \"this row stands in relation to those\nrows, by this many units\", so every rule that reads a `{path, quantity}[]`\nreads both — the carry-forward across a rebuild, the row-identity rules, the\ndocument diff. What differs is the physical story, and it is the whole\ndistinction:\n\n| | `substituted_for` | `exchanged_for` |\n|---|---|---|\n| X went out | no — Y went instead | yes, and it is out NOW |\n| X's booking | cancelled by the netting | kept, and marked by `reason` |\n| why | the picker had no X on the shelf | X broke, got dirty or was lost mid-rental |\n\n🔴 **So they must never be conflated.** `itemsWithSubstitutions` NETS a\nsubstitution away — X's booking is cancelled and Y's inherits its custody —\nwhich is exactly the wrong answer for an exchange, where X is on set and its units\nare what the exchange takes back.\n\n⚠️ **It lives on the ROW rather than on the exchange PAIR**, because an exchange\nTRIP legitimately carries replacements for several damaged lines at once: one\nleg, one card, one drive. A pair-level field would force one leg per damaged\nline and put three trip cards on the dispatch board for one physical trip —\nand it would state \"what\" a level above the `quantity` that says \"how many\".\nTrip facts (which leg it returns on, whether X comes back on it) stay on the\npair; line facts live here."
         },
         {
+          "kind": "interface",
+          "name": "ExchangedForViolation",
+          "declaration": "interface ExchangedForViolation {\n  index: number;\n  entry: number | null;\n  field: \"exchanged_for\" | \"path\" | \"reason\";\n  message: string;\n}",
+          "doc": "One way an `exchanged_for` entry breaks {@link checkExchangedFor}'s rules."
+        },
+        {
           "kind": "variable",
           "name": "ExtendRentalInput",
           "declaration": "const ExtendRentalInput: z.ZodType<ExtendRentalInputType>;",
@@ -6274,6 +6280,14 @@
           "returnsTag": null
         },
         {
+          "kind": "function",
+          "name": "exchangedForViolations",
+          "signature": "exchangedForViolations(doc: typeLiteral): ExchangedForViolation[]",
+          "doc": "{@link checkExchangedFor}'s rules as DATA, so a writer or a client can ask the\nsame question without a Zod context — the refinement is this function plus an\n`addIssue` per entry, as {@link checkDestinationJoin} is for\n{@link destinationJoinViolations}. Read {@link checkExchangedFor} for the three\nrules and why existence is deliberately not one of them.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
           "kind": "variable",
           "name": "firestoreDisplayDefaults",
           "declaration": "const firestoreDisplayDefaults: Record<string, FirestoreDisplayDefaults>;",
@@ -9221,6 +9235,12 @@
           "doc": "`same_trip` — the units taken back come back on the exchange's own trip.\n`send_now` — the replacement goes out now and the units come back at the\nnormal return (or, for a `lost` entry, never). A fact about the TRIP; why each\nunit comes back is the `exchanged_for` entry's `reason`.\n\n`same_trip` was stored as `exchange` until api-cloudrun#1147 renamed it\n(backfilled 2026-10-01; prod and dev held no exchange pair)."
         },
         {
+          "kind": "interface",
+          "name": "ExchangedForViolation",
+          "declaration": "interface ExchangedForViolation {\n  index: number;\n  entry: number | null;\n  field: \"exchanged_for\" | \"path\" | \"reason\";\n  message: string;\n}",
+          "doc": "One way an `exchanged_for` entry breaks {@link checkExchangedFor}'s rules."
+        },
+        {
           "kind": "variable",
           "name": "ExtendRentalInput",
           "declaration": "const ExtendRentalInput: z.ZodType<ExtendRentalInputType>;",
@@ -9593,6 +9613,14 @@
           "name": "destinationJoinViolations",
           "signature": "destinationJoinViolations(items: ReadonlyArray<unknown>, destinations: ReadonlyArray<unknown>): DestinationJoinViolation[]",
           "doc": "Where the destination dividers and pairs of one document disagree — the rule\n{@link checkDestinationJoin} enforces on the order and fulfillment schemas, as\ndata, so a WRITER can refuse the same input with a 400 before it builds a\ndocument the schema would reject with a 500. One author: the refinement is this\nfunction plus an `addIssue` per entry, and api-cloudrun's write guard (which\nalso covers invoices) calls it rather than keeping a second copy.\n\nThe join is the divider's `uid` = the pair's `uid` (see\n{@link DocDestinationType.uid}), and it is a plain biconditional: every divider\nis answered by a pair and every pair names a divider.\n\n🔴 **There is no divider-less exemption any more** (api-cloudrun#1154, owner\n2026-09-28). A document with no dividers and ONE pair used to be legal as a\n\"single-entry deduction\" — the lone pair answered every line — and it was the\nshape that let a second destination be added beside an unjoined first one.\nEvery order is now born with its divider (`items.min(1)` plus\n{@link leadingDividerViolations}), so the shape is unrepresentable on the\norder and fulfillment and the exemption had nothing left to exempt. 0 stored\ndocuments used it in either project (measured 2026-09-28).\n\nA row with a non-string `uid` is skipped: the schema parse owns it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "exchangedForViolations",
+          "signature": "exchangedForViolations(doc: typeLiteral): ExchangedForViolation[]",
+          "doc": "{@link checkExchangedFor}'s rules as DATA, so a writer or a client can ask the\nsame question without a Zod context — the refinement is this function plus an\n`addIssue` per entry, as {@link checkDestinationJoin} is for\n{@link destinationJoinViolations}. Read {@link checkExchangedFor} for the three\nrules and why existence is deliberately not one of them.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -16551,6 +16579,50 @@
             }
           ],
           "returnsTag": "The pairing, the rows it consumed, and the uids it guessed at"
+        }
+      ]
+    },
+    {
+      "entrypoint": "@cfs/core/utils/item-rules",
+      "moduleDoc": "The rules for a legal items array, composed ONCE.\n\nBefore this module they lived in three places that disagreed: manager's\nreorder guard, api-cloudrun's write guard (`api-cloudrun/src/lib/validate.ts` +\n`api-cloudrun/src/lib/firestoreWrite.ts`),\nand the core schema refinements. A rule added to one was missing from the\nothers until someone noticed — the manager offered reorders the API then\n400'd on mixed booking grains, a zero-priced line at the root, or a misplaced\n`exchanged_for`. {@link itemArrayIssues} is the one composition; the next rule\nlands here and every caller has it.\n\n**It ADDS no rule.** Every arm is an existing building block, named in the\ntable on {@link itemArrayIssues}, and the schema refinements stay — they are\nwhat `validateCollection` audits the stored corpus through.\n\n**It holds issues, not policy.** The API refuses on any issue; the manager\naccepts a reorder that does not make the count worse. Both read the same list.",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "ItemArrayDoc",
+          "declaration": "interface ItemArrayDoc {\n  items: readonly LineItem[];\n  destinations?: ReadonlyArray<typeLiteral>;\n  query_by_orders?: readonly string[];\n}",
+          "doc": "The document fields {@link itemArrayIssues} reads."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ItemArrayGrain",
+          "declaration": "type ItemArrayGrain = \"order\" | \"invoice\" | \"fulfillment\";",
+          "doc": "Which document an items array belongs to. Each grain has its own rule set."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ItemArrayIssue",
+          "declaration": "type ItemArrayIssue = parenthesized | parenthesized | parenthesized | parenthesized | typeLiteral | typeLiteral | parenthesized | parenthesized | parenthesized | parenthesized | parenthesized | parenthesized;",
+          "doc": "One reason an items array is not legal, discriminated by `rule`. Each arm\ncarries its building block's own finding, so a caller mapping it onto an\nexisting error shape loses nothing."
+        },
+        {
+          "kind": "interface",
+          "name": "ItemArrayIssueOptions",
+          "declaration": "interface ItemArrayIssueOptions {\n  recompute?: boolean;\n}",
+          "doc": "Options for {@link itemArrayIssues}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "ItemArrayRule",
+          "declaration": "type ItemArrayRule = indexedAccess;",
+          "doc": "Every `rule` an {@link ItemArrayIssue} can carry."
+        },
+        {
+          "kind": "function",
+          "name": "itemArrayIssues",
+          "signature": "itemArrayIssues(doc: ItemArrayDoc, grain: ItemArrayGrain, _: unknown): ItemArrayIssue[]",
+          "doc": "Every way an items array breaks the rules of its grain.\n\n| rule | built from | grains |\n|---|---|---|\n| `leading_divider` | `leadingDividerViolations` (`linked` = `query_by_orders` non-empty) | all |\n| `destination_join` | `destinationJoinViolations` | all (needs `destinations`) |\n| `parentage` | `validateItemParentage` | all |\n| `uniqueness` | `validateItemUniqueness` / `validateInvoiceItemUniqueness` | all |\n| `path_empty`, `path_not_self` | asserted directly — invariants (4) and (5) | all |\n| `path_fixed_point` | `validateItemPaths` / `validateInvoiceItemPaths` | all |\n| `zero_priced_non_component`, `zero_priced_unstated` | `zeroPricedFlaggedNonComponents`, `zeroPricedUnstatedComponents` | all |\n| `zero_quantity_component`, `mixed_booking_grain` | `zeroQuantityComponents`, `mixedBookingGrains` | order |\n| `exchanged_for` | `exchangedForViolations` | order, fulfillment (needs `destinations`) |\n\n⚠️ **(4) and (5) are asserted directly, beside the fixed point, on purpose.**\nA fixed-point check can only agree with its normalizer; these hold whatever\nthe normalizer does (the `cfs-items` skill records the 79 items a fixed point\ncertified clean).\n\n**Deliberately OUT** — each needs context an items array does not carry:\n- `orderLineClaimIssues` — needs the OTHER orders' current items;\n- `chargeWindowPairViolations` — needs the pricing context;\n- the fulfillment's `uid_order` / `order_number` agreement — needs the\n  document's own identity;\n- a product's `components` — a different path convention; that is\n  `validateComponentUniqueness`;\n- credit notes — they carry no structural paths.\n\nReturns `[]` for a legal array.",
+          "paramTags": [],
+          "returnsTag": null
         }
       ]
     },

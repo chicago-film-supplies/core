@@ -4478,6 +4478,19 @@ pair; line facts live here.
 const ExchangedForList: z.ZodType<ExchangedForEntryType[]>;
 ```
 
+### `ExchangedForViolation`
+
+One way an `exchanged_for` entry breaks {@link checkExchangedFor}'s rules.
+
+```ts
+interface ExchangedForViolation {
+  index: number;
+  entry: number | null;
+  field: "exchanged_for" | "path" | "reason";
+  message: string;
+}
+```
+
 ### `ExtendRentalInput`
 
 Zod schema for {@link ExtendRentalInputType}.
@@ -14104,6 +14117,14 @@ two entries on one path.
 
 A row's `exchanged_for` entries, with absent read as none.
 
+### `exchangedForViolations(doc: typeLiteral): ExchangedForViolation[]`
+
+{@link checkExchangedFor}'s rules as DATA, so a writer or a client can ask the
+same question without a Zod context — the refinement is this function plus an
+`addIssue` per entry, as {@link checkDestinationJoin} is for
+{@link destinationJoinViolations}. Read {@link checkExchangedFor} for the three
+rules and why existence is deliberately not one of them.
+
 ### `firestoreDisplayDefaults`
 
 Display defaults for every Firestore collection, derived from schema meta.
@@ -20257,6 +20278,19 @@ unit comes back is the `exchanged_for` entry's `reason`.
 type ExchangeDispositionType = indexedAccess;
 ```
 
+### `ExchangedForViolation`
+
+One way an `exchanged_for` entry breaks {@link checkExchangedFor}'s rules.
+
+```ts
+interface ExchangedForViolation {
+  index: number;
+  entry: number | null;
+  field: "exchanged_for" | "path" | "reason";
+  message: string;
+}
+```
+
 ### `ExtendRentalInput`
 
 Zod schema for {@link ExtendRentalInputType}.
@@ -21182,6 +21216,14 @@ order and fulfillment and the exemption had nothing left to exempt. 0 stored
 documents used it in either project (measured 2026-09-28).
 
 A row with a non-string `uid` is skipped: the schema parse owns it.
+
+### `exchangedForViolations(doc: typeLiteral): ExchangedForViolation[]`
+
+{@link checkExchangedFor}'s rules as DATA, so a writer or a client can ask the
+same question without a Zod context — the refinement is this function plus an
+`addIssue` per entry, as {@link checkDestinationJoin} is for
+{@link destinationJoinViolations}. Read {@link checkExchangedFor} for the three
+rules and why existence is deliberately not one of them.
 
 ### `getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]`
 
@@ -36051,6 +36093,106 @@ deliberately.
 - `to` — The pool paired against, bucketed in document order
 
 **Returns** — The pairing, the rows it consumed, and the uids it guessed at
+
+## `@cfs/core/utils/item-rules`
+
+The rules for a legal items array, composed ONCE.
+
+Before this module they lived in three places that disagreed: manager's
+reorder guard, api-cloudrun's write guard (`api-cloudrun/src/lib/validate.ts` +
+`api-cloudrun/src/lib/firestoreWrite.ts`),
+and the core schema refinements. A rule added to one was missing from the
+others until someone noticed — the manager offered reorders the API then
+400'd on mixed booking grains, a zero-priced line at the root, or a misplaced
+`exchanged_for`. {@link itemArrayIssues} is the one composition; the next rule
+lands here and every caller has it.
+
+**It ADDS no rule.** Every arm is an existing building block, named in the
+table on {@link itemArrayIssues}, and the schema refinements stay — they are
+what `validateCollection` audits the stored corpus through.
+
+**It holds issues, not policy.** The API refuses on any issue; the manager
+accepts a reorder that does not make the count worse. Both read the same list.
+
+### `ItemArrayDoc`
+
+The document fields {@link itemArrayIssues} reads.
+
+```ts
+interface ItemArrayDoc {
+  items: readonly LineItem[];
+  destinations?: ReadonlyArray<typeLiteral>;
+  query_by_orders?: readonly string[];
+}
+```
+
+### `ItemArrayGrain`
+
+Which document an items array belongs to. Each grain has its own rule set.
+
+```ts
+type ItemArrayGrain = "order" | "invoice" | "fulfillment";
+```
+
+### `ItemArrayIssue`
+
+One reason an items array is not legal, discriminated by `rule`. Each arm
+carries its building block's own finding, so a caller mapping it onto an
+existing error shape loses nothing.
+
+```ts
+type ItemArrayIssue = parenthesized | parenthesized | parenthesized | parenthesized | typeLiteral | typeLiteral | parenthesized | parenthesized | parenthesized | parenthesized | parenthesized | parenthesized;
+```
+
+### `ItemArrayIssueOptions`
+
+Options for {@link itemArrayIssues}.
+
+```ts
+interface ItemArrayIssueOptions {
+  recompute?: boolean;
+}
+```
+
+### `ItemArrayRule`
+
+Every `rule` an {@link ItemArrayIssue} can carry.
+
+```ts
+type ItemArrayRule = indexedAccess;
+```
+
+### `itemArrayIssues(doc: ItemArrayDoc, grain: ItemArrayGrain, _: unknown): ItemArrayIssue[]`
+
+Every way an items array breaks the rules of its grain.
+
+| rule | built from | grains |
+|---|---|---|
+| `leading_divider` | `leadingDividerViolations` (`linked` = `query_by_orders` non-empty) | all |
+| `destination_join` | `destinationJoinViolations` | all (needs `destinations`) |
+| `parentage` | `validateItemParentage` | all |
+| `uniqueness` | `validateItemUniqueness` / `validateInvoiceItemUniqueness` | all |
+| `path_empty`, `path_not_self` | asserted directly — invariants (4) and (5) | all |
+| `path_fixed_point` | `validateItemPaths` / `validateInvoiceItemPaths` | all |
+| `zero_priced_non_component`, `zero_priced_unstated` | `zeroPricedFlaggedNonComponents`, `zeroPricedUnstatedComponents` | all |
+| `zero_quantity_component`, `mixed_booking_grain` | `zeroQuantityComponents`, `mixedBookingGrains` | order |
+| `exchanged_for` | `exchangedForViolations` | order, fulfillment (needs `destinations`) |
+
+⚠️ **(4) and (5) are asserted directly, beside the fixed point, on purpose.**
+A fixed-point check can only agree with its normalizer; these hold whatever
+the normalizer does (the `cfs-items` skill records the 79 items a fixed point
+certified clean).
+
+**Deliberately OUT** — each needs context an items array does not carry:
+- `orderLineClaimIssues` — needs the OTHER orders' current items;
+- `chargeWindowPairViolations` — needs the pricing context;
+- the fulfillment's `uid_order` / `order_number` agreement — needs the
+  document's own identity;
+- a product's `components` — a different path convention; that is
+  `validateComponentUniqueness`;
+- credit notes — they carry no structural paths.
+
+Returns `[]` for a legal array.
 
 ## `@cfs/core/utils/fulfillment-stage`
 
