@@ -757,6 +757,29 @@ Deno.test("custody - BookingAction: a known rule and a positive quantity; the R2
   assert(!BookingAction.safeParse({ rule: "reserve", quantity: 1 }).success);
 });
 
+Deno.test("custody - a refunded return (api-cloudrun#513): a credit note rides a SALE's check_in, and nothing else", () => {
+  const cn = "AbCdEfGhIjKlMnOpQrSt";
+  assert(BookingAction.safeParse({ rule: "check_in", quantity: 1, uid_credit_note: cn }).success);
+  const wrongRule = BookingAction.safeParse({ rule: "mark_lost", quantity: 1, uid_credit_note: cn });
+  assert(!wrongRule.success);
+  assertEquals(wrongRule.error.issues[0].path, ["uid_credit_note"]);
+  assert(!BookingAction.safeParse({ rule: "check_in", quantity: 1, uid_credit_note: "not a firestore id!" }).success);
+
+  // The api reads the note off the row's check_in action, not the transition:
+  // a row that also undoes a loss takes the record-consuming path, which
+  // re-derives its transitions from the breakdown.
+  const sale = booking(3, { out: 3 }, "active", "sale");
+  const refunded = applyCustodyActions(sale, [{ rule: "check_in", quantity: 2, uid_credit_note: cn }]);
+  assertEquals(shape(refunded.transitions), ["sale_return:out→returned×2"]);
+
+  // A rental's check_in is a return CFS charged nothing to take back.
+  assertThrows(
+    () => applyCustodyActions(booking(2, { out: 2 }, "active"), [{ rule: "check_in", quantity: 1, uid_credit_note: cn }]),
+    CustodyRefusal,
+    "only a sale's return",
+  );
+});
+
 Deno.test("custody - BookingActions refuses one movement id twice and a loss undo after a forward step", () => {
   assert(!BookingActions.safeParse([{ rule: "mark_lost", quantity: 1 }, { rule: "mark_lost_returned", quantity: 1 }]).success);
   assert(!BookingActions.safeParse([

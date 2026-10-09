@@ -369,7 +369,7 @@
         {
           "kind": "interface",
           "name": "BookingActionType",
-          "declaration": "interface BookingActionType {\n  rule: CustodyRuleId;\n  quantity: number;\n  uid_out_of_service?: string;\n  units?: number[];\n}",
+          "declaration": "interface BookingActionType {\n  rule: CustodyRuleId;\n  quantity: number;\n  uid_out_of_service?: string;\n  units?: number[];\n  uid_credit_note?: string;\n}",
           "doc": "One step an operator takes on a booking.\n\n- `uid_out_of_service` — names the record a reclassification or an undo acts\n  on. Optional: an undo without one consumes the booking's open loss records\n  newest first, as the delta form always has.\n\nNo action names a reason: since P2b every reason is its own breakdown key and\nits own rule (`mark_cleaning`, `flag_maintenance_returned`, …)."
         },
         {
@@ -8217,7 +8217,7 @@
         {
           "kind": "interface",
           "name": "BookingActionType",
-          "declaration": "interface BookingActionType {\n  rule: CustodyRuleId;\n  quantity: number;\n  uid_out_of_service?: string;\n  units?: number[];\n}",
+          "declaration": "interface BookingActionType {\n  rule: CustodyRuleId;\n  quantity: number;\n  uid_out_of_service?: string;\n  units?: number[];\n  uid_credit_note?: string;\n}",
           "doc": "One step an operator takes on a booking.\n\n- `uid_out_of_service` — names the record a reclassification or an undo acts\n  on. Optional: an undo without one consumes the booking's open loss records\n  newest first, as the delta form always has.\n\nNo action names a reason: since P2b every reason is its own breakdown key and\nits own rule (`mark_cleaning`, `flag_maintenance_returned`, …)."
         },
         {

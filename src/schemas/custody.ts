@@ -44,7 +44,7 @@
  * @module
  */
 import { z } from "zod";
-import { BookingId, OutOfServiceId } from "./_uid.ts";
+import { BookingId, FirestoreId, OutOfServiceId } from "./_uid.ts";
 import { UnitSet } from "./unit.ts";
 import {
   BOOKING_BREAKDOWN_KEYS,
@@ -748,6 +748,22 @@ export interface BookingActionType {
    * live in prod before the manager sends it.
    */
   units?: number[];
+  /**
+   * A REFUNDED sale return (stock campaign decision 6, api-cloudrun#513): the
+   * credit note the customer was refunded on. Only on `check_in` of a SALE
+   * booking — anything else is refused (`applyCustodyActions`).
+   *
+   * Absent is the common case, the no-refund return: the units come back at a
+   * $0 basis and the zero is the decision. Present, the `sale_return` restores
+   * the sold units' exact basis, newest sale first, read off the booking's
+   * journal, and names the credit note in its `sources[]`. Its undo
+   * (`sale_return_undo`) relieves exactly what it restored.
+   *
+   * ⚠️ **Release order:** like `units`, an api older than this field STRIPS it
+   * silently, which books the return as no-refund. The api release that reads
+   * it must be live in prod before the manager sends it.
+   */
+  uid_credit_note?: string;
 }
 
 /** Zod schema for {@link BookingActionType}. */
@@ -756,9 +772,13 @@ export const BookingAction: z.ZodType<BookingActionType> = z.object({
   quantity: z.int().min(1),
   uid_out_of_service: OutOfServiceId.optional(),
   units: UnitSet.optional(),
+  uid_credit_note: FirestoreId.optional(),
 }).refine((a) => a.units === undefined || a.units.length === a.quantity, {
   message: "an action that names units names exactly `quantity` of them",
   path: ["units"],
+}).refine((a) => a.uid_credit_note === undefined || a.rule === "check_in", {
+  message: "only a check_in (a sale's return) is refunded against a credit note",
+  path: ["uid_credit_note"],
 });
 
 /**

@@ -228,6 +228,12 @@ export function applyCustodyActions(
         rule.id,
       );
     }
+    if (action.uid_credit_note !== undefined && arm.movement !== "sale_return") {
+      throw new CustodyRefusal(
+        `"${rule.id}" names a credit note, but only a sale's return is refunded against one`,
+        rule.id,
+      );
+    }
     // A new flag lands on units that carry none.
     if (addsFlag(rule)) {
       if (unflagged < action.quantity) {

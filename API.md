@@ -918,6 +918,7 @@ interface BookingActionType {
   quantity: number;
   uid_out_of_service?: string;
   units?: number[];
+  uid_credit_note?: string;
 }
 ```
 
@@ -18107,6 +18108,7 @@ interface BookingActionType {
   quantity: number;
   uid_out_of_service?: string;
   units?: number[];
+  uid_credit_note?: string;
 }
 ```
 
