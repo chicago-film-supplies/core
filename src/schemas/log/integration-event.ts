@@ -115,6 +115,21 @@ export const INTEGRATION_EVENT_MSGS = [
   // is exactly the case for a row already in the journal. 120 prod invoices sat
   // that way undetected until 2026-08-20.
   "settlement_totals_sweep",
+  // The daily state record under the `bookings` projection (api-cloudrun#920,
+  // stock campaign P3). Bookings are built inside `updateOrder`'s transaction and
+  // NOT by the order-write fan-out, so any write that bypasses `updateOrder`
+  // leaves them stale with nothing to notice. Two oracles on one run, kept
+  // apart for the reason `settlement_totals_sweep`'s are — their remedies differ:
+  //   - `drifted`: bookings a no-op recompute of their order would change on a
+  //     PLAN field (quantity, dates, status, breakdown, leg), plus the ones it
+  //     would create or delete. The remedy is a recompute.
+  //   - `unreproduced`: bookings the movement journal does not reproduce, and
+  //     orphaned movements leaving custody nothing holds. The stored breakdown
+  //     wins, so the remedy is never a recompute: it is a bug report about a
+  //     writer that skipped the journal.
+  // `failed` counts orders whose recompute threw. Emitted on EVERY run including
+  // clean ones, so the alert reads STATE. Report only: nothing is repaired.
+  "booking_drift_sweep",
   // The state check over Illinois' published tax rates (api-cloudrun#600).
   // Emitted on EVERY run including clean ones, for the reason the two sweeps
   // above are: an alert that counted complaints could not tell a matching
@@ -247,7 +262,7 @@ export interface IntegrationEventLogRecord {
   lag_ms?: number;
   // ── Scheduled-watch counters ─────────────────────────────────────
   // `il_tax_rate_check`, `tax_expiry_check`, `settlement_totals_sweep`,
-  // `stock_summary_sweep`, `organization_tree_check`. Each emits on EVERY run
+  // `stock_summary_sweep`, `organization_tree_check`, `booking_drift_sweep`. Each emits on EVERY run
   // including clean ones, so
   // these are the state an alert reads — not an event count.
   /** Cells / rows / ledgers examined this run. A `checked: 0` run is a finding. */
@@ -259,9 +274,15 @@ export interface IntegrationEventLogRecord {
   /** `tax_expiry_check` — cells past their review window / approaching it. */
   expired?: number;
   expiring_soon?: number;
-  /** `settlement_totals_sweep` — invoices whose stored projection disagrees. */
+  /**
+   * `settlement_totals_sweep` — invoices whose stored projection disagrees.
+   * `booking_drift_sweep` — bookings a recompute of their order would change.
+   */
   drifted?: number;
-  /** `settlement_totals_sweep` — invoices the fold could not reproduce. */
+  /**
+   * `settlement_totals_sweep` — invoices the fold could not reproduce.
+   * `booking_drift_sweep` — bookings (and orphaned ids) the movement journal does not reproduce.
+   */
   unreproduced?: number;
   /** `settlement_totals_sweep` — carried #575 pins that no longer reproduce. */
   pins_stale?: number;
@@ -282,7 +303,10 @@ export interface IntegrationEventLogRecord {
    * NOT in this count: an over-credited invoice must stay negative.
    */
   negative_buckets?: number;
-  /** `stock_summary_sweep` — projections repaired / that failed to repair. */
+  /**
+   * `stock_summary_sweep` — projections repaired / that failed to repair.
+   * `booking_drift_sweep` — `failed` is orders whose recompute threw.
+   */
   repaired?: number;
   failed?: number;
 
