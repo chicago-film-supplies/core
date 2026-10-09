@@ -19908,7 +19908,7 @@
           "kind": "function",
           "name": "productHasLedger",
           "signature": "productHasLedger(type: ProductTypeType): boolean",
-          "doc": "True iff a product of this `type` has an inventory ledger (and so a\n`stock/{P}` projection and a `stock-locks/{P}` token), counted or not.\n\nOne of the two answers to \"what stock does this product have?\" — moved here\nfrom api-cloudrun's `src/lib/productStock.ts` (which re-exports it) so the\nmanager's component fan-out (api-cloudrun#388) asks the same question the\nAPI's ledger lifecycle does. Only `rental` and `sale` are physical: `service`,\n`surcharge` and `transaction_fee` are billing lines, and `replacement` is the\nbilling stand-in for a lost rental unit, not a second copy of it.",
+          "doc": "True iff a product of this `type` has an inventory ledger (and so a\n`stock/{P}` projection and a `stock-locks/{P}` token), counted or not.\n\nOne of the two answers to \"what stock does this product have?\" — moved here\nfrom `api-cloudrun/src/lib/productStock.ts` (which re-exports it) so the\nmanager's component fan-out (api-cloudrun#388) asks the same question the\nAPI's ledger lifecycle does. Only `rental` and `sale` are physical: `service`,\n`surcharge` and `transaction_fee` are billing lines, and `replacement` is the\nbilling stand-in for a lost rental unit, not a second copy of it.",
           "paramTags": [],
           "returnsTag": null
         },

@@ -526,7 +526,7 @@ function checkBookingCollection(
  * booking to the wrong sheet silently. The collection side has held the same
  * rule since `checkBookingCollection`; a census before this refine shipped read 0
  * disagreements on all 8,390 prod / 8,409 dev bookings (2026-10-09,
- * api-cloudrun `scripts/audit-collection-legs.ts`, `booking-delivery-mirror`).
+ * `api-cloudrun/scripts/audit-collection-legs.ts`, `booking-delivery-mirror`).
  */
 function checkBookingDelivery(
   doc: { destinations: { delivery: { uid: string } | null }; uid_destination_delivery: string },

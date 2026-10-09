@@ -33,7 +33,7 @@ export type CountedStockMethod = Exclude<StockMethodType, "none">;
  * `stock/{P}` projection and a `stock-locks/{P}` token), counted or not.
  *
  * One of the two answers to "what stock does this product have?" — moved here
- * from api-cloudrun's `src/lib/productStock.ts` (which re-exports it) so the
+ * from `api-cloudrun/src/lib/productStock.ts` (which re-exports it) so the
  * manager's component fan-out (api-cloudrun#388) asks the same question the
  * API's ledger lifecycle does. Only `rental` and `sale` are physical: `service`,
  * `surcharge` and `transaction_fee` are billing lines, and `replacement` is the
