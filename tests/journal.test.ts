@@ -1,7 +1,8 @@
 /**
  * The journal fold (`utils/journal.ts`). The custody-replay cases are carried
- * over verbatim from `api-cloudrun/tests/unit/custodyReplay.test.ts`, which
- * tested the same functions before they moved to core (stock campaign P1).
+ * over verbatim from api-cloudrun's custodyReplay unit test, which tested the
+ * same functions before they moved to core (stock campaign P1; the api copy
+ * and its test were deleted in P3).
  *
  * Pure — no Firestore, no app boot. These assert the DESIGN's claims rather than
  * the code's behaviour: that the two writer normalizations net out, that the
