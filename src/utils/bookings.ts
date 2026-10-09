@@ -190,16 +190,12 @@ export function sumBookingsBreakdown(
  * never a delta"*. `applyBookingBreakdownDelta` has **zero call sites** in
  * `api-cloudrun/src/`.
  *
- * Two live consumer classes remain, and neither is the cascade:
- *
- * - **The manager's optimistic UI**, which applies the delta locally for instant
- *   feedback and lets the server's authoritative fold land after.
- * - **api-cloudrun's operational repair script**
- *   `api-cloudrun/scripts/repair-booking-breakdowns.ts`, which moves one booking
- *   and adjusts its parent by exactly that booking's delta rather than re-folding
- *   the whole order. (Its former sibling `complete-stale-bookings.ts` was the
- *   other, and was deleted on 2026-08-30 — its successor drives
- *   `applyBookingUpdates` and so gets the whole-order fold instead.)
+ * One live consumer class remains, and it is not the cascade: **the manager's
+ * optimistic UI**, which applies the delta locally for instant feedback and lets
+ * the server's authoritative fold land after. (api-cloudrun's repair scripts
+ * were the other — the repair-booking-breakdowns script, deleted 2026-10-09 by
+ * the stock campaign because it wrote custody with no event, and
+ * complete-stale-bookings before it, deleted 2026-08-30.)
  *
  * So it is kept deliberately. **Do not reach for it to maintain a roll-up in a
  * writer** — a delta is lossy the moment one is dropped, which is the failure
