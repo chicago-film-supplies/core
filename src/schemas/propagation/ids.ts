@@ -205,6 +205,8 @@ export type RuleId =
   | "update-order:order-self-derive"
   | "update-order:order-to-bookings"
   | "update-order:grain-carry-to-bookings"
+  | "update-order:bookings-to-order"
+  | "custody-transfer:bookings-to-transactions"
   | "update-order:grain-carry-to-transactions"
   | "update-order:ledger-to-bookings"
   | "update-order:fulfillment-to-cards"

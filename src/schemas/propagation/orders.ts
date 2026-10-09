@@ -858,6 +858,56 @@ const grainCarryRules: CollectionRule[] = [
   },
 ];
 
+// ── custody moving between bookings, and the reopen (stock campaign P2) ──
+
+const CUSTODY_GAPS_TESTS = "api-cloudrun/tests/integration/orders/custodyJournalGaps.test.ts";
+
+const SUBSTITUTION_JOURNALED: EnforcementRef = {
+  kind: "test",
+  ref: `${CUSTODY_GAPS_TESTS}::G1b: a whole swap of PREPPED units journals unprep on X and prep on Y`,
+  clause:
+    "a whole swap of prepped units journals an unprep on X and a prep on Y, and both bookings replay exactly; a swap after check-out is refused (G1a) and a partial swap journals its prepped move (G2)",
+  gates: true,
+};
+
+const REOPEN_DERIVED: EnforcementRef = {
+  kind: "test",
+  ref: `${CUSTODY_GAPS_TESTS}::G3a: raising a COMPLETE rental's quantity reserves the raise and reopens`,
+  clause:
+    "a raise on a complete rental lands reserved on a booking that keeps its stored custody, and the order reads active",
+  gates: true,
+};
+
+const custodyTransferRules: CollectionRule[] = [
+  {
+    id: "custody-transfer:bookings-to-transactions",
+    source: "bookings",
+    target: "transactions",
+    mode: "co-write",
+    invariant:
+      "Custody moving BETWEEN bookings is journaled, decided by `planCustodyTransfer` (`@cfs/core/utils/custody`): a complete-order grain carry or repoint as a lineless `rebook_out` {bucket → null} on each booking that gives units and a `rebook_in` {null → bucket} on each that takes them; a substitution's prepped units as an `unprep` on X and a `prep` on Y. Each (kind, bucket) has its own sub-session, outs numbered first. A transfer that does not net to zero per custody bucket, moves anything but prepped across products, or names tracked units is refused, never journaled.",
+    enforced_by: [SUBSTITUTION_JOURNALED],
+    fields: [
+      { source: ["uid_product"], target: ["uid_product"] },
+      { source: ["uid"], target: ["uid_booking"] },
+      { source: ["breakdown"], target: ["quantity"], transform: "the bucket's change on that booking" },
+    ],
+  },
+  {
+    id: "update-order:bookings-to-order",
+    source: "bookings",
+    target: "orders",
+    mode: "co-write",
+    invariant:
+      "An order's status is `authored ⊕ derived` (`deriveOrderStatus`): draft, quoted and canceled are the operator's; otherwise it is the phase its bookings read after the write — complete when every booking it asks for is closed, active when custody is past the prep shelf, else reserved. So an edit that raises a line on a complete order REOPENS it, and lowering the raise re-completes it.",
+    enforced_by: [REOPEN_DERIVED],
+    transaction: "update-order",
+    fields: [
+      { source: ["breakdown"], target: ["status"], transform: "deriveOrderStatus(stored status, the bookings as written)" },
+    ],
+  },
+];
+
 const updateOrderTransaction: TransactionDefinition = {
   id: "update-order",
   description:
@@ -868,6 +918,8 @@ const updateOrderTransaction: TransactionDefinition = {
     "update-order:order-to-bookings",
     "update-order:grain-carry-to-bookings",
     "update-order:grain-carry-to-transactions",
+    "custody-transfer:bookings-to-transactions",
+    "update-order:bookings-to-order",
     "update-order:ledger-to-bookings",
     ...STOCK_STEPS,
     "update-order:fulfillment-to-cards",
@@ -1548,6 +1600,7 @@ export const orders: PropagationModule = {
     ...createOrderRules,
     ...updateOrderRules,
     ...grainCarryRules,
+    ...custodyTransferRules,
     ...updateBookingRules,
     ...extendRentalRules,
     ...undoExtendRentalRules,

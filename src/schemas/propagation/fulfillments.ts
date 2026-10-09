@@ -664,6 +664,8 @@ const reconcileOrderFromInvoicesTransaction: TransactionDefinition = {
   steps: [
     "reconcile-order-from-invoices:invoices-to-fulfillments",
     "reconcile-order-from-invoices:fulfillments-to-bookings",
+    // A stored substitution's prepped units move as a journaled transfer.
+    "custody-transfer:bookings-to-transactions",
     ...STOCK_STEPS,
   ],
 };

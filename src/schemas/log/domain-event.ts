@@ -145,6 +145,14 @@ export const DOMAIN_EVENT_MSGS = [
   // `residue` is the falls and rises no rule paired. Emitted from api-cloudrun's
   // booking lever.
   "custody_delta_unmatched",
+  // A substitution already stored on a fulfillment whose custody the order's
+  // booking reconcile could NOT move (stock campaign decision 1): X holds units
+  // past prepped, or tracked prepped units, so X keeps its custody and Y
+  // reserves fresh. The picker's own write refuses such a substitution, so this
+  // fires only for one stored before that refusal or raced past it. `{ uid_order,
+  // uid_booking, reason }`, at `warn`, where `reason` is core
+  // `substitutionCapacity`'s refusal. Emitted from api-cloudrun's order writers.
+  "substitution_custody_kept",
   // An operator route accepted an invoice, credit-note or order-invoice action
   // that `@cfs/core/utils/invoice-actions` does not offer — the `assert*`
   // functions refused it in SHADOW. **SHADOW, not a refusal** (invoice-actions
