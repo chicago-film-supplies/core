@@ -116,6 +116,16 @@ Deno.test("BookingSchema: a booking's collection follows its own type (api-cloud
   });
 });
 
+Deno.test("BookingSchema: the flat delivery id mirrors its ref (core#103)", () => {
+  const refused = (doc: unknown) => {
+    const r = BookingSchema.safeParse(doc);
+    return !r.success && r.error.issues.some((i) => i.path.join(".") === "uid_destination_delivery");
+  };
+  assertEquals(refused(validBooking), false);
+  assertEquals(refused({ ...validBooking, uid_destination_delivery: "testdest300000000000" }), true);
+  assertEquals(refused({ ...validBooking, destinations: { ...validBooking.destinations, delivery: null } }), true);
+});
+
 Deno.test("BookingSchema accepts optional crms_id fields", () => {
   const doc = {
     ...validBooking,

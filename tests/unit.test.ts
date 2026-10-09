@@ -158,8 +158,14 @@ Deno.test("UnitRoster: keys are unit numbers; an empty roster is valid", () => {
 
 const EMPTY_SETS = { cleaning: [], damaged: [], lost: [], maintenance: [], out: [], prepped: [], returned: [] };
 
+// The flat delivery id mirrors its ref (core#103), a cross-field rule the walker cannot derive.
+const DELIVERY = {
+  destinations: { delivery: { uid: "AAAAAAAAAAAAAAAAAAAA", address: null } },
+  uid_destination_delivery: "AAAAAAAAAAAAAAAAAAAA",
+};
+
 function booking(units: unknown, breakdown: Record<string, number> = {}) {
-  const base = getTestDoc(BookingSchema, {}, NOW) as unknown as Record<string, unknown>;
+  const base = getTestDoc(BookingSchema, DELIVERY, NOW) as unknown as Record<string, unknown>;
   return {
     ...base,
     breakdown: { ...(base.breakdown as Record<string, number>), ...breakdown },
@@ -168,7 +174,7 @@ function booking(units: unknown, breakdown: Record<string, number> = {}) {
 }
 
 Deno.test("Booking.units: absent, null and empty sets all parse", () => {
-  const base = getTestDoc(BookingSchema, {}, NOW);
+  const base = getTestDoc(BookingSchema, DELIVERY, NOW);
   assert(BookingSchema.safeParse(base).success);
   assert(BookingSchema.safeParse(booking(null)).success);
   assert(BookingSchema.safeParse(booking(EMPTY_SETS)).success);

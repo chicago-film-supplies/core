@@ -219,6 +219,11 @@ export interface Booking {
   stores: BookingStore[];
   query_by_uid_store: string[];
   query_by_uid_location: string[];
+  /**
+   * The delivery ADDRESS, flat — the indexed query surface. Refined on
+   * {@link BookingSchema} (`checkBookingDelivery`) to equal
+   * `destinations.delivery.uid` (core#103).
+   */
   uid_destination_delivery: string;
   /**
    * The collection ADDRESS — or `null` on a booking that does not come back.
@@ -515,6 +520,28 @@ function checkBookingCollection(
 }
 
 /**
+ * The flat delivery id always equals its nested ref's `uid` (core#103). The flat
+ * one is the indexed query surface (`bookings: [uid_destination_delivery,
+ * status]`, read by api-cloudrun's pick sheets), so a disagreement would send a
+ * booking to the wrong sheet silently. The collection side has held the same
+ * rule since `checkBookingCollection`; a census before this refine shipped read 0
+ * disagreements on all 8,390 prod / 8,409 dev bookings (2026-10-09,
+ * api-cloudrun `scripts/audit-collection-legs.ts`, `booking-delivery-mirror`).
+ */
+function checkBookingDelivery(
+  doc: { destinations: { delivery: { uid: string } | null }; uid_destination_delivery: string },
+  ctx: z.RefinementCtx,
+): void {
+  if (doc.uid_destination_delivery !== doc.destinations.delivery?.uid) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_destination_delivery"],
+      message: "uid_destination_delivery must equal destinations.delivery.uid",
+    });
+  }
+}
+
+/**
  * A bucket can name at most as many units as it holds: `units[k].length ≤
  * breakdown[k]`. Fewer is the untracked count a conversion left; more is a
  * unit the breakdown does not account for. Disjointness is the unit-sets
@@ -585,7 +612,7 @@ export const BookingSchema: z.ZodType<Booking> = z.strictObject({
   version: z.int().min(0).default(0),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
   updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
-}).superRefine(checkBookingCollection).superRefine(checkBookingUnits).meta({
+}).superRefine(checkBookingCollection).superRefine(checkBookingDelivery).superRefine(checkBookingUnits).meta({
   title: "Booking",
   collection: "bookings",
   displayDefaults: {

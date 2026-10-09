@@ -104,6 +104,14 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
     uid_invoice: "AAAAAAAAAAAAAAAAAAAA",
     uid_organization: "AAAAAAAAAAAAAAAAAAAA",
   },
+  // ⚠️ **Fifth entry, added when the flat delivery id was refined to mirror its
+  // ref** (core#103). The walker seeds `destinations.delivery: null` beside a
+  // generated `uid_destination_delivery`, and no structural rule makes one echo
+  // the other — the same cross-field class as the four above.
+  booking: {
+    destinations: { delivery: { uid: "AAAAAAAAAAAAAAAAAAAA", address: null } },
+    uid_destination_delivery: "AAAAAAAAAAAAAAAAAAAA",
+  },
 };
 
 /** Distinct schemas from the registry, keyed by their first (singular) name. */
@@ -159,7 +167,8 @@ Deno.test("corpus gate — every registry schema has a minimal fixture that pars
   // The escape hatch is the measurement. Structural coverage is 61/63 without
   // it; if this grows for a reason OTHER than a new cross-field refinement, the
   // walker has stopped keeping up with the schemas.
-  assertEquals(Object.keys(OVERRIDES).length, 5, "a schema now needs hand-written fixture knowledge");
+  // 6 since core#103's booking delivery mirror — a new cross-field refinement.
+  assertEquals(Object.keys(OVERRIDES).length, 6, "a schema now needs hand-written fixture knowledge");
 });
 
 Deno.test("corpus gate companion — an unsatisfiable invariant still throws, naming its path", () => {
@@ -271,7 +280,7 @@ Deno.test("arrays honour .min(n) — the reason a bare seed cannot be a fixture"
 
 Deno.test("composite ids are built structurally, from the template literal's own parts", () => {
   // No candidate list can spell these; they come out of `z.templateLiteral`.
-  const booking = getTestDoc(BookingSchema, undefined, NOW);
+  const booking = getTestDoc(BookingSchema, OVERRIDES.booking, NOW);
   assertEquals(booking.uid.split(":").length, 3);
 
   const quote = getTestDoc(QuoteSchema, undefined, NOW);
@@ -341,7 +350,7 @@ Deno.test("enum-arm search — re-chooses exactly four arms across the corpus, b
 
   // `booking` parses only as a non-rental: a rental obliges a collection ref
   // through a superRefine, and the walker seeds `destinations.collection: null`.
-  const booking = getTestDoc(BookingSchema, undefined, NOW);
+  const booking = getTestDoc(BookingSchema, OVERRIDES.booking, NOW);
   assertEquals(booking.type === "rental", false);
 
   // And the corpus-wide count, so a third one cannot appear unnoticed.

@@ -18483,6 +18483,18 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "ComponentQuantity",
+          "declaration": "interface ComponentQuantity {\n  component: C;\n  quantity: number;\n  path: string[];\n}",
+          "doc": "One component the walk reached: the row, its resolved quantity, and its self-inclusive doc path."
+        },
+        {
+          "kind": "interface",
+          "name": "ComponentRowForWalk",
+          "declaration": "interface ComponentRowForWalk {\n  uid?: string;\n  type?: string;\n  path?: string[];\n  quantity?: number;\n  inclusion_type?: string;\n  zero_priced?: boolean;\n}",
+          "doc": "The fields of a catalog component row the quantity walk reads — satisfied by\nboth the Firestore `ProductComponent` and the Typesense\n`ProductDocumentComponent`."
+        },
+        {
+          "kind": "interface",
           "name": "CustomLineBuildOptions",
           "declaration": "interface CustomLineBuildOptions {\n  type: DocLineItemTypeType;\n  name?: string;\n  quantity?: number;\n  base_cents?: number;\n  formula?: PriceFormulaType;\n  chargeDays: number | null;\n  taxes: ReadonlyArray<typeLiteral>;\n  uid_tax_class: string;\n  uidOrder?: string;\n}",
           "doc": "Options for a one-off \"custom\" line with no product catalog entry behind it —\nthe orders/invoices \"Add Custom Item\" flow.\n\n`taxes` is the line's own resolved tax set (already carrying name/rate/type),\nnot the tax catalog: a custom line has no product to read tax references off,\nso the caller resolves them."
@@ -18522,6 +18534,14 @@
           "name": "buildOrderLineFromProduct",
           "signature": "buildOrderLineFromProduct(doc: ProductDocument, opts: OrderLineBuildOptions): OrderDocLineItemType",
           "doc": "Build a top-level order line item from a `ProductDocument`.\n\n`path` carries the component ancestry only — the item's own uid and the\nstructural destination/group prefix are appended by `computeItemPaths`, which\nis the sole author of a stored `path`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "componentQuantities",
+          "signature": "componentQuantities(rootUid: string, components: readonly C[], quantity: number, _: unknown): ComponentQuantity<C>[]",
+          "doc": "Which `mandatory`/`default` components a product at `quantity` carries, and\nhow many of each — the ONE quantity rule, shared by the order-line expander\n({@link buildOrderComponentLines}) and the manager's component fan-out on a\nmovement (api-cloudrun#388, manager#271), so an order line and a movement\nproposal never disagree about how many sides come with three tents.\n\nDepth-first, each parent's direct children `zero_priced` first; quantities\nrecurse per level as `ceil(comp.quantity × parentEffective)` (owner,\n2026-10-09: a movement proposal rounds up like an order line, and the\noperator edits it). An `optional` row is not walked, and neither is its\nsubtree — see {@link buildOrderComponentLines} for why that drop is right.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -19838,6 +19858,12 @@
       "moduleDoc": "Shared product utility functions for CFS applications.\n\n```ts\nimport { buildComponentEntries } from \"@cfs/core/utils/products\";\n\n// When adding component B to product A, copy B's nested components\n// into A's components array with adjusted paths:\nconst nested = buildComponentEntries(\"A\", productB.components, 1);\n```",
       "symbols": [
         {
+          "kind": "typeAlias",
+          "name": "CountedStockMethod",
+          "declaration": "type CountedStockMethod = Exclude<StockMethodType, \"none\">;",
+          "doc": "A `stock_method` that carries a count."
+        },
+        {
           "kind": "function",
           "name": "buildComponentEntries",
           "signature": "buildComponentEntries(parentUid: string, sourceComponents: T[], baseDepth: number, maxDepth?: number): T[]",
@@ -19867,6 +19893,22 @@
           "name": "deriveProductImageUuids",
           "signature": "deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]",
           "doc": "Derive `query_by_images` from `images` — each row's `uuid` followed by its\n`uuid_cutout` when set, walking `images` in order.\n\nThe single source of the denormalization, called by every writer. Defined here\nrather than in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\n**Ordered, but not an ordering source.** The emitted array follows `images`\nrow order — it costs nothing (one pass either way) and a mirror that tracks\nthe display array is easier to eyeball in the console than an arbitrary one.\nBut `images` remains the sole authority on display order: this field exists\nfor Firestore `array-contains`, and the refinement below compares it as a\nmultiset, so a differently-ordered mirror holding the same uuids is still\nvalid. Nothing may read order back out of it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "productCountsStock",
+          "signature": "productCountsStock(type: ProductTypeType, stockMethod: StockMethodType): stockMethod is CountedStockMethod",
+          "doc": "True iff a product with this `type` + `stock_method` holds a COUNTED stock —\na ledger whose `quantity_held` is a number. `stock_method: \"none\"` has a\nledger with a `null` count (supply unbounded), so nothing can be moved\nagainst it.\n\nA type predicate, so a guarded branch gets `bulk | serialized` for free.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "productHasLedger",
+          "signature": "productHasLedger(type: ProductTypeType): boolean",
+          "doc": "True iff a product of this `type` has an inventory ledger (and so a\n`stock/{P}` projection and a `stock-locks/{P}` token), counted or not.\n\nOne of the two answers to \"what stock does this product have?\" — moved here\nfrom api-cloudrun's `src/lib/productStock.ts` (which re-exports it) so the\nmanager's component fan-out (api-cloudrun#388) asks the same question the\nAPI's ledger lifecycle does. Only `rental` and `sale` are physical: `service`,\n`surcharge` and `transaction_fee` are billing lines, and `replacement` is the\nbilling stand-in for a lost rental unit, not a second copy of it.",
           "paramTags": [],
           "returnsTag": null
         },

@@ -39683,6 +39683,35 @@ rather than concatenating the catalog chain — the same "one author, parent-
 derived" rule `computeItemPaths` follows, and for the same reason: a catalog
 row whose chain contradicts its position must not be able to write a path.
 
+### `ComponentQuantity`
+
+One component the walk reached: the row, its resolved quantity, and its self-inclusive doc path.
+
+```ts
+interface ComponentQuantity {
+  component: C;
+  quantity: number;
+  path: string[];
+}
+```
+
+### `ComponentRowForWalk`
+
+The fields of a catalog component row the quantity walk reads — satisfied by
+both the Firestore `ProductComponent` and the Typesense
+`ProductDocumentComponent`.
+
+```ts
+interface ComponentRowForWalk {
+  uid?: string;
+  type?: string;
+  path?: string[];
+  quantity?: number;
+  inclusion_type?: string;
+  zero_priced?: boolean;
+}
+```
+
 ### `CustomLineBuildOptions`
 
 Options for a one-off "custom" line with no product catalog entry behind it —
@@ -39800,6 +39829,20 @@ Build a top-level order line item from a `ProductDocument`.
 `path` carries the component ancestry only — the item's own uid and the
 structural destination/group prefix are appended by `computeItemPaths`, which
 is the sole author of a stored `path`.
+
+### `componentQuantities(rootUid: string, components: readonly C[], quantity: number, _: unknown): ComponentQuantity<C>[]`
+
+Which `mandatory`/`default` components a product at `quantity` carries, and
+how many of each — the ONE quantity rule, shared by the order-line expander
+({@link buildOrderComponentLines}) and the manager's component fan-out on a
+movement (api-cloudrun#388, manager#271), so an order line and a movement
+proposal never disagree about how many sides come with three tents.
+
+Depth-first, each parent's direct children `zero_priced` first; quantities
+recurse per level as `ceil(comp.quantity × parentEffective)` (owner,
+2026-10-09: a movement proposal rounds up like an order line, and the
+operator edits it). An `optional` row is not walked, and neither is its
+subtree — see {@link buildOrderComponentLines} for why that drop is right.
 
 ## `@cfs/core/utils/order-edit-delta`
 
@@ -42548,6 +42591,14 @@ import { buildComponentEntries } from "@cfs/core/utils/products";
 const nested = buildComponentEntries("A", productB.components, 1);
 ```
 
+### `CountedStockMethod`
+
+A `stock_method` that carries a count.
+
+```ts
+type CountedStockMethod = Exclude<StockMethodType, "none">;
+```
+
 ### `buildComponentEntries(parentUid: string, sourceComponents: T[], baseDepth: number, maxDepth?: number): T[]`
 
 Build component entries for a parent product from a component product's
@@ -42583,6 +42634,27 @@ But `images` remains the sole authority on display order: this field exists
 for Firestore `array-contains`, and the refinement below compares it as a
 multiset, so a differently-ordered mirror holding the same uuids is still
 valid. Nothing may read order back out of it.
+
+### `productCountsStock(type: ProductTypeType, stockMethod: StockMethodType): stockMethod is CountedStockMethod`
+
+True iff a product with this `type` + `stock_method` holds a COUNTED stock —
+a ledger whose `quantity_held` is a number. `stock_method: "none"` has a
+ledger with a `null` count (supply unbounded), so nothing can be moved
+against it.
+
+A type predicate, so a guarded branch gets `bulk | serialized` for free.
+
+### `productHasLedger(type: ProductTypeType): boolean`
+
+True iff a product of this `type` has an inventory ledger (and so a
+`stock/{P}` projection and a `stock-locks/{P}` token), counted or not.
+
+One of the two answers to "what stock does this product have?" — moved here
+from api-cloudrun's `src/lib/productStock.ts` (which re-exports it) so the
+manager's component fan-out (api-cloudrun#388) asks the same question the
+API's ledger lifecycle does. Only `rental` and `sale` are physical: `service`,
+`surcharge` and `transaction_fee` are billing lines, and `replacement` is the
+billing stand-in for a lost rental unit, not a second copy of it.
 
 ### `removeComponentEntries(components: T[], path: string[]): T[]`
 
