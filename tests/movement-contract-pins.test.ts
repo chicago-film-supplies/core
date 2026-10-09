@@ -1,6 +1,6 @@
 /**
  * Byte-for-byte pins on every movement type that existed BEFORE the stock
- * campaign's `undoes` change (P1, api-cloudrun/.claude/plans/stock-campaign.md).
+ * campaign's `undoes` change (P1, api-cloudrun#1240).
  *
  * `tests/fixtures/movement-contract-pins.json` was captured from the code as it
  * stood before the change: every field of `MOVEMENT_CONTRACTS[t]` plus its

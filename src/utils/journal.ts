@@ -1,6 +1,6 @@
 /**
  * The movement journal, folded: ONE order for every fold, and the custody
- * replay as projections over it (stock campaign P1, api-cloudrun/.claude/plans/stock-campaign.md).
+ * replay as projections over it (stock campaign P1, api-cloudrun#1240).
  *
  * ```ts
  * import { foldJournal, journalOrder, custodyByBooking } from "@cfs/core/utils/journal";
