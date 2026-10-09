@@ -12,7 +12,7 @@
  * @module
  */
 
-import type { ProductComponent } from "../schemas/mod.ts";
+import type { ProductComponent, ProductTypeType, StockMethodType } from "../schemas/mod.ts";
 
 /**
  * Re-exported from `schemas/product.ts`, where it must live so `ProductSchema`'s
@@ -21,6 +21,42 @@ import type { ProductComponent } from "../schemas/mod.ts";
  * entry point. (Same arrangement as `deriveName` in `utils/contact-name.ts`.)
  */
 export { deriveProductImageUuids } from "../schemas/mod.ts";
+
+/** Product types that have an inventory ledger. */
+const LEDGER_TYPES: ReadonlySet<string> = new Set<ProductTypeType>(["rental", "sale"]);
+
+/** A `stock_method` that carries a count. */
+export type CountedStockMethod = Exclude<StockMethodType, "none">;
+
+/**
+ * True iff a product of this `type` has an inventory ledger (and so a
+ * `stock/{P}` projection and a `stock-locks/{P}` token), counted or not.
+ *
+ * One of the two answers to "what stock does this product have?" — moved here
+ * from api-cloudrun's `src/lib/productStock.ts` (which re-exports it) so the
+ * manager's component fan-out (api-cloudrun#388) asks the same question the
+ * API's ledger lifecycle does. Only `rental` and `sale` are physical: `service`,
+ * `surcharge` and `transaction_fee` are billing lines, and `replacement` is the
+ * billing stand-in for a lost rental unit, not a second copy of it.
+ */
+export function productHasLedger(type: ProductTypeType): boolean {
+  return LEDGER_TYPES.has(type);
+}
+
+/**
+ * True iff a product with this `type` + `stock_method` holds a COUNTED stock —
+ * a ledger whose `quantity_held` is a number. `stock_method: "none"` has a
+ * ledger with a `null` count (supply unbounded), so nothing can be moved
+ * against it.
+ *
+ * A type predicate, so a guarded branch gets `bulk | serialized` for free.
+ */
+export function productCountsStock(
+  type: ProductTypeType,
+  stockMethod: StockMethodType,
+): stockMethod is CountedStockMethod {
+  return productHasLedger(type) && stockMethod !== "none";
+}
 
 /**
  * Remove a component and all its descendants from a flat components array.

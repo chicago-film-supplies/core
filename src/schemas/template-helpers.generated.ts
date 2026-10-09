@@ -205,7 +205,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
 
   ],
   "order-lines": [
-
+    { name: "componentQuantities", expr: "it.order-lines.componentQuantities(rootUid, components, quantity, arg4)", desc: "Which `mandatory`/`default` components a product at `quantity` carries, and how many of each — the ONE quantity rule, shared by the order-line expander ({@link buildOrderComponentLines}) and the manager's component fan-out on a movement (api-cloudrun#388, manager#271), so an order line and a movement proposal never disagree about how many sides come with three tents.", returns: "ComponentQuantity<C>[]" },
   ],
   "orders": [
     { name: "buildPackingList", expr: "it.orders.buildPackingList(items, consolidated, destinationDividerUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },
@@ -274,6 +274,8 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "products": [
     { name: "buildComponentEntries", expr: "it.products.buildComponentEntries(parentUid, sourceComponents, baseDepth, maxDepth)", desc: "Build component entries for a parent product from a component product's own `components` array. Each entry's `path` is prepended with `parentUid` so it reflects its position in the parent's tree.", returns: "T[]" },
+    { name: "productCountsStock", expr: "it.products.productCountsStock(type, stockMethod)", desc: "True iff a product with this `type` + `stock_method` holds a COUNTED stock — a ledger whose `quantity_held` is a number. `stock_method: \"none\"` has a ledger with a `null` count (supply unbounded), so nothing can be moved against it.", returns: "stockMethod is CountedStockMethod" },
+    { name: "productHasLedger", expr: "it.products.productHasLedger(type)", desc: "True iff a product of this `type` has an inventory ledger (and so a `stock/{P}` projection and a `stock-locks/{P}` token), counted or not.", returns: "boolean" },
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
   "purchases": [

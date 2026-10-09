@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { buildComponentEntries, removeComponentEntries } from "../src/utils/products.ts";
+import { buildComponentEntries, productCountsStock, productHasLedger, removeComponentEntries } from "../src/utils/products.ts";
 import { ComponentSchema, getInitialValues } from "../src/schemas/mod.ts";
 import type { ProductComponent } from "../src/schemas/mod.ts";
 
@@ -122,4 +122,15 @@ Deno.test("buildComponentEntries respects maxDepth", () => {
   assertEquals(result, [
     comp("D", ["A", "B", "D"]),
   ]);
+});
+
+Deno.test("productHasLedger / productCountsStock: rental and sale only, and none holds no count", () => {
+  assertEquals(productHasLedger("rental"), true);
+  assertEquals(productHasLedger("sale"), true);
+  assertEquals(productHasLedger("service"), false);
+  assertEquals(productHasLedger("replacement"), false);
+  assertEquals(productCountsStock("rental", "bulk"), true);
+  assertEquals(productCountsStock("sale", "serialized"), true);
+  assertEquals(productCountsStock("rental", "none"), false);
+  assertEquals(productCountsStock("service", "bulk"), false);
 });

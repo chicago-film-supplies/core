@@ -298,6 +298,84 @@ function resolveParentUid(comp: ProductDocumentComponent, rootUid: string): stri
 }
 
 /**
+ * The fields of a catalog component row the quantity walk reads — satisfied by
+ * both the Firestore `ProductComponent` and the Typesense
+ * `ProductDocumentComponent`.
+ */
+export interface ComponentRowForWalk {
+  uid?: string;
+  type?: string;
+  path?: string[];
+  quantity?: number;
+  inclusion_type?: string;
+  zero_priced?: boolean;
+}
+
+/** One component the walk reached: the row, its resolved quantity, and its self-inclusive doc path. */
+export interface ComponentQuantity<C extends ComponentRowForWalk> {
+  component: C;
+  quantity: number;
+  /** `[...rootDocPath, ...ancestors, uid]` — derived from the resolved parent, never copied from the catalog chain. */
+  path: string[];
+}
+
+/**
+ * Which `mandatory`/`default` components a product at `quantity` carries, and
+ * how many of each — the ONE quantity rule, shared by the order-line expander
+ * ({@link buildOrderComponentLines}) and the manager's component fan-out on a
+ * movement (api-cloudrun#388, manager#271), so an order line and a movement
+ * proposal never disagree about how many sides come with three tents.
+ *
+ * Depth-first, each parent's direct children `zero_priced` first; quantities
+ * recurse per level as `ceil(comp.quantity × parentEffective)` (owner,
+ * 2026-10-09: a movement proposal rounds up like an order line, and the
+ * operator edits it). An `optional` row is not walked, and neither is its
+ * subtree — see {@link buildOrderComponentLines} for why that drop is right.
+ *
+ * @throws Error when a reached component row carries no `uid` or no `type`.
+ */
+export function componentQuantities<C extends ComponentRowForWalk>(
+  rootUid: string,
+  components: readonly C[],
+  quantity: number,
+  rootDocPath: readonly string[] = [rootUid],
+): ComponentQuantity<C>[] {
+  const included = components.filter((c) => c.inclusion_type === "mandatory" || c.inclusion_type === "default");
+  if (!included.length) return [];
+
+  const childrenByParent = new Map<string, C[]>();
+  for (const comp of included) {
+    if (!comp.uid) throw new Error(`Product ${rootUid} has a component with no uid`);
+    if (!comp.type) throw new Error(`Product ${rootUid} component ${comp.uid} has no type`);
+    const parentUid = resolveParentUid(comp, rootUid);
+    let bucket = childrenByParent.get(parentUid);
+    if (!bucket) {
+      bucket = [];
+      childrenByParent.set(parentUid, bucket);
+    }
+    bucket.push(comp);
+  }
+  // Zero-priced first, within each parent's direct-children block. Stable, so
+  // position across blocks is preserved — the same rule
+  // `sortComponentsZeroPricedFirst` applies to the catalog array itself.
+  for (const bucket of childrenByParent.values()) {
+    bucket.sort((a, b) => (a.zero_priced === true ? 0 : 1) - (b.zero_priced === true ? 0 : 1));
+  }
+
+  const out: ComponentQuantity<C>[] = [];
+  const emit = (parentUid: string, parentEffective: number, parentDocPath: string[]): void => {
+    for (const comp of childrenByParent.get(parentUid) ?? []) {
+      const qty = Math.ceil((comp.quantity ?? 1) * parentEffective);
+      const path = [...parentDocPath, comp.uid!];
+      out.push({ component: comp, quantity: qty, path });
+      emit(comp.uid!, qty, path);
+    }
+  };
+  emit(rootUid, quantity, [...rootDocPath]);
+  return out;
+}
+
+/**
  * Build the mandatory/default sub-component lines for a parent
  * `ProductDocument`, scaling each component's quantity off the parent quantity.
  *
@@ -347,86 +425,39 @@ export function buildOrderComponentLines(
   doc: ProductDocument,
   opts: OrderLineBuildOptions,
 ): OrderDocLineItemType[] {
-  const components = (doc.components ?? []).filter(
-    (c) => c.inclusion_type === "mandatory" || c.inclusion_type === "default",
-  );
-  if (!components.length) return [];
-
-  const childrenByParent = new Map<string, ProductDocumentComponent[]>();
-  for (const comp of components) {
-    if (!comp.uid) {
-      throw new Error(`Product ${doc.uid} has a component with no uid`);
-    }
-    if (!comp.type) {
-      throw new Error(`Product ${doc.uid} component ${comp.uid} has no type`);
-    }
-    const parentUid = resolveParentUid(comp, doc.uid);
-    let bucket = childrenByParent.get(parentUid);
-    if (!bucket) {
-      bucket = [];
-      childrenByParent.set(parentUid, bucket);
-    }
-    bucket.push(comp);
-  }
-  // Zero-priced first, within each parent's direct-children block. Stable, so
-  // position across blocks is preserved — the same rule
-  // `sortComponentsZeroPricedFirst` applies to the catalog array itself.
-  for (const bucket of childrenByParent.values()) {
-    bucket.sort((a, b) => (a.zero_priced === true ? 0 : 1) - (b.zero_priced === true ? 0 : 1));
-  }
-
-  const items: OrderDocLineItemType[] = [];
-
-  /**
-   * @param parentUid the catalog uid whose children to emit
-   * @param parentEffective the parent's resolved quantity, for the ratio
-   * @param parentDocPath the parent's doc-item `path` — self-inclusive, so each
-   *   child's path is this plus its own uid. Threading it down is what makes the
-   *   doc path parent-DERIVED rather than copied from the catalog chain.
-   */
-  function emit(parentUid: string, parentEffective: number, parentDocPath: string[]): void {
-    const bucket = childrenByParent.get(parentUid);
-    if (!bucket) return;
-    for (const comp of bucket) {
-      const uid = comp.uid!;
-      const type = comp.type as DocLineItemTypeType;
-      const isRental = type === "rental";
-      const quantity = Math.ceil((comp.quantity ?? 1) * parentEffective);
-      const docPath = [...parentDocPath, uid];
-
-      items.push({
-        uid,
-        type,
-        name: comp.name ?? "",
-        description: comp.description ?? "",
-        quantity,
-        // Read off the component row. The `initial` spread this replaced said
-        // `"bulk"` for every component regardless — so a no-stock component
-        // rendered availability it does not have until the server echo landed.
-        stock_method: comp.stock_method as StockMethodType,
-        ...(opts.uidOrder ? { uid_order: opts.uidOrder } : {}),
-        path: docPath,
-        inclusion_type: comp.inclusion_type as OrderDocLineItemType["inclusion_type"],
-        zero_priced: comp.zero_priced ?? null,
-        uid_tax_class: comp.uid_tax_class || opts.taxClassForType(type),
-        price: {
-          base_cents: comp.zero_priced ? 0 : (comp.price?.base_cents ?? 0),
-          replacement_cents: comp.price?.replacement_cents ?? null,
-          chargeable_days: isRental ? opts.chargeDays : null,
-          formula: (comp.price?.formula as PriceFormulaType | undefined) ?? "five_day_week",
-          discount: null,
-          subtotal_cents: 0,
-          subtotal_discounted_cents: 0,
-          taxes: [],
-          total_cents: 0,
-        },
-      });
-
-      emit(uid, quantity, docPath);
-    }
-  }
-
-  emit(doc.uid, opts.quantity, [...(opts.inheritedAncestry ?? []), doc.uid]);
-
-  return items;
+  return componentQuantities(
+    doc.uid,
+    doc.components ?? [],
+    opts.quantity,
+    [...(opts.inheritedAncestry ?? []), doc.uid],
+  ).map(({ component: comp, quantity, path }) => {
+    const type = comp.type as DocLineItemTypeType;
+    return {
+      uid: comp.uid!,
+      type,
+      name: comp.name ?? "",
+      description: comp.description ?? "",
+      quantity,
+      // Read off the component row. The `initial` spread this replaced said
+      // `"bulk"` for every component regardless — so a no-stock component
+      // rendered availability it does not have until the server echo landed.
+      stock_method: comp.stock_method as StockMethodType,
+      ...(opts.uidOrder ? { uid_order: opts.uidOrder } : {}),
+      path,
+      inclusion_type: comp.inclusion_type as OrderDocLineItemType["inclusion_type"],
+      zero_priced: comp.zero_priced ?? null,
+      uid_tax_class: comp.uid_tax_class || opts.taxClassForType(type),
+      price: {
+        base_cents: comp.zero_priced ? 0 : (comp.price?.base_cents ?? 0),
+        replacement_cents: comp.price?.replacement_cents ?? null,
+        chargeable_days: type === "rental" ? opts.chargeDays : null,
+        formula: (comp.price?.formula as PriceFormulaType | undefined) ?? "five_day_week",
+        discount: null,
+        subtotal_cents: 0,
+        subtotal_discounted_cents: 0,
+        taxes: [],
+        total_cents: 0,
+      },
+    };
+  });
 }

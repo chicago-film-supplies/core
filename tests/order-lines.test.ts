@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
+  componentQuantities,
   buildCustomInvoiceLine,
   buildCustomOrderLine,
   buildOrderComponentLines,
@@ -464,4 +465,30 @@ Deno.test("buildCustomInvoiceLine emits no order-only field", () => {
   assertEquals(line.price.chargeable_days, 5);
   assertEquals(line.price.formula, "five_day_week");
   assert(line.uid.startsWith("custom-"));
+});
+
+Deno.test("componentQuantities: the movement fan-out walks the same rule as the order expander (api-cloudrun#388)", async (t) => {
+  const row = (uid: string, path: string[], quantity: number, inclusion_type: string) => comp(uid, path, { quantity, inclusion_type });
+  const comps = [
+    row("sides", ["tent"], 4, "mandatory"),
+    row("stakes", ["tent", "sides"], 0.5, "default"),
+    row("bag", ["tent"], 0.5, "default"),
+    row("lights", ["tent"], 2, "optional"),
+    row("bulbs", ["tent", "lights"], 3, "mandatory"),
+  ];
+  await t.step("ceil per level, depth-first, optional subtree dropped", () => {
+    const walked = componentQuantities("tent", comps, 3);
+    assertEquals(walked.map((w) => [w.component.uid, w.quantity, w.path.join("/")]), [
+      ["sides", 12, "tent/sides"],
+      ["stakes", 6, "tent/sides/stakes"],
+      ["bag", 2, "tent/bag"],
+    ]);
+  });
+  await t.step("agrees with buildOrderComponentLines on the same tree", () => {
+    const lines = buildOrderComponentLines(
+      product({ uid: "tent", components: comps }),
+      { ...OPTS, quantity: 3 },
+    );
+    assertEquals(lines.map((l) => [l.uid, l.quantity]), componentQuantities("tent", comps, 3).map((w) => [w.component.uid, w.quantity]));
+  });
 });
