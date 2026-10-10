@@ -37579,12 +37579,18 @@ Every earlier-era movement precedes every later one.
 reproducing it: the rebuild broke a same-instant tie by an internal rank and
 a carried movement kept its old `number`, neither of which is stored.
 
-### `unitsByBooking(since: string): JournalProjection<Map<string, UnitSetsByKey>>`
+### `unitsByBooking(): JournalProjection<Map<string, UnitSetsByKey>>`
 
-Which units each booking holds per history key, folded from the movements
-dated at or after `since` — a roster's seeding instant, before which no
-movement named a unit. A unit leaves `custody.from`'s set and joins
-`custody.to`'s.
+Which units each booking holds per history key, folded over the WHOLE journal
+from empty sets. A unit leaves `custody.from`'s set and joins `custody.to`'s.
+
+⚠️ **There is no era cut, and none should come back** (api-cloudrun#1253). A
+roster interval is journaled (`enroll` / `unenroll`), and numbers are never
+reused, so a movement naming unit N can only mean that one unit, in whichever
+interval it was written. An earlier `since` cut the fold by business `date`,
+which disagreed with the unit replay's `created_at` cut and was then left with
+nothing to cut at all. If a caller ever needs one interval, derive it from that
+interval's `enroll`, never from a date.
 
 ## `@cfs/core/utils/fulfillment-stage`
 

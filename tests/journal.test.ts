@@ -399,16 +399,17 @@ Deno.test("foldJournal: per booking, per grain, orphaned, and units — one orde
     custodyByBooking(),
     custodyByGrain(),
     orphanedCustody(new Set([A, A2])),
-    unitsByBooking(t(2)),
+    unitsByBooking(),
   ] as const);
   assertEquals(byBooking.get(A)!.returned, 1);
   assertEquals(byBooking.get(A)!.prepped, 0);
   assertEquals(byGrain.get("ord:prod:leg")!.returned, 2, "the grain pools every signature");
   assertEquals(orphans.get(GONE)!.returned, 0, "a carried-away id nets to zero");
   assertEquals(orphans.has(A), false);
-  // Units folded from t(2): the prep at t(1) is before the cutoff, so 7 starts in no set.
+  // The whole journal, from empty sets: 7 is prepped, then out, then returned.
   assertEquals([...(units.get(A)!.returned ?? [])], [7]);
   assertEquals([...(units.get(A)!.out ?? [])], []);
+  assertEquals([...(units.get(A)!.prepped ?? [])], []);
 });
 
 // ── recordOrder / replayOrder (api-cloudrun#1255) ────────────────────

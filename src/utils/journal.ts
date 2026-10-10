@@ -265,17 +265,22 @@ export function orphanedCustody(existing: ReadonlySet<string>): JournalProjectio
 export type UnitSetsByKey = Partial<Record<BookingBreakdownKeyType, Set<number>>>;
 
 /**
- * Which units each booking holds per history key, folded from the movements
- * dated at or after `since` — a roster's seeding instant, before which no
- * movement named a unit. A unit leaves `custody.from`'s set and joins
- * `custody.to`'s.
+ * Which units each booking holds per history key, folded over the WHOLE journal
+ * from empty sets. A unit leaves `custody.from`'s set and joins `custody.to`'s.
+ *
+ * ⚠️ **There is no era cut, and none should come back** (api-cloudrun#1253). A
+ * roster interval is journaled (`enroll` / `unenroll`), and numbers are never
+ * reused, so a movement naming unit N can only mean that one unit, in whichever
+ * interval it was written. An earlier `since` cut the fold by business `date`,
+ * which disagreed with the unit replay's `created_at` cut and was then left with
+ * nothing to cut at all. If a caller ever needs one interval, derive it from that
+ * interval's `enroll`, never from a date.
  */
-export function unitsByBooking(since: string): JournalProjection<Map<string, UnitSetsByKey>> {
-  const from = Date.parse(since);
+export function unitsByBooking(): JournalProjection<Map<string, UnitSetsByKey>> {
   return {
     init: () => new Map(),
     step(state, m) {
-      if (m.uid_booking === null || !m.custody || m.units.length === 0 || Date.parse(m.date) < from) return;
+      if (m.uid_booking === null || !m.custody || m.units.length === 0) return;
       const sets = state.get(m.uid_booking) ?? {};
       for (const { number: n } of m.units) {
         if (m.custody.from !== null && HISTORY.has(m.custody.from)) sets[m.custody.from]?.delete(n);

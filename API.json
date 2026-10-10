@@ -17396,8 +17396,8 @@
         {
           "kind": "function",
           "name": "unitsByBooking",
-          "signature": "unitsByBooking(since: string): JournalProjection<Map<string, UnitSetsByKey>>",
-          "doc": "Which units each booking holds per history key, folded from the movements\ndated at or after `since` — a roster's seeding instant, before which no\nmovement named a unit. A unit leaves `custody.from`'s set and joins\n`custody.to`'s.",
+          "signature": "unitsByBooking(): JournalProjection<Map<string, UnitSetsByKey>>",
+          "doc": "Which units each booking holds per history key, folded over the WHOLE journal\nfrom empty sets. A unit leaves `custody.from`'s set and joins `custody.to`'s.\n\n⚠️ **There is no era cut, and none should come back** (api-cloudrun#1253). A\nroster interval is journaled (`enroll` / `unenroll`), and numbers are never\nreused, so a movement naming unit N can only mean that one unit, in whichever\ninterval it was written. An earlier `since` cut the fold by business `date`,\nwhich disagreed with the unit replay's `created_at` cut and was then left with\nnothing to cut at all. If a caller ever needs one interval, derive it from that\ninterval's `enroll`, never from a date.",
           "paramTags": [],
           "returnsTag": null
         }
