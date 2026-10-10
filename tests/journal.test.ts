@@ -10,7 +10,7 @@
  * cases is distinguished from a real divergence. An audit that cannot tell those
  * apart is worse than none, because it trains you to ignore it.
  */
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   classifyReplay,
   type CustodyEvent,
@@ -18,6 +18,9 @@ import {
   custodyByGrain,
   foldJournal,
   journalOrder,
+  REBUILD_AT_MS,
+  recordOrder,
+  replayOrder,
   type JournalMovement,
   orphanedCustody,
   replayCustody,
@@ -406,4 +409,47 @@ Deno.test("foldJournal: per booking, per grain, orphaned, and units — one orde
   // Units folded from t(2): the prep at t(1) is before the cutoff, so 7 starts in no set.
   assertEquals([...(units.get(A)!.returned ?? [])], [7]);
   assertEquals([...(units.get(A)!.out ?? [])], []);
+});
+
+// ── recordOrder / replayOrder (api-cloudrun#1255) ────────────────────
+
+const ts = (iso: string) => {
+  const ms = Date.parse(iso);
+  return { toMillis: () => ms, toDate: () => new Date(ms), seconds: Math.floor(ms / 1000), nanoseconds: (ms % 1000) * 1e6 };
+};
+const rm = (number: number, date: string, created: string) => ({ number, date, created_at: ts(created) });
+
+Deno.test("REBUILD_AT_MS is the rebuild's last write run, before the first live movement", () => {
+  assertEquals(new Date(REBUILD_AT_MS).toISOString(), "2026-10-03T15:20:59.228Z");
+  assert(REBUILD_AT_MS < Date.parse("2026-10-03T16:11:30.695Z"));
+});
+
+Deno.test("replayOrder: a backdated post-rebuild purchase applies when it was recorded", () => {
+  // Recorded 10-07 but dated 09-01: the live writer applied it after the 10-05 sale.
+  const sale = rm(30000, "2026-10-05T10:00:00.000-05:00", "2026-10-05T15:00:00.000Z");
+  const purchase = rm(30100, "2026-09-01T10:00:00.000-05:00", "2026-10-07T15:00:00.000Z");
+  assertEquals([purchase, sale].sort(replayOrder).map((m) => m.number), [30000, 30100]);
+  // journalOrder would put the purchase first — the wrong answer for basis.
+  assertEquals([purchase, sale].sort(journalOrder).map((m) => m.number), [30100, 30000]);
+});
+
+Deno.test("replayOrder: a carried pre-rebuild movement keeps business order", () => {
+  // Carried with its 2025 created_at, but the rebuild folded it at its 2026 date, after the find.
+  const carried = rm(7, "2026-03-01T10:00:00.000-06:00", "2025-01-01T00:00:00.000Z");
+  const find = rm(22000, "2026-02-01T10:00:00.000-06:00", "2026-10-03T04:03:58.152Z");
+  assertEquals([carried, find].sort(replayOrder).map((m) => m.number), [22000, 7]);
+  assertEquals([carried, find].sort(recordOrder).map((m) => m.number), [7, 22000]);
+});
+
+Deno.test("replayOrder: every rebuilt movement precedes every live one, whatever the dates", () => {
+  const rebuilt = rm(25465, "2026-12-01T10:00:00.000-06:00", "2026-10-03T15:20:59.228Z");
+  const live = rm(25466, "2026-10-03T11:11:30.695-05:00", "2026-10-03T16:11:30.695Z");
+  assertEquals([live, rebuilt].sort(replayOrder).map((m) => m.number), [25465, 25466]);
+});
+
+Deno.test("recordOrder: created_at, then number; a write sentinel is refused", () => {
+  const at = "2026-10-08T15:36:21.822Z";
+  assertEquals([rm(2, "x", at), rm(1, "x", at)].sort(recordOrder).map((m) => m.number), [1, 2]);
+  const sentinel = { number: 3, date: "x", created_at: { isEqual: () => false } };
+  assertThrows(() => recordOrder(sentinel, rm(1, "x", at)), Error, "not a stored Timestamp");
 });

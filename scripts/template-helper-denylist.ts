@@ -521,7 +521,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "foldJournal",
     "journalOrder",
     "orphanedCustody",
+    "recordOrder",
     "replayCustody",
+    "replayOrder",
     "unitsByBooking",
   ],
   // `utils/contentHash.ts` fingerprints a document — the API's content-addressed

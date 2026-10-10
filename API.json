@@ -17278,7 +17278,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/journal",
-      "moduleDoc": "The movement journal, folded: ONE order for every fold, and the custody\nreplay as projections over it (stock campaign P1, api-cloudrun#1240).\n\n```ts\nimport { foldJournal, journalOrder, custodyByBooking } from \"@cfs/core/utils/journal\";\n```\n\n## Why one order\n\nThree folds each ordered the journal their own way: the custody replay\ngrouped by `date` instant with no tiebreak and said \"never `created_at`\"; the\nledger replay sorted `date_fs` then `number`; and the grain carry, the rental\nextension and the propagation catalog said \"`created_at`, then `number`\". A\nrebook pair is numbered `rebook_out` first precisely so that a fold takes it\nfirst — which holds only if every fold breaks a tie the same way.\n{@link journalOrder} is that one way: the movement's own `date` instant, then\nits `number`. Not `created_at`: when this was written, 569 prod movements\nstored it as a raw map (api-cloudrun#1146), so it could not be compared. The\n2026-10-03 journal replay removed them; whether replay should now use it is\napi-cloudrun#1255.\n\n## The replay identity, and why it covers exactly the history keys\n\n`calculateBookingBreakdown` carries every custody-history key forward\nverbatim and re-derives only the plan keys, so the order path never\nORIGINATES a unit in a history key; only the fulfillment ladder does, and it\nwrites a movement for every step. Hence\n\n    net[k] = Σ(movements with custody.to === k) − Σ(movements with custody.from === k)\n    net[k] === booking.breakdown[k]        for k in CUSTODY_HISTORY_KEYS\n\nThe plan keys move with an order's status, a planning act with no event, so\nthey are deliberately outside the identity. **The stored breakdown wins on\ndisagreement**: a divergence is a bug report about the journal, never a\nlicence to rewrite the booking.\n\nLifted from api-cloudrun's custodyReplay module (`replayCustody`,\n`classifyReplay`; deleted there in stock campaign P3), unchanged in behaviour. How the audit judges each verdict\n(the cutover instant, `booking.created_at`) stays in the audit.",
+      "moduleDoc": "The movement journal, folded: the orders a fold may use, and the custody\nreplay as projections over it (stock campaign P1, api-cloudrun#1240).\n\n```ts\nimport { foldJournal, journalOrder, custodyByBooking } from \"@cfs/core/utils/journal\";\n```\n\n## Two orders, because two questions\n\nThree folds each ordered the journal their own way: the custody replay\ngrouped by `date` instant with no tiebreak; the ledger replay sorted `date_fs`\nthen `number`; and the unit replay sorted `created_at` then `number`. They\nanswer two different questions, so they need exactly two orders:\n\n- **What happened, in what order** — {@link journalOrder}: the movement's own\n  `date` instant, then its `number`. Custody folds use it. A rebook pair is\n  numbered `rebook_out` first precisely so that a fold takes it first.\n- **What a writer applied, in what order** — {@link replayOrder}: what a\n  replay must use to reproduce a stored ledger or roster, since basis and\n  roster state depend on the order movements were applied, not the order\n  they happened (api-cloudrun#1255). {@link recordOrder} is its live-writer\n  half.\n\n## The replay identity, and why it covers exactly the history keys\n\n`calculateBookingBreakdown` carries every custody-history key forward\nverbatim and re-derives only the plan keys, so the order path never\nORIGINATES a unit in a history key; only the fulfillment ladder does, and it\nwrites a movement for every step. Hence\n\n    net[k] = Σ(movements with custody.to === k) − Σ(movements with custody.from === k)\n    net[k] === booking.breakdown[k]        for k in CUSTODY_HISTORY_KEYS\n\nThe plan keys move with an order's status, a planning act with no event, so\nthey are deliberately outside the identity. **The stored breakdown wins on\ndisagreement**: a divergence is a bug report about the journal, never a\nlicence to rewrite the booking.\n\nLifted from api-cloudrun's custodyReplay module (`replayCustody`,\n`classifyReplay`; deleted there in stock campaign P3), unchanged in behaviour. How the audit judges each verdict\n(the cutover instant, `booking.created_at`) stays in the audit.",
       "symbols": [
         {
           "kind": "interface",
@@ -17317,10 +17317,28 @@
           "doc": "The states a list of projections produce, in the same order."
         },
         {
+          "kind": "variable",
+          "name": "REBUILD_AT_MS",
+          "declaration": "const REBUILD_AT_MS: number;",
+          "doc": "The last `--write` run of the 2026-10 journal rebuild (api-cloudrun#1088).\n\nMeasured on prod 2026-10-09. The rebuild wrote three times on 2026-10-03 —\n04:03:58.152Z (22,012 movements sharing that `created_at`), 06:09:44.184Z (43)\nand 15:20:59.228Z (12) — and each run re-derived EVERY ledger by folding the\nwhole journal in business-date order. The first movement any live writer\nrecorded is 16:11:30.695Z. So a movement whose `created_at` is at or before\nthis instant reached its ledger through a business-order fold, and one after\nit through the live writer, which applies movements as they arrive.\n\n⚠️ Prod's instant. Dev's rebuild ran at 2026-10-02T20:32:30.134Z and dev also\nholds prod rows mirrored in, so a dev replay under this cut is approximate —\ndev is ephemeral and never the reference."
+        },
+        {
+          "kind": "interface",
+          "name": "RecordOrdered",
+          "declaration": "interface RecordOrdered {\n  created_at: FirestoreTimestampType;\n  number: number;\n}",
+          "doc": "The fields {@link recordOrder} and {@link replayOrder} read."
+        },
+        {
           "kind": "typeAlias",
           "name": "ReplayDeltas",
           "declaration": "type ReplayDeltas = Record<string, typeLiteral>;",
           "doc": "Per-key disagreement, present only for the keys that differ."
+        },
+        {
+          "kind": "interface",
+          "name": "ReplayOrdered",
+          "declaration": "interface ReplayOrdered {\n}",
+          "doc": "The fields {@link replayOrder} reads."
         },
         {
           "kind": "typeAlias",
@@ -17389,9 +17407,25 @@
         },
         {
           "kind": "function",
+          "name": "recordOrder",
+          "signature": "recordOrder(a: RecordOrdered, b: RecordOrdered): number",
+          "doc": "Record order: `created_at`, then `number` — the order the live ledger writer\napplied movements in (`commitLedgerMovements` folds a batch as it arrives).\n\nA backdated movement is recorded late, so it applies late: it moves basis\nfrom the moment it is recorded, not from its business date.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "replayCustody",
           "signature": "replayCustody(events: readonly CustodyEvent[]): CustodyNet",
           "doc": "Net units the events place in each custody-history key. A `reverses`\nreversal carries its custody swapped and nets itself out; a planning key on\none end contributes only through the other.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "replayOrder",
+          "signature": "replayOrder(a: ReplayOrdered, b: ReplayOrdered): number",
+          "doc": "The order the writers actually applied the journal in, which is what a replay\nmust use to reproduce a stored ledger or roster.\n\nTwo eras, split at {@link REBUILD_AT_MS}:\n\n- **At or before it**, {@link journalOrder}: the rebuild folded the whole\n  journal by business date. Record order is wrong here — the rebuild CARRIED\n  older movements with their original `created_at`, so they would replay\n  ahead of the supply that preceded them on the shelf and relieve $0\n  (`costOfUnits` returns 0 when held is 0 or less).\n- **After it**, {@link recordOrder}: the live writer applied on arrival.\n  Business order is wrong here — a backdated purchase would move basis for\n  every movement between its date and its recording.\n\nEvery earlier-era movement precedes every later one.\n\n⚠️ Inside the earlier era this approximates the rebuild rather than\nreproducing it: the rebuild broke a same-instant tie by an internal rank and\na carried movement kept its old `number`, neither of which is stored.",
           "paramTags": [],
           "returnsTag": null
         },

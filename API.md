@@ -37432,26 +37432,28 @@ Returns `[]` for a legal array.
 
 ## `@cfs/core/utils/journal`
 
-The movement journal, folded: ONE order for every fold, and the custody
+The movement journal, folded: the orders a fold may use, and the custody
 replay as projections over it (stock campaign P1, api-cloudrun#1240).
 
 ```ts
 import { foldJournal, journalOrder, custodyByBooking } from "@cfs/core/utils/journal";
 ```
 
-## Why one order
+## Two orders, because two questions
 
 Three folds each ordered the journal their own way: the custody replay
-grouped by `date` instant with no tiebreak and said "never `created_at`"; the
-ledger replay sorted `date_fs` then `number`; and the grain carry, the rental
-extension and the propagation catalog said "`created_at`, then `number`". A
-rebook pair is numbered `rebook_out` first precisely so that a fold takes it
-first — which holds only if every fold breaks a tie the same way.
-{@link journalOrder} is that one way: the movement's own `date` instant, then
-its `number`. Not `created_at`: when this was written, 569 prod movements
-stored it as a raw map (api-cloudrun#1146), so it could not be compared. The
-2026-10-03 journal replay removed them; whether replay should now use it is
-api-cloudrun#1255.
+grouped by `date` instant with no tiebreak; the ledger replay sorted `date_fs`
+then `number`; and the unit replay sorted `created_at` then `number`. They
+answer two different questions, so they need exactly two orders:
+
+- **What happened, in what order** — {@link journalOrder}: the movement's own
+  `date` instant, then its `number`. Custody folds use it. A rebook pair is
+  numbered `rebook_out` first precisely so that a fold takes it first.
+- **What a writer applied, in what order** — {@link replayOrder}: what a
+  replay must use to reproduce a stored ledger or roster, since basis and
+  roster state depend on the order movements were applied, not the order
+  they happened (api-cloudrun#1255). {@link recordOrder} is its live-writer
+  half.
 
 ## The replay identity, and why it covers exactly the history keys
 
@@ -37536,12 +37538,52 @@ The states a list of projections produce, in the same order.
 type ProjectionStates = mapped;
 ```
 
+### `REBUILD_AT_MS`
+
+The last `--write` run of the 2026-10 journal rebuild (api-cloudrun#1088).
+
+Measured on prod 2026-10-09. The rebuild wrote three times on 2026-10-03 —
+04:03:58.152Z (22,012 movements sharing that `created_at`), 06:09:44.184Z (43)
+and 15:20:59.228Z (12) — and each run re-derived EVERY ledger by folding the
+whole journal in business-date order. The first movement any live writer
+recorded is 16:11:30.695Z. So a movement whose `created_at` is at or before
+this instant reached its ledger through a business-order fold, and one after
+it through the live writer, which applies movements as they arrive.
+
+⚠️ Prod's instant. Dev's rebuild ran at 2026-10-02T20:32:30.134Z and dev also
+holds prod rows mirrored in, so a dev replay under this cut is approximate —
+dev is ephemeral and never the reference.
+
+```ts
+const REBUILD_AT_MS: number;
+```
+
+### `RecordOrdered`
+
+The fields {@link recordOrder} and {@link replayOrder} read.
+
+```ts
+interface RecordOrdered {
+  created_at: FirestoreTimestampType;
+  number: number;
+}
+```
+
 ### `ReplayDeltas`
 
 Per-key disagreement, present only for the keys that differ.
 
 ```ts
 type ReplayDeltas = Record<string, typeLiteral>;
+```
+
+### `ReplayOrdered`
+
+The fields {@link replayOrder} reads.
+
+```ts
+interface ReplayOrdered {
+}
 ```
 
 ### `ReplayVerdict`
@@ -37611,11 +37653,41 @@ Net custody on movements whose booking no longer exists: per booking id, the
 net its movements leave. A grain carry or a deleted plan-only booking nets to
 zero or below; a positive bucket is custody nothing holds any more.
 
+### `recordOrder(a: RecordOrdered, b: RecordOrdered): number`
+
+Record order: `created_at`, then `number` — the order the live ledger writer
+applied movements in (`commitLedgerMovements` folds a batch as it arrives).
+
+A backdated movement is recorded late, so it applies late: it moves basis
+from the moment it is recorded, not from its business date.
+
 ### `replayCustody(events: readonly CustodyEvent[]): CustodyNet`
 
 Net units the events place in each custody-history key. A `reverses`
 reversal carries its custody swapped and nets itself out; a planning key on
 one end contributes only through the other.
+
+### `replayOrder(a: ReplayOrdered, b: ReplayOrdered): number`
+
+The order the writers actually applied the journal in, which is what a replay
+must use to reproduce a stored ledger or roster.
+
+Two eras, split at {@link REBUILD_AT_MS}:
+
+- **At or before it**, {@link journalOrder}: the rebuild folded the whole
+  journal by business date. Record order is wrong here — the rebuild CARRIED
+  older movements with their original `created_at`, so they would replay
+  ahead of the supply that preceded them on the shelf and relieve $0
+  (`costOfUnits` returns 0 when held is 0 or less).
+- **After it**, {@link recordOrder}: the live writer applied on arrival.
+  Business order is wrong here — a backdated purchase would move basis for
+  every movement between its date and its recording.
+
+Every earlier-era movement precedes every later one.
+
+⚠️ Inside the earlier era this approximates the rebuild rather than
+reproducing it: the rebuild broke a same-instant tie by an internal rank and
+a carried movement kept its old `number`, neither of which is stored.
 
 ### `unitsByBooking(since: string): JournalProjection<Map<string, UnitSetsByKey>>`
 
