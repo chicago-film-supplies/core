@@ -4,10 +4,7 @@
 import { z } from "zod";
 import { extendChecked } from "./_extend.ts";
 import { FirestoreId, ThreadId } from "./_uid.ts";
-import { chicagoInstant } from "./_datetime.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
-import { MovementAllocationInput, type MovementAllocationInputType } from "./transaction.ts";
-import { CreateProductPurchaseInput, type CreateProductPurchaseInputType } from "./purchase.ts";
 import {
   ActorRef,
   type ActorRefType,
@@ -803,24 +800,33 @@ export interface CreateProductInputType {
     available: boolean;
     description?: string | null;
   };
-  /**
-   * The opening-balance movement: stock the shop already HAS. `purchase` is not
-   * a member — stock bought from a supplier is a {@link CreateProductInputType.purchase}.
-   */
-  transaction?: {
-    type: "make" | "find";
-    quantity: number;
-    total_cost_cents: number;
-    date: string;
-    reference: string;
-    uuid_session: string;
-    allocations: MovementAllocationInputType[];
-  };
-  /**
-   * An OPEN purchase created with the product, optional. See
-   * {@link CreateProductPurchaseInputType}.
-   */
-  purchase?: CreateProductPurchaseInputType;
+  /** Retired — see `retiredCreateKey`. Present is a 400. */
+  transaction?: never;
+  /** Retired — see `retiredCreateKey`. Present is a 400. */
+  purchase?: never;
+}
+
+/**
+ * A key `CreateProductInput` used to carry and no longer does, declared only so
+ * a payload still carrying it is REFUSED rather than stripped (api-cloudrun#1269,
+ * owner ruling 2 of 2026-10-09).
+ *
+ * `createProduct` authors no movement and no purchase: the manager creates the
+ * product, then runs the existing routes — `POST /transactions` for stock the
+ * shop already holds, `POST /purchases` for stock on order — each with its own
+ * permission check and contracts. This input is a stripping `z.object`, so a
+ * stale client (a manager tab loaded before the change) sending the old blocks
+ * would get a 200 and a product with none of the stock it described. Refusing
+ * the key turns that into a 400 naming it. Same shape as `retiredKey` in
+ * `schemas/booking.ts`, including the OpenAPI meta its comment explains.
+ */
+function retiredCreateKey(key: "transaction" | "purchase") {
+  const why = key === "transaction"
+    ? "create the product, then POST /transactions for its opening stock"
+    : "create the product, then POST /purchases";
+  return z.never({ error: `"${key}" is retired: ${why}` })
+    .meta({ type: "null", not: {}, description: `Retired: ${why}. Present is a 400.` })
+    .optional();
 }
 
 /** Input schema for creating a product. */
@@ -885,41 +891,13 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     available: z.boolean(),
     description: z.string().nullable().optional(),
   }),
-  // The opening-balance movement. No `uid`: a movement's document id is derived
-  // (`{uuid_session}|{type}|{subject}`), which is what makes a retried create
-  // idempotent rather than appending a second event.
-  transaction: z.object({
-    type: z.enum(["make", "find"]),
-    quantity: z.number().int().nonnegative(),
-    total_cost_cents: z.int(),
-    date: chicagoInstant(),
-    reference: z.string(),
-    uuid_session: z.uuid(),
-    allocations: z.array(MovementAllocationInput).min(1),
-  }).optional(),
-  // `seed: false`: the type-derived zero (`supplier: { uid: "" }`, `quantity: 0`) is
-  // unparseable, and the only legal "no purchase" is absence — so a form seeded
-  // from `getInitialValues` must not carry the key at all (cf. `path_order_item`).
-  purchase: CreateProductPurchaseInput.optional().meta({ seed: false }),
+  transaction: retiredCreateKey("transaction"),
+  purchase: retiredCreateKey("purchase"),
 }).refine(
   (p) => p.type !== "rental" || p.stock_method === "none" || p.price.replacement_cents != null,
   {
     message: "price.replacement_cents is required for rental products",
     path: ["price", "replacement_cents"],
-  },
-).refine(
-  // Opening-balance scalar quantity must equal Σ per-location allocation, or the
-  // ledger is born desynced (quantity_held != Σ store_breakdown). Backstop behind
-  // the server-side assertQuantityMatchesLocations guard (#168). Same rule the
-  // movement schema enforces as balance rule 1, applied at the input boundary so
-  // the caller gets a 400 rather than a 500 from validateBeforeWrite.
-  (p) =>
-    !p.transaction ||
-    p.transaction.quantity ===
-      p.transaction.allocations.reduce((sum, a) => sum + a.quantity, 0),
-  {
-    message: "transaction.quantity must equal the sum of per-location allocation quantities",
-    path: ["transaction", "quantity"],
   },
 );
 

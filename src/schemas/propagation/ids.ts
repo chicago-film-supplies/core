@@ -274,8 +274,6 @@ export type RuleId =
   | "create-product:product-to-tracking-categories"
   | "create-product:product-to-components"
   | "create-product:product-to-ledger"
-  | "create-product:product-to-opening-movement"
-  | "create-product:product-to-purchase"
   | "create-product:product-to-webshop"
   | "update-product:catalog-to-components"
   | "update-product:components-to-components"

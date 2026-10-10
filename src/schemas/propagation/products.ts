@@ -385,107 +385,12 @@ const createProductRules: CollectionRule[] = [
   },
 ];
 
-/**
- * The opening-balance movement.
- *
- * ⚠️ **This edge is `transactions`-as-a-CASCADE-TARGET, which `create-transaction`
- * does not need and cannot supply.** Under the 2026-08-17 root-write ruling a
- * transaction does not declare the write to its own root, so
- * `create-transaction` declares the ledger and location folds and never the
- * movement itself. `create-product` writes the same movement document as a
- * consequence of creating a product, which is a genuine cascade — so the edge
- * exists here and nowhere else. **The ruling is per transaction, not per
- * collection**, and this is the case that shows why.
- *
- * Measured undeclared in prod 2026-08-17: `create-product` wrote `transactions`
- * 11 times in 30 days while declaring no rule with that target. Its own
- * hand-written `target_counts` did not name it either, so only the measured
- * write side could see it.
- */
-const createProductMovementRule: CollectionRule = {
-  id: "create-product:product-to-opening-movement",
-  source: "products",
-  target: "transactions",
-  mode: "co-write",
-  invariant:
-    "A product created with an opening balance appends ONE movement to the journal in the same transaction, at the derived id {uuid_session}|{type}|{subject} — so a retried create resolves to the same document instead of appending a second opening balance. Absent when the product opens at zero.",
-  transaction: "create-product",
-  enforced_by: [
-    {
-      kind: "audit",
-      ref: "api-cloudrun/scripts/audit-stock.ts",
-      clause:
-        "the ledger's quantity_held equals the fold of its movements — an opening balance that failed to append shows up as a ledger ahead of its journal",
-      gates: true,
-    },
-  ],
-  fields: [
-    { source: ["uid"], target: ["uid_product"] },
-    {
-      source: [],
-      target: ["uid"],
-      transform:
-        "movementId(uuid_session, type, uid_product) — derived, so a retry is idempotent",
-    },
-    {
-      source: [],
-      target: ["lines"],
-      transform:
-        "linesFromAllocations(type, allocations) — the units land on the `to` side",
-    },
-    {
-      source: [],
-      target: ["cost", "amount_cents"],
-      transform: "total_cost_cents from the create input",
-    },
-  ],
-};
-
-/**
- * The purchase a product is created WITH (`CreateProductInput.purchase`,
- * api-cloudrun#1210) — "I just ordered ten of a new item", recorded where the
- * item is created. It is the document `POST /purchases` writes, one line naming
- * the new product, so nothing about it is special downstream: a receipt, a bill
- * and a short close all find it as any purchase.
- *
- * ⚠️ **An OPEN purchase only.** It moves no stock (receiving is its own step) and
- * posts nothing to Xero, which is why the opening BALANCE (`make`/`find`, stock
- * the shop already holds) and this are different inputs: the old opening
- * `purchase` movement was received and billed in one act, and had no document.
- */
-const createProductPurchaseRule: CollectionRule = {
-  id: "create-product:product-to-purchase",
-  source: "products",
-  target: "purchases",
-  mode: "co-write",
-  invariant:
-    "A product created with a `purchase` writes ONE open purchase in the same transaction, at the id derived from the client's uuid_session — so a retried create cannot mint a second order. The purchase's single line names the new product, and the purchase carries its own default thread (the cowrite-thread rules). Absent when the create states no purchase.",
-  transaction: "create-product",
-  enforced_by: [
-    {
-      kind: "test",
-      ref:
-        "api-cloudrun/tests/integration/products/products.test.ts::POST - a product created WITH a purchase writes the open purchase, its thread and PO number in one commit",
-      clause:
-        "the purchase exists at the derived id with one line naming the new product, quantity and amount as sent, every bucket at zero and status active; it carries a PO number and a default thread; no movement and no stock were written for it; a caller without purchases.create is refused before anything is written; a missing supplier writes neither the product nor the purchase",
-      gates: true,
-    },
-  ],
-  fields: [
-    { source: ["uid"], target: ["lines", "uid_product"] },
-    { source: ["name"], target: ["lines", "name"] },
-    {
-      source: [],
-      target: ["uid"],
-      transform: "purchaseIdForSession(uuid_session) — derived, so a retry is idempotent",
-    },
-    {
-      source: [],
-      target: ["number"],
-      transform: "allocated in-transaction from counters/purchases, after every other read",
-    },
-  ],
-};
+// No movement, unit or purchase edge, by ruling (api-cloudrun#1269, owner,
+// 2026-10-09). `createProduct` used to author an opening movement, its units
+// and an open purchase in the create's own transaction. It now writes only the
+// product and its stock scaffolding; the manager follows the create with the
+// routes that already author those documents (`POST /transactions`,
+// `POST /purchases`), whose own transactions declare their edges.
 
 const createProductTransaction: TransactionDefinition = {
   id: "create-product",
@@ -496,20 +401,14 @@ const createProductTransaction: TransactionDefinition = {
     "create-product:product-to-tracking-categories",
     "create-product:product-to-components",
     "create-product:product-to-ledger",
-    "create-product:product-to-opening-movement",
-    "create-product:product-to-purchase",
-    "cowrite-thread:purchases-to-thread",
-    "cowrite-thread:thread-to-purchases",
-    // Shared step, declared in `propagation/transactions.ts`: the opening movement folds
-    // onto the location documents through the same applier `create-transaction`
-    // uses. Measured undeclared in prod 2026-08-17 (`locations`, 11 records).
-    "create-transaction:transaction-to-locations",
     "stock:seed-ledger-to-stock",
     "create-product:product-to-webshop",
     "cowrite-thread:products-to-thread",
     "cowrite-thread:thread-to-products",
+    // A product created `serialized` gets an EMPTY roster: its units are minted
+    // afterwards (`POST /products/{uid}/units`) and placed by the movement that
+    // names them, so the create writes no `units` document.
     "units:product-to-roster",
-    "units:product-to-units",
   ],
 };
 
@@ -1025,8 +924,6 @@ const updateProductTransaction: TransactionDefinition = {
 export const products: PropagationModule = {
   rules: [
     ...createProductRules,
-    createProductMovementRule,
-    createProductPurchaseRule,
     ...updateProductRules,
     ...updateProductPriceRules,
     ...updateProductOrderRules,

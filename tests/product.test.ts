@@ -237,8 +237,18 @@ Deno.test("CreateProductInput requires price.replacement_cents for rental produc
   assertEquals(CreateProductInput.safeParse({ ...input, stock_method: "none" }).success, true);
 });
 
-Deno.test("CreateProductInput: an opening balance is stock the shop HAS — a purchase is the `purchase` block", () => {
-  const opening = {
+// api-cloudrun#1269 (owner ruling 2, 2026-10-09): `createProduct` authors no
+// movement and no purchase. The input is a stripping `z.object`, so a deleted key
+// would be dropped with a 200 and a stale client's opening stock lost silently.
+// Each old block is therefore REFUSED by name. Both old payload shapes are sent
+// whole, so the test fails if either key goes back to stripping.
+Deno.test("CreateProductInput refuses the retired `transaction` and `purchase` blocks", () => {
+  const paths = (input: unknown): string[] => {
+    const r = CreateProductInput.safeParse(input);
+    return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+  };
+  const transaction = {
+    type: "make",
     quantity: 2,
     total_cost_cents: 1000,
     date: "2026-09-16T12:00:00.000-05:00",
@@ -246,20 +256,6 @@ Deno.test("CreateProductInput: an opening balance is stock the shop HAS — a pu
     uuid_session: "7f3c1b1e-9d2a-4c1e-8f6a-2b3c4d5e6f70",
     allocations: [{ uid_location: "testlocation10000000", quantity: 2 }],
   };
-  const withTx = (transaction: Record<string, unknown>) => ({ ...validCreateInput, transaction });
-  const paths = (input: unknown): string[] => {
-    const r = CreateProductInput.safeParse(input);
-    return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
-  };
-
-  assertEquals(CreateProductInput.safeParse(withTx({ ...opening, type: "make" })).success, true);
-  assertEquals(CreateProductInput.safeParse(withTx({ ...opening, type: "find" })).success, true);
-  // The old path: an opening `purchase` posted its own movement-level Xero bill.
-  assertEquals(paths(withTx({ ...opening, type: "purchase" })), ["transaction.type"]);
-  assertEquals(paths(withTx({ ...opening, type: "purchase", supplier: { uid: "testsupplier10000000" } })), ["transaction.type"]);
-});
-
-Deno.test("CreateProductInput.purchase: an optional open purchase for the product being created", () => {
   const purchase = {
     supplier: { uid: "testsupplier10000000" },
     store: { uid: "teststore10000000000" },
@@ -268,40 +264,17 @@ Deno.test("CreateProductInput.purchase: an optional open purchase for the produc
     amount_cents: 125000,
     uuid_session: "0b6f3c1e-9d2a-4c1e-8f6a-2b3c4d5e6f71",
   };
-  const withPurchase = (p: Record<string, unknown>) => ({ ...validCreateInput, purchase: p });
-  const paths = (input: unknown): string[] => {
-    const r = CreateProductInput.safeParse(input);
-    return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
-  };
 
-  // A form seeded from `getInitialValues` must not carry a `purchase` stub: its
-  // zero (`quantity: 0`, an empty supplier uid) is unparseable, and the only legal
-  // "no purchase" is absence. Mutation control: without `seed: false` this key is
-  // present.
-  assertEquals("purchase" in (getInitialValues(CreateProductInput) as Record<string, unknown>), false);
-
-  // Optional: the base input has none, and the full one parses.
-  assertEquals(CreateProductInput.safeParse(validCreateInput).success, true);
-  assertEquals(CreateProductInput.safeParse(withPurchase(purchase)).success, true);
-  // The date normalizes to Chicago start-of-day like every purchase date.
-  const parsed = CreateProductInput.safeParse(withPurchase(purchase));
-  assertEquals(parsed.success && parsed.data.purchase?.date, "2026-10-06T00:00:00.000-05:00");
-
-  // `getInitialValues` would hand a fixture every key, so each required one is
-  // dropped by hand and the issue must name exactly it.
-  for (const key of ["supplier", "store", "date", "quantity", "amount_cents", "uuid_session"]) {
-    const { [key]: _dropped, ...rest } = purchase as Record<string, unknown>;
-    assertEquals(paths(withPurchase(rest)), [`purchase.${key}`], `dropping ${key}`);
-  }
-  assertEquals(paths(withPurchase({ ...purchase, quantity: 0 })), ["purchase.quantity"]);
-  assertEquals(paths(withPurchase({ ...purchase, quantity: 1.5 })), ["purchase.quantity"]);
-  assertEquals(paths(withPurchase({ ...purchase, amount_cents: -1 })), ["purchase.amount_cents"]);
-  assertEquals(paths(withPurchase({ ...purchase, amount_cents: 12.5 })), ["purchase.amount_cents"]);
-
-  // The line's product is the one being created: it is not an input, so a
-  // client cannot aim the purchase at another product.
-  const withUid = CreateProductInput.safeParse(withPurchase({ ...purchase, uid_product: "testotherproduct00000" }));
-  assertEquals(withUid.success && "uid_product" in (withUid.data.purchase ?? {}), false);
+  assertEquals(paths(validCreateInput), []);
+  assertEquals(paths({ ...validCreateInput, transaction }), ["transaction"]);
+  assertEquals(paths({ ...validCreateInput, purchase }), ["purchase"]);
+  const refused = CreateProductInput.safeParse({ ...validCreateInput, purchase });
+  assertEquals(!refused.success && refused.error.issues[0].message.includes("POST /purchases"), true);
+  // An unrelated unknown key still strips, as on any input schema.
+  assertEquals(paths({ ...validCreateInput, not_a_field: 1 }), []);
+  // A form seeded from `getInitialValues` must carry neither key.
+  const seed = getInitialValues(CreateProductInput) as Record<string, unknown>;
+  assertEquals("transaction" in seed || "purchase" in seed, false);
 });
 Deno.test("CreateProductInput requires price.replacement_cents for rental components", () => {
   const rentalComponent = {
