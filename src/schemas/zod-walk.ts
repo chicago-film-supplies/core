@@ -242,7 +242,7 @@ function unwrapPipes(node: z.ZodType): z.ZodType {
  * a display label produces a *different instance* that is still the same type,
  * and an identity-only test would call it "not a date".
  */
-function isFirestoreTimestampNode(node: z.ZodType): boolean {
+export function isFirestoreTimestampNode(node: z.ZodType): boolean {
   if (node === FirestoreTimestamp) return true;
   return getNodeMeta(node)?.[FIRESTORE_TIMESTAMP_META] === true;
 }

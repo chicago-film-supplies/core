@@ -37448,8 +37448,10 @@ extension and the propagation catalog said "`created_at`, then `number`". A
 rebook pair is numbered `rebook_out` first precisely so that a fold takes it
 first — which holds only if every fold breaks a tie the same way.
 {@link journalOrder} is that one way: the movement's own `date` instant, then
-its `number`. Never `created_at`: 569 prod movements store it as a raw map
-(api-cloudrun#1146), so it cannot even be compared.
+its `number`. Not `created_at`: when this was written, 569 prod movements
+stored it as a raw map (api-cloudrun#1146), so it could not be compared. The
+2026-10-03 journal replay removed them; whether replay should now use it is
+api-cloudrun#1255.
 
 ## The replay identity, and why it covers exactly the history keys
 
