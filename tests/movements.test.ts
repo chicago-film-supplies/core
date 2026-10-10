@@ -19,6 +19,7 @@ import {
   isReversing,
   movementHeldDelta,
   negateLines,
+  replayStartsUncounted,
   xeroPostingFor,
 } from "../src/utils/movements.ts";
 import { InventoryLedgerSchema, MOVEMENT_CONTRACTS, MOVEMENT_TYPES } from "../src/schemas/mod.ts";
@@ -1492,4 +1493,127 @@ Deno.test("consumeNewestFirst: however a forward is consumed, its shares sum to 
   assertEquals(partial > 150_000, true, `only ${partial} partial shares`);
   // Fail-closed companion: rounding each share on its own does NOT conserve the amount.
   assertEquals(naiveWrong > 10_000, true, `per-share rounding disagreed on only ${naiveWrong} draws`);
+});
+
+// ── The count boundaries (api-cloudrun#1254) ────────────────────────
+
+const OOS_2 = "testoos2000000000000";
+const atOos2 = { collection: "out-of-service" as const, uid: OOS_2 };
+
+/** A `count_open` / `count_close` as the writer stages them, minus identity. */
+function boundary(
+  type: "count_open" | "count_close",
+  lines: MovementLineType[] = [],
+  service: { from: null; to: "lost" | "damaged" | "cleaning" | "maintenance" } | null = null,
+) {
+  return {
+    reverses: null,
+    service,
+    type,
+    custody: null,
+    quantity: lines.reduce((n, l) => n + l.quantity, 0),
+    lines,
+    cost: null,
+  };
+}
+
+Deno.test("count_open on an uncounted ledger starts at zero and folds its off-shelf lines", () => {
+  // Axis 1: units out on two live rentals, in service.
+  const out = applyMovementToLedger(
+    uncounted(),
+    boundary("count_open", [line(2, null, atBooking), line(1, null, { ...atBooking, uid: BOOKING + "x" })]),
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(out.ledger.quantity_held, 3);
+  assertEquals(out.ledger.quantity_in_service, 3);
+  assertEquals(out.ledger.store_breakdown, [], "the shelves are counted in afterwards");
+  assertEquals(out.ledger.total_cost_basis_cents, 0);
+  assertEquals(out.linelessCountedQuantity, 0);
+
+  // Axis 2, folded onto axis 1: units away at two lost records.
+  const lost = applyMovementToLedger(
+    out.ledger,
+    boundary("count_open", [line(1, null, atOos), line(2, null, atOos2)], { from: null, to: "lost" }),
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(lost.ledger.quantity_held, 6);
+  assertEquals(lost.ledger.out_of_service_breakdown, { cleaning: 0, damaged: 0, maintenance: 0, lost: 3 });
+  assertEquals(lost.ledger.quantity_out_of_service, 3);
+  assertEquals(lost.ledger.quantity_in_service, 3);
+  assertEquals(lost.oosUnattributedDelta, 0, "the axis names the reason");
+  assertEquals(InventoryLedgerSchema.safeParse({ ...lost.ledger, stock_method: "bulk" }).success, true);
+});
+
+Deno.test("count_open with nothing off-shelf is a lineless zero that still counts the ledger", () => {
+  const opened = applyMovementToLedger(uncounted(), boundary("count_open"), placements, mockTimestamp);
+  assertEquals(opened.ledger.quantity_held, 0);
+  assertEquals(opened.ledger.quantity_in_service, 0);
+  assertEquals(opened.linelessCountedQuantity, 0, "a zero open is not the lineless-on-counted defect");
+  // Fail-closed companion: the same lineless document of any OTHER lineless
+  // type on an uncounted ledger leaves the count null — the open is what counts.
+  const custody = applyMovementToLedger(
+    uncounted(),
+    { ...boundary("count_open"), type: "return_to_service" },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(custody.ledger.quantity_held, null);
+});
+
+Deno.test("count_close is absolute: everything goes, and the held it discarded is reported", () => {
+  const counted = ledger({
+    quantity_held: 7,
+    quantity_in_service: 5,
+    quantity_out_of_service: 2,
+    out_of_service_breakdown: { cleaning: 0, damaged: 0, maintenance: 0, lost: 2 },
+    total_cost_basis_cents: 1234,
+    average_unit_cost: 1.7629,
+  });
+  const closed = applyMovementToLedger(counted, boundary("count_close"), placements, mockTimestamp);
+  assertEquals(closed.ledger.quantity_held, null);
+  assertEquals(closed.ledger.quantity_in_service, null);
+  assertEquals(closed.ledger.quantity_out_of_service, 0);
+  assertEquals(closed.ledger.out_of_service_breakdown, { cleaning: 0, damaged: 0, maintenance: 0, lost: 0 });
+  assertEquals(closed.ledger.total_cost_basis_cents, 0);
+  assertEquals(closed.ledger.average_unit_cost, 0);
+  assertEquals(closed.countClosedHeld, 7);
+  assertEquals(InventoryLedgerSchema.safeParse({ ...closed.ledger, stock_method: "none" }).success, true);
+  // Every other movement reports nothing here.
+  assertEquals(
+    applyMovementToLedger(counted, boundary("count_open"), placements, mockTimestamp).countClosedHeld,
+    0,
+  );
+});
+
+Deno.test("open → close → open replays to the same ledger the writer would hold", () => {
+  const journal = [
+    boundary("count_open", [line(2, null, atBooking)]),
+    boundary("count_close"),
+    boundary("count_open", [line(1, null, atOos)], { from: null, to: "damaged" }),
+  ];
+  let l = uncounted();
+  for (const m of journal) l = applyMovementToLedger(l, m, placements, mockTimestamp).ledger;
+  assertEquals(l.quantity_held, 1);
+  assertEquals(l.out_of_service_breakdown.damaged, 1);
+  assertEquals(l.quantity_in_service, 0);
+});
+
+Deno.test("replayStartsUncounted: the first boundary decides, else the stored state", () => {
+  const t = (type: MovementTypeType) => ({ type });
+  assertEquals(replayStartsUncounted([t("check_out"), t("count_open"), t("count_close")], false), true);
+  assertEquals(replayStartsUncounted([t("purchase"), t("count_close"), t("count_open")], true), false);
+  // No boundary: the ledger never changed its counted-ness, so it starts as it stands.
+  assertEquals(replayStartsUncounted([t("purchase")], false), false);
+  assertEquals(replayStartsUncounted([t("check_out")], true), true);
+  assertEquals(replayStartsUncounted([], true), true);
+});
+
+Deno.test("the count boundaries carry no cost, no booking and no custody", () => {
+  for (const type of ["count_open", "count_close"] as const) {
+    assertEquals(MOVEMENT_CONTRACTS[type].cost, "forbidden", type);
+    assertEquals(MOVEMENT_CONTRACTS[type].booking, "forbidden", type);
+    assertEquals(MOVEMENT_CONTRACTS[type].custody, "forbidden", type);
+  }
 });

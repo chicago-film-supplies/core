@@ -191,6 +191,15 @@ const SUMMARY_BICONDITIONAL_TESTED: EnforcementRef = {
   gates: true,
 };
 
+const COUNT_BOUNDARY_TESTED: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts::PUT stock_method none→bulk→none→bulk journals every count boundary",
+  clause:
+    "open, close and re-open on one product: each flip writes its boundary movements in the same transaction as the ledger, the ledger equals the fold of them, and a replay from the journal alone reproduces the stored ledger at every step",
+  gates: true,
+};
+
 const WEBSHOP_MIRROR_TESTED: EnforcementRef = {
   kind: "test",
   ref:
@@ -716,7 +725,7 @@ const updateProductRules: CollectionRule[] = [
     target: "inventory-ledgers",
     mode: "co-write",
     invariant:
-      "Every rental/sale has an inventory ledger, `stock/{P}` projection and `stock-locks/{P}` token whatever its stock_method; stock_method decides only whether the ledger is COUNTED. Changing a rental/sale to 'none' UNCOUNTS its ledger in place — `quantity_held` and `quantity_in_service` become null, the shelves and basis go, the out-of-service breakdown stays — and is refused while units sit on a shelf or carry basis (write them off first). Changing it away from 'none' COUNTS the ledger, seeding `quantity_held` from the units owned off any shelf (out on live rentals plus away on open records) with the shelves empty, so the shelf identity holds at once. A product with no ledger type keeps no trio. The projection and the token exist if and only if the ledger does — see `stock:seed-ledger-to-stock`. Until uncounted-ledger phase 3 a change to 'none' DELETED all three, which left the product's lines unbookable.",
+      "Every rental/sale has an inventory ledger, `stock/{P}` projection and `stock-locks/{P}` token whatever its stock_method; stock_method decides only whether the ledger is COUNTED. Changing a rental/sale to 'none' UNCOUNTS its ledger in place — `quantity_held` and `quantity_in_service` become null, and the shelves, the basis and the out-of-service breakdown go (the open records state it) — and is refused while units sit on a shelf or carry basis (write them off first). Changing it away from 'none' COUNTS the ledger, seeding `quantity_held` from the units owned off any shelf (out on live rentals plus away on open records) with the shelves empty, so the shelf identity holds at once. Both flips are the fold of their boundary movements (`update-product:stock-method-to-count-movement`), so the ledger is exactly what a replay of its journal reproduces. A product with no ledger type keeps no trio. The projection and the token exist if and only if the ledger does — see `stock:seed-ledger-to-stock`. Until uncounted-ledger phase 3 a change to 'none' DELETED all three, which left the product's lines unbookable.",
     enforced_by: [SUMMARY_BICONDITIONAL_TESTED],
     transaction: "update-product",
     fields: [
@@ -731,6 +740,24 @@ const updateProductRules: CollectionRule[] = [
         target: [],
         transform:
           "stock/{uid} + stock-locks/{uid} rebuilt, seeded or deleted in lockstep with the ledger. The TOKEN leg is the one with teeth: stageStockClaim PATCHES it and update does not upsert, so a ledger left without one fails every claim against that product.",
+      },
+    ],
+  },
+  {
+    id: "update-product:stock-method-to-count-movement",
+    source: "products",
+    target: "transactions",
+    mode: "co-write",
+    invariant:
+      "A flip between COUNTED and UNCOUNTED is journaled, in the same transaction as the ledger it moves (api-cloudrun#1254). Uncounted → counted writes `count_open` movements: one carrying a line per live rental booking with units out (service null), and one per out-of-service reason carrying a line per open record with units away (service {null → reason}, the records in `sources[]`); a product owning nothing off-shelf writes ONE lineless `count_open` of quantity 0, so the boundary is still in the journal. Counted → uncounted writes ONE lineless `count_close`. The ledger written is the fold of those movements onto the stored ledger — never a second computation beside them — which is what lets a replay read its starting state off the journal (`replayStartsUncounted`) instead of a `counted_from` marker. A ledger CREATED by the change (from a type with no ledger) is born in its state and writes no boundary.",
+    enforced_by: [COUNT_BOUNDARY_TESTED],
+    transaction: "update-product",
+    fields: [
+      {
+        source: ["stock_method"],
+        target: [],
+        transform:
+          "count_open movements (uncounted → counted) or one count_close (counted → uncounted), numbered from counters/transactions reserved outside the transaction",
       },
     ],
   },
@@ -911,6 +938,7 @@ const updateProductTransaction: TransactionDefinition = {
     "update-product:tags-to-tags",
     "update-product:tracking-category-change",
     "update-product:stock-method-change",
+    "update-product:stock-method-to-count-movement",
     "update-product:type-change",
     "units:product-to-roster",
     "units:product-to-units",

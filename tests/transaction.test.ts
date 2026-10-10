@@ -101,6 +101,8 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     // custody change a flag can carry — a damaged return found on the shelf.
     flag: { from: "returned", to: "damaged" },
     send_away: null,
+    count_open: null,
+    count_close: null,
   };
 
   // TOTAL for the same reason as `custodyFor`. `null` on every type whose
@@ -145,6 +147,9 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     return_to_service: null,
     flag: { from: null, to: "damaged" },
     send_away: { from: null, to: "lost" },
+    // The fixture's line lands at a booking, the in-service axis.
+    count_open: null,
+    count_close: null,
   };
 
   let lines: unknown[] = [];
@@ -523,6 +528,8 @@ Deno.test("an uncounted product's step is lineless: the ladder and two record re
     "check_in_undo",
     "check_out",
     "check_out_undo",
+    // A product owning nothing off-shelf still writes its count boundary.
+    "count_open",
     "flag",
     "mark_cleaning",
     "mark_cleaning_undo",
@@ -1115,9 +1122,12 @@ function issuePaths(doc: unknown): string[] {
   return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
 }
 
-Deno.test("rule 5: only the twin reclass forbids units", () => {
+Deno.test("rule 5: only the twin reclass and the count boundaries forbid units", () => {
+  // A reclass moves units between two products' rosters; a count boundary is
+  // not where a serialized product's units are placed (its roster's `enroll`
+  // is), so naming one there would place it twice.
   const forbidden = MOVEMENT_TYPES.filter((t) => MOVEMENT_CONTRACTS[t].units === "forbidden");
-  assertEquals(forbidden, ["reclass_out", "reclass_in"]);
+  assertEquals(forbidden, ["reclass_out", "reclass_in", "count_open", "count_close"]);
 });
 
 Deno.test("rule 5: every type accepts empty unit keys (the scaffold) and refuses absent ones", () => {

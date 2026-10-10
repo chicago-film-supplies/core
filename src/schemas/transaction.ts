@@ -336,6 +336,41 @@ export const MOVEMENT_TYPES = [
   // own. api-cloudrun#768, #1118.
   "flag",
   "send_away",
+  // ── the count boundaries: a ledger starts or stops COUNTING ──
+  //
+  // A `stock_method` flip between `none` and a counted method changes what the
+  // ledger claims to KNOW (`quantity_held` null ↔ a number), not where any unit
+  // is. Until these existed the flip wrote no movement and stamped a
+  // `counted_from` marker on the ledger instead, so a replay had to be told
+  // where the journal stopped describing the count (api-cloudrun#1254, #1205).
+  // Now the boundary IS a movement, and a replay reads its starting state off
+  // the journal (`replayStartsUncounted`).
+  //
+  // - `count_open` turns an uncounted ledger into a counted one, seeded from the
+  //   units owned OFF any shelf. One movement per axis, each a set of lines from
+  //   outside ownership: the units out on live rental bookings (`service:
+  //   null`, a line per booking), and per out-of-service reason the units away
+  //   at the open records (`service: {null → r}`, a line per record, the
+  //   records in `sources[]`) — one reason per movement, because a movement
+  //   carries one service transition. A product owning nothing off-shelf writes
+  //   ONE lineless `count_open` of quantity 0, so the boundary is still in the
+  //   journal. The shelves are counted in afterwards by ordinary movements.
+  // - `count_close` makes a counted ledger uncounted: lineless and ABSOLUTE.
+  //   Held, in-service, the shelves, the basis and the out-of-service breakdown
+  //   all go, whatever they were; the held quantity it discarded is reported
+  //   (`LedgerFoldResult.countClosedHeld`), never thrown. The writer refuses a
+  //   close while units sit on a shelf or carry basis.
+  //
+  // Both are ownership-axis events with no cost, so `xeroPostingFor` skips them
+  // on `no_cost_contract` with no arm of its own. Neither is a manual type, and
+  // neither is reversible: a boundary is undone by the opposite boundary.
+  //
+  // ⚠️ **There are deliberately no markers on the ledger.** A counted ledger
+  // born counted (every product created `bulk` or `serialized`) needs nothing:
+  // a replay with no boundary in its journal starts at the ledger's birth
+  // state. Only a FLIP writes a boundary.
+  "count_open",
+  "count_close",
 ] as const;
 
 /** Union of all movement type string literals. */
@@ -789,6 +824,35 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
     service: "required",
     units: "allowed",
     uncounted: "refused",
+  },
+  // ── the count boundaries (see `MOVEMENT_TYPES`) ──
+  // `count_open` enters ownership AT the off-shelf places: a booking holding
+  // units out on a rental, or an out-of-service record holding units away.
+  // `outside → X` makes it +1 to `getTransactionMultiplier`, which is what files
+  // it on the ownership axis. `service: "nullable"` because the booking axis is
+  // in service and each record axis is not; rule 4 then requires a record line
+  // to name its reason and a booking line to name none. `lineless` because a
+  // product owning nothing off-shelf still writes its boundary. `units:
+  // "forbidden"`: a serialized product's units are placed by its roster's
+  // `enroll`, never by a count.
+  count_open: {
+    custody: "forbidden",
+    cost: "forbidden",
+    places: { from: ["outside"], to: ["bookings", "out-of-service"] },
+    booking: "forbidden",
+    service: "nullable",
+    units: "forbidden",
+    uncounted: "lineless",
+  },
+  // `places: null` — nothing moves; the fold sets the count to null absolutely.
+  count_close: {
+    custody: "forbidden",
+    cost: "forbidden",
+    places: null,
+    booking: "forbidden",
+    service: "forbidden",
+    units: "forbidden",
+    uncounted: "lineless",
   },
 };
 

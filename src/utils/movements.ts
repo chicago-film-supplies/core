@@ -271,6 +271,42 @@ export interface LedgerFoldResult {
    * WRITER refuses, SCAN counts — the split {@link basisUnderflowCents} uses.
    */
   linelessCountedQuantity: number;
+  /**
+   * The `quantity_held` a `count_close` discarded: what the ledger held the
+   * instant it stopped counting. `0` on every other movement.
+   *
+   * Non-zero is normal when units are out on rentals or away at a record — a
+   * close forgets the count, not the units, and a later `count_open` re-seeds
+   * them from the bookings and records. Units still on a SHELF are the case the
+   * writer refuses before it writes (the location documents would keep units
+   * the ledger dropped), so a SCAN reading a shelved close here is reading a
+   * write that bypassed that refusal. Reported, never thrown: the
+   * WRITER-refuses / SCAN-counts split {@link basisUnderflowCents} uses.
+   */
+  countClosedHeld: number;
+}
+
+/**
+ * The counted ledger a `count_open` folds onto when the ledger is UNCOUNTED:
+ * zero held, no shelves, no basis, no out-of-service breakdown. An uncounted
+ * ledger already carries all of those as zero or empty except the count, so
+ * this changes only `quantity_held`/`quantity_in_service` in practice; zeroing
+ * the rest is what keeps the open exact if an uncounted ledger ever carried
+ * stale values.
+ */
+function openedCountBase(ledger: InventoryLedger): InventoryLedger {
+  return {
+    ...ledger,
+    quantity_held: 0,
+    quantity_in_service: 0,
+    store_breakdown: [],
+    query_by_uid_store: [],
+    query_by_uid_location: [],
+    average_unit_cost: 0,
+    total_cost_basis_cents: 0,
+    out_of_service_breakdown: { cleaning: 0, damaged: 0, maintenance: 0, lost: 0 },
+    quantity_out_of_service: 0,
+  };
 }
 
 /** A shallow-cloned store entry, so the fold never mutates its input. */
@@ -417,10 +453,41 @@ export function applyMovementToLedger(
    */
   oosReason: keyof InventoryLedger["out_of_service_breakdown"] | null = null,
 ): LedgerFoldResult {
+  // ── The count boundaries ──
+  // A close is ABSOLUTE: line arithmetic cannot take a count to null, so it
+  // returns the uncounted shape directly. An open onto an uncounted ledger
+  // starts from zero and then folds its lines like any increase.
+  if (movement.type === "count_close") {
+    return {
+      ledger: {
+        ...ledger,
+        quantity_held: null,
+        quantity_in_service: null,
+        store_breakdown: [],
+        query_by_uid_store: [],
+        query_by_uid_location: [],
+        average_unit_cost: 0,
+        total_cost_basis_cents: 0,
+        out_of_service_breakdown: { cleaning: 0, damaged: 0, maintenance: 0, lost: 0 },
+        quantity_out_of_service: 0,
+        updated_at: now,
+      },
+      costAppliedCents: 0,
+      unitCost: 0,
+      basisUnderflowCents: 0,
+      oosUnattributedDelta: 0,
+      uncountedCostCents: 0,
+      linelessCountedQuantity: 0,
+      countClosedHeld: ledger.quantity_held ?? 0,
+    };
+  }
+  const source = movement.type === "count_open" && ledger.quantity_held === null
+    ? openedCountBase(ledger)
+    : ledger;
   const next: InventoryLedger = {
-    ...ledger,
-    out_of_service_breakdown: { ...ledger.out_of_service_breakdown },
-    store_breakdown: cloneStoreBreakdown(ledger.store_breakdown),
+    ...source,
+    out_of_service_breakdown: { ...source.out_of_service_breakdown },
+    store_breakdown: cloneStoreBreakdown(source.store_breakdown),
   };
 
   const delta = movementHeldDelta(movement.lines);
@@ -536,7 +603,35 @@ export function applyMovementToLedger(
         MOVEMENT_CONTRACTS[movement.type].places !== null
       ? movement.quantity
       : 0,
+    countClosedHeld: 0,
   };
+}
+
+/**
+ * Whether a REPLAY of one product's journal starts from an UNCOUNTED ledger
+ * (`true`) or a counted one at zero (`false`), read off the journal itself.
+ *
+ * The first count boundary decides it: a `count_open` first means the ledger
+ * was uncounted until then, a `count_close` first means it was counted. With no
+ * boundary at all the ledger never changed its counted-ness, so it starts as it
+ * stands — `storedUncounted`, the stored ledger's `quantity_held === null`.
+ * That last arm reads the stored ledger, which is sound only because nothing in
+ * the journal ever flipped it.
+ *
+ * ⭐ This is what replaced the ledger's `counted_from` marker: the boundary is a
+ * movement, so a replay needs no seed stamped beside the journal, and a product
+ * born counted needs nothing written at all.
+ *
+ * ⚠️ **Pass the journal in the order the replay folds it** (`replayOrder`,
+ * `utils/journal.ts`): "first" here is first in the array as given.
+ */
+export function replayStartsUncounted(
+  journal: ReadonlyArray<Pick<Movement, "type">>,
+  storedUncounted: boolean,
+): boolean {
+  const first = journal.find((m) => m.type === "count_open" || m.type === "count_close");
+  if (!first) return storedUncounted;
+  return first.type === "count_open";
 }
 
 /**

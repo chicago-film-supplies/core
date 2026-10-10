@@ -196,6 +196,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // (`XERO_ASSET_ACCOUNTS`, `XERO_OFFSET_ACCOUNTS`) are values rather than
     // functions, so the generator never sees them.
     "xeroPostingFor",
+    "replayStartsUncounted", // a replay's starting state — audit-path only
   ],
   // Allocation answers "which shelf do I pick these off?" from a ledger's
   // store_breakdown. Same story: never in a render context.
