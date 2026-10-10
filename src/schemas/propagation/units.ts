@@ -101,12 +101,38 @@ const sharedRules: CollectionRule[] = [
     ],
   },
   {
+    id: "units:product-to-enroll-movement",
+    source: "products",
+    target: "transactions",
+    mode: "co-write",
+    invariant:
+      "Every roster INTERVAL is bracketed by movements, written in the same transaction as the roster create or delete they record (api-cloudrun#1254, #1253). A roster created by a conversion is the fold of `enroll` movements onto an empty roster — never a second computation beside them: one movement for the units in service (in-place lines on each shelf, and on each live booking holding units out, which the roster records `unattributed_out`), and one per open out-of-service record (in-place `{r → r}` lines on each shelf holding its flagged units and on the record for its away units, the record in `sources[]`). A product created `serialized` writes ONE lineless `enroll` of 0. A teardown writes `unenroll` movements over every rostered unit in the transaction that deletes the roster, or one lineless `unenroll` of 0 for an empty roster. So `audit-unit-replay` folds the journal from an empty roster with no inferred start, across any number of intervals — numbers are never reused.",
+    fields: [
+      {
+        source: ["stock_method"],
+        target: ["type"],
+        transform: "`enroll` on → serialized (and on create), `unenroll` on serialized →",
+      },
+      {
+        source: [],
+        target: ["lines"],
+        transform:
+          "in place: locations/L, bookings/B or out-of-service/R on both sides, each naming the units that stand there",
+      },
+      {
+        source: [],
+        target: ["number"],
+        transform: "reserved from counters/transactions outside the transaction",
+      },
+    ],
+  },
+  {
     id: "units:product-to-units",
     source: "products",
     target: "units",
     mode: "co-write",
     invariant:
-      "Becoming `serialized` creates one `active` unit per held unit, numbered from the product's block — the one writer allowed to create units active, standing in for an `opening_balance`. Leaving it retires every active unit (vacant, then retired). Each step is keyed by the derived unit id, so a re-sent PUT skips what already exists.",
+      "Becoming `serialized` creates one `active` unit per held unit, numbered from the product's block — the one writer allowed to create units active. The units were already OWNED; what they gain is a number, and the `enroll` that places them on the roster (`units:product-to-enroll-movement`) is what journals it. Leaving it retires every active unit (vacant, then retired). Each step is keyed by the derived unit id, so a re-sent PUT skips what already exists.",
     fields: [
       { source: ["uid"], target: ["uid_product"] },
       {

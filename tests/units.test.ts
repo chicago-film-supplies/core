@@ -527,3 +527,80 @@ Deno.test("rosterUnitsForBucket: a loss bucket offers only the named records' un
   assertEquals(rosterUnitsForBucket(roster, "damaged", { records, location: OTHER_SHELF }), []);
   assertEquals(rosterUnitsForBucket(roster, "lost"), [], "no record named, nothing offered");
 });
+
+// ── The roster boundaries: enroll / unenroll (api-cloudrun#1254, #1253) ──
+
+/** An in-place roster boundary: each group is (place, numbers). */
+function boundary(
+  type: "enroll" | "unenroll",
+  groups: Array<[ReturnType<typeof place>, number[]]>,
+  service: RosterMovement["service"] = null,
+): RosterMovement {
+  const numbers = groups.flatMap(([, ns]) => ns).sort((a, b) => a - b);
+  return {
+    uid: `${SESSION}|${type}|${PRODUCT}`,
+    type,
+    uid_booking: null,
+    custody: null,
+    service,
+    lines: groups.map(([p, ns]) => ({ quantity: ns.length, location: { from: p, to: p }, units: ns })),
+    units: numbers.map((n) => ({ uid_unit: `unit-${n}`, number: n, serial_number: null })),
+    sources: service === null ? [] : [{ collection: "out-of-service", uid: RECORD }],
+  };
+}
+
+Deno.test("enroll: numbers units where they stand — shelf, flagged shelf, away, and a booking as unattributed_out", () => {
+  let roster: RosterUnits = {};
+  roster = foldRosterUnits(roster, boundary("enroll", [[place("locations", SHELF), [1001, 1002]], [place("bookings", BOOKING), [1003]]]));
+  roster = foldRosterUnits(
+    roster,
+    boundary("enroll", [[place("locations", OTHER_SHELF), [1004]], [place("out-of-service", RECORD), [1005]]], {
+      from: "damaged",
+      to: "damaged",
+    }),
+  );
+  assertEquals(roster, {
+    "1001": { state: "shelf", uid_location: SHELF, flag: null, uid_out_of_service: null },
+    "1002": { state: "shelf", uid_location: SHELF, flag: null, uid_out_of_service: null },
+    "1003": { state: "unattributed_out" },
+    "1004": { state: "shelf", uid_location: OTHER_SHELF, flag: "damaged", uid_out_of_service: RECORD },
+    "1005": { state: "away", uid_out_of_service: RECORD },
+  });
+});
+
+Deno.test("enroll: a number already on the roster is refused", () => {
+  const roster = shelfRoster([1001]);
+  assertThrows(
+    () => foldRosterUnits(roster, boundary("enroll", [[place("locations", SHELF), [1001]]])),
+    RosterFoldError,
+    "already on shelf",
+  );
+});
+
+Deno.test("enroll of 0 and unenroll of 0 leave the roster as it is", () => {
+  const zero = (type: "enroll" | "unenroll"): RosterMovement => ({ ...boundary(type, []), lines: [], units: [] });
+  assertEquals(foldRosterUnits({}, zero("enroll")), {});
+  assertEquals(foldRosterUnits({}, zero("unenroll")), {});
+});
+
+Deno.test("unenroll: retires units from where they stand, and refuses one that is elsewhere", () => {
+  let roster: RosterUnits = foldRosterUnits({}, boundary("enroll", [[place("locations", SHELF), [1001, 1002]]]));
+  roster = foldRosterUnits(roster, boundary("enroll", [[place("out-of-service", RECORD), [1003]]], { from: "lost", to: "lost" }));
+  assertThrows(
+    () => foldRosterUnits(roster, boundary("unenroll", [[place("locations", OTHER_SHELF), [1001]]])),
+    RosterFoldError,
+    "retires unit 1001",
+  );
+  roster = foldRosterUnits(roster, boundary("unenroll", [[place("locations", SHELF), [1001, 1002]]]));
+  roster = foldRosterUnits(roster, boundary("unenroll", [[place("out-of-service", RECORD), [1003]]], { from: "lost", to: "lost" }));
+  assertEquals(roster, {});
+});
+
+Deno.test("two intervals fold from empty: enroll → custody → unenroll → enroll fresh numbers", () => {
+  let roster: RosterUnits = foldRosterUnits({}, boundary("enroll", [[place("locations", SHELF), [1001, 1002]]]));
+  roster = foldRosterUnits(roster, ownership("transfer", [1002], SHELF, OTHER_SHELF));
+  roster = foldRosterUnits(roster, boundary("unenroll", [[place("locations", SHELF), [1001]], [place("locations", OTHER_SHELF), [1002]]]));
+  assertEquals(roster, {});
+  roster = foldRosterUnits(roster, boundary("enroll", [[place("locations", SHELF), [1003, 1004]]]));
+  assertEquals(Object.keys(roster), ["1003", "1004"]);
+});

@@ -468,6 +468,81 @@ function foldRebook(next: RosterUnits, m: RosterMovement, once: (n: number) => v
 }
 
 /**
+ * The roster boundaries. Each line is in place (`MovementSchema` rule 6), so
+ * its one place says where the line's units STAND:
+ *
+ * | place | `enroll` puts the unit | `unenroll` takes it from |
+ * |---|---|---|
+ * | `locations/L` | `shelf` at L, flagged `service.to` for the record in `sources[]` | `shelf` at L with that flag and record |
+ * | `out-of-service/R` | `away` at R | `away` at R |
+ * | `bookings/B` | `unattributed_out` — the seed never knew which number went to which booking | refused (a teardown waits until no unit is with a booking) |
+ *
+ * An `enroll` refuses a number already on the roster; an `unenroll` refuses a
+ * unit that is not where its line says, and removes the rest.
+ */
+function foldRosterBoundary(next: RosterUnits, m: RosterMovement, once: (n: number) => void): RosterUnits {
+  const flag = asFlag(m.service?.to);
+  const record = oosSource(m);
+  for (const line of m.lines) {
+    const units = line.units ?? [];
+    if (units.length !== line.quantity) {
+      throw new RosterFoldError(`"${m.type}" names units, so each line names exactly its quantity`);
+    }
+    const place = line.location.to;
+    if (place === null) throw new RosterFoldError(`"${m.type}" has a line to no place`);
+    for (const n of units) {
+      once(n);
+      const entry = next[String(n)];
+      if (m.type === "enroll") {
+        if (entry !== undefined) {
+          throw new RosterFoldError(`"enroll" numbers unit ${n}, but the unit is already ${describe(entry)}`, n);
+        }
+        switch (place.collection) {
+          case "bookings":
+            next[String(n)] = { state: "unattributed_out" };
+            break;
+          case "out-of-service":
+            next[String(n)] = { state: "away", uid_out_of_service: place.uid };
+            break;
+          case "locations":
+            if (flag !== null && record === null) {
+              throw new RosterFoldError(`"enroll" flags unit ${n} ${flag} but names no out-of-service record`, n);
+            }
+            next[String(n)] = {
+              state: "shelf",
+              uid_location: place.uid,
+              flag,
+              uid_out_of_service: flag === null ? null : record,
+            };
+            break;
+          default:
+            throw new RosterFoldError(`"enroll" places unit ${n} at ${place.collection}, which is not a place`, n);
+        }
+        continue;
+      }
+      const there = place.collection === "out-of-service"
+        ? entry?.state === "away" && entry.uid_out_of_service === place.uid
+        : place.collection === "locations" && entry?.state === "shelf" && entry.uid_location === place.uid &&
+          entry.flag === flag && (flag === null || entry.uid_out_of_service === record);
+      if (!there) {
+        throw new RosterFoldError(
+          `"unenroll" retires unit ${n} from ${place.collection}/${place.uid}, but the unit is ${describe(entry)}`,
+          n,
+        );
+      }
+      delete next[String(n)];
+    }
+  }
+  const named = new Set(m.units.map((u) => u.number));
+  for (const n of named) {
+    if (!m.lines.some((l) => (l.units ?? []).includes(n))) {
+      throw new RosterFoldError(`"${m.type}"'s lines must name exactly the units it names`, n);
+    }
+  }
+  return next;
+}
+
+/**
  * Fold one movement's units into a product's roster, returning the NEW map
  * (the input is not mutated, so a rejected group member's fold rolls back by
  * dropping the result).
@@ -492,6 +567,10 @@ function foldRebook(next: RosterUnits, m: RosterMovement, once: (n: number) => v
  * an unflagged shelf unit `prepped` where it stands, and an unprep puts it
  * back. `rebook_out` / `rebook_in` have no lines either: the unit stays at the
  * customer and moves from one booking to another (see `foldRebook`).
+ * `enroll` / `unenroll` have IN-PLACE lines and open or close the roster's
+ * interval: an enroll places units where they stand, an unenroll retires them
+ * (see `foldRosterBoundary`), so the roster is the fold of its journal from an
+ * EMPTY map.
  *
  * Every unit must be where the line's `from` side says — absent for a unit
  * coming in, `out` on the booking (or `unattributed_out`) for one coming back,
@@ -510,6 +589,8 @@ export function foldRosterUnits(roster: RosterUnits, m: RosterMovement): RosterU
   if (m.lines.length === 0 && (m.type === "rebook_out" || m.type === "rebook_in")) {
     return foldRebook(next, m, once);
   }
+
+  if (m.type === "enroll" || m.type === "unenroll") return foldRosterBoundary(next, m, once);
 
   // A step wholly on the customer's side (a sale's unit lost in transit, and its
   // undo): the unit left the roster at the sale, so it must still be absent,

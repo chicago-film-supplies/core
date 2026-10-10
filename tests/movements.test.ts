@@ -22,7 +22,7 @@ import {
   replayStartsUncounted,
   xeroPostingFor,
 } from "../src/utils/movements.ts";
-import { InventoryLedgerSchema, MOVEMENT_CONTRACTS, MOVEMENT_TYPES } from "../src/schemas/mod.ts";
+import { getTransactionMultiplier, InventoryLedgerSchema, MOVEMENT_CONTRACTS, MOVEMENT_TYPES } from "../src/schemas/mod.ts";
 import type {
   InventoryLedger,
   MovementContract,
@@ -1615,5 +1615,44 @@ Deno.test("the count boundaries carry no cost, no booking and no custody", () =>
     assertEquals(MOVEMENT_CONTRACTS[type].cost, "forbidden", type);
     assertEquals(MOVEMENT_CONTRACTS[type].booking, "forbidden", type);
     assertEquals(MOVEMENT_CONTRACTS[type].custody, "forbidden", type);
+  }
+});
+
+// ── The roster boundaries are held-neutral BY ARM, not by cancellation ──
+
+Deno.test("enroll / unenroll move nothing on the ledger — even where the in-place arithmetic would clamp", () => {
+  // One damaged unit recorded; an in-place {damaged → damaged} line over TWO
+  // would come out non-neutral through `applyOutOfServiceReason`'s clamp
+  // (−2 → 0, then +2 → 2). The arm returns the ledger untouched.
+  const counted = ledger({
+    quantity_held: 3,
+    quantity_in_service: 2,
+    quantity_out_of_service: 1,
+    out_of_service_breakdown: { cleaning: 0, damaged: 1, maintenance: 0, lost: 0 },
+    total_cost_basis_cents: 900,
+    average_unit_cost: 3,
+  });
+  for (const type of ["enroll", "unenroll"] as const) {
+    const r = applyMovementToLedger(
+      counted,
+      {
+        reverses: null,
+        service: { from: "damaged", to: "damaged" },
+        type,
+        custody: null,
+        quantity: 2,
+        lines: [line(2, { collection: "locations", uid: LOC_A }, { collection: "locations", uid: LOC_A })],
+        cost: null,
+      },
+      placements,
+      mockTimestamp,
+    );
+    assertEquals({ ...r.ledger, updated_at: counted.updated_at }, counted, type);
+    assertEquals(
+      [r.costAppliedCents, r.basisUnderflowCents, r.oosUnattributedDelta, r.linelessCountedQuantity, r.countClosedHeld],
+      [0, 0, 0, 0, 0],
+      type,
+    );
+    assertEquals(getTransactionMultiplier(type), 0, `${type} is held-neutral by contract`);
   }
 });

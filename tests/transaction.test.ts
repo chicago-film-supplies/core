@@ -103,6 +103,8 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     send_away: null,
     count_open: null,
     count_close: null,
+    enroll: null,
+    unenroll: null,
   };
 
   // TOTAL for the same reason as `custodyFor`. `null` on every type whose
@@ -150,7 +152,13 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     // The fixture's line lands at a booking, the in-service axis.
     count_open: null,
     count_close: null,
+    // The fixture's line stands on a shelf, in service.
+    enroll: null,
+    unenroll: null,
   };
+
+  // A roster boundary numbers units where they stand, so it names them.
+  const rosterBoundary = type === "enroll" || type === "unenroll";
 
   let lines: unknown[] = [];
   if (contract.places) {
@@ -165,6 +173,7 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     lines = [{
       quantity: 2,
       location: { from: place(contract.places.from), to: place(contract.places.to) },
+      ...(rosterBoundary ? { units: [1001, 1002] } : {}),
     }];
   }
 
@@ -190,8 +199,10 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     reference: "test",
     uuid_session: SESSION,
     reverses: null,
-    units: [],
-    query_by_unit_number: [],
+    units: rosterBoundary
+      ? [1001, 1002].map((n) => ({ uid_unit: `unit-${n}`, number: n, serial_number: null }))
+      : [],
+    query_by_unit_number: rosterBoundary ? [1001, 1002] : [],
     created_by: { uid: "test-bot", name: "Test Bot" },
     updated_by: { uid: "test-bot", name: "Test Bot" },
     created_at: mockTimestamp,
@@ -298,8 +309,12 @@ Deno.test("the reversal of every type is writable — its contract is mirrored",
       uid: `${REVERSAL_SESSION}|${type}|${forward.uid_booking ?? PRODUCT}`,
       uuid_session: REVERSAL_SESSION,
       reverses: forward.uid,
-      lines: (forward.lines as Array<{ quantity: number; location: { from: unknown; to: unknown } }>)
-        .map((l) => ({ quantity: l.quantity, location: { from: l.location.to, to: l.location.from } })),
+      lines: (forward.lines as Array<{ quantity: number; location: { from: unknown; to: unknown }; units?: number[] }>)
+        .map((l) => ({
+          quantity: l.quantity,
+          location: { from: l.location.to, to: l.location.from },
+          ...(l.units ? { units: l.units } : {}),
+        })),
       custody: forward.custody
         ? { from: (forward.custody as { to: unknown }).to, to: (forward.custody as { from: unknown }).from }
         : null,
@@ -530,6 +545,8 @@ Deno.test("an uncounted product's step is lineless: the ladder and two record re
     "check_out_undo",
     // A product owning nothing off-shelf still writes its count boundary.
     "count_open",
+    // A product born serialized enrolls 0; an empty roster unenrolls 0.
+    "enroll",
     "flag",
     "mark_cleaning",
     "mark_cleaning_undo",
@@ -544,11 +561,13 @@ Deno.test("an uncounted product's step is lineless: the ladder and two record re
     "sale_return",
     "sale_return_undo",
     "sale_undo",
+    "unenroll",
     "write_off",
   ]);
   for (const type of lineless) {
     const doc = movement(type, {
       lines: [],
+      ...(type === "enroll" || type === "unenroll" ? { quantity: 0, units: [], query_by_unit_number: [] } : {}),
       ...(MOVEMENT_CONTRACTS[type].cost === "required"
         ? { cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] } }
         : {}),
@@ -1134,7 +1153,10 @@ Deno.test("rule 5: every type accepts empty unit keys (the scaffold) and refuses
   // Required since 2026-10-03: every stored movement in both environments
   // carries both keys, so an absent key is a writer that skipped the scaffold.
   for (const type of MOVEMENT_TYPES) {
-    const stamped = movement(type, { units: [], query_by_unit_number: [] });
+    // A roster boundary with lines must name its units (rule 6), so its
+    // unit-less form is the zero-unit boundary.
+    const zero = type === "enroll" || type === "unenroll" ? { lines: [], quantity: 0 } : {};
+    const stamped = movement(type, { units: [], query_by_unit_number: [], ...zero });
     assertEquals(issuePaths(stamped), [], `${type}: names no units`);
     const absent = movement(type) as Record<string, unknown>;
     delete absent.units;
@@ -1271,4 +1293,67 @@ Deno.test("serialized_details is gone from both inputs — a client sending it h
     ...sent,
   });
   assertEquals("serialized_details" in transfer, false);
+});
+
+// ── Rule 6: a roster boundary numbers units where they STAND ──
+
+function enrollDoc(over: Record<string, unknown> = {}) {
+  return movement("enroll", {
+    units: [unit(3), unit(7)],
+    query_by_unit_number: [3, 7],
+    lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_A) }, units: [3, 7] }],
+    ...over,
+  });
+}
+
+Deno.test("rule 6: an in-place enroll naming its units parses; flagged and away units carry {r → r} and one record", () => {
+  assertEquals(issuePaths(enrollDoc()), []);
+  assertEquals(
+    issuePaths(enrollDoc({
+      service: { from: "damaged", to: "damaged" },
+      sources: [{ collection: "out-of-service", uid: OOS }],
+      lines: [
+        { quantity: 1, location: { from: at(LOC_A), to: at(LOC_A) }, units: [3] },
+        { quantity: 1, location: { from: atOos, to: atOos }, units: [7] },
+      ],
+    })),
+    [],
+  );
+  assertEquals(
+    issuePaths(enrollDoc({ lines: [{ quantity: 2, location: { from: atBooking, to: atBooking }, units: [3, 7] }] })),
+    [],
+  );
+});
+
+Deno.test("rule 6: a line that MOVES units is refused — an enrollment is held-neutral", () => {
+  assertEquals(
+    issuePaths(enrollDoc({ lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_B) }, units: [3, 7] }] })),
+    ["lines.0.location"],
+  );
+});
+
+Deno.test("rule 6: an enrollment of a COUNT, a lineless one naming units, and a flagging axis are refused", () => {
+  assertEquals(
+    issuePaths(enrollDoc({ units: [], query_by_unit_number: [], lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_A) } }] })),
+    ["units"],
+  );
+  assertEquals(issuePaths(enrollDoc({ lines: [] })), ["quantity"]);
+  assertEquals(
+    issuePaths(enrollDoc({ service: { from: null, to: "damaged" }, sources: [{ collection: "out-of-service", uid: OOS }] })),
+    ["service"],
+  );
+  assertEquals(
+    issuePaths(enrollDoc({ service: { from: "lost", to: "lost" }, sources: [{ collection: "out-of-service", uid: OOS }] })),
+    ["service.to"],
+  );
+});
+
+Deno.test("rule 6: an unenroll cannot take units off a booking — a teardown waits until none is with one", () => {
+  const doc = movement("unenroll", {
+    units: [unit(3)],
+    query_by_unit_number: [3],
+    quantity: 1,
+    lines: [{ quantity: 1, location: { from: atBooking, to: atBooking }, units: [3] }],
+  });
+  assertEquals(issuePaths(doc).sort(), ["lines.0.location.from", "lines.0.location.to"]);
 });

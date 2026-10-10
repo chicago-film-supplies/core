@@ -371,6 +371,39 @@ export const MOVEMENT_TYPES = [
   // state. Only a FLIP writes a boundary.
   "count_open",
   "count_close",
+  // ── the roster boundaries: a product starts or stops NUMBERING its units ──
+  //
+  // A serialized product's roster says where each numbered unit is. Until
+  // these existed the D9 seed wrote the roster with no movement, so a replay
+  // had no starting state and inferred each unit's start from its first
+  // movement (api-cloudrun#1254, #1253). Now each roster INTERVAL is bracketed
+  // by movements, and the roster is the fold of the journal from empty.
+  //
+  // - `enroll` gives numbers to units CFS already holds, where they stand. Its
+  //   lines are IN PLACE (`from` and `to` the same place), so it moves nothing
+  //   on the ledger — `heldDelta` of an in-place line is 0 — while saying where
+  //   each named unit is: a shelf (`service: null`, or `{r → r}` for one
+  //   record's flagged units, that record in `sources[]`), a record holding
+  //   units away (`{r → r}`, the record in `sources[]`), or a booking holding
+  //   units out, which the roster records as `unattributed_out` because which
+  //   number went to which booking was never written down. One movement per
+  //   placement group: a movement carries one service transition and the
+  //   roster fold reads one record. A product born `serialized` enrolls 0: one
+  //   lineless `enroll`, so every interval still opens with one.
+  // - `unenroll` retires the numbers when the product stops being serialized:
+  //   in-place lines over shelf and away units (units with a booking refuse
+  //   the change before it starts), each named unit leaving the roster. An
+  //   empty roster writes one lineless `unenroll` of 0.
+  //
+  // Both are held-neutral (`getTransactionMultiplier` 0), cost-free (so
+  // `xeroPostingFor` skips them on `no_cost_contract`), not manual and not
+  // reversible: an interval is closed by the opposite boundary.
+  //
+  // ⚠️ **There is no roster marker, as there is no ledger marker.** Numbers
+  // are never reused (`nextFreeNumbers` draws above every number the product
+  // ever had), so a journal holding several intervals folds from empty.
+  "enroll",
+  "unenroll",
 ] as const;
 
 /** Union of all movement type string literals. */
@@ -852,6 +885,32 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
     booking: "forbidden",
     service: "forbidden",
     units: "forbidden",
+    uncounted: "lineless",
+  },
+  // ── the roster boundaries (see `MOVEMENT_TYPES`) ──
+  // In place, always: every line's `from` and `to` are the SAME place, so the
+  // kinds on both sides are the same list and the multiplier reads 0. `lineless`
+  // for the zero-unit interval (a product born serialized; a teardown of an
+  // empty roster). `uid_booking` stays null: a booking an enroll names is a
+  // PLACE on a line, never the movement's subject, because the units are not
+  // attributed to it.
+  enroll: {
+    custody: "forbidden",
+    cost: "forbidden",
+    places: { from: ["locations", "bookings", "out-of-service"], to: ["locations", "bookings", "out-of-service"] },
+    booking: "forbidden",
+    service: "nullable",
+    units: "allowed",
+    uncounted: "lineless",
+  },
+  // No `bookings`: a teardown is refused while any unit is with a booking.
+  unenroll: {
+    custody: "forbidden",
+    cost: "forbidden",
+    places: { from: ["locations", "out-of-service"], to: ["locations", "out-of-service"] },
+    booking: "forbidden",
+    service: "nullable",
+    units: "allowed",
     uncounted: "lineless",
   },
 };
@@ -1427,6 +1486,9 @@ function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
   // Rule 5: unit identity. Runs before the lines checks, which return early.
   checkMovementUnits(m, contract, ctx);
 
+  // Rule 6: a roster boundary. Also before the lines checks, for the same reason.
+  if (m.type === "enroll" || m.type === "unenroll") checkRosterBoundary(m, ctx);
+
   // ── lines ──
   if (contract.places === null) {
     if (m.lines.length > 0) {
@@ -1518,6 +1580,72 @@ function checkMovementContract(m: Movement, ctx: z.RefinementCtx): void {
 
   // Rule 4: the service axis, and agreement between it and the places.
   checkMovementService(m, contract, ctx);
+}
+
+/**
+ * Rule 6 of {@link checkMovementContract}: an `enroll` / `unenroll` names
+ * units where they STAND.
+ *
+ * - Every line is in place: `from` and `to` are the same document. That is
+ *   what makes the movement held-neutral (`heldDelta` of such a line is 0)
+ *   while still saying where each unit is.
+ * - With lines, the movement names exactly its units — an enrollment of a
+ *   COUNT would number nothing. Without lines it is the zero-unit boundary:
+ *   quantity 0, no units.
+ * - A service axis is `{r → r}`: the units keep the state they already have.
+ *   `{null → r}` would flag units, which is a `flag`'s job, not a roster's.
+ */
+function checkRosterBoundary(m: Movement, ctx: z.RefinementCtx): void {
+  m.lines.forEach((line, i) => {
+    const { from, to } = line.location;
+    if (from === null || to === null || from.collection !== to.collection || from.uid !== to.uid) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lines", i, "location"],
+        message: `"${m.type}" numbers units where they stand; each line's from and to must be the same place`,
+      });
+    }
+  });
+  if (m.lines.length > 0 && m.units.length === 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["units"],
+      message: `"${m.type}" with lines must name the units it ${m.type === "enroll" ? "numbers" : "retires"}`,
+    });
+  }
+  if (m.lines.length === 0 && (m.quantity !== 0 || m.units.length > 0)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["quantity"],
+      message: `a lineless "${m.type}" is the zero-unit boundary: quantity 0 and no units`,
+    });
+  }
+  if (m.service !== null && m.service.from !== m.service.to) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["service"],
+      message: `"${m.type}" keeps the units' state: service must be {r → r}`,
+    });
+  }
+  if (m.service !== null && m.sources.filter((s) => s.collection === "out-of-service").length !== 1) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["sources"],
+      message: `"${m.type}" of out-of-service units names exactly ONE out-of-service record in sources[]`,
+    });
+  }
+  // On a shelf the state is a FLAG; `lost` is a place, never a shelf state.
+  const reason = m.service?.to ?? null;
+  if (
+    reason !== null && !(OOS_FLAG_REASONS as readonly string[]).includes(reason) &&
+    m.lines.some((l) => l.location.to?.collection === "locations")
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["service", "to"],
+      message: `"${m.type}" numbers units on a shelf flagged ${OOS_FLAG_REASONS.join(", ")}; "${reason}" is not a flag`,
+    });
+  }
 }
 
 /**

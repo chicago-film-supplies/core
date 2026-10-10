@@ -544,7 +544,7 @@ export const templateSchemaFields: Partial<
   "movement-sessions": [
     { path: "uuid_session", type: "string" },
     { path: "date", type: "string" },
-    { path: "types", type: "prep | check_out | check_in | mark_damaged | mark_lost | unprep | check_out_undo | check_in_undo | mark_lost_undo | mark_damaged_undo | mark_cleaning | mark_cleaning_undo | mark_maintenance | mark_maintenance_undo | rebook_out | rebook_in | sale | sale_return | sale_undo | sale_return_undo | sale_lost | sale_lost_undo | sale_damaged | sale_damaged_undo | opening_balance | purchase | find | make | adjustment_increase | adjustment_decrease | trade_in | write_off | reclass_out | reclass_in | transfer | return_to_service | flag | send_away | count_open | count_close[]" },
+    { path: "types", type: "prep | check_out | check_in | mark_damaged | mark_lost | unprep | check_out_undo | check_in_undo | mark_lost_undo | mark_damaged_undo | mark_cleaning | mark_cleaning_undo | mark_maintenance | mark_maintenance_undo | rebook_out | rebook_in | sale | sale_return | sale_undo | sale_return_undo | sale_lost | sale_lost_undo | sale_damaged | sale_damaged_undo | opening_balance | purchase | find | make | adjustment_increase | adjustment_decrease | trade_in | write_off | reclass_out | reclass_in | transfer | return_to_service | flag | send_away | count_open | count_close | enroll | unenroll[]" },
     { path: "numbers", type: "number[]" },
     { path: "quantity", type: "number" },
     { path: "created_by", type: "object" },
@@ -562,7 +562,7 @@ export const templateSchemaFields: Partial<
     { path: "items", type: "object[]" },
     { path: "items[].uid", type: "string" },
     { path: "items[].number", type: "number" },
-    { path: "items[].type", type: "prep | check_out | check_in | mark_damaged | mark_lost | unprep | check_out_undo | check_in_undo | mark_lost_undo | mark_damaged_undo | mark_cleaning | mark_cleaning_undo | mark_maintenance | mark_maintenance_undo | rebook_out | rebook_in | sale | sale_return | sale_undo | sale_return_undo | sale_lost | sale_lost_undo | sale_damaged | sale_damaged_undo | opening_balance | purchase | find | make | adjustment_increase | adjustment_decrease | trade_in | write_off | reclass_out | reclass_in | transfer | return_to_service | flag | send_away | count_open | count_close" },
+    { path: "items[].type", type: "prep | check_out | check_in | mark_damaged | mark_lost | unprep | check_out_undo | check_in_undo | mark_lost_undo | mark_damaged_undo | mark_cleaning | mark_cleaning_undo | mark_maintenance | mark_maintenance_undo | rebook_out | rebook_in | sale | sale_return | sale_undo | sale_return_undo | sale_lost | sale_lost_undo | sale_damaged | sale_damaged_undo | opening_balance | purchase | find | make | adjustment_increase | adjustment_decrease | trade_in | write_off | reclass_out | reclass_in | transfer | return_to_service | flag | send_away | count_open | count_close | enroll | unenroll" },
     { path: "items[].quantity", type: "number" },
     { path: "items[].uid_product", type: "string" },
     { path: "items[].name", type: "string" },

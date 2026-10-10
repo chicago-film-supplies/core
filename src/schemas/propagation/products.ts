@@ -416,8 +416,10 @@ const createProductTransaction: TransactionDefinition = {
     "cowrite-thread:thread-to-products",
     // A product created `serialized` gets an EMPTY roster: its units are minted
     // afterwards (`POST /products/{uid}/units`) and placed by the movement that
-    // names them, so the create writes no `units` document.
+    // names them, so the create writes no `units` document. The interval still
+    // opens with a movement: one lineless `enroll` of 0.
     "units:product-to-roster",
+    "units:product-to-enroll-movement",
   ],
 };
 
@@ -944,6 +946,7 @@ const updateProductTransaction: TransactionDefinition = {
     "units:product-to-units",
     "units:product-to-bookings",
     "units:product-to-out-of-service",
+    "units:product-to-enroll-movement",
   ],
 };
 

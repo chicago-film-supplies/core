@@ -481,6 +481,25 @@ export function applyMovementToLedger(
       countClosedHeld: ledger.quantity_held ?? 0,
     };
   }
+  // ── The roster boundaries ──
+  // An enrollment numbers units where they stand and moves nothing on the
+  // ledger. Its in-place lines would net to zero through the arithmetic below,
+  // but not EXACTLY: `applyOutOfServiceReason` clamps each endpoint at 0, so an
+  // in-place `{r → r}` line over more flagged units than the ledger records
+  // would come out non-neutral. Held-neutral is the contract, so it is stated
+  // here rather than left to cancellation.
+  if (movement.type === "enroll" || movement.type === "unenroll") {
+    return {
+      ledger: { ...ledger, updated_at: now },
+      costAppliedCents: 0,
+      unitCost: 0,
+      basisUnderflowCents: 0,
+      oosUnattributedDelta: 0,
+      uncountedCostCents: 0,
+      linelessCountedQuantity: 0,
+      countClosedHeld: 0,
+    };
+  }
   const source = movement.type === "count_open" && ledger.quantity_held === null
     ? openedCountBase(ledger)
     : ledger;

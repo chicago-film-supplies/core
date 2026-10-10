@@ -155,37 +155,18 @@ Deno.test("InventoryLedgerSchema rejects additional properties", () => {
   assertEquals(InventoryLedgerSchema.safeParse(doc).success, false);
 });
 
-// ── counted_from: the seed a counting flip stamps (api-cloudrun#1205 item 1) ──
+// ── counted_from is RETIRED (api-cloudrun#1254) ──
+// A counting flip is a `count_open` / `count_close` movement now, and a replay
+// reads its start off the journal (`replayStartsUncounted`). Both projects held
+// 0 markers on 2026-10-09, so the strict schema refuses the key.
 
-const countedFrom = {
-  at: mockTimestamp,
-  quantity_held: 12,
-  out_of_service_breakdown: { cleaning: 0, damaged: 1, maintenance: 0, lost: 0 },
-};
-
-Deno.test("InventoryLedgerSchema: counted_from is optional on a counted ledger", () => {
-  assertEquals(InventoryLedgerSchema.safeParse(validLedger).success, true, "absent");
-  assertEquals(InventoryLedgerSchema.safeParse({ ...validLedger, counted_from: countedFrom }).success, true, "present");
-});
-
-Deno.test("InventoryLedgerSchema: an uncounted ledger carries no counted_from", () => {
-  const r = InventoryLedgerSchema.safeParse({ ...uncountedLedger, counted_from: countedFrom });
+Deno.test("InventoryLedgerSchema: counted_from is refused — a count boundary is a movement", () => {
+  const counted_from = {
+    at: mockTimestamp,
+    quantity_held: 12,
+    out_of_service_breakdown: { cleaning: 0, damaged: 1, maintenance: 0, lost: 0 },
+  };
+  const r = InventoryLedgerSchema.safeParse({ ...validLedger, counted_from });
   assertEquals(r.success, false);
-  assertEquals(r.error?.issues.map((i) => i.path.join(".")), ["counted_from"]);
-});
-
-Deno.test("InventoryLedgerSchema: counted_from's counts are non-negative integers, and it is strict", () => {
-  for (
-    const [label, bad] of [
-      ["fractional held", { ...countedFrom, quantity_held: 1.5 }],
-      ["negative held", { ...countedFrom, quantity_held: -1 }],
-      ["fractional bucket", { ...countedFrom, out_of_service_breakdown: { ...countedFrom.out_of_service_breakdown, lost: 0.5 } }],
-      ["missing at", { quantity_held: 1, out_of_service_breakdown: countedFrom.out_of_service_breakdown }],
-      ["extra key", { ...countedFrom, quantity_in_service: 11 }],
-    ] as const
-  ) {
-    const r = InventoryLedgerSchema.safeParse({ ...validLedger, counted_from: bad });
-    assertEquals(r.success, false, label);
-    assertEquals(r.error?.issues.every((i) => i.path[0] === "counted_from"), true, label);
-  }
+  assertEquals(r.error?.issues.map((i) => i.code), ["unrecognized_keys"]);
 });

@@ -968,7 +968,6 @@ export {
 export {
   InventoryLedgerSchema,
   type InventoryLedger,
-  type InventoryLedgerCountedFrom,
 } from "./inventory-ledger.ts";
 
 export {
