@@ -18,6 +18,7 @@ import {
   MOVEMENT_CONTRACTS,
   MOVEMENT_TYPES,
   MovementSchema,
+  MovementTypeEnum,
   StoreTransferLineInput,
   type MovementTypeType,
   UpdateTransactionInput,
@@ -831,19 +832,15 @@ Deno.test("every increaseOnly transaction type is one CreateTransactionInput acc
 });
 
 /**
- * The deliberate asymmetry, pinned so it is not "tidied" into symmetry.
- * `opening_balance` is ACCEPTED by the input and hidden from the picker, because
- * it is minted at product creation rather than keyed. Hiding an accepted type
- * costs nothing; offering a rejected one is a dead end in the UI.
+ * `opening_balance` is pre-2023 history only (owner ruling, 2026-10-09): the
+ * input refuses it at any date, while the 156 stored rows still parse.
  */
-Deno.test("opening_balance is accepted by the input but deliberately not displayed", () => {
-  assertEquals(
-    CreateTransactionInput.safeParse({ ...validCreateInput, type: "opening_balance" }).success,
-    true,
-  );
+Deno.test("CreateTransactionInput refuses opening_balance; a stored one still parses", () => {
+  const refused = CreateTransactionInput.safeParse({ ...validCreateInput, type: "opening_balance" });
+  assertEquals(refused.success, false);
+  assertEquals(MovementTypeEnum.safeParse("opening_balance").success, true);
   assertEquals(getDisplayTransactionTypes().includes("opening_balance"), false);
 });
-
 
 Deno.test("CreateTransactionInput REFUSES a purchase, with or without a supplier", () => {
   // A purchase is received against a Purchase document (api-cloudrun#1210); the

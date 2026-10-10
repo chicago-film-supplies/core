@@ -928,17 +928,15 @@ export function hasCosts(type: MovementTypeType): boolean {
  * booking, so it passed that filter and reached the manager's type picker, while
  * the input schema refused it. An operator picking it got a 400. (core#41)
  *
- * The one remaining asymmetry is deliberate and runs the safe way:
- * `opening_balance` is *accepted* by the input but hidden here, because it is
- * minted at product creation rather than keyed. Hiding an accepted type costs
- * nothing; offering a rejected one is a dead end in the UI.
+ * There is no asymmetry left: `opening_balance` was the last, accepted by the
+ * input and hidden here, until the input stopped accepting it (2026-10-09).
  *
  * When `increaseOnly` is true, returns only types that add stock — for the first
  * transaction on a product.
  */
 export function getDisplayTransactionTypes(increaseOnly?: boolean): MovementTypeType[] {
   if (increaseOnly) return ["make", "find"];
-  return MANUAL_MOVEMENT_TYPES.filter((t) => t !== "opening_balance");
+  return [...MANUAL_MOVEMENT_TYPES];
 }
 
 // ── Line, custody and cost ──────────────────────────────────────────
@@ -1865,13 +1863,18 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
  * carry the `purchases` source and are billed through a `PurchaseBill`. A keyed
  * `purchase` movement was the old path: it posted its own movement-level Xero
  * bill, with no purchase to receive against. This is an INPUT refusal only —
- * stored `purchase` movements still parse (`MovementTypeEnum` is unchanged), and
- * `CreateProductInput.transaction` still accepts a `purchase` opening balance.
+ * stored `purchase` movements still parse (`MovementTypeEnum` is unchanged).
+ *
+ * ⚠️ **`opening_balance` is NOT a member either (owner ruling, 2026-10-09).** It
+ * is pre-2023 history only: all 156 stored rows sit at the 2023-01-01 line
+ * (`Date.UTC(2023,0,1)`), written by the journal rebuild through
+ * `MovementSchema`, which still accepts the type. Stock found since then is a
+ * `find`; stock bought is a purchase. Refusing the type outright needs no date
+ * boundary, so there is none to get wrong across the Chicago offset.
  */
 const MANUAL_MOVEMENT_TYPES = [
   "find",
   "make",
-  "opening_balance",
   "adjustment_increase",
   "sale",
   "write_off",

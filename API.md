@@ -14438,10 +14438,8 @@ the API rejects.** It used to re-derive the set independently from
 booking, so it passed that filter and reached the manager's type picker, while
 the input schema refused it. An operator picking it got a 400. (core#41)
 
-The one remaining asymmetry is deliberate and runs the safe way:
-`opening_balance` is *accepted* by the input but hidden here, because it is
-minted at product creation rather than keyed. Hiding an accepted type costs
-nothing; offering a rejected one is a dead end in the UI.
+There is no asymmetry left: `opening_balance` was the last, accepted by the
+input and hidden here, until the input stopped accepting it (2026-10-09).
 
 When `increaseOnly` is true, returns only types that add stock — for the first
 transaction on a product.
@@ -25663,10 +25661,8 @@ the API rejects.** It used to re-derive the set independently from
 booking, so it passed that filter and reached the manager's type picker, while
 the input schema refused it. An operator picking it got a 400. (core#41)
 
-The one remaining asymmetry is deliberate and runs the safe way:
-`opening_balance` is *accepted* by the input but hidden here, because it is
-minted at product creation rather than keyed. Hiding an accepted type costs
-nothing; offering a rejected one is a dead end in the UI.
+There is no asymmetry left: `opening_balance` was the last, accepted by the
+input and hidden here, until the input stopped accepting it (2026-10-09).
 
 When `increaseOnly` is true, returns only types that add stock — for the first
 transaction on a product.
