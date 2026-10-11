@@ -1,14 +1,19 @@
 # Stamp `quantity_per_parent` on kit component lines
 
 > ## ⚠️ STATUS UPDATE 2026-10-11
-> **Phase 1 core half is DONE (uncommitted → this commit).** Shipped in core: `quantity_per_parent`
-> on `LineItemCore` + the order/invoice input schemas + the three stored interfaces + `LineItem`;
-> `componentQuantityAt`, `kitCutQuantities`, `isDirectComponent`, and `rescaleKitSubtree` /
-> `kitRootPos` moved from manager (still CATALOG-reading until Phase 3), all in
-> `core/src/utils/order-lines.ts`; tests in `core/tests/kit-ratio.test.ts`.
-> **Next:** publish the beta, then the manager + api half of Phase 1 (manager#639 items 1/3/4,
-> manager#640, api `path.length === 1` sites → `isDirectComponent`) against the new pin. Both
-> must reach PROD before Phase 2 writes the stamp.
+> **Phase 1 is landed except the api push.**
+> - **core** `0ee5d79` → `10.0.0-beta.653`: `quantity_per_parent` on `LineItemCore`, the
+>   order/invoice input schemas, the three stored interfaces and `LineItem`. New in
+>   `core/src/utils/order-lines.ts`: `componentQuantityAt`, `kitCutQuantities`, `isDirectComponent`,
+>   and `rescaleKitSubtree` / `kitRootPos` (moved from manager, still CATALOG-reading until Phase 3).
+>   Tests: `core/tests/kit-ratio.test.ts`.
+> - **manager** `95dd9fb5` (pushed, pin beta.653): manager#639 items 1/3/4 and manager#640 — both
+>   CLOSED by its trailers.
+> - **api-cloudrun** `20d96173` (committed, NOT pushed, pin beta.653 + the new
+>   `@cfs/core/utils/order-lines` map entry): the six `api-cloudrun/src/services/products.ts` direct-child tests and
+>   the zero-priced sort's parent bucket now read `isDirectComponent`.
+> **Next:** push api-cloudrun, then release BOTH to prod. Only then do api-cloudrun#1286 and #1287
+> (the Phase 2 prerequisites), then Phase 2.
 > ⚠️ Item 3 landed as a predicate, `isDirectComponent(comp)`, not as an exported
 > `resolveParentUid`: every call site asks "is this a direct child?", none has a root uid in hand.
 
@@ -26,7 +31,7 @@ with N kits" either loads the catalog or guesses from line proportions:
   proportions are WRONG, not just drifty, for packing ratios: 1 mirror / 1 case
   reads as 1:1 when the rule is 0.5.
 - **Kit quantity edit + merge-on-add** (`rescaleKitSubtree`,
-  `manager/src/utils/kitQuantity.ts`) — loads the catalog across an await
+  now `core/src/utils/order-lines.ts`; manager deleted its copy) — loads the catalog across an await
   (`manager/src/stores/kitQuantityEdit.ts`, with its stale-index / baseline machinery), and
   a catalog edit after the order was written makes every untouched component look
   hand-edited, so it silently stops following its kit.
