@@ -2187,7 +2187,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineItemType",
-          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_ordered: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_ordered: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "Line item in the fulfillment order view — no price, no financial flags."
         },
         {
@@ -2481,7 +2481,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n  path_order_item?: string[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -2541,7 +2541,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n  uid_out_of_service?: string | null;\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  uid_out_of_service?: string | null;\n  path_order_item?: string[];\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -3453,7 +3453,7 @@
         {
           "kind": "interface",
           "name": "OrderDocLineItemType",
-          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "Line item in the full order document.\n\n`price` and `stock_method` are REQUIRED, and that is a statement about the\nwriters rather than a convenience: every one of the 9,303 line items in prod\n(and in dev) carries both, because `buildOrderLineItem` resolves them off the\nbacking product doc — or off the `custom-` line's own payload — before it can\nbuild anything at all. While they were optional, three call sites downstream\nhad to compensate for a shape no writer has ever produced: two `item.price!`\nassertions, and a `\"stock_method\" in item` duck-type that answered \"not a line\nitem\" for a line item that merely omitted the field.\n\n`uid_delivery` / `uid_collection` are absent, matching the input arm. They\nbelong to the destination divider — 0 of 9,303 stored lines carry either key,\nno writer has ever set one on a line, and both readers in\n`@cfs/core/utils/orders` gate on `type === \"destination\"` before looking. The\nFULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit\n`null` there, so removing it would be a backfill, not a tightening."
         },
         {
@@ -3513,7 +3513,7 @@
         {
           "kind": "interface",
           "name": "OrderItemLineType",
-          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  order_number?: number;\n  uid_order?: string;\n  uid_tax_class_override?: string | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  order_number?: number;\n  uid_order?: string;\n  uid_tax_class_override?: string | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A billable order line as a client sends it — the input mirror of\n`OrderDocLineItem`.\n\nDeliberately permissive about what may be OMITTED: the server fills `name`,\n`stock_method` and the whole price from the backing product doc, and a custom\nline supplies them itself. What it is no longer permissive about is what a\nline may CLAIM — see {@link OrderItem} for why the arms exist.\n\n`uid_delivery` / `uid_collection` are absent here on purpose. The flat schema\nthis replaces accepted both on any item, and `buildOrderLineItem` has never\npropagated them to a line — prod agrees: 0 of 9,303 order line items carry\neither key. They belong to the destination divider, which is where they now\nlive exclusively."
         },
         {
@@ -8995,7 +8995,7 @@
         {
           "kind": "interface",
           "name": "InvoiceDocLineItemType",
-          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: InvoiceDocItemPriceType;\n  path: string[];\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  xero_id?: string | null;\n  xero_tracking_option_id?: string | null;\n  crms_opportunity_id?: number | null;\n  crms_id?: number | string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  uid_out_of_service?: string | null;\n  path_order_item?: string[];\n}",
           "doc": "A billable line item on an invoice."
         },
         {
@@ -9049,7 +9049,7 @@
         {
           "kind": "interface",
           "name": "InvoiceItemInputLineType",
-          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n  uid_out_of_service?: string | null;\n  path_order_item?: string[];\n}",
+          "declaration": "interface InvoiceItemInputLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: InvoiceItemInputPriceType;\n  path: string[];\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class_override?: string | null;\n  tracking_category?: string | null;\n  substituted_for?: SubstitutedForEntryType[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  uid_out_of_service?: string | null;\n  path_order_item?: string[];\n}",
           "doc": "A billable invoice line as a client sends it — the input mirror of\n`InvoiceDocLineItem`.\n\n`uid_order` / `uid_delivery` / `uid_collection` are absent on purpose. The\nflat schema this replaces accepted all three on any item; `buildInvoiceItems`\nreads the destination pair only on a destination divider and reads `uid_order`\nnowhere at all (the order divider's identity IS the source order's uid — the\ntransitional field was retired in Phase D, and the manager stopped sending\nit). Prod agrees: 0 of 8,744 invoice line items carry any of the three."
         },
         {
@@ -9707,7 +9707,7 @@
         {
           "kind": "interface",
           "name": "OrderDocLineItemType",
-          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface OrderDocLineItemType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  price: OrderDocItemPriceType;\n  stock_method: StockMethodType;\n  order_number?: number;\n  uid_order?: string;\n  path: string[];\n  inclusion_type?: \"default\" | \"mandatory\" | \"optional\" | null;\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  crms_id?: number | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class: string;\n  uid_tax_class_override?: string | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "Line item in the full order document.\n\n`price` and `stock_method` are REQUIRED, and that is a statement about the\nwriters rather than a convenience: every one of the 9,303 line items in prod\n(and in dev) carries both, because `buildOrderLineItem` resolves them off the\nbacking product doc — or off the `custom-` line's own payload — before it can\nbuild anything at all. While they were optional, three call sites downstream\nhad to compensate for a shape no writer has ever produced: two `item.price!`\nassertions, and a `\"stock_method\" in item` duck-type that answered \"not a line\nitem\" for a line item that merely omitted the field.\n\n`uid_delivery` / `uid_collection` are absent, matching the input arm. They\nbelong to the destination divider — 0 of 9,303 stored lines carry either key,\nno writer has ever set one on a line, and both readers in\n`@cfs/core/utils/orders` gate on `type === \"destination\"` before looking. The\nFULFILLMENT line arm keeps its own pair: 9,304 prod rows carry an explicit\n`null` there, so removing it would be a backfill, not a tightening."
         },
         {
@@ -9755,7 +9755,7 @@
         {
           "kind": "interface",
           "name": "OrderItemLineType",
-          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  order_number?: number;\n  uid_order?: string;\n  uid_tax_class_override?: string | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface OrderItemLineType {\n  uid: string;\n  type: DocLineItemTypeType;\n  name?: string;\n  description?: string;\n  quantity?: number;\n  price?: ItemPriceType;\n  stock_method?: StockMethodType;\n  path: string[];\n  inclusion_type?: InclusionTypeType | null;\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  order_number?: number;\n  uid_order?: string;\n  uid_tax_class_override?: string | null;\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "A billable order line as a client sends it — the input mirror of\n`OrderDocLineItem`.\n\nDeliberately permissive about what may be OMITTED: the server fills `name`,\n`stock_method` and the whole price from the backing product doc, and a custom\nline supplies them itself. What it is no longer permissive about is what a\nline may CLAIM — see {@link OrderItem} for why the arms exist.\n\n`uid_delivery` / `uid_collection` are absent here on purpose. The flat schema\nthis replaces accepted both on any item, and `buildOrderLineItem` has never\npropagated them to a line — prod agrees: 0 of 9,303 order line items carry\neither key. They belong to the destination divider, which is where they now\nlive exclusively."
         },
         {
@@ -10090,7 +10090,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineItemType",
-          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced: boolean | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_ordered: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
+          "declaration": "interface FulfillmentLineItemType {\n  uid: string;\n  type: FulfillmentLineItemTypeType;\n  name: string;\n  description: string;\n  quantity: number;\n  stock_method?: StockMethodType;\n  zero_priced: boolean | null;\n  quantity_per_parent?: number | null;\n  path: string[];\n  order_number?: number;\n  uid_order?: string;\n  quantity_ordered: number | null;\n  substituted_for?: SubstitutedForEntryType[];\n  exchanged_for?: ExchangedForEntryType[];\n}",
           "doc": "Line item in the fulfillment order view — no price, no financial flags."
         },
         {
@@ -15650,7 +15650,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -16908,7 +16908,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -18517,6 +18517,12 @@
       "symbols": [
         {
           "kind": "interface",
+          "name": "CatalogComponentLike",
+          "declaration": "interface CatalogComponentLike {\n  readonly uid?: string;\n  readonly path?: readonly string[] | null;\n  readonly quantity?: number | null;\n}",
+          "doc": "The fields read off a catalog `components[]` row by {@link rescaleKitSubtree} — shared by `Product` and the Typesense `ProductDocument`."
+        },
+        {
+          "kind": "interface",
           "name": "ComponentQuantity",
           "declaration": "interface ComponentQuantity {\n  component: C;\n  quantity: number;\n  path: string[];\n}",
           "doc": "One component the walk reached: the row, its resolved quantity, and its self-inclusive doc path."
@@ -18532,6 +18538,12 @@
           "name": "CustomLineBuildOptions",
           "declaration": "interface CustomLineBuildOptions {\n  type: DocLineItemTypeType;\n  name?: string;\n  quantity?: number;\n  base_cents?: number;\n  formula?: PriceFormulaType;\n  chargeDays: number | null;\n  taxes: ReadonlyArray<typeLiteral>;\n  uid_tax_class: string;\n  uidOrder?: string;\n}",
           "doc": "Options for a one-off \"custom\" line with no product catalog entry behind it —\nthe orders/invoices \"Add Custom Item\" flow.\n\n`taxes` is the line's own resolved tax set (already carrying name/rate/type),\nnot the tax catalog: a custom line has no product to read tax references off,\nso the caller resolves them."
+        },
+        {
+          "kind": "interface",
+          "name": "KitLineLike",
+          "declaration": "interface KitLineLike {\n  readonly uid: string;\n  readonly type: string;\n  readonly path: string[];\n  readonly quantity?: number | null;\n  readonly quantity_per_parent?: number | null;\n}",
+          "doc": "The fields of a document line a kit cut or rescale reads — every grain's item satisfies it."
         },
         {
           "kind": "interface",
@@ -18575,8 +18587,57 @@
           "kind": "function",
           "name": "componentQuantities",
           "signature": "componentQuantities(rootUid: string, components: readonly C[], quantity: number, _: unknown): ComponentQuantity<C>[]",
-          "doc": "Which `mandatory`/`default` components a product at `quantity` carries, and\nhow many of each — the ONE quantity rule, shared by the order-line expander\n({@link buildOrderComponentLines}) and the manager's component fan-out on a\nmovement (api-cloudrun#388, manager#271), so an order line and a movement\nproposal never disagree about how many sides come with three tents.\n\nDepth-first, each parent's direct children `zero_priced` first; quantities\nrecurse per level as `ceil(comp.quantity × parentEffective)` (owner,\n2026-10-09: a movement proposal rounds up like an order line, and the\noperator edits it). An `optional` row is not walked, and neither is its\nsubtree — see {@link buildOrderComponentLines} for why that drop is right.",
+          "doc": "Which `mandatory`/`default` components a product at `quantity` carries, and\nhow many of each — the ONE quantity rule, shared by the order-line expander\n({@link buildOrderComponentLines}) and the manager's component fan-out on a\nmovement (api-cloudrun#388, manager#271), so an order line and a movement\nproposal never disagree about how many sides come with three tents.\n\nDepth-first, each parent's direct children `zero_priced` first; quantities\nrecurse per level as {@link componentQuantityAt}`(comp.quantity, parentEffective)` (owner,\n2026-10-09: a movement proposal rounds up like an order line, and the\noperator edits it). An `optional` row is not walked, and neither is its\nsubtree — see {@link buildOrderComponentLines} for why that drop is right.",
           "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "componentQuantityAt",
+          "signature": "componentQuantityAt(ratio: number, parentQty: number): number",
+          "doc": "How many of a component go with `parentQty` of its DIRECT parent:\n`ceil(ratio × parentQty)`, exactly.\n\nThe ONE quantity rule — {@link componentQuantities} expands through it, a kit\nrescale reads it, and a stamped line's override is read off the document as\n`quantity !== componentQuantityAt(quantity_per_parent, parent.quantity)`.\n\n⚠️ **Integer arithmetic at a 1e4 scale, not `Math.ceil(ratio × parentQty)`.**\nThe float product of a 4 dp ratio and an integer lands a hair ABOVE the\ninteger it should equal often enough to matter — `0.07 × 100` is\n`7.000000000000001`, so the float form ceils it to 8. The ratio is quantized\nonce to 4 dp (where it is stored), and nothing after that rounds until the\nsingle ceil — the closure rule `cfs-money` states for money, applied to a\ncount.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isDirectComponent",
+          "signature": "isDirectComponent(comp: typeLiteral): boolean",
+          "doc": "Is this catalog `components[]` row a DIRECT child of the product that carries\nthe array? The one definition of \"direct child\" (manager#639 item 3), shared\nby {@link resolveParentUid}, the manager's relationship table and api-cloudrun's\ncomponent services.\n\n`path.length <= 1`, not `=== 1`: the `<=` is what the\n{@link resolveParentUid} hardening above depends on, and a row with no path at\nall has no other parent to name.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "kitCutQuantities",
+          "signature": "kitCutQuantities(items: T[], kitIndex: number, k: number): Map<number, number>",
+          "doc": "How many units of each line move when the kit at `items[kitIndex]` is cut to\n`k` of its `n` (= `quantity`) — the fulfillment \"move 2 of 5 kits\" split.\nReturns a map from item INDEX to moved count, for the kit and every line of its\nsubtree (`getItemSubtreeRange`), and never null. The kit itself moves `k`.\n\nPer level, each line's parent moved `k'` of its `n'`:\n\n- **Parent moved in full (`k' === n'`)** → the line moves its whole `quantity`.\n  Without this a hand-edited line above its ratio would leave units behind.\n- **The line still matches its stamp** (`quantity ===\n  componentQuantityAt(r, n')`) → `min(quantity, componentQuantityAt(r, k'))`.\n  A shared container goes with the FIRST move, so the remainder may be short a\n  case; that is expected — the operator adds one (owner, 2026-10-10). The\n  splitter does not try to keep both sides whole.\n- **Anything else moves proportionally**, `ceil(quantity × k' ÷ n')` — one rule\n  for a hand edit, a re-parented line, a line built under an older catalog, a\n  raised optional (`r = 0`) and a pre-stamp line (`r` null or absent) (owner,\n  2026-10-11).\n\nA sub-kit's own moved count is its children's `k'`, so the rule cascades. The\ncap at what a component's BOOKING can actually move stays with the caller —\nthis answers for the document, not for custody.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "kitRootPos",
+          "signature": "kitRootPos(items: readonly T[], index: number): number",
+          "doc": "The index in `items[index].path` of the outermost line-item ancestor — the\ntop-level kit product whose catalog describes the whole subtree. Every segment\nbefore it is a divider (order / destination / group). Returns -1 when the path\nholds no line segment, which a well-formed line cannot.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "rescaleKitSubtree",
+          "signature": "rescaleKitSubtree(items: T[], index: number, newQty: number, catalog: readonly CatalogComponentLike[], rootPos: number): T[]",
+          "doc": "Set `items[index]` to `newQty` and rescale its component subtree per level —\nthe one answer shared by merge-on-add and a direct quantity edit on the order,\ninvoice and fulfillment items tables (moved from the manager, manager#639 item 4).\nReturns a new array; nothing is mutated. Sets quantity only — pricing is the\ncaller's document reprice.\n\n**Catalog ratio with override, applied per level**: a component still at\n{@link componentQuantityAt}`(ratio, parentOld)` follows its parent to\n`componentQuantityAt(ratio, parentNew)`; anything else is a hand edit and\nkeeps its number. The ratio is relative to the DIRECT parent.\n\n⚠️ Reads the CATALOG for now. Once every component line carries\n`quantity_per_parent` (core#131 Phase 2), Phase 3 switches it to the stamp\nand the catalog argument goes away.",
+          "paramTags": [
+            {
+              "name": "catalog",
+              "doc": "the ROOT product's `components[]` — the materialized whole tree"
+            },
+            {
+              "name": "rootPos",
+              "doc": "{@link kitRootPos} of the edited line, so editing a nested\nsub-kit still reads the root's catalog"
+            }
+          ],
           "returnsTag": null
         }
       ]
@@ -18763,7 +18824,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {
@@ -20444,7 +20505,7 @@
         {
           "kind": "interface",
           "name": "LineItem",
-          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
+          "declaration": "interface LineItem {\n  uid: string;\n  name: string;\n  type: ItemTypeType;\n  quantity?: number;\n  price?: PriceObject;\n  stock_method?: string;\n  path: string[];\n  zero_priced?: boolean | null;\n  quantity_per_parent?: number | null;\n  description?: string;\n  order_number?: number;\n  uid_order?: string | null;\n  coa_revenue?: COARevenueType | null;\n  uid_tax_class?: string | null;\n  uid_tax_class_override?: string | null;\n}",
           "doc": "A single item in an order/invoice/fulfillment array — product, divider,\nsurcharge or fee.\n\nA structural supertype, not a shadow of the real unions. Every member of\n`OrderDocItemType`, `InvoiceDocItemType` and `FulfillmentItemType` is\nassignable to it, so a caller holding real doc items passes them straight in\nand the generic helpers (`computeItemPaths`, `getItemSubtreeRange`, …) hand\nback the caller's own type. It exists because the manager also calls these\nhelpers on STAGED, mid-edit items that are not yet valid doc items — narrowing\nthe helpers to the doc unions would force those callers back into casts.\n\n`type` is `ItemTypeType`, NOT `string`. That is the difference between a\nsupertype and a hole: the pricing and billability predicates all resolve\nthrough `ITEM_CONTRACTS`, and a `string` here made \"a type with no contract\" a\nreachable state for every one of them. The runtime guards still handle it —\nthese items come off Firestore documents — but no caller can construct it.\n\nMember-specific fields are still reached through the type guards\n(`isPriceableItem`, `isPreTaxItem`, `isTransactionFeeItem`)."
         },
         {

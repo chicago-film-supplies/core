@@ -52,6 +52,8 @@ import type {
   StockMethodType,
 } from "../schemas/mod.ts";
 import type { ProductDocument, ProductDocumentComponent } from "../schemas/typesense/mod.ts";
+import { isDividerItemType } from "../schemas/mod.ts";
+import { getItemSubtreeRange } from "./orders.ts";
 
 // ── Typesense enum narrowing ─────────────────────────────────────
 //
@@ -294,7 +296,21 @@ export function buildCustomInvoiceLine(
  */
 function resolveParentUid(comp: ProductDocumentComponent, rootUid: string): string {
   const path = comp.path ?? [];
-  return path.length <= 1 ? rootUid : path[path.length - 1]!;
+  return isDirectComponent(comp) ? rootUid : path[path.length - 1]!;
+}
+
+/**
+ * Is this catalog `components[]` row a DIRECT child of the product that carries
+ * the array? The one definition of "direct child" (manager#639 item 3), shared
+ * by {@link resolveParentUid}, the manager's relationship table and api-cloudrun's
+ * component services.
+ *
+ * `path.length <= 1`, not `=== 1`: the `<=` is what the
+ * {@link resolveParentUid} hardening above depends on, and a row with no path at
+ * all has no other parent to name.
+ */
+export function isDirectComponent(comp: { readonly path?: readonly string[] | null }): boolean {
+  return (comp.path ?? []).length <= 1;
 }
 
 /**
@@ -327,7 +343,7 @@ export interface ComponentQuantity<C extends ComponentRowForWalk> {
  * proposal never disagree about how many sides come with three tents.
  *
  * Depth-first, each parent's direct children `zero_priced` first; quantities
- * recurse per level as `ceil(comp.quantity × parentEffective)` (owner,
+ * recurse per level as {@link componentQuantityAt}`(comp.quantity, parentEffective)` (owner,
  * 2026-10-09: a movement proposal rounds up like an order line, and the
  * operator edits it). An `optional` row is not walked, and neither is its
  * subtree — see {@link buildOrderComponentLines} for why that drop is right.
@@ -365,7 +381,7 @@ export function componentQuantities<C extends ComponentRowForWalk>(
   const out: ComponentQuantity<C>[] = [];
   const emit = (parentUid: string, parentEffective: number, parentDocPath: string[]): void => {
     for (const comp of childrenByParent.get(parentUid) ?? []) {
-      const qty = Math.ceil((comp.quantity ?? 1) * parentEffective);
+      const qty = componentQuantityAt(comp.quantity ?? 1, parentEffective);
       const path = [...parentDocPath, comp.uid!];
       out.push({ component: comp, quantity: qty, path });
       emit(comp.uid!, qty, path);
@@ -460,4 +476,203 @@ export function buildOrderComponentLines(
       },
     };
   });
+}
+
+// ── Kit ratios: expand, rescale, cut (core#131) ──────────────────
+
+/** Fixed-point scale of a kit ratio — 4 dp, the bound `AuthoredComponentSchema.quantity` enforces. */
+const RATIO_SCALE = 10_000n;
+
+/**
+ * How many of a component go with `parentQty` of its DIRECT parent:
+ * `ceil(ratio × parentQty)`, exactly.
+ *
+ * The ONE quantity rule — {@link componentQuantities} expands through it, a kit
+ * rescale reads it, and a stamped line's override is read off the document as
+ * `quantity !== componentQuantityAt(quantity_per_parent, parent.quantity)`.
+ *
+ * ⚠️ **Integer arithmetic at a 1e4 scale, not `Math.ceil(ratio × parentQty)`.**
+ * The float product of a 4 dp ratio and an integer lands a hair ABOVE the
+ * integer it should equal often enough to matter — `0.07 × 100` is
+ * `7.000000000000001`, so the float form ceils it to 8. The ratio is quantized
+ * once to 4 dp (where it is stored), and nothing after that rounds until the
+ * single ceil — the closure rule `cfs-money` states for money, applied to a
+ * count.
+ *
+ * @throws RangeError when `ratio` is negative or not finite, or `parentQty` is
+ *   not a non-negative integer — neither has a meaning a count can take.
+ */
+export function componentQuantityAt(ratio: number, parentQty: number): number {
+  if (!Number.isFinite(ratio) || ratio < 0) throw new RangeError(`kit ratio must be a finite number ≥ 0, got ${ratio}`);
+  if (!Number.isInteger(parentQty) || parentQty < 0) {
+    throw new RangeError(`parent quantity must be an integer ≥ 0, got ${parentQty}`);
+  }
+  const num = BigInt(Math.round(ratio * Number(RATIO_SCALE))) * BigInt(parentQty);
+  return Number((num + RATIO_SCALE - 1n) / RATIO_SCALE);
+}
+
+/** `ceil(num / den)` over non-negative bigints. */
+function ceilDiv(num: bigint, den: bigint): bigint {
+  return (num + den - 1n) / den;
+}
+
+/** The fields of a document line a kit cut or rescale reads — every grain's item satisfies it. */
+export interface KitLineLike {
+  readonly uid: string;
+  readonly type: string;
+  readonly path: string[];
+  readonly quantity?: number | null;
+  readonly quantity_per_parent?: number | null;
+}
+
+/**
+ * How many units of each line move when the kit at `items[kitIndex]` is cut to
+ * `k` of its `n` (= `quantity`) — the fulfillment "move 2 of 5 kits" split.
+ * Returns a map from item INDEX to moved count, for the kit and every line of its
+ * subtree (`getItemSubtreeRange`), and never null. The kit itself moves `k`.
+ *
+ * Per level, each line's parent moved `k'` of its `n'`:
+ *
+ * - **Parent moved in full (`k' === n'`)** → the line moves its whole `quantity`.
+ *   Without this a hand-edited line above its ratio would leave units behind.
+ * - **The line still matches its stamp** (`quantity ===
+ *   componentQuantityAt(r, n')`) → `min(quantity, componentQuantityAt(r, k'))`.
+ *   A shared container goes with the FIRST move, so the remainder may be short a
+ *   case; that is expected — the operator adds one (owner, 2026-10-10). The
+ *   splitter does not try to keep both sides whole.
+ * - **Anything else moves proportionally**, `ceil(quantity × k' ÷ n')` — one rule
+ *   for a hand edit, a re-parented line, a line built under an older catalog, a
+ *   raised optional (`r = 0`) and a pre-stamp line (`r` null or absent) (owner,
+ *   2026-10-11).
+ *
+ * A sub-kit's own moved count is its children's `k'`, so the rule cascades. The
+ * cap at what a component's BOOKING can actually move stays with the caller —
+ * this answers for the document, not for custody.
+ *
+ * @throws RangeError when `items[kitIndex]` is a divider, or `k` is not an
+ *   integer in `[0, n]`.
+ * @throws Error when a subtree line's parent row is missing — a path
+ *   `computeItemPaths` could not have written.
+ */
+export function kitCutQuantities<T extends KitLineLike>(items: T[], kitIndex: number, k: number): Map<number, number> {
+  const kit = items[kitIndex];
+  if (!kit || isDividerItemType(kit.type)) throw new RangeError(`items[${kitIndex}] is not a line item`);
+  const n = kit.quantity ?? 0;
+  if (!Number.isInteger(k) || k < 0 || k > n) throw new RangeError(`cut must be an integer in [0, ${n}], got ${k}`);
+
+  const out = new Map<number, number>();
+  // Keyed by the row's own path: a parent ROW is the one whose path is the
+  // child's minus self (cfs-items), never "a row with the parent's uid".
+  const byPath = new Map<string, { n: number; moved: number }>();
+  const { startIndex, endIndex } = getItemSubtreeRange(items, kitIndex);
+  for (let i = startIndex; i <= endIndex; i++) {
+    const item = items[i];
+    const q = item.quantity ?? 0;
+    let moved: number;
+    if (i === kitIndex) {
+      moved = k;
+    } else {
+      const parent = byPath.get(item.path.slice(0, -1).join("\u0000"));
+      if (!parent) throw new Error(`items[${i}] (${item.uid}) has no parent row inside the kit's subtree`);
+      const r = item.quantity_per_parent;
+      if (parent.moved === parent.n) {
+        moved = q;
+      } else if (r != null && q === componentQuantityAt(r, parent.n)) {
+        moved = Math.min(q, componentQuantityAt(r, parent.moved));
+      } else {
+        moved = Number(ceilDiv(BigInt(q) * BigInt(parent.moved), BigInt(parent.n)));
+      }
+    }
+    byPath.set(item.path.join("\u0000"), { n: q, moved });
+    out.set(i, moved);
+  }
+  return out;
+}
+
+/** The fields read off a catalog `components[]` row by {@link rescaleKitSubtree} — shared by `Product` and the Typesense `ProductDocument`. */
+export interface CatalogComponentLike {
+  readonly uid?: string;
+  readonly path?: readonly string[] | null;
+  readonly quantity?: number | null;
+}
+
+/**
+ * The index in `items[index].path` of the outermost line-item ancestor — the
+ * top-level kit product whose catalog describes the whole subtree. Every segment
+ * before it is a divider (order / destination / group). Returns -1 when the path
+ * holds no line segment, which a well-formed line cannot.
+ */
+export function kitRootPos<T extends KitLineLike>(items: readonly T[], index: number): number {
+  const dividers = new Set(items.filter((i) => isDividerItemType(i.type)).map((i) => i.uid));
+  return (items[index]?.path ?? []).findIndex((seg) => !dividers.has(seg));
+}
+
+/** A catalog row's chain from the root product to itself (the catalog `path` excludes self). */
+function catalogChain(comp: CatalogComponentLike, rootUid: string): string[] {
+  return isDirectComponent(comp) ? [rootUid, comp.uid ?? ""] : [...(comp.path ?? []), comp.uid ?? ""];
+}
+
+/**
+ * Set `items[index]` to `newQty` and rescale its component subtree per level —
+ * the one answer shared by merge-on-add and a direct quantity edit on the order,
+ * invoice and fulfillment items tables (moved from the manager, manager#639 item 4).
+ * Returns a new array; nothing is mutated. Sets quantity only — pricing is the
+ * caller's document reprice.
+ *
+ * **Catalog ratio with override, applied per level**: a component still at
+ * {@link componentQuantityAt}`(ratio, parentOld)` follows its parent to
+ * `componentQuantityAt(ratio, parentNew)`; anything else is a hand edit and
+ * keeps its number. The ratio is relative to the DIRECT parent.
+ *
+ * ⚠️ Reads the CATALOG for now. Once every component line carries
+ * `quantity_per_parent` (core#131 Phase 2), Phase 3 switches it to the stamp
+ * and the catalog argument goes away.
+ *
+ * @param catalog the ROOT product's `components[]` — the materialized whole tree
+ * @param rootPos {@link kitRootPos} of the edited line, so editing a nested
+ *   sub-kit still reads the root's catalog
+ */
+export function rescaleKitSubtree<T extends KitLineLike>(
+  items: T[],
+  index: number,
+  newQty: number,
+  catalog: readonly CatalogComponentLike[],
+  rootPos: number,
+): T[] {
+  const out = [...items];
+  const { startIndex, endIndex } = getItemSubtreeRange(items, index);
+  const rootUid = items[index].path[rootPos];
+  const oldQty = new Map<string, number>();
+  const nextQty = new Map<string, number>();
+
+  for (let i = startIndex; i <= endIndex; i++) {
+    const item = items[i];
+    const key = item.path.join("\u0000");
+    const before = item.quantity ?? 0;
+    oldQty.set(key, before);
+
+    let after = before;
+    if (i === index) {
+      after = newQty;
+    } else {
+      const parentKey = item.path.slice(0, -1).join("\u0000");
+      const parentOld = oldQty.get(parentKey);
+      const parentNew = nextQty.get(parentKey);
+      if (parentOld !== undefined && parentNew !== undefined && parentOld !== parentNew) {
+        const chain = item.path.slice(rootPos);
+        const comp = catalog.find((c) => {
+          const cc = catalogChain(c, rootUid);
+          return cc.length === chain.length && cc.every((seg, j) => seg === chain[j]);
+        });
+        if (comp) {
+          const ratio = comp.quantity ?? 1;
+          if (before === componentQuantityAt(ratio, parentOld)) after = componentQuantityAt(ratio, parentNew);
+        }
+      }
+    }
+
+    nextQty.set(key, after);
+    if (after !== before) out[i] = { ...item, quantity: after };
+  }
+  return out;
 }

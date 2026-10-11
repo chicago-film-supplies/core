@@ -1799,6 +1799,12 @@ export interface OrderItemLineType {
   path: string[];
   inclusion_type?: InclusionTypeType | null;
   zero_priced?: boolean | null;
+  /**
+   * @see `OrderDocLineItemType.quantity_per_parent`. Needs an input channel: this
+   * is a `z.object`, so an undeclared key is STRIPPED and every order PUT would
+   * silently drop the stamp off every line.
+   */
+  quantity_per_parent?: number | null;
   order_number?: number;
   uid_order?: string;
   /** @see `OrderDocLineItemType.uid_tax_class_override` — operator-authored, so it is accepted here. */
@@ -1831,6 +1837,7 @@ const OrderItemLineInner = z.object({
   path: z.array(ItemUid),
   inclusion_type: InclusionTypeEnum.nullable().optional(),
   zero_priced: z.boolean().nullable().optional(),
+  quantity_per_parent: z.number().min(0).nullable().optional(),
   order_number: z.int().optional(),
   uid_order: FirestoreId.optional(),
   uid_tax_class_override: FirestoreId.nullable().optional(),
@@ -2236,6 +2243,8 @@ export interface OrderDocLineItemType {
   path: string[];
   inclusion_type?: "default" | "mandatory" | "optional" | null;
   zero_priced: boolean | null;
+  /** @see `LineItemCore.quantity_per_parent` (`schemas/_items.ts`) — the per-parent ratio, stamped at expansion. */
+  quantity_per_parent?: number | null;
   crms_id?: number | null;
   /**
    * Revenue chart-of-accounts code, denormalized from the product at write time

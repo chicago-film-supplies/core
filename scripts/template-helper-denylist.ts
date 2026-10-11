@@ -409,6 +409,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "buildCustomOrderLine", // mints a `custom-` order line
     "buildCustomInvoiceLine", // mints a `custom-` invoice line
     "buildOrderComponentLines", // expands a kit's component subtree
+    "isDirectComponent", // catalog-editing predicate (product relationship table)
+    "kitCutQuantities", // fulfillment kit-split machinery
+    "kitRootPos", // locates the kit root for a rescale
+    "rescaleKitSubtree", // rewrites quantities on an items edit
   ],
   products: [
     // Denormalization machinery for `products.query_by_images`, re-exported here

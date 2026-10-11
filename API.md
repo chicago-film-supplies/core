@@ -4959,6 +4959,7 @@ interface FulfillmentLineItemType {
   quantity: number;
   stock_method?: StockMethodType;
   zero_priced: boolean | null;
+  quantity_per_parent?: number | null;
   path: string[];
   order_number?: number;
   uid_order?: string;
@@ -5628,6 +5629,7 @@ interface InvoiceDocLineItemType {
   price: InvoiceDocItemPriceType;
   path: string[];
   zero_priced: boolean | null;
+  quantity_per_parent?: number | null;
   coa_revenue?: COARevenueType | null;
   uid_tax_class: string;
   uid_tax_class_override?: string | null;
@@ -5781,6 +5783,7 @@ interface InvoiceItemInputLineType {
   tracking_category?: string | null;
   substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
+  quantity_per_parent?: number | null;
   uid_out_of_service?: string | null;
   path_order_item?: string[];
 }
@@ -7831,6 +7834,7 @@ interface OrderDocLineItemType {
   path: string[];
   inclusion_type?: "default" | "mandatory" | "optional" | null;
   zero_priced: boolean | null;
+  quantity_per_parent?: number | null;
   crms_id?: number | null;
   coa_revenue?: COARevenueType | null;
   uid_tax_class: string;
@@ -7986,6 +7990,7 @@ interface OrderItemLineType {
   path: string[];
   inclusion_type?: InclusionTypeType | null;
   zero_priced?: boolean | null;
+  quantity_per_parent?: number | null;
   order_number?: number;
   uid_order?: string;
   uid_tax_class_override?: string | null;
@@ -19704,6 +19709,7 @@ interface InvoiceDocLineItemType {
   price: InvoiceDocItemPriceType;
   path: string[];
   zero_priced: boolean | null;
+  quantity_per_parent?: number | null;
   coa_revenue?: COARevenueType | null;
   uid_tax_class: string;
   uid_tax_class_override?: string | null;
@@ -19851,6 +19857,7 @@ interface InvoiceItemInputLineType {
   tracking_category?: string | null;
   substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
+  quantity_per_parent?: number | null;
   uid_out_of_service?: string | null;
   path_order_item?: string[];
 }
@@ -21249,6 +21256,7 @@ interface OrderDocLineItemType {
   path: string[];
   inclusion_type?: "default" | "mandatory" | "optional" | null;
   zero_priced: boolean | null;
+  quantity_per_parent?: number | null;
   crms_id?: number | null;
   coa_revenue?: COARevenueType | null;
   uid_tax_class: string;
@@ -21381,6 +21389,7 @@ interface OrderItemLineType {
   path: string[];
   inclusion_type?: InclusionTypeType | null;
   zero_priced?: boolean | null;
+  quantity_per_parent?: number | null;
   order_number?: number;
   uid_order?: string;
   uid_tax_class_override?: string | null;
@@ -22113,6 +22122,7 @@ interface FulfillmentLineItemType {
   quantity: number;
   stock_method?: StockMethodType;
   zero_priced: boolean | null;
+  quantity_per_parent?: number | null;
   path: string[];
   order_number?: number;
   uid_order?: string;
@@ -34171,6 +34181,7 @@ interface LineItem {
   stock_method?: string;
   path: string[];
   zero_priced?: boolean | null;
+  quantity_per_parent?: number | null;
   description?: string;
   order_number?: number;
   uid_order?: string | null;
@@ -36623,6 +36634,7 @@ interface LineItem {
   stock_method?: string;
   path: string[];
   zero_priced?: boolean | null;
+  quantity_per_parent?: number | null;
   description?: string;
   order_number?: number;
   uid_order?: string | null;
@@ -39698,6 +39710,18 @@ rather than concatenating the catalog chain — the same "one author, parent-
 derived" rule `computeItemPaths` follows, and for the same reason: a catalog
 row whose chain contradicts its position must not be able to write a path.
 
+### `CatalogComponentLike`
+
+The fields read off a catalog `components[]` row by {@link rescaleKitSubtree} — shared by `Product` and the Typesense `ProductDocument`.
+
+```ts
+interface CatalogComponentLike {
+  readonly uid?: string;
+  readonly path?: readonly string[] | null;
+  readonly quantity?: number | null;
+}
+```
+
 ### `ComponentQuantity`
 
 One component the walk reached: the row, its resolved quantity, and its self-inclusive doc path.
@@ -39747,6 +39771,20 @@ interface CustomLineBuildOptions {
   taxes: ReadonlyArray<typeLiteral>;
   uid_tax_class: string;
   uidOrder?: string;
+}
+```
+
+### `KitLineLike`
+
+The fields of a document line a kit cut or rescale reads — every grain's item satisfies it.
+
+```ts
+interface KitLineLike {
+  readonly uid: string;
+  readonly type: string;
+  readonly path: string[];
+  readonly quantity?: number | null;
+  readonly quantity_per_parent?: number | null;
 }
 ```
 
@@ -39854,10 +39892,93 @@ movement (api-cloudrun#388, manager#271), so an order line and a movement
 proposal never disagree about how many sides come with three tents.
 
 Depth-first, each parent's direct children `zero_priced` first; quantities
-recurse per level as `ceil(comp.quantity × parentEffective)` (owner,
+recurse per level as {@link componentQuantityAt}`(comp.quantity, parentEffective)` (owner,
 2026-10-09: a movement proposal rounds up like an order line, and the
 operator edits it). An `optional` row is not walked, and neither is its
 subtree — see {@link buildOrderComponentLines} for why that drop is right.
+
+### `componentQuantityAt(ratio: number, parentQty: number): number`
+
+How many of a component go with `parentQty` of its DIRECT parent:
+`ceil(ratio × parentQty)`, exactly.
+
+The ONE quantity rule — {@link componentQuantities} expands through it, a kit
+rescale reads it, and a stamped line's override is read off the document as
+`quantity !== componentQuantityAt(quantity_per_parent, parent.quantity)`.
+
+⚠️ **Integer arithmetic at a 1e4 scale, not `Math.ceil(ratio × parentQty)`.**
+The float product of a 4 dp ratio and an integer lands a hair ABOVE the
+integer it should equal often enough to matter — `0.07 × 100` is
+`7.000000000000001`, so the float form ceils it to 8. The ratio is quantized
+once to 4 dp (where it is stored), and nothing after that rounds until the
+single ceil — the closure rule `cfs-money` states for money, applied to a
+count.
+
+### `isDirectComponent(comp: typeLiteral): boolean`
+
+Is this catalog `components[]` row a DIRECT child of the product that carries
+the array? The one definition of "direct child" (manager#639 item 3), shared
+by {@link resolveParentUid}, the manager's relationship table and api-cloudrun's
+component services.
+
+`path.length <= 1`, not `=== 1`: the `<=` is what the
+{@link resolveParentUid} hardening above depends on, and a row with no path at
+all has no other parent to name.
+
+### `kitCutQuantities(items: T[], kitIndex: number, k: number): Map<number, number>`
+
+How many units of each line move when the kit at `items[kitIndex]` is cut to
+`k` of its `n` (= `quantity`) — the fulfillment "move 2 of 5 kits" split.
+Returns a map from item INDEX to moved count, for the kit and every line of its
+subtree (`getItemSubtreeRange`), and never null. The kit itself moves `k`.
+
+Per level, each line's parent moved `k'` of its `n'`:
+
+- **Parent moved in full (`k' === n'`)** → the line moves its whole `quantity`.
+  Without this a hand-edited line above its ratio would leave units behind.
+- **The line still matches its stamp** (`quantity ===
+  componentQuantityAt(r, n')`) → `min(quantity, componentQuantityAt(r, k'))`.
+  A shared container goes with the FIRST move, so the remainder may be short a
+  case; that is expected — the operator adds one (owner, 2026-10-10). The
+  splitter does not try to keep both sides whole.
+- **Anything else moves proportionally**, `ceil(quantity × k' ÷ n')` — one rule
+  for a hand edit, a re-parented line, a line built under an older catalog, a
+  raised optional (`r = 0`) and a pre-stamp line (`r` null or absent) (owner,
+  2026-10-11).
+
+A sub-kit's own moved count is its children's `k'`, so the rule cascades. The
+cap at what a component's BOOKING can actually move stays with the caller —
+this answers for the document, not for custody.
+
+### `kitRootPos(items: readonly T[], index: number): number`
+
+The index in `items[index].path` of the outermost line-item ancestor — the
+top-level kit product whose catalog describes the whole subtree. Every segment
+before it is a divider (order / destination / group). Returns -1 when the path
+holds no line segment, which a well-formed line cannot.
+
+### `rescaleKitSubtree(items: T[], index: number, newQty: number, catalog: readonly CatalogComponentLike[], rootPos: number): T[]`
+
+Set `items[index]` to `newQty` and rescale its component subtree per level —
+the one answer shared by merge-on-add and a direct quantity edit on the order,
+invoice and fulfillment items tables (moved from the manager, manager#639 item 4).
+Returns a new array; nothing is mutated. Sets quantity only — pricing is the
+caller's document reprice.
+
+**Catalog ratio with override, applied per level**: a component still at
+{@link componentQuantityAt}`(ratio, parentOld)` follows its parent to
+`componentQuantityAt(ratio, parentNew)`; anything else is a hand edit and
+keeps its number. The ratio is relative to the DIRECT parent.
+
+⚠️ Reads the CATALOG for now. Once every component line carries
+`quantity_per_parent` (core#131 Phase 2), Phase 3 switches it to the stamp
+and the catalog argument goes away.
+
+**Parameters**
+
+- `catalog` — the ROOT product's `components[]` — the materialized whole tree
+- `rootPos` — {@link kitRootPos} of the edited line, so editing a nested
+sub-kit still reads the root's catalog
 
 ## `@cfs/core/utils/order-edit-delta`
 
@@ -40225,6 +40346,7 @@ interface LineItem {
   stock_method?: string;
   path: string[];
   zero_priced?: boolean | null;
+  quantity_per_parent?: number | null;
   description?: string;
   order_number?: number;
   uid_order?: string | null;
@@ -43722,6 +43844,7 @@ interface LineItem {
   stock_method?: string;
   path: string[];
   zero_priced?: boolean | null;
+  quantity_per_parent?: number | null;
   description?: string;
   order_number?: number;
   uid_order?: string | null;

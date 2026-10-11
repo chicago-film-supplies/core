@@ -123,6 +123,8 @@ export interface FulfillmentLineItemType {
    * stored items is what keeps every line in the order the document already had.
    */
   zero_priced: boolean | null;
+  /** @see `LineItemCore.quantity_per_parent` (`schemas/_items.ts`) — the per-parent ratio, stamped at expansion. */
+  quantity_per_parent?: number | null;
   path: string[];
   /**
    * The line's own order attribution — a DENORMALISED COPY of the document's

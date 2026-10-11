@@ -117,6 +117,7 @@ export const LineItemCore: {
   quantity: z.ZodNumber;
   path: z.ZodArray<z.ZodType<string>>;
   zero_priced: z.ZodNullable<z.ZodBoolean>;
+  quantity_per_parent: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
 } = {
   uid: ItemUid,
 
@@ -222,6 +223,31 @@ export const LineItemCore: {
     label: "Zero Priced",
     propagate: true,
   }),
+
+  // The catalog's per-kit ratio, snapshotted onto a COMPONENT line at expansion
+  // (`products/{uid}.components[].quantity ?? 1`, 4 dp) — relative to the line's
+  // DIRECT parent, exactly as `componentQuantities` expands it (core#131).
+  // Fractional by design: a value below 1 is a packing ratio (2 mirrors per
+  // case → the case is 0.5 on the mirror), `0` is an optional the operator
+  // raises by hand.
+  //
+  // ⭐ **A hand edit changes `quantity`, never this.** The override is read off
+  // the document — `quantity !== componentQuantityAt(quantity_per_parent,
+  // parent.quantity)` (`utils/order-lines.ts`) — so there is no stored override
+  // flag, by the same rule the order projections follow: the difference IS the
+  // signal.
+  //
+  // `null` on a top-level line. ABSENT on every line written before the stamp
+  // existed, permanently: there is no backfill and no catalog fallback, so a
+  // pre-stamp component reads as a mismatch and cuts proportionally
+  // (`kitCutQuantities`). A ratio is only ever read THROUGH its parent, so a
+  // stamp with no parent (a line dragged out of its kit) is inert and a stamp
+  // under the wrong parent reads as a mismatch — no writer rule nulls it.
+  //
+  // Line items only, never bookings: a booking merges every line with the same
+  // (order, product, leg, ancestry), whose copies may carry different hand
+  // edits, so one ratio per booking is undefined.
+  quantity_per_parent: z.number().min(0).nullable().optional().meta({ propagate: true }),
 };
 
 /**

@@ -206,6 +206,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   ],
   "order-lines": [
     { name: "componentQuantities", expr: "it.order-lines.componentQuantities(rootUid, components, quantity, arg4)", desc: "Which `mandatory`/`default` components a product at `quantity` carries, and how many of each — the ONE quantity rule, shared by the order-line expander ({@link buildOrderComponentLines}) and the manager's component fan-out on a movement (api-cloudrun#388, manager#271), so an order line and a movement proposal never disagree about how many sides come with three tents.", returns: "ComponentQuantity<C>[]" },
+    { name: "componentQuantityAt", expr: "it.order-lines.componentQuantityAt(ratio, parentQty)", desc: "How many of a component go with `parentQty` of its DIRECT parent: `ceil(ratio × parentQty)`, exactly.", returns: "number" },
   ],
   "orders": [
     { name: "buildPackingList", expr: "it.orders.buildPackingList(items, consolidated, destinationDividerUid)", desc: "Build a packing list from order line items.", returns: "PackingListItem[] | ConsolidatedItem[]" },

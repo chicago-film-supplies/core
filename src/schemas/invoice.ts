@@ -362,6 +362,8 @@ export interface InvoiceDocLineItemType {
    * answer" — a component with no answer is what the core#100 refine refuses.
    */
   zero_priced: boolean | null;
+  /** @see `LineItemCore.quantity_per_parent` (`schemas/_items.ts`) — the per-parent ratio, stamped at expansion. */
+  quantity_per_parent?: number | null;
   coa_revenue?: COARevenueType | null;
   /**
    * @see `OrderDocLineItemType.uid_tax_class`. Mirrored onto the invoice so an
@@ -1308,6 +1310,12 @@ export interface InvoiceItemInputLineType {
    */
   zero_priced?: boolean | null;
   /**
+   * @see `InvoiceDocLineItemType.quantity_per_parent`. Projected from the order
+   * line, and needs an input channel for the `zero_priced` reason above:
+   * `buildInvoiceItems` rebuilds every line from typed fields.
+   */
+  quantity_per_parent?: number | null;
+  /**
    * @see `InvoiceDocLineItemType.uid_out_of_service`. Needs an input channel for
    * the `substituted_for` reason: `buildInvoiceItems` rebuilds every stored line
    * from typed fields, so a key absent here is dropped on every PUT.
@@ -1364,6 +1372,7 @@ const InvoiceItemInputLineInner = z.object({
   tracking_category: z.string().nullable().optional(),
   substituted_for: SubstitutedForList.optional(),
   zero_priced: z.boolean().nullable().optional(),
+  quantity_per_parent: z.number().min(0).nullable().optional(),
   uid_out_of_service: OutOfServiceId.nullable().optional(),
   path_order_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
 }).superRefine(checkItemPriceFormula).superRefine(checkOutOfServiceLineType);

@@ -127,6 +127,8 @@ export interface LineItem {
   stock_method?: string;
   path: string[];
   zero_priced?: boolean | null;
+  /** @see `LineItemCore.quantity_per_parent` (`schemas/_items.ts`). */
+  quantity_per_parent?: number | null;
   description?: string;
   order_number?: number;
   uid_order?: string | null;
