@@ -1379,6 +1379,14 @@ could see it.
 const COMPONENT_PRICE_KEYS: "base_cents" | "base_percent" | "replacement_cents" | "coa_revenue" | "formula" | "discountable"[];
 ```
 
+### `COMPONENT_QUANTITY_DECIMALS`
+
+Decimal places a catalog component `quantity` (a per-parent ratio) may carry.
+
+```ts
+const COMPONENT_QUANTITY_DECIMALS: 4;
+```
+
 ### `CREATE_ORDER_STATUSES`
 
 The statuses an order may be CREATED in: the plan statuses (stock campaign gap G5).
@@ -14957,6 +14965,10 @@ this to validate a write VALUE against the field, so a `null` write to a
 `.nullable()` field (or `undefined` to an `.optional()` one) is accepted.
 Intermediate segments are always unwrapped (needed to descend).
 
+### `roundComponentQuantity(n: number): number`
+
+Round a component quantity to {@link COMPONENT_QUANTITY_DECIMALS} — the writer's normalization.
+
 ### `schemaFor(collection: C): z.ZodType<indexedAccess>`
 
 The schema for a collection known at compile time, typed to its document.
@@ -22723,6 +22735,14 @@ could see it.
 const COMPONENT_PRICE_KEYS: "base_cents" | "base_percent" | "replacement_cents" | "coa_revenue" | "formula" | "discountable"[];
 ```
 
+### `COMPONENT_QUANTITY_DECIMALS`
+
+Decimal places a catalog component `quantity` (a per-parent ratio) may carry.
+
+```ts
+const COMPONENT_QUANTITY_DECIMALS: 4;
+```
+
 ### `ComponentPriceKeyEnum`
 
 Zod form of {@link COMPONENT_PRICE_KEYS}.
@@ -23028,6 +23048,10 @@ But `images` remains the sole authority on display order: this field exists
 for Firestore `array-contains`, and the refinement below compares it as a
 multiset, so a differently-ordered mirror holding the same uuids is still
 valid. Nothing may read order back out of it.
+
+### `roundComponentQuantity(n: number): number`
+
+Round a component quantity to {@link COMPONENT_QUANTITY_DECIMALS} — the writer's normalization.
 
 ## `@cfs/core/schemas/purchase`
 

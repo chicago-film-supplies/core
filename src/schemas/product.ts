@@ -406,6 +406,19 @@ export interface Product {
  * `price.taxes[].rate`, so a component diff could say nothing but "Rate".
  * Measured 2026-09-05: 68 of 568 dev products carry a non-empty `components`.
  */
+/** Decimal places a catalog component `quantity` (a per-parent ratio) may carry. */
+export const COMPONENT_QUANTITY_DECIMALS = 4;
+const COMPONENT_QUANTITY_SCALE = 10 ** COMPONENT_QUANTITY_DECIMALS;
+
+/** Round a component quantity to {@link COMPONENT_QUANTITY_DECIMALS} — the writer's normalization. */
+export function roundComponentQuantity(n: number): number {
+  return Math.round(n * COMPONENT_QUANTITY_SCALE) / COMPONENT_QUANTITY_SCALE;
+}
+
+function isAtComponentQuantityScale(n: number): boolean {
+  return roundComponentQuantity(n) === n;
+}
+
 const ComponentObject = z.strictObject({
   uid: FirestoreId,
   path: z.array(z.string()),
@@ -562,6 +575,22 @@ export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = exte
      * than an override.
      */
     price_overridden: z.array(ComponentPriceKeyEnum),
+    /**
+     * Units of this component per ONE parent — a ratio, so fractional by design
+     * (0.5 = one per two parents, a packing ratio; 1.01 = one extra per run, the
+     * fence-post rule on "Roll Up Fence"). `0` is an optional component.
+     *
+     * **Bounded on the authored side only: ≥ 0 and at most 4 decimals.** A ratio
+     * is expanded as `ceil(ratio × parent quantity)`, and a ratio with more
+     * decimals than the expander's integer scale cannot be applied exactly. The
+     * input schemas keep the unbounded `ComponentSchema` field; the API writer
+     * rounds to 4 decimals, so only a negative reaches this check (the same
+     * normalize-at-the-writer, guard-at-storage split as `inclusion_type`).
+     * Measured 2026-10-11: 180 of 180 entries in each env already conform.
+     */
+    quantity: z.number().min(0).refine(isAtComponentQuantityScale, {
+      message: `quantity must have at most ${COMPONENT_QUANTITY_DECIMALS} decimal places`,
+    }).meta({ label: "Quantity" }),
   },
 ).superRefine(checkItemContract);
 

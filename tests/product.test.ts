@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { AuthoredComponentSchema, ComponentSchema, CreateProductInput, deriveProductImageUuids, ProductSchema, UpdateProductInput } from "../src/schemas/product.ts";
+import { AuthoredComponentSchema, ComponentSchema, CreateProductInput, deriveProductImageUuids, ProductSchema, roundComponentQuantity, UpdateProductInput } from "../src/schemas/product.ts";
 import { getInitialValues } from "../src/schemas/initial.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -560,6 +560,50 @@ Deno.test("components require inclusion_type, price_overridden and zero_priced; 
   // not rebuilt against this beta — manager is pinned several betas back on
   // purpose. Normalize at the writer, guard at storage.
   assertEquals(CreateProductInput.safeParse({ ...validCreateInput, components: [backRef] }).success, true);
+});
+
+// ── An authored component quantity is a ratio: ≥ 0, at most 4 decimals ─────
+//
+// Bounded on the AUTHORED side only — the input keeps the loose field and the
+// API writer rounds (`roundComponentQuantity`), so only a negative is refused.
+
+Deno.test("an authored component quantity is ≥ 0 with at most 4 decimals; the input and component_of stay loose", () => {
+  const authored = {
+    uid: "testcomp100000000000",
+    path: ["testproduct100000000"],
+    name: "Battery",
+    type: "rental",
+    stock_method: "bulk",
+    crms_id: 200,
+    inclusion_type: "default",
+    zero_priced: false,
+    price_overridden: [],
+    price: { base_cents: 0, replacement_cents: 10000, formula: "fixed", discountable: false },
+  };
+  const parses = (quantity: number) => AuthoredComponentSchema.safeParse({ ...authored, quantity }).success;
+
+  // Every shape measured in the prod catalog 2026-10-11, the fence-post 1.01 included.
+  for (const q of [0, 1, 2, 0.5, 0.25, 0.125, 0.04, 0.16, 0.1, 0.15, 1.01, 0.0001]) {
+    assertEquals(parses(q), true, `quantity ${q}`);
+  }
+  for (const q of [-1, -0.5, 0.00001, 0.12345, 1 / 3]) {
+    assertEquals(parses(q), false, `quantity ${q}`);
+  }
+
+  // The writer's normalization lands every value on the scale.
+  assertEquals(roundComponentQuantity(1 / 3), 0.3333);
+  assertEquals(roundComponentQuantity(0.12345), 0.1235);
+  assertEquals(parses(roundComponentQuantity(1 / 3)), true);
+  for (let i = 0; i <= 20_000; i++) {
+    const q = roundComponentQuantity(i / 7919);
+    assertEquals(parses(q), true, `rounded ${i}/7919 = ${q}`);
+  }
+
+  // The loose sides are untouched: a client sends 5 decimals and the writer rounds.
+  const { inclusion_type: _i, zero_priced: _z, price_overridden: _p, ...unauthored } = authored;
+  assertEquals(ComponentSchema.safeParse({ ...unauthored, quantity: 0.12345 }).success, true);
+  assertEquals(ProductSchema.safeParse({ ...validProduct, component_of: [{ ...unauthored, quantity: 0.12345 }] }).success, true);
+  assertEquals(ProductSchema.safeParse({ ...validProduct, components: [{ ...authored, quantity: 0.12345 }] }).success, false);
 });
 
 // ── core#78: a component cannot be priced from a document total ─────

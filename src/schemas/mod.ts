@@ -800,6 +800,8 @@ export {
   type AuthoredProductComponent,
   ComponentSchema,
   type ProductComponent,
+  COMPONENT_QUANTITY_DECIMALS,
+  roundComponentQuantity,
   // The `price_overridden` vocabulary. ⚠️ Shipped in `10.0.0-beta.342` reachable
   // only from `./product.ts` — the field existed and the enum to populate it did
   // not, because this barrel lists exports EXPLICITLY and nothing checks that a

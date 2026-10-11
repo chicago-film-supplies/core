@@ -620,6 +620,12 @@
         },
         {
           "kind": "variable",
+          "name": "COMPONENT_QUANTITY_DECIMALS",
+          "declaration": "const COMPONENT_QUANTITY_DECIMALS: 4;",
+          "doc": "Decimal places a catalog component `quantity` (a per-parent ratio) may carry."
+        },
+        {
+          "kind": "variable",
           "name": "CREATE_ORDER_STATUSES",
           "declaration": "const CREATE_ORDER_STATUSES: \"draft\" | \"quoted\" | \"reserved\"[];",
           "doc": "The statuses an order may be CREATED in: the plan statuses (stock campaign gap G5)."
@@ -6800,6 +6806,14 @@
         },
         {
           "kind": "function",
+          "name": "roundComponentQuantity",
+          "signature": "roundComponentQuantity(n: number): number",
+          "doc": "Round a component quantity to {@link COMPONENT_QUANTITY_DECIMALS} — the writer's normalization.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "schemaFor",
           "signature": "schemaFor(collection: C): z.ZodType<indexedAccess>",
           "doc": "The schema for a collection known at compile time, typed to its document.\n\nThe precise counterpart to {@link schemas} — use it wherever the collection is\na literal, and the return type carries the document type instead of\n`z.ZodType<unknown>`. Return type written out rather than inferred: this is\nexported, and the declaration emit is the one surface this package cannot\nverify locally (see {@link CollectionDocs}).",
@@ -10365,6 +10379,12 @@
         },
         {
           "kind": "variable",
+          "name": "COMPONENT_QUANTITY_DECIMALS",
+          "declaration": "const COMPONENT_QUANTITY_DECIMALS: 4;",
+          "doc": "Decimal places a catalog component `quantity` (a per-parent ratio) may carry."
+        },
+        {
+          "kind": "variable",
           "name": "ComponentPriceKeyEnum",
           "declaration": "const ComponentPriceKeyEnum: z.ZodType<ComponentPriceKeyType>;",
           "doc": "Zod form of {@link COMPONENT_PRICE_KEYS}."
@@ -10458,6 +10478,14 @@
           "name": "deriveProductImageUuids",
           "signature": "deriveProductImageUuids(images: readonly typeLiteral[] | undefined): string[]",
           "doc": "Derive `query_by_images` from `images` — each row's `uuid` followed by its\n`uuid_cutout` when set, walking `images` in order.\n\nThe single source of the denormalization, called by every writer. Defined here\nrather than in `utils/products.ts` because the schema needs it and the import\ndirection is strictly utils → schemas; `@cfs/core/utils/products` re-exports\nit, which is where writers should import from (same shape as `deriveName`).\n\n**Ordered, but not an ordering source.** The emitted array follows `images`\nrow order — it costs nothing (one pass either way) and a mirror that tracks\nthe display array is easier to eyeball in the console than an arbitrary one.\nBut `images` remains the sole authority on display order: this field exists\nfor Firestore `array-contains`, and the refinement below compares it as a\nmultiset, so a differently-ordered mirror holding the same uuids is still\nvalid. Nothing may read order back out of it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "roundComponentQuantity",
+          "signature": "roundComponentQuantity(n: number): number",
+          "doc": "Round a component quantity to {@link COMPONENT_QUANTITY_DECIMALS} — the writer's normalization.",
           "paramTags": [],
           "returnsTag": null
         }
