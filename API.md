@@ -11907,6 +11907,7 @@ interface TemplateVersion {
   uid_thread?: string;
   committed_content_hash?: string;
   staging_sha?: string | null;
+  head_sha?: string;
   sha?: string;
   semver?: string;
   seq?: number;

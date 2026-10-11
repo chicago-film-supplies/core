@@ -422,6 +422,26 @@ export interface TemplateVersion {
    * absent value is recoverable rather than ambiguous.
    */
   staging_sha?: string | null;
+  /**
+   * The draft-branch commit this draft's content map was last SYNCED against —
+   * written only by the verbs that sync content with the branch: create (its
+   * seed commit), commit, release, and rebase/resolve when they adopt the head.
+   *
+   * It is the base of a three-way check, not a compare-and-set token
+   * (api-cloudrun#1281). Commit and release overlay the whole content map onto
+   * the branch head, so a commit that read the draft BEFORE a concurrent rebase
+   * would write the pre-merge bytes over the merge and silently revert main's
+   * side of it. They now refuse only when that would happen: a path whose blob
+   * moved between `head_sha` and the current head, AND which the commit would
+   * write with different bytes. A bare equality CAS would also refuse every
+   * branch mover that never touches the draft's work (a fixture commit, a
+   * metadata edit, an overlay alignment), each of which would then have to
+   * stamp this field in order.
+   *
+   * Absent on a draft predating the field, meaning "no check": the next commit
+   * stamps it. Optional on every status, like `staging_sha`.
+   */
+  head_sha?: string;
 
   // ── published fields ──
   sha?: string;
@@ -470,6 +490,7 @@ export const TemplateVersionSchema: z.ZodType<TemplateVersion> = z.strictObject(
   uid_thread: FirestoreId.optional(),
   committed_content_hash: z.string().min(1).optional(),
   staging_sha: z.string().min(1).nullable().optional(),
+  head_sha: z.string().min(1).optional(),
 
   sha: z.string().min(1).optional(),
   semver: z.string().min(1).optional().meta({ column: true, label: "Version" }),
