@@ -1,22 +1,20 @@
 # Stamp `quantity_per_parent` on kit component lines
 
 > ## ⚠️ STATUS UPDATE 2026-10-12
-> **Phase 1 is DONE and in prod.** Every reader accepts `quantity_per_parent`; nothing writes it yet.
-> - **core** `0ee5d79` → `10.0.0-beta.653`: `quantity_per_parent` on `LineItemCore`, the
->   order/invoice input schemas, the three stored interfaces and `LineItem`. New in
->   `core/src/utils/order-lines.ts`: `componentQuantityAt`, `kitCutQuantities`, `isDirectComponent`,
->   and `rescaleKitSubtree` / `kitRootPos` (moved from manager, still CATALOG-reading until Phase 3).
->   Tests: `core/tests/kit-ratio.test.ts`.
-> - **manager** `95dd9fb5` (pin beta.653): manager#639 items 1/3/4 and manager#640, both CLOSED.
->   Released to prod as **manager-v27.49.2** (2026-10-12; `deploy-prod` green).
-> - **api-cloudrun** `20d96173` (pin beta.653 + the `@cfs/core/utils/order-lines` map entry): the six
->   `api-cloudrun/src/services/products.ts` direct-child tests and the zero-priced sort's parent bucket
->   read `isDirectComponent`. Released as **v0.346.0** (2026-10-12), after manager, with
->   `requires-manager` green.
-> **Next:** api-cloudrun#1286, then api-cloudrun#1287 (both closed IN FULL; launch from
-> `api-cloudrun/`), then Phase 2.
-> ⚠️ Item 3 landed as a predicate, `isDirectComponent(comp)`, not as an exported
-> `resolveParentUid`: every call site asks "is this a direct child?", none has a root uid in hand.
+> **Phase 1 and both prerequisites are DONE and in prod. Next: Phase 2.**
+> - **Phase 1** — core `0ee5d79` (beta.653): every reader accepts `quantity_per_parent`;
+>   `componentQuantityAt`, `kitCutQuantities`, `isDirectComponent`, `rescaleKitSubtree` /
+>   `kitRootPos` in `core/src/utils/order-lines.ts`. manager-v27.49.2, api v0.346.0.
+> - **api-cloudrun#1286 + api-cloudrun#1287, CLOSED in full** — core `1d713b3` (beta.654),
+>   manager `c2e078bf` (27.49.3), api `45c10742` (0.346.1). One author for a line's catalog
+>   facts (`deriveLineCatalogFacts`, `zeroPricedForSlot`, `catalogSlotOf`,
+>   `catalogComponentAt`), the fulfillment projector in core
+>   (`projectFulfillmentLine`, `fulfillmentSourceOfComponent` in
+>   `core/src/utils/fulfillment-items.ts`), and the api order writer resolving each row's
+>   flag before the build in `api-cloudrun/src/lib/orderLineZeroPriced.ts`.
+> - ⭐ **Owner ruling 2026-10-12: `zero_priced` is a SNAPSHOT carried by row** (stored flag for
+>   an existing row, the catalog slot only for a new row, never the client's). The stamp
+>   already had snapshot semantics in this plan, so Phase 2 below takes the same shape.
 
 ## Problem
 
@@ -106,8 +104,8 @@ emits it. Two core releases rather than one, so manager and api never have to
 land together.
 
 **Sequence (owner, 2026-10-11):**
-1. Phase 1, with manager#639 items 1, 3 and 4 and manager#640 folded in.
-2. api-cloudrun#1286, then api-cloudrun#1287 — **prerequisites of Phase 2, closed in full.**
+1. Phase 1, with manager#639 items 1, 3 and 4 and manager#640 folded in. **Done.**
+2. api-cloudrun#1286, then api-cloudrun#1287 — **prerequisites of Phase 2, closed in full. Done.**
 3. Phase 2.
 4. Phase 3.
 
@@ -154,37 +152,34 @@ api-cloudrun#1290 open; those are separate campaigns.
 - Publish `feat`. Then api + manager pin bumps → **both released to prod**.
 - Skills: `cfs-release-order`, `cfs-items`, `cfs-order-projections`; read `core/CLAUDE.md`.
 
-### Phase 2 — core: write  (`Launch from: core/`)
-**Blocked on api-cloudrun#1286 and api-cloudrun#1287 — both CLOSED IN FULL (owner, 2026-10-11).**
-Not just the slice this phase needs. For #1286 that means every writer in its table (incl.
-`syncDraftOrders`, the order-writer derivation, the invoice fills, manager `setItemType`). For
-#1287 it includes item 5 (`createFulfillmentExchange` eligibility).
-- **#1286** gives a line's catalog facts one core author (`deriveLineCatalogFacts`). The
-  stamp is one more catalog fact, so it is added THERE, in one line.
-- **#1287** collapses the fulfillment projectors (`projectFulfillmentLine`,
-  `toFulfillmentLine`, `exchangeComponentRows`, substituted-subtree rows) into one core
-  projector, which resolves catalog entries **by path**.
-- ⚠️ Correctness, not only effort: today's first-uid lookup (`subtreeComponentOf`) would
-  stamp a component listed under two kits with the WRONG kit's ratio. That is a wrong
-  value, and nothing refuses it.
-- After both land, the projector list below shrinks to their single authors plus
-  `projectOrderItemToInvoiceItem` and `projectItem`.
-- `buildOrderComponentLines` (`core/src/utils/order-lines.ts`) stamps
-  `quantity_per_parent: round4(comp.quantity ?? 1)`. Use `?? 1` because expansion uses it. That one builder covers api
-  (`api-cloudrun/src/lib/productComponents.ts`, `api-cloudrun/src/lib/fulfillmentLine.ts`) and manager's order /
-  invoice / fulfillment stores, item search, exchanges.
-- **Named-field projectors drop it unless told.** Each of these needs the field:
+### Phase 2 — core: write  (`Launch from: core/`, then `api-cloudrun/`, then `manager/`)
+Unblocked: api-cloudrun#1286 and api-cloudrun#1287 are closed in full. The writer list is now
+the single authors they created, so the stamp lands in each ONCE:
+- **core** (`core/src/utils/order-lines.ts`): a slot rule beside `zeroPricedForSlot` —
+  `quantityPerParentForSlot(slot)` = `slot === null ? null : round4(slot.quantity ?? 1)`
+  (`?? 1` because expansion uses it). `buildOrderComponentLines` stamps it, which covers the
+  manager's order / invoice / fulfillment stores, item search and exchanges.
+  `fulfillmentSourceOfComponent` (`core/src/utils/fulfillment-items.ts`) and
+  `projectFulfillmentLine` carry it, which covers the api's substituted-subtree and
+  exchange-component rows and manager's `toFulfillmentLine`.
+- **api order writer**: `resolveOrderZeroPriced` (`api-cloudrun/src/lib/orderLineZeroPriced.ts`)
+  already resolves each row's slot and carries the stored value by row. Generalize it to
+  resolve the stamp the same way, so a new row is stamped from its slot and an existing
+  row keeps its stored stamp: the snapshot rule, and the client is never the source. ⚠️
+  This is a recommendation: the owner ruled the snapshot for `zero_priced`, and the stamp
+  was already "a snapshot" in this plan, but confirm the server-derives-it half.
+- **Named-field projectors drop it unless told:**
   - `projectOrderItemToInvoiceItem` (`core/src/utils/invoices.ts`). Spread it only when
     present, because `invoiceItemDifferences` compares key sets.
-  - `projectFulfillmentLine` (`api-cloudrun/src/lib/fulfillmentLine.ts`)
-  - `projectItem` (`api-cloudrun/src/services/fulfillment.ts`)
-  - `buildOrderLineItem` (`api-cloudrun/src/services/orders.ts`)
-  - `exchangeComponentRows` (`api-cloudrun/src/services/fulfillmentEdits.ts`)
-  - substitution root and subtree (`api-cloudrun/src/lib/substitutedSubtree.ts`, manager `buildOrderLineFromProduct`)
-  - manager `toFulfillmentLine` (`manager/src/stores/fulfillment.ts`)
+  - `projectItem` (`api-cloudrun/src/services/fulfillment.ts`) — the order-line → fulfillment
+    projection (it passes an order line's fields to `projectFulfillmentLine`).
+  - substitution ROOT: takes X's stamp (the slot rule, as `substitutionRootZeroPriced`), in
+    `api-cloudrun/src/lib/orderFulfillmentSync.ts`, `api-cloudrun/src/services/fulfillmentEdits.ts`,
+    the invoice substitution path, and manager's `applySubstitution` / `substituteRows`.
 
-  `zero_priced` has the same footprint, so use it as the map.
-- Publish; api + manager pin bumps.
+  `zero_priced` has the same footprint; grep it as the map.
+- Publish; api + manager pin bumps. No ordering constraint (every reader already accepts
+  the field since Phase 1).
 
 ### Phase 3 — manager readers  (`Launch from: manager/`)
 - `rescaleKitSubtree` (moved to core in Phase 1) reads the stamp. A null stamp means no ratio, so the line
