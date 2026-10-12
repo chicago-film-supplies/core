@@ -797,29 +797,6 @@ export function kitCutQuantities<T extends KitLineLike>(items: T[], kitIndex: nu
   return out;
 }
 
-/** The fields read off a catalog `components[]` row by {@link rescaleKitSubtree} — shared by `Product` and the Typesense `ProductDocument`. */
-export interface CatalogComponentLike {
-  readonly uid?: string;
-  readonly path?: readonly string[] | null;
-  readonly quantity?: number | null;
-}
-
-/**
- * The index in `items[index].path` of the outermost line-item ancestor — the
- * top-level kit product whose catalog describes the whole subtree. Every segment
- * before it is a divider (order / destination / group). Returns -1 when the path
- * holds no line segment, which a well-formed line cannot.
- */
-export function kitRootPos<T extends KitLineLike>(items: readonly T[], index: number): number {
-  const dividers = new Set(items.filter((i) => isDividerItemType(i.type)).map((i) => i.uid));
-  return (items[index]?.path ?? []).findIndex((seg) => !dividers.has(seg));
-}
-
-/** A catalog row's chain from the root product to itself (the catalog `path` excludes self). */
-function catalogChain(comp: CatalogComponentLike, rootUid: string): string[] {
-  return isDirectComponent(comp) ? [rootUid, comp.uid ?? ""] : [...(comp.path ?? []), comp.uid ?? ""];
-}
-
 /**
  * Set `items[index]` to `newQty` and rescale its component subtree per level —
  * the one answer shared by merge-on-add and a direct quantity edit on the order,
@@ -827,29 +804,22 @@ function catalogChain(comp: CatalogComponentLike, rootUid: string): string[] {
  * Returns a new array; nothing is mutated. Sets quantity only — pricing is the
  * caller's document reprice.
  *
- * **Catalog ratio with override, applied per level**: a component still at
- * {@link componentQuantityAt}`(ratio, parentOld)` follows its parent to
- * `componentQuantityAt(ratio, parentNew)`; anything else is a hand edit and
- * keeps its number. The ratio is relative to the DIRECT parent.
+ * **Stamped ratio with override, applied per level** (core#131 Phase 3): a
+ * component still at {@link componentQuantityAt}`(quantity_per_parent, parentOld)`
+ * follows its parent to `componentQuantityAt(quantity_per_parent, parentNew)`;
+ * anything else is a hand edit and keeps its number, and so does its subtree,
+ * because its own quantity did not move. The ratio is relative to the DIRECT
+ * parent, as {@link buildOrderComponentLines} stamps it.
  *
- * ⚠️ Reads the CATALOG for now. Once every component line carries
- * `quantity_per_parent` (core#131 Phase 2), Phase 3 switches it to the stamp
- * and the catalog argument goes away.
- *
- * @param catalog the ROOT product's `components[]` — the materialized whole tree
- * @param rootPos {@link kitRootPos} of the edited line, so editing a nested
- *   sub-kit still reads the root's catalog
+ * ⚠️ **A line with no stamp (`null` or absent) keeps its number.** That is every
+ * component line written before the stamp, and there is no catalog fallback
+ * (owner, 2026-10-10): the document is the whole input, so the answer cannot
+ * change under a catalog edit made after the line was written, and there is
+ * nothing to await.
  */
-export function rescaleKitSubtree<T extends KitLineLike>(
-  items: T[],
-  index: number,
-  newQty: number,
-  catalog: readonly CatalogComponentLike[],
-  rootPos: number,
-): T[] {
+export function rescaleKitSubtree<T extends KitLineLike>(items: T[], index: number, newQty: number): T[] {
   const out = [...items];
   const { startIndex, endIndex } = getItemSubtreeRange(items, index);
-  const rootUid = items[index].path[rootPos];
   const oldQty = new Map<string, number>();
   const nextQty = new Map<string, number>();
 
@@ -866,16 +836,9 @@ export function rescaleKitSubtree<T extends KitLineLike>(
       const parentKey = item.path.slice(0, -1).join("\u0000");
       const parentOld = oldQty.get(parentKey);
       const parentNew = nextQty.get(parentKey);
-      if (parentOld !== undefined && parentNew !== undefined && parentOld !== parentNew) {
-        const chain = item.path.slice(rootPos);
-        const comp = catalog.find((c) => {
-          const cc = catalogChain(c, rootUid);
-          return cc.length === chain.length && cc.every((seg, j) => seg === chain[j]);
-        });
-        if (comp) {
-          const ratio = comp.quantity ?? 1;
-          if (before === componentQuantityAt(ratio, parentOld)) after = componentQuantityAt(ratio, parentNew);
-        }
+      const r = item.quantity_per_parent;
+      if (parentOld !== undefined && parentNew !== undefined && parentOld !== parentNew && r != null) {
+        if (before === componentQuantityAt(r, parentOld)) after = componentQuantityAt(r, parentNew);
       }
     }
 

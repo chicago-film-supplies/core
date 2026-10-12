@@ -411,7 +411,6 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "buildOrderComponentLines", // expands a kit's component subtree
     "isDirectComponent", // catalog-editing predicate (product relationship table)
     "kitCutQuantities", // fulfillment kit-split machinery
-    "kitRootPos", // locates the kit root for a rescale
     "rescaleKitSubtree", // rewrites quantities on an items edit
     "catalogComponentAt", // resolves a catalog row by path for a writer
     "catalogSlotOf", // resolves a parent's direct catalog row for a writer

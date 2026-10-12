@@ -39788,18 +39788,6 @@ rather than concatenating the catalog chain — the same "one author, parent-
 derived" rule `computeItemPaths` follows, and for the same reason: a catalog
 row whose chain contradicts its position must not be able to write a path.
 
-### `CatalogComponentLike`
-
-The fields read off a catalog `components[]` row by {@link rescaleKitSubtree} — shared by `Product` and the Typesense `ProductDocument`.
-
-```ts
-interface CatalogComponentLike {
-  readonly uid?: string;
-  readonly path?: readonly string[] | null;
-  readonly quantity?: number | null;
-}
-```
-
 ### `CatalogLineSource`
 
 The catalog fields a line's facts are read from — satisfied by a Firestore
@@ -40115,13 +40103,6 @@ A sub-kit's own moved count is its children's `k'`, so the rule cascades. The
 cap at what a component's BOOKING can actually move stays with the caller —
 this answers for the document, not for custody.
 
-### `kitRootPos(items: readonly T[], index: number): number`
-
-The index in `items[index].path` of the outermost line-item ancestor — the
-top-level kit product whose catalog describes the whole subtree. Every segment
-before it is a divider (order / destination / group). Returns -1 when the path
-holds no line segment, which a well-formed line cannot.
-
 ### `quantityPerParentForSlot(slot: CatalogSlot | null): number | null`
 
 A line's `quantity_per_parent`, from the slot it fills (core#131): `null` for a
@@ -40136,7 +40117,7 @@ built from — otherwise a freshly expanded line would read as hand-edited.
 catalog only when a row is first built; after that the stored stamp is carried
 by row, and a hand edit changes `quantity`, never this.
 
-### `rescaleKitSubtree(items: T[], index: number, newQty: number, catalog: readonly CatalogComponentLike[], rootPos: number): T[]`
+### `rescaleKitSubtree(items: T[], index: number, newQty: number): T[]`
 
 Set `items[index]` to `newQty` and rescale its component subtree per level —
 the one answer shared by merge-on-add and a direct quantity edit on the order,
@@ -40144,20 +40125,18 @@ invoice and fulfillment items tables (moved from the manager, manager#639 item 4
 Returns a new array; nothing is mutated. Sets quantity only — pricing is the
 caller's document reprice.
 
-**Catalog ratio with override, applied per level**: a component still at
-{@link componentQuantityAt}`(ratio, parentOld)` follows its parent to
-`componentQuantityAt(ratio, parentNew)`; anything else is a hand edit and
-keeps its number. The ratio is relative to the DIRECT parent.
+**Stamped ratio with override, applied per level** (core#131 Phase 3): a
+component still at {@link componentQuantityAt}`(quantity_per_parent, parentOld)`
+follows its parent to `componentQuantityAt(quantity_per_parent, parentNew)`;
+anything else is a hand edit and keeps its number, and so does its subtree,
+because its own quantity did not move. The ratio is relative to the DIRECT
+parent, as {@link buildOrderComponentLines} stamps it.
 
-⚠️ Reads the CATALOG for now. Once every component line carries
-`quantity_per_parent` (core#131 Phase 2), Phase 3 switches it to the stamp
-and the catalog argument goes away.
-
-**Parameters**
-
-- `catalog` — the ROOT product's `components[]` — the materialized whole tree
-- `rootPos` — {@link kitRootPos} of the edited line, so editing a nested
-sub-kit still reads the root's catalog
+⚠️ **A line with no stamp (`null` or absent) keeps its number.** That is every
+component line written before the stamp, and there is no catalog fallback
+(owner, 2026-10-10): the document is the whole input, so the answer cannot
+change under a catalog edit made after the line was written, and there is
+nothing to await.
 
 ### `retypedLinePrice(price: P, type: DocLineItemTypeType, chargeDays: number | null): P`
 

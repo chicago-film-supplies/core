@@ -9,12 +9,10 @@
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
-  type CatalogComponentLike,
   componentQuantities,
   componentQuantityAt,
   isDirectComponent,
   kitCutQuantities,
-  kitRootPos,
   rescaleKitSubtree,
 } from "../src/utils/order-lines.ts";
 
@@ -225,84 +223,89 @@ Deno.test("kitCutQuantities: sweep — moved ≤ q, a full cut moves q, moved is
   }
 });
 
-// ── rescaleKitSubtree (moved from manager) ───────────────────────
+// ── rescaleKitSubtree (moved from manager; reads the stamp since Phase 3) ──
 
-Deno.test("kitRootPos: skips the divider prefix to the top-level product", () => {
-  const items = [dest("D"), group("G", "D"), line(["D", "G", "A"], 1), line(["D", "G", "A", "B"], 2)];
-  assertEquals(kitRootPos(items, 2), 2);
-  assertEquals(kitRootPos(items, 3), 2);
-});
-
-Deno.test("rescaleKitSubtree: scales by the catalog ratio, not proportionally", () => {
+Deno.test("rescaleKitSubtree: scales by the stamped ratio, not proportionally", () => {
   // ratio 0.5: at A=1 the child is ceil(0.5) = 1; at A=3 it is ceil(1.5) = 2.
-  const items = [dest("D"), line(["D", "A"], 1), line(["D", "A", "B"], 1)];
-  const catalog: CatalogComponentLike[] = [{ uid: "B", path: ["A"], quantity: 0.5 }];
-  assertEquals(qtys(rescaleKitSubtree(items, 1, 3, catalog, 1)), [undefined, 3, 2]);
+  const items = [dest("D"), line(["D", "A"], 1, null), line(["D", "A", "B"], 1, 0.5)];
+  assertEquals(qtys(rescaleKitSubtree(items, 1, 3)), [undefined, 3, 2]);
 });
 
 Deno.test("rescaleKitSubtree: keeps a hand-edited child", () => {
-  const items = [dest("D"), line(["D", "A"], 1), line(["D", "A", "B"], 5)];
-  const catalog: CatalogComponentLike[] = [{ uid: "B", path: ["A"], quantity: 2 }];
-  assertEquals(qtys(rescaleKitSubtree(items, 1, 2, catalog, 1)), [undefined, 2, 5]);
+  // ratio 2 at A=1 is 2; the line says 5, so it is a hand edit.
+  const items = [dest("D"), line(["D", "A"], 1, null), line(["D", "A", "B"], 5, 2)];
+  assertEquals(qtys(rescaleKitSubtree(items, 1, 2)), [undefined, 2, 5]);
 });
 
 Deno.test("rescaleKitSubtree: scales each level off its direct parent", () => {
   // A(1) → B ratio 2 → C ratio 3: B = 2, C = 6. A → 2: B = 4, C = 12.
-  const items = [dest("D"), line(["D", "A"], 1), line(["D", "A", "B"], 2), line(["D", "A", "B", "C"], 6)];
-  const catalog: CatalogComponentLike[] = [{ uid: "B", path: ["A"], quantity: 2 }, { uid: "C", path: ["A", "B"], quantity: 3 }];
-  assertEquals(qtys(rescaleKitSubtree(items, 1, 2, catalog, 1)), [undefined, 2, 4, 12]);
+  const items = [dest("D"), line(["D", "A"], 1, null), line(["D", "A", "B"], 2, 2), line(["D", "A", "B", "C"], 6, 3)];
+  assertEquals(qtys(rescaleKitSubtree(items, 1, 2)), [undefined, 2, 4, 12]);
 });
 
-Deno.test("rescaleKitSubtree: rescales only below an edited sub-kit, using the root's catalog", () => {
-  const items = [dest("D"), line(["D", "A"], 1), line(["D", "A", "B"], 2), line(["D", "A", "B", "C"], 6)];
-  const catalog: CatalogComponentLike[] = [{ uid: "B", path: ["A"], quantity: 2 }, { uid: "C", path: ["A", "B"], quantity: 3 }];
-  assertEquals(qtys(rescaleKitSubtree(items, 2, 3, catalog, 1)), [undefined, 1, 3, 9]);
+Deno.test("rescaleKitSubtree: rescales only below an edited sub-kit", () => {
+  // B 2 → 3 under ratio-3 C: C 6 → 9. A is above the edit and stays.
+  const items = [dest("D"), line(["D", "A"], 1, null), line(["D", "A", "B"], 2, 2), line(["D", "A", "B", "C"], 6, 3)];
+  assertEquals(qtys(rescaleKitSubtree(items, 2, 3)), [undefined, 1, 3, 9]);
 });
 
 Deno.test("rescaleKitSubtree: leaves a grandchild alone when its parent was an override that stayed put", () => {
-  const items = [dest("D"), line(["D", "A"], 1), line(["D", "A", "B"], 7), line(["D", "A", "B", "C"], 6)];
-  const catalog: CatalogComponentLike[] = [{ uid: "B", path: ["A"], quantity: 2 }, { uid: "C", path: ["A", "B"], quantity: 3 }];
-  assertEquals(qtys(rescaleKitSubtree(items, 1, 2, catalog, 1)), [undefined, 2, 7, 6]);
+  // B is 7 (ratio 2 says 2), so B keeps 7, and C's parent did not move.
+  const items = [dest("D"), line(["D", "A"], 1, null), line(["D", "A", "B"], 7, 2), line(["D", "A", "B", "C"], 6, 3)];
+  assertEquals(qtys(rescaleKitSubtree(items, 1, 2)), [undefined, 2, 7, 6]);
 });
 
-Deno.test("rescaleKitSubtree: keeps a child with no catalog row, and a zero-ratio one at zero", () => {
-  const items = [dest("D"), line(["D", "A"], 1), line(["D", "A", "X"], 4), line(["D", "A", "B"], 0)];
-  const catalog: CatalogComponentLike[] = [{ uid: "B", path: ["A"], quantity: 0 }];
-  assertEquals(qtys(rescaleKitSubtree(items, 1, 3, catalog, 1)), [undefined, 3, 4, 0]);
+Deno.test("rescaleKitSubtree: keeps a pre-stamp child (null or absent), and a zero-ratio one at zero", () => {
+  // X null, Y absent: no ratio, no catalog fallback. B ratio 0 stays 0 at any A.
+  const items = [
+    dest("D"),
+    line(["D", "A"], 1, null),
+    line(["D", "A", "X"], 1, null),
+    line(["D", "A", "Y"], 1),
+    line(["D", "A", "B"], 0, 0),
+  ];
+  assertEquals(qtys(rescaleKitSubtree(items, 1, 3)), [undefined, 3, 1, 1, 0]);
+});
+
+Deno.test("rescaleKitSubtree: a raised optional (ratio 0, quantity > 0) is a hand edit", () => {
+  // ceil(0 × 1) = 0, the line says 2: it keeps 2.
+  const items = [dest("D"), line(["D", "A"], 1, null), line(["D", "A", "B"], 2, 0)];
+  assertEquals(qtys(rescaleKitSubtree(items, 1, 4)), [undefined, 4, 2]);
 });
 
 Deno.test("rescaleKitSubtree: changes nothing when the quantity is unchanged", () => {
-  const items = [dest("D"), line(["D", "A"], 2), line(["D", "A", "B"], 9)];
-  const out = rescaleKitSubtree(items, 1, 2, [{ uid: "B", path: ["A"], quantity: 2 }], 1);
+  const items = [dest("D"), line(["D", "A"], 2, null), line(["D", "A", "B"], 9, 2)];
+  const out = rescaleKitSubtree(items, 1, 2);
   assertEquals(qtys(out), [undefined, 2, 9]);
   assert(out[2] === items[2]);
 });
 
-Deno.test("rescaleKitSubtree: matches a catalog row by its chain, not by uid alone", () => {
+Deno.test("rescaleKitSubtree: the same uid under two sub-kits follows each one's own stamp", () => {
   // X under B (ratio 1) and under C (ratio 4). A 1 → 2: X|B 1 → 2, X|C 4 → 8.
   const items = [
     dest("D"),
-    line(["D", "A"], 1),
-    line(["D", "A", "B"], 1),
-    line(["D", "A", "B", "X"], 1),
-    line(["D", "A", "C"], 1),
-    line(["D", "A", "C", "X"], 4),
+    line(["D", "A"], 1, null),
+    line(["D", "A", "B"], 1, 1),
+    line(["D", "A", "B", "X"], 1, 1),
+    line(["D", "A", "C"], 1, 1),
+    line(["D", "A", "C", "X"], 4, 4),
   ];
-  const catalog: CatalogComponentLike[] = [
-    { uid: "B", path: ["A"], quantity: 1 },
-    { uid: "X", path: ["A", "B"], quantity: 1 },
-    { uid: "C", path: ["A"], quantity: 1 },
-    { uid: "X", path: ["A", "C"], quantity: 4 },
-  ];
-  assertEquals(qtys(rescaleKitSubtree(items, 1, 2, catalog, 1)), [undefined, 2, 2, 2, 2, 8]);
+  assertEquals(qtys(rescaleKitSubtree(items, 1, 2)), [undefined, 2, 2, 2, 2, 8]);
 });
 
-Deno.test("rescaleKitSubtree: a direct child with a self-naming path is a child of the root", () => {
-  const items = [dest("D"), line(["D", "A"], 1), line(["D", "A", "B"], 2)];
-  assertEquals(qtys(rescaleKitSubtree(items, 1, 3, [{ uid: "B", path: ["B"], quantity: 2 }], 1)), [undefined, 3, 6]);
+Deno.test("rescaleKitSubtree: rounds at the 1e4 scale — 0.07 × 100 is 7, not 8", () => {
+  // A 1 → 100: ceil(0.07) = 1 → exactly 7 (the float form reads 7.000000000000001 and ceils to 8).
+  const items = [dest("D"), line(["D", "A"], 1, null), line(["D", "A", "B"], 1, 0.07)];
+  assertEquals(qtys(rescaleKitSubtree(items, 1, 100)), [undefined, 100, 7]);
 });
 
 Deno.test("rescaleKitSubtree: does not touch the next sibling's subtree", () => {
-  const items = [dest("D"), line(["D", "A"], 1), line(["D", "A", "B"], 2), line(["D", "Z"], 1), line(["D", "Z", "B"], 2)];
-  assertEquals(qtys(rescaleKitSubtree(items, 1, 2, [{ uid: "B", path: ["A"], quantity: 2 }], 1)), [undefined, 2, 4, 1, 2]);
+  const items = [
+    dest("D"),
+    line(["D", "A"], 1, null),
+    line(["D", "A", "B"], 2, 2),
+    line(["D", "Z"], 1, null),
+    line(["D", "Z", "B"], 2, 2),
+  ];
+  assertEquals(qtys(rescaleKitSubtree(items, 1, 2)), [undefined, 2, 4, 1, 2]);
 });

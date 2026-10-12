@@ -18561,12 +18561,6 @@
       "symbols": [
         {
           "kind": "interface",
-          "name": "CatalogComponentLike",
-          "declaration": "interface CatalogComponentLike {\n  readonly uid?: string;\n  readonly path?: readonly string[] | null;\n  readonly quantity?: number | null;\n}",
-          "doc": "The fields read off a catalog `components[]` row by {@link rescaleKitSubtree} — shared by `Product` and the Typesense `ProductDocument`."
-        },
-        {
-          "kind": "interface",
           "name": "CatalogLineSource",
           "declaration": "interface CatalogLineSource {\n  readonly type?: string;\n  readonly stock_method?: string;\n  readonly price?: typeLiteral | null;\n}",
           "doc": "The catalog fields a line's facts are read from — satisfied by a Firestore\n`Product`, a Typesense `ProductDocument`, and a `components[]` row of either\n(which mirrors its component product's price)."
@@ -18703,14 +18697,6 @@
         },
         {
           "kind": "function",
-          "name": "kitRootPos",
-          "signature": "kitRootPos(items: readonly T[], index: number): number",
-          "doc": "The index in `items[index].path` of the outermost line-item ancestor — the\ntop-level kit product whose catalog describes the whole subtree. Every segment\nbefore it is a divider (order / destination / group). Returns -1 when the path\nholds no line segment, which a well-formed line cannot.",
-          "paramTags": [],
-          "returnsTag": null
-        },
-        {
-          "kind": "function",
           "name": "quantityPerParentForSlot",
           "signature": "quantityPerParentForSlot(slot: CatalogSlot | null): number | null",
           "doc": "A line's `quantity_per_parent`, from the slot it fills (core#131): `null` for a\nline that fills no slot (top-level), else the ratio the slot expands at,\nrounded to 4 dp.\n\n`?? 1` because that is what {@link componentQuantities} expands a row that\nstates no quantity at, and the stamp must be the ratio the line was actually\nbuilt from — otherwise a freshly expanded line would read as hand-edited.\n\n⭐ **A SNAPSHOT, like `zero_priced` (owner, 2026-10-12).** It is read off the\ncatalog only when a row is first built; after that the stored stamp is carried\nby row, and a hand edit changes `quantity`, never this.",
@@ -18720,18 +18706,9 @@
         {
           "kind": "function",
           "name": "rescaleKitSubtree",
-          "signature": "rescaleKitSubtree(items: T[], index: number, newQty: number, catalog: readonly CatalogComponentLike[], rootPos: number): T[]",
-          "doc": "Set `items[index]` to `newQty` and rescale its component subtree per level —\nthe one answer shared by merge-on-add and a direct quantity edit on the order,\ninvoice and fulfillment items tables (moved from the manager, manager#639 item 4).\nReturns a new array; nothing is mutated. Sets quantity only — pricing is the\ncaller's document reprice.\n\n**Catalog ratio with override, applied per level**: a component still at\n{@link componentQuantityAt}`(ratio, parentOld)` follows its parent to\n`componentQuantityAt(ratio, parentNew)`; anything else is a hand edit and\nkeeps its number. The ratio is relative to the DIRECT parent.\n\n⚠️ Reads the CATALOG for now. Once every component line carries\n`quantity_per_parent` (core#131 Phase 2), Phase 3 switches it to the stamp\nand the catalog argument goes away.",
-          "paramTags": [
-            {
-              "name": "catalog",
-              "doc": "the ROOT product's `components[]` — the materialized whole tree"
-            },
-            {
-              "name": "rootPos",
-              "doc": "{@link kitRootPos} of the edited line, so editing a nested\nsub-kit still reads the root's catalog"
-            }
-          ],
+          "signature": "rescaleKitSubtree(items: T[], index: number, newQty: number): T[]",
+          "doc": "Set `items[index]` to `newQty` and rescale its component subtree per level —\nthe one answer shared by merge-on-add and a direct quantity edit on the order,\ninvoice and fulfillment items tables (moved from the manager, manager#639 item 4).\nReturns a new array; nothing is mutated. Sets quantity only — pricing is the\ncaller's document reprice.\n\n**Stamped ratio with override, applied per level** (core#131 Phase 3): a\ncomponent still at {@link componentQuantityAt}`(quantity_per_parent, parentOld)`\nfollows its parent to `componentQuantityAt(quantity_per_parent, parentNew)`;\nanything else is a hand edit and keeps its number, and so does its subtree,\nbecause its own quantity did not move. The ratio is relative to the DIRECT\nparent, as {@link buildOrderComponentLines} stamps it.\n\n⚠️ **A line with no stamp (`null` or absent) keeps its number.** That is every\ncomponent line written before the stamp, and there is no catalog fallback\n(owner, 2026-10-10): the document is the whole input, so the answer cannot\nchange under a catalog edit made after the line was written, and there is\nnothing to await.",
+          "paramTags": [],
           "returnsTag": null
         },
         {
