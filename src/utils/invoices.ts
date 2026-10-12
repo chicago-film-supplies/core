@@ -1008,6 +1008,12 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
     // line it was projected from. UNCONDITIONAL — see the docblock: this is the
     // one key here whose presence must not depend on its value.
     zero_priced: item.zero_priced ?? null,
+    // CONDITIONAL, unlike `zero_priced` above, and the population is why: every
+    // line stored before core#131 lacks the key on BOTH documents, so `?? null`
+    // would make each such pair report a key-set difference. Presence follows
+    // the order line's, never the value — the stamp is a snapshot, so the
+    // statedness hazard the docblock names cannot arise.
+    ...(item.quantity_per_parent !== undefined ? { quantity_per_parent: item.quantity_per_parent } : {}),
     // ⚠️ `coa_revenue` is an INVOICE_ONLY field, and projecting it is not a
     // contradiction — it is what makes the override an override. The invoice's
     // own value still wins (`carryForwardOverrides` re-applies it after the

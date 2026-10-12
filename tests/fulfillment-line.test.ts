@@ -3,6 +3,7 @@ import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import {
   fulfillmentSourceOfComponent,
   projectFulfillmentLine,
+  substitutionRootQuantityPerParent,
   substitutionRootZeroPriced,
 } from "../src/utils/fulfillment-items.ts";
 import { catalogComponentAt, retypedLinePrice } from "../src/utils/order-lines.ts";
@@ -117,7 +118,29 @@ Deno.test("fulfillmentSourceOfComponent: a catalog row that says nothing is bill
     description: "d",
     stock_method: "bulk",
     zero_priced: false,
+    quantity_per_parent: 1,
   });
+});
+
+Deno.test("fulfillmentSourceOfComponent: the catalog row's ratio is the stamp, 1 when it states none", () => {
+  const row = { uid: "c", name: "C", type: "rental", stock_method: "bulk" };
+  assertStrictEquals(fulfillmentSourceOfComponent({ ...row, quantity: 0.5 }).quantity_per_parent, 0.5);
+  assertStrictEquals(fulfillmentSourceOfComponent(row).quantity_per_parent, 1);
+});
+
+// Y takes X's slot, so it takes X's ratio; a pre-stamp or top-level X gives none.
+Deno.test("substitutionRootQuantityPerParent: the replacement takes X's stamp", () => {
+  assertStrictEquals(substitutionRootQuantityPerParent({ quantity_per_parent: 0.5 }), 0.5);
+  assertStrictEquals(substitutionRootQuantityPerParent({ quantity_per_parent: 0 }), 0);
+  assertStrictEquals(substitutionRootQuantityPerParent({ quantity_per_parent: null }), null);
+  assertStrictEquals(substitutionRootQuantityPerParent({}), null);
+});
+
+Deno.test("projectFulfillmentLine: quantity_per_parent follows the SOURCE's presence — a pre-stamp row gains no key", () => {
+  const base = { uid: "p", type: "rental" as const, name: "P" };
+  assert(!("quantity_per_parent" in projectFulfillmentLine(base, 1, ["p"])));
+  assertStrictEquals(projectFulfillmentLine({ ...base, quantity_per_parent: null }, 1, ["p"]).quantity_per_parent, null);
+  assertStrictEquals(projectFulfillmentLine({ ...base, quantity_per_parent: 0.5 }, 1, ["p"]).quantity_per_parent, 0.5);
 });
 
 // A kit listing one product under TWO parents — included free under X, charged

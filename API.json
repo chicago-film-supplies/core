@@ -17067,7 +17067,7 @@
         {
           "kind": "interface",
           "name": "FulfillmentLineSource",
-          "declaration": "interface FulfillmentLineSource {\n  readonly uid: string;\n  readonly type: indexedAccess;\n  readonly name: string;\n  readonly description?: string | null;\n  readonly stock_method?: indexedAccess;\n  readonly zero_priced?: boolean | null;\n}",
+          "declaration": "interface FulfillmentLineSource {\n  readonly uid: string;\n  readonly type: indexedAccess;\n  readonly name: string;\n  readonly description?: string | null;\n  readonly stock_method?: indexedAccess;\n  readonly zero_priced?: boolean | null;\n  readonly quantity_per_parent?: number | null;\n}",
           "doc": "What a line is made OF — the descriptive facts, from whichever source the\ncaller projects (an order line, a product, a catalog component)."
         },
         {
@@ -17143,6 +17143,14 @@
           "name": "rebuildFulfillmentItems",
           "signature": "rebuildFulfillmentItems(storedItems: readonly FulfillmentItemType[], submitted: readonly FulfillmentLineItemType[]): FulfillmentItemType[]",
           "doc": "Rebuild the items array from the stored document and a picker submission.\n\nStructure and sequence come from `storedItems`; membership, quantities and\nsubstitutions come from `submitted`. The result is a function of\n*(stored order, submitted set)* — **the order lines arrive in does not affect\nit**, which is the property the two previous implementations both lacked.\n\n- A stored line whose path the submission still carries is kept, in place,\n  carrying the submitted line's values.\n- A stored line the submission drops is removed.\n- A submitted line with no stored counterpart is a substitution: it is placed\n  immediately after the deepest ancestor the output still carries, which is\n  where its parentage comes from. Several substitutions against one ancestor\n  keep their submitted order relative to each other.\n- Structural items are never taken from the submission — the picker does not\n  own them, and the API strips them from the request body.\n\n`computeItemPaths` runs last and remains the ONE author of `path`; this\nfunction only decides the sequence it reads.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "substitutionRootQuantityPerParent",
+          "signature": "substitutionRootQuantityPerParent(replaced: typeLiteral): number | null",
+          "doc": "`quantity_per_parent` for a substitution's REPLACEMENT ROOT — X's stamp, by\nthe same slot rule as {@link substitutionRootZeroPriced} (core#131): Y sits in\nX's slot, under X's parent, so it goes with that parent at X's ratio. Y's own\nsubtree is stamped from Y's catalog ({@link fulfillmentSourceOfComponent}).\n\nAnything that is not a number reads as `null` — no ratio, so the root reads as\na mismatch and cuts proportionally (`kitCutQuantities`).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -18566,7 +18574,7 @@
         {
           "kind": "interface",
           "name": "CatalogSlot",
-          "declaration": "interface CatalogSlot {\n  readonly zero_priced?: boolean;\n}",
+          "declaration": "interface CatalogSlot {\n  readonly zero_priced?: boolean;\n  readonly quantity?: number;\n}",
           "doc": "What a parent's `components[]` row says about the SLOT a component line fills."
         },
         {
@@ -18698,6 +18706,14 @@
           "name": "kitRootPos",
           "signature": "kitRootPos(items: readonly T[], index: number): number",
           "doc": "The index in `items[index].path` of the outermost line-item ancestor — the\ntop-level kit product whose catalog describes the whole subtree. Every segment\nbefore it is a divider (order / destination / group). Returns -1 when the path\nholds no line segment, which a well-formed line cannot.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "quantityPerParentForSlot",
+          "signature": "quantityPerParentForSlot(slot: CatalogSlot | null): number | null",
+          "doc": "A line's `quantity_per_parent`, from the slot it fills (core#131): `null` for a\nline that fills no slot (top-level), else the ratio the slot expands at,\nrounded to 4 dp.\n\n`?? 1` because that is what {@link componentQuantities} expands a row that\nstates no quantity at, and the stamp must be the ratio the line was actually\nbuilt from — otherwise a freshly expanded line would read as hand-edited.\n\n⭐ **A SNAPSHOT, like `zero_priced` (owner, 2026-10-12).** It is read off the\ncatalog only when a row is first built; after that the stored stamp is carried\nby row, and a hand edit changes `quantity`, never this.",
           "paramTags": [],
           "returnsTag": null
         },

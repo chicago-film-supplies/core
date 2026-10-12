@@ -6,7 +6,9 @@ import {
   buildOrderComponentLines,
   buildOrderLineFromProduct,
   catalogSlotOf,
+  componentQuantityAt,
   deriveLineCatalogFacts,
+  quantityPerParentForSlot,
   zeroPricedForSlot,
 } from "../src/utils/order-lines.ts";
 import { OrderDocLineItem } from "../src/schemas/mod.ts";
@@ -247,6 +249,57 @@ Deno.test("a fractional ratio rounds up, so a kit is never short a component", (
   const doc = product({ components: [comp("B", ["A"], { quantity: 0.5 })] });
   assertEquals(buildOrderComponentLines(doc, { ...OPTS, quantity: 1 })[0].quantity, 1);
   assertEquals(buildOrderComponentLines(doc, { ...OPTS, quantity: 3 })[0].quantity, 2);
+});
+
+// ── quantity_per_parent: the stamp (core#131 Phase 2) ───────────────
+
+Deno.test("quantityPerParentForSlot: null with no slot, the slot's ratio at 4 dp, 1 when it states none", () => {
+  assertEquals(quantityPerParentForSlot(null), null);
+  assertEquals(quantityPerParentForSlot({ quantity: 0.5 }), 0.5);
+  assertEquals(quantityPerParentForSlot({ quantity: 0 }), 0); // an optional the operator raises
+  assertEquals(quantityPerParentForSlot({ quantity: 1.01 }), 1.01);
+  assertEquals(quantityPerParentForSlot({ quantity: 0.123456 }), 0.1235);
+  // `?? 1`: what the expansion uses for a row stating no quantity.
+  assertEquals(quantityPerParentForSlot({}), 1);
+});
+
+Deno.test("buildOrderComponentLines stamps each line with its DIRECT parent's ratio", () => {
+  const doc = product({
+    components: [
+      comp("B", ["A"], { quantity: 2 }),
+      comp("C", ["A", "B"], { quantity: 0.5 }),
+      comp("D", ["A"], { quantity: undefined }),
+    ],
+  });
+  const byUid = new Map(buildOrderComponentLines(doc, { ...OPTS, quantity: 3 }).map((l) => [l.uid, l]));
+  assertEquals(byUid.get("B")!.quantity_per_parent, 2);
+  assertEquals(byUid.get("C")!.quantity_per_parent, 0.5); // relative to B, not to the root
+  assertEquals(byUid.get("D")!.quantity_per_parent, 1);
+});
+
+Deno.test("a freshly expanded line reads as NOT hand-edited: componentQuantityAt(stamp, parent) === quantity", () => {
+  const doc = product({
+    components: [
+      comp("B", ["A"], { quantity: 0.25 }),
+      comp("C", ["A", "B"], { quantity: 0.07 }),
+      comp("E", ["A"], { quantity: 1.01 }),
+    ],
+  });
+  for (const q of [1, 3, 7, 100]) {
+    const lines = buildOrderComponentLines(doc, { ...OPTS, quantity: q });
+    const qtyOf = new Map(lines.map((l) => [l.uid, l.quantity]));
+    for (const l of lines) {
+      const parentQty = l.path.length === 2 ? q : qtyOf.get(l.path.at(-2)!)!;
+      assertEquals(componentQuantityAt(l.quantity_per_parent!, parentQty), l.quantity, `${l.uid} at ${q}`);
+    }
+  }
+});
+
+Deno.test("a top-level and a custom line state quantity_per_parent: null — they fill no slot", () => {
+  assertEquals(buildOrderLineFromProduct(product(), OPTS).quantity_per_parent, null);
+  const custom = buildCustomOrderLine({ type: "sale", chargeDays: null, taxes: [], uid_tax_class: "AbCdEfGhIjKlMnOpQrSt" });
+  assertEquals(custom.quantity_per_parent, null);
+  assert(OrderDocLineItem.safeParse(custom).success);
 });
 
 // ── buildOrderComponentLines: filtering + ordering ──────────────────

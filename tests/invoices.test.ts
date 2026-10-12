@@ -2696,6 +2696,17 @@ Deno.test("projectOrderItemToInvoiceItem: the export IS what the sync path compa
   }
 });
 
+Deno.test("projectOrderItemToInvoiceItem: quantity_per_parent is carried only when the order line states it (core#131)", () => {
+  const line = RESYNC_ORDER_ITEMS.find((i) => isInvoiceLineItem({ type: i.type } as InvoiceDocItemType))!;
+  const { quantity_per_parent: _drop, ...preStamp } = line as LineItem;
+  // A pre-stamp line gains no key, so the pair it already has stays key-set equal.
+  assert(!("quantity_per_parent" in projectOrderItemToInvoiceItem(preStamp as LineItem, ORDER_DIV_1)));
+  for (const qpp of [null, 0, 0.5]) {
+    const projected = projectOrderItemToInvoiceItem({ ...line, quantity_per_parent: qpp } as LineItem, ORDER_DIV_1);
+    assertEquals((projected as { quantity_per_parent?: number | null }).quantity_per_parent, qpp);
+  }
+});
+
 Deno.test("fail-closed companion: comparing the two SHAPES directly still disagrees", () => {
   const orderLine = orderShapedLine();
   const invoiceLine = buildOrderScopedItems([orderLine], ORDER_DIV_1)[0] as InvoiceItem;

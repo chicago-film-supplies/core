@@ -36953,6 +36953,7 @@ interface FulfillmentLineSource {
   readonly description?: string | null;
   readonly stock_method?: indexedAccess;
   readonly zero_priced?: boolean | null;
+  readonly quantity_per_parent?: number | null;
 }
 ```
 
@@ -37099,6 +37100,16 @@ it**, which is the property the two previous implementations both lacked.
 
 `computeItemPaths` runs last and remains the ONE author of `path`; this
 function only decides the sequence it reads.
+
+### `substitutionRootQuantityPerParent(replaced: typeLiteral): number | null`
+
+`quantity_per_parent` for a substitution's REPLACEMENT ROOT — X's stamp, by
+the same slot rule as {@link substitutionRootZeroPriced} (core#131): Y sits in
+X's slot, under X's parent, so it goes with that parent at X's ratio. Y's own
+subtree is stamped from Y's catalog ({@link fulfillmentSourceOfComponent}).
+
+Anything that is not a number reads as `null` — no ratio, so the root reads as
+a mismatch and cuts proportionally (`kitCutQuantities`).
 
 ### `substitutionRootZeroPriced(replaced: typeLiteral): boolean | null`
 
@@ -39810,6 +39821,7 @@ What a parent's `components[]` row says about the SLOT a component line fills.
 ```ts
 interface CatalogSlot {
   readonly zero_priced?: boolean;
+  readonly quantity?: number;
 }
 ```
 
@@ -40109,6 +40121,20 @@ The index in `items[index].path` of the outermost line-item ancestor — the
 top-level kit product whose catalog describes the whole subtree. Every segment
 before it is a divider (order / destination / group). Returns -1 when the path
 holds no line segment, which a well-formed line cannot.
+
+### `quantityPerParentForSlot(slot: CatalogSlot | null): number | null`
+
+A line's `quantity_per_parent`, from the slot it fills (core#131): `null` for a
+line that fills no slot (top-level), else the ratio the slot expands at,
+rounded to 4 dp.
+
+`?? 1` because that is what {@link componentQuantities} expands a row that
+states no quantity at, and the stamp must be the ratio the line was actually
+built from — otherwise a freshly expanded line would read as hand-edited.
+
+⭐ **A SNAPSHOT, like `zero_priced` (owner, 2026-10-12).** It is read off the
+catalog only when a row is first built; after that the stored stamp is carried
+by row, and a hand edit changes `quantity`, never this.
 
 ### `rescaleKitSubtree(items: T[], index: number, newQty: number, catalog: readonly CatalogComponentLike[], rootPos: number): T[]`
 

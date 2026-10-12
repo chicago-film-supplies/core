@@ -418,6 +418,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "deriveLineCatalogFacts", // a line's catalog facts, at build time
     "retypedLinePrice", // rewrites a custom line's price on a type switch
     "zeroPricedForSlot", // a line's flag, at build time
+    "quantityPerParentForSlot", // a line's kit ratio stamp, at build time
   ],
   products: [
     // Denormalization machinery for `products.query_by_images`, re-exported here
@@ -663,6 +664,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "fulfillmentSourceOfComponent",
     "projectFulfillmentLine",
     "substitutionRootZeroPriced",
+    "substitutionRootQuantityPerParent",
     "keepKitAncestors",
     "rebuildFulfillmentItems",
   ],

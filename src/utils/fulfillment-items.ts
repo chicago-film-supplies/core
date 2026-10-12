@@ -41,7 +41,7 @@ import { computeItemPaths } from "./orders.ts";
 import { collectSubstitutionAnchors, isStrictlyBelow, isSubstitutionRow } from "./substitutions.ts";
 import { isFulfillmentLineItem } from "../schemas/fulfillment.ts";
 import { isFulfillableItemType } from "../schemas/common.ts";
-import { deriveLineCatalogFacts, zeroPricedForSlot } from "./order-lines.ts";
+import { deriveLineCatalogFacts, quantityPerParentForSlot, zeroPricedForSlot } from "./order-lines.ts";
 import type {
   FulfillmentItemType,
   FulfillmentLineItemType,
@@ -299,6 +299,13 @@ export interface FulfillmentLineSource {
   readonly stock_method?: FulfillmentLineItemType["stock_method"];
   /** Already resolved to the answer the ROW should state — see {@link substitutionRootZeroPriced} and {@link fulfillmentSourceOfComponent}. */
   readonly zero_priced?: boolean | null;
+  /**
+   * The row's per-parent kit ratio (core#131) — already resolved, like
+   * `zero_priced`: an order line's stored stamp, a catalog component's slot
+   * ({@link fulfillmentSourceOfComponent}), or a substitution root's X
+   * ({@link substitutionRootQuantityPerParent}).
+   */
+  readonly quantity_per_parent?: number | null;
 }
 
 /**
@@ -354,6 +361,12 @@ export function projectFulfillmentLine(
     zero_priced: source.zero_priced ?? null,
     quantity_ordered: orderFacts.quantity_ordered ?? null,
   };
+  // CONDITIONAL, unlike `zero_priced`: every line stored before the stamp
+  // existed lacks the key, and its order line lacks it too, so emitting `null`
+  // for an absent source would make every pre-stamp row differ from its stored
+  // self on a field neither ever set. The key's presence follows the SOURCE's,
+  // never its value — the stamp is a snapshot, so a value never comes and goes.
+  if (source.quantity_per_parent !== undefined) line.quantity_per_parent = source.quantity_per_parent;
   if (source.stock_method !== undefined) line.stock_method = source.stock_method;
   if (orderFacts.order_number !== undefined) line.order_number = orderFacts.order_number;
   if (orderFacts.uid_order !== undefined) line.uid_order = orderFacts.uid_order;
@@ -382,6 +395,21 @@ export function substitutionRootZeroPriced(
 }
 
 /**
+ * `quantity_per_parent` for a substitution's REPLACEMENT ROOT — X's stamp, by
+ * the same slot rule as {@link substitutionRootZeroPriced} (core#131): Y sits in
+ * X's slot, under X's parent, so it goes with that parent at X's ratio. Y's own
+ * subtree is stamped from Y's catalog ({@link fulfillmentSourceOfComponent}).
+ *
+ * Anything that is not a number reads as `null` — no ratio, so the root reads as
+ * a mismatch and cuts proportionally (`kitCutQuantities`).
+ */
+export function substitutionRootQuantityPerParent(
+  replaced: { readonly quantity_per_parent?: unknown },
+): number | null {
+  return typeof replaced.quantity_per_parent === "number" ? replaced.quantity_per_parent : null;
+}
+
+/**
  * The {@link FulfillmentLineSource} of a CATALOG component row — a row inside a
  * substituted subtree, or a component sent with an exchange's replacement.
  *
@@ -398,6 +426,7 @@ export function fulfillmentSourceOfComponent(
     readonly type?: string;
     readonly stock_method?: string;
     readonly zero_priced?: boolean;
+    readonly quantity?: number;
   },
 ): FulfillmentLineSource {
   const facts = deriveLineCatalogFacts(row, zeroPricedForSlot(row));
@@ -408,5 +437,7 @@ export function fulfillmentSourceOfComponent(
     description: row.description,
     stock_method: facts.stock_method as FulfillmentLineItemType["stock_method"],
     zero_priced: facts.zero_priced,
+    // The row is the slot, so its ratio is the stamp — as `buildOrderComponentLines`.
+    quantity_per_parent: quantityPerParentForSlot(row),
   };
 }

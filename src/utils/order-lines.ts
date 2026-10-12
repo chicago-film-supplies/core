@@ -103,6 +103,8 @@ export interface CatalogLineSource {
 /** What a parent's `components[]` row says about the SLOT a component line fills. */
 export interface CatalogSlot {
   readonly zero_priced?: boolean;
+  /** The per-parent ratio the slot expands at — see {@link quantityPerParentForSlot}. */
+  readonly quantity?: number;
 }
 
 /**
@@ -137,6 +139,28 @@ export interface LineCatalogFacts {
  */
 export function zeroPricedForSlot(slot: CatalogSlot | null): boolean | null {
   return slot === null ? null : slot.zero_priced === true;
+}
+
+/**
+ * A line's `quantity_per_parent`, from the slot it fills (core#131): `null` for a
+ * line that fills no slot (top-level), else the ratio the slot expands at,
+ * rounded to 4 dp.
+ *
+ * `?? 1` because that is what {@link componentQuantities} expands a row that
+ * states no quantity at, and the stamp must be the ratio the line was actually
+ * built from — otherwise a freshly expanded line would read as hand-edited.
+ *
+ * ⭐ **A SNAPSHOT, like `zero_priced` (owner, 2026-10-12).** It is read off the
+ * catalog only when a row is first built; after that the stored stamp is carried
+ * by row, and a hand edit changes `quantity`, never this.
+ */
+export function quantityPerParentForSlot(slot: CatalogSlot | null): number | null {
+  return slot === null ? null : roundRatio(slot.quantity ?? 1);
+}
+
+/** A kit ratio quantized to the 4 dp it is stored at (`AuthoredComponentSchema.quantity`). */
+function roundRatio(ratio: number): number {
+  return Math.round(ratio * 10_000) / 10_000;
 }
 
 /**
@@ -303,6 +327,7 @@ export function buildOrderLineFromProduct(
     // both as an explicit `null` — so the optimistic row matches the echo.
     inclusion_type: null,
     zero_priced: facts.zero_priced,
+    quantity_per_parent: quantityPerParentForSlot(null),
     // The class the product is taxed as, so the optimistic reprice resolves
     // what the server will stamp; a hit indexed before the field takes its
     // type's default, which is the server's fallback too.
@@ -370,6 +395,7 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
     path: [],
     inclusion_type: null,
     zero_priced: null,
+    quantity_per_parent: null,
     uid_tax_class: opts.uid_tax_class,
     price: {
       base_cents: opts.base_cents ?? 0,
@@ -638,6 +664,10 @@ export function buildOrderComponentLines(
       path,
       inclusion_type: comp.inclusion_type as OrderDocLineItemType["inclusion_type"],
       zero_priced: facts.zero_priced,
+      // The ratio this line was just expanded at, relative to its DIRECT parent
+      // — `componentQuantityAt(quantity_per_parent, parent.quantity)` reproduces
+      // `quantity` until someone edits it (core#131).
+      quantity_per_parent: quantityPerParentForSlot(comp),
       uid_tax_class: comp.uid_tax_class || opts.taxClassForType(type),
       price: {
         // No `base_percent` key: a component line never wrote one, and a
