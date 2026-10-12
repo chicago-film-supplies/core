@@ -14,7 +14,8 @@
 >   flag before the build in `api-cloudrun/src/lib/orderLineZeroPriced.ts`.
 > - ⭐ **Owner ruling 2026-10-12: `zero_priced` is a SNAPSHOT carried by row** (stored flag for
 >   an existing row, the catalog slot only for a new row, never the client's). The stamp
->   already had snapshot semantics in this plan, so Phase 2 below takes the same shape.
+>   already had snapshot semantics in this plan, so Phase 2 below takes the same shape —
+>   confirmed for the stamp by the owner the same day.
 
 ## Problem
 
@@ -165,9 +166,9 @@ the single authors they created, so the stamp lands in each ONCE:
 - **api order writer**: `resolveOrderZeroPriced` (`api-cloudrun/src/lib/orderLineZeroPriced.ts`)
   already resolves each row's slot and carries the stored value by row. Generalize it to
   resolve the stamp the same way, so a new row is stamped from its slot and an existing
-  row keeps its stored stamp: the snapshot rule, and the client is never the source. ⚠️
-  This is a recommendation: the owner ruled the snapshot for `zero_priced`, and the stamp
-  was already "a snapshot" in this plan, but confirm the server-derives-it half.
+  row keeps its stored stamp: the snapshot rule, and the client is never the source.
+  **Owner ruling 2026-10-12: yes** — the stamp follows `zero_priced`'s snapshot rule
+  exactly (catalog slot for a new row, stored value carried by row, never the client's).
 - **Named-field projectors drop it unless told:**
   - `projectOrderItemToInvoiceItem` (`core/src/utils/invoices.ts`). Spread it only when
     present, because `invoiceItemDifferences` compares key sets.
