@@ -70,7 +70,7 @@ import { z } from "zod";
 
 import { FIRESTORE_TIMESTAMP_META, FirestoreTimestamp } from "../src/schemas/common.ts";
 import { InvoiceSchema } from "../src/schemas/invoice.ts";
-import { schemaFor } from "../src/schemas/mod.ts";
+import { coveringColumn, getQueryByStringFields, schemaFor } from "../src/schemas/mod.ts";
 import { typesenseSchemas } from "../src/schemas/typesense/mod.ts";
 import { isStrippedAtIndexTime } from "../src/schemas/typesense/types.ts";
 import type { TypesenseField } from "../src/schemas/typesense/types.ts";
@@ -421,6 +421,60 @@ Deno.test("typesense coverage: no declared field is deleted at index time", () =
       "declare the nested sub-fields you actually want to query.\n\n" +
       stripped.join("\n"),
   );
+});
+
+// ── `text: true` — a facet that is also a free-text target ───────────
+
+/** Why a `text: true` declaration is wrong, or `null` when it is legal. */
+function textFlagDefect(alias: string, field: TypesenseField): string | null {
+  if (!field.text) return null;
+  if (field.type !== "string" && field.type !== "string[]") return `${alias}:${field.name} is ${field.type}, not text`;
+  if (!field.facet) return `${alias}:${field.name} is not a facet, so it is already a query_by target`;
+  // The operator rule also requires a covering column, so a flag on an uncovered
+  // field is DEAD — declared, and never searched. cards' `organization.path.name`
+  // was flagged in the first draft and was exactly that.
+  if (!coveringColumn(alias, field.name)) return `${alias}:${field.name} has no covering column, so it never reaches query_by`;
+  return null;
+}
+
+Deno.test("typesense coverage: every `text: true` is a covered string facet", () => {
+  const defects: string[] = [];
+  let flagged = 0;
+  for (const [alias, config] of Object.entries(typesenseSchemas)) {
+    for (const field of config.schema.fields) {
+      if (field.text) flagged++;
+      const defect = textFlagDefect(alias, field);
+      if (defect) defects.push(defect);
+    }
+  }
+  assertEquals(defects, [], "`text: true` only makes sense on a string FACET that a column covers:\n" + defects.join("\n"));
+  assert(flagged > 0, "no field declares `text: true` — this arm is vacuous");
+});
+
+Deno.test("typesense coverage companion: the `text` arm reports each kind of bad declaration", () => {
+  const field = (over: Partial<TypesenseField>): TypesenseField => ({ name: "tags.name", type: "string[]", facet: true, text: true, ...over });
+  assertEquals(textFlagDefect("products", field({})), null, "a real covered string facet must be legal");
+  assert(textFlagDefect("products", field({ type: "int64[]" }))?.includes("not text"));
+  assert(textFlagDefect("products", field({ facet: false }))?.includes("not a facet"));
+  // A real indexed field with no covering column on its surface.
+  assert(textFlagDefect("cards", field({ name: "organization.path.name" }))?.includes("no covering column"));
+});
+
+Deno.test("operator query_by: opted-in facets are searched, vocabulary facets and uids are not", () => {
+  // Measured 2026-10-12, prod: `q=janitorial` over products found 0 hits under
+  // the pre-`text` rule and 48 — the `tags.name` facet count — with `tags.name`.
+  const products = getQueryByStringFields("products").split(",");
+  for (const f of ["name", "tags.name", "tracking_category_name"]) assert(products.includes(f), `products query_by lacks ${f}`);
+  for (const f of ["type", "stock_method", "uid", "price.formula"]) assert(!products.includes(f), `products query_by includes ${f}`);
+
+  const orders = getQueryByStringFields("orders").split(",");
+  for (const f of ["destinations.delivery.contact.name", "destinations.collection.contact.name"]) {
+    assert(orders.includes(f), `orders query_by lacks ${f}`);
+  }
+  for (const f of ["status", "uid"]) assert(!orders.includes(f), `orders query_by includes ${f}`);
+
+  assert(getQueryByStringFields("cards").split(",").includes("destination.contact.name"));
+  assertEquals(getQueryByStringFields("not-a-collection"), "");
 });
 
 // ── Display defaults name declared fields ───────────────────────────

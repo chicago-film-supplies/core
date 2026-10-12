@@ -30,6 +30,7 @@ export {
   TypesenseSynonymSchema,
   typesenseAddressFields,
   toWireSchema,
+  toHashSchema,
 } from "./types.ts";
 
 export type {

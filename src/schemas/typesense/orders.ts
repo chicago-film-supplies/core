@@ -54,7 +54,7 @@ export const orders: TypesenseCollectionConfig = {
       // beside the address. `pii: "mask"` on these governs LOG scrubbing and
       // template goldens, not storage or the index; `orders.search` +
       // `orders.read` is the authorization boundary (owner, 2026-09-19).
-      { name: "destinations.delivery.contact.name", type: "string[]", stem: true, facet: true, optional: true },
+      { name: "destinations.delivery.contact.name", type: "string[]", stem: true, facet: true, text: true, optional: true },
       { name: "destinations.delivery.contact.phones", type: "string[]", facet: true, optional: true },
       { name: "destinations.collection", type: "object[]", optional: true },
       ...typesenseAddressFields("destinations.collection.address", { array: true }),
@@ -69,7 +69,7 @@ export const orders: TypesenseCollectionConfig = {
       // beside the address. `pii: "mask"` on these governs LOG scrubbing and
       // template goldens, not storage or the index; `orders.search` +
       // `orders.read` is the authorization boundary (owner, 2026-09-19).
-      { name: "destinations.collection.contact.name", type: "string[]", stem: true, facet: true, optional: true },
+      { name: "destinations.collection.contact.name", type: "string[]", stem: true, facet: true, text: true, optional: true },
       { name: "destinations.collection.contact.phones", type: "string[]", facet: true, optional: true },
       { name: "destinations.dates", type: "object[]", optional: true },
       { name: "destinations.dates.delivery_start_fs", type: "int64[]", index: true, facet: false, optional: true },

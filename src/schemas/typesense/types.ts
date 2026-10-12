@@ -70,6 +70,26 @@ export interface TypesenseField {
    * lexically.
    */
   money?: boolean;
+  /**
+   * This **facet** is also a free-text `query_by` target in the manager.
+   *
+   * The operator search rule (`getQueryByStringFields`, `schemas/mod.ts`)
+   * excludes facets, because most of them are closed vocabularies — a status or
+   * a type — and folding one into full-text search makes every row whose
+   * status merely contains the query term match. Some facets are not
+   * vocabularies but human text an operator types: a tag name, a category
+   * name, a contact's name. Those were invisible to search — measured
+   * 2026-10-12, prod `q=janitorial` over products found **0** of the 48
+   * products the `tags.name` facet reports.
+   *
+   * Only legal on a `string` / `string[]` field that is also `facet: true`
+   * (`tests/typesenseFieldCoverage.test.ts`): on a non-facet it is redundant,
+   * on a non-string it means nothing.
+   *
+   * A QUERY-time annotation: it changes no indexed value, so `toHashSchema`
+   * removes it and toggling it never forces a reindex. Contrast `money`.
+   */
+  text?: boolean;
 }
 
 /** Zod schema for TypesenseField. */
@@ -82,6 +102,7 @@ export const TypesenseFieldSchema: z.ZodType<TypesenseField> = z.strictObject({
   index: z.boolean().optional(),
   optional: z.boolean().optional(),
   money: z.boolean().optional(),
+  text: z.boolean().optional(),
 });
 
 /**
@@ -89,10 +110,19 @@ export const TypesenseFieldSchema: z.ZodType<TypesenseField> = z.strictObject({
  * must be stripped before the schema reaches the collections API.
  *
  * `sort`, `stem`, `facet`, `index` and `optional` are all real Typesense
- * properties and pass through. `money` is not — it instructs *our* `_str` mirror
- * builder and means nothing to the search engine.
+ * properties and pass through. `money` and `text` are not — `money` instructs
+ * *our* `_str` mirror builder and `text` the manager's `query_by` rule, and
+ * neither means anything to the search engine.
+ *
+ * ⚠️ **They split by whether they change what is INDEXED**, and that split is
+ * what the reindex hash reads (`toHashSchema`):
+ * - `money` changes every `_str` mirror's content → stays in the hash.
+ * - `text` changes only which fields a caller searches → excluded from it.
+ * A new key must be added to exactly one of the two lists.
  */
-const CFS_ONLY_FIELD_KEYS = ["money"] as const;
+const CFS_INDEX_FIELD_KEYS = ["money"] as const;
+const CFS_QUERY_FIELD_KEYS = ["text"] as const;
+const CFS_ONLY_FIELD_KEYS = [...CFS_INDEX_FIELD_KEYS, ...CFS_QUERY_FIELD_KEYS] as const;
 
 /**
  * Prefix marking a **Firestore reverse-index mirror** — a denormalized flat
@@ -133,12 +163,12 @@ export function isStrippedAtIndexTime(fieldName: string): boolean {
  * field property. Call this at the one place the create-collection body is
  * built; everywhere else wants the annotated schema.
  *
- * **Deliberately not used for the reindex schema hash.** The hash covers the
- * full annotated schema, so adding or removing a `money` marker changes it and
- * forces a reindex — which is exactly right, because the marker changes what
- * every `_str` mirror in that collection contains. A hash over the wire form
- * would call the change a no-op and leave a stale index that no dollar-amount
- * query could reach.
+ * **Deliberately not used for the reindex schema hash** — that is
+ * `toHashSchema`. The hash keeps `money`, so adding or removing a `money`
+ * marker forces a reindex — which is exactly right, because the marker changes
+ * what every `_str` mirror in that collection contains. A hash over the wire
+ * form would call the change a no-op and leave a stale index that no
+ * dollar-amount query could reach.
  */
 export function toWireSchema(schema: TypesenseSchema): TypesenseSchema {
   return {
@@ -147,6 +177,30 @@ export function toWireSchema(schema: TypesenseSchema): TypesenseSchema {
       const wire: Record<string, unknown> = { ...field };
       for (const key of CFS_ONLY_FIELD_KEYS) delete wire[key];
       return wire as unknown as TypesenseField;
+    }),
+  };
+}
+
+/**
+ * The schema the reindex hash covers — the annotated schema minus the
+ * QUERY-time annotations (`text`), which change no indexed value.
+ *
+ * Feed this, never `toWireSchema`, to api-cloudrun's `computeSchemaHash`
+ * (`api-cloudrun/src/lib/typesenseReindexHash.ts`): the INDEX-time `money`
+ * marker must stay in the hash (see `toWireSchema`), while toggling `text`
+ * must not rebuild a collection whose documents it does not touch.
+ *
+ * Field key order is preserved and an absent key is not added, so for a schema
+ * carrying no query-time key the result serializes byte-identically to the
+ * input — which is what lets this land without reindexing anything.
+ */
+export function toHashSchema(schema: TypesenseSchema): TypesenseSchema {
+  return {
+    ...schema,
+    fields: schema.fields.map((field) => {
+      const hashed: Record<string, unknown> = { ...field };
+      for (const key of CFS_QUERY_FIELD_KEYS) delete hashed[key];
+      return hashed as unknown as TypesenseField;
     }),
   };
 }

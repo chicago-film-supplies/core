@@ -6323,6 +6323,14 @@
         },
         {
           "kind": "function",
+          "name": "coveringColumn",
+          "signature": "coveringColumn(alias: string, fieldName: string): DisplayTableColumn | null",
+          "doc": "The declared column that **covers** an indexed field: the field itself if it\nis a column, otherwise the longest column key it sits beneath.\n\nA column names an entity, and the index's sub-fields of that entity belong to\nit. `organizations.contacts` is one column rendering a joined name, and the\nindex carries `contacts.first_name` / `contacts.last_name` / `contacts.roles`\nseparately — those are how you *search* for the org whose contact is Andrea,\nand they take their heading from the column above them. Same for\n`created_by.name`, which is a facet under the `created_by` column.\n\nThis is what keeps the search and filter surfaces from shrinking to the column\nsurface. Gating them on exact column membership alone lost contact-name search\non organizations, orders and fulfillments, and the created-by facet everywhere.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "custodyMovementSlot",
           "signature": "custodyMovementSlot(rule: CustodyRule, bookingType: \"rental\" | \"sale\"): string | null",
           "doc": "The movement-id slot an action occupies in one save, or `null` when it writes\nno movement for that booking type.\n\nA movement's id is `{session}|{type}|{booking}`, so two actions of one type\nagainst one booking in one save collide. The exception is a `flag` into or\nout of `cleaning`/`maintenance`, whose id is its reason's own (the api's\n`transitionMovementId`), so `flag_cleaning_returned` and\n`flag_damaged_returned` in one save are two slots.",
@@ -6476,6 +6484,22 @@
           "name": "getOrderStatusTransitions",
           "signature": "getOrderStatusTransitions(current: OrderStatusType): OrderUserStatusType[]",
           "doc": "The statuses an operator can move to from the given current status — the\nuser-settable set minus the current status.\n\nFrom a computed status only ONE manual move exists: `active → canceled`\n(stock campaign decision 13, owner 2026-10-08). It is legal as a TRANSITION;\nwhether this particular order may take it is `cancelRefusal`'s question\n(`@cfs/core/utils/orders`), which refuses while any booking still holds\nunits that have to come back or be undone first. `complete` has none: a\ncomplete order reopens through an edit, never a status write.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "getQueryByNumberFields",
+          "signature": "getQueryByNumberFields(alias: string): string",
+          "doc": "The `query_by` for a query with no letters in it — the `_str` mirrors, which\ncarry numbers (and rendered money) as searchable text. `\"\"` for an unknown\nalias.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "getQueryByStringFields",
+          "signature": "getQueryByStringFields(alias: string): string",
+          "doc": "The **operator** free-text `query_by` for a Typesense alias — the covered\nstring fields that are not facets, plus the facets that opt in with\n`text: true`. `\"\"` for an unknown alias.\n\nFacets are excluded by default because they are the *filter* surface: a\nstatus facet already narrows by exact value, and folding it into full-text\nsearch makes every query match every row whose status merely contains the\nterm. A facet holding human text rather than a vocabulary — a tag name, a\ncontact's name — declares `text: true` (`typesense/types.ts`) and is searched\nas well as filtered.\n\nWhat the coverage rule keeps out: `items.path` (a uuid chain),\n`items.price.taxes.type` and its siblings (the `percent`/`flat`\ndiscriminators — every order matches \"percent\"), and `images.alt`.\n\n⚠️ **api-cloudrun's `deriveQueryBy` (`api-cloudrun/src/lib/searchableCollections.ts`)\nis a DIFFERENT rule on purpose**: every indexed string field, facets and uids\nincluded, because its caller is an ad-hoc MCP/agent search that wants recall\n(a product by uid, an order by a status word). Do not point it here without\ndeciding that agent search should narrow.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12174,7 +12198,7 @@
         {
           "kind": "interface",
           "name": "TypesenseField",
-          "declaration": "interface TypesenseField {\n  name: string;\n  type: TypesenseFieldType;\n  sort?: boolean;\n  stem?: boolean;\n  facet?: boolean;\n  index?: boolean;\n  optional?: boolean;\n  money?: boolean;\n}",
+          "declaration": "interface TypesenseField {\n  name: string;\n  type: TypesenseFieldType;\n  sort?: boolean;\n  stem?: boolean;\n  facet?: boolean;\n  index?: boolean;\n  optional?: boolean;\n  money?: boolean;\n  text?: boolean;\n}",
           "doc": "A single field definition in a Typesense collection schema."
         },
         {
@@ -12481,9 +12505,17 @@
         },
         {
           "kind": "function",
+          "name": "toHashSchema",
+          "signature": "toHashSchema(schema: TypesenseSchema): TypesenseSchema",
+          "doc": "The schema the reindex hash covers — the annotated schema minus the\nQUERY-time annotations (`text`), which change no indexed value.\n\nFeed this, never `toWireSchema`, to api-cloudrun's `computeSchemaHash`\n(`api-cloudrun/src/lib/typesenseReindexHash.ts`): the INDEX-time `money`\nmarker must stay in the hash (see `toWireSchema`), while toggling `text`\nmust not rebuild a collection whose documents it does not touch.\n\nField key order is preserved and an absent key is not added, so for a schema\ncarrying no query-time key the result serializes byte-identically to the\ninput — which is what lets this land without reindexing anything.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "toWireSchema",
           "signature": "toWireSchema(schema: TypesenseSchema): TypesenseSchema",
-          "doc": "The wire form of a collection schema — what actually gets POSTed to\n`collections`.\n\nA CFS annotation left on a field would be sent to Typesense as if it were a\nfield property. Call this at the one place the create-collection body is\nbuilt; everywhere else wants the annotated schema.\n\n**Deliberately not used for the reindex schema hash.** The hash covers the\nfull annotated schema, so adding or removing a `money` marker changes it and\nforces a reindex — which is exactly right, because the marker changes what\nevery `_str` mirror in that collection contains. A hash over the wire form\nwould call the change a no-op and leave a stale index that no dollar-amount\nquery could reach.",
+          "doc": "The wire form of a collection schema — what actually gets POSTed to\n`collections`.\n\nA CFS annotation left on a field would be sent to Typesense as if it were a\nfield property. Call this at the one place the create-collection body is\nbuilt; everywhere else wants the annotated schema.\n\n**Deliberately not used for the reindex schema hash** — that is\n`toHashSchema`. The hash keeps `money`, so adding or removing a `money`\nmarker forces a reindex — which is exactly right, because the marker changes\nwhat every `_str` mirror in that collection contains. A hash over the wire\nform would call the change a no-op and leave a stale index that no\ndollar-amount query could reach.",
           "paramTags": [],
           "returnsTag": null
         },

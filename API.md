@@ -14218,6 +14218,22 @@ been one `.optional().nullable()` away from silently truncating. Hitting the
 cap pushes a `__depth_cap__` entry into `unhandled` rather than returning
 quietly.
 
+### `coveringColumn(alias: string, fieldName: string): DisplayTableColumn | null`
+
+The declared column that **covers** an indexed field: the field itself if it
+is a column, otherwise the longest column key it sits beneath.
+
+A column names an entity, and the index's sub-fields of that entity belong to
+it. `organizations.contacts` is one column rendering a joined name, and the
+index carries `contacts.first_name` / `contacts.last_name` / `contacts.roles`
+separately — those are how you *search* for the org whose contact is Andrea,
+and they take their heading from the column above them. Same for
+`created_by.name`, which is a facet under the `created_by` column.
+
+This is what keeps the search and filter surfaces from shrinking to the column
+surface. Gating them on exact column membership alone lost contact-name search
+on organizations, orders and fulfillments, and the created-by facet everywhere.
+
 ### `custodyMovementSlot(rule: CustodyRule, bookingType: "rental" | "sale"): string | null`
 
 The movement-id slot an action occupies in one save, or `null` when it writes
@@ -14473,6 +14489,35 @@ whether this particular order may take it is `cancelRefusal`'s question
 (`@cfs/core/utils/orders`), which refuses while any booking still holds
 units that have to come back or be undone first. `complete` has none: a
 complete order reopens through an edit, never a status write.
+
+### `getQueryByNumberFields(alias: string): string`
+
+The `query_by` for a query with no letters in it — the `_str` mirrors, which
+carry numbers (and rendered money) as searchable text. `""` for an unknown
+alias.
+
+### `getQueryByStringFields(alias: string): string`
+
+The **operator** free-text `query_by` for a Typesense alias — the covered
+string fields that are not facets, plus the facets that opt in with
+`text: true`. `""` for an unknown alias.
+
+Facets are excluded by default because they are the *filter* surface: a
+status facet already narrows by exact value, and folding it into full-text
+search makes every query match every row whose status merely contains the
+term. A facet holding human text rather than a vocabulary — a tag name, a
+contact's name — declares `text: true` (`typesense/types.ts`) and is searched
+as well as filtered.
+
+What the coverage rule keeps out: `items.path` (a uuid chain),
+`items.price.taxes.type` and its siblings (the `percent`/`flat`
+discriminators — every order matches "percent"), and `images.alt`.
+
+⚠️ **api-cloudrun's `deriveQueryBy` (`api-cloudrun/src/lib/searchableCollections.ts`)
+is a DIFFERENT rule on purpose**: every indexed string field, facets and uids
+included, because its caller is an ad-hoc MCP/agent search that wants recall
+(a product by uid, an order by a status word). Do not point it here without
+deciding that agent search should narrow.
 
 ### `getServerSortableColumns(schema: z.ZodType): Record<string, string>`
 
@@ -27119,6 +27164,7 @@ interface TypesenseField {
   index?: boolean;
   optional?: boolean;
   money?: boolean;
+  text?: boolean;
 }
 ```
 
@@ -27669,6 +27715,20 @@ so provisioning skips this collection; the schema exists only to keep the
 const threads: TypesenseCollectionConfig;
 ```
 
+### `toHashSchema(schema: TypesenseSchema): TypesenseSchema`
+
+The schema the reindex hash covers — the annotated schema minus the
+QUERY-time annotations (`text`), which change no indexed value.
+
+Feed this, never `toWireSchema`, to api-cloudrun's `computeSchemaHash`
+(`api-cloudrun/src/lib/typesenseReindexHash.ts`): the INDEX-time `money`
+marker must stay in the hash (see `toWireSchema`), while toggling `text`
+must not rebuild a collection whose documents it does not touch.
+
+Field key order is preserved and an absent key is not added, so for a schema
+carrying no query-time key the result serializes byte-identically to the
+input — which is what lets this land without reindexing anything.
+
 ### `toWireSchema(schema: TypesenseSchema): TypesenseSchema`
 
 The wire form of a collection schema — what actually gets POSTed to
@@ -27678,12 +27738,12 @@ A CFS annotation left on a field would be sent to Typesense as if it were a
 field property. Call this at the one place the create-collection body is
 built; everywhere else wants the annotated schema.
 
-**Deliberately not used for the reindex schema hash.** The hash covers the
-full annotated schema, so adding or removing a `money` marker changes it and
-forces a reindex — which is exactly right, because the marker changes what
-every `_str` mirror in that collection contains. A hash over the wire form
-would call the change a no-op and leave a stale index that no dollar-amount
-query could reach.
+**Deliberately not used for the reindex schema hash** — that is
+`toHashSchema`. The hash keeps `money`, so adding or removing a `money`
+marker forces a reindex — which is exactly right, because the marker changes
+what every `_str` mirror in that collection contains. A hash over the wire
+form would call the change a no-op and leave a stale index that no
+dollar-amount query could reach.
 
 ### `trackingCategories`
 

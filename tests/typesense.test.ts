@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import {
   bookings,
   cards,
@@ -23,6 +23,7 @@ import {
   templates,
   templateComponents,
   threads,
+  toHashSchema,
   toWireSchema,
   trackingCategories,
   typesenseSchemas,
@@ -345,11 +346,13 @@ Deno.test("toWireSchema strips the CFS annotation, so nothing unknown reaches Ty
   for (const config of allConfigs) {
     const wire = toWireSchema(config.schema);
     for (const field of wire.fields) {
-      assertEquals(
-        "money" in field,
-        false,
-        `${config.alias}.${field.name}: money survived into the wire schema`,
-      );
+      for (const key of ["money", "text"]) {
+        assertEquals(
+          key in field,
+          false,
+          `${config.alias}.${field.name}: ${key} survived into the wire schema`,
+        );
+      }
     }
     // Everything else is untouched — same fields, same order, same real
     // Typesense properties.
@@ -375,4 +378,53 @@ Deno.test("toWireSchema does not mutate its input — the annotation survives fo
   toWireSchema(invoicesConfig.schema);
   assertEquals(invoicesConfig.schema.fields.filter((f) => f.money).length, before);
   assertEquals(before, 5);
+});
+
+Deno.test("toHashSchema drops the QUERY-time `text` key and keeps the INDEX-time `money` key", () => {
+  // api-cloudrun's `computeSchemaHash` hashes this. `money` changes every `_str`
+  // mirror's content, so toggling it must force a reindex; `text` changes only
+  // the manager's `query_by`, so toggling it must not.
+  let textSeen = 0;
+  let moneySeen = 0;
+  for (const config of allConfigs) {
+    const hashed = toHashSchema(config.schema);
+    for (const [i, field] of hashed.fields.entries()) {
+      const source = config.schema.fields[i];
+      assertEquals("text" in field, false, `${config.alias}.${field.name}: text survived into the hash input`);
+      assertEquals(field.money, source.money, `${config.alias}.${field.name}: money was not carried into the hash input`);
+      if (source.text) textSeen++;
+      if (source.money) moneySeen++;
+    }
+  }
+  // Both arms must have had something to check, or the loop says nothing.
+  assert(textSeen > 0, "no config declares `text: true` — the drop arm is vacuous");
+  assert(moneySeen > 0, "no config declares `money: true` — the keep arm is vacuous");
+});
+
+Deno.test("toHashSchema serializes byte-identically once `text` is removed — the flag cannot reindex", () => {
+  // The hash is `JSON.stringify`, so key ORDER matters as much as membership: a
+  // helper that rebuilt each field in a different order would change every hash
+  // and reindex every collection on the deploy that adopted it.
+  for (const config of allConfigs) {
+    const expected = {
+      ...config.schema,
+      fields: config.schema.fields.map((f) => {
+        const copy: Record<string, unknown> = { ...f };
+        delete copy.text;
+        return copy;
+      }),
+    };
+    assertEquals(JSON.stringify(toHashSchema(config.schema)), JSON.stringify(expected), config.alias);
+    if (!config.schema.fields.some((f) => f.text)) {
+      assertEquals(JSON.stringify(toHashSchema(config.schema)), JSON.stringify(config.schema), config.alias);
+    }
+  }
+});
+
+Deno.test("toHashSchema does not mutate its input — `text` survives for the query_by rule", () => {
+  const productsConfig = allConfigs.find((c) => c.alias === "products")!;
+  const before = productsConfig.schema.fields.filter((f) => f.text).length;
+  toHashSchema(productsConfig.schema);
+  assertEquals(productsConfig.schema.fields.filter((f) => f.text).length, before);
+  assertEquals(before, 2);
 });

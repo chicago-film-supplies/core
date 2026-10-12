@@ -1987,6 +1987,86 @@ export function getTypesenseColumns(alias: string): DisplayTableColumn[] {
   return columns;
 }
 
+// ── Operator free-text `query_by` ──────────────────────────────────
+
+const coverCache = new Map<string, DisplayTableColumn | null>();
+
+/**
+ * The declared column that **covers** an indexed field: the field itself if it
+ * is a column, otherwise the longest column key it sits beneath.
+ *
+ * A column names an entity, and the index's sub-fields of that entity belong to
+ * it. `organizations.contacts` is one column rendering a joined name, and the
+ * index carries `contacts.first_name` / `contacts.last_name` / `contacts.roles`
+ * separately — those are how you *search* for the org whose contact is Andrea,
+ * and they take their heading from the column above them. Same for
+ * `created_by.name`, which is a facet under the `created_by` column.
+ *
+ * This is what keeps the search and filter surfaces from shrinking to the column
+ * surface. Gating them on exact column membership alone lost contact-name search
+ * on organizations, orders and fulfillments, and the created-by facet everywhere.
+ */
+export function coveringColumn(alias: string, fieldName: string): DisplayTableColumn | null {
+  const cacheKey = `${alias}::${fieldName}`;
+  const hit = coverCache.get(cacheKey);
+  if (hit !== undefined) return hit;
+  let best: DisplayTableColumn | null = null;
+  for (const col of getTypesenseColumns(alias)) {
+    if (col.key === fieldName) {
+      best = col;
+      break;
+    }
+    if (fieldName.startsWith(`${col.key}.`) && (!best || col.key.length > best.key.length)) best = col;
+  }
+  coverCache.set(cacheKey, best);
+  return best;
+}
+
+/**
+ * The **operator** free-text `query_by` for a Typesense alias — the covered
+ * string fields that are not facets, plus the facets that opt in with
+ * `text: true`. `""` for an unknown alias.
+ *
+ * Facets are excluded by default because they are the *filter* surface: a
+ * status facet already narrows by exact value, and folding it into full-text
+ * search makes every query match every row whose status merely contains the
+ * term. A facet holding human text rather than a vocabulary — a tag name, a
+ * contact's name — declares `text: true` (`typesense/types.ts`) and is searched
+ * as well as filtered.
+ *
+ * What the coverage rule keeps out: `items.path` (a uuid chain),
+ * `items.price.taxes.type` and its siblings (the `percent`/`flat`
+ * discriminators — every order matches "percent"), and `images.alt`.
+ *
+ * ⚠️ **api-cloudrun's `deriveQueryBy` (`api-cloudrun/src/lib/searchableCollections.ts`)
+ * is a DIFFERENT rule on purpose**: every indexed string field, facets and uids
+ * included, because its caller is an ad-hoc MCP/agent search that wants recall
+ * (a product by uid, an order by a status word). Do not point it here without
+ * deciding that agent search should narrow.
+ */
+export function getQueryByStringFields(alias: string): string {
+  const config = typesenseSchemas[alias as keyof typeof typesenseSchemas];
+  if (!config) return "";
+  return config.schema.fields
+    .filter((f) => (f.type === "string" || f.type === "string[]") && (!f.facet || f.text) && coveringColumn(alias, f.name))
+    .map((f) => f.name)
+    .join(",");
+}
+
+/**
+ * The `query_by` for a query with no letters in it — the `_str` mirrors, which
+ * carry numbers (and rendered money) as searchable text. `""` for an unknown
+ * alias.
+ */
+export function getQueryByNumberFields(alias: string): string {
+  const config = typesenseSchemas[alias as keyof typeof typesenseSchemas];
+  if (!config) return "";
+  return config.schema.fields
+    .filter((f) => f.type === "string" && f.name.endsWith("_str"))
+    .map((f) => f.name)
+    .join(",");
+}
+
 // ── Template schema fields (static, generated) ─────────────────────
 
 export type { SchemaField } from "./template-schema-fields.generated.ts";

@@ -77,7 +77,7 @@ export const cards: TypesenseCollectionConfig = {
       { name: "destination.contact.middle_name", type: "string", stem: true, optional: true },
       { name: "destination.contact.last_name", type: "string", stem: true, optional: true },
       { name: "destination.contact.pronunciation", type: "string", stem: true, optional: true },
-      { name: "destination.contact.name", type: "string", stem: true, facet: true, optional: true },
+      { name: "destination.contact.name", type: "string", stem: true, facet: true, text: true, optional: true },
       { name: "destination.contact.phones", type: "string[]", facet: true, optional: true },
 
       // Organization — the card's own org axis, and its ancestor path, so a
