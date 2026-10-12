@@ -1,21 +1,35 @@
 # Stamp `quantity_per_parent` on kit component lines
 
-> ## ⚠️ STATUS UPDATE 2026-10-12
-> **Phase 1 and both prerequisites are DONE and in prod. Next: Phase 2.**
-> - **Phase 1** — core `0ee5d79` (beta.653): every reader accepts `quantity_per_parent`;
->   `componentQuantityAt`, `kitCutQuantities`, `isDirectComponent`, `rescaleKitSubtree` /
->   `kitRootPos` in `core/src/utils/order-lines.ts`. manager-v27.49.2, api v0.346.0.
-> - **api-cloudrun#1286 + api-cloudrun#1287, CLOSED in full** — core `1d713b3` (beta.654),
->   manager `c2e078bf` (27.49.3), api `45c10742` (0.346.1). One author for a line's catalog
->   facts (`deriveLineCatalogFacts`, `zeroPricedForSlot`, `catalogSlotOf`,
->   `catalogComponentAt`), the fulfillment projector in core
->   (`projectFulfillmentLine`, `fulfillmentSourceOfComponent` in
->   `core/src/utils/fulfillment-items.ts`), and the api order writer resolving each row's
->   flag before the build in `api-cloudrun/src/lib/orderLineZeroPriced.ts`.
-> - ⭐ **Owner ruling 2026-10-12: `zero_priced` is a SNAPSHOT carried by row** (stored flag for
->   an existing row, the catalog slot only for a new row, never the client's). The stamp
->   already had snapshot semantics in this plan, so Phase 2 below takes the same shape —
->   confirmed for the stamp by the owner the same day.
+> ## ⚠️ STATUS UPDATE 2026-10-12 (Phase 2)
+> **Phases 1 and 2 are DONE on every `main`/`beta`. Phase 1 is in prod; Phase 2 awaits the
+> api and manager release PRs (no ordering constraint between them). Next: Phase 3.**
+> - **Phase 1** — core `0ee5d79` (beta.653), manager-v27.49.2, api v0.346.0: every reader
+>   accepts `quantity_per_parent`; `componentQuantityAt`, `kitCutQuantities`,
+>   `isDirectComponent`, `rescaleKitSubtree` / `kitRootPos` in `core/src/utils/order-lines.ts`.
+>   Prerequisites api-cloudrun#1286 + api-cloudrun#1287 closed in full (core beta.654).
+> - **Phase 2** — core `7d2fd44` (beta.655): `quantityPerParentForSlot` beside
+>   `zeroPricedForSlot`; `buildOrderComponentLines` stamps, top-level and custom order lines
+>   state `null`; `fulfillmentSourceOfComponent` stamps; `projectFulfillmentLine` and
+>   `projectOrderItemToInvoiceItem` carry it only when the source states it;
+>   `substitutionRootQuantityPerParent`. api-cloudrun `b82ce866`: `resolveOrderLineSnapshots`
+>   (was `resolveOrderZeroPriced`), `projectItem`, both substitution roots, exchange rows.
+>   manager `e22bd3be`: `applySubstitution` and the invoice substitution root. templates#462
+>   bumps the templates pin (650 → 655), auto-merge queued.
+> - ⭐ **Two findings the plan's writer list missed, both fixed in Phase 2:**
+>   1. **Absence must be carried, not just values.** `carryForwardRowField` lets a stored
+>      absent/`null` fall through to the derived value, which for the stamp would stamp
+>      every pre-stamp row from the CURRENT catalog on its next save, and every frozen
+>      invoice holding the unstamped line would then read as out of sync. New
+>      `carryStoredRowSnapshot` (`api-cloudrun/src/lib/itemNesting.ts`) carries the stored
+>      value exactly, absence included.
+>   2. **The api INVOICE writer** rebuilds lines from named fields and would strip a synced
+>      stamp on every PUT. `preserveStoredQuantityPerParent` (PUT) and
+>      `fillQuantityPerParentFromSourceOrders` (create) in
+>      `api-cloudrun/src/lib/invoiceLineDenorms.ts`.
+> - ⚠️ **An ORDER-side substitution root is `null`, not X's.** On the order Y simply
+>   replaces X (no `substituted_for` record), so the server's resolver sees a new row with
+>   no catalog slot and states no ratio — consistent with "never the client's". The
+>   X's-stamp rule applies on the fulfillment and the invoice, where the record exists.
 
 ## Problem
 
