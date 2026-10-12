@@ -36925,6 +36925,37 @@ of prod orders (a priced principal beside zero-priced accessory copies, a
 `path` identifies a row within a document, which is why the submission is
 matched on it.
 
+### `FulfillmentLineOrderFacts`
+
+What the ORDER row states about this line beyond its source — its attribution
+(a copy of the document's identity), its quantity, and an exchange's
+`exchanged_for`.
+
+```ts
+interface FulfillmentLineOrderFacts {
+  readonly order_number?: indexedAccess;
+  readonly uid_order?: indexedAccess;
+  readonly quantity_ordered?: number | null;
+  readonly exchanged_for?: indexedAccess;
+}
+```
+
+### `FulfillmentLineSource`
+
+What a line is made OF — the descriptive facts, from whichever source the
+caller projects (an order line, a product, a catalog component).
+
+```ts
+interface FulfillmentLineSource {
+  readonly uid: string;
+  readonly type: indexedAccess;
+  readonly name: string;
+  readonly description?: string | null;
+  readonly stock_method?: indexedAccess;
+  readonly zero_priced?: boolean | null;
+}
+```
+
 ### `FulfillmentRowSource`
 
 Why a stored fulfillment LINE row exists — {@link fulfillmentRowSources}.
@@ -36993,6 +37024,16 @@ server's signature.
 
 **Returns** — Each line row, by object identity, mapped to its source
 
+### `fulfillmentSourceOfComponent(row: typeLiteral): FulfillmentLineSource`
+
+The {@link FulfillmentLineSource} of a CATALOG component row — a row inside a
+substituted subtree, or a component sent with an exchange's replacement.
+
+Every descriptive fact comes from `deriveLineCatalogFacts`, the one author an
+order line's facts come from too, so a component reads the same on an order
+and on a fulfillment. Resolve the row BY PATH (`catalogComponentAt`), never
+by first uid.
+
 ### `keepKitAncestors(candidates: readonly T[], kept: readonly typeLiteral[]): Map<T, T>`
 
 **A KEPT fulfillment row keeps its PRODUCT ancestors** — the rows, among
@@ -37024,6 +37065,19 @@ those are is the writer's own rule; dividers are placed separately
 
 **Returns** — Each candidate to keep, mapped to the row it survives as
 
+### `projectFulfillmentLine(source: FulfillmentLineSource, quantity: number, path: string[], _: unknown): FulfillmentLineItemType`
+
+Build one fulfillment line. `quantity` and `path` are the picker's /
+projection's to state; everything else comes from the source.
+
+⚠️ **`zero_priced` is emitted UNCONDITIONALLY**, `?? null`. The order-side
+merge compares a projected line against the stored one, so a key whose
+PRESENCE moved with its VALUE would make a catalog edit a permanent diff.
+
+Optional keys (`stock_method`, `order_number`, `uid_order`, `exchanged_for`)
+are omitted when the source does not carry them — the stored documents
+depend on it. `quantity_ordered` is always stated.
+
 ### `rebuildFulfillmentItems(storedItems: readonly FulfillmentItemType[], submitted: readonly FulfillmentLineItemType[]): FulfillmentItemType[]`
 
 Rebuild the items array from the stored document and a picker submission.
@@ -37045,6 +37099,19 @@ it**, which is the property the two previous implementations both lacked.
 
 `computeItemPaths` runs last and remains the ONE author of `path`; this
 function only decides the sequence it reads.
+
+### `substitutionRootZeroPriced(replaced: typeLiteral): boolean | null`
+
+`zero_priced` for a substitution's REPLACEMENT ROOT — the answer the slot it
+fills already gives.
+
+⭐ **The flag is a property of the SLOT, not of the product.** A root is a
+sibling of the line it replaces, under the same parent, so it sits in the
+same slot: a kit component included at no charge is replaced on the same
+terms; a top-level line's replacement stays `null`.
+
+Anything that is not a boolean reads as `null`: that is a NON-component's
+correct answer, and a component whose X states nothing was already invalid.
 
 ## `@cfs/core/utils/item-pairing`
 
@@ -39722,6 +39789,30 @@ interface CatalogComponentLike {
 }
 ```
 
+### `CatalogLineSource`
+
+The catalog fields a line's facts are read from — satisfied by a Firestore
+`Product`, a Typesense `ProductDocument`, and a `components[]` row of either
+(which mirrors its component product's price).
+
+```ts
+interface CatalogLineSource {
+  readonly type?: string;
+  readonly stock_method?: string;
+  readonly price?: typeLiteral | null;
+}
+```
+
+### `CatalogSlot`
+
+What a parent's `components[]` row says about the SLOT a component line fills.
+
+```ts
+interface CatalogSlot {
+  readonly zero_priced?: boolean;
+}
+```
+
 ### `ComponentQuantity`
 
 One component the walk reached: the row, its resolved quantity, and its self-inclusive doc path.
@@ -39785,6 +39876,23 @@ interface KitLineLike {
   readonly path: string[];
   readonly quantity?: number | null;
   readonly quantity_per_parent?: number | null;
+}
+```
+
+### `LineCatalogFacts`
+
+Every catalog-derived fact of a product line, decided together.
+
+VALUES only, never a key set: each builder decides which keys it writes,
+because a writer's price key set is a claim about the documents it already
+stored (api-cloudrun's `linePriceKeySets`).
+
+```ts
+interface LineCatalogFacts {
+  type: DocLineItemTypeType;
+  stock_method: StockMethodType;
+  zero_priced: boolean | null;
+  price: typeLiteral;
 }
 ```
 
@@ -39883,6 +39991,30 @@ Build a top-level order line item from a `ProductDocument`.
 structural destination/group prefix are appended by `computeItemPaths`, which
 is the sole author of a stored `path`.
 
+### `catalogComponentAt(product: typeLiteral, ancestors: readonly string[], uid: string): C | undefined`
+
+The catalog row of `product` for component `uid` sitting under `ancestors`
+(the component uids strictly between `product` and it, outermost first) —
+resolved BY PATH.
+
+⚠️ **Not "the first row with this uid"** (the lookup this replaces,
+api-cloudrun#1287). A kit may list one product under two parents, charged
+under one and included free under the other, and a uid-only match hands the
+second slot the first slot's flag. A catalog path EXCLUDES self and starts at
+the root, so the row at `[product, ...ancestors]` is the one; a direct child
+is matched through {@link isDirectComponent}, which also covers the one
+malformed direct-child shape {@link resolveParentUid} hardens against.
+
+### `catalogSlotOf(parent: typeLiteral | undefined, uid: string): C | undefined`
+
+The `components[]` row of `parent` that describes its DIRECT child `uid` — the
+slot a component line of `uid` under a `parent` line fills.
+
+⚠️ **Direct rows only.** `components[]` is the materialized WHOLE descendant
+tree, so the same uid can also appear as a grandchild under another child;
+"the first row with this uid" (the lookup this replaces) can read that row's
+flag for the wrong slot.
+
 ### `componentQuantities(rootUid: string, components: readonly C[], quantity: number, _: unknown): ComponentQuantity<C>[]`
 
 Which `mandatory`/`default` components a product at `quantity` carries, and
@@ -39913,6 +40045,27 @@ integer it should equal often enough to matter — `0.07 × 100` is
 once to 4 dp (where it is stored), and nothing after that rounds until the
 single ceil — the closure rule `cfs-money` states for money, applied to a
 count.
+
+### `deriveLineCatalogFacts(product: CatalogLineSource, zeroPriced: boolean | null): LineCatalogFacts`
+
+The ONE author of a product line's catalog facts — type, stock method,
+`zero_priced` and the catalog half of the price — decided together, so no
+writer can produce a pair this function would not (api-cloudrun#1286). The
+failure it closes: five writers each re-derived a SUBSET (the flag without
+the price, the price without the flag, the formula from the type), and every
+subset could write a flag/price pair nothing else would.
+
+- **`zeroPriced` is an input, not derived here.** Its source differs by
+  writer: a builder takes {@link zeroPricedForSlot} of the catalog row, while
+  api-cloudrun's order writer carries the STORED flag by row and derives only
+  for a new row — a SNAPSHOT (owner, 2026-10-12). Whatever it is, the price
+  follows it here: flagged → `base_cents: 0`.
+- **`formula` is the catalog's**, falling back to the type default only when
+  the catalog states none. Two prod rentals are deliberately `fixed` (Combo
+  Hangers); a type-derived formula would bill them per day.
+- **`percent_of_total`** carries its unit in `base_percent` and must state
+  `base_cents: 0` (`checkPriceBaseUnit`); every other formula states
+  `base_percent: null`.
 
 ### `isDirectComponent(comp: typeLiteral): boolean`
 
@@ -39979,6 +40132,34 @@ and the catalog argument goes away.
 - `catalog` — the ROOT product's `components[]` — the materialized whole tree
 - `rootPos` — {@link kitRootPos} of the edited line, so editing a nested
 sub-kit still reads the root's catalog
+
+### `retypedLinePrice(price: P, type: DocLineItemTypeType, chargeDays: number | null): P`
+
+A custom line's price after its TYPE changes — the one rule both manager
+stores' `setItemType` apply (api-cloudrun#1286). They used to disagree:
+retyping rental → sale, the order store nulled `replacement_cents` and the
+invoice store kept it.
+
+The formula and `chargeable_days` follow the new type, exactly as
+{@link buildCustomOrderLine} defaults them. `replacement_cents` is restated
+ONLY where the key is present (an invoice line has none; a writer's key set
+is a claim about its stored lines): `0` for a rental, `null` otherwise.
+`taxes` is cleared — the reprice re-derives them from the line's class.
+
+`chargeDays` is the caller's: an order passes its destination's charged days,
+an invoice `null` (its operator fills the Duration cell).
+
+### `zeroPricedForSlot(slot: CatalogSlot | null): boolean | null`
+
+A line's `zero_priced`, from the slot it fills: `null` for a line that fills
+no slot (top-level), else whether the parent includes it at no charge.
+
+⚠️ **`=== true`, never `?? null`.** A component must state a boolean — core's
+own `zero_priced_unstated` refuses `null` on one — and a catalog row that says
+nothing means *billed separately*, which is how the price was always read
+(`zero_priced ? 0 : price`). This builder used to write `?? null`, so a line
+expanded from such a row was refused by the rule beside it
+(api-cloudrun#1287).
 
 ## `@cfs/core/utils/order-edit-delta`
 

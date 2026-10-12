@@ -5,6 +5,9 @@ import {
   buildCustomOrderLine,
   buildOrderComponentLines,
   buildOrderLineFromProduct,
+  catalogSlotOf,
+  deriveLineCatalogFacts,
+  zeroPricedForSlot,
 } from "../src/utils/order-lines.ts";
 import { OrderDocLineItem } from "../src/schemas/mod.ts";
 import type { ProductDocument, ProductDocumentComponent } from "../src/schemas/typesense/mod.ts";
@@ -406,6 +409,82 @@ Deno.test("a product with no expandable components returns an empty array", () =
 });
 
 // ── custom lines ────────────────────────────────────────────────────
+
+// ── a line's catalog facts: one author (api-cloudrun#1286) ───────────
+
+Deno.test("zeroPricedForSlot: null with no slot, else a boolean — a component always states one", () => {
+  assertEquals(zeroPricedForSlot(null), null);
+  assertEquals(zeroPricedForSlot({ zero_priced: true }), true);
+  assertEquals(zeroPricedForSlot({ zero_priced: false }), false);
+  // A catalog row that says nothing is "billed separately", and `null` on a
+  // component is what core's `zero_priced_unstated` refuses (api-cloudrun#1287).
+  assertEquals(zeroPricedForSlot({}), false);
+});
+
+Deno.test("a component whose catalog row states no zero_priced builds as false, never null", () => {
+  const { zero_priced: _omit, ...unstated } = comp("U", ["A"]);
+  const [line] = buildOrderComponentLines(product({ components: [unstated] }), OPTS);
+  assertEquals(line.zero_priced, false);
+  assertEquals(line.price.base_cents, 1000);
+});
+
+Deno.test("deriveLineCatalogFacts: the price follows the flag it is given", () => {
+  const p = { type: "rental", stock_method: "bulk", price: { base_cents: 2500, replacement_cents: 9000, formula: "five_day_week" } };
+  assertEquals(deriveLineCatalogFacts(p, true).price.base_cents, 0);
+  assertEquals(deriveLineCatalogFacts(p, false).price.base_cents, 2500);
+  assertEquals(deriveLineCatalogFacts(p, null).price.base_cents, 2500);
+  assertEquals(deriveLineCatalogFacts(p, true).zero_priced, true);
+  assertEquals(deriveLineCatalogFacts(p, true).price.replacement_cents, 9000);
+});
+
+Deno.test("deriveLineCatalogFacts: the CATALOG formula wins over the type default", () => {
+  // Prod's two Combo Hangers rentals are deliberately `fixed`; a type-derived
+  // formula bills them per day (api-cloudrun#1286).
+  const hangers = { type: "rental", stock_method: "bulk", price: { base_cents: 3000, formula: "fixed" } };
+  assertEquals(deriveLineCatalogFacts(hangers, null).price.formula, "fixed");
+  // Only a catalog that states nothing takes the type's default.
+  assertEquals(deriveLineCatalogFacts({ type: "rental", price: {} }, null).price.formula, "five_day_week");
+  assertEquals(deriveLineCatalogFacts({ type: "sale", price: {} }, null).price.formula, "fixed");
+  assertEquals(deriveLineCatalogFacts({ type: "sale" }, null).price.formula, "fixed");
+});
+
+Deno.test("deriveLineCatalogFacts: percent_of_total states base 0 and the rate; others state base_percent null", () => {
+  const fee = { type: "transaction_fee", stock_method: "none", price: { base_cents: 999, base_percent: 3, formula: "percent_of_total" } };
+  assertEquals(deriveLineCatalogFacts(fee, null).price, { base_cents: 0, base_percent: 3, replacement_cents: null, formula: "percent_of_total" });
+  const sale = { type: "sale", stock_method: "bulk", price: { base_cents: 500, base_percent: 7, formula: "fixed" } };
+  assertEquals(deriveLineCatalogFacts(sale, null).price.base_percent, null);
+});
+
+Deno.test("both builders agree with deriveLineCatalogFacts field for field", () => {
+  const top = buildOrderLineFromProduct(product({ price: { base_cents: 4200, replacement_cents: 7, formula: "fixed" } }), OPTS);
+  const topFacts = deriveLineCatalogFacts(product({ price: { base_cents: 4200, replacement_cents: 7, formula: "fixed" } }), null);
+  assertEquals(
+    { type: top.type, stock_method: top.stock_method, zero_priced: top.zero_priced, base_cents: top.price.base_cents, base_percent: top.price.base_percent, replacement_cents: top.price.replacement_cents, formula: top.price.formula },
+    { type: topFacts.type, stock_method: topFacts.stock_method, zero_priced: topFacts.zero_priced, ...topFacts.price },
+  );
+  const c = comp("F", ["A"], { zero_priced: true, price: { base_cents: 9900, replacement_cents: 1, formula: "fixed" } });
+  const [line] = buildOrderComponentLines(product({ components: [c] }), OPTS);
+  const facts = deriveLineCatalogFacts(c, zeroPricedForSlot(c));
+  assertEquals(
+    { type: line.type, stock_method: line.stock_method, zero_priced: line.zero_priced, base_cents: line.price.base_cents, replacement_cents: line.price.replacement_cents, formula: line.price.formula },
+    { type: facts.type, stock_method: facts.stock_method, zero_priced: facts.zero_priced, base_cents: facts.price.base_cents, replacement_cents: facts.price.replacement_cents, formula: facts.price.formula },
+  );
+  // A component line keeps its key set: no `base_percent` key.
+  assert(!("base_percent" in line.price));
+});
+
+Deno.test("catalogSlotOf reads the DIRECT row, never a same-uid grandchild", () => {
+  const parent = {
+    components: [
+      comp("X", ["A"]),
+      comp("C", ["A", "X"], { zero_priced: true }), // C as a grandchild, under X
+      comp("C", ["A"], { zero_priced: false }), // C as a direct child
+    ],
+  };
+  assertEquals(catalogSlotOf(parent, "C")?.zero_priced, false);
+  assertEquals(catalogSlotOf(parent, "nope"), undefined);
+  assertEquals(catalogSlotOf(undefined, "C"), undefined);
+});
 
 const CUSTOM_TAXES = [{ uid: "tax1", name: "IL", rate: 10, type: "percent" as const }];
 

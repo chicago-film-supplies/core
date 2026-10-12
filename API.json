@@ -17059,6 +17059,18 @@
       "moduleDoc": "Rebuilding a fulfillment's `items[]` from a picker submission.\n\nONE function, called by both writers — `api-cloudrun`'s\n`PUT /fulfillments/{uid}/items` and the manager's optimistic\n`applySubstitution`. It lives here because a copy drifted: the manager\nnormalized with a bare `computeItemPaths` while the API bucketed by carried\npath, and the manager's comment asserted they used the same function while\nthey did not. That divergence shipped a real defect — a substitution appended\nat the array tail was re-parented to the LAST divider in the document and\nlost its line-item parent, so substituting into any order with more than one\ngroup failed at the API's in-place check.\n\n## Sequence is NOT the picker's to author\n\n🔴 **The order of `items[]` comes from the STORED document, never from the\nsubmission.** A picker authors which lines exist, their quantities, and\nsubstitutions — nothing else. The fulfillment surface has no drag-reorder\n(dnd-kit is wired on orders, invoices and products; not here), so a\nsubmission's sequence carries no operator intent to preserve.\n\n⚠️ **The zero-priced-first invariant is no longer part of the reason.** This\nused to say a fulfillment line carried no `zero_priced` and so could only\ninherit its order's sequence. It has carried the flag since 2026-09-10\n(emitted by `projectItem`, corpus backfilled, and checked by\n`checkZeroPricedComponents` on `FulfillmentSchema`), so a fulfillment can\nevaluate the invariant itself. What stands is the sentence above: sequence\nis not the picker's to author, so the stored order is kept.\n\n## Why keyed on `path`, never `uid`\n\n⚠️ `item.uid` is not a row identity — it repeats within one document, in 18%\nof prod orders (a priced principal beside zero-priced accessory copies, a\n`splitItem`, or a product appearing standalone and as a kit component). Only\n`path` identifies a row within a document, which is why the submission is\nmatched on it.",
       "symbols": [
         {
+          "kind": "interface",
+          "name": "FulfillmentLineOrderFacts",
+          "declaration": "interface FulfillmentLineOrderFacts {\n  readonly order_number?: indexedAccess;\n  readonly uid_order?: indexedAccess;\n  readonly quantity_ordered?: number | null;\n  readonly exchanged_for?: indexedAccess;\n}",
+          "doc": "What the ORDER row states about this line beyond its source — its attribution\n(a copy of the document's identity), its quantity, and an exchange's\n`exchanged_for`."
+        },
+        {
+          "kind": "interface",
+          "name": "FulfillmentLineSource",
+          "declaration": "interface FulfillmentLineSource {\n  readonly uid: string;\n  readonly type: indexedAccess;\n  readonly name: string;\n  readonly description?: string | null;\n  readonly stock_method?: indexedAccess;\n  readonly zero_priced?: boolean | null;\n}",
+          "doc": "What a line is made OF — the descriptive facts, from whichever source the\ncaller projects (an order line, a product, a catalog component)."
+        },
+        {
           "kind": "typeAlias",
           "name": "FulfillmentRowSource",
           "declaration": "type FulfillmentRowSource = \"order\" | \"substitution\" | \"exchange\" | \"kept\" | \"invoice_projected\" | \"unexplained\";",
@@ -17095,6 +17107,14 @@
         },
         {
           "kind": "function",
+          "name": "fulfillmentSourceOfComponent",
+          "signature": "fulfillmentSourceOfComponent(row: typeLiteral): FulfillmentLineSource",
+          "doc": "The {@link FulfillmentLineSource} of a CATALOG component row — a row inside a\nsubstituted subtree, or a component sent with an exchange's replacement.\n\nEvery descriptive fact comes from `deriveLineCatalogFacts`, the one author an\norder line's facts come from too, so a component reads the same on an order\nand on a fulfillment. Resolve the row BY PATH (`catalogComponentAt`), never\nby first uid.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "keepKitAncestors",
           "signature": "keepKitAncestors(candidates: readonly T[], kept: readonly typeLiteral[]): Map<T, T>",
           "doc": "**A KEPT fulfillment row keeps its PRODUCT ancestors** — the rows, among\n`candidates`, that sit strictly above some `kept` row, each in the form it\nsurvives as: `quantity: 0`, `quantity_ordered: 0` (structure, not units —\nruling Q2 of api-cloudrun#1147).\n\nA kit component's grain includes its kit, and `computeItemPaths` derives a\nrow's path from the rows above it, so a kept component whose kit parent went\nis re-rooted: its booking signature goes null, it detaches from its 4-segment\nbooking, and its stored `zero_priced: true` lands on a top-level line, which\n`FulfillmentSchema` refuses. A kit's OWN booking keeps it only when that\nbooking holds custody, and an operator who checked out only the components\nleft the kit's booking a plan — so custody alone does not keep the kit, and\nthis rule has to.\n\nONE rule for every writer that keeps rows by custody. It was `syncRows`'\nprivate loop (`api-cloudrun/src/lib/orderFulfillmentSync.ts`, kit review A)\nwhile the invoice-only projection\n(`api-cloudrun/src/lib/invoiceOnlyProjection.ts`) kept a component and\ndropped its kit.",
@@ -17112,9 +17132,25 @@
         },
         {
           "kind": "function",
+          "name": "projectFulfillmentLine",
+          "signature": "projectFulfillmentLine(source: FulfillmentLineSource, quantity: number, path: string[], _: unknown): FulfillmentLineItemType",
+          "doc": "Build one fulfillment line. `quantity` and `path` are the picker's /\nprojection's to state; everything else comes from the source.\n\n⚠️ **`zero_priced` is emitted UNCONDITIONALLY**, `?? null`. The order-side\nmerge compares a projected line against the stored one, so a key whose\nPRESENCE moved with its VALUE would make a catalog edit a permanent diff.\n\nOptional keys (`stock_method`, `order_number`, `uid_order`, `exchanged_for`)\nare omitted when the source does not carry them — the stored documents\ndepend on it. `quantity_ordered` is always stated.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "rebuildFulfillmentItems",
           "signature": "rebuildFulfillmentItems(storedItems: readonly FulfillmentItemType[], submitted: readonly FulfillmentLineItemType[]): FulfillmentItemType[]",
           "doc": "Rebuild the items array from the stored document and a picker submission.\n\nStructure and sequence come from `storedItems`; membership, quantities and\nsubstitutions come from `submitted`. The result is a function of\n*(stored order, submitted set)* — **the order lines arrive in does not affect\nit**, which is the property the two previous implementations both lacked.\n\n- A stored line whose path the submission still carries is kept, in place,\n  carrying the submitted line's values.\n- A stored line the submission drops is removed.\n- A submitted line with no stored counterpart is a substitution: it is placed\n  immediately after the deepest ancestor the output still carries, which is\n  where its parentage comes from. Several substitutions against one ancestor\n  keep their submitted order relative to each other.\n- Structural items are never taken from the submission — the picker does not\n  own them, and the API strips them from the request body.\n\n`computeItemPaths` runs last and remains the ONE author of `path`; this\nfunction only decides the sequence it reads.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "substitutionRootZeroPriced",
+          "signature": "substitutionRootZeroPriced(replaced: typeLiteral): boolean | null",
+          "doc": "`zero_priced` for a substitution's REPLACEMENT ROOT — the answer the slot it\nfills already gives.\n\n⭐ **The flag is a property of the SLOT, not of the product.** A root is a\nsibling of the line it replaces, under the same parent, so it sits in the\nsame slot: a kit component included at no charge is replaced on the same\nterms; a top-level line's replacement stays `null`.\n\nAnything that is not a boolean reads as `null`: that is a NON-component's\ncorrect answer, and a component whose X states nothing was already invalid.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -18523,6 +18559,18 @@
         },
         {
           "kind": "interface",
+          "name": "CatalogLineSource",
+          "declaration": "interface CatalogLineSource {\n  readonly type?: string;\n  readonly stock_method?: string;\n  readonly price?: typeLiteral | null;\n}",
+          "doc": "The catalog fields a line's facts are read from — satisfied by a Firestore\n`Product`, a Typesense `ProductDocument`, and a `components[]` row of either\n(which mirrors its component product's price)."
+        },
+        {
+          "kind": "interface",
+          "name": "CatalogSlot",
+          "declaration": "interface CatalogSlot {\n  readonly zero_priced?: boolean;\n}",
+          "doc": "What a parent's `components[]` row says about the SLOT a component line fills."
+        },
+        {
+          "kind": "interface",
           "name": "ComponentQuantity",
           "declaration": "interface ComponentQuantity {\n  component: C;\n  quantity: number;\n  path: string[];\n}",
           "doc": "One component the walk reached: the row, its resolved quantity, and its self-inclusive doc path."
@@ -18544,6 +18592,12 @@
           "name": "KitLineLike",
           "declaration": "interface KitLineLike {\n  readonly uid: string;\n  readonly type: string;\n  readonly path: string[];\n  readonly quantity?: number | null;\n  readonly quantity_per_parent?: number | null;\n}",
           "doc": "The fields of a document line a kit cut or rescale reads — every grain's item satisfies it."
+        },
+        {
+          "kind": "interface",
+          "name": "LineCatalogFacts",
+          "declaration": "interface LineCatalogFacts {\n  type: DocLineItemTypeType;\n  stock_method: StockMethodType;\n  zero_priced: boolean | null;\n  price: typeLiteral;\n}",
+          "doc": "Every catalog-derived fact of a product line, decided together.\n\nVALUES only, never a key set: each builder decides which keys it writes,\nbecause a writer's price key set is a claim about the documents it already\nstored (api-cloudrun's `linePriceKeySets`)."
         },
         {
           "kind": "interface",
@@ -18585,6 +18639,22 @@
         },
         {
           "kind": "function",
+          "name": "catalogComponentAt",
+          "signature": "catalogComponentAt(product: typeLiteral, ancestors: readonly string[], uid: string): C | undefined",
+          "doc": "The catalog row of `product` for component `uid` sitting under `ancestors`\n(the component uids strictly between `product` and it, outermost first) —\nresolved BY PATH.\n\n⚠️ **Not \"the first row with this uid\"** (the lookup this replaces,\napi-cloudrun#1287). A kit may list one product under two parents, charged\nunder one and included free under the other, and a uid-only match hands the\nsecond slot the first slot's flag. A catalog path EXCLUDES self and starts at\nthe root, so the row at `[product, ...ancestors]` is the one; a direct child\nis matched through {@link isDirectComponent}, which also covers the one\nmalformed direct-child shape {@link resolveParentUid} hardens against.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "catalogSlotOf",
+          "signature": "catalogSlotOf(parent: typeLiteral | undefined, uid: string): C | undefined",
+          "doc": "The `components[]` row of `parent` that describes its DIRECT child `uid` — the\nslot a component line of `uid` under a `parent` line fills.\n\n⚠️ **Direct rows only.** `components[]` is the materialized WHOLE descendant\ntree, so the same uid can also appear as a grandchild under another child;\n\"the first row with this uid\" (the lookup this replaces) can read that row's\nflag for the wrong slot.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "componentQuantities",
           "signature": "componentQuantities(rootUid: string, components: readonly C[], quantity: number, _: unknown): ComponentQuantity<C>[]",
           "doc": "Which `mandatory`/`default` components a product at `quantity` carries, and\nhow many of each — the ONE quantity rule, shared by the order-line expander\n({@link buildOrderComponentLines}) and the manager's component fan-out on a\nmovement (api-cloudrun#388, manager#271), so an order line and a movement\nproposal never disagree about how many sides come with three tents.\n\nDepth-first, each parent's direct children `zero_priced` first; quantities\nrecurse per level as {@link componentQuantityAt}`(comp.quantity, parentEffective)` (owner,\n2026-10-09: a movement proposal rounds up like an order line, and the\noperator edits it). An `optional` row is not walked, and neither is its\nsubtree — see {@link buildOrderComponentLines} for why that drop is right.",
@@ -18596,6 +18666,14 @@
           "name": "componentQuantityAt",
           "signature": "componentQuantityAt(ratio: number, parentQty: number): number",
           "doc": "How many of a component go with `parentQty` of its DIRECT parent:\n`ceil(ratio × parentQty)`, exactly.\n\nThe ONE quantity rule — {@link componentQuantities} expands through it, a kit\nrescale reads it, and a stamped line's override is read off the document as\n`quantity !== componentQuantityAt(quantity_per_parent, parent.quantity)`.\n\n⚠️ **Integer arithmetic at a 1e4 scale, not `Math.ceil(ratio × parentQty)`.**\nThe float product of a 4 dp ratio and an integer lands a hair ABOVE the\ninteger it should equal often enough to matter — `0.07 × 100` is\n`7.000000000000001`, so the float form ceils it to 8. The ratio is quantized\nonce to 4 dp (where it is stored), and nothing after that rounds until the\nsingle ceil — the closure rule `cfs-money` states for money, applied to a\ncount.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveLineCatalogFacts",
+          "signature": "deriveLineCatalogFacts(product: CatalogLineSource, zeroPriced: boolean | null): LineCatalogFacts",
+          "doc": "The ONE author of a product line's catalog facts — type, stock method,\n`zero_priced` and the catalog half of the price — decided together, so no\nwriter can produce a pair this function would not (api-cloudrun#1286). The\nfailure it closes: five writers each re-derived a SUBSET (the flag without\nthe price, the price without the flag, the formula from the type), and every\nsubset could write a flag/price pair nothing else would.\n\n- **`zeroPriced` is an input, not derived here.** Its source differs by\n  writer: a builder takes {@link zeroPricedForSlot} of the catalog row, while\n  api-cloudrun's order writer carries the STORED flag by row and derives only\n  for a new row — a SNAPSHOT (owner, 2026-10-12). Whatever it is, the price\n  follows it here: flagged → `base_cents: 0`.\n- **`formula` is the catalog's**, falling back to the type default only when\n  the catalog states none. Two prod rentals are deliberately `fixed` (Combo\n  Hangers); a type-derived formula would bill them per day.\n- **`percent_of_total`** carries its unit in `base_percent` and must state\n  `base_cents: 0` (`checkPriceBaseUnit`); every other formula states\n  `base_percent: null`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -18638,6 +18716,22 @@
               "doc": "{@link kitRootPos} of the edited line, so editing a nested\nsub-kit still reads the root's catalog"
             }
           ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "retypedLinePrice",
+          "signature": "retypedLinePrice(price: P, type: DocLineItemTypeType, chargeDays: number | null): P",
+          "doc": "A custom line's price after its TYPE changes — the one rule both manager\nstores' `setItemType` apply (api-cloudrun#1286). They used to disagree:\nretyping rental → sale, the order store nulled `replacement_cents` and the\ninvoice store kept it.\n\nThe formula and `chargeable_days` follow the new type, exactly as\n{@link buildCustomOrderLine} defaults them. `replacement_cents` is restated\nONLY where the key is present (an invoice line has none; a writer's key set\nis a claim about its stored lines): `0` for a rental, `null` otherwise.\n`taxes` is cleared — the reprice re-derives them from the line's class.\n\n`chargeDays` is the caller's: an order passes its destination's charged days,\nan invoice `null` (its operator fills the Duration cell).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "zeroPricedForSlot",
+          "signature": "zeroPricedForSlot(slot: CatalogSlot | null): boolean | null",
+          "doc": "A line's `zero_priced`, from the slot it fills: `null` for a line that fills\nno slot (top-level), else whether the parent includes it at no charge.\n\n⚠️ **`=== true`, never `?? null`.** A component must state a boolean — core's\nown `zero_priced_unstated` refuses `null` on one — and a catalog row that says\nnothing means *billed separately*, which is how the price was always read\n(`zero_priced ? 0 : price`). This builder used to write `?? null`, so a line\nexpanded from such a row was refused by the rule beside it\n(api-cloudrun#1287).",
+          "paramTags": [],
           "returnsTag": null
         }
       ]

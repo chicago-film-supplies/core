@@ -82,6 +82,153 @@ type _ComponentTypesAreLineTypes = ComponentTypeType extends DocLineItemTypeType
 const _componentTypeParity: _ComponentTypesAreLineTypes = true;
 void _componentTypeParity;
 
+// ── A line's catalog facts: ONE author (api-cloudrun#1286) ───────
+
+/**
+ * The catalog fields a line's facts are read from — satisfied by a Firestore
+ * `Product`, a Typesense `ProductDocument`, and a `components[]` row of either
+ * (which mirrors its component product's price).
+ */
+export interface CatalogLineSource {
+  readonly type?: string;
+  readonly stock_method?: string;
+  readonly price?: {
+    readonly base_cents?: number;
+    readonly base_percent?: number | null;
+    readonly replacement_cents?: number | null;
+    readonly formula?: string;
+  } | null;
+}
+
+/** What a parent's `components[]` row says about the SLOT a component line fills. */
+export interface CatalogSlot {
+  readonly zero_priced?: boolean;
+}
+
+/**
+ * Every catalog-derived fact of a product line, decided together.
+ *
+ * VALUES only, never a key set: each builder decides which keys it writes,
+ * because a writer's price key set is a claim about the documents it already
+ * stored (api-cloudrun's `linePriceKeySets`).
+ */
+export interface LineCatalogFacts {
+  type: DocLineItemTypeType;
+  stock_method: StockMethodType;
+  zero_priced: boolean | null;
+  price: {
+    base_cents: number;
+    base_percent: number | null;
+    replacement_cents: number | null;
+    formula: PriceFormulaType;
+  };
+}
+
+/**
+ * A line's `zero_priced`, from the slot it fills: `null` for a line that fills
+ * no slot (top-level), else whether the parent includes it at no charge.
+ *
+ * ⚠️ **`=== true`, never `?? null`.** A component must state a boolean — core's
+ * own `zero_priced_unstated` refuses `null` on one — and a catalog row that says
+ * nothing means *billed separately*, which is how the price was always read
+ * (`zero_priced ? 0 : price`). This builder used to write `?? null`, so a line
+ * expanded from such a row was refused by the rule beside it
+ * (api-cloudrun#1287).
+ */
+export function zeroPricedForSlot(slot: CatalogSlot | null): boolean | null {
+  return slot === null ? null : slot.zero_priced === true;
+}
+
+/**
+ * The formula a line takes when its catalog states none: the type's default.
+ * Measured 2026-10-12, every prod product states one, so this is a floor and not
+ * a policy.
+ */
+function defaultFormulaFor(type: string | undefined): PriceFormulaType {
+  return type === "rental" ? "five_day_week" : "fixed";
+}
+
+/**
+ * The ONE author of a product line's catalog facts — type, stock method,
+ * `zero_priced` and the catalog half of the price — decided together, so no
+ * writer can produce a pair this function would not (api-cloudrun#1286). The
+ * failure it closes: five writers each re-derived a SUBSET (the flag without
+ * the price, the price without the flag, the formula from the type), and every
+ * subset could write a flag/price pair nothing else would.
+ *
+ * - **`zeroPriced` is an input, not derived here.** Its source differs by
+ *   writer: a builder takes {@link zeroPricedForSlot} of the catalog row, while
+ *   api-cloudrun's order writer carries the STORED flag by row and derives only
+ *   for a new row — a SNAPSHOT (owner, 2026-10-12). Whatever it is, the price
+ *   follows it here: flagged → `base_cents: 0`.
+ * - **`formula` is the catalog's**, falling back to the type default only when
+ *   the catalog states none. Two prod rentals are deliberately `fixed` (Combo
+ *   Hangers); a type-derived formula would bill them per day.
+ * - **`percent_of_total`** carries its unit in `base_percent` and must state
+ *   `base_cents: 0` (`checkPriceBaseUnit`); every other formula states
+ *   `base_percent: null`.
+ */
+export function deriveLineCatalogFacts(
+  product: CatalogLineSource,
+  zeroPriced: boolean | null,
+): LineCatalogFacts {
+  const formula = (product.price?.formula as PriceFormulaType | undefined) ?? defaultFormulaFor(product.type);
+  const isPercent = formula === "percent_of_total";
+  return {
+    type: product.type as DocLineItemTypeType,
+    stock_method: product.stock_method as StockMethodType,
+    zero_priced: zeroPriced,
+    price: {
+      base_cents: zeroPriced === true || isPercent ? 0 : (product.price?.base_cents ?? 0),
+      base_percent: isPercent ? (product.price?.base_percent ?? null) : null,
+      replacement_cents: product.price?.replacement_cents ?? null,
+      formula,
+    },
+  };
+}
+
+/**
+ * The `components[]` row of `parent` that describes its DIRECT child `uid` — the
+ * slot a component line of `uid` under a `parent` line fills.
+ *
+ * ⚠️ **Direct rows only.** `components[]` is the materialized WHOLE descendant
+ * tree, so the same uid can also appear as a grandchild under another child;
+ * "the first row with this uid" (the lookup this replaces) can read that row's
+ * flag for the wrong slot.
+ */
+export function catalogSlotOf<C extends { readonly uid?: string; readonly path?: readonly string[] | null }>(
+  parent: { readonly components?: readonly C[] | null } | undefined,
+  uid: string,
+): C | undefined {
+  return parent?.components?.find((c) => c.uid === uid && isDirectComponent(c));
+}
+
+/**
+ * The catalog row of `product` for component `uid` sitting under `ancestors`
+ * (the component uids strictly between `product` and it, outermost first) —
+ * resolved BY PATH.
+ *
+ * ⚠️ **Not "the first row with this uid"** (the lookup this replaces,
+ * api-cloudrun#1287). A kit may list one product under two parents, charged
+ * under one and included free under the other, and a uid-only match hands the
+ * second slot the first slot's flag. A catalog path EXCLUDES self and starts at
+ * the root, so the row at `[product, ...ancestors]` is the one; a direct child
+ * is matched through {@link isDirectComponent}, which also covers the one
+ * malformed direct-child shape {@link resolveParentUid} hardens against.
+ */
+export function catalogComponentAt<C extends { readonly uid?: string; readonly path?: readonly string[] | null }>(
+  product: { readonly uid: string; readonly components?: readonly C[] | null },
+  ancestors: readonly string[],
+  uid: string,
+): C | undefined {
+  if (ancestors.length === 0) return catalogSlotOf(product, uid);
+  const want = [product.uid, ...ancestors];
+  return product.components?.find((c) => {
+    const path = c.path ?? [];
+    return c.uid === uid && path.length === want.length && path.every((seg, i) => seg === want[i]);
+  });
+}
+
 /**
  * Shared options for building order line items from a Typesense
  * `ProductDocument` — used by the staging popover, the substitute flow, and any
@@ -137,37 +284,35 @@ export function buildOrderLineFromProduct(
   doc: ProductDocument,
   opts: OrderLineBuildOptions,
 ): OrderDocLineItemType {
-  const type = doc.type as DocLineItemTypeType;
+  // A top-level line fills no slot, so its flag is `null` and its price is the
+  // catalog's — see `deriveLineCatalogFacts`.
+  const facts = deriveLineCatalogFacts(doc, zeroPricedForSlot(null));
+  const type = facts.type;
   const isRental = type === "rental";
-  const formula = (doc.price?.formula as PriceFormulaType | undefined) ?? "five_day_week";
-  // A `percent_of_total` price carries its unit in `base_percent` and must
-  // state `base_cents: 0` (`checkPriceBaseUnit`), so both are decided here by
-  // the formula rather than copied independently.
-  const isPercent = formula === "percent_of_total";
   return {
     uid: doc.uid,
     type,
     name: doc.name,
     description: doc.description || "",
     quantity: opts.quantity,
-    stock_method: doc.stock_method as StockMethodType,
+    stock_method: facts.stock_method,
     crms_id: doc.crms_id ?? null,
     ...(opts.uidOrder ? { uid_order: opts.uidOrder } : {}),
     path: [...(opts.inheritedAncestry ?? [])],
     // A top-level line is not a component of anything, and the server writes
     // both as an explicit `null` — so the optimistic row matches the echo.
     inclusion_type: null,
-    zero_priced: null,
+    zero_priced: facts.zero_priced,
     // The class the product is taxed as, so the optimistic reprice resolves
     // what the server will stamp; a hit indexed before the field takes its
     // type's default, which is the server's fallback too.
     uid_tax_class: doc.uid_tax_class || opts.taxClassForType(type),
     price: {
-      base_cents: isPercent ? 0 : doc.price?.base_cents ?? 0,
-      base_percent: isPercent ? (doc.price?.base_percent ?? null) : null,
-      replacement_cents: doc.price?.replacement_cents ?? null,
+      base_cents: facts.price.base_cents,
+      base_percent: facts.price.base_percent,
+      replacement_cents: facts.price.replacement_cents,
       chargeable_days: isRental ? opts.chargeDays : null,
-      formula,
+      formula: facts.price.formula,
       discount: null,
       subtotal_cents: 0,
       subtotal_discounted_cents: 0,
@@ -277,6 +422,34 @@ export function buildCustomInvoiceLine(
       taxes: opts.taxes.map((t) => ({ ...t, amount_cents: 0 })),
       total_cents: 0,
     },
+  };
+}
+
+/**
+ * A custom line's price after its TYPE changes — the one rule both manager
+ * stores' `setItemType` apply (api-cloudrun#1286). They used to disagree:
+ * retyping rental → sale, the order store nulled `replacement_cents` and the
+ * invoice store kept it.
+ *
+ * The formula and `chargeable_days` follow the new type, exactly as
+ * {@link buildCustomOrderLine} defaults them. `replacement_cents` is restated
+ * ONLY where the key is present (an invoice line has none; a writer's key set
+ * is a claim about its stored lines): `0` for a rental, `null` otherwise.
+ * `taxes` is cleared — the reprice re-derives them from the line's class.
+ *
+ * `chargeDays` is the caller's: an order passes its destination's charged days,
+ * an invoice `null` (its operator fills the Duration cell).
+ */
+export function retypedLinePrice<
+  P extends { formula: PriceFormulaType; chargeable_days?: number | null; replacement_cents?: number | null; taxes: unknown[] },
+>(price: P, type: DocLineItemTypeType, chargeDays: number | null): P {
+  const isRental = type === "rental";
+  return {
+    ...price,
+    formula: isRental ? "five_day_week" : "fixed",
+    chargeable_days: isRental ? chargeDays : null,
+    ...("replacement_cents" in price ? { replacement_cents: isRental ? 0 : null } : {}),
+    taxes: [],
   };
 }
 
@@ -447,7 +620,10 @@ export function buildOrderComponentLines(
     opts.quantity,
     [...(opts.inheritedAncestry ?? []), doc.uid],
   ).map(({ component: comp, quantity, path }) => {
-    const type = comp.type as DocLineItemTypeType;
+    // The row is both the slot (its `zero_priced`) and the product (it mirrors
+    // the component product's type, stock method and price).
+    const facts = deriveLineCatalogFacts(comp, zeroPricedForSlot(comp));
+    const type = facts.type;
     return {
       uid: comp.uid!,
       type,
@@ -457,17 +633,19 @@ export function buildOrderComponentLines(
       // Read off the component row. The `initial` spread this replaced said
       // `"bulk"` for every component regardless — so a no-stock component
       // rendered availability it does not have until the server echo landed.
-      stock_method: comp.stock_method as StockMethodType,
+      stock_method: facts.stock_method,
       ...(opts.uidOrder ? { uid_order: opts.uidOrder } : {}),
       path,
       inclusion_type: comp.inclusion_type as OrderDocLineItemType["inclusion_type"],
-      zero_priced: comp.zero_priced ?? null,
+      zero_priced: facts.zero_priced,
       uid_tax_class: comp.uid_tax_class || opts.taxClassForType(type),
       price: {
-        base_cents: comp.zero_priced ? 0 : (comp.price?.base_cents ?? 0),
-        replacement_cents: comp.price?.replacement_cents ?? null,
+        // No `base_percent` key: a component line never wrote one, and a
+        // writer's key set is a claim about its stored lines.
+        base_cents: facts.price.base_cents,
+        replacement_cents: facts.price.replacement_cents,
         chargeable_days: type === "rental" ? opts.chargeDays : null,
-        formula: (comp.price?.formula as PriceFormulaType | undefined) ?? "five_day_week",
+        formula: facts.price.formula,
         discount: null,
         subtotal_cents: 0,
         subtotal_discounted_cents: 0,

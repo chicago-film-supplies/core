@@ -41,6 +41,7 @@ import { computeItemPaths } from "./orders.ts";
 import { collectSubstitutionAnchors, isStrictlyBelow, isSubstitutionRow } from "./substitutions.ts";
 import { isFulfillmentLineItem } from "../schemas/fulfillment.ts";
 import { isFulfillableItemType } from "../schemas/common.ts";
+import { deriveLineCatalogFacts, zeroPricedForSlot } from "./order-lines.ts";
 import type {
   FulfillmentItemType,
   FulfillmentLineItemType,
@@ -275,4 +276,137 @@ export function fulfillmentRowSources<T extends FulfillmentLineItemType>(
     out.set(row, source);
   }
   return out;
+}
+
+// ── The ONE fulfillment line projector (api-cloudrun#1055, api-cloudrun#1287) ──
+//
+// Moved here from api-cloudrun `src/lib/fulfillmentLine.ts`, so the manager's
+// optimistic substitution builds its rows with the SAME function the server
+// stores them with. The manager carried a field-for-field twin
+// (`toFulfillmentLine`), and the twin already disagreed: it passed a replaced
+// row's `zero_priced` through raw, where the server normalized a non-boolean
+// to `null`.
+
+/**
+ * What a line is made OF — the descriptive facts, from whichever source the
+ * caller projects (an order line, a product, a catalog component).
+ */
+export interface FulfillmentLineSource {
+  readonly uid: string;
+  readonly type: FulfillmentLineItemType["type"];
+  readonly name: string;
+  readonly description?: string | null;
+  readonly stock_method?: FulfillmentLineItemType["stock_method"];
+  /** Already resolved to the answer the ROW should state — see {@link substitutionRootZeroPriced} and {@link fulfillmentSourceOfComponent}. */
+  readonly zero_priced?: boolean | null;
+}
+
+/**
+ * What the ORDER row states about this line beyond its source — its attribution
+ * (a copy of the document's identity), its quantity, and an exchange's
+ * `exchanged_for`.
+ */
+export interface FulfillmentLineOrderFacts {
+  readonly order_number?: FulfillmentLineItemType["order_number"];
+  readonly uid_order?: FulfillmentLineItemType["uid_order"];
+  /**
+   * The ORDER's quantity for this row (S8c decision 19, api-cloudrun#1147), the
+   * same number the row's booking carries as `quantity_ordered`. Omitted for a
+   * row the order never had (a substitute, a fulfillment-authored exchange
+   * unit), which then states `null` — the key is REQUIRED on a stored line. A
+   * conflict is the COMPARISON `quantity !== quantity_ordered`, never the key's
+   * presence.
+   */
+  readonly quantity_ordered?: number | null;
+  /**
+   * An exchange replacement line's pointer at the damaged rows
+   * (api-cloudrun#1114), as the ORDER states it. Deep-copied, so the stored row
+   * never aliases the order's array.
+   */
+  readonly exchanged_for?: FulfillmentLineItemType["exchanged_for"];
+}
+
+/**
+ * Build one fulfillment line. `quantity` and `path` are the picker's /
+ * projection's to state; everything else comes from the source.
+ *
+ * ⚠️ **`zero_priced` is emitted UNCONDITIONALLY**, `?? null`. The order-side
+ * merge compares a projected line against the stored one, so a key whose
+ * PRESENCE moved with its VALUE would make a catalog edit a permanent diff.
+ *
+ * Optional keys (`stock_method`, `order_number`, `uid_order`, `exchanged_for`)
+ * are omitted when the source does not carry them — the stored documents
+ * depend on it. `quantity_ordered` is always stated.
+ */
+export function projectFulfillmentLine(
+  source: FulfillmentLineSource,
+  quantity: number,
+  path: string[],
+  orderFacts: FulfillmentLineOrderFacts = {},
+): FulfillmentLineItemType {
+  const line: FulfillmentLineItemType = {
+    uid: source.uid,
+    type: source.type,
+    name: source.name,
+    description: source.description ?? "",
+    quantity,
+    path,
+    zero_priced: source.zero_priced ?? null,
+    quantity_ordered: orderFacts.quantity_ordered ?? null,
+  };
+  if (source.stock_method !== undefined) line.stock_method = source.stock_method;
+  if (orderFacts.order_number !== undefined) line.order_number = orderFacts.order_number;
+  if (orderFacts.uid_order !== undefined) line.uid_order = orderFacts.uid_order;
+  if (orderFacts.exchanged_for !== undefined) {
+    line.exchanged_for = orderFacts.exchanged_for.map((e) => ({ path: [...e.path], quantity: e.quantity, reason: e.reason }));
+  }
+  return line;
+}
+
+/**
+ * `zero_priced` for a substitution's REPLACEMENT ROOT — the answer the slot it
+ * fills already gives.
+ *
+ * ⭐ **The flag is a property of the SLOT, not of the product.** A root is a
+ * sibling of the line it replaces, under the same parent, so it sits in the
+ * same slot: a kit component included at no charge is replaced on the same
+ * terms; a top-level line's replacement stays `null`.
+ *
+ * Anything that is not a boolean reads as `null`: that is a NON-component's
+ * correct answer, and a component whose X states nothing was already invalid.
+ */
+export function substitutionRootZeroPriced(
+  replaced: { readonly zero_priced?: unknown },
+): boolean | null {
+  return typeof replaced.zero_priced === "boolean" ? replaced.zero_priced : null;
+}
+
+/**
+ * The {@link FulfillmentLineSource} of a CATALOG component row — a row inside a
+ * substituted subtree, or a component sent with an exchange's replacement.
+ *
+ * Every descriptive fact comes from `deriveLineCatalogFacts`, the one author an
+ * order line's facts come from too, so a component reads the same on an order
+ * and on a fulfillment. Resolve the row BY PATH (`catalogComponentAt`), never
+ * by first uid.
+ */
+export function fulfillmentSourceOfComponent(
+  row: {
+    readonly uid: string;
+    readonly name?: string;
+    readonly description?: string | null;
+    readonly type?: string;
+    readonly stock_method?: string;
+    readonly zero_priced?: boolean;
+  },
+): FulfillmentLineSource {
+  const facts = deriveLineCatalogFacts(row, zeroPricedForSlot(row));
+  return {
+    uid: row.uid,
+    type: facts.type as FulfillmentLineItemType["type"],
+    name: row.name ?? "",
+    description: row.description,
+    stock_method: facts.stock_method as FulfillmentLineItemType["stock_method"],
+    zero_priced: facts.zero_priced,
+  };
 }

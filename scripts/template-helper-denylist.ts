@@ -413,6 +413,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "kitCutQuantities", // fulfillment kit-split machinery
     "kitRootPos", // locates the kit root for a rescale
     "rescaleKitSubtree", // rewrites quantities on an items edit
+    "catalogComponentAt", // resolves a catalog row by path for a writer
+    "catalogSlotOf", // resolves a parent's direct catalog row for a writer
+    "deriveLineCatalogFacts", // a line's catalog facts, at build time
+    "retypedLinePrice", // rewrites a custom line's price on a type switch
+    "zeroPricedForSlot", // a line's flag, at build time
   ],
   products: [
     // Denormalization machinery for `products.query_by_images`, re-exported here
@@ -655,6 +660,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // `citations` and `template-lint` are.
   "fulfillment-items": [
     "fulfillmentRowSources",
+    "fulfillmentSourceOfComponent",
+    "projectFulfillmentLine",
+    "substitutionRootZeroPriced",
     "keepKitAncestors",
     "rebuildFulfillmentItems",
   ],
