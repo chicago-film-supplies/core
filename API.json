@@ -3465,7 +3465,7 @@
         {
           "kind": "interface",
           "name": "OrderDocument",
-          "declaration": "interface OrderDocument {\n  uid: string;\n  uuid: string;\n  mime: string;\n  name: string;\n  orderUpdatedAt: FirestoreTimestampType;\n  source_hash: string;\n}",
+          "declaration": "interface OrderDocument {\n  uid: string;\n  uuid: string;\n  mime: string;\n  name: string;\n  orderUpdatedAt: FirestoreTimestampType;\n  source_hash: string;\n  params_context?: RenderParamsContext;\n}",
           "doc": "Metadata for a single generated order document (quote / packing list PDF)."
         },
         {

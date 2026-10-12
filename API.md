@@ -7869,6 +7869,7 @@ interface OrderDocument {
   name: string;
   orderUpdatedAt: FirestoreTimestampType;
   source_hash: string;
+  params_context?: RenderParamsContext;
 }
 ```
 

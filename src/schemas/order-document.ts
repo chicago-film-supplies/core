@@ -2,10 +2,11 @@
  * OrderDocument schema — Firestore subcollection: orders/{uid}/documents
  *
  * Metadata for the generated PDFs (quote + packing list) an order produces.
- * Written by the api-cloudrun `processOrderDocs` Cloud Task after rendering in
- * CRMS and uploading to the Uploadcare CDN. There are no server timestamps —
- * `orderUpdatedAt` is the order's `updated_at` at render time, used to prune
- * stale generated docs.
+ * The packing list is rendered ON READ by api-cloudrun's `resolvePackingListUuid`
+ * (`GET /packing-list?number=`) and uploaded to the Uploadcare CDN; the
+ * `processOrderDocs` Cloud Task that used to write this collection was deleted
+ * with api-cloudrun#1129. There are no server timestamps — `orderUpdatedAt` is
+ * the order's `updated_at` at render time.
  *
  * ⭐ **This type carries `uid` AND `uuid` side by side, which is the convention's
  * clearest illustration** (`core/CLAUDE.md` § *UID property naming*): `uid` is
@@ -46,6 +47,7 @@
 import { z } from "zod";
 import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
+import { type RenderParamsContext, RenderParamsContextSchema } from "./template-version.ts";
 
 /** Metadata for a single generated order document (quote / packing list PDF). */
 export interface OrderDocument {
@@ -66,6 +68,21 @@ export interface OrderDocument {
    * backfill.
    */
   source_hash: string;
+  /**
+   * The template and component versions (and the param declaration) this file
+   * was rendered against — what `renderDocument` returned for these bytes.
+   *
+   * ⚠️ **On THIS collection, ABSENT reads as STALE** — the opposite of the
+   * convention `RenderParamsContext` documents for quotes and invoices, and on
+   * purpose. Those are SAVED artifacts an operator chose to keep, so an
+   * unrecorded version must not flag. A packing list is rendered on read, so
+   * "stale" costs one re-render, and the owner ruled (2026-10-12) that a
+   * template or component release must reach every cached packing list. A file
+   * written before this field existed therefore re-renders once on its next
+   * read. Optional rather than nullable because no stored document carries it
+   * and none can be backfilled.
+   */
+  params_context?: RenderParamsContext;
 }
 
 /** Zod schema for OrderDocument. */
@@ -82,6 +99,9 @@ export const OrderDocumentSchema: z.ZodType<OrderDocument> = z.strictObject({
   orderUpdatedAt: FirestoreTimestamp,
   // Required — see `Quote.source_hash`.
   source_hash: z.string(),
+  // Optional: absent on every file rendered before it existed, and absent reads
+  // as stale here (see the interface).
+  params_context: RenderParamsContextSchema.optional(),
 }).meta({
   title: "Order Document",
   collection: "orders/{uid}/documents",
