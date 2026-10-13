@@ -45787,8 +45787,9 @@ and a reversal (lines negated, type kept) folds correctly:
 
 `prep` and `unprep` move nothing physically and have no lines: a prep turns
 an unflagged shelf unit `prepped` where it stands, and an unprep puts it
-back. `rebook_out` / `rebook_in` have no lines either: the unit stays at the
-customer and moves from one booking to another (see `foldRebook`).
+back. `rebook_out` / `rebook_in` have no lines either: an `out` unit stays at
+the customer and moves from one booking to another, and a terminal one moves
+nothing (see `foldRebook`).
 `enroll` / `unenroll` have IN-PLACE lines and open or close the roster's
 interval: an enroll places units where they stand, an unenroll retires them
 (see `foldRosterBoundary`), so the roster is the fold of its journal from an

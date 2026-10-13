@@ -9,6 +9,7 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   type BookingActionType,
   type BookingBreakdown,
+  type BookingBreakdownKeyType,
   type BookingUnitSetsType,
   MOVEMENT_CONTRACTS,
   type MovementLineType,
@@ -326,12 +327,18 @@ Deno.test("foldRosterUnits: an unattributed_out unit (a conversion's) checks in 
 const LEG_B = bookingId(fid("order1"), PRODUCT, legUid("leg2"));
 
 /** A rebook half as the api's extension route shapes it: no lines, the counterpart in `sources[]`. */
-function rebook(type: "rebook_out" | "rebook_in", numbers: number[], subject: string, counterpart: string): RosterMovement {
+function rebook(
+  type: "rebook_out" | "rebook_in",
+  numbers: number[],
+  subject: string,
+  counterpart: string,
+  bucket: BookingBreakdownKeyType = "out",
+): RosterMovement {
   return {
     uid: `${SESSION}|${type}|${subject}`,
     type,
     uid_booking: subject,
-    custody: type === "rebook_out" ? { from: "out", to: null } : { from: null, to: "out" },
+    custody: type === "rebook_out" ? { from: bucket, to: null } : { from: null, to: bucket },
     service: null,
     lines: [],
     units: numbers.map((n) => ({ uid_unit: `unit-${n}`, number: n, serial_number: null })),
@@ -381,6 +388,45 @@ Deno.test("foldRosterUnits: an unattributed_out unit (a conversion residue) rebo
   // Still one order: B's half first writes the unit down on B, and A's half then refuses it.
   const inFirst = foldRosterUnits(start, rebook("rebook_in", [1001], LEG_B, BOOKING));
   assertThrows(() => foldRosterUnits(inFirst, rebook("rebook_out", [1001], BOOKING, LEG_B)), RosterFoldError, `out on ${LEG_B}`);
+});
+
+Deno.test("foldRosterUnits: a terminal rebook pair moves no unit — the roster comes back as the same object", () => {
+  const start: RosterUnits = {
+    ...shelfRoster([1001]),
+    "1002": { state: "away", uid_out_of_service: "record-1" },
+    "1003": { state: "shelf", uid_location: SHELF, flag: "cleaning", uid_out_of_service: "record-2" },
+  };
+  const snapshot = structuredClone(start);
+  for (const bucket of ["returned", "lost", "cleaning"] as const) {
+    const numbers = bucket === "returned" ? [1001] : bucket === "lost" ? [1002] : [1003];
+    assert(foldRosterUnits(start, rebook("rebook_out", numbers, BOOKING, LEG_B, bucket)) === start, bucket);
+    assert(foldRosterUnits(start, rebook("rebook_in", numbers, LEG_B, BOOKING, bucket)) === start, bucket);
+  }
+  assertEquals(start, snapshot);
+});
+
+Deno.test("foldRosterUnits: a terminal rebook accepts a written-off unit, which is absent from the roster", () => {
+  const start = shelfRoster([1001]);
+  assert(foldRosterUnits(start, rebook("rebook_out", [1009], BOOKING, LEG_B, "lost")) === start);
+  assert(foldRosterUnits(start, rebook("rebook_in", [1009], LEG_B, BOOKING, "lost")) === start);
+});
+
+Deno.test("foldRosterUnits: a terminal rebook refuses a unit the roster holds with a booking — it did not come back", () => {
+  const start: RosterUnits = {
+    "1001": { state: "out", uid_booking: BOOKING },
+    "1002": { state: "prepped", uid_booking: BOOKING, uid_location: SHELF },
+    "1003": { state: "unattributed_out" },
+  };
+  assertThrows(() => foldRosterUnits(start, rebook("rebook_out", [1001], BOOKING, LEG_B, "returned")), RosterFoldError, `out on ${BOOKING}`);
+  assertThrows(() => foldRosterUnits(start, rebook("rebook_in", [1001], LEG_B, BOOKING, "returned")), RosterFoldError, `out on ${BOOKING}`);
+  assertThrows(() => foldRosterUnits(start, rebook("rebook_out", [1002], BOOKING, LEG_B, "damaged")), RosterFoldError, "prepped on");
+  assertThrows(() => foldRosterUnits(start, rebook("rebook_in", [1003], LEG_B, BOOKING, "maintenance")), RosterFoldError, "unrecorded booking");
+});
+
+Deno.test("foldRosterUnits: a rebook of prepped units is refused — only a complete order carries custody this way", () => {
+  const start: RosterUnits = { "1001": { state: "prepped", uid_booking: BOOKING, uid_location: SHELF } };
+  assertThrows(() => foldRosterUnits(start, rebook("rebook_out", [1001], BOOKING, LEG_B, "prepped")), RosterFoldError, "prepped custody");
+  assertThrows(() => foldRosterUnits(start, rebook("rebook_in", [1001], LEG_B, BOOKING, "prepped")), RosterFoldError, "prepped custody");
 });
 
 Deno.test("foldRosterUnits: rebook_in must name exactly one counterpart booking", () => {

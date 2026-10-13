@@ -14,6 +14,7 @@
  * @module
  */
 import {
+  BOOKING_BREAKDOWN_TERMINAL_KEYS,
   type BookingBreakdownKeyType,
   type DocSourceType,
   isCustomerCustodyStep,
@@ -329,6 +330,7 @@ export class RosterFoldError extends Error {
 }
 
 const FLAG_REASONS: ReadonlySet<string> = new Set(OOS_FLAG_REASONS);
+const TERMINAL_BUCKETS: ReadonlySet<string> = new Set(BOOKING_BREAKDOWN_TERMINAL_KEYS);
 
 function asFlag(reason: string | null | undefined): OOSFlagReasonType | null {
   return reason != null && FLAG_REASONS.has(reason) ? reason as OOSFlagReasonType : null;
@@ -459,9 +461,40 @@ function destination(
  * down which (a conversion residue). Rebooking it is what writes the booking
  * down — B — so the extension settles it the way a check-in does (owner,
  * 2026-10-07). The writer caps how many it names at A's untracked `out`.
+ *
+ * The arm is keyed on the custody bucket the pair carries (`custody.from` on
+ * `rebook_out`, `custody.to` on `rebook_in`). Only `out` moves the roster. A
+ * TERMINAL bucket (`returned` and the out-of-service keys — a complete order's
+ * repoint or grain carry, api-cloudrun#1313) moves the booking's unit SETS and
+ * leaves the roster as it is: a returned, lost, damaged, cleaning or
+ * maintenance unit stands on a shelf, at a record, or nowhere (written off),
+ * and is never with a booking. So a terminal half refuses a unit the roster
+ * holds booking-bound (`prepped`, `out`, `unattributed_out`) — that is a unit
+ * that did not come back — and accepts the rest, an absent one included. Any
+ * other bucket (`prepped`) is refused: only a complete order carries custody
+ * this way.
  */
-function foldRebook(next: RosterUnits, m: RosterMovement, once: (n: number) => void): RosterUnits {
+function foldRebook(
+  roster: RosterUnits,
+  next: RosterUnits,
+  m: RosterMovement,
+  once: (n: number) => void,
+): RosterUnits {
   if (m.uid_booking === null) throw new RosterFoldError(`"${m.type}" names units but no booking`);
+  const bucket = m.type === "rebook_out" ? m.custody?.from : m.custody?.to;
+  if (bucket !== "out") {
+    if (!TERMINAL_BUCKETS.has(bucket ?? "")) {
+      throw new RosterFoldError(`"${m.type}" names units in ${bucket ?? "no"} custody, which a rebook cannot carry`);
+    }
+    for (const { number: n } of m.units) {
+      once(n);
+      const entry = next[String(n)];
+      if (entry?.state === "prepped" || entry?.state === "out" || entry?.state === "unattributed_out") {
+        throw new RosterFoldError(`"${m.type}" carries unit ${n} as ${bucket}, but the unit is ${describe(entry)}`, n);
+      }
+    }
+    return roster;
+  }
   let from = m.uid_booking;
   if (m.type === "rebook_in") {
     const counterparts = m.sources.filter((s) => s.collection === "bookings" && s.uid !== m.uid_booking);
@@ -580,8 +613,9 @@ function foldRosterBoundary(next: RosterUnits, m: RosterMovement, once: (n: numb
  *
  * `prep` and `unprep` move nothing physically and have no lines: a prep turns
  * an unflagged shelf unit `prepped` where it stands, and an unprep puts it
- * back. `rebook_out` / `rebook_in` have no lines either: the unit stays at the
- * customer and moves from one booking to another (see `foldRebook`).
+ * back. `rebook_out` / `rebook_in` have no lines either: an `out` unit stays at
+ * the customer and moves from one booking to another, and a terminal one moves
+ * nothing (see `foldRebook`).
  * `enroll` / `unenroll` have IN-PLACE lines and open or close the roster's
  * interval: an enroll places units where they stand, an unenroll retires them
  * (see `foldRosterBoundary`), so the roster is the fold of its journal from an
@@ -602,7 +636,7 @@ export function foldRosterUnits(roster: RosterUnits, m: RosterMovement): RosterU
   };
 
   if (m.lines.length === 0 && (m.type === "rebook_out" || m.type === "rebook_in")) {
-    return foldRebook(next, m, once);
+    return foldRebook(roster, next, m, once);
   }
 
   if (m.type === "enroll" || m.type === "unenroll") return foldRosterBoundary(next, m, once);
