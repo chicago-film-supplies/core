@@ -867,6 +867,8 @@ export {
   type BulkBookingUpdateResponseType,
   UpdateBookingResponse,
   type UpdateBookingResponseType,
+  PrepShortfall,
+  type PrepShortfallType,
 } from "./booking.ts";
 export {
   BookingAction,

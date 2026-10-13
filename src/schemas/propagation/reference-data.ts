@@ -205,6 +205,37 @@ const updateLocationRules: CollectionRule[] = [
       },
     ],
   },
+  {
+    id: "update-location:placement-to-inventory-ledgers",
+    source: "locations",
+    target: "inventory-ledgers",
+    mode: "fan-out",
+    invariant:
+      "A ledger's store_breakdown[].locations[] copies the location's role and whether it is THIS product's default storage location (products[uid_product].default) — every allocator ranks on both, so a change to either must re-stamp every ledger naming the location (api-cloudrun#1302 §2)",
+    trigger:
+      "role or any products[].default change — Eventarc on location write, BulkWriter with lastUpdateTime precondition",
+    enforced_by: [{
+      kind: "test",
+      ref:
+        "api-cloudrun/tests/integration/locations/locationProductDefault.test.ts::setting a product's default re-stamps that product's ledger copy",
+      clause:
+        "the cascade re-stamps `default` from `products[uid_product].default` and `role` from the location, on every ledger whose `query_by_uid_location` names it",
+      gates: true,
+    }],
+    fields: [
+      {
+        source: ["products", "default"],
+        target: ["store_breakdown", "locations", "default"],
+        transform:
+          "the ledger's own product's entry in products[] (the ledger id is the product uid); false when it has none",
+      },
+      {
+        source: ["role"],
+        target: ["store_breakdown", "locations", "role"],
+        transform: "copied; an absent role is written as `storage`",
+      },
+    ],
+  },
   // No `update-location:name-to-stock` rule, deliberately. Stock
   // summaries used to embed `store_breakdown` (location names and all), so a
   // rename had to fan out across every summary of every product stored at that

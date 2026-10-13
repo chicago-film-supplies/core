@@ -161,6 +161,7 @@ export type TransactionId =
   // locations.ts
   | "create-location"
   | "update-location"
+  | "set-location-product-default"
   // threads.ts
   | "create-role"
   | "create-comment"
@@ -269,6 +270,7 @@ export type RuleId =
   | "create-store-transfer:transaction-to-ledger"
   | "create-store-transfer:transaction-to-locations"
   | "create-store-transfer:transaction-to-out-of-service"
+  | "create-store-transfer:transaction-to-bookings"
   // products.ts
   | "create-product:product-to-tags"
   | "create-product:product-to-tracking-categories"
@@ -399,6 +401,7 @@ export type RuleId =
   | "update-tracking-category:name-to-products"
   | "update-location-type:capacities-to-locations"
   | "update-location:name-to-inventory-ledgers"
+  | "update-location:placement-to-inventory-ledgers"
   | "update-location:name-to-bookings"
   | "update-location:name-to-out-of-service"
   | "update-location:name-to-transactions"

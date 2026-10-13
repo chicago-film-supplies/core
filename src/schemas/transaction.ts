@@ -2344,6 +2344,19 @@ export interface StoreTransferLineInputType {
    * flag, as the line's `oos` already says.
    */
   units?: number[];
+  /**
+   * A RESTAGE (api-cloudrun#1302 ruling 9): this booking's prepped units move
+   * between two staging locations (Back → Front → Van) and stay prepped. The
+   * api refuses one unless both ends are staging and the booking holds at least
+   * `quantity` staged at `from`, and moves the booking's `stores` in the same
+   * write. Absent is an ordinary transfer, which may not take units a live
+   * booking holds staged beyond the location's free quantity.
+   *
+   * ⚠️ **Release order:** the api release that reads it must be live in prod
+   * before the manager sends it — this line is a `z.strictObject`, so an older
+   * api REFUSES the key rather than stripping it.
+   */
+  uid_booking?: string;
 }
 
 /** Zod schema for {@link StoreTransferLineInputType}. */
@@ -2353,6 +2366,10 @@ export const StoreTransferLineInput: z.ZodType<StoreTransferLineInputType> = z.s
   quantity: z.number().int().positive(),
   oos: z.strictObject({ uid: OutOfServiceId }).nullable(),
   units: UnitSet.optional(),
+  uid_booking: BookingId.optional(),
+}).refine((l) => l.uid_booking === undefined || l.oos === null, {
+  message: "a restage moves a booking's prepped units, never an out-of-service record's",
+  path: ["uid_booking"],
 }).refine((l) => l.from !== l.to, {
   message: "a transfer line moves units to a DIFFERENT location",
   path: ["to"],

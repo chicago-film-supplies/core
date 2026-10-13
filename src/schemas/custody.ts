@@ -764,6 +764,19 @@ export interface BookingActionType {
    * it must be live in prod before the manager sends it.
    */
   uid_credit_note?: string;
+  /**
+   * Where a `prep` puts the units: a STAGING location in the booking's store
+   * (api-cloudrun#1302 ruling 3). Only on `prep` — anything else is refused.
+   *
+   * Absent is the common case: the units go to the store's default staging
+   * location (`store.default_location`). The api refuses a location that is not
+   * `staging`, not active, or not in the store the units come from.
+   *
+   * ⚠️ **Release order:** like `units`, an api older than this field STRIPS it
+   * silently, which preps to the store default instead. The api release that
+   * reads it must be live in prod before the manager sends it.
+   */
+  uid_location?: string;
 }
 
 /** Zod schema for {@link BookingActionType}. */
@@ -773,12 +786,16 @@ export const BookingAction: z.ZodType<BookingActionType> = z.object({
   uid_out_of_service: OutOfServiceId.optional(),
   units: UnitSet.optional(),
   uid_credit_note: FirestoreId.optional(),
+  uid_location: FirestoreId.optional(),
 }).refine((a) => a.units === undefined || a.units.length === a.quantity, {
   message: "an action that names units names exactly `quantity` of them",
   path: ["units"],
 }).refine((a) => a.uid_credit_note === undefined || a.rule === "check_in", {
   message: "only a check_in (a sale's return) is refunded against a credit note",
   path: ["uid_credit_note"],
+}).refine((a) => a.uid_location === undefined || a.rule === "prep", {
+  message: "only a prep names a destination location",
+  path: ["uid_location"],
 });
 
 /**

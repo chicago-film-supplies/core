@@ -446,7 +446,26 @@ export interface BulkBookingUpdateResponseType {
   failures: Array<{ uid: string; error: string }>;
   /** Transactions the rows were split across. 1 for the p50 order. */
   chunks: number;
+  /** See {@link PrepShortfallType}. Absent when every prep was covered. */
+  prep_shortfalls?: PrepShortfallType[];
 }
+
+/**
+ * A prep the shelves could not fully cover (api-cloudrun#1302 ruling 8). The
+ * covered units moved to staging; the `shortfall` was prepped IN PLACE with no
+ * shelf, because the units are not on any shelf to move. Never a 400: the
+ * operator is told, and resolves it with a recount or by cleaning up bookings.
+ */
+export interface PrepShortfallType {
+  uid: string;
+  shortfall: number;
+}
+
+/** Zod schema for {@link PrepShortfallType}. */
+export const PrepShortfall: z.ZodType<PrepShortfallType> = z.object({
+  uid: BookingId,
+  shortfall: z.int().min(1),
+});
 
 export const BulkBookingUpdateResponse: z.ZodType<BulkBookingUpdateResponseType> =
   z.object({
@@ -461,6 +480,7 @@ export const BulkBookingUpdateResponse: z.ZodType<BulkBookingUpdateResponseType>
       error: z.string(),
     })),
     chunks: z.int().min(1),
+    prep_shortfalls: z.array(PrepShortfall).optional(),
   });
 
 /**
@@ -475,12 +495,15 @@ export interface UpdateBookingResponseType {
   success: boolean;
   version: number;
   oos_records_written: number;
+  /** See {@link PrepShortfallType}. Absent when the prep was covered. */
+  prep_shortfalls?: PrepShortfallType[];
 }
 
 export const UpdateBookingResponse: z.ZodType<UpdateBookingResponseType> = z.object({
   success: z.boolean(),
   version: z.int().min(0),
   oos_records_written: z.int().min(0),
+  prep_shortfalls: z.array(PrepShortfall).optional(),
 });
 
 /**

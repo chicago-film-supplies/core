@@ -125,6 +125,22 @@ const updateLocationTransaction: TransactionDefinition = {
   ],
 };
 
+// ── Product default storage locations ───────────────────────────
+
+/**
+ * Set or clear one product's default-storage flag at one location
+ * (api-cloudrun#1302 §2, ruling 4). The location is the whole write; the
+ * ledger's per-product copy is refreshed by the Eventarc placement cascade
+ * (`update-location:placement-to-inventory-ledgers`), not by a step here — so
+ * this transaction never meets the ledger writer's group commit.
+ */
+const setLocationProductDefaultTransaction: TransactionDefinition = {
+  id: "set-location-product-default",
+  description:
+    "Sets or clears one product's default-storage flag (`products[].default`) at one storage location. A product may have several. Writes the location alone; its ledgers are re-stamped post-commit by the location write's placement cascade.",
+  steps: [],
+};
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/locations.ts` contributes to the propagation catalog. */
 export const locations: PropagationModule = {
@@ -135,5 +151,6 @@ export const locations: PropagationModule = {
   transactions: [
     createLocationTransaction,
     updateLocationTransaction,
+    setLocationProductDefaultTransaction,
   ],
 };

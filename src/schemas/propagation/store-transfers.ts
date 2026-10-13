@@ -140,6 +140,35 @@ const createStoreTransferRules: CollectionRule[] = [
       },
     ],
   },
+  {
+    id: "create-store-transfer:transaction-to-bookings",
+    source: "transactions",
+    target: "bookings",
+    mode: "co-write",
+    invariant:
+      "A RESTAGE — a transfer line naming `uid_booking` (api-cloudrun#1302 ruling 9) — moves that booking's prepped units between two staging locations, and the booking's `stores` is where its staged units live (ruling 7), so the same commit moves the booking's staging entries from the source to the destination. Refused unless both ends are staging and the booking holds at least that many staged at the source; a line with no booking moves no booking.",
+    enforced_by: [{
+      kind: "test",
+      ref:
+        "api-cloudrun/tests/integration/transactions/restageTransfer.test.ts::a restage moves the booking's staged entry with its units",
+      clause:
+        "the booking's staging entry at the source falls by the line's quantity and the destination's rises by it, in the transfer's own commit",
+      gates: true,
+    }],
+    transaction: "create-store-transfer",
+    fields: [
+      {
+        source: ["lines", "location"],
+        target: ["stores", "locations", "quantity"],
+        transform: "−quantity at the line's `from` staging location, +quantity at its `to`",
+      },
+      {
+        source: [],
+        target: ["query_by_uid_location"],
+        transform: "rebuilt from the post-restage stores",
+      },
+    ],
+  },
 ];
 
 const createStoreTransferTransaction: TransactionDefinition = {
@@ -150,6 +179,7 @@ const createStoreTransferTransaction: TransactionDefinition = {
     "create-store-transfer:transaction-to-ledger",
     "create-store-transfer:transaction-to-locations",
     "create-store-transfer:transaction-to-out-of-service",
+    "create-store-transfer:transaction-to-bookings",
     "units:transactions-to-roster",
   ],
 };
