@@ -62,13 +62,13 @@ export interface Location {
    */
   default: boolean;
   /**
-   * `storage` or `staging` ({@link LocationRoleEnum}). **Optional through
-   * api-cloudrun#1302's rollout** (`z.strictObject` has no safe direction, so a
-   * new key is optional until the deploy that declares it is live, every writer
-   * stamps it, and the corpus is backfilled). Absent means `storage`
-   * ({@link locationRole}). Becomes required in phase 3.
+   * `storage` or `staging` ({@link LocationRoleEnum}). **Required** since
+   * api-cloudrun#1302 phase 3 (2026-10-13): `createLocation` has stamped it on
+   * every create since phase 1, and `api-cloudrun/scripts/backfill-location-role.ts`
+   * stamped `storage` on the 299 prod / 301 dev documents that predated it —
+   * the value every reader already took for an absent key.
    */
-  role?: LocationRoleType;
+  role: LocationRoleType;
   uid_location_type: string | null;
   product_capacities: LocationProductCapacity[];
   query_by_product_capacities: string[];
@@ -90,7 +90,7 @@ export const LocationSchema: z.ZodType<Location> = z.strictObject({
   name_key: z.string().max(100).optional(),
   default: z.boolean().meta({ column: true, label: "Default" }),
   // Optional until api-cloudrun#1302 phase 3 — see the interface note.
-  role: LocationRoleEnum.optional().meta({ column: true, label: "Role" }),
+  role: LocationRoleEnum.meta({ column: true, label: "Role" }),
   // Required-but-nullable, and every one of the 209 prod docs carries the KEY as
   // `null` (2026-08-23). A value census reads that as "dead"; it is not — the
   // writer is explicit and location types are simply unassigned. CLAUDE.md

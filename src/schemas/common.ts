@@ -2347,7 +2347,8 @@ export type LocationRoleType = (typeof LOCATION_ROLES)[number];
 
 /**
  * A location's role, with an absent `role` read as `storage` — the one place
- * that rule is spelled. Takes the document or the ledger's copy.
+ * that rule is spelled. Takes the document (where `role` is required since
+ * api-cloudrun#1302 phase 3) or the ledger's copy (where it may still be absent).
  */
 export function locationRole(loc: { role?: LocationRoleType }): LocationRoleType {
   return loc.role ?? "storage";

@@ -2751,7 +2751,7 @@
         {
           "kind": "interface",
           "name": "Location",
-          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  default: boolean;\n  role?: LocationRoleType;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  default: boolean;\n  role: LocationRoleType;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A location document in Firestore."
         },
         {
@@ -6802,7 +6802,7 @@
           "kind": "function",
           "name": "locationRole",
           "signature": "locationRole(loc: typeLiteral): LocationRoleType",
-          "doc": "A location's role, with an absent `role` read as `storage` — the one place\nthat rule is spelled. Takes the document or the ledger's copy.",
+          "doc": "A location's role, with an absent `role` read as `storage` — the one place\nthat rule is spelled. Takes the document (where `role` is required since\napi-cloudrun#1302 phase 3) or the ledger's copy (where it may still be absent).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -8014,7 +8014,7 @@
           "kind": "function",
           "name": "locationRole",
           "signature": "locationRole(loc: typeLiteral): LocationRoleType",
-          "doc": "A location's role, with an absent `role` read as `storage` — the one place\nthat rule is spelled. Takes the document or the ledger's copy.",
+          "doc": "A location's role, with an absent `role` read as `storage` — the one place\nthat rule is spelled. Takes the document (where `role` is required since\napi-cloudrun#1302 phase 3) or the ledger's copy (where it may still be absent).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9327,7 +9327,7 @@
         {
           "kind": "interface",
           "name": "Location",
-          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  default: boolean;\n  role?: LocationRoleType;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  default: boolean;\n  role: LocationRoleType;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A location document in Firestore."
         },
         {

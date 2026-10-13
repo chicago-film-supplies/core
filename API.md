@@ -6206,7 +6206,7 @@ interface Location {
   name: string;
   name_key?: string;
   default: boolean;
-  role?: LocationRoleType;
+  role: LocationRoleType;
   uid_location_type: string | null;
   product_capacities: LocationProductCapacity[];
   query_by_product_capacities: string[];
@@ -14984,7 +14984,8 @@ oracle from this function itself.
 ### `locationRole(loc: typeLiteral): LocationRoleType`
 
 A location's role, with an absent `role` read as `storage` — the one place
-that rule is spelled. Takes the document or the ledger's copy.
+that rule is spelled. Takes the document (where `role` is required since
+api-cloudrun#1302 phase 3) or the ledger's copy (where it may still be absent).
 
 ### `markReasonOf(type: MovementTypeType): OutOfServiceKeyType | null`
 
@@ -17583,7 +17584,8 @@ contract and every derived predicate answers `false` for it.
 ### `locationRole(loc: typeLiteral): LocationRoleType`
 
 A location's role, with an absent `role` read as `storage` — the one place
-that rule is spelled. Takes the document or the ledger's copy.
+that rule is spelled. Takes the document (where `role` is required since
+api-cloudrun#1302 phase 3) or the ledger's copy (where it may still be absent).
 
 ### `settlementContract(type: string): SettlementContract | undefined`
 
@@ -20376,7 +20378,7 @@ interface Location {
   name: string;
   name_key?: string;
   default: boolean;
-  role?: LocationRoleType;
+  role: LocationRoleType;
   uid_location_type: string | null;
   product_capacities: LocationProductCapacity[];
   query_by_product_capacities: string[];

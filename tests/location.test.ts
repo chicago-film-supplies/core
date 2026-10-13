@@ -69,11 +69,14 @@ Deno.test("LocationSchema rejects additional properties", () => {
 
 // ── role (api-cloudrun#1302) ─────────────────────────────────────
 
-Deno.test("role: a location without one parses, and reads as storage", () => {
+Deno.test("role: required on the document — a location without one is refused, naming role", () => {
+  // api-cloudrun#1302 phase 3: every stored location was backfilled first.
   const { role: _role, ...noRole } = validLocation as Record<string, unknown>;
   const parsed = LocationSchema.safeParse(noRole);
-  assertEquals(parsed.success, true);
-  assertEquals(locationRole(parsed.data!), "storage");
+  assertEquals(parsed.success, false);
+  assertEquals(parsed.error!.issues.map((i) => i.path.join(".")), ["role"]);
+  // The helper still reads an absent role as storage, for the ledger's copy.
+  assertEquals(locationRole({}), "storage");
 });
 
 Deno.test("role: staging and storage parse; anything else is refused", () => {
