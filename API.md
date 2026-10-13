@@ -32046,8 +32046,12 @@ otherwise. The record's VERSION is the api's precondition, not this rule.
 Who owns a record's reason, read off its mark movement (the movement whose id
 the record shares). Lifted from `api-cloudrun/src/lib/recordReclassify.ts`.
 
-- `booking` — the mark carries custody on a booking the record's sources
-  name: a reason edit moves that booking's bucket.
+- `booking` — the mark carries custody on a booking: a reason edit moves the
+  owning booking's bucket. The owner is the booking the record's sources
+  name — the mark's own, or, once a complete-order repoint or grain carry
+  moved the custody and the record with it, its ONE successor
+  (api-cloudrun#1313). The mark is provenance: journal history, never
+  rewritten.
 - `standalone` — POSTed on its own; its mark names no booking, so the edit is
   the record's alone.
 - `legacy` — no mark, and the sources name a booking: units in a bucket no

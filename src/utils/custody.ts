@@ -1250,7 +1250,12 @@ export function lossUndoRefusal(
   if (!record.query_by_sources.includes(`bookings:${uid_booking}`)) {
     return refuse("other_booking", `Cannot undo ${label}: it was not raised from this booking.`);
   }
-  if (mark?.custody && mark.uid_booking === uid_booking && mark.custody.to !== record.reason) {
+  // The record's OWNER, not its mark's booking: a complete-order repoint or
+  // grain carry moves the record with the custody, so the mark (immutable
+  // journal history) may name the booking it was raised on (api-cloudrun#1313).
+  const owner = recordOwner(record, mark);
+  const mine = owner.kind === "booking" && owner.uid_booking === uid_booking;
+  if (mark?.custody && mine && mark.custody.to !== record.reason) {
     return refuse(
       "reclassified",
       `Cannot decrease breakdown.${reason} via PUT /bookings — ${label} was reclassified from ` +
@@ -1258,7 +1263,7 @@ export function lossUndoRefusal(
     );
   }
   if (
-    mark?.type === "flag" && mark.uid_booking === uid_booking && mark.custody?.from != null &&
+    mark?.type === "flag" && mine && mark.custody?.from != null &&
     (OOS_FLAG_REASONS as readonly string[]).includes(mark.custody.from)
   ) {
     return refuse(
@@ -1274,7 +1279,7 @@ export function lossUndoRefusal(
     ? "flag"
     : `mark_${reason}`;
   if (
-    mark === null || mark.type !== expectedType || mark.uid_booking !== uid_booking ||
+    mark === null || mark.type !== expectedType || !mine ||
     mark.custody === null || mark.custody.from === null
   ) {
     return refuse(
@@ -1355,8 +1360,12 @@ export function undoableFromRecords(
  * Who owns a record's reason, read off its mark movement (the movement whose id
  * the record shares). Lifted from `api-cloudrun/src/lib/recordReclassify.ts`.
  *
- * - `booking` — the mark carries custody on a booking the record's sources
- *   name: a reason edit moves that booking's bucket.
+ * - `booking` — the mark carries custody on a booking: a reason edit moves the
+ *   owning booking's bucket. The owner is the booking the record's sources
+ *   name — the mark's own, or, once a complete-order repoint or grain carry
+ *   moved the custody and the record with it, its ONE successor
+ *   (api-cloudrun#1313). The mark is provenance: journal history, never
+ *   rewritten.
  * - `standalone` — POSTed on its own; its mark names no booking, so the edit is
  *   the record's alone.
  * - `legacy` — no mark, and the sources name a booking: units in a bucket no
@@ -1369,8 +1378,10 @@ export function recordOwner(
   if (mark === null) {
     return record.query_by_sources.some((s) => s.startsWith("bookings:")) ? { kind: "legacy" } : { kind: "standalone" };
   }
-  if (mark.uid_booking && mark.custody && record.query_by_sources.includes(`bookings:${mark.uid_booking}`)) {
-    return { kind: "booking", uid_booking: mark.uid_booking };
+  if (mark.uid_booking && mark.custody) {
+    const named = record.query_by_sources.filter((s) => s.startsWith("bookings:")).map((s) => s.slice("bookings:".length));
+    if (named.includes(mark.uid_booking)) return { kind: "booking", uid_booking: mark.uid_booking };
+    if (named.length === 1) return { kind: "booking", uid_booking: named[0] };
   }
   return { kind: "standalone" };
 }

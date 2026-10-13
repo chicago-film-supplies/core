@@ -1232,6 +1232,26 @@ Deno.test("custody - recordOwner reads the mark", () => {
   assertEquals(recordOwner(rec, { uid_booking: null, custody: null }), { kind: "standalone" });
 });
 
+Deno.test("custody - recordOwner: a CARRIED record is owned by the booking its sources name, the mark is provenance", () => {
+  // A repoint or grain carry moved the custody X → Y and rewrote the record's
+  // sources; the mark still names X (api-cloudrun#1313).
+  const mark = { uid_booking: "x", custody: { from: "out", to: "lost" } } as const;
+  assertEquals(recordOwner({ query_by_sources: ["orders:o", "bookings:y"] }, mark), { kind: "booking", uid_booking: "y" });
+  // Two bookings named, neither the mark's: not decidable, so not a booking's.
+  assertEquals(recordOwner({ query_by_sources: ["bookings:y", "bookings:z"] }, mark), { kind: "standalone" });
+  // The mark's own booking wins where it is still named.
+  assertEquals(recordOwner({ query_by_sources: ["bookings:x", "bookings:y"] }, mark), { kind: "booking", uid_booking: "x" });
+});
+
+Deno.test("custody - lossUndoRefusal: a carried record is undoable on its successor, and on no other booking", () => {
+  const carried = (): LossRecordView => {
+    const v = lossView({ reason: "lost", booking: "x" });
+    return { ...v, record: { ...v.record, query_by_sources: ["bookings:b1"] } };
+  };
+  assertEquals(lossUndoRefusal(carried(), "b1", "lost"), null);
+  assertEquals(lossUndoRefusal(carried(), "x", "lost")?.code, "other_booking");
+});
+
 // ── serviceUnitMovesFor: api-cloudrun tests/unit/oosUnits.test.ts, carried over, plus the editor's checks ──
 
 const ob = (over: Partial<OOSBreakdown>): OOSBreakdown => ({ flagged: 0, away: 0, written_off: 0, returned_to_service: 0, ...over });

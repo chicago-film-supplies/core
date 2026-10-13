@@ -14520,7 +14520,7 @@
           "kind": "function",
           "name": "recordOwner",
           "signature": "recordOwner(record: Pick<OutOfService, \"query_by_sources\">, mark: Pick<Movement, \"uid_booking\" | \"custody\"> | null): typeLiteral | typeLiteral | typeLiteral",
-          "doc": "Who owns a record's reason, read off its mark movement (the movement whose id\nthe record shares). Lifted from `api-cloudrun/src/lib/recordReclassify.ts`.\n\n- `booking` — the mark carries custody on a booking the record's sources\n  name: a reason edit moves that booking's bucket.\n- `standalone` — POSTed on its own; its mark names no booking, so the edit is\n  the record's alone.\n- `legacy` — no mark, and the sources name a booking: units in a bucket no\n  movement raised. Refused, as its undo is.",
+          "doc": "Who owns a record's reason, read off its mark movement (the movement whose id\nthe record shares). Lifted from `api-cloudrun/src/lib/recordReclassify.ts`.\n\n- `booking` — the mark carries custody on a booking: a reason edit moves the\n  owning booking's bucket. The owner is the booking the record's sources\n  name — the mark's own, or, once a complete-order repoint or grain carry\n  moved the custody and the record with it, its ONE successor\n  (api-cloudrun#1313). The mark is provenance: journal history, never\n  rewritten.\n- `standalone` — POSTed on its own; its mark names no booking, so the edit is\n  the record's alone.\n- `legacy` — no mark, and the sources name a booking: units in a bucket no\n  movement raised. Refused, as its undo is.",
           "paramTags": [],
           "returnsTag": null
         },
