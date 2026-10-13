@@ -29,15 +29,47 @@ Deno.test("pins: every pre-campaign movement type still exists", () => {
   for (const t of types) assert((MOVEMENT_TYPES as readonly string[]).includes(t), `${t} was removed`);
 });
 
-Deno.test("pins: every pre-campaign contract is unchanged, field for field", () => {
+/**
+ * Contract changes made DELIBERATELY after the fixture was captured, each by an
+ * owner ruling. The fixture stays the oracle for everything else: a ruled change
+ * is stated here with its reason, never regenerated into the fixture, so a
+ * change nobody ruled on still fails.
+ */
+const RULED_CHANGES: Record<string, { fields: Record<string, unknown>; why: string }> = {
+  prep: {
+    fields: { places: { from: ["locations"], to: ["locations"] } },
+    why: "api-cloudrun#1302 ruling 1: prep moves units shelf → a staging location",
+  },
+  unprep: {
+    fields: { places: { from: ["locations"], to: ["locations"] } },
+    why: "api-cloudrun#1302: the mirror of prep, staging → shelf",
+  },
+  transfer: {
+    fields: { booking: "optional" },
+    why: "api-cloudrun#1302 ruling 9: a restage is a transfer naming its booking",
+  },
+};
+
+Deno.test("pins: every pre-campaign contract is unchanged, field for field, except the ruled changes", () => {
   for (const [t, pinned] of Object.entries(pins.contracts)) {
     const type = t as (typeof MOVEMENT_TYPES)[number];
-    const { undoes: _undoes, ...rest } = MOVEMENT_CONTRACTS[type] as unknown as Record<string, unknown>;
+    const { undoes: _undoes, ...rest } = MOVEMENT_CONTRACTS[type];
+    const ruled = RULED_CHANGES[t];
     assertEquals(
       strip({ ...rest, multiplier: getTransactionMultiplier(type), hasCosts: hasCosts(type) }),
-      pinned,
-      t,
+      ruled ? { ...(pinned as Record<string, unknown>), ...ruled.fields } : pinned,
+      ruled ? `${t} (ruled: ${ruled.why})` : t,
     );
+  }
+});
+
+Deno.test("pins: every ruled change still differs from the fixture (no dead entry)", () => {
+  for (const [t, ruled] of Object.entries(RULED_CHANGES)) {
+    const pinned = pins.contracts[t] as Record<string, unknown> | undefined;
+    assert(pinned, `${t} is not a pre-campaign type`);
+    for (const [field, value] of Object.entries(ruled.fields)) {
+      assert(JSON.stringify(pinned[field]) !== JSON.stringify(value), `${t}.${field} already matched the fixture`);
+    }
   }
 });
 

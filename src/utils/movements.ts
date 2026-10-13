@@ -19,6 +19,7 @@
  */
 import type {
   InventoryLedger,
+  LocationRoleType,
   Movement,
   MovementLineType,
   MovementServiceType,
@@ -376,8 +377,20 @@ export interface LocationPlacement {
   /** The owning store's own `default` flag — NOT the location's. */
   store_default: boolean;
   name: string;
+  /**
+   * Whether this location is one of the MOVED PRODUCT's default storage
+   * locations (`locations/{uid}.products[uid_product].default`) — stamped onto
+   * the ledger's `locations[].default`. ⚠️ Not the location's own `default`,
+   * which copies the store pointer (api-cloudrun#1302 §2).
+   */
   default: boolean;
   max: number | null;
+  /**
+   * The location's role. Absent leaves the ledger entry's `role` as it was, so
+   * a caller predating the field cannot erase one; absent on both means
+   * `storage` (`locationRole`).
+   */
+  role?: LocationRoleType;
 }
 
 /**
@@ -587,6 +600,7 @@ export function applyMovementToLedger(
       location.name = placement.name;
       location.default = placement.default;
       location.max = placement.max;
+      if (placement.role !== undefined) location.role = placement.role;
       location.quantity += line.quantity * sign;
       store.quantity += line.quantity * sign;
       // The shelf's own out-of-service count moves with a flag on this

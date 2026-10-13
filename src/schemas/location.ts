@@ -3,7 +3,12 @@
  */
 import { z } from "zod";
 import { FirestoreId } from "./_uid.ts";
-import { FirestoreTimestamp, type FirestoreTimestampType } from "./common.ts";
+import {
+  FirestoreTimestamp,
+  type FirestoreTimestampType,
+  LocationRoleEnum,
+  type LocationRoleType,
+} from "./common.ts";
 
 /** Product capacity constraint for a location. */
 export interface LocationProductCapacity {
@@ -17,6 +22,13 @@ export interface LocationProduct {
   uid: string;
   name: string;
   quantity: number;
+  /**
+   * Whether this location is one of the product's **default storage
+   * locations** — where it is put away, and the shelf the allocators draw from
+   * first. The source of truth for that fact; the ledger's
+   * `store_breakdown[].locations[].default` is its per-product copy. A product
+   * may have several (ruling 11), and only on a `storage` location.
+   */
   default: boolean;
 }
 
@@ -39,7 +51,21 @@ export interface Location {
    * so it is not the constraint — do not narrow this optional window by it.)
    */
   name_key?: string;
+  /**
+   * A COPY of the store pointer: true exactly when `store.default_location`
+   * names this location. Not a product's default — that is
+   * `products[].default`. Scheduled for removal (api-cloudrun#1302 phase 5);
+   * read `store.default_location` instead, and add no new readers.
+   */
   default: boolean;
+  /**
+   * `storage` or `staging` ({@link LocationRoleEnum}). **Optional through
+   * api-cloudrun#1302's rollout** (`z.strictObject` has no safe direction, so a
+   * new key is optional until the deploy that declares it is live, every writer
+   * stamps it, and the corpus is backfilled). Absent means `storage`
+   * ({@link locationRole}). Becomes required in phase 3.
+   */
+  role?: LocationRoleType;
   uid_location_type: string | null;
   product_capacities: LocationProductCapacity[];
   query_by_product_capacities: string[];
@@ -60,6 +86,8 @@ export const LocationSchema: z.ZodType<Location> = z.strictObject({
   // window; no `.min(1)` because a name of pure separators normalizes to "".
   name_key: z.string().max(100).optional(),
   default: z.boolean().meta({ column: true, label: "Default" }),
+  // Optional until api-cloudrun#1302 phase 3 — see the interface note.
+  role: LocationRoleEnum.optional().meta({ column: true, label: "Role" }),
   // Required-but-nullable, and every one of the 209 prod docs carries the KEY as
   // `null` (2026-08-23). A value census reads that as "dead"; it is not — the
   // writer is explicit and location types are simply unassigned. CLAUDE.md
@@ -97,6 +125,8 @@ export interface CreateLocationInputType {
   uid: string;
   uid_store: string;
   name: string;
+  /** Absent means the writer stamps `storage`. */
+  role?: LocationRoleType;
   uid_location_type?: string | null;
 }
 /** Input schema for creating a location. */
@@ -104,6 +134,7 @@ export const CreateLocationInput: z.ZodType<CreateLocationInputType> = z.object(
   uid: FirestoreId,
   uid_store: FirestoreId,
   name: z.string().min(1).max(100),
+  role: LocationRoleEnum.optional(),
   uid_location_type: FirestoreId.nullable().optional(),
 });
 
@@ -112,6 +143,11 @@ export interface UpdateLocationInputType {
   uid: string;
   name?: string;
   default?: boolean;
+  /**
+   * Refused by the API while the location holds stock, or while a store
+   * pointer or a product's default names it (api-cloudrun#1302 §1).
+   */
+  role?: LocationRoleType;
   active?: boolean;
   version: number;
 }
@@ -120,6 +156,33 @@ export const UpdateLocationInput: z.ZodType<UpdateLocationInputType> = z.object(
   uid: FirestoreId,
   name: z.string().min(1).max(100).optional(),
   default: z.boolean().optional(),
+  role: LocationRoleEnum.optional(),
   active: z.boolean().optional(),
+  version: z.int().min(0),
+});
+
+/**
+ * Set or clear ONE product's default-storage flag at ONE location
+ * (`locations/{uid}.products[uid_product].default`) — the only writer of that
+ * fact outside a rebuild script (api-cloudrun#1302 §2).
+ *
+ * **Set or clear, never move**: a product may have several default storage
+ * locations (ruling 11), so setting one leaves the others alone. The API
+ * refuses a set on a location whose role is not `storage`, or on an inactive
+ * one. The ledger's per-product copy is refreshed by a post-commit cascade.
+ */
+export interface SetLocationProductDefaultInputType {
+  /** The location. */
+  uid: string;
+  uid_product: string;
+  default: boolean;
+  /** The location's `version`, for optimistic concurrency. */
+  version: number;
+}
+/** Input schema for {@link SetLocationProductDefaultInputType}. */
+export const SetLocationProductDefaultInput: z.ZodType<SetLocationProductDefaultInputType> = z.object({
+  uid: FirestoreId,
+  uid_product: FirestoreId,
+  default: z.boolean(),
   version: z.int().min(0),
 });

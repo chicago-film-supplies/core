@@ -251,7 +251,7 @@ export const CUSTODY_RULES: readonly CustodyRule[] = [
     stage: "prep",
     inverse: "unprep",
     billable: false,
-    description: "Pick reserved units onto the prep shelf. Nothing moves physically.",
+    description: "Move reserved units off their shelf to a staging location (the store's default staging location unless the operator picks another).",
     enforced_by: [TABLE_TEST],
   },
   {
@@ -266,7 +266,7 @@ export const CUSTODY_RULES: readonly CustodyRule[] = [
     stage: "prep",
     inverse: "prep",
     billable: false,
-    description: "Put prepped units back as merely reserved.",
+    description: "Put prepped units back as merely reserved: they return from staging to the shelf they were prepped from.",
     enforced_by: [TABLE_TEST],
   },
   {

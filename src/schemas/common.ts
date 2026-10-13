@@ -2324,14 +2324,58 @@ void _settlementContractParity;
 
 // ── Store breakdown (shared by InventoryLedger & StockSummary) ──────
 
+/**
+ * What a location is FOR (api-cloudrun#1302, ruling 2).
+ *
+ * - `storage` — a shelf a product is put away on. A product's default storage
+ *   locations (`products[].default`) must be `storage`.
+ * - `staging` — a temporary place for an item: the store's arrivals inbox,
+ *   a prep area, a loaded vehicle. `store.default_location` (the store's default
+ *   staging location) must be `staging`.
+ *
+ * Declared here, never inferred from the name, and never from `location_type`
+ * (prod has no location types). ⚠️ **ABSENT means `storage`**, on this document
+ * and on the ledger's copy ({@link StoreBreakdownLocation}`.role`) alike — read it
+ * through {@link locationRole}, never as `role === "storage"`, which is false for
+ * every location written before the field existed.
+ */
+export const LOCATION_ROLES = ["storage", "staging"] as const;
+/** Zod enum for {@link LOCATION_ROLES}. */
+export const LocationRoleEnum: z.ZodType<LocationRoleType> = z.enum(LOCATION_ROLES);
+/** A location's role. */
+export type LocationRoleType = (typeof LOCATION_ROLES)[number];
+
+/**
+ * A location's role, with an absent `role` read as `storage` — the one place
+ * that rule is spelled. Takes the document or the ledger's copy.
+ */
+export function locationRole(loc: { role?: LocationRoleType }): LocationRoleType {
+  return loc.role ?? "storage";
+}
+
+
 /** A single location within a store breakdown entry. */
 export interface StoreBreakdownLocation {
   uid_location: string;
   name: string;
   quantity: number;
+  /**
+   * Whether this location is one of THIS product's default storage locations —
+   * the per-product copy of `locations/{uid}.products[uid_product].default`.
+   * The ledger is per product, so the name already means that (ruling 16).
+   * ⚠️ Until api-cloudrun#1302 phase 2 the applier stamped it from the
+   * location's copy of the STORE pointer instead, which made every allocator
+   * draw from the arrivals inbox first.
+   */
   default: boolean;
   max: number | null;
   quantity_out_of_service?: number;
+  /**
+   * The location's role, copied like `name`. **Optional permanently**: absent
+   * means `storage` (`locationRole`), so no ledger needs a backfill and no
+   * reader may test `role === "storage"`.
+   */
+  role?: LocationRoleType;
 }
 
 /** A single store entry in a stock breakdown, containing its locations. */
@@ -2377,6 +2421,8 @@ export const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation> = z
     column: true,
     label: "Out Of Service",
   }),
+  // Optional permanently — absent means storage. See the interface note.
+  role: LocationRoleEnum.optional(),
 });
 
 /** Zod schema for StoreBreakdownEntry. */

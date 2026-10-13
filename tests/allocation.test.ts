@@ -18,6 +18,10 @@ import {
   allocateBookingToStores,
   allocateBookingWithNetting,
   buildReservedByLocation,
+  compareShelves,
+  mergeBookingStores,
+  shelfTier,
+  stagedPortion,
   type ReservedByLocation,
   type ReservingBooking,
 } from "../src/utils/allocation.ts";
@@ -33,7 +37,9 @@ const id = (label: string) => (label + "x".repeat(20)).slice(0, 20);
 function store(
   name: string,
   isDefault: boolean,
-  locations: Array<{ name: string; quantity: number; default?: boolean; max?: number | null }>,
+  locations: Array<
+    { name: string; quantity: number; default?: boolean; max?: number | null; role?: "storage" | "staging" }
+  >,
 ): StoreBreakdownEntry {
   const locs = locations.map((l) => ({
     uid_location: id(name + l.name),
@@ -41,6 +47,7 @@ function store(
     quantity: l.quantity,
     default: l.default ?? false,
     max: l.max ?? null,
+    ...(l.role ? { role: l.role } : {}),
   }));
   return {
     uid_store: id(name),
@@ -393,4 +400,117 @@ Deno.test("allocateBookingToStores: works on Proxy-wrapped input (a Solid store 
   assertEquals(result.shortage, 0);
   // And it agrees with the same allocation over plain objects.
   assertEquals(result.stores, allocateBookingToStores(plain, 5).stores);
+});
+
+// ── Staging locations (api-cloudrun#1302) ────────────────────────
+
+Deno.test("ranking: the product's default storage location, then other storage, then staging", () => {
+  // Quantity alone would draw staging first (9), then storage (6), then the
+  // default (2). The tiers must win over quantity.
+  const breakdown = [store("Main", true, [
+    { name: "Inbox", quantity: 9, role: "staging" },
+    { name: "Shelf", quantity: 6 }, // no role: storage
+    { name: "Home", quantity: 2, default: true, role: "storage" },
+  ])];
+  const drawn = (want: number) =>
+    allocateBookingToStores(breakdown, want).stores[0].locations.map((l) => [l.name, l.quantity]);
+  assertEquals(drawn(2), [["Home", 2]]);
+  assertEquals(drawn(8), [["Home", 2], ["Shelf", 6]]);
+  assertEquals(drawn(17), [["Home", 2], ["Shelf", 6], ["Inbox", 9]], "staging is a last resort, never excluded");
+});
+
+Deno.test("ranking: a default flag on a STAGING location ranks as staging", () => {
+  // The pre-#1302 applier stamped `default` from the store pointer, so the inbox
+  // carries it on stored ledgers. It must not be drawn first by way of that copy.
+  assertEquals(shelfTier({ default: true, role: "staging" }), 2);
+  assertEquals(shelfTier({ default: true }), 0, "absent role is storage");
+  assertEquals(shelfTier({ default: false }), 1);
+  const breakdown = [store("Main", true, [
+    { name: "Inbox", quantity: 9, default: true, role: "staging" },
+    { name: "Shelf", quantity: 1 },
+  ])];
+  assertEquals(allocateBookingToStores(breakdown, 1).stores[0].locations[0].name, "Shelf");
+});
+
+Deno.test("ranking: within a tier, most units first; equal shelves keep their order", () => {
+  const a = { default: false, quantity: 3 };
+  const b = { default: false, quantity: 5 };
+  assertEquals([a, b].sort(compareShelves), [b, a]);
+  const c = { default: false, quantity: 3 };
+  assertEquals([a, c].sort(compareShelves)[0], a, "stable");
+});
+
+const bookingStore = (locations: Array<{ uid: string; quantity: number }>): BookingStore => ({
+  uid_store: id("Main"),
+  name: "Main",
+  default: true,
+  quantity: locations.reduce((n, l) => n + l.quantity, 0),
+  locations: locations.map((l) => ({ uid_location: l.uid, name: l.uid, quantity: l.quantity, default: false })),
+});
+const SHELF = id("Shelf");
+const BACK = id("Back");
+const VAN = id("Van");
+const roles = (uid: string) => (uid === BACK || uid === VAN ? "staging" as const : uid === SHELF ? "storage" as const : undefined);
+
+Deno.test("stagedPortion: a part-prepped booking's staged units are its staging entries", () => {
+  // 10 units: 4 prepped (3 in Back, 1 in the Van), 6 reserved on the shelf.
+  const booking = {
+    breakdown: { ...heldBreakdown(6), prepped: 4 },
+    stores: [bookingStore([{ uid: SHELF, quantity: 6 }, { uid: BACK, quantity: 3 }, { uid: VAN, quantity: 1 }])],
+  };
+  const staged = stagedPortion(booking, roles);
+  assertEquals(staged.quantity, 4);
+  assertEquals(staged.stores[0].locations.map((l) => [l.uid_location, l.quantity]), [[BACK, 3], [VAN, 1]]);
+  assertEquals(staged.stores[0].quantity, 4);
+});
+
+Deno.test("stagedPortion: capped at prepped, trimmed from the end; nothing prepped is nothing staged", () => {
+  const stores = [bookingStore([{ uid: BACK, quantity: 3 }, { uid: VAN, quantity: 2 }])];
+  const capped = stagedPortion({ breakdown: { ...heldBreakdown(1), prepped: 4 }, stores }, roles);
+  assertEquals(capped.stores[0].locations.map((l) => [l.uid_location, l.quantity]), [[BACK, 3], [VAN, 1]]);
+  // A reserved booking whose PLAN drew from staging stages nothing.
+  assertEquals(stagedPortion({ breakdown: heldBreakdown(5), stores }, roles), { stores: [], quantity: 0 });
+});
+
+Deno.test("stagedPortion: an unknown location reads as storage, so it is re-allocated, not frozen", () => {
+  const stores = [bookingStore([{ uid: id("Gone"), quantity: 2 }])];
+  assertEquals(stagedPortion({ breakdown: { ...heldBreakdown(0), prepped: 2 }, stores }, roles).quantity, 0);
+});
+
+Deno.test("mergeBookingStores: staged entries lead, a location named twice sums, zeros drop", () => {
+  const staged = [bookingStore([{ uid: BACK, quantity: 3 }])];
+  const fresh = [bookingStore([{ uid: SHELF, quantity: 4 }, { uid: BACK, quantity: 1 }, { uid: VAN, quantity: 0 }])];
+  const merged = mergeBookingStores(staged, fresh);
+  assertEquals(merged.stores.length, 1);
+  assertEquals(merged.stores[0].locations.map((l) => [l.uid_location, l.quantity]), [[BACK, 4], [SHELF, 4]]);
+  assertEquals(merged.stores[0].quantity, 8);
+  assertEquals(merged.query_by_uid_store, [id("Main")]);
+  assertEquals(merged.query_by_uid_location, [BACK, SHELF]);
+  // Inputs are untouched.
+  assertEquals(staged[0].locations[0].quantity, 3);
+  // The result parses as a booking's stores.
+  const storesSchema = resolveZodField(BookingSchema, "stores");
+  assert(storesSchema, "stores resolves");
+  assertEquals(storesSchema.safeParse(merged.stores).success, true);
+});
+
+Deno.test("allocateBookingWithNetting: STAGED units net whatever the window, a windowless call included", () => {
+  // 5 units at A; another booking holds 3 of them staged there, on a window that
+  // does NOT overlap ours. As a plan they would not net; as staged units they do.
+  const breakdown = [store("Main", true, [{ name: "A", quantity: 5, default: true }])];
+  const other: ReservingBooking = {
+    ...reserving(3, 0, 1),
+    staged: reserving(3, 0, 1).stores,
+  };
+  const disjoint = allocateBookingWithNetting(breakdown, 5, [other], 100, 200, new Map());
+  assertEquals(totalAllocated(disjoint.stores), 2);
+  assertEquals(disjoint.shortage, 3);
+  const windowless = allocateBookingWithNetting(breakdown, 5, [other], null, null, new Map());
+  assertEquals(totalAllocated(windowless.stores), 2, "a sale with no window nets staged units too");
+  // Overlapping: the staged units are inside `stores` already, so not counted twice.
+  const overlap = allocateBookingWithNetting(breakdown, 5, [other], 0, 1, new Map());
+  assertEquals(totalAllocated(overlap.stores), 2);
+  // Fail-closed companion: without `staged`, a disjoint window nets nothing.
+  const plan = allocateBookingWithNetting(breakdown, 5, [reserving(3, 0, 1)], 100, 200, new Map());
+  assertEquals(totalAllocated(plan.stores), 5);
 });

@@ -604,3 +604,75 @@ Deno.test("two intervals fold from empty: enroll → custody → unenroll → en
   roster = foldRosterUnits(roster, boundary("enroll", [[place("locations", SHELF), [1003, 1004]]]));
   assertEquals(Object.keys(roster), ["1003", "1004"]);
 });
+
+// ── Staging (api-cloudrun#1302) ──────────────────────────────────
+
+const STAGING_BACK = fid("stageback");
+const STAGING_VAN = fid("stagevan");
+
+/** A movement with explicit lines, for the place moves `movementFor` cannot spell. */
+function placed(
+  type: RosterMovement["type"],
+  custody: RosterMovement["custody"],
+  numbers: number[],
+  from: string,
+  to: string,
+  uid_booking: string | null = BOOKING,
+): RosterMovement {
+  return {
+    uid: `${SESSION}|${type}|${uid_booking ?? "none"}`,
+    type,
+    uid_booking,
+    custody,
+    service: null,
+    lines: [{ quantity: numbers.length, location: { from: place("locations", from), to: place("locations", to) }, units: numbers }],
+    units: numbers.map((n) => ({ uid_unit: `unit-${n}`, number: n, serial_number: null })),
+    sources: [],
+  };
+}
+
+Deno.test("foldRosterUnits: a lined prep stages a unit (prepped@staging), a restage moves it, an unprep shelves it", () => {
+  let roster = shelfRoster([1001, 1002]);
+  roster = foldRosterUnits(roster, placed("prep", { from: "reserved", to: "prepped" }, [1001], SHELF, STAGING_BACK));
+  assertEquals(roster["1001"], { state: "prepped", uid_booking: BOOKING, uid_location: STAGING_BACK });
+  assertEquals(roster["1002"], shelfRoster([1002])["1002"], "the other unit stays on the shelf");
+
+  // Restage: a transfer naming the booking. No custody — the unit stays prepped.
+  roster = foldRosterUnits(roster, placed("transfer", null, [1001], STAGING_BACK, STAGING_VAN));
+  assertEquals(roster["1001"], { state: "prepped", uid_booking: BOOKING, uid_location: STAGING_VAN });
+
+  roster = foldRosterUnits(roster, placed("unprep", { from: "prepped", to: "reserved" }, [1001], STAGING_VAN, SHELF));
+  assertEquals(roster["1001"], shelfRoster([1001])["1001"]);
+});
+
+Deno.test("foldRosterUnits: a restage moves only the booking's prepped units, from where they are", () => {
+  const staged = foldRosterUnits(
+    shelfRoster([1001, 1002]),
+    placed("prep", { from: "reserved", to: "prepped" }, [1001], SHELF, STAGING_BACK),
+  );
+  // Shelf stock is not the booking's staged unit.
+  assertThrows(
+    () => foldRosterUnits(staged, placed("transfer", null, [1002], SHELF, STAGING_VAN)),
+    RosterFoldError,
+    "the unit is on shelf",
+  );
+  // Not where the line says it leaves from.
+  assertThrows(
+    () => foldRosterUnits(staged, placed("transfer", null, [1001], STAGING_VAN, SHELF)),
+    RosterFoldError,
+  );
+  // Another booking's restage cannot take it.
+  const other = bookingId(fid("order2"), PRODUCT, legUid("leg1"));
+  assertThrows(
+    () => foldRosterUnits(staged, placed("transfer", null, [1001], STAGING_BACK, STAGING_VAN, other)),
+    RosterFoldError,
+  );
+  // A plain transfer (no booking) still cannot move a prepped unit.
+  assertThrows(
+    () => foldRosterUnits(staged, placed("transfer", null, [1001], STAGING_BACK, STAGING_VAN, null)),
+    RosterFoldError,
+  );
+  // And it still moves shelf stock, as before.
+  const moved = foldRosterUnits(staged, placed("transfer", null, [1002], SHELF, STAGING_VAN, null));
+  assertEquals(moved["1002"], shelfRoster([1002], STAGING_VAN)["1002"]);
+});

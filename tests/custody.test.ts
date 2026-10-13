@@ -1068,7 +1068,9 @@ Deno.test("custody - custodyPlaces: out is a booking for a rental and outside fo
   assertEquals(custodyPlaces("sale", { from: "prepped", to: "out" }), { from: "locations", to: "outside" });
   assertEquals(custodyPlaces("mark_lost_undo", { from: "lost", to: "returned" }), { from: "out-of-service", to: "locations" });
   assertEquals(custodyPlaces("flag", { from: "returned", to: "damaged" }), { from: "locations", to: "locations" });
-  assertEquals(custodyPlaces("prep", { from: "reserved", to: "prepped" }), null);
+  // A prep is a physical move since api-cloudrun#1302: shelf → staging location.
+  assertEquals(custodyPlaces("prep", { from: "reserved", to: "prepped" }), { from: "locations", to: "locations" });
+  assertEquals(custodyPlaces("rebook_out", { from: "out", to: "out" }), null);
 });
 
 Deno.test("custody - isReleasingRewind: every rule arm, as the api's line-netting form measured it (2026-10-08)", () => {

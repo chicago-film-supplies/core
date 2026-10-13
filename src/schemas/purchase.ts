@@ -399,7 +399,12 @@ export const ClosePurchaseInput: z.ZodType<ClosePurchaseInputType> = z.object({
 export interface ReceivePurchaseLineInputType {
   uid_product: string;
   quantity: number;
-  /** Which shelves the units go to. Absent means the server allocates. */
+  /**
+   * Which locations the units go to. Absent means they land at the store's
+   * default staging location (`store.default_location`, the arrivals inbox),
+   * as every arrival does — a receipt is an arrival (api-cloudrun#1302 ruling
+   * 12; api-cloudrun#1308). Name a storage location to shelve them directly.
+   */
   allocations?: MovementAllocationInputType[];
   /**
    * Which units arrive, on a serialized product: exactly `quantity`, ascending

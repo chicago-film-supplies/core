@@ -215,6 +215,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "allocateBookingWithNetting", // ditto, plus overlapping bookings
     "buildReservedByLocation", // netting building block
     "addAllocationToReserved", // netting building block
+    "shelfTier", // ranks a ledger location for a pick
+    "compareShelves", // ditto, as a sort comparator
+    "stagedPortion", // needs a role resolver over the ledger; a writer's carry-forward
+    "mergeBookingStores", // a writer's merge of carried + fresh allocations
   ],
   // `bookings.uid` construction and DEcomposition — a template renders a
   // document that already carries its own `uid`; it never derives one and

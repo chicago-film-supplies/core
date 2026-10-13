@@ -121,7 +121,8 @@ Deno.test("allocationSide follows the contract, so the client stays direction-ag
   assertEquals(allocationSide("check_in"), "to", "put back on a shelf");
   assertEquals(allocationSide("purchase"), "to");
   assertEquals(allocationSide("transfer"), "both");
-  assertEquals(allocationSide("prep"), null, "nothing moves");
+  assertEquals(allocationSide("prep"), "both", "off a shelf AND onto a staging location (api-cloudrun#1302)");
+  assertEquals(allocationSide("rebook_in"), null, "nothing moves: the units stay at the customer");
   // 🔴 These three ARE the place-model change, read through the one function the
   // client uses to decide which side it is picking. A damaged return names a
   // destination shelf exactly as a clean return does; a shelf-discovered loss
@@ -1334,14 +1335,25 @@ Deno.test("lineless: the same document on a COUNTED ledger is reported, so the w
   );
   assertEquals(lined.linelessCountedQuantity, 0);
 
-  // `prep` has no places at all, so its empty lines are the norm, not a report.
+  // A prep is a physical move since api-cloudrun#1302, so a lineless one on a
+  // counted ledger IS reported — the writer refuses it unless it is one of its
+  // four named exemptions, which only the writer can recognise.
   const prep = applyMovementToLedger(
     counted,
     { ...lineless, type: "prep", custody: { from: "reserved", to: "prepped" } as MovementCustodyType },
     placements,
     mockTimestamp,
   );
-  assertEquals(prep.linelessCountedQuantity, 0);
+  assertEquals(prep.linelessCountedQuantity, 3);
+
+  // A rebook has no places at all, so its empty lines are the norm, not a report.
+  const rebook = applyMovementToLedger(
+    counted,
+    { ...lineless, type: "rebook_out", custody: { from: "out", to: null } as MovementCustodyType },
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(rebook.linelessCountedQuantity, 0);
 });
 
 // ── Typed reversals (stock campaign decision 5) ──────────────────────
@@ -1655,4 +1667,32 @@ Deno.test("enroll / unenroll move nothing on the ledger — even where the in-pl
     );
     assertEquals(getTransactionMultiplier(type), 0, `${type} is held-neutral by contract`);
   }
+});
+
+Deno.test("the fold stamps a placement's role onto the ledger location; an absent role leaves it alone (api-cloudrun#1302)", () => {
+  const prep = {
+    reverses: null,
+    service: null,
+    type: "prep" as const,
+    custody: { from: "reserved", to: "prepped" } as MovementCustodyType,
+    quantity: 2,
+    lines: [line(2, at(LOC_A), at(LOC_B))],
+    cost: null,
+  };
+  const staging = new Map([
+    [LOC_A, { ...placements.get(LOC_A)!, role: "storage" as const }],
+    [LOC_B, { ...placements.get(LOC_B)!, role: "staging" as const }],
+  ]);
+  const folded = applyMovementToLedger(ledgerAtShelfA(5), prep, staging, mockTimestamp).ledger;
+  const locs = folded.store_breakdown[0].locations;
+  assertEquals(locs.find((l) => l.uid_location === LOC_A)?.role, "storage");
+  assertEquals(locs.find((l) => l.uid_location === LOC_B)?.role, "staging");
+  assertEquals(locs.find((l) => l.uid_location === LOC_B)?.quantity, 2);
+  assertEquals(folded.quantity_held, 5, "a prep moves no ownership");
+  assertEquals(InventoryLedgerSchema.safeParse(folded).success, true);
+
+  // A caller predating `role` passes none, and cannot erase the stored one.
+  const back = { ...prep, type: "unprep" as const, custody: { from: "prepped", to: "reserved" } as MovementCustodyType, lines: [line(1, at(LOC_B), at(LOC_A))] };
+  const again = applyMovementToLedger(folded, back, placements, mockTimestamp).ledger;
+  assertEquals(again.store_breakdown[0].locations.find((l) => l.uid_location === LOC_B)?.role, "staging");
 });

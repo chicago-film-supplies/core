@@ -1251,7 +1251,7 @@
         {
           "kind": "interface",
           "name": "CreateLocationInputType",
-          "declaration": "interface CreateLocationInputType {\n  uid: string;\n  uid_store: string;\n  name: string;\n  uid_location_type?: string | null;\n}",
+          "declaration": "interface CreateLocationInputType {\n  uid: string;\n  uid_store: string;\n  name: string;\n  role?: LocationRoleType;\n  uid_location_type?: string | null;\n}",
           "doc": "Input type for creating a location."
         },
         {
@@ -2671,6 +2671,12 @@
           "doc": "Statuses whose Xero counterpart is expected to exist and be non-VOIDED.\n\nWas three textually identical copies — `lib/xeroQuoteStatus.ts`,\n`services/invoices.ts` and `api-cloudrun/scripts/audit-xero-quotes.ts`, the last carrying\na \"keep in lockstep\" comment that nothing enforced."
         },
         {
+          "kind": "variable",
+          "name": "LOCATION_ROLES",
+          "declaration": "const LOCATION_ROLES: \"storage\" | \"staging\"[];",
+          "doc": "What a location is FOR (api-cloudrun#1302, ruling 2).\n\n- `storage` — a shelf a product is put away on. A product's default storage\n  locations (`products[].default`) must be `storage`.\n- `staging` — a temporary place for an item: the store's arrivals inbox,\n  a prep area, a loaded vehicle. `store.default_location` (the store's default\n  staging location) must be `staging`.\n\nDeclared here, never inferred from the name, and never from `location_type`\n(prod has no location types). ⚠️ **ABSENT means `storage`**, on this document\nand on the ledger's copy ({@link StoreBreakdownLocation}`.role`) alike — read it\nthrough {@link locationRole}, never as `role === \"storage\"`, which is false for\nevery location written before the field existed."
+        },
+        {
           "kind": "typeAlias",
           "name": "LeadingDividerGrain",
           "declaration": "type LeadingDividerGrain = \"order\" | \"fulfillment\" | \"invoice\";",
@@ -2745,7 +2751,7 @@
         {
           "kind": "interface",
           "name": "Location",
-          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  default: boolean;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  default: boolean;\n  role?: LocationRoleType;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A location document in Firestore."
         },
         {
@@ -2765,6 +2771,18 @@
           "name": "LocationProductCapacity",
           "declaration": "interface LocationProductCapacity {\n  uid: string;\n  max: number | null;\n  max_default: number | null;\n}",
           "doc": "Product capacity constraint for a location."
+        },
+        {
+          "kind": "variable",
+          "name": "LocationRoleEnum",
+          "declaration": "const LocationRoleEnum: z.ZodType<LocationRoleType>;",
+          "doc": "Zod enum for {@link LOCATION_ROLES}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "LocationRoleType",
+          "declaration": "type LocationRoleType = indexedAccess;",
+          "doc": "A location's role."
         },
         {
           "kind": "variable",
@@ -2872,7 +2890,7 @@
           "kind": "variable",
           "name": "MOVEMENT_TYPES",
           "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost\" | \"sale_lost_undo\" | \"sale_damaged\" | \"sale_damaged_undo\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\" | \"count_open\" | \"count_close\" | \"enroll\" | \"unenroll\"[];",
-          "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    🔴 **The movement shape does NOT already exist.** This note claimed it\n    did — *\"`lines: []` + a negative `cost`, the same shape a late\n    landed-cost adjustment uses\"* — and that was wrong in three independent\n    ways, each measured (core#75):\n      1. **No contract permits it.** `places: null` means \"lines must be\n         empty\", and the only entry carrying it is `prep`, whose `cost` is\n         `forbidden`. Every cost-bearing type has `places` set, and\n         `checkMovementContract` then requires at least one line — so\n         `MovementSchema` rejects `lines: []` beside a cost on **every**\n         {@link MOVEMENT_TYPES} member. `places: null` + `cost: \"required\"`\n         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.\n      2. **The fold would ignore it anyway.** `applyMovementToLedger`\n         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside\n         `delta > 0` / `delta < 0`, where `delta` is\n         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at\n         0; the same cost on one `+10` line moves it to 50000.\n      3. **And it could not reach Xero.** `xeroPostingFor`\n         (`utils/movements.ts`) terminals a cost-bearing movement whose lines\n         net to zero as `no_ownership_direction`, deliberately, because a\n         document like that is malformed today.\n    So a cost-only event needs all three gates opened, in one change: a\n    contract entry pairing `places: null` with `cost: \"required\"`, a\n    `delta === 0` arm in the fold — which owes its own decision about\n    `average_unit_cost`, since the basis moves while the quantity does not —\n    and a posting decision that is not derived from an ownership direction\n    there is none of.\n    The \"late landed-cost adjustment\" cited as precedent is not writable\n    today either, by the same mechanism. (1) and (2) are pinned in\n    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the\n    day someone mints the contract entry is the day a pin goes red rather\n    than the day the ledger silently stops moving.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
+          "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    🔴 **The movement shape does NOT already exist.** This note claimed it\n    did — *\"`lines: []` + a negative `cost`, the same shape a late\n    landed-cost adjustment uses\"* — and that was wrong in three independent\n    ways, each measured (core#75):\n      1. **No contract permits it.** `places: null` means \"lines must be\n         empty\", and the only entries carrying it are the rebook pair\n         (`prep` did until api-cloudrun#1302), whose `cost` is `forbidden`. Every cost-bearing type has `places` set, and\n         `checkMovementContract` then requires at least one line — so\n         `MovementSchema` rejects `lines: []` beside a cost on **every**\n         {@link MOVEMENT_TYPES} member. `places: null` + `cost: \"required\"`\n         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.\n      2. **The fold would ignore it anyway.** `applyMovementToLedger`\n         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside\n         `delta > 0` / `delta < 0`, where `delta` is\n         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at\n         0; the same cost on one `+10` line moves it to 50000.\n      3. **And it could not reach Xero.** `xeroPostingFor`\n         (`utils/movements.ts`) terminals a cost-bearing movement whose lines\n         net to zero as `no_ownership_direction`, deliberately, because a\n         document like that is malformed today.\n    So a cost-only event needs all three gates opened, in one change: a\n    contract entry pairing `places: null` with `cost: \"required\"`, a\n    `delta === 0` arm in the fold — which owes its own decision about\n    `average_unit_cost`, since the basis moves while the quantity does not —\n    and a posting decision that is not derived from an ownership direction\n    there is none of.\n    The \"late landed-cost adjustment\" cited as precedent is not writable\n    today either, by the same mechanism. (1) and (2) are pinned in\n    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the\n    day someone mints the contract entry is the day a pin goes red rather\n    than the day the ledger silently stops moving.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
         },
         {
           "kind": "variable",
@@ -4681,6 +4699,18 @@
           "doc": "Zod schema for Session."
         },
         {
+          "kind": "variable",
+          "name": "SetLocationProductDefaultInput",
+          "declaration": "const SetLocationProductDefaultInput: z.ZodType<SetLocationProductDefaultInputType>;",
+          "doc": "Input schema for {@link SetLocationProductDefaultInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "SetLocationProductDefaultInputType",
+          "declaration": "interface SetLocationProductDefaultInputType {\n  uid: string;\n  uid_product: string;\n  default: boolean;\n  version: number;\n}",
+          "doc": "Set or clear ONE product's default-storage flag at ONE location\n(`locations/{uid}.products[uid_product].default`) — the only writer of that\nfact outside a rebuild script (api-cloudrun#1302 §2).\n\n**Set or clear, never move**: a product may have several default storage\nlocations (ruling 11), so setting one leaves the others alone. The API\nrefuses a set on a location whose role is not `storage`, or on an inactive\none. The ledger's per-product copy is refreshed by a post-commit cascade."
+        },
+        {
           "kind": "interface",
           "name": "Settlement",
           "declaration": "interface Settlement {\n  uid: string;\n  uid_invoice: string | null;\n  uid_organization: string | null;\n  uid_purchase_bill: string | null;\n  uid_purchase_credit: string | null;\n  uid_supplier: string | null;\n  type: SettlementTypeType;\n  reason: SettlementReasonType;\n  amount_cents: number;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  uuid_session: string;\n  reverses: string | null;\n  uid_credit_note: string | null;\n  number_credit_note: string | null;\n  xero_payment_id: string | null;\n  xero_credit_note_id: string | null;\n  synced_at: FirestoreTimestampType | null;\n  legacy_payment_uid: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
@@ -4863,7 +4893,7 @@
         {
           "kind": "interface",
           "name": "StoreBreakdownLocation",
-          "declaration": "interface StoreBreakdownLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  default: boolean;\n  max: number | null;\n  quantity_out_of_service?: number;\n}",
+          "declaration": "interface StoreBreakdownLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  default: boolean;\n  max: number | null;\n  quantity_out_of_service?: number;\n  role?: LocationRoleType;\n}",
           "doc": "A single location within a store breakdown entry."
         },
         {
@@ -5763,7 +5793,7 @@
         {
           "kind": "interface",
           "name": "UpdateLocationInputType",
-          "declaration": "interface UpdateLocationInputType {\n  uid: string;\n  name?: string;\n  default?: boolean;\n  active?: boolean;\n  version: number;\n}",
+          "declaration": "interface UpdateLocationInputType {\n  uid: string;\n  name?: string;\n  default?: boolean;\n  role?: LocationRoleType;\n  active?: boolean;\n  version: number;\n}",
           "doc": "Input type for updating a location."
         },
         {
@@ -6758,6 +6788,14 @@
         },
         {
           "kind": "function",
+          "name": "locationRole",
+          "signature": "locationRole(loc: typeLiteral): LocationRoleType",
+          "doc": "A location's role, with an absent `role` read as `storage` — the one place\nthat rule is spelled. Takes the document or the ledger's copy.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "markReasonOf",
           "signature": "markReasonOf(type: MovementTypeType): OutOfServiceKeyType | null",
           "doc": "The out-of-service reason a MARK movement puts units into — `mark_lost` →\n`lost`, `mark_cleaning` → `cleaning`, … — or `null` for any other type.\n\nRead off {@link CUSTODY_RULES}: the forward row off `out` whose rental arm\nwrites `type`. A script that hand-mapped only `mark_damaged`/`mark_lost`\nattributed every cleaning and maintenance mark to nothing (api-cloudrun\n`_ledgerReplayRebuild.ts`, gap G15). A `flag` carries its reason on the\nservice axis, not here.",
@@ -7426,9 +7464,27 @@
         },
         {
           "kind": "variable",
+          "name": "LOCATION_ROLES",
+          "declaration": "const LOCATION_ROLES: \"storage\" | \"staging\"[];",
+          "doc": "What a location is FOR (api-cloudrun#1302, ruling 2).\n\n- `storage` — a shelf a product is put away on. A product's default storage\n  locations (`products[].default`) must be `storage`.\n- `staging` — a temporary place for an item: the store's arrivals inbox,\n  a prep area, a loaded vehicle. `store.default_location` (the store's default\n  staging location) must be `staging`.\n\nDeclared here, never inferred from the name, and never from `location_type`\n(prod has no location types). ⚠️ **ABSENT means `storage`**, on this document\nand on the ledger's copy ({@link StoreBreakdownLocation}`.role`) alike — read it\nthrough {@link locationRole}, never as `role === \"storage\"`, which is false for\nevery location written before the field existed."
+        },
+        {
+          "kind": "variable",
           "name": "ListId",
           "declaration": "const ListId: z.ZodType<string>;",
           "doc": "`lists.uid` (and `uid_list` references) — a Firestore auto-id (user-created\nlists) or a lowercase-kebab slug (seeded/system lists, e.g. `in-store`,\n`field-service`)."
+        },
+        {
+          "kind": "variable",
+          "name": "LocationRoleEnum",
+          "declaration": "const LocationRoleEnum: z.ZodType<LocationRoleType>;",
+          "doc": "Zod enum for {@link LOCATION_ROLES}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "LocationRoleType",
+          "declaration": "type LocationRoleType = indexedAccess;",
+          "doc": "A location's role."
         },
         {
           "kind": "variable",
@@ -7727,7 +7783,7 @@
         {
           "kind": "interface",
           "name": "StoreBreakdownLocation",
-          "declaration": "interface StoreBreakdownLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  default: boolean;\n  max: number | null;\n  quantity_out_of_service?: number;\n}",
+          "declaration": "interface StoreBreakdownLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  default: boolean;\n  max: number | null;\n  quantity_out_of_service?: number;\n  role?: LocationRoleType;\n}",
           "doc": "A single location within a store breakdown entry."
         },
         {
@@ -7939,6 +7995,14 @@
           "name": "itemContract",
           "signature": "itemContract(type: string): ItemContract | undefined",
           "doc": "The contract for an item `type`, or `undefined` for a value outside\n{@link ITEM_TYPES}. Takes a `string` because the loose `LineItem` shadow in\n`@cfs/core/utils/orders` types `type` as `string`; an unrecognized type has no\ncontract and every derived predicate answers `false` for it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "locationRole",
+          "signature": "locationRole(loc: typeLiteral): LocationRoleType",
+          "doc": "A location's role, with an absent `role` read as `storage` — the one place\nthat rule is spelled. Takes the document or the ledger's copy.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -9233,13 +9297,13 @@
         {
           "kind": "interface",
           "name": "CreateLocationInputType",
-          "declaration": "interface CreateLocationInputType {\n  uid: string;\n  uid_store: string;\n  name: string;\n  uid_location_type?: string | null;\n}",
+          "declaration": "interface CreateLocationInputType {\n  uid: string;\n  uid_store: string;\n  name: string;\n  role?: LocationRoleType;\n  uid_location_type?: string | null;\n}",
           "doc": "Input type for creating a location."
         },
         {
           "kind": "interface",
           "name": "Location",
-          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  default: boolean;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  default: boolean;\n  role?: LocationRoleType;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A location document in Firestore."
         },
         {
@@ -9262,6 +9326,18 @@
         },
         {
           "kind": "variable",
+          "name": "SetLocationProductDefaultInput",
+          "declaration": "const SetLocationProductDefaultInput: z.ZodType<SetLocationProductDefaultInputType>;",
+          "doc": "Input schema for {@link SetLocationProductDefaultInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "SetLocationProductDefaultInputType",
+          "declaration": "interface SetLocationProductDefaultInputType {\n  uid: string;\n  uid_product: string;\n  default: boolean;\n  version: number;\n}",
+          "doc": "Set or clear ONE product's default-storage flag at ONE location\n(`locations/{uid}.products[uid_product].default`) — the only writer of that\nfact outside a rebuild script (api-cloudrun#1302 §2).\n\n**Set or clear, never move**: a product may have several default storage\nlocations (ruling 11), so setting one leaves the others alone. The API\nrefuses a set on a location whose role is not `storage`, or on an inactive\none. The ledger's per-product copy is refreshed by a post-commit cascade."
+        },
+        {
+          "kind": "variable",
           "name": "UpdateLocationInput",
           "declaration": "const UpdateLocationInput: z.ZodType<UpdateLocationInputType>;",
           "doc": "Input schema for updating a location."
@@ -9269,7 +9345,7 @@
         {
           "kind": "interface",
           "name": "UpdateLocationInputType",
-          "declaration": "interface UpdateLocationInputType {\n  uid: string;\n  name?: string;\n  default?: boolean;\n  active?: boolean;\n  version: number;\n}",
+          "declaration": "interface UpdateLocationInputType {\n  uid: string;\n  name?: string;\n  default?: boolean;\n  role?: LocationRoleType;\n  active?: boolean;\n  version: number;\n}",
           "doc": "Input type for updating a location."
         }
       ]
@@ -11381,7 +11457,7 @@
     },
     {
       "entrypoint": "@cfs/core/schemas/transaction",
-      "moduleDoc": "Movement document schema — Firestore collection: `transactions`\n\nAn append-only journal of inventory movement. Every event is **one subject**\n(a booking for custody events, a product for ownership events) plus a set of\nsigned lines, grouped with its siblings by a client-minted `uuid_session`.\n\nThe collection keeps its name — the journal was migrated in place — but the\ndocument is a `Movement`, not the old current-state `Transaction`.\n\n## Four axes\n\nEach answers an independent question about the same physical unit:\n\n| Axis       | Question                              | Lands on                                  |\n|------------|---------------------------------------|-------------------------------------------|\n| `custody`  | How far through this order is it?     | `booking.breakdown` — `BOOKING_BREAKDOWN_KEYS` |\n| `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |\n| `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |\n| `service`  | Is it out of service, and why?        | `out_of_service_breakdown`; per-shelf OOS |\n\n`service` is the newest and the only optional one: movements written before\nit existed carry no key, and read as \"no service change\" — see\n{@link MovementServiceType}.\n\n`cost` is **cost only, never revenue** — customer-facing money lives in Xero;\nthe only money here is inventory's carrying value.\n\n`custody` and `lines` are correlated but not derivable from each other:\ncustody implies the *kind* of place a unit is in ({@link CUSTODY_PLACE_KINDS})\nbut not *which* location, because where a returning unit goes back to is an\noperator's choice.\n\n## Conservation is structural, not checked\n\nA line's contribution to `quantity_held` is\n`(location.to ? +q : 0) + (location.from ? −q : 0)` — no cross-line\nsummation. `{from: null, to: L3}` reads \"entered ownership at L3\";\n`{from: L3, to: null}` reads \"left ownership from L3\"; both non-null is a\nmove that leaves ownership untouched. A half-move is inexpressible.\n\n`lines: []` means **nothing physically moved** — today only a `prep`, where\nreserved and prepped units sit on the same shelf. ⚠️ It *reads* like the shape\nfor a cost-only adjustment too, and that is the trap: no contract pairs\n`lines: []` with a cost, and `applyMovementToLedger` would fold one to nothing\nif one did. See the depreciation note on {@link MOVEMENT_TYPES} (core#75).",
+      "moduleDoc": "Movement document schema — Firestore collection: `transactions`\n\nAn append-only journal of inventory movement. Every event is **one subject**\n(a booking for custody events, a product for ownership events) plus a set of\nsigned lines, grouped with its siblings by a client-minted `uuid_session`.\n\nThe collection keeps its name — the journal was migrated in place — but the\ndocument is a `Movement`, not the old current-state `Transaction`.\n\n## Four axes\n\nEach answers an independent question about the same physical unit:\n\n| Axis       | Question                              | Lands on                                  |\n|------------|---------------------------------------|-------------------------------------------|\n| `custody`  | How far through this order is it?     | `booking.breakdown` — `BOOKING_BREAKDOWN_KEYS` |\n| `lines[]`  | Where is it in the warehouse?         | `locations.products[]`; `quantity_held`   |\n| `cost`     | What is it carried at on the books?   | `inventory-ledgers.total_cost_basis`      |\n| `service`  | Is it out of service, and why?        | `out_of_service_breakdown`; per-shelf OOS |\n\n`service` is the newest and the only optional one: movements written before\nit existed carry no key, and read as \"no service change\" — see\n{@link MovementServiceType}.\n\n`cost` is **cost only, never revenue** — customer-facing money lives in Xero;\nthe only money here is inventory's carrying value.\n\n`custody` and `lines` are correlated but not derivable from each other:\ncustody implies the *kind* of place a unit is in ({@link CUSTODY_PLACE_KINDS})\nbut not *which* location, because where a returning unit goes back to is an\noperator's choice.\n\n## Conservation is structural, not checked\n\nA line's contribution to `quantity_held` is\n`(location.to ? +q : 0) + (location.from ? −q : 0)` — no cross-line\nsummation. `{from: null, to: L3}` reads \"entered ownership at L3\";\n`{from: L3, to: null}` reads \"left ownership from L3\"; both non-null is a\nmove that leaves ownership untouched. A half-move is inexpressible.\n\n`lines: []` means **nothing physically moved** — a rebook (the units stay at\nthe customer), an uncounted product's step (no shelves to name), or a `prep`\nthat stages nothing (api-cloudrun#1302: a prep moves units shelf → a staging\nlocation, except where the applier exempts it). ⚠️ It *reads* like the shape\nfor a cost-only adjustment too, and that is the trap: no contract pairs\n`lines: []` with a cost, and `applyMovementToLedger` would fold one to nothing\nif one did. See the depreciation note on {@link MOVEMENT_TYPES} (core#75).",
       "symbols": [
         {
           "kind": "typeAlias",
@@ -11435,7 +11511,7 @@
           "kind": "variable",
           "name": "MOVEMENT_TYPES",
           "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost\" | \"sale_lost_undo\" | \"sale_damaged\" | \"sale_damaged_undo\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\" | \"count_open\" | \"count_close\" | \"enroll\" | \"unenroll\"[];",
-          "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    🔴 **The movement shape does NOT already exist.** This note claimed it\n    did — *\"`lines: []` + a negative `cost`, the same shape a late\n    landed-cost adjustment uses\"* — and that was wrong in three independent\n    ways, each measured (core#75):\n      1. **No contract permits it.** `places: null` means \"lines must be\n         empty\", and the only entry carrying it is `prep`, whose `cost` is\n         `forbidden`. Every cost-bearing type has `places` set, and\n         `checkMovementContract` then requires at least one line — so\n         `MovementSchema` rejects `lines: []` beside a cost on **every**\n         {@link MOVEMENT_TYPES} member. `places: null` + `cost: \"required\"`\n         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.\n      2. **The fold would ignore it anyway.** `applyMovementToLedger`\n         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside\n         `delta > 0` / `delta < 0`, where `delta` is\n         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at\n         0; the same cost on one `+10` line moves it to 50000.\n      3. **And it could not reach Xero.** `xeroPostingFor`\n         (`utils/movements.ts`) terminals a cost-bearing movement whose lines\n         net to zero as `no_ownership_direction`, deliberately, because a\n         document like that is malformed today.\n    So a cost-only event needs all three gates opened, in one change: a\n    contract entry pairing `places: null` with `cost: \"required\"`, a\n    `delta === 0` arm in the fold — which owes its own decision about\n    `average_unit_cost`, since the basis moves while the quantity does not —\n    and a posting decision that is not derived from an ownership direction\n    there is none of.\n    The \"late landed-cost adjustment\" cited as precedent is not writable\n    today either, by the same mechanism. (1) and (2) are pinned in\n    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the\n    day someone mints the contract entry is the day a pin goes red rather\n    than the day the ledger silently stops moving.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
+          "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    🔴 **The movement shape does NOT already exist.** This note claimed it\n    did — *\"`lines: []` + a negative `cost`, the same shape a late\n    landed-cost adjustment uses\"* — and that was wrong in three independent\n    ways, each measured (core#75):\n      1. **No contract permits it.** `places: null` means \"lines must be\n         empty\", and the only entries carrying it are the rebook pair\n         (`prep` did until api-cloudrun#1302), whose `cost` is `forbidden`. Every cost-bearing type has `places` set, and\n         `checkMovementContract` then requires at least one line — so\n         `MovementSchema` rejects `lines: []` beside a cost on **every**\n         {@link MOVEMENT_TYPES} member. `places: null` + `cost: \"required\"`\n         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.\n      2. **The fold would ignore it anyway.** `applyMovementToLedger`\n         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside\n         `delta > 0` / `delta < 0`, where `delta` is\n         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at\n         0; the same cost on one `+10` line moves it to 50000.\n      3. **And it could not reach Xero.** `xeroPostingFor`\n         (`utils/movements.ts`) terminals a cost-bearing movement whose lines\n         net to zero as `no_ownership_direction`, deliberately, because a\n         document like that is malformed today.\n    So a cost-only event needs all three gates opened, in one change: a\n    contract entry pairing `places: null` with `cost: \"required\"`, a\n    `delta === 0` arm in the fold — which owes its own decision about\n    `average_unit_cost`, since the basis moves while the quantity does not —\n    and a posting decision that is not derived from an ownership direction\n    there is none of.\n    The \"late landed-cost adjustment\" cited as precedent is not writable\n    today either, by the same mechanism. (1) and (2) are pinned in\n    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the\n    day someone mints the contract entry is the day a pin goes red rather\n    than the day the ledger silently stops moving.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
         },
         {
           "kind": "variable",
@@ -17662,7 +17738,7 @@
         {
           "kind": "interface",
           "name": "ReservingBooking",
-          "declaration": "interface ReservingBooking {\n  breakdown: BookingBreakdown;\n  stores: BookingStore[];\n  startMs: number | null;\n  endMs: number | null;\n}",
+          "declaration": "interface ReservingBooking {\n  breakdown: BookingBreakdown;\n  stores: BookingStore[];\n  startMs: number | null;\n  endMs: number | null;\n  staged?: BookingStore[];\n}",
           "doc": "A stock-holding booking with its window, for in-memory overlap netting."
         },
         {
@@ -17685,7 +17761,7 @@
           "kind": "function",
           "name": "allocateBookingToStores",
           "signature": "allocateBookingToStores(ledgerStoreBreakdown: StoreBreakdownEntry[], bookingQuantity: number): typeLiteral",
-          "doc": "Allocates booking quantity across all available stores.\nFollows priority: default store first, then others alphabetically.\nDraws from default locations first within each store.",
+          "doc": "Allocates booking quantity across all available stores.\nFollows priority: default store first, then others alphabetically.\nWithin each store, draws in {@link compareShelves} order: the product's\ndefault storage locations, then other storage, then staging.",
           "paramTags": [
             {
               "name": "ledgerStoreBreakdown",
@@ -17702,7 +17778,7 @@
           "kind": "function",
           "name": "allocateBookingWithNetting",
           "signature": "allocateBookingWithNetting(storeBreakdown: StoreBreakdownEntry[], quantity: number, reserving: ReservingBooking[], windowStartMs: number | null, windowEndMs: number | null, inBatchReserved: ReservedByLocation): ReturnType<allocateBookingToStores>",
-          "doc": "Allocate one booking's stores, netting against (a) pre-fetched bookings of the\nsame product that overlap this booking's window and (b) `inBatchReserved` —\nallocations already made earlier in THIS transaction for the same product. The\nallocation is folded back into `inBatchReserved` so the next booking for the\nsame product nets against it too. Pure (no I/O).",
+          "doc": "Allocate one booking's stores, netting against (a) pre-fetched bookings of the\nsame product that overlap this booking's window and (b) `inBatchReserved` —\nallocations already made earlier in THIS transaction for the same product. The\nallocation is folded back into `inBatchReserved` so the next booking for the\nsame product nets against it too. Pure (no I/O).\n\nTwo kinds of claim, netted differently:\n\n- **A plan** — a reserving booking's `stores` — nets only when its window\n  overlaps this one, and not at all when this call has no window (`null`\n  bound): two bookings that never coexist can share a unit.\n- **Staged units** — a reserving booking's `staged` ({@link stagedPortion}) —\n  net ALWAYS, window or not. They are a physical fact: those units sit at a\n  staging location for that booking now, so no other booking's pick may be\n  pointed at them, a windowless sale's included (api-cloudrun#1302 §4). An\n  overlapping booking's staged units are already inside its `stores`, so they\n  are not counted twice.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -17711,6 +17787,38 @@
           "name": "buildReservedByLocation",
           "signature": "buildReservedByLocation(bookings: ReadonlyArray<typeLiteral>): ReservedByLocation",
           "doc": "Sum the shelf units claimed by a set of bookings, per location. Only bookings\nthat currently hold stock contribute — a returned/quoted booking reserves\nnothing even if a stale `stores` array lingers.\n\n⚠️ **This is the SHELF-side question, not `quantity_booked`.** This docstring\nused to claim the gate was *\"the same definition as `quantity_booked`\"*. It is\nnot, and that sentence is why the two looked safe to merge: this result is\nsubtracted from `store_breakdown`, which a check-out DOES reduce, while\n`quantity_booked` is subtracted from `quantity_held`, which a rental check-out\ndoes NOT. Unifying them would make the allocator under-net for rentals and\npoint two pickers at one unit. See `utils/stock.ts`'s header for the table.\n\nThe gate is {@link bookingHoldsStock}; the *amount* added is the booking's own\n`stores[].locations[].quantity`, not the gate's value.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "compareShelves",
+          "signature": "compareShelves(a: Pick<StoreBreakdownLocation, \"default\" | \"role\" | \"quantity\">, b: Pick<StoreBreakdownLocation, \"default\" | \"role\" | \"quantity\">): number",
+          "doc": "THE shelf order every allocator shares: {@link shelfTier}, then most units\nfirst within a tier. A comparator for `Array.prototype.sort`, which is stable,\nso equal shelves keep their stored order. The API's own pickers and the\nmanager's allocation editor sort with this rather than restating it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "mergeBookingStores",
+          "signature": "mergeBookingStores(_: ReadonlyArray<readonly BookingStore[]>): typeLiteral",
+          "doc": "Merge store allocations into one `stores` array, summing a location named\ntwice — how a carried staged portion and a fresh allocation of the rest\nbecome one booking's `stores`. Store and location order is first-seen, so\nthe staged entries lead. Zero-quantity locations and stores are dropped.\nReturns the `query_by_*` arrays beside it, derived the way\n{@link allocateBookingToStores} derives them.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "shelfTier",
+          "signature": "shelfTier(loc: Pick<StoreBreakdownLocation, \"default\" | \"role\">): 0 | 1 | 2",
+          "doc": "Which tier a ledger location is drawn from, lowest first (api-cloudrun#1302\n§2):\n\n- `0` — one of the product's default storage locations (`default`, on a\n  storage location);\n- `1` — any other storage location;\n- `2` — a staging location. **A last resort, never excluded**: staging stock\n  is real stock, and a pick that refused it would report a false shortage.\n\nA `default` flag on a STAGING location is a data error (a product default\nmust be storage) and ranks as staging, so the inbox can never be drawn first\nagain by way of a stale copy. Absent `role` means storage (`locationRole`).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "stagedPortion",
+          "signature": "stagedPortion(booking: Pick<Booking, \"breakdown\" | \"stores\">, roleOf: fnOrConstructor): typeLiteral",
+          "doc": "A booking's **staged portion**: the units its `stores` places at STAGING\nlocations, capped at `breakdown.prepped`.\n\nPrep moves units shelf → a staging location, and `booking.stores` is where\nthose units now live (ruling 7). Unlike the rest of `stores`, which is a\nrecomputable PLAN, this part is a physical fact: an order edit must carry it\nverbatim (like `units`), and only `quantity − staged` is re-allocated. It is\nalso all that `isAllocationAnchor` keeps for the prepped part of a booking.\n\n- **The cap**: entries beyond `prepped` are not staged units — they are a\n  stale plan that happens to name a staging location (an arrival inbox an\n  allocator drew from as a last resort). Trimmed from the END of the stored\n  order, so the result is deterministic.\n- **`roleOf`** answers a location's role; `undefined` (unknown) reads as\n  storage, so an unresolvable location is re-allocated rather than frozen.\n  The API reads it off the ledger's `store_breakdown[].locations[].role`,\n  with a location point-read when the entry has emptied.\n\nReturns the staged stores (each `quantity` recomputed) and their total.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -18362,7 +18470,7 @@
         {
           "kind": "interface",
           "name": "LocationPlacement",
-          "declaration": "interface LocationPlacement {\n  uid_store: string;\n  store_name: string;\n  store_default: boolean;\n  name: string;\n  default: boolean;\n  max: number | null;\n}",
+          "declaration": "interface LocationPlacement {\n  uid_store: string;\n  store_name: string;\n  store_default: boolean;\n  name: string;\n  default: boolean;\n  max: number | null;\n  role?: LocationRoleType;\n}",
           "doc": "Where a `locations`-kind DocSource sits, resolved by the caller.\n\nEvery field is read from the `locations` / `stores` documents, never from\nclient input — that is what makes a cross-store placement inexpressible\n(#307). It carries the store's identity as well as the location's because the\nledger's `store_breakdown` denormalizes both, and `allocateBookingToStores`\nsorts on `store.default`, `store.name` and `location.default`: a placement\nthat left them at `\"\"`/`false` would silently cost the allocator its\ndefault-store-first and default-location-first ordering."
         },
         {

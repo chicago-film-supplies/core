@@ -1,6 +1,12 @@
 import { assertEquals } from "@std/assert";
 import { getInitialValues } from "../src/schemas/initial.ts";
-import { LocationSchema } from "../src/schemas/location.ts";
+import {
+  CreateLocationInput,
+  LocationSchema,
+  SetLocationProductDefaultInput,
+  UpdateLocationInput,
+} from "../src/schemas/location.ts";
+import { locationRole, type StoreBreakdownLocation, StoreBreakdownLocationSchema } from "../src/schemas/common.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const locationBase = getInitialValues(LocationSchema) as Record<string, unknown>;
@@ -59,4 +65,53 @@ Deno.test("LocationSchema accepts null max_default", () => {
 Deno.test("LocationSchema rejects additional properties", () => {
   const doc = { ...validLocation, bogus: true };
   assertEquals(LocationSchema.safeParse(doc).success, false);
+});
+
+// ── role (api-cloudrun#1302) ─────────────────────────────────────
+
+Deno.test("role: a location without one parses, and reads as storage", () => {
+  const { role: _role, ...noRole } = validLocation as Record<string, unknown>;
+  const parsed = LocationSchema.safeParse(noRole);
+  assertEquals(parsed.success, true);
+  assertEquals(locationRole(parsed.data!), "storage");
+});
+
+Deno.test("role: staging and storage parse; anything else is refused", () => {
+  assertEquals(locationRole(LocationSchema.parse({ ...validLocation, role: "staging" })), "staging");
+  assertEquals(locationRole(LocationSchema.parse({ ...validLocation, role: "storage" })), "storage");
+  assertEquals(LocationSchema.safeParse({ ...validLocation, role: "vehicle" }).success, false);
+});
+
+Deno.test("role: the ledger copy is optional too, and absent reads as storage", () => {
+  const loc: StoreBreakdownLocation = {
+    uid_location: "testloc1000000000000",
+    name: "A",
+    quantity: 1,
+    default: false,
+    max: null,
+  };
+  assertEquals(StoreBreakdownLocationSchema.safeParse(loc).success, true);
+  assertEquals(locationRole(loc), "storage");
+  assertEquals(StoreBreakdownLocationSchema.safeParse({ ...loc, role: "staging" }).success, true);
+  assertEquals(StoreBreakdownLocationSchema.safeParse({ ...loc, role: "home" }).success, false);
+});
+
+Deno.test("role: the create and update inputs accept it optionally", () => {
+  const create = { uid: "testloc1000000000000", uid_store: "teststore10000000000", name: "Staging - Van" };
+  assertEquals(CreateLocationInput.safeParse(create).success, true);
+  assertEquals(CreateLocationInput.parse({ ...create, role: "staging" }).role, "staging");
+  assertEquals(CreateLocationInput.safeParse({ ...create, role: "van" }).success, false);
+  assertEquals(UpdateLocationInput.parse({ uid: create.uid, role: "staging", version: 0 }).role, "staging");
+});
+
+Deno.test("SetLocationProductDefaultInput: set or clear one product's flag at one location", () => {
+  const base = { uid: "testloc1000000000000", uid_product: "testp100000000000000", default: true, version: 3 };
+  assertEquals(SetLocationProductDefaultInput.safeParse(base).success, true);
+  assertEquals(SetLocationProductDefaultInput.safeParse({ ...base, default: false }).success, true);
+  for (const key of ["uid", "uid_product", "default", "version"] as const) {
+    const { [key]: _dropped, ...rest } = base;
+    const parsed = SetLocationProductDefaultInput.safeParse(rest);
+    assertEquals(parsed.success, false, key);
+    assertEquals(parsed.error!.issues.map((i) => i.path.join(".")), [key]);
+  }
 });

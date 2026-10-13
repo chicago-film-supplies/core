@@ -39,8 +39,10 @@
  * `{from: L3, to: null}` reads "left ownership from L3"; both non-null is a
  * move that leaves ownership untouched. A half-move is inexpressible.
  *
- * `lines: []` means **nothing physically moved** — today only a `prep`, where
- * reserved and prepped units sit on the same shelf. ⚠️ It *reads* like the shape
+ * `lines: []` means **nothing physically moved** — a rebook (the units stay at
+ * the customer), an uncounted product's step (no shelves to name), or a `prep`
+ * that stages nothing (api-cloudrun#1302: a prep moves units shelf → a staging
+ * location, except where the applier exempts it). ⚠️ It *reads* like the shape
  * for a cost-only adjustment too, and that is the trap: no contract pairs
  * `lines: []` with a cost, and `applyMovementToLedger` would fold one to nothing
  * if one did. See the depreciation note on {@link MOVEMENT_TYPES} (core#75).
@@ -94,8 +96,8 @@ import { BookingBreakdownKeyEnum, type BookingBreakdownKeyType } from "./booking
  *     landed-cost adjustment uses"* — and that was wrong in three independent
  *     ways, each measured (core#75):
  *       1. **No contract permits it.** `places: null` means "lines must be
- *          empty", and the only entry carrying it is `prep`, whose `cost` is
- *          `forbidden`. Every cost-bearing type has `places` set, and
+ *          empty", and the only entries carrying it are the rebook pair
+ *          (`prep` did until api-cloudrun#1302), whose `cost` is `forbidden`. Every cost-bearing type has `places` set, and
  *          `checkMovementContract` then requires at least one line — so
  *          `MovementSchema` rejects `lines: []` beside a cost on **every**
  *          {@link MOVEMENT_TYPES} member. `places: null` + `cost: "required"`
@@ -551,8 +553,29 @@ export interface MovementContract {
  * undo. `undoes` is filled in for all of them as `null` when the table is built.
  */
 const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementContract>> = {
-  // Reserved and prepped units are both on the shelf, so nothing moves.
-  prep: { custody: "required", cost: "forbidden", places: null, booking: "required", service: "forbidden", units: "allowed", uncounted: "lineless" },
+  // Prep is a PHYSICAL move: units leave their shelf for a staging location
+  // (api-cloudrun#1302, ruling 1 — Fillmore stages in Staging - Back, Staging -
+  // Front and a van packed the night before). It was `places: null` until then,
+  // which left prepped units showing on their shelf until check-out.
+  //
+  // `uncounted: "lineless"` keeps a lineless prep legal in the SCHEMA, for an
+  // uncounted product and for the applier's four exemptions on a counted one
+  // (a prep covered by a check-out in the same row, a shelf-shortage
+  // remainder, an unprep of a historical lineless prep, a revert's release).
+  // Which of those a lineless prep on a counted ledger is, only the writer can
+  // know; the fold reports it as `linelessCountedQuantity`.
+  //
+  // ⚠️ Roll-forward only: a stored lined prep fails every parse on a core older
+  // than this one.
+  prep: {
+    custody: "required",
+    cost: "forbidden",
+    places: { from: ["locations"], to: ["locations"] },
+    booking: "required",
+    service: "forbidden",
+    units: "allowed",
+    uncounted: "lineless",
+  },
   check_out: {
     custody: "required",
     cost: "forbidden",
@@ -784,11 +807,18 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
   // units, which travel WITH their flag — and then `sources[]` names that
   // record, because a location carries one flagged count with no reason and a
   // record finds its units only through `query_by_sources`.
+  //
+  // `booking: "optional"` (api-cloudrun#1302, ruling 9): a RESTAGE — staged units
+  // moving Back → Front → Van — is a transfer naming the booking whose units
+  // they are, so its `stores` moves in the same write. Custody stays
+  // forbidden: the units are prepped before and after. `forbidden` was never a
+  // deliberate exclusion — transfer was defined as a pure place move before
+  // staging existed.
   transfer: {
     custody: "forbidden",
     cost: "forbidden",
     places: { from: ["locations"], to: ["locations"] },
-    booking: "forbidden",
+    booking: "optional",
     service: "nullable",
     units: "allowed",
     uncounted: "refused",

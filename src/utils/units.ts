@@ -382,6 +382,12 @@ function checkSource(m: RosterMovement, n: number, entry: UnitRosterEntryType | 
       if (entry.state === "away" && entry.uid_out_of_service === from.uid) return;
       throw refuse();
     case "locations":
+      // A RESTAGE (a `transfer` naming a booking, api-cloudrun#1302 ruling 9)
+      // moves only that booking's PREPPED units, never shelf stock.
+      if (isRestage(m)) {
+        if (entry.state === "prepped" && entry.uid_booking === m.uid_booking && entry.uid_location === from.uid) return;
+        throw refuse();
+      }
       if (
         entry.state === "prepped" && m.custody?.from === "prepped" &&
         entry.uid_booking === m.uid_booking && entry.uid_location === from.uid
@@ -391,6 +397,15 @@ function checkSource(m: RosterMovement, n: number, entry: UnitRosterEntryType | 
     default:
       throw refuse();
   }
+}
+
+/**
+ * A `transfer` naming a booking: staged units moving between staging
+ * locations. Custody is null (the units are prepped before and after), so the
+ * roster reads the booking off the subject instead.
+ */
+function isRestage(m: RosterMovement): boolean {
+  return m.type === "transfer" && m.uid_booking !== null;
 }
 
 function oosSource(m: RosterMovement): string | null {
@@ -411,7 +426,7 @@ function destination(
     case "out-of-service":
       return { state: "away", uid_out_of_service: to.uid };
     case "locations": {
-      if (m.custody?.to === "prepped") {
+      if (m.custody?.to === "prepped" || isRestage(m)) {
         if (m.uid_booking === null) throw new RosterFoldError(`"${m.type}" preps unit ${n} onto no booking`, n);
         return { state: "prepped", uid_booking: m.uid_booking, uid_location: to.uid };
       }

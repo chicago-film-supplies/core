@@ -2838,6 +2838,7 @@ interface CreateLocationInputType {
   uid: string;
   uid_store: string;
   name: string;
+  role?: LocationRoleType;
   uid_location_type?: string | null;
 }
 ```
@@ -6027,6 +6028,26 @@ a "keep in lockstep" comment that nothing enforced.
 const LIVE_IN_XERO_STATUSES: readonly InvoiceStatusType[];
 ```
 
+### `LOCATION_ROLES`
+
+What a location is FOR (api-cloudrun#1302, ruling 2).
+
+- `storage` — a shelf a product is put away on. A product's default storage
+  locations (`products[].default`) must be `storage`.
+- `staging` — a temporary place for an item: the store's arrivals inbox,
+  a prep area, a loaded vehicle. `store.default_location` (the store's default
+  staging location) must be `staging`.
+
+Declared here, never inferred from the name, and never from `location_type`
+(prod has no location types). ⚠️ **ABSENT means `storage`**, on this document
+and on the ledger's copy ({@link StoreBreakdownLocation}`.role`) alike — read it
+through {@link locationRole}, never as `role === "storage"`, which is false for
+every location written before the field existed.
+
+```ts
+const LOCATION_ROLES: "storage" | "staging"[];
+```
+
 ### `LeadingDividerGrain`
 
 Which document a {@link leadingDividerViolations} call is judging.
@@ -6183,6 +6204,7 @@ interface Location {
   name: string;
   name_key?: string;
   default: boolean;
+  role?: LocationRoleType;
   uid_location_type: string | null;
   product_capacities: LocationProductCapacity[];
   query_by_product_capacities: string[];
@@ -6224,6 +6246,22 @@ interface LocationProductCapacity {
   max: number | null;
   max_default: number | null;
 }
+```
+
+### `LocationRoleEnum`
+
+Zod enum for {@link LOCATION_ROLES}.
+
+```ts
+const LocationRoleEnum: z.ZodType<LocationRoleType>;
+```
+
+### `LocationRoleType`
+
+A location's role.
+
+```ts
+type LocationRoleType = indexedAccess;
 ```
 
 ### `LocationSchema`
@@ -6420,8 +6458,8 @@ Asset depreciation IS on the roadmap. When it lands:
     landed-cost adjustment uses"* — and that was wrong in three independent
     ways, each measured (core#75):
       1. **No contract permits it.** `places: null` means "lines must be
-         empty", and the only entry carrying it is `prep`, whose `cost` is
-         `forbidden`. Every cost-bearing type has `places` set, and
+         empty", and the only entries carrying it are the rebook pair
+         (`prep` did until api-cloudrun#1302), whose `cost` is `forbidden`. Every cost-bearing type has `places` set, and
          `checkMovementContract` then requires at least one line — so
          `MovementSchema` rejects `lines: []` beside a cost on **every**
          {@link MOVEMENT_TYPES} member. `places: null` + `cost: "required"`
@@ -10543,6 +10581,34 @@ Zod schema for Session.
 const SessionSchema: z.ZodType<Session>;
 ```
 
+### `SetLocationProductDefaultInput`
+
+Input schema for {@link SetLocationProductDefaultInputType}.
+
+```ts
+const SetLocationProductDefaultInput: z.ZodType<SetLocationProductDefaultInputType>;
+```
+
+### `SetLocationProductDefaultInputType`
+
+Set or clear ONE product's default-storage flag at ONE location
+(`locations/{uid}.products[uid_product].default`) — the only writer of that
+fact outside a rebuild script (api-cloudrun#1302 §2).
+
+**Set or clear, never move**: a product may have several default storage
+locations (ruling 11), so setting one leaves the others alone. The API
+refuses a set on a location whose role is not `storage`, or on an inactive
+one. The ledger's per-product copy is refreshed by a post-commit cascade.
+
+```ts
+interface SetLocationProductDefaultInputType {
+  uid: string;
+  uid_product: string;
+  default: boolean;
+  version: number;
+}
+```
+
 ### `Settlement`
 
 One settlement event against an invoice, a customer credit note, a supplier
@@ -10977,6 +11043,7 @@ interface StoreBreakdownLocation {
   default: boolean;
   max: number | null;
   quantity_out_of_service?: number;
+  role?: LocationRoleType;
 }
 ```
 
@@ -12971,6 +13038,7 @@ interface UpdateLocationInputType {
   uid: string;
   name?: string;
   default?: boolean;
+  role?: LocationRoleType;
   active?: boolean;
   version: number;
 }
@@ -14885,6 +14953,11 @@ returns `null` before this runs ({@link deriveNextEventDate}). Pinned against
 {@link pickSheetLegDirection} over constructed bookings — never re-derive an
 oracle from this function itself.
 
+### `locationRole(loc: typeLiteral): LocationRoleType`
+
+A location's role, with an absent `role` read as `storage` — the one place
+that rule is spelled. Takes the document or the ledger's copy.
+
 ### `markReasonOf(type: MovementTypeType): OutOfServiceKeyType | null`
 
 The out-of-service reason a MARK movement puts units into — `mark_lost` →
@@ -16251,6 +16324,26 @@ Allowed values for tax jurisdiction.
 type JurisdictionType = indexedAccess;
 ```
 
+### `LOCATION_ROLES`
+
+What a location is FOR (api-cloudrun#1302, ruling 2).
+
+- `storage` — a shelf a product is put away on. A product's default storage
+  locations (`products[].default`) must be `storage`.
+- `staging` — a temporary place for an item: the store's arrivals inbox,
+  a prep area, a loaded vehicle. `store.default_location` (the store's default
+  staging location) must be `staging`.
+
+Declared here, never inferred from the name, and never from `location_type`
+(prod has no location types). ⚠️ **ABSENT means `storage`**, on this document
+and on the ledger's copy ({@link StoreBreakdownLocation}`.role`) alike — read it
+through {@link locationRole}, never as `role === "storage"`, which is false for
+every location written before the field existed.
+
+```ts
+const LOCATION_ROLES: "storage" | "staging"[];
+```
+
 ### `ListId`
 
 `lists.uid` (and `uid_list` references) — a Firestore auto-id (user-created
@@ -16259,6 +16352,22 @@ lists) or a lowercase-kebab slug (seeded/system lists, e.g. `in-store`,
 
 ```ts
 const ListId: z.ZodType<string>;
+```
+
+### `LocationRoleEnum`
+
+Zod enum for {@link LOCATION_ROLES}.
+
+```ts
+const LocationRoleEnum: z.ZodType<LocationRoleType>;
+```
+
+### `LocationRoleType`
+
+A location's role.
+
+```ts
+type LocationRoleType = indexedAccess;
 ```
 
 ### `MovementId`
@@ -17040,6 +17149,7 @@ interface StoreBreakdownLocation {
   default: boolean;
   max: number | null;
   quantity_out_of_service?: number;
+  role?: LocationRoleType;
 }
 ```
 
@@ -17441,6 +17551,11 @@ The contract for an item `type`, or `undefined` for a value outside
 {@link ITEM_TYPES}. Takes a `string` because the loose `LineItem` shadow in
 `@cfs/core/utils/orders` types `type` as `string`; an unrecognized type has no
 contract and every derived predicate answers `false` for it.
+
+### `locationRole(loc: typeLiteral): LocationRoleType`
+
+A location's role, with an absent `role` read as `storage` — the one place
+that rule is spelled. Takes the document or the ledger's copy.
 
 ### `settlementContract(type: string): SettlementContract | undefined`
 
@@ -20192,6 +20307,7 @@ interface CreateLocationInputType {
   uid: string;
   uid_store: string;
   name: string;
+  role?: LocationRoleType;
   uid_location_type?: string | null;
 }
 ```
@@ -20207,6 +20323,7 @@ interface Location {
   name: string;
   name_key?: string;
   default: boolean;
+  role?: LocationRoleType;
   uid_location_type: string | null;
   product_capacities: LocationProductCapacity[];
   query_by_product_capacities: string[];
@@ -20252,6 +20369,34 @@ Zod schema for Location.
 const LocationSchema: z.ZodType<Location>;
 ```
 
+### `SetLocationProductDefaultInput`
+
+Input schema for {@link SetLocationProductDefaultInputType}.
+
+```ts
+const SetLocationProductDefaultInput: z.ZodType<SetLocationProductDefaultInputType>;
+```
+
+### `SetLocationProductDefaultInputType`
+
+Set or clear ONE product's default-storage flag at ONE location
+(`locations/{uid}.products[uid_product].default`) — the only writer of that
+fact outside a rebuild script (api-cloudrun#1302 §2).
+
+**Set or clear, never move**: a product may have several default storage
+locations (ruling 11), so setting one leaves the others alone. The API
+refuses a set on a location whose role is not `storage`, or on an inactive
+one. The ledger's per-product copy is refreshed by a post-commit cascade.
+
+```ts
+interface SetLocationProductDefaultInputType {
+  uid: string;
+  uid_product: string;
+  default: boolean;
+  version: number;
+}
+```
+
 ### `UpdateLocationInput`
 
 Input schema for updating a location.
@@ -20269,6 +20414,7 @@ interface UpdateLocationInputType {
   uid: string;
   name?: string;
   default?: boolean;
+  role?: LocationRoleType;
   active?: boolean;
   version: number;
 }
@@ -24995,8 +25141,10 @@ summation. `{from: null, to: L3}` reads "entered ownership at L3";
 `{from: L3, to: null}` reads "left ownership from L3"; both non-null is a
 move that leaves ownership untouched. A half-move is inexpressible.
 
-`lines: []` means **nothing physically moved** — today only a `prep`, where
-reserved and prepped units sit on the same shelf. ⚠️ It *reads* like the shape
+`lines: []` means **nothing physically moved** — a rebook (the units stay at
+the customer), an uncounted product's step (no shelves to name), or a `prep`
+that stages nothing (api-cloudrun#1302: a prep moves units shelf → a staging
+location, except where the applier exempts it). ⚠️ It *reads* like the shape
 for a cost-only adjustment too, and that is the trap: no contract pairs
 `lines: []` with a cost, and `applyMovementToLedger` would fold one to nothing
 if one did. See the depreciation note on {@link MOVEMENT_TYPES} (core#75).
@@ -25142,8 +25290,8 @@ Asset depreciation IS on the roadmap. When it lands:
     landed-cost adjustment uses"* — and that was wrong in three independent
     ways, each measured (core#75):
       1. **No contract permits it.** `places: null` means "lines must be
-         empty", and the only entry carrying it is `prep`, whose `cost` is
-         `forbidden`. Every cost-bearing type has `places` set, and
+         empty", and the only entries carrying it are the rebook pair
+         (`prep` did until api-cloudrun#1302), whose `cost` is `forbidden`. Every cost-bearing type has `places` set, and
          `checkMovementContract` then requires at least one line — so
          `MovementSchema` rejects `lines: []` beside a cost on **every**
          {@link MOVEMENT_TYPES} member. `places: null` + `cost: "required"`
@@ -38140,6 +38288,7 @@ interface ReservingBooking {
   stores: BookingStore[];
   startMs: number | null;
   endMs: number | null;
+  staged?: BookingStore[];
 }
 ```
 
@@ -38160,7 +38309,8 @@ allocation when `reserved` is empty.
 
 Allocates booking quantity across all available stores.
 Follows priority: default store first, then others alphabetically.
-Draws from default locations first within each store.
+Within each store, draws in {@link compareShelves} order: the product's
+default storage locations, then other storage, then staging.
 
 **Parameters**
 
@@ -38176,6 +38326,18 @@ same product that overlap this booking's window and (b) `inBatchReserved` —
 allocations already made earlier in THIS transaction for the same product. The
 allocation is folded back into `inBatchReserved` so the next booking for the
 same product nets against it too. Pure (no I/O).
+
+Two kinds of claim, netted differently:
+
+- **A plan** — a reserving booking's `stores` — nets only when its window
+  overlaps this one, and not at all when this call has no window (`null`
+  bound): two bookings that never coexist can share a unit.
+- **Staged units** — a reserving booking's `staged` ({@link stagedPortion}) —
+  net ALWAYS, window or not. They are a physical fact: those units sit at a
+  staging location for that booking now, so no other booking's pick may be
+  pointed at them, a windowless sale's included (api-cloudrun#1302 §4). An
+  overlapping booking's staged units are already inside its `stores`, so they
+  are not counted twice.
 
 ### `buildReservedByLocation(bookings: ReadonlyArray<typeLiteral>): ReservedByLocation`
 
@@ -38193,6 +38355,59 @@ point two pickers at one unit. See `utils/stock.ts`'s header for the table.
 
 The gate is {@link bookingHoldsStock}; the *amount* added is the booking's own
 `stores[].locations[].quantity`, not the gate's value.
+
+### `compareShelves(a: Pick<StoreBreakdownLocation, "default" | "role" | "quantity">, b: Pick<StoreBreakdownLocation, "default" | "role" | "quantity">): number`
+
+THE shelf order every allocator shares: {@link shelfTier}, then most units
+first within a tier. A comparator for `Array.prototype.sort`, which is stable,
+so equal shelves keep their stored order. The API's own pickers and the
+manager's allocation editor sort with this rather than restating it.
+
+### `mergeBookingStores(_: ReadonlyArray<readonly BookingStore[]>): typeLiteral`
+
+Merge store allocations into one `stores` array, summing a location named
+twice — how a carried staged portion and a fresh allocation of the rest
+become one booking's `stores`. Store and location order is first-seen, so
+the staged entries lead. Zero-quantity locations and stores are dropped.
+Returns the `query_by_*` arrays beside it, derived the way
+{@link allocateBookingToStores} derives them.
+
+### `shelfTier(loc: Pick<StoreBreakdownLocation, "default" | "role">): 0 | 1 | 2`
+
+Which tier a ledger location is drawn from, lowest first (api-cloudrun#1302
+§2):
+
+- `0` — one of the product's default storage locations (`default`, on a
+  storage location);
+- `1` — any other storage location;
+- `2` — a staging location. **A last resort, never excluded**: staging stock
+  is real stock, and a pick that refused it would report a false shortage.
+
+A `default` flag on a STAGING location is a data error (a product default
+must be storage) and ranks as staging, so the inbox can never be drawn first
+again by way of a stale copy. Absent `role` means storage (`locationRole`).
+
+### `stagedPortion(booking: Pick<Booking, "breakdown" | "stores">, roleOf: fnOrConstructor): typeLiteral`
+
+A booking's **staged portion**: the units its `stores` places at STAGING
+locations, capped at `breakdown.prepped`.
+
+Prep moves units shelf → a staging location, and `booking.stores` is where
+those units now live (ruling 7). Unlike the rest of `stores`, which is a
+recomputable PLAN, this part is a physical fact: an order edit must carry it
+verbatim (like `units`), and only `quantity − staged` is re-allocated. It is
+also all that `isAllocationAnchor` keeps for the prepped part of a booking.
+
+- **The cap**: entries beyond `prepped` are not staged units — they are a
+  stale plan that happens to name a staging location (an arrival inbox an
+  allocator drew from as a last resort). Trimmed from the END of the stored
+  order, so the result is deterministic.
+- **`roleOf`** answers a location's role; `undefined` (unknown) reads as
+  storage, so an unresolvable location is re-allocated rather than frozen.
+  The API reads it off the ledger's `store_breakdown[].locations[].role`,
+  with a location point-read when the entry has emptied.
+
+Returns the staged stores (each `quantity` recomputed) and their total.
 
 ## `@cfs/core/utils/stock`
 
@@ -39406,6 +39621,7 @@ interface LocationPlacement {
   name: string;
   default: boolean;
   max: number | null;
+  role?: LocationRoleType;
 }
 ```
 

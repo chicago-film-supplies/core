@@ -509,13 +509,30 @@ Deno.test("a no-refund sale_return is cost 0, not cost absent — the zero is th
 
 // ── lines ───────────────────────────────────────────────────────────
 
-Deno.test("prep moves nothing physically — lines must be empty", () => {
-  assertEquals(MOVEMENT_CONTRACTS.prep.places, null);
-  assertEquals(MovementSchema.safeParse(movement("prep")).success, true);
-  const stray = movement("prep", {
+Deno.test("prep moves units shelf → staging location; a lineless prep still parses (api-cloudrun#1302)", () => {
+  assertEquals(MOVEMENT_CONTRACTS.prep.places, { from: ["locations"], to: ["locations"] });
+  const lined = movement("prep", {
     lines: [{ quantity: 2, location: { from: at(LOC_A), to: at(LOC_B) } }],
   });
-  assertEquals(MovementSchema.safeParse(stray).success, false);
+  assertEquals(MovementSchema.safeParse(lined).success, true);
+  // Lineless stays legal in the schema: an uncounted product, and the
+  // writer's four exemptions on a counted one, which only the writer knows.
+  assertEquals(MovementSchema.safeParse(movement("prep", { lines: [] })).success, true);
+  // A prep never lands at a booking — that is a check-out.
+  const toBooking = movement("prep", {
+    lines: [{ quantity: 2, location: { from: at(LOC_A), to: atBooking } }],
+  });
+  assertEquals(MovementSchema.safeParse(toBooking).success, false);
+  // The unprep is its mirror, staging → shelf.
+  assertEquals(MOVEMENT_CONTRACTS.unprep.places, { from: ["locations"], to: ["locations"] });
+});
+
+Deno.test("transfer may name a booking (a restage) and still carries no custody (api-cloudrun#1302)", () => {
+  assertEquals(MOVEMENT_CONTRACTS.transfer.booking, "optional");
+  assertEquals(MovementSchema.safeParse(movement("transfer")).success, true, "the booking-scoped restage");
+  assertEquals(MovementSchema.safeParse(movement("transfer", { uid_booking: null })).success, true, "a plain transfer");
+  const withCustody = movement("transfer", { custody: { from: "prepped", to: "prepped" } });
+  assertEquals(MovementSchema.safeParse(withCustody).success, false, "custody stays forbidden");
 });
 
 Deno.test("a type that only means anything as a count rejects an empty lines array", () => {
@@ -556,12 +573,15 @@ Deno.test("an uncounted product's step is lineless: the ladder and two record re
     "mark_lost_undo",
     "mark_maintenance",
     "mark_maintenance_undo",
+    // A physical move since api-cloudrun#1302, and lineless for an uncounted product.
+    "prep",
     "return_to_service",
     "sale",
     "sale_return",
     "sale_return_undo",
     "sale_undo",
     "unenroll",
+    "unprep",
     "write_off",
   ]);
   for (const type of lineless) {
@@ -1177,7 +1197,7 @@ Deno.test("rule 5: a movement naming its units, on one line or split across two"
 });
 
 Deno.test("rule 5: a type with no lines may still name its units", () => {
-  const prep = movement("prep", { units: [unit(3), unit(7)], query_by_unit_number: [3, 7] });
+  const prep = movement("prep", { lines: [], units: [unit(3), unit(7)], query_by_unit_number: [3, 7] });
   assertEquals(issuePaths(prep), []);
 });
 
@@ -1196,16 +1216,16 @@ Deno.test("rule 5: the mirror is units[].number in order", () => {
 });
 
 Deno.test("rule 5: named units number exactly the quantity", () => {
-  // A prep has no lines, so nothing else can fail.
-  const one = movement("prep", { units: [unit(3)], query_by_unit_number: [3] });
+  // A lineless prep, so nothing else can fail.
+  const one = movement("prep", { lines: [], units: [unit(3)], query_by_unit_number: [3] });
   assertEquals(issuePaths(one), ["units"]);
 });
 
 Deno.test("rule 5: units are strictly ascending, so no unit appears twice", () => {
   const descending = unitsCheckOut({ units: [unit(7), unit(3)], query_by_unit_number: [7, 3] });
   assertEquals(issuePaths(descending), ["units.1.number"]);
-  // A prep has no lines, so the ordering is the only thing that can fail.
-  const repeated = movement("prep", { units: [unit(3), unit(3)], query_by_unit_number: [3, 3] });
+  // A lineless prep, so the ordering is the only thing that can fail.
+  const repeated = movement("prep", { lines: [], units: [unit(3), unit(3)], query_by_unit_number: [3, 3] });
   assertEquals(issuePaths(repeated), ["units.1.number"]);
 });
 
