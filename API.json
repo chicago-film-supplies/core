@@ -18530,13 +18530,13 @@
         {
           "kind": "typeAlias",
           "name": "XeroPostingManualReason",
-          "declaration": "type XeroPostingManualReason = \"capitalised_disposal\" | \"reclass_between_products\";",
+          "declaration": "type XeroPostingManualReason = \"capitalised_disposal\";",
           "doc": "Why a movement needs a person in the Xero UI."
         },
         {
           "kind": "typeAlias",
           "name": "XeroPostingSkipReason",
-          "declaration": "type XeroPostingSkipReason = \"no_cost_contract\" | \"opening_balance\" | \"sale_posts_on_accrec\" | \"refunded_return_posts_on_accrec\";",
+          "declaration": "type XeroPostingSkipReason = \"no_cost_contract\" | \"opening_balance\" | \"sale_posts_on_accrec\" | \"refunded_return_posts_on_accrec\" | \"reclass_zero_basis_fleet\";",
           "doc": "Why a movement deliberately posts nothing."
         },
         {

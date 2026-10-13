@@ -900,7 +900,13 @@ export type XeroPostingSkipReason =
   /** A `sale`'s cost side is COGS on the ACCREC invoice; a bill would double-count it. */
   | "sale_posts_on_accrec"
   /** A refunded return is customer money — an ACCREC credit note, not a supplier bill. */
-  | "refunded_return_posts_on_accrec";
+  | "refunded_return_posts_on_accrec"
+  /**
+   * A reclass half on a FLEET product that carried no basis. `1999` tracks no
+   * quantity, so a $0 line there records nothing; a retail half at $0 still
+   * posts, to move its item's quantity on hand.
+   */
+  | "reclass_zero_basis_fleet";
 
 /** Why a movement needs a person in the Xero UI. */
 export type XeroPostingManualReason =
@@ -915,22 +921,7 @@ export type XeroPostingManualReason =
    * disposal by quantity at all. So CFS refuses rather than posting a journal
    * it cannot complete.
    */
-  | "capitalised_disposal"
-  /**
-   * A twin reclass — units moved between a retail product and its rental twin.
-   *
-   * 🔴 **It is not a spend and must never post a bill.** Nothing entered or left
-   * CFS; one inventory account has to be credited and another debited, which is
-   * a Xero MANUAL JOURNAL and not an ACCPAY document. Routing it down the bill
-   * path would post a shrink expense on one side and an adjustment clearing
-   * entry on the other, recording a loss and a gain for an event that is
-   * neither.
-   *
-   * ⚠️ Both sides of the pair report, and that is deliberate: each is a
-   * different account movement, and an operator reading one intervention with
-   * no counterpart would not know which direction was left unposted.
-   */
-  | "reclass_between_products";
+  | "capitalised_disposal";
 
 /** Why a movement *should* post but cannot — permanent, and detected before any Xero call. */
 export type XeroPostingTerminalReason =
@@ -1020,15 +1011,6 @@ export function xeroPostingFor(
   if (!hasCosts(forward)) return { kind: "skip", reason: "no_cost_contract" };
   if (forward === "opening_balance") return { kind: "skip", reason: "opening_balance" };
   if (forward === "sale") return { kind: "skip", reason: "sale_posts_on_accrec" };
-  // 🔴 Before any account derivation: a reclass has no ACCPAY document of any
-  // kind, whichever direction it runs and whatever the product type. Placing
-  // this after the `asset_account` switch would make a reclass on a
-  // non-stock-bearing product terminal instead of manual, i.e. a 500 on a
-  // movement that is simply not Xero's business.
-  if (forward === "reclass_out" || forward === "reclass_in") {
-    return { kind: "manual", reason: "reclass_between_products" };
-  }
-
   // A refunded return is settled against the customer, not a supplier. The zero
   // IS the decision — `MOVEMENT_CONTRACTS` makes `cost` required on
   // `sale_return` precisely so the amount can be zero and mean something.
@@ -1069,6 +1051,39 @@ export function xeroPostingFor(
   // document — `natural !== 0` already ruled the type out above — so it is a
   // malformed document rather than a table row, and it must not post.
   if (direction === 0) return { kind: "terminal", reason: "no_ownership_direction" };
+
+  // ── The reclass: each half posts on its OWN product's account ─────────
+  //
+  // Owner ruling 2026-10-13 (api-cloudrun#1068): a reclass moves value with the
+  // units, and Xero's tracked inventory must follow. A manual journal cannot do
+  // that — Xero refuses any line to `1400` without an `ItemCode`, and a journal
+  // line cannot carry one — so each half is the ordinary $0 adjustment
+  // document: the asset line on its own product's account (carrying the item),
+  // offset to `2510`. The pair nets `2510` to zero, leaving the value moved
+  // between the two products' accounts — `1400`→`1999` for retail→fleet,
+  // `1400`→`1400` between two retail items, `1999`→`1400` for fleet→retail.
+  //
+  // ⚠️ **A fleet half posts even as a decrease**, unlike every other disposal
+  // (the `capitalised_disposal` refusal below): the owner ruled that a unit
+  // leaving the fleet for retail credits `1999`, and the accountant clears it
+  // with the disposal in the fixed-asset register. The units were not lost, so
+  // nothing is expensed to `5700`.
+  //
+  // A fleet half carrying no basis posts nothing: `1999` is `FIXED` and tracks
+  // no quantity, so a $0 line there says nothing. A RETAIL half at $0 still
+  // posts, because its item's quantity on hand has to move.
+  if (forward === "reclass_out" || forward === "reclass_in") {
+    if (asset_account === XERO_ASSET_ACCOUNTS.fixed_asset_clearing && costAmountCents === 0) {
+      return { kind: "skip", reason: "reclass_zero_basis_fleet" };
+    }
+    return {
+      kind: "bill",
+      asset_account,
+      offset_account: XERO_OFFSET_ACCOUNTS.adjustment_clearing,
+      direction,
+      zero_total: true,
+    };
+  }
 
   // ── Accounts, from `natural` ──────────────────────────────────────────
   const offset_account = natural === 1

@@ -9,6 +9,7 @@ import {
 import {
   XERO_ASSET_ACCOUNTS,
   XERO_OFFSET_ACCOUNTS,
+  type XeroPostingDecision,
   xeroPostingFor,
 } from "../src/utils/movements.ts";
 
@@ -157,27 +158,54 @@ Deno.test("a CAPITALISED disposal refuses, and routes to the manual seam", () =>
   }
 });
 
-Deno.test("a twin reclass NEVER posts a bill, in either direction or on any product type", () => {
-  // A reclass moves units between a retail product and its rental twin. Nothing
-  // entered or left CFS, so there is no ACCPAY document of any kind — the Xero
-  // side is a manual journal between two inventory accounts (api-cloudrun#1068).
-  //
-  // 🔴 Asserted over EVERY product type and both signs of the stored cost,
-  // because the arm sits before the `asset_account` switch deliberately: behind
-  // it, a reclass on a non-stock-bearing product would come back TERMINAL, which
-  // is a 500 on a movement that is simply not Xero's business.
+Deno.test("a reclass half posts a $0 adjustment on its OWN product's account, offset to 2510", () => {
+  // Owner ruling 2026-10-13 (api-cloudrun#1068): value and the tracked item move
+  // together. Each half is the ordinary $0 adjustment document — its asset line
+  // on its own product's account, offset to 2510 — so the pair nets 2510 to zero
+  // and leaves the value moved between the two products' accounts.
+  const bill = (asset_account: 1400 | 1999, direction: 1 | -1): XeroPostingDecision => ({
+    kind: "bill",
+    asset_account,
+    offset_account: 2510,
+    direction,
+    zero_total: true,
+  });
+  assertEquals(xeroPostingFor("reclass_out", "sale", -6325, -139), bill(1400, -1));
+  assertEquals(xeroPostingFor("reclass_in", "sale", 6325, 139), bill(1400, 1));
+  assertEquals(xeroPostingFor("reclass_in", "rental", 6325, 139), bill(1999, 1));
+  // ⚠️ A fleet DECREASE posts here, where every other one is refused as
+  // `capitalised_disposal`: the owner ruled a unit leaving the fleet for retail
+  // credits 1999, and the accountant clears it in the fixed-asset register.
+  assertEquals(xeroPostingFor("reclass_out", "rental", -6325, -139), bill(1999, -1));
+  assertEquals(xeroPostingFor("write_off", "rental", -6325, -139), { kind: "manual", reason: "capitalised_disposal" });
+  // Never the shrink account: the units were not lost.
   for (const type of ["reclass_out", "reclass_in"] as const) {
-    for (const productType of PRODUCT_TYPES) {
-      for (const cost of [null, 0, 12_345, -12_345]) {
-        for (const delta of [null, 5, -5, 0]) {
-          assertEquals(
-            xeroPostingFor(type, productType, cost, delta),
-            { kind: "manual", reason: "reclass_between_products" },
-            `${type}/${productType}/${cost}/${delta} must not post`,
-          );
-        }
-      }
+    for (const productType of ["sale", "rental"] as const) {
+      const out = xeroPostingFor(type, productType, null, null);
+      assertEquals(out.kind === "bill" && out.offset_account, 2510, `${type}/${productType}`);
     }
+  }
+});
+
+Deno.test("a reclass half at $0 posts on a retail item and skips on the fleet", () => {
+  // A retail item's quantity on hand has to move even when the basis is zero;
+  // 1999 tracks no quantity, so a $0 fleet line records nothing.
+  assertEquals(xeroPostingFor("reclass_in", "sale", 0, 4).kind, "bill");
+  assertEquals(xeroPostingFor("reclass_out", "sale", 0, -4).kind, "bill");
+  for (const type of ["reclass_out", "reclass_in"] as const) {
+    assertEquals(xeroPostingFor(type, "rental", 0, type === "reclass_in" ? 4 : -4), {
+      kind: "skip",
+      reason: "reclass_zero_basis_fleet",
+    });
+  }
+});
+
+Deno.test("a reclass on a non-stock-bearing product is terminal (unreachable: both halves need a ledger)", () => {
+  for (const productType of PRODUCT_TYPES.filter((p) => p !== "sale" && p !== "rental")) {
+    assertEquals(xeroPostingFor("reclass_in", productType, 100, 1), {
+      kind: "terminal",
+      reason: "product_type_not_stock_bearing",
+    });
   }
 });
 

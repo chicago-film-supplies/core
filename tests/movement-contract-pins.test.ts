@@ -63,6 +63,17 @@ Deno.test("pins: every pre-campaign contract is unchanged, field for field, exce
   }
 });
 
+/**
+ * Types whose `xeroPostingFor` answers changed DELIBERATELY after the fixture was
+ * captured, by an owner ruling. Every input of a ruled type must differ from the
+ * fixture — all of a reclass's moved off `manual` — and its new answers are
+ * pinned by its own tests.
+ */
+const RULED_XERO: Record<string, { why: string }> = {
+  reclass_out: { why: "api-cloudrun#1068, owner ruling 2026-10-13: each reclass half posts on its own account" },
+  reclass_in: { why: "api-cloudrun#1068, owner ruling 2026-10-13: each reclass half posts on its own account" },
+};
+
 Deno.test("pins: every ruled change still differs from the fixture (no dead entry)", () => {
   for (const [t, ruled] of Object.entries(RULED_CHANGES)) {
     const pinned = pins.contracts[t] as Record<string, unknown> | undefined;
@@ -84,7 +95,15 @@ Deno.test("pins: xeroPostingFor answers every pre-campaign input exactly as befo
     } catch (e) {
       out = { threw: (e as Error).message };
     }
-    assertEquals(strip(out), pinned, key);
+    const ruled = RULED_XERO[t];
+    if (ruled) {
+      // A ruled type is pinned by its own tests (`tests/xero-posting.test.ts`);
+      // here it must merely have MOVED, so the fixture's old answer cannot
+      // come back unnoticed.
+      assert(JSON.stringify(strip(out)) !== JSON.stringify(pinned), `${key} (ruled: ${ruled.why})`);
+    } else {
+      assertEquals(strip(out), pinned, key);
+    }
     checked++;
   }
   assertEquals(checked, 32 * 64, "4 product types × 4 costs × 4 deltas per type");

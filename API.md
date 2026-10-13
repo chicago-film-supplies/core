@@ -39744,7 +39744,7 @@ type XeroPostingDecision = XeroBillPosting | typeLiteral | typeLiteral | typeLit
 Why a movement needs a person in the Xero UI.
 
 ```ts
-type XeroPostingManualReason = "capitalised_disposal" | "reclass_between_products";
+type XeroPostingManualReason = "capitalised_disposal";
 ```
 
 ### `XeroPostingSkipReason`
@@ -39752,7 +39752,7 @@ type XeroPostingManualReason = "capitalised_disposal" | "reclass_between_product
 Why a movement deliberately posts nothing.
 
 ```ts
-type XeroPostingSkipReason = "no_cost_contract" | "opening_balance" | "sale_posts_on_accrec" | "refunded_return_posts_on_accrec";
+type XeroPostingSkipReason = "no_cost_contract" | "opening_balance" | "sale_posts_on_accrec" | "refunded_return_posts_on_accrec" | "reclass_zero_basis_fleet";
 ```
 
 ### `XeroPostingTerminalReason`
