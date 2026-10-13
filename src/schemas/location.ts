@@ -27,7 +27,10 @@ export interface LocationProduct {
    * locations** — where it is put away, and the shelf the allocators draw from
    * first. The source of truth for that fact; the ledger's
    * `store_breakdown[].locations[].default` is its per-product copy. A product
-   * may have several (ruling 11), and only on a `storage` location.
+   * has exactly ONE per store, only on a `storage` location (ruling 11,
+   * corrected 2026-10-13); it may be STORED on several. One schema parse sees
+   * one location, so the count is enforced by the API's single writer and its
+   * audit, not here.
    */
   default: boolean;
 }
@@ -166,10 +169,12 @@ export const UpdateLocationInput: z.ZodType<UpdateLocationInputType> = z.object(
  * (`locations/{uid}.products[uid_product].default`) — the only writer of that
  * fact outside a rebuild script (api-cloudrun#1302 §2).
  *
- * **Set or clear, never move**: a product may have several default storage
- * locations (ruling 11), so setting one leaves the others alone. The API
- * refuses a set on a location whose role is not `storage`, or on an inactive
- * one. The ledger's per-product copy is refreshed by a post-commit cascade.
+ * **A set MOVES the flag**: a product has exactly one default storage location
+ * per store (ruling 11, corrected 2026-10-13), so setting it here clears it on
+ * the product's other locations at that store in the same write. A clear
+ * touches this location only. The API refuses a set on a location whose role
+ * is not `storage`, or on an inactive one. The ledger's per-product copy is
+ * refreshed by a post-commit cascade.
  */
 export interface SetLocationProductDefaultInputType {
   /** The location. */

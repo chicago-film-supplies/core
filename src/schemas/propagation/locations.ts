@@ -127,18 +127,58 @@ const updateLocationTransaction: TransactionDefinition = {
 
 // ── Product default storage locations ───────────────────────────
 
+const PRODUCT_DEFAULT_WRITER: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/locations/locationProductDefault.test.ts::setting a product's default MOVES it: the other location at the store is cleared",
+  clause:
+    "setting a product's default at one storage location clears it on that product's other locations at the same store, in the same transaction, and the placement cascade re-stamps the ledger copy",
+  gates: true,
+};
+
+const PRODUCT_DEFAULT_COUNT: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-product-defaults.ts",
+  clause:
+    "`several_defaults` — a product flagged default on more than one location at one store FAILS the audit; the same rule (`product_default_count`) runs in the nightly location-integrity sweep",
+  gates: true,
+};
+
 /**
- * Set or clear one product's default-storage flag at one location
- * (api-cloudrun#1302 §2, ruling 4). The location is the whole write; the
- * ledger's per-product copy is refreshed by the Eventarc placement cascade
+ * Set or clear one product's default-storage flag (api-cloudrun#1302 §2,
+ * ruling 4). **A product has exactly ONE default storage location per store**
+ * (ruling 11, corrected by the owner 2026-10-13), so a set MOVES the flag: the
+ * product's other locations at that store are cleared in the same transaction.
+ * The ledger's per-product copy is refreshed by the Eventarc placement cascade
  * (`update-location:placement-to-inventory-ledgers`), not by a step here — so
  * this transaction never meets the ledger writer's group commit.
  */
+const setLocationProductDefaultRules: CollectionRule[] = [
+  {
+    id: "set-location-product-default:clear-sibling-defaults",
+    source: "locations",
+    target: "locations",
+    mode: "co-write",
+    invariant:
+      "A product has exactly one default storage location per store — setting it on one location clears it on the product's other locations at that store in the same transaction",
+    enforced_by: [PRODUCT_DEFAULT_WRITER, PRODUCT_DEFAULT_COUNT],
+    transaction: "set-location-product-default",
+    fields: [
+      {
+        source: [],
+        target: ["products", "default"],
+        transform:
+          "set false on the product's entry at every other location in the store (looked up by uid_store + query_by_products array-contains)",
+      },
+    ],
+  },
+];
+
 const setLocationProductDefaultTransaction: TransactionDefinition = {
   id: "set-location-product-default",
   description:
-    "Sets or clears one product's default-storage flag (`products[].default`) at one storage location. A product may have several. Writes the location alone; its ledgers are re-stamped post-commit by the location write's placement cascade.",
-  steps: [],
+    "Sets or clears one product's default-storage flag (`products[].default`) at one storage location. A product has exactly one per store, so a set clears it on the product's other locations at that store. Its ledgers are re-stamped post-commit by the location write's placement cascade.",
+  steps: ["set-location-product-default:clear-sibling-defaults"],
 };
 
 // ── Module ──────────────────────────────────────────────────────────
@@ -147,6 +187,7 @@ export const locations: PropagationModule = {
   rules: [
     ...createLocationRules,
     ...updateLocationTransactionalRules,
+    ...setLocationProductDefaultRules,
   ],
   transactions: [
     createLocationTransaction,
