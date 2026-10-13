@@ -335,6 +335,10 @@ export type RuleId =
   | "update-contact:name-to-orgs"
   | "update-contact:name-to-orders"
   | "update-contact:phones-to-orders"
+  | "update-contact:name-to-fulfillments"
+  | "update-contact:phones-to-fulfillments"
+  | "update-contact:name-to-invoices"
+  | "update-contact:phones-to-invoices"
   | "update-contact:orgs-change"
   | "update-contact:name-to-user"
   // users.ts
