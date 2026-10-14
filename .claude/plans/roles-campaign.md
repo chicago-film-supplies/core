@@ -280,7 +280,7 @@ Templates is a pin bump and nothing else — no role type is reachable from that
 
 - `deno task check && deno task lint && deno task test` in core after each phase.
 - **Phase 2** — parse every live role name in **both** environments through `RoleId` before shipping. Parse `on_call` through `RoleSchema` **and** `DocSource`: both must now agree. Confirm `SeededRoleName` makes a typo'd literal a compile error.
-- **Phase 3** — rehearse the rename end-to-end **in dev**, against a throwaway role with a holder, a thread and a comment. Assert afterwards that:
+- **Phase 3** — rehearse the rename end-to-end **in dev**, against a throwaway role with a holder, a thread and a comment. A dev-native role, thread or comment is deleted by the weekly dev reset (Sunday 03:00 Chicago), so do not let a rehearsal straddle it. Assert afterwards that:
   - no `users.roles[]`, `threads.sources[]` or `comments.sources[]` still names the old value;
   - the holder's permissions never dropped mid-run;
   - `search_users` / `search_comments` facets reflect the new name.

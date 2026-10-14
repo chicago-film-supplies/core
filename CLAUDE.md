@@ -912,9 +912,13 @@ not a checklist: each step has caught something the others could not.
    *Is a field dead?* above for why `select` cannot answer this). ⚠️ **Prod-only
    is how a tightening ships broken** — `contacts.crms_id` is 166/166 in prod
    and **166 of 178 in dev**, because dev's native contacts have no CRMS id;
-   `locations.name_key` is 209/209 and 209/210 the same way. Dev's extra
-   documents are the ones NOT written by the legacy ingest, which makes them the
-   most informative rows in either corpus.
+   `locations.name_key` is 209/209 and 209/210 the same way (both measured before
+   2026-10-14). ⚠️ **Dev `(default)` is now reset from prod every Sunday**
+   (api-cloudrun#833), so its extra documents are at most a week of dev-native
+   writes, and right after a reset the two-env census is close to prod-only. The
+   population the api tests write lives in cfs-dev-3100's `test` database:
+   census the native writers there, or read the writer (step 2). Never treat a
+   dev-only document as a standing population.
 2. **Read every writer.** 🔴 **100% key-presence over a machine-generated corpus
    is evidence about the GENERATOR, never about the document.**
    `orders.crms_status` is 995/995 and its only writer in the whole repo is the
@@ -962,7 +966,7 @@ not a checklist: each step has caught something the others could not.
    ⭐ **Census by DOCUMENT SHAPE**: match a signature of fields that identifies
    the collection, then check the required ones, and **skip any body containing
    `...`** — a spread inherits from a real document and is a false positive (all
-   7 raw `products` seeds spread a live dev doc and none failed). That pass found
+   7 raw `products` seeds spread a live stored doc — then in dev `(default)`, now in the `test` database — and none failed). That pass found
    the stragglers and then reported zero remaining.
    🔴 **For the REPAIR, proximity is not merely weak — it corrupts.** A bad
    *find* is a miss; a bad *write* puts the wrong field in the wrong document.
@@ -983,6 +987,9 @@ not a checklist: each step has caught something the others could not.
    *Seeding: form values vs test fixtures* below — so the class is closed rather
    than swept again next campaign.
 6. **Re-parse both live corpora** against the tightened schema before committing.
+   `audit:reparse` reads prod and dev `(default)`. ⚠️ The api suite runs on
+   cfs-dev-3100's `test` database, which neither covers; a stale document there
+   surfaces only as a red pre-push suite (step 5).
 
 ⚠️ **Requiring a field rewrites every negative test that spelled its fields
 inline** — each silently becomes *"fails for SOME reason"*, and the constraint it
