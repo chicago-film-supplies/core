@@ -16,7 +16,6 @@ const validLocation = {
   uid: "testloc1000000000000",
   uid_store: "teststore10000000000",
   name: "Aisle A",
-  default: true,
   active: true,
   product_capacities: [{ uid: "testp100000000000000", max: 50, max_default: 40 }],
   query_by_product_capacities: ["testp100000000000000"],
@@ -49,11 +48,11 @@ Deno.test("LocationSchema requires the query_by_* denorms", async (t) => {
   }
 });
 
-Deno.test("default: retiring — a location without the store-pointer copy parses (api-cloudrun#1302 phase 5)", () => {
-  const { default: _dropped, ...doc } = validLocation;
-  assertEquals(LocationSchema.safeParse(doc).success, true);
-  // Still a boolean while present: retiring is not loosening its type.
-  assertEquals(LocationSchema.safeParse({ ...doc, default: "yes" }).success, false);
+Deno.test("default: deleted — a location carrying the store-pointer copy is refused (api-cloudrun#1302 phase 5)", () => {
+  // `store.default_location` is the one record of the store's default staging
+  // location; the per-location copy is gone from the schema.
+  assertEquals(LocationSchema.safeParse(validLocation).success, true);
+  assertEquals(LocationSchema.safeParse({ ...validLocation, default: true }).success, false);
 });
 
 Deno.test("LocationSchema rejects missing uid_store", () => {

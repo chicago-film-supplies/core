@@ -1095,7 +1095,6 @@ interface BookingStoreLocation {
   uid_location: string;
   name: string;
   quantity: number;
-  default?: boolean;
 }
 ```
 
@@ -6205,7 +6204,6 @@ interface Location {
   uid_store: string;
   name: string;
   name_key?: string;
-  default?: boolean;
   role: LocationRoleType;
   uid_location_type: string | null;
   product_capacities: LocationProductCapacity[];
@@ -7383,7 +7381,6 @@ interface OOSStoreLocation {
   name: string;
   quantity: number;
   transactionQuantity: number;
-  default?: boolean;
   max?: number | null;
 }
 ```
@@ -17949,7 +17946,6 @@ interface BookingStoreLocation {
   uid_location: string;
   name: string;
   quantity: number;
-  default?: boolean;
 }
 ```
 
@@ -20377,7 +20373,6 @@ interface Location {
   uid_store: string;
   name: string;
   name_key?: string;
-  default?: boolean;
   role: LocationRoleType;
   uid_location_type: string | null;
   product_capacities: LocationProductCapacity[];
@@ -22749,7 +22744,6 @@ interface OOSStoreLocation {
   name: string;
   quantity: number;
   transactionQuantity: number;
-  default?: boolean;
   max?: number | null;
 }
 ```

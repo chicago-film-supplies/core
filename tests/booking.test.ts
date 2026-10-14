@@ -72,7 +72,6 @@ Deno.test("BookingSchema validates with stores", () => {
         uid_location: "testloc1000000000000",
         name: "Shelf A",
         quantity: 5,
-        default: true,
       }],
     }],
     query_by_uid_store: ["teststore10000000000"],

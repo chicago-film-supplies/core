@@ -129,12 +129,7 @@ const updateStoreRules: CollectionRule[] = [
       {
         source: [],
         target: ["active"],
-        transform: "set false on every location of this store that is active or flagged default",
-      },
-      {
-        source: [],
-        target: ["default"],
-        transform: "set false on the same locations, so no closed location still claims the store's default",
+        transform: "set false on every active location of this store (no location carries a copy of the store pointer since api-cloudrun#1302 phase 5, so there is no flag to clear)",
       },
     ],
   },

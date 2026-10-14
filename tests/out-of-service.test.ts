@@ -98,14 +98,13 @@ Deno.test("OutOfServiceSchema validates with stores", () => {
         name: "Shelf A",
         quantity: 5,
         transactionQuantity: 2,
-        default: true,
       }],
     }],
   };
   assertEquals(OutOfServiceSchema.safeParse(doc).success, true);
 });
 
-Deno.test("OutOfServiceSchema: a store location without the retiring `default` copy parses (api-cloudrun#1302 phase 5)", () => {
+Deno.test("OutOfServiceSchema: a store location carries no `default` copy (api-cloudrun#1302 phase 5)", () => {
   const doc = {
     ...validOOS,
     stores: [{
@@ -117,6 +116,8 @@ Deno.test("OutOfServiceSchema: a store location without the retiring `default` c
     }],
   };
   assertEquals(OutOfServiceSchema.safeParse(doc).success, true);
+  const withCopy = { ...doc, stores: [{ ...doc.stores[0], locations: [{ ...doc.stores[0].locations[0], default: true }] }] };
+  assertEquals(OutOfServiceSchema.safeParse(withCopy).success, false, "the retired copy is refused");
 });
 
 Deno.test("OutOfServiceSchema rejects additional properties", () => {

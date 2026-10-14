@@ -203,7 +203,7 @@ Deno.test("buildReservedByLocation: only bookings that actually hold stock contr
     name: "S",
     default: true,
     quantity: 3,
-    locations: [{ uid_location: id("SL"), name: "L", quantity: 3, default: true }],
+    locations: [{ uid_location: id("SL"), name: "L", quantity: 3 }],
   }];
   // A returned booking can keep a stale `stores` array; `reserved+prepped+out`
   // is the same definition `quantity_booked` uses, so it must contribute 0.
@@ -222,7 +222,7 @@ Deno.test("addAllocationToReserved: accumulates rather than overwrites", () => {
     name: "S",
     default: true,
     quantity: 2,
-    locations: [{ uid_location: id("SL"), name: "L", quantity: 2, default: true }],
+    locations: [{ uid_location: id("SL"), name: "L", quantity: 2 }],
   }];
   addAllocationToReserved(reserved, stores);
   addAllocationToReserved(reserved, stores);
@@ -300,7 +300,7 @@ const reserving = (qty: number, startMs: number | null, endMs: number | null): R
     name: "Main",
     default: true,
     quantity: qty,
-    locations: [{ uid_location: id("MainA"), name: "A", quantity: qty, default: true }],
+    locations: [{ uid_location: id("MainA"), name: "A", quantity: qty }],
   }],
   startMs,
   endMs,
@@ -448,7 +448,7 @@ const bookingStore = (locations: Array<{ uid: string; quantity: number }>): Book
   name: "Main",
   default: true,
   quantity: locations.reduce((n, l) => n + l.quantity, 0),
-  locations: locations.map((l) => ({ uid_location: l.uid, name: l.uid, quantity: l.quantity, default: false })),
+  locations: locations.map((l) => ({ uid_location: l.uid, name: l.uid, quantity: l.quantity })),
 });
 const SHELF = id("Shelf");
 const BACK = id("Back");

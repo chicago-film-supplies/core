@@ -70,13 +70,6 @@ export interface BookingStoreLocation {
   uid_location: string;
   name: string;
   quantity: number;
-  /**
-   * RETIRING (api-cloudrun#1302 phase 5, ruling 16): a copy, taken at
-   * allocation, of a location's default flag — the store pointer's copy on
-   * older bookings, the product's default on newer ones. Nothing ranks on it.
-   * Optional while storage empties; the next breaking beta deletes it.
-   */
-  default?: boolean;
 }
 
 /** A store and its locations assigned to a booking. */
@@ -266,8 +259,6 @@ const BookingStoreLocationSchema: z.ZodType<BookingStoreLocation> = z.strictObje
   uid_location: FirestoreId,
   name: z.string().meta({ column: true }),
   quantity: z.int().meta({ column: true, label: "Quantity" }),
-  // Retiring — see the interface note.
-  default: z.boolean().optional(),
 });
 
 /**

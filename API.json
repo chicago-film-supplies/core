@@ -465,7 +465,7 @@
         {
           "kind": "interface",
           "name": "BookingStoreLocation",
-          "declaration": "interface BookingStoreLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  default?: boolean;\n}",
+          "declaration": "interface BookingStoreLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n}",
           "doc": "A specific location within a store allocated for a booking."
         },
         {
@@ -2751,7 +2751,7 @@
         {
           "kind": "interface",
           "name": "Location",
-          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  default?: boolean;\n  role: LocationRoleType;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  role: LocationRoleType;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A location document in Firestore."
         },
         {
@@ -3255,7 +3255,7 @@
         {
           "kind": "interface",
           "name": "OOSStoreLocation",
-          "declaration": "interface OOSStoreLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  transactionQuantity: number;\n  default?: boolean;\n  max?: number | null;\n}",
+          "declaration": "interface OOSStoreLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  transactionQuantity: number;\n  max?: number | null;\n}",
           "doc": "A location within a store affected by an out-of-service record."
         },
         {
@@ -8179,7 +8179,7 @@
         {
           "kind": "interface",
           "name": "BookingStoreLocation",
-          "declaration": "interface BookingStoreLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  default?: boolean;\n}",
+          "declaration": "interface BookingStoreLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n}",
           "doc": "A specific location within a store allocated for a booking."
         },
         {
@@ -9327,7 +9327,7 @@
         {
           "kind": "interface",
           "name": "Location",
-          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  default?: boolean;\n  role: LocationRoleType;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Location {\n  uid: string;\n  uid_store: string;\n  name: string;\n  name_key?: string;\n  role: LocationRoleType;\n  uid_location_type: string | null;\n  product_capacities: LocationProductCapacity[];\n  query_by_product_capacities: string[];\n  active: boolean;\n  products: LocationProduct[];\n  query_by_products: string[];\n  version: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A location document in Firestore."
         },
         {
@@ -10396,7 +10396,7 @@
         {
           "kind": "interface",
           "name": "OOSStoreLocation",
-          "declaration": "interface OOSStoreLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  transactionQuantity: number;\n  default?: boolean;\n  max?: number | null;\n}",
+          "declaration": "interface OOSStoreLocation {\n  uid_location: string;\n  name: string;\n  quantity: number;\n  transactionQuantity: number;\n  max?: number | null;\n}",
           "doc": "A location within a store affected by an out-of-service record."
         },
         {

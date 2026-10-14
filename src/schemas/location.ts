@@ -55,14 +55,6 @@ export interface Location {
    */
   name_key?: string;
   /**
-   * RETIRING (api-cloudrun#1302 phase 5, ruling 16). It was a COPY of the store
-   * pointer: true exactly when `store.default_location` named this location.
-   * Optional while storage empties — no writer stamps it and nothing reads it;
-   * the next breaking beta deletes it. Read `store.default_location`. A
-   * product's default storage location is `products[].default`, a different fact.
-   */
-  default?: boolean;
-  /**
    * `storage` or `staging` ({@link LocationRoleEnum}). **Required** since
    * api-cloudrun#1302 phase 3 (2026-10-13): `createLocation` has stamped it on
    * every create since phase 1, and `api-cloudrun/scripts/backfill-location-role.ts`
@@ -89,8 +81,6 @@ export const LocationSchema: z.ZodType<Location> = z.strictObject({
   // Derived denorm (see the interface note). Optional through the backfill
   // window; no `.min(1)` because a name of pure separators normalizes to "".
   name_key: z.string().max(100).optional(),
-  // Retiring — optional while storage empties (see the interface note).
-  default: z.boolean().optional(),
   role: LocationRoleEnum.meta({ column: true, label: "Role" }),
   // Required-but-nullable, and every one of the 209 prod docs carries the KEY as
   // `null` (2026-08-23). A value census reads that as "dead"; it is not — the
