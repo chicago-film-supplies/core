@@ -190,6 +190,9 @@ Deno.test("allocateBookingToStores: the result parses as Booking['stores'] — s
   // 7B-1's 41-breakage estimate rests on, confirmed by the compiler in passing.)
   assert(!Object.hasOwn(result.stores[0], "crms_stock_level_id"), "crms_stock_level_id leaked");
   assert(!Object.hasOwn(result.stores[0].locations[0], "max"), "max leaked into the booking");
+  // api-cloudrun#1302 phase 5: a booking's location entry no longer copies the
+  // shelf's `default` (the ledger, here `true`, is where it is read).
+  assert(!Object.hasOwn(result.stores[0].locations[0], "default"), "default leaked into the booking");
 });
 
 // ── buildReservedByLocation ──────────────────────────────────────

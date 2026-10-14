@@ -28,16 +28,16 @@ const LOCATION_DEFAULT_POINTER: EnforcementRef = {
   kind: "audit",
   ref: "api-cloudrun/scripts/audit-location-defaults.ts",
   clause:
-    "checks 1 + 2 — exactly one ACTIVE `default: true` location per store, and `store.default_location` non-null, naming an existing location, in THIS store, flagged default, with a matching `name` denorm. Unit-tested at `api-cloudrun/tests/unit/locationIntegrity.test.ts` (dangling, cross-store, not-default and stale-name each reported separately).",
+    "check 2 — `store.default_location` is non-null and names an existing, ACTIVE, `staging` location in THIS store, with a matching `name` denorm. The pointer is the one source of truth; no location carries a copy of it (api-cloudrun#1302 phase 5). Unit-tested at `api-cloudrun/tests/unit/locationIntegrity.test.ts` (dangling, cross-store, inactive and stale-name each reported separately).",
   gates: true,
 };
 
 const LOCATION_DEFAULT_WRITER: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/locations/locations.test.ts::PUT - setting default:true updates store default_location and unsets previous default",
+    "api-cloudrun/tests/integration/locations/locations.test.ts::PUT - setting default:true moves the store default_location",
   clause:
-    "the writer path and its three refusals — setting `default: true` updates the store pointer and unsets the previous default; deactivating the default 409s; unsetting it is rejected; and `default:false` then `active:false` cannot orphan the pointer (`PUT - default:false then active:false cannot orphan the store pointer`). A rename of the default reaches `store.default_location.name` (`PUT - cascades default location name to store via afterLocationWrite`) and a non-default rename does NOT (`PUT - does NOT cascade non-default location name to store`). Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+    "the writer path and its refusals — `default: true` on a staging location moves the store pointer to it, and writes no flag on any location; deactivating the pointer's target 409s; `default: false` is rejected; and `default:false` then `active:false` cannot orphan the pointer (`PUT - default:false then active:false cannot orphan the store pointer`). A rename of the pointer's target reaches `store.default_location.name` (`PUT - cascades default location name to store via afterLocationWrite`) and any other rename does NOT (`PUT - does NOT cascade non-default location name to store`). Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 
@@ -59,7 +59,7 @@ const createLocationRules: CollectionRule[] = [
     target: "stores",
     mode: "co-write",
     invariant:
-      "When the first active location is created for a store, it becomes the default and the store's default_location is set so clients don't need a global locations listener",
+      "When a staging location is created for a store whose default_location is null, the store's default_location is set to it, so clients don't need a global locations listener",
     enforced_by: [FIRST_LOCATION_IS_DEFAULT, LOCATION_DEFAULT_POINTER],
     transaction: "create-location",
     fields: [
@@ -72,7 +72,7 @@ const createLocationRules: CollectionRule[] = [
 const createLocationTransaction: TransactionDefinition = {
   id: "create-location",
   description:
-    "Creates a location. If it is the first active location for the store, auto-sets default:true and co-writes default_location to the parent store.",
+    "Creates a location. If it is a staging location and the store has no default_location yet, co-writes default_location to the parent store.",
   steps: [
     "create-location:default-location-to-store",
   ],
@@ -87,7 +87,7 @@ const updateLocationTransactionalRules: CollectionRule[] = [
     target: "stores",
     mode: "co-write",
     invariant:
-      "Setting default:true on a location co-writes default_location {uid, name} to the parent store and unsets default on the previous default location",
+      "Setting default:true on a staging location co-writes default_location {uid, name} to the parent store; renaming the location the pointer names co-writes the new name. No location document carries a copy of the pointer.",
     enforced_by: [LOCATION_DEFAULT_WRITER, LOCATION_DEFAULT_POINTER],
     transaction: "update-location",
     fields: [
@@ -95,33 +95,14 @@ const updateLocationTransactionalRules: CollectionRule[] = [
       { source: ["name"], target: ["default_location", "name"] },
     ],
   },
-  {
-    id: "update-location:unset-previous-default",
-    source: "locations",
-    target: "locations",
-    mode: "co-write",
-    invariant:
-      "Only one location per store can be default — setting a new default must unset the previous one in the same transaction",
-    enforced_by: [LOCATION_DEFAULT_WRITER, LOCATION_DEFAULT_POINTER],
-    transaction: "update-location",
-    fields: [
-      {
-        source: [],
-        target: ["default"],
-        transform:
-          "set false on previous default location (looked up by uid_store + default:true)",
-      },
-    ],
-  },
 ];
 
 const updateLocationTransaction: TransactionDefinition = {
   id: "update-location",
   description:
-    "Updates a location. If default is being set, unsets the previous default location and co-writes default_location to the parent store.",
+    "Updates a location. If default is being set (a command — the location stores no flag), co-writes default_location to the parent store.",
   steps: [
     "update-location:set-default-to-store",
-    "update-location:unset-previous-default",
   ],
 };
 

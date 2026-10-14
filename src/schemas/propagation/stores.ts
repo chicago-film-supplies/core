@@ -49,7 +49,7 @@ const STORE_DEFAULT_CORPUS: EnforcementRef = {
   kind: "audit",
   ref: "api-cloudrun/scripts/audit-location-defaults.ts",
   clause:
-    "check 1 (`store_default_count`) — per store, exactly one ACTIVE `default: true` location, over the whole corpus. Its rules live in `api-cloudrun/src/lib/locationIntegrity.ts`, shared verbatim with the nightly `/tasks/sweep-location-integrity` job, and are unit-tested at `api-cloudrun/tests/unit/locationIntegrity.test.ts` (zero AND two defaults both reported).",
+    "check 6 (`default_store_missing`) — the corpus holds stores but NONE is an active `default: true` store. The ZERO case only, deliberately: the prod→dev mirror can re-land a second default store, so `> 1` would alarm without any writer at fault. Its rules live in `api-cloudrun/src/lib/locationIntegrity.ts`, shared verbatim with the nightly `/tasks/sweep-location-integrity` job, and are unit-tested at `api-cloudrun/tests/unit/locationIntegrity.test.ts`. (It cited check 1, a per-store LOCATION flag count, until api-cloudrun#1302 phase 5 retired that flag.)",
   gates: true,
 };
 
@@ -63,7 +63,7 @@ const CLOSE_STORE_TESTED: EnforcementRef = {
   ref:
     "api-cloudrun/tests/integration/stores/stores.test.ts::PUT - deactivating a store closes every location and clears default_location",
   clause:
-    "every active location of the store goes `active: false, default: false` in the transaction that closes the store, and `default_location` is null. Its sibling step `PUT - refuses to deactivate a store whose locations hold stock` pins the refusal. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
+    "every active location of the store goes `active: false` in the transaction that closes the store, and `default_location` is null. Its sibling step `PUT - refuses to deactivate a store whose locations hold stock` pins the refusal. Runs in `deno task test` (pre-push), not the hermetic CI gate.",
   gates: true,
 };
 

@@ -105,6 +105,20 @@ Deno.test("OutOfServiceSchema validates with stores", () => {
   assertEquals(OutOfServiceSchema.safeParse(doc).success, true);
 });
 
+Deno.test("OutOfServiceSchema: a store location without the retiring `default` copy parses (api-cloudrun#1302 phase 5)", () => {
+  const doc = {
+    ...validOOS,
+    stores: [{
+      uid_store: "teststore10000000000",
+      name: "Main",
+      default: true,
+      quantity: 2,
+      locations: [{ uid_location: "testloc1000000000000", name: "Shelf A", quantity: 2, transactionQuantity: 2 }],
+    }],
+  };
+  assertEquals(OutOfServiceSchema.safeParse(doc).success, true);
+});
+
 Deno.test("OutOfServiceSchema rejects additional properties", () => {
   const doc = { ...validOOS, bogus: true };
   assertEquals(OutOfServiceSchema.safeParse(doc).success, false);

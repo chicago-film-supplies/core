@@ -421,7 +421,6 @@ export type RuleId =
   // locations.ts
   | "create-location:default-location-to-store"
   | "update-location:set-default-to-store"
-  | "update-location:unset-previous-default"
   | "set-location-product-default:clear-sibling-defaults"
   // threads.ts
   | "cowrite-thread:orders-to-thread"

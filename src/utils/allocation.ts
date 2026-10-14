@@ -167,11 +167,12 @@ export function allocateBookingToStores(
         name: storeData.name,
         default: storeData.default,
         quantity: storeQuantity,
+        // No `default`: a booking's location entry no longer copies the shelf's
+        // flag (api-cloudrun#1302 phase 5). The ledger is where it is read.
         locations: result.locations.map((loc) => ({
           uid_location: loc.uid_location,
           name: loc.name,
           quantity: loc.quantity,
-          default: loc.default,
         })),
       });
 

@@ -184,7 +184,12 @@ export interface OOSStoreLocation {
   name: string;
   quantity: number;
   transactionQuantity: number;
-  default: boolean;
+  /**
+   * RETIRING (api-cloudrun#1302 phase 5, ruling 16): a copy of the location's
+   * default flag from the ledger. Nothing ranks on it. Optional while storage
+   * empties; the next breaking beta deletes it.
+   */
+  default?: boolean;
   max?: number | null;
 }
 
@@ -272,7 +277,8 @@ const OOSStoreLocationSchema: z.ZodType<OOSStoreLocation> = z.strictObject({
   name: z.string().meta({ column: true }),
   quantity: z.int().meta({ column: true, label: "Quantity" }),
   transactionQuantity: z.int(),
-  default: z.boolean(),
+  // Retiring — see the interface note.
+  default: z.boolean().optional(),
   max: z.int().nullable().optional(),
 });
 

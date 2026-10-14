@@ -55,12 +55,13 @@ export interface Location {
    */
   name_key?: string;
   /**
-   * A COPY of the store pointer: true exactly when `store.default_location`
-   * names this location. Not a product's default — that is
-   * `products[].default`. Scheduled for removal (api-cloudrun#1302 phase 5);
-   * read `store.default_location` instead, and add no new readers.
+   * RETIRING (api-cloudrun#1302 phase 5, ruling 16). It was a COPY of the store
+   * pointer: true exactly when `store.default_location` named this location.
+   * Optional while storage empties — no writer stamps it and nothing reads it;
+   * the next breaking beta deletes it. Read `store.default_location`. A
+   * product's default storage location is `products[].default`, a different fact.
    */
-  default: boolean;
+  default?: boolean;
   /**
    * `storage` or `staging` ({@link LocationRoleEnum}). **Required** since
    * api-cloudrun#1302 phase 3 (2026-10-13): `createLocation` has stamped it on
@@ -88,8 +89,8 @@ export const LocationSchema: z.ZodType<Location> = z.strictObject({
   // Derived denorm (see the interface note). Optional through the backfill
   // window; no `.min(1)` because a name of pure separators normalizes to "".
   name_key: z.string().max(100).optional(),
-  default: z.boolean().meta({ column: true, label: "Default" }),
-  // Optional until api-cloudrun#1302 phase 3 — see the interface note.
+  // Retiring — optional while storage empties (see the interface note).
+  default: z.boolean().optional(),
   role: LocationRoleEnum.meta({ column: true, label: "Role" }),
   // Required-but-nullable, and every one of the 209 prod docs carries the KEY as
   // `null` (2026-08-23). A value census reads that as "dead"; it is not — the
@@ -117,7 +118,7 @@ export const LocationSchema: z.ZodType<Location> = z.strictObject({
   title: "Location",
   collection: "locations",
   displayDefaults: {
-    columns: ["name", "active", "default"],
+    columns: ["name", "active", "role"],
     filters: { active: [true] },
     sort: { column: "name", direction: "asc" },
   },
@@ -145,6 +146,13 @@ export const CreateLocationInput: z.ZodType<CreateLocationInputType> = z.object(
 export interface UpdateLocationInputType {
   uid: string;
   name?: string;
+  /**
+   * A COMMAND, not a stored field: `true` makes this location its store's
+   * default staging location (`store.default_location`), which must be a
+   * `staging` location. `false` is refused — the pointer is only ever moved, by
+   * promoting another location. The location document itself carries no flag
+   * (api-cloudrun#1302 phase 5).
+   */
   default?: boolean;
   /**
    * Refused by the API while the location holds stock, or while a store

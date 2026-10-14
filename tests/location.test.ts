@@ -49,6 +49,13 @@ Deno.test("LocationSchema requires the query_by_* denorms", async (t) => {
   }
 });
 
+Deno.test("default: retiring — a location without the store-pointer copy parses (api-cloudrun#1302 phase 5)", () => {
+  const { default: _dropped, ...doc } = validLocation;
+  assertEquals(LocationSchema.safeParse(doc).success, true);
+  // Still a boolean while present: retiring is not loosening its type.
+  assertEquals(LocationSchema.safeParse({ ...doc, default: "yes" }).success, false);
+});
+
 Deno.test("LocationSchema rejects missing uid_store", () => {
   const { uid_store: _, ...doc } = validLocation;
   assertEquals(LocationSchema.safeParse(doc).success, false);

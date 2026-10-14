@@ -308,7 +308,8 @@ export interface LocationDocument {
   name: string;
   uid_store: string;
   active: boolean;
-  default?: boolean;
+  /** `storage | staging` (v6, api-cloudrun#1302 phase 5 — replaced `default`). */
+  role: "storage" | "staging";
   uid_location_type?: string;
   products?: Array<{
     uid?: string;
