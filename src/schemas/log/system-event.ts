@@ -28,6 +28,16 @@ export const SYSTEM_EVENT_MSGS = [
   "rate_limit_exceeded",
   "retry_attempt",
   "startup_error",
+  /**
+   * The process is listening on its port. Carries `boot_ms` — process start to
+   * listening, from the runtime's `performance.now()` — and `deno_version`.
+   *
+   * Exists because a container's boot is invisible otherwise: Cloud Run logs
+   * when it starts an instance and when the startup probe passes, but not when
+   * the process itself started, so the time cannot be split between the
+   * platform and the runtime's module load (api-cloudrun#1324).
+   */
+  "startup_ready",
   "unhandled_error",
   "health_check_firestore_error",
   "preview_served",
@@ -43,6 +53,7 @@ export interface SystemEventLogRecord {
   msg: SystemEventMsg;
   ts: string;
   attempt?: number;
+  boot_ms?: number;
   request_id?: string;
   method?: string;
   path?: string;
@@ -58,4 +69,5 @@ export const SystemEventLogRecordSchema: z.ZodType<SystemEventLogRecord> = z.obj
   ...baseLogFields,
   msg: z.enum(SYSTEM_EVENT_MSGS),
   attempt: z.number().optional(),
+  boot_ms: z.number().optional(),
 }).passthrough().meta({ title: "SystemEventLogRecord" });

@@ -29628,7 +29628,7 @@ const RequestLogRecordSchema: z.ZodType<RequestLogRecord>;
 Msg literals this archetype absorbs.
 
 ```ts
-const SYSTEM_EVENT_MSGS: "db_page_clipped" | "dev_guard_skip" | "dry_run_skip" | "rate_limit_exceeded" | "retry_attempt" | "startup_error" | "unhandled_error" | "health_check_firestore_error" | "preview_served" | "validation_failed"[];
+const SYSTEM_EVENT_MSGS: "db_page_clipped" | "dev_guard_skip" | "dry_run_skip" | "rate_limit_exceeded" | "retry_attempt" | "startup_error" | "startup_ready" | "unhandled_error" | "health_check_firestore_error" | "preview_served" | "validation_failed"[];
 ```
 
 ### `SyncErrorLogRecord`
@@ -29674,6 +29674,7 @@ interface SystemEventLogRecord {
   msg: SystemEventMsg;
   ts: string;
   attempt?: number;
+  boot_ms?: number;
   request_id?: string;
   method?: string;
   path?: string;

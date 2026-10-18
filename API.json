@@ -13291,7 +13291,7 @@
         {
           "kind": "variable",
           "name": "SYSTEM_EVENT_MSGS",
-          "declaration": "const SYSTEM_EVENT_MSGS: \"db_page_clipped\" | \"dev_guard_skip\" | \"dry_run_skip\" | \"rate_limit_exceeded\" | \"retry_attempt\" | \"startup_error\" | \"unhandled_error\" | \"health_check_firestore_error\" | \"preview_served\" | \"validation_failed\"[];",
+          "declaration": "const SYSTEM_EVENT_MSGS: \"db_page_clipped\" | \"dev_guard_skip\" | \"dry_run_skip\" | \"rate_limit_exceeded\" | \"retry_attempt\" | \"startup_error\" | \"startup_ready\" | \"unhandled_error\" | \"health_check_firestore_error\" | \"preview_served\" | \"validation_failed\"[];",
           "doc": "Msg literals this archetype absorbs."
         },
         {
@@ -13309,7 +13309,7 @@
         {
           "kind": "interface",
           "name": "SystemEventLogRecord",
-          "declaration": "interface SystemEventLogRecord {\n  level: LogLevelType;\n  msg: SystemEventMsg;\n  ts: string;\n  attempt?: number;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
+          "declaration": "interface SystemEventLogRecord {\n  level: LogLevelType;\n  msg: SystemEventMsg;\n  ts: string;\n  attempt?: number;\n  boot_ms?: number;\n  request_id?: string;\n  method?: string;\n  path?: string;\n  route?: string;\n  user_id?: string;\n  trace_id?: string;\n  span_id?: string;\n}",
           "doc": "Structured log entry for any system-lifecycle event."
         },
         {
