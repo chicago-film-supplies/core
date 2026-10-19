@@ -152,9 +152,7 @@
       "src/",
       "deno.json",
       "LICENSE",
-      "README.md",
-      "API.md",
-      "API.json"
+      "README.md"
     ]
   }
 }
