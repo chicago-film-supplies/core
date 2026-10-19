@@ -324,6 +324,26 @@ export function invoiceIsFrozen(
 }
 
 /**
+ * Which settlements are **live** — i.e. not named by any sibling's `reverses`.
+ * A reverser is itself live: nothing names it.
+ *
+ * **For MATCHING, never for arithmetic.** The totals are a signed fold over
+ * every row (a reversal contributes −1 by its type), so liveness plays no part
+ * in them. It matters only where a row must be matched or counted: a Xero
+ * payment whose id matches only a *reversed* settlement has to be treated as
+ * unmatched, or the reap becomes a one-way trapdoor.
+ *
+ * Moved here from `api-cloudrun/src/lib/settlements.ts`, so the API, the invoice
+ * action ruleset and the Xero edit push share one liveness rule.
+ */
+export function liveSettlements<T extends { uid: string; reverses: string | null }>(settlements: readonly T[]): T[] {
+  const reversed = new Set(
+    settlements.map((s) => s.reverses).filter((r): r is string => r !== null),
+  );
+  return settlements.filter((s) => !reversed.has(s.uid));
+}
+
+/**
  * Derive an invoice's status from its stored status and its settled totals.
  * Pure function — does not mutate the invoice. **Replaced `derivePaymentStatus`**
  * (api-cloudrun#1169), taking the same argument shape as {@link invoiceIsFrozen}

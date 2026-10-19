@@ -38,6 +38,7 @@ export const INVOICE_ACTION_IDS = [
   "edit_items",
   "edit_organization",
   "edit_date",
+  "push_to_xero",
   // on a credit note
   "void_credit_note",
   "allocate_credit_note",
@@ -79,6 +80,7 @@ export const INVOICE_ACTIONS: Readonly<Record<InvoiceActionId, InvoiceActionDefi
   edit_items: { subject: "invoice", description: "Edit lines; money is frozen once settled." },
   edit_organization: { subject: "invoice", description: "Re-address the invoice." },
   edit_date: { subject: "invoice", description: "Change the invoice date." },
+  push_to_xero: { subject: "invoice", description: "Re-push an out-of-sync issued invoice to Xero." },
   void_credit_note: { subject: "credit_note", description: "Void a note with no live allocation or refund." },
   allocate_credit_note: { subject: "credit_note", description: "Allocate remaining credit to an invoice." },
   record_refund: { subject: "credit_note", description: "Record remaining credit refunded to the customer in cash." },

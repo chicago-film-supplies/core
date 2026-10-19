@@ -36,11 +36,14 @@ import {
   type OfferSettlement,
   orderInvoiceActionsFor,
 } from "../src/utils/invoice-actions.ts";
+import type { InvoiceXeroSyncStatus } from "../src/utils/invoice-xero-sync.ts";
 import type { AccountedInvoice } from "../src/utils/quantityAccounting.ts";
 
 const INVOICE_STATUSES = Object.keys(INVOICE_STATUS_CONTRACTS) as InvoiceStatusType[];
 const NOTE_STATUSES = Object.keys(CREDIT_NOTE_STATUS_CONTRACTS) as CreditNoteStatusType[];
 const SETTLEMENT_TYPES = Object.keys(SETTLEMENT_CONTRACTS) as SettlementTypeType[];
+/** Every `InvoiceXeroSyncStatus` member. A type-only union, so `satisfies` below is what keeps it whole. */
+const XERO_SYNC_STATUSES = ["in_sync", "out_of_sync", "unknown", "not_applicable"] as const satisfies readonly InvoiceXeroSyncStatus[];
 
 /** A billed line: `qty` units over `days` chargeable days (null for a sale). */
 function line(uid: string, qty: number, days: number | null): InvoiceDocItemType {
@@ -110,7 +113,10 @@ function invoiceSweep(): InvoiceActionOffer[][] {
       for (const closure of [0, 1]) {
         const every = SETTLEMENT_TYPES.map((t, i) => row(`s${i}`, t, SETTLEMENT_CONTRACTS[t].reverses === "required" ? { reverses: "x" } : {}));
         for (const settlements of [[], every]) {
-          out.push(invoiceActionsFor(invoice(status, { total_cents: total, closure_count: closure }), { settlements }));
+          for (const xero_sync_status of [undefined, ...XERO_SYNC_STATUSES]) {
+            const inv = { ...invoice(status, { total_cents: total, closure_count: closure }), xero_id: "x-1" };
+            out.push(invoiceActionsFor(inv, { settlements, xero_sync_status }));
+          }
         }
       }
     }
@@ -312,6 +318,46 @@ Deno.test("D8 edit_items: always offered; money frozen with the freeze, labels n
   const closed = invoice("paid", { total_cents: 0, closure_count: 1 });
   assertEquals(has(invoiceActionsFor(closed), "edit_organization"), false);
   assertEquals(has(invoiceActionsFor(invoice("issued", { total_cents: 0, closure_count: 0 })), "edit_date"), true);
+});
+
+// ── push to Xero (api-cloudrun#1332) ─────────────────────────────────
+
+Deno.test("api-cloudrun#1332 push_to_xero: a linked issued/part_paid invoice whose Xero twin is not known in sync", () => {
+  // Exhaustiveness of the hand-written list: an `InvoiceXeroSyncStatus` member
+  // missing from it would be a status this block never tries.
+  const _all: Record<InvoiceXeroSyncStatus, true> = { in_sync: true, out_of_sync: true, unknown: true, not_applicable: true };
+  assertEquals(Object.keys(_all).sort(), [...XERO_SYNC_STATUSES].sort());
+
+  for (const status of INVOICE_STATUSES) {
+    for (const xero_sync_status of XERO_SYNC_STATUSES) {
+      const inv = { ...invoice(status), xero_id: "x-1" };
+      const expected = (status === "issued" || status === "part_paid") &&
+        (xero_sync_status === "out_of_sync" || xero_sync_status === "unknown");
+      assertEquals(has(invoiceActionsFor(inv, { xero_sync_status }), "push_to_xero"), expected, `${status}/${xero_sync_status}`);
+      if (expected) assertInvoiceAction(inv, { xero_sync_status }, { action: "push_to_xero" });
+      else {
+        assertThrows(
+          () => assertInvoiceAction(inv, { xero_sync_status }, { action: "push_to_xero" }),
+          InvoiceActionRefusal,
+          undefined,
+          `${status}/${xero_sync_status}`,
+        );
+      }
+    }
+  }
+  // Unlinked: the issue POST never landed, so an EDIT push has nothing to edit.
+  for (const xero_id of [null, undefined]) {
+    const unlinked = { ...invoice("issued"), xero_id };
+    assertEquals(has(invoiceActionsFor(unlinked, { xero_sync_status: "out_of_sync" }), "push_to_xero"), false, String(xero_id));
+    assertThrows(() => assertInvoiceAction(unlinked, { xero_sync_status: "out_of_sync" }, { action: "push_to_xero" }), InvoiceActionRefusal, "not linked");
+  }
+  // A caller that did not read the sidecar is not offered the push.
+  const linked = { ...invoice("issued"), xero_id: "x-1" };
+  assertEquals(has(invoiceActionsFor(linked), "push_to_xero"), false);
+  assertThrows(() => assertInvoiceAction(linked, {}, { action: "push_to_xero" }), InvoiceActionRefusal, "unknown to the caller");
+  // A CFS-recorded payment does not block it: the task decides on what Xero holds.
+  const paidInCfs = { ...invoice("part_paid", { amount_paid_cents: 1_000 }), xero_id: "x-1" };
+  assertEquals(has(invoiceActionsFor(paidInCfs, { xero_sync_status: "out_of_sync" }), "push_to_xero"), true);
 });
 
 // ── credit notes (D4–D6) ─────────────────────────────────────────────

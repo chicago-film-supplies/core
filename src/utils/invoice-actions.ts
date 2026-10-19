@@ -28,9 +28,16 @@
  *
  * Referenced by the ruleset, never duplicated into it: `lineMoneyAgrees` (it
  * needs the REBUILT lines, so `edit_items` takes its answer as `money_moved`),
- * the organization tombstone and Xero-contact re-address checks, the Xero pushes
- * and `XERO_RETRACTION`, CAS/version checks, idempotency and counter allocation.
- * An offer is a snapshot of the documents it was handed; the server re-checks.
+ * the organization tombstone and Xero-contact re-address checks, the automatic
+ * Xero pushes and `XERO_RETRACTION`, CAS/version checks, idempotency and counter
+ * allocation. An offer is a snapshot of the documents it was handed; the server
+ * re-checks.
+ *
+ * The one Xero push an OPERATOR may request is `push_to_xero`
+ * (api-cloudrun#1332). It only enqueues the edit push; the task re-plans and
+ * still stops at its own seams. Like `edit_items`, it takes a server-computed
+ * answer, `xero_sync_status`, because the status needs the invoice's whole Xero
+ * projection and its sidecar.
  *
  * ## Calling an `assert*` on a write path — what to hand it
  *
@@ -74,7 +81,8 @@ import {
   type Settlement,
   SETTLEMENT_CONTRACTS,
 } from "../schemas/mod.ts";
-import { invoiceHasMoneySettlement, invoiceIsFrozen, type InvoiceSettledTotals } from "./invoices.ts";
+import { invoiceHasMoneySettlement, invoiceIsFrozen, type InvoiceSettledTotals, liveSettlements } from "./invoices.ts";
+import type { InvoiceXeroSyncStatus } from "./invoice-xero-sync.ts";
 import {
   type AccountedCreditNote,
   type AccountedInvoice,
@@ -147,6 +155,8 @@ export interface OfferInvoice {
   totals: InvoiceSettledTotals & { total_cents: number; amount_due_cents: number };
   /** Read only by `add_credit_note`; the dividers are skipped. */
   items?: readonly InvoiceDocItemType[];
+  /** Read only by `push_to_xero`. **Absent ⇒ unlinked**, so it is not offered. */
+  xero_id?: string | null;
 }
 
 /** A settlement row as `reverse_settlement` reads it. */
@@ -180,6 +190,12 @@ export interface InvoiceOfferContext {
    * server re-checks against the notes inside its transaction.
    */
   creditNotes?: readonly CappedNote[];
+  /**
+   * `invoiceXeroSyncStatus(invoice, sidecar)` from `@cfs/core/utils/invoice-xero-sync`.
+   * **Absent ⇒ `push_to_xero` is not offered**: the state is unknown to the
+   * caller, which is different from the `unknown` status (no hash recorded yet).
+   */
+  xero_sync_status?: InvoiceXeroSyncStatus;
 }
 
 /** A status outside the vocabulary has no contract, and every gate reads false. */
@@ -322,6 +338,8 @@ function reversalRefusal(row: OfferSettlement, rows: readonly OfferSettlement[])
  * - `add_credit_note` (D3) — a status live in Xero, with credit left on a line.
  * - `edit_items` (D8) — always; `money_frozen` says whether line money is.
  * - `edit_organization` / `edit_date` — while not {@link invoiceIsFrozen}.
+ * - `push_to_xero` — `issued` / `part_paid`, linked to Xero, and the caller's
+ *   `xero_sync_status` is `out_of_sync` or `unknown`.
  */
 export function invoiceActionsFor(invoice: OfferInvoice, ctx: InvoiceOfferContext = {}): InvoiceActionOffer[] {
   const contract = invoiceContract(invoice.status);
@@ -352,7 +370,20 @@ export function invoiceActionsFor(invoice: OfferInvoice, ctx: InvoiceOfferContex
     offer("edit_organization");
     offer("edit_date");
   }
+  if (pushRefusal(invoice, ctx) === null) offer("push_to_xero");
   return offers;
+}
+
+/** Statuses whose Xero twin tracks CFS edits — the same set `invoiceXeroSyncStatus` reads. */
+const PUSHABLE_STATUSES: ReadonlySet<InvoiceStatusType> = new Set(["issued", "part_paid"]);
+
+function pushRefusal(invoice: OfferInvoice, ctx: InvoiceOfferContext): string | null {
+  if (!PUSHABLE_STATUSES.has(invoice.status)) return `a ${invoice.status} invoice is not pushed to Xero`;
+  if (!invoice.xero_id) return "the invoice is not linked to Xero; it is pushed by issuing it";
+  const status = ctx.xero_sync_status;
+  if (status === undefined) return "the invoice's Xero sync status is unknown to the caller";
+  if (status !== "out_of_sync" && status !== "unknown") return `the invoice is ${status} with Xero; there is nothing to push`;
+  return null;
 }
 
 function closeRefusal(invoice: OfferInvoice, contract: InvoiceStatusContract): string | null {
@@ -370,7 +401,7 @@ export type InvoiceActionRequest =
   | { action: "add_credit_note"; invoice_number: number; lines: readonly CappedCreditLine[] }
   /** `money_moved` is the server's `lineMoneyAgrees` answer, negated. */
   | { action: "edit_items"; money_moved: boolean }
-  | { action: "issue" | "void" | "close" | "edit_organization" | "edit_date" };
+  | { action: "issue" | "void" | "close" | "edit_organization" | "edit_date" | "push_to_xero" };
 
 /**
  * Refuse an invoice action the ruleset does not offer, or one that exceeds its
@@ -423,6 +454,11 @@ export function assertInvoiceAction(
       if (why !== null) refuse(why);
       return;
     }
+    case "push_to_xero": {
+      const why = pushRefusal(invoice, ctx);
+      if (why !== null) refuse(why);
+      return;
+    }
     default:
       if (!offered(request.action)) refuse(`"${request.action}" is not legal on a ${invoice.status} invoice`);
   }
@@ -464,8 +500,7 @@ function creditNoteContract(status: string): CreditNoteStatusContract | undefine
 
 /** Live rows of `type`: rows of that type no reversal names. */
 function liveRows(rows: CreditNoteOfferContext["allocations"], type: "credit" | "refund"): number {
-  const reversed = new Set(rows.map((r) => r.reverses).filter((r): r is string => r !== null));
-  return rows.filter((r) => r.type === type && !reversed.has(r.uid)).length;
+  return liveSettlements(rows).filter((r) => r.type === type).length;
 }
 
 function allocationRefusal(note: OfferCreditNote, ctx: CreditNoteOfferContext): string | null {

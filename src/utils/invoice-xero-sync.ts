@@ -18,17 +18,26 @@
  *
  * ## One author for the projection
  *
- * The projection is also what decides whether a write enqueues an edit push
- * (`api-cloudrun/src/lib/xeroInvoiceEdit.ts` `shouldEnqueueInvoiceEditPush`). It
- * lives here so the push trigger and the out-of-sync badge cannot disagree about
- * what "the part Xero carries" means: a change that should have pushed and did not
- * is exactly a change this reports.
+ * The projection hash is ONE key with three readers: the enqueue gate
+ * ({@link shouldPushInvoiceToXero}), the task's supersede check (the task payload
+ * carries the hash it was enqueued for), and the manager's out-of-sync badge
+ * ({@link invoiceXeroSyncStatus}). It lives here so the three cannot disagree
+ * about what "the part Xero carries" means.
+ *
+ * ⚠️ **The gate compares against the WATERMARK, never old-vs-new** (api-cloudrun#1332).
+ * The gate used to diff the old and new projections while the task superseded on
+ * `version`. A settlement or a no-op PUT moves `version` and not the projection,
+ * so it superseded the newest edit's task without re-arming one, and prod #2459
+ * lost a $44.20 replacement line. Gated on the watermark, every write to a stale
+ * invoice re-enqueues until a push lands. This is the order-quote push's design
+ * (`api-cloudrun/src/services/orderDocWritten.ts`, gated on its `pushed_hash`).
  *
  * @module
  */
-import type { Invoice, XeroSyncState } from "../schemas/mod.ts";
-import { isInvoiceLineItem } from "../schemas/mod.ts";
+import type { Invoice, Settlement, XeroSyncState } from "../schemas/mod.ts";
+import { isInvoiceLineItem, SETTLEMENT_CONTRACTS } from "../schemas/mod.ts";
 import { canonicalJson, hash48 } from "./contentHash.ts";
+import { liveSettlements } from "./invoices.ts";
 
 /**
  * The part of an invoice that the Xero update body is built from.
@@ -110,4 +119,58 @@ export function invoiceXeroSyncStatus(
   const pushed = state?.pushed_hash ?? null;
   if (pushed === null || LEGACY_VERSION_WATERMARK.test(pushed)) return "unknown";
   return pushed === invoiceXeroProjectionHash(invoice) ? "in_sync" : "out_of_sync";
+}
+
+/**
+ * **Should this write enqueue a Xero edit push?** The one enqueue gate for an
+ * issued invoice (api-cloudrun#1332).
+ *
+ * - `old.xero_id` must be set. The issue path patches `xero_id` onto the invoice
+ *   before it writes the watermark, so that write would read `unknown` and enqueue
+ *   an edit push for an invoice whose create POST has only just landed. The old
+ *   side is what tells the two apart.
+ * - The new state must read `out_of_sync` or `unknown` against the watermark.
+ *   `unknown` enqueues because no push has recorded a hash yet, and a push that
+ *   finds nothing to change is cheap. `paid`, `void` and `draft` read
+ *   `not_applicable`, so they never enqueue.
+ *
+ * Nothing here compares `old` to `next`. A write that changes no Xero-carried
+ * field still enqueues while an earlier edit's push has not landed. That is the
+ * point: the earlier task may already have been superseded by this write.
+ */
+export function shouldPushInvoiceToXero(
+  old: Partial<Invoice> | null | undefined,
+  next: Partial<Invoice> | null | undefined,
+  state: Pick<XeroSyncState, "pushed_hash"> | null,
+): boolean {
+  // Both sides are `Partial` because that is what an Eventarc write carries; a
+  // delete (no `next`) or a document with no status has nothing to push.
+  if (!old?.xero_id || !next?.status) return false;
+  const status = invoiceXeroSyncStatus({ ...next, status: next.status, xero_id: next.xero_id ?? null }, state);
+  return status === "out_of_sync" || status === "unknown";
+}
+
+/**
+ * The live invoice-settling rows that **Xero holds** — a payment or credit
+ * allocation Xero has an id for (`SETTLEMENT_CONTRACTS[type].xero_id_field` set on
+ * the row). Xero refuses an edit to an invoice carrying one, so the edit push
+ * stops at a manual seam when this is non-empty.
+ *
+ * ⚠️ **Not CFS's `status` or `amount_paid_cents`.** A payment an operator records
+ * in CFS has no Xero id until Xero reports it, and Xero accepts an edit until then.
+ * Keying on what CFS holds refused edits Xero would have taken. When CFS lags
+ * Xero (a payment is in Xero and not yet reaped), this reads empty and Xero's own
+ * ValidationException is the seam.
+ *
+ * Reversed rows are skipped ({@link liveSettlements}); reversers carry no Xero id
+ * by contract, so they never count.
+ */
+export function invoiceSettlementsHeldByXero<
+  T extends Pick<Settlement, "uid" | "type" | "reverses" | "xero_payment_id" | "xero_credit_note_id">,
+>(settlements: readonly T[]): T[] {
+  return liveSettlements(settlements).filter((s) => {
+    const contract = SETTLEMENT_CONTRACTS[s.type];
+    if (contract?.settles !== "invoice" || contract.xero_id_field === null) return false;
+    return s[contract.xero_id_field] != null;
+  });
 }

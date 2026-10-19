@@ -5263,7 +5263,7 @@ Every invoice action id. `tests/invoice-actions.test.ts` asserts it equals
 de-duplicates its menus by these ids, never by a label.
 
 ```ts
-const INVOICE_ACTION_IDS: "issue" | "void" | "close" | "add_payment" | "reverse_settlement" | "add_credit_note" | "edit_items" | "edit_organization" | "edit_date" | "void_credit_note" | "allocate_credit_note" | "record_refund" | "create_invoice" | "create_remaining_invoice" | "create_replacement_invoice" | "create_service_charge_invoice" | "credit_overbilling"[];
+const INVOICE_ACTION_IDS: "issue" | "void" | "close" | "add_payment" | "reverse_settlement" | "add_credit_note" | "edit_items" | "edit_organization" | "edit_date" | "push_to_xero" | "void_credit_note" | "allocate_credit_note" | "record_refund" | "create_invoice" | "create_remaining_invoice" | "create_replacement_invoice" | "create_service_charge_invoice" | "credit_overbilling"[];
 ```
 
 ### `INVOICE_STATUS_CONTRACTS`
@@ -35594,6 +35594,20 @@ guard, `api-cloudrun/scripts/audit-fulfillment-diff.ts`, {@link computeInvoiceSy
 
 **Returns** — Live anchors, in order-relative path space
 
+### `liveSettlements(settlements: readonly T[]): T[]`
+
+Which settlements are **live** — i.e. not named by any sibling's `reverses`.
+A reverser is itself live: nothing names it.
+
+**For MATCHING, never for arithmetic.** The totals are a signed fold over
+every row (a reversal contributes −1 by its type), so liveness plays no part
+in them. It matters only where a row must be matched or counted: a Xero
+payment whose id matches only a *reversed* settlement has to be treated as
+unmatched, or the reap becomes a one-way trapdoor.
+
+Moved here from `api-cloudrun/src/lib/settlements.ts`, so the API, the invoice
+action ruleset and the Xero edit push share one liveness rule.
+
 ### `orderHasDiscount(items: LineItem[]): boolean`
 
 Check whether any pre-tax line item has a discount.
@@ -36317,9 +36331,16 @@ cannot be offered that the server refuses.
 
 Referenced by the ruleset, never duplicated into it: `lineMoneyAgrees` (it
 needs the REBUILT lines, so `edit_items` takes its answer as `money_moved`),
-the organization tombstone and Xero-contact re-address checks, the Xero pushes
-and `XERO_RETRACTION`, CAS/version checks, idempotency and counter allocation.
-An offer is a snapshot of the documents it was handed; the server re-checks.
+the organization tombstone and Xero-contact re-address checks, the automatic
+Xero pushes and `XERO_RETRACTION`, CAS/version checks, idempotency and counter
+allocation. An offer is a snapshot of the documents it was handed; the server
+re-checks.
+
+The one Xero push an OPERATOR may request is `push_to_xero`
+(api-cloudrun#1332). It only enqueues the edit push; the task re-plans and
+still stops at its own seams. Like `edit_items`, it takes a server-computed
+answer, `xero_sync_status`, because the status needs the invoice's whole Xero
+projection and its sidecar.
 
 ## Calling an `assert*` on a write path — what to hand it
 
@@ -36440,6 +36461,7 @@ What {@link invoiceActionsFor} needs that the invoice alone does not carry.
 interface InvoiceOfferContext {
   settlements?: readonly OfferSettlement[];
   creditNotes?: readonly CappedNote[];
+  xero_sync_status?: InvoiceXeroSyncStatus;
 }
 ```
 
@@ -36472,6 +36494,7 @@ interface OfferInvoice {
   status: InvoiceStatusType;
   totals: InvoiceSettledTotals & typeLiteral;
   items?: readonly InvoiceDocItemType[];
+  xero_id?: string | null;
 }
 ```
 
@@ -36579,6 +36602,8 @@ Every action the UI may offer on this invoice.
 - `add_credit_note` (D3) — a status live in Xero, with credit left on a line.
 - `edit_items` (D8) — always; `money_frozen` says whether line money is.
 - `edit_organization` / `edit_date` — while not {@link invoiceIsFrozen}.
+- `push_to_xero` — `issued` / `part_paid`, linked to Xero, and the caller's
+  `xero_sync_status` is `out_of_sync` or `unknown`.
 
 ### `orderInvoiceActionsFor(order: OfferOrder, _: unknown): InvoiceActionOffer[]`
 
@@ -36618,11 +36643,19 @@ handler ever observes (a dropped task, a retry exhausted after the process died)
 
 ## One author for the projection
 
-The projection is also what decides whether a write enqueues an edit push
-(`api-cloudrun/src/lib/xeroInvoiceEdit.ts` `shouldEnqueueInvoiceEditPush`). It
-lives here so the push trigger and the out-of-sync badge cannot disagree about
-what "the part Xero carries" means: a change that should have pushed and did not
-is exactly a change this reports.
+The projection hash is ONE key with three readers: the enqueue gate
+({@link shouldPushInvoiceToXero}), the task's supersede check (the task payload
+carries the hash it was enqueued for), and the manager's out-of-sync badge
+({@link invoiceXeroSyncStatus}). It lives here so the three cannot disagree
+about what "the part Xero carries" means.
+
+⚠️ **The gate compares against the WATERMARK, never old-vs-new** (api-cloudrun#1332).
+The gate used to diff the old and new projections while the task superseded on
+`version`. A settlement or a no-op PUT moves `version` and not the projection,
+so it superseded the newest edit's task without re-arming one, and prod #2459
+lost a $44.20 replacement line. Gated on the watermark, every write to a stale
+invoice re-enqueues until a push lands. This is the order-quote push's design
+(`api-cloudrun/src/services/orderDocWritten.ts`, gated on its `pushed_hash`).
 
 ### `InvoiceXeroSyncStatus`
 
@@ -36660,6 +36693,22 @@ recursed into.
 
 48-bit FNV-1a of a string, base36 — compact, deterministic, no deps.
 
+### `invoiceSettlementsHeldByXero(settlements: readonly T[]): T[]`
+
+The live invoice-settling rows that **Xero holds** — a payment or credit
+allocation Xero has an id for (`SETTLEMENT_CONTRACTS[type].xero_id_field` set on
+the row). Xero refuses an edit to an invoice carrying one, so the edit push
+stops at a manual seam when this is non-empty.
+
+⚠️ **Not CFS's `status` or `amount_paid_cents`.** A payment an operator records
+in CFS has no Xero id until Xero reports it, and Xero accepts an edit until then.
+Keying on what CFS holds refused edits Xero would have taken. When CFS lags
+Xero (a payment is in Xero and not yet reaped), this reads empty and Xero's own
+ValidationException is the seam.
+
+Reversed rows are skipped ({@link liveSettlements}); reversers carry no Xero id
+by contract, so they never count.
+
 ### `invoiceXeroProjection(invoice: Partial<Invoice>): unknown`
 
 The part of an invoice that the Xero update body is built from.
@@ -36684,6 +36733,24 @@ The hash a successful push records as the invoice sidecar's `pushed_hash`.
 ### `invoiceXeroSyncStatus(invoice: Pick<Invoice, "status" | "xero_id"> & Partial<Invoice>, state: Pick<XeroSyncState, "pushed_hash"> | null): InvoiceXeroSyncStatus`
 
 See {@link InvoiceXeroSyncStatus}. `state` is the watermark, or `null` when absent.
+
+### `shouldPushInvoiceToXero(old: Partial<Invoice> | null | undefined, next: Partial<Invoice> | null | undefined, state: Pick<XeroSyncState, "pushed_hash"> | null): boolean`
+
+**Should this write enqueue a Xero edit push?** The one enqueue gate for an
+issued invoice (api-cloudrun#1332).
+
+- `old.xero_id` must be set. The issue path patches `xero_id` onto the invoice
+  before it writes the watermark, so that write would read `unknown` and enqueue
+  an edit push for an invoice whose create POST has only just landed. The old
+  side is what tells the two apart.
+- The new state must read `out_of_sync` or `unknown` against the watermark.
+  `unknown` enqueues because no push has recorded a hash yet, and a push that
+  finds nothing to change is cheap. `paid`, `void` and `draft` read
+  `not_applicable`, so they never enqueue.
+
+Nothing here compares `old` to `next`. A write that changes no Xero-carried
+field still enqueues while an earlier edit's push has not landed. That is the
+point: the earlier task may already have been superseded by this write.
 
 ## `@cfs/core/utils/fulfillment-booking-rows`
 

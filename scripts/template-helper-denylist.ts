@@ -352,6 +352,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "invoiceHasSettlement",
     "invoiceHasMoneySettlement",
     "invoiceIsFrozen",
+    // Settlement liveness, for MATCHING rows (the reap, the edit push's held
+    // settlements). A rendered invoice reads its stored totals.
+    "liveSettlements",
     // ── Path + uniqueness machinery (invoice variants of the order ones above) ──
     "computeInvoiceItemPaths", // canonical path computation — write-path only
     "validateInvoiceItemPaths", // invariant assertion — write-path only
@@ -558,9 +561,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   "invoice-xero-sync": [
     "canonicalJson",
     "hash48",
+    "invoiceSettlementsHeldByXero",
     "invoiceXeroProjection",
     "invoiceXeroProjectionHash",
     "invoiceXeroSyncStatus",
+    "shouldPushInvoiceToXero",
   ],
   // `utils/shared-fields.ts` classifies how each key an order shares with an
   // invoice or fulfillment propagates (api-cloudrun#890). It reads two Zod

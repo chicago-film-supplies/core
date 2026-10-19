@@ -1,10 +1,12 @@
 import { assertEquals, assertNotEquals } from "@std/assert";
-import type { Invoice } from "../src/schemas/mod.ts";
+import type { Invoice, Settlement } from "../src/schemas/mod.ts";
 import {
   canonicalJson,
   hash48,
+  invoiceSettlementsHeldByXero,
   invoiceXeroProjectionHash,
   invoiceXeroSyncStatus,
+  shouldPushInvoiceToXero,
 } from "../src/utils/invoice-xero-sync.ts";
 
 const line = (uid: string, subtotal: number) => ({
@@ -57,4 +59,63 @@ Deno.test("canonicalJson/hash48: key order does not move the hash; content does"
   // same inputs — so moving the function here changes no stored task name or watermark.
   assertEquals(hash48("xero"), "2qcdkbu6zt");
   assertEquals(hash48(canonicalJson({ b: [1, { d: null, c: "x" }], a: true })), "ks5pjp85x");
+});
+
+// ── the enqueue gate (api-cloudrun#1332) ─────────────────────────────
+
+Deno.test("shouldPushInvoiceToXero: fires on a projection change against the watermark, not on old-vs-new", () => {
+  const before = invoice();
+  const state = { pushed_hash: invoiceXeroProjectionHash(before) };
+  const edited = invoice({ items: [{ uid: "o", type: "order", path: ["o"] }, line("tent", 5100)], version: 4 });
+  assertEquals(shouldPushInvoiceToXero(before, edited, state), true);
+  assertEquals(shouldPushInvoiceToXero(before, invoice({ version: 4 }), state), false, "in sync: nothing to push");
+});
+
+Deno.test("shouldPushInvoiceToXero: the #1332 sequence — every write re-arms while the watermark is behind", () => {
+  // prod #2459: an edit's task was superseded by a no-op PUT and then by a payment,
+  // neither of which enqueued, so the edit never reached Xero.
+  const pushed = invoice({ version: 20 });
+  const state = { pushed_hash: invoiceXeroProjectionHash(pushed) };
+  const lines = [{ uid: "o", type: "order", path: ["o"] }, line("tent", 5000), line("bottle", 4420)];
+  const edit = invoice({ version: 21, items: lines });
+  const noop = invoice({ version: 22, items: lines });
+  const paid = invoice({ version: 23, items: lines, status: "part_paid", totals: { total_cents: 9430, amount_paid_cents: 2630 } });
+  assertEquals(shouldPushInvoiceToXero(pushed, edit, state), true, "the edit");
+  assertEquals(shouldPushInvoiceToXero(edit, noop, state), true, "the no-op PUT — old-vs-new would read false here");
+  assertEquals(shouldPushInvoiceToXero(noop, paid, state), true, "the settlement append");
+  // Once the push lands the same writes go quiet.
+  const landed = { pushed_hash: invoiceXeroProjectionHash(edit) };
+  assertEquals(shouldPushInvoiceToXero(edit, noop, landed), false);
+  assertEquals(shouldPushInvoiceToXero(noop, paid, landed), false);
+});
+
+Deno.test("shouldPushInvoiceToXero: unlinked old side, unknown watermark, and the exempt statuses", () => {
+  const state = { pushed_hash: "stale" };
+  assertEquals(shouldPushInvoiceToXero(invoice({ xero_id: null }), invoice(), state), false, "the issue path's own xero_id patch");
+  assertEquals(shouldPushInvoiceToXero(null, invoice(), state), false, "a create");
+  assertEquals(shouldPushInvoiceToXero(invoice(), invoice(), null), true, "no sidecar ⇒ unknown ⇒ push");
+  assertEquals(shouldPushInvoiceToXero(invoice(), invoice(), { pushed_hash: "v7" }), true, "legacy watermark ⇒ unknown ⇒ push");
+  for (const status of ["paid", "void", "draft"]) {
+    assertEquals(shouldPushInvoiceToXero(invoice(), invoice({ status }), state), false, status);
+  }
+});
+
+// ── settlements Xero holds ───────────────────────────────────────────
+
+const settlement = (uid: string, type: string, over: Record<string, unknown> = {}) =>
+  ({ uid, type, reverses: null, xero_payment_id: null, xero_credit_note_id: null, ...over }) as unknown as Settlement;
+
+Deno.test("invoiceSettlementsHeldByXero: only live rows carrying their contract's Xero id", () => {
+  assertEquals(invoiceSettlementsHeldByXero([settlement("p", "payment")]), [], "a CFS-only payment");
+  const linked = settlement("p", "payment", { xero_payment_id: "xp-1" });
+  assertEquals(invoiceSettlementsHeldByXero([linked]), [linked], "a linked payment");
+  assertEquals(
+    invoiceSettlementsHeldByXero([linked, settlement("r", "payment_reversal", { reverses: "p" })]),
+    [],
+    "a linked payment that has been reversed",
+  );
+  const credit = settlement("c", "credit", { xero_credit_note_id: "xcn-1" });
+  assertEquals(invoiceSettlementsHeldByXero([credit]), [credit], "a linked credit");
+  assertEquals(invoiceSettlementsHeldByXero([settlement("c", "credit")]), [], "an unlinked credit");
+  assertEquals(invoiceSettlementsHeldByXero([settlement("v", "void"), settlement("z", "closure")]), [], "no Xero id by contract");
 });

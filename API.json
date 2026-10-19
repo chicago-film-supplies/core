@@ -2331,7 +2331,7 @@
         {
           "kind": "variable",
           "name": "INVOICE_ACTION_IDS",
-          "declaration": "const INVOICE_ACTION_IDS: \"issue\" | \"void\" | \"close\" | \"add_payment\" | \"reverse_settlement\" | \"add_credit_note\" | \"edit_items\" | \"edit_organization\" | \"edit_date\" | \"void_credit_note\" | \"allocate_credit_note\" | \"record_refund\" | \"create_invoice\" | \"create_remaining_invoice\" | \"create_replacement_invoice\" | \"create_service_charge_invoice\" | \"credit_overbilling\"[];",
+          "declaration": "const INVOICE_ACTION_IDS: \"issue\" | \"void\" | \"close\" | \"add_payment\" | \"reverse_settlement\" | \"add_credit_note\" | \"edit_items\" | \"edit_organization\" | \"edit_date\" | \"push_to_xero\" | \"void_credit_note\" | \"allocate_credit_note\" | \"record_refund\" | \"create_invoice\" | \"create_remaining_invoice\" | \"create_replacement_invoice\" | \"create_service_charge_invoice\" | \"credit_overbilling\"[];",
           "doc": "Every invoice action id. `tests/invoice-actions.test.ts` asserts it equals\n{@link INVOICE_ACTIONS}' keys in both directions, and the manager\nde-duplicates its menus by these ids, never by a label."
         },
         {
@@ -16358,6 +16358,14 @@
         },
         {
           "kind": "function",
+          "name": "liveSettlements",
+          "signature": "liveSettlements(settlements: readonly T[]): T[]",
+          "doc": "Which settlements are **live** — i.e. not named by any sibling's `reverses`.\nA reverser is itself live: nothing names it.\n\n**For MATCHING, never for arithmetic.** The totals are a signed fold over\nevery row (a reversal contributes −1 by its type), so liveness plays no part\nin them. It matters only where a row must be matched or counted: a Xero\npayment whose id matches only a *reversed* settlement has to be treated as\nunmatched, or the reap becomes a one-way trapdoor.\n\nMoved here from `api-cloudrun/src/lib/settlements.ts`, so the API, the invoice\naction ruleset and the Xero edit push share one liveness rule.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "orderHasDiscount",
           "signature": "orderHasDiscount(items: LineItem[]): boolean",
           "doc": "Check whether any pre-tax line item has a discount.",
@@ -16719,7 +16727,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/invoice-actions",
-      "moduleDoc": "The invoice action ruleset — ONE answer, for the manager and the API alike, to\n\"what may an operator do to this invoice, this credit note, or this order's\ninvoicing?\" (api-cloudrun#1169, R3).\n\nThree offer functions, each returning only ids from `INVOICE_ACTION_IDS`:\n\n- {@link invoiceActionsFor} — on an invoice;\n- {@link creditNoteActionsFor} — on a credit note;\n- {@link orderInvoiceActionsFor} — creating invoices or credits from an order.\n\nand an `assert*` per function, throwing {@link InvoiceActionRefusal}, that the\nAPI runs on its OPERATOR routes. The shape is custody's (`utils/custody.ts`):\nthe UI renders the offers, the server asserts the same rules, so a button\ncannot be offered that the server refuses.\n\n## Two rules every caller must keep\n\n1. 🔴 **Operator policy is not legality.** The `assert*` functions belong on\n   operator routes only — never on the Xero webhook, the reap, void-from-cancel\n   or {@link deriveInvoiceStatus}. Xero is the authority on payments: an\n   overpayment that arrives from Xero is a fact to record, not a request to\n   refuse. `add_payment`'s cap applies to the operator, never to the ledger.\n2. **Fail closed.** An action this module does not offer is refused, and an\n   unknown status offers nothing rather than throwing.\n\n## What stays server-only\n\nReferenced by the ruleset, never duplicated into it: `lineMoneyAgrees` (it\nneeds the REBUILT lines, so `edit_items` takes its answer as `money_moved`),\nthe organization tombstone and Xero-contact re-address checks, the Xero pushes\nand `XERO_RETRACTION`, CAS/version checks, idempotency and counter allocation.\nAn offer is a snapshot of the documents it was handed; the server re-checks.\n\n## Calling an `assert*` on a write path — what to hand it\n\nThe `api-cloudrun` `firestore-transactions` skill decides this, and two\ncontexts are easy to get wrong:\n\n- 🔴 **`reverse_settlement` needs only the TARGET row and any row that NAMES\n  it** — never the invoice's whole settlement list. Inside the reversal's\n  transaction pass `[target]`, plus the derived reverser when its point-get\n  exists. A `uid_invoice` range read there would block every concurrent\n  appender (the range-lock family). A pre-read outside the transaction would\n  decide on a stale `xero_payment_id`, which `linkSettlementToXero` binds\n  null → value after the row is written: the #358 hoist-data-not-ids\n  prohibition.\n- **`add_payment`'s cap is only as strong as the read it is checked against.**\n  The payment path claims its row and then CASes the invoice outside any\n  transaction, and a refusal after the claim would strand a committed row.\n  So the cap is checked against the read the claim was decided on, and two\n  concurrent payments can still overpay between them. The fold keeps that\n  visible as a negative `amount_due_cents`; it does not prevent it.\n- `close` needs no context at all: assert it against the transaction's own\n  invoice snapshot. The total it tests can change under any read outside the\n  transaction.",
+      "moduleDoc": "The invoice action ruleset — ONE answer, for the manager and the API alike, to\n\"what may an operator do to this invoice, this credit note, or this order's\ninvoicing?\" (api-cloudrun#1169, R3).\n\nThree offer functions, each returning only ids from `INVOICE_ACTION_IDS`:\n\n- {@link invoiceActionsFor} — on an invoice;\n- {@link creditNoteActionsFor} — on a credit note;\n- {@link orderInvoiceActionsFor} — creating invoices or credits from an order.\n\nand an `assert*` per function, throwing {@link InvoiceActionRefusal}, that the\nAPI runs on its OPERATOR routes. The shape is custody's (`utils/custody.ts`):\nthe UI renders the offers, the server asserts the same rules, so a button\ncannot be offered that the server refuses.\n\n## Two rules every caller must keep\n\n1. 🔴 **Operator policy is not legality.** The `assert*` functions belong on\n   operator routes only — never on the Xero webhook, the reap, void-from-cancel\n   or {@link deriveInvoiceStatus}. Xero is the authority on payments: an\n   overpayment that arrives from Xero is a fact to record, not a request to\n   refuse. `add_payment`'s cap applies to the operator, never to the ledger.\n2. **Fail closed.** An action this module does not offer is refused, and an\n   unknown status offers nothing rather than throwing.\n\n## What stays server-only\n\nReferenced by the ruleset, never duplicated into it: `lineMoneyAgrees` (it\nneeds the REBUILT lines, so `edit_items` takes its answer as `money_moved`),\nthe organization tombstone and Xero-contact re-address checks, the automatic\nXero pushes and `XERO_RETRACTION`, CAS/version checks, idempotency and counter\nallocation. An offer is a snapshot of the documents it was handed; the server\nre-checks.\n\nThe one Xero push an OPERATOR may request is `push_to_xero`\n(api-cloudrun#1332). It only enqueues the edit push; the task re-plans and\nstill stops at its own seams. Like `edit_items`, it takes a server-computed\nanswer, `xero_sync_status`, because the status needs the invoice's whole Xero\nprojection and its sidecar.\n\n## Calling an `assert*` on a write path — what to hand it\n\nThe `api-cloudrun` `firestore-transactions` skill decides this, and two\ncontexts are easy to get wrong:\n\n- 🔴 **`reverse_settlement` needs only the TARGET row and any row that NAMES\n  it** — never the invoice's whole settlement list. Inside the reversal's\n  transaction pass `[target]`, plus the derived reverser when its point-get\n  exists. A `uid_invoice` range read there would block every concurrent\n  appender (the range-lock family). A pre-read outside the transaction would\n  decide on a stale `xero_payment_id`, which `linkSettlementToXero` binds\n  null → value after the row is written: the #358 hoist-data-not-ids\n  prohibition.\n- **`add_payment`'s cap is only as strong as the read it is checked against.**\n  The payment path claims its row and then CASes the invoice outside any\n  transaction, and a refusal after the claim would strand a committed row.\n  So the cap is checked against the read the claim was decided on, and two\n  concurrent payments can still overpay between them. The fold keeps that\n  visible as a negative `amount_due_cents`; it does not prevent it.\n- `close` needs no context at all: assert it against the transaction's own\n  invoice snapshot. The total it tests can change under any read outside the\n  transaction.",
       "symbols": [
         {
           "kind": "interface",
@@ -16772,7 +16780,7 @@
         {
           "kind": "interface",
           "name": "InvoiceOfferContext",
-          "declaration": "interface InvoiceOfferContext {\n  settlements?: readonly OfferSettlement[];\n  creditNotes?: readonly CappedNote[];\n}",
+          "declaration": "interface InvoiceOfferContext {\n  settlements?: readonly OfferSettlement[];\n  creditNotes?: readonly CappedNote[];\n  xero_sync_status?: InvoiceXeroSyncStatus;\n}",
           "doc": "What {@link invoiceActionsFor} needs that the invoice alone does not carry."
         },
         {
@@ -16790,7 +16798,7 @@
         {
           "kind": "interface",
           "name": "OfferInvoice",
-          "declaration": "interface OfferInvoice {\n  status: InvoiceStatusType;\n  totals: InvoiceSettledTotals & typeLiteral;\n  items?: readonly InvoiceDocItemType[];\n}",
+          "declaration": "interface OfferInvoice {\n  status: InvoiceStatusType;\n  totals: InvoiceSettledTotals & typeLiteral;\n  items?: readonly InvoiceDocItemType[];\n  xero_id?: string | null;\n}",
           "doc": "An invoice as the ruleset reads it."
         },
         {
@@ -16877,7 +16885,7 @@
           "kind": "function",
           "name": "invoiceActionsFor",
           "signature": "invoiceActionsFor(invoice: OfferInvoice, _: unknown): InvoiceActionOffer[]",
-          "doc": "Every action the UI may offer on this invoice.\n\n- `issue` / `void` — `canOperatorTransition`, the column `updateInvoice` gates on.\n- `close` — a live invoice totalling $0, nothing money-settled, no live\n  closure. ⚠️ Offered on a `paid` $0 invoice too: the ones today's derivation\n  copied PAID from Xero (#2197) are closed by exactly this action.\n- `add_payment` (D1) — the status `accepts_payment` and something is due;\n  `max_cents` is the amount due, a hard cap with no overpay override.\n- `reverse_settlement` (D2) — one offer per reversible row.\n- `add_credit_note` (D3) — a status live in Xero, with credit left on a line.\n- `edit_items` (D8) — always; `money_frozen` says whether line money is.\n- `edit_organization` / `edit_date` — while not {@link invoiceIsFrozen}.",
+          "doc": "Every action the UI may offer on this invoice.\n\n- `issue` / `void` — `canOperatorTransition`, the column `updateInvoice` gates on.\n- `close` — a live invoice totalling $0, nothing money-settled, no live\n  closure. ⚠️ Offered on a `paid` $0 invoice too: the ones today's derivation\n  copied PAID from Xero (#2197) are closed by exactly this action.\n- `add_payment` (D1) — the status `accepts_payment` and something is due;\n  `max_cents` is the amount due, a hard cap with no overpay override.\n- `reverse_settlement` (D2) — one offer per reversible row.\n- `add_credit_note` (D3) — a status live in Xero, with credit left on a line.\n- `edit_items` (D8) — always; `money_frozen` says whether line money is.\n- `edit_organization` / `edit_date` — while not {@link invoiceIsFrozen}.\n- `push_to_xero` — `issued` / `part_paid`, linked to Xero, and the caller's\n  `xero_sync_status` is `out_of_sync` or `unknown`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -16893,7 +16901,7 @@
     },
     {
       "entrypoint": "@cfs/core/utils/invoice-xero-sync",
-      "moduleDoc": "**Is this issued invoice's Xero twin up to date?** — answered from the invoice\nand its `invoices/{uid}/xero-sync/state` watermark alone, with no Xero call.\n\n## Why it exists (api-cloudrun#1009, gate (c) of the order-propagation plan)\n\nAn edit to an issued invoice reaches Xero through `/tasks/push-xero-invoice`.\nWhen that push does not land — Xero refuses the payload (the task is dropped),\nCloud Tasks exhausts its retries, the day budget defers it to abandonment, or\nthe invoice needs manual intervention (payments applied) — the only record was\na log line. The invoice looked fine.\n\nSo the state is DERIVED rather than recorded: the watermark's `pushed_hash` holds\nthe hash of {@link invoiceXeroProjection} as of the last push that SUCCEEDED, and the invoice\nis out of sync whenever its current projection hashes differently. Every failure\nmode above leaves the watermark behind, so every one shows, including those no\nhandler ever observes (a dropped task, a retry exhausted after the process died).\n\n## One author for the projection\n\nThe projection is also what decides whether a write enqueues an edit push\n(`api-cloudrun/src/lib/xeroInvoiceEdit.ts` `shouldEnqueueInvoiceEditPush`). It\nlives here so the push trigger and the out-of-sync badge cannot disagree about\nwhat \"the part Xero carries\" means: a change that should have pushed and did not\nis exactly a change this reports.",
+      "moduleDoc": "**Is this issued invoice's Xero twin up to date?** — answered from the invoice\nand its `invoices/{uid}/xero-sync/state` watermark alone, with no Xero call.\n\n## Why it exists (api-cloudrun#1009, gate (c) of the order-propagation plan)\n\nAn edit to an issued invoice reaches Xero through `/tasks/push-xero-invoice`.\nWhen that push does not land — Xero refuses the payload (the task is dropped),\nCloud Tasks exhausts its retries, the day budget defers it to abandonment, or\nthe invoice needs manual intervention (payments applied) — the only record was\na log line. The invoice looked fine.\n\nSo the state is DERIVED rather than recorded: the watermark's `pushed_hash` holds\nthe hash of {@link invoiceXeroProjection} as of the last push that SUCCEEDED, and the invoice\nis out of sync whenever its current projection hashes differently. Every failure\nmode above leaves the watermark behind, so every one shows, including those no\nhandler ever observes (a dropped task, a retry exhausted after the process died).\n\n## One author for the projection\n\nThe projection hash is ONE key with three readers: the enqueue gate\n({@link shouldPushInvoiceToXero}), the task's supersede check (the task payload\ncarries the hash it was enqueued for), and the manager's out-of-sync badge\n({@link invoiceXeroSyncStatus}). It lives here so the three cannot disagree\nabout what \"the part Xero carries\" means.\n\n⚠️ **The gate compares against the WATERMARK, never old-vs-new** (api-cloudrun#1332).\nThe gate used to diff the old and new projections while the task superseded on\n`version`. A settlement or a no-op PUT moves `version` and not the projection,\nso it superseded the newest edit's task without re-arming one, and prod #2459\nlost a $44.20 replacement line. Gated on the watermark, every write to a stale\ninvoice re-enqueues until a push lands. This is the order-quote push's design\n(`api-cloudrun/src/services/orderDocWritten.ts`, gated on its `pushed_hash`).",
       "symbols": [
         {
           "kind": "typeAlias",
@@ -16919,6 +16927,14 @@
         },
         {
           "kind": "function",
+          "name": "invoiceSettlementsHeldByXero",
+          "signature": "invoiceSettlementsHeldByXero(settlements: readonly T[]): T[]",
+          "doc": "The live invoice-settling rows that **Xero holds** — a payment or credit\nallocation Xero has an id for (`SETTLEMENT_CONTRACTS[type].xero_id_field` set on\nthe row). Xero refuses an edit to an invoice carrying one, so the edit push\nstops at a manual seam when this is non-empty.\n\n⚠️ **Not CFS's `status` or `amount_paid_cents`.** A payment an operator records\nin CFS has no Xero id until Xero reports it, and Xero accepts an edit until then.\nKeying on what CFS holds refused edits Xero would have taken. When CFS lags\nXero (a payment is in Xero and not yet reaped), this reads empty and Xero's own\nValidationException is the seam.\n\nReversed rows are skipped ({@link liveSettlements}); reversers carry no Xero id\nby contract, so they never count.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "invoiceXeroProjection",
           "signature": "invoiceXeroProjection(invoice: Partial<Invoice>): unknown",
           "doc": "The part of an invoice that the Xero update body is built from.\n\n⚠️ **Money totals and `status` are deliberately absent.** A settlement writer\nadvances `version` and moves `status` / `amount_*_cents` without touching a\nline, and Xero learns of a payment from its own ledger, not from a push.\n\n⚠️ **Lines are projected to what the body reads, never compared whole.**\napi-cloudrun's `assembleXeroInvoiceUpdateBody` reads, per billable line: `uid`,\n`name`, `quantity`, `coa_revenue`, `price.subtotal_cents`, `price.discount`,\nand each tax's `uid` and `amount_cents`. Comparing `items` whole made every\nkey-only change a real Xero POST (api-cloudrun#993). api-cloudrun's\n`api-cloudrun/tests/unit/xeroInvoiceEdit.test.ts` perturbs every leaf of a real line through\nthe real assembler, so a field the body starts reading cannot be missing here\nunnoticed.",
@@ -16938,6 +16954,14 @@
           "name": "invoiceXeroSyncStatus",
           "signature": "invoiceXeroSyncStatus(invoice: Pick<Invoice, \"status\" | \"xero_id\"> & Partial<Invoice>, state: Pick<XeroSyncState, \"pushed_hash\"> | null): InvoiceXeroSyncStatus",
           "doc": "See {@link InvoiceXeroSyncStatus}. `state` is the watermark, or `null` when absent.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "shouldPushInvoiceToXero",
+          "signature": "shouldPushInvoiceToXero(old: Partial<Invoice> | null | undefined, next: Partial<Invoice> | null | undefined, state: Pick<XeroSyncState, \"pushed_hash\"> | null): boolean",
+          "doc": "**Should this write enqueue a Xero edit push?** The one enqueue gate for an\nissued invoice (api-cloudrun#1332).\n\n- `old.xero_id` must be set. The issue path patches `xero_id` onto the invoice\n  before it writes the watermark, so that write would read `unknown` and enqueue\n  an edit push for an invoice whose create POST has only just landed. The old\n  side is what tells the two apart.\n- The new state must read `out_of_sync` or `unknown` against the watermark.\n  `unknown` enqueues because no push has recorded a hash yet, and a push that\n  finds nothing to change is cheap. `paid`, `void` and `draft` read\n  `not_applicable`, so they never enqueue.\n\nNothing here compares `old` to `next`. A write that changes no Xero-carried\nfield still enqueues while an earlier edit's push has not landed. That is the\npoint: the earlier task may already have been superseded by this write.",
           "paramTags": [],
           "returnsTag": null
         }
