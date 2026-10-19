@@ -1,0 +1,51 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard"
+  ],
+  "description": [
+    "Release TOOLING only. Library dependencies in deno.json (zod, date-fns, currency.js, ...) change what api-cloudrun, manager and templates receive, so bumping one is a release decision, not upkeep — they stay off, as in the consumer repos' configs.",
+    "Commits are chore(ci), which semantic-release treats as no-release, so merging a Renovate PR into beta does not cut a beta."
+  ],
+  "baseBranchPatterns": ["beta"],
+  "schedule": ["before 5am"],
+  "enabledManagers": ["github-actions", "custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The exact semantic-release pins in publish.yaml's `npm install -g` list.",
+      "managerFilePatterns": ["/^\\.github/workflows/publish\\.yaml$/"],
+      "matchStrings": [
+        "\\s(?<depName>(?:@[a-z0-9-]+/)?[a-z0-9-]+)@(?<currentValue>\\d+\\.\\d+\\.\\d+)[ \\t]*\\\\?\\n"
+      ],
+      "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
+      "description": "The Deno CLI that runs checks and `deno publish`.",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["deno-version:\\s*v(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "denoland/deno",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["*"],
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "ci"
+    },
+    {
+      "description": "Held at 9.3.1 on purpose — see the comment above the install step in publish.yaml. Its 10.x line drags the floating @conventional-changelog/template chain back in, which broke every publish on 2026-08-18. Re-enable only together with a release-notes-generator that has moved to conventional-changelog-writer@9.",
+      "matchPackageNames": ["conventional-changelog-conventionalcommits"],
+      "enabled": false
+    },
+    {
+      "description": "One PR for the semantic-release stack: its plugins are pinned to be compatible with each other.",
+      "matchPackageNames": ["semantic-release", "@semantic-release/*"],
+      "groupName": "semantic-release"
+    }
+  ]
+}

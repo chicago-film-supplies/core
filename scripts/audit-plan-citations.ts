@@ -418,6 +418,7 @@ const NOT_PROSE: Record<string, string> = {
   ".git": "git internals",
   ".gitignore": "not prose",
   ".releaserc.json": "semantic-release config; no citations",
+  "renovate.json": "Renovate config; its descriptions name workflows but cite none",
   "deno.json": "task + import config; cited BY docs, cites none itself",
   "deno.lock": "generated",
   "LICENSE": "verbatim licence text",
