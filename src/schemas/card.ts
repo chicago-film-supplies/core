@@ -429,7 +429,7 @@ function checkEventCard(doc: Card, ctx: z.RefinementCtx): void {
     }
   }
 
-  const require = (ok: boolean, path: (string | number)[], field: string) => {
+  const requireField = (ok: boolean, path: (string | number)[], field: string) => {
     if (ok) return;
     ctx.addIssue({
       code: "custom",
@@ -438,19 +438,19 @@ function checkEventCard(doc: Card, ctx: z.RefinementCtx): void {
     });
   };
 
-  require(doc.destination !== null, ["destination"], "destination");
-  require(
+  requireField(doc.destination !== null, ["destination"], "destination");
+  requireField(
     doc.destination === null || doc.destination.uid !== null,
     ["destination", "uid"],
     "destination.uid",
   );
-  require(doc.organization !== null, ["organization"], "organization");
-  require(
+  requireField(doc.organization !== null, ["organization"], "organization");
+  requireField(
     doc.organization === null || doc.organization.uid !== null,
     ["organization", "uid"],
     "organization.uid",
   );
-  require(doc.date_fs !== null, ["date_fs"], "date_fs");
+  requireField(doc.date_fs !== null, ["date_fs"], "date_fs");
 }
 
 export const CardSchema: z.ZodType<Card> = z.strictObject({
