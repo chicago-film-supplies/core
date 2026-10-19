@@ -38,6 +38,18 @@ export const SYSTEM_EVENT_MSGS = [
    * platform and the runtime's module load (api-cloudrun#1324).
    */
   "startup_ready",
+  /**
+   * A request reached a Cloud Run service whose role does not serve its path —
+   * a background route (`/tasks/*`, `/eventarc/mirror`, …) on the user-facing
+   * `api` service, or a user-facing route on the `worker`. Carries
+   * `service_role` (the service that received it), `route_tier` (the service
+   * that should have) and `gate_mode` (`log` serves it anyway, `enforce` 404s).
+   *
+   * The gate is QoS, not auth, so a misroute is a routing defect rather than an
+   * intrusion: it reads zero once every enqueuer and trigger targets the right
+   * service, and that zero is what licenses `enforce` (api-cloudrun#1326).
+   */
+  "service_role_misroute",
   "unhandled_error",
   "health_check_firestore_error",
   "preview_served",
@@ -54,6 +66,9 @@ export interface SystemEventLogRecord {
   ts: string;
   attempt?: number;
   boot_ms?: number;
+  service_role?: "api" | "worker";
+  route_tier?: "api" | "worker";
+  gate_mode?: "log" | "enforce";
   request_id?: string;
   method?: string;
   path?: string;
@@ -70,4 +85,7 @@ export const SystemEventLogRecordSchema: z.ZodType<SystemEventLogRecord> = z.obj
   msg: z.enum(SYSTEM_EVENT_MSGS),
   attempt: z.number().optional(),
   boot_ms: z.number().optional(),
+  service_role: z.enum(["api", "worker"]).optional(),
+  route_tier: z.enum(["api", "worker"]).optional(),
+  gate_mode: z.enum(["log", "enforce"]).optional(),
 }).passthrough().meta({ title: "SystemEventLogRecord" });
