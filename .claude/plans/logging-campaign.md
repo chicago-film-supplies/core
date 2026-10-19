@@ -43,8 +43,9 @@ retention.
    half). That makes an undeclared field NAME a compile error. ⚠️ Three things depend on the
    signature today:
    - about 10 of `SAFE_PASSTHROUGH`'s keys exist in logs only because of it;
-   - `api-cloudrun/.claude/plans/dev-database-pool.md` adds an undeclared `database` field to
-     the `mirror_*` records on the strength of it;
+   - ~~the api-cloudrun dev database pool's undeclared `database` field on the `mirror_*`
+     records~~ — no longer a dependent: chicago-film-supplies/api-cloudrun#833 was re-scoped
+     to one `test` database with no mirror fan-out, and its plan doc is deleted;
    - every top-level spread site (below).
 2. **A named `context` bag in place of the index signature.** 🔴 **PII trap:** a naively
    declared `context` turns the scrub OFF for exactly the fields that need it. `denylistScrub`
