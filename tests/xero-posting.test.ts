@@ -360,13 +360,47 @@ Deno.test("a NO-REFUND sale_return still bills in both directions", () => {
   assertEquals(xeroPostingFor("sale_return", "sale", 0, -2).kind, "bill");
 });
 
-Deno.test("a reversed rental increase is a CAPITALISED DISPOSAL — a person posts it", () => {
-  // The forward `find` mints a fixed asset via asset.accountant's 1999 import.
-  assertEquals(xeroPostingFor("find", "rental", 50_000, +1).kind, "bill");
-  // Undoing it REMOVES a capitalised unit, which cannot clear accumulated
-  // depreciation — the same refusal a rental `write_off` takes, reached from the
-  // other direction. Keyed on the DOCUMENT's direction, which is the whole point.
-  assertEquals(xeroPostingFor("find", "rental", -50_000, -1), {
+Deno.test("a reversed rental increase POSTS its forward's mirror through 2510", () => {
+  // api-cloudrun#1317. The forward posted DR 1999 / CR 2510, so the reversal
+  // must post DR 2510 / CR 1999 — refusing it, as this row used to, left Xero
+  // overstated by every rental find an operator reversed and re-entered.
+  for (const type of ["find", "make", "adjustment_increase"] as const) {
+    const forward = xeroPostingFor(type, "rental", 50_000, +1);
+    const reversed = xeroPostingFor(type, "rental", -50_000, -1);
+    assertEquals(forward, {
+      kind: "bill",
+      asset_account: 1999,
+      offset_account: 2510,
+      direction: 1,
+      zero_total: true,
+    }, `${type} forward`);
+    assertEquals(reversed, {
+      kind: "bill",
+      asset_account: 1999,
+      offset_account: 2510,
+      direction: -1,
+      zero_total: true,
+    }, `${type} reversal`);
+  }
+  // A no-refund return is an increase through 2510 too, so its rewind — typed
+  // (`sale_return_undo`) or a `reverses` reversal — posts the mirror as well.
+  for (const type of ["sale_return", "sale_return_undo"] as const) {
+    assertEquals(xeroPostingFor(type, "rental", 0, -1), {
+      kind: "bill",
+      asset_account: 1999,
+      offset_account: 2510,
+      direction: -1,
+      zero_total: true,
+    }, type);
+  }
+});
+
+Deno.test("a reversed rental PURCHASE stays a CAPITALISED DISPOSAL — a person posts it", () => {
+  // The one row refused although its forward posted: it moves real AP on a unit
+  // the fixed-asset register may already depreciate. The fail-closed companion
+  // to the arm above — narrowing the guard must not reach this row.
+  assertEquals(xeroPostingFor("purchase", "rental", 50_000, +1).kind, "bill");
+  assertEquals(xeroPostingFor("purchase", "rental", -50_000, -1), {
     kind: "manual",
     reason: "capitalised_disposal",
   });

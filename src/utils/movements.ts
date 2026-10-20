@@ -920,6 +920,10 @@ export type XeroPostingManualReason =
    * balance sheet still balances. Xero additionally cannot do a partial
    * disposal by quantity at all. So CFS refuses rather than posting a journal
    * it cannot complete.
+   *
+   * ⚠️ The REVERSAL of a rental `find` / `make` / `adjustment_increase` is not
+   * one: it corrects a unit that was never acquired, and posts the mirror of its
+   * forward (api-cloudrun#1317). See `xeroPostingFor`.
    */
   | "capitalised_disposal";
 
@@ -1108,12 +1112,26 @@ export function xeroPostingFor(
   //    guard keyed only on the document's direction misses it. This is the arm a
   //    reversed rental `write_off` takes; without it the function returns a bill
   //    `DR 1999 / CR 5700` undoing a disposal that was never posted.
-  //  - `direction === -1` — THIS document removes a capitalised unit, whether it
-  //    is a rental `write_off` or the reversal of a rental `find`. The two read
-  //    identically to Xero and neither can clear accumulated depreciation.
+  //  - `direction === -1 && forward === "purchase"` — the reversal of a rental
+  //    purchase, and the ONE row refused although its forward posted. It moves
+  //    real Accounts Payable on a unit the fixed-asset register may already
+  //    carry and depreciate, which no entry CFS can write clears, so a person
+  //    posts it. Refusing is the safe direction here: nothing one-sided lands.
+  //
+  // ⭐ **The reversal of a rental `find` / `make` / `adjustment_increase` (or a
+  // no-refund `sale_return`, and its `sale_return_undo`) POSTS** — the remaining
+  // `natural === +1, direction === -1` rows, since every non-purchase increase
+  // nets through `2510`. Its forward posted `DR 1999 / CR 2510`, so the rule
+  // above REQUIRES the mirror `DR 2510 / CR 1999`: refusing it left Xero
+  // overstated by every mistyped rental find an operator corrected
+  // (api-cloudrun#1317). It is the correction of a unit that was never
+  // acquired, not a disposal of one, so the depreciation argument does not
+  // reach it. Same exposure the fleet reclass accepted (api-cloudrun#1068): if
+  // the accountant already moved the unit's 1999 balance into the fixed-asset
+  // register, the credit leaves clearing negative for a human to clear.
   if (
     asset_account === XERO_ASSET_ACCOUNTS.fixed_asset_clearing &&
-    (natural === -1 || direction === -1)
+    (natural === -1 || (direction === -1 && forward === "purchase"))
   ) {
     return { kind: "manual", reason: "capitalised_disposal" };
   }

@@ -74,6 +74,28 @@ const RULED_XERO: Record<string, { why: string }> = {
   reclass_in: { why: "api-cloudrun#1068, owner ruling 2026-10-13: each reclass half posts on its own account" },
 };
 
+/**
+ * Single INPUTS whose answer changed by a ruling narrower than a whole type.
+ * Unlike {@link RULED_XERO}, each matched input is pinned to its exact NEW answer
+ * here, and the number of matched inputs is asserted, so the ruling can neither
+ * spread to a neighbouring row nor match nothing.
+ */
+const RULED_XERO_INPUTS: {
+  matches: (t: string, p: string, c: number | null, d: number | null) => boolean;
+  expected: unknown;
+  count: number;
+  why: string;
+}[] = [{
+  // The reversal of a rental increase through 2510 — a no-refund `sale_return`
+  // (cost null or 0) included — posts its forward's mirror.
+  matches: (t, p, c, d) =>
+    p === "rental" && d === -1 &&
+    (["find", "make", "adjustment_increase"].includes(t) || (t === "sale_return" && !c)),
+  expected: { kind: "bill", asset_account: 1999, offset_account: 2510, direction: -1, zero_total: true },
+  count: 3 * 4 + 2,
+  why: "api-cloudrun#1317: a reversed rental increase posts DR 2510 / CR 1999",
+}];
+
 Deno.test("pins: every ruled change still differs from the fixture (no dead entry)", () => {
   for (const [t, ruled] of Object.entries(RULED_CHANGES)) {
     const pinned = pins.contracts[t] as Record<string, unknown> | undefined;
@@ -86,6 +108,7 @@ Deno.test("pins: every ruled change still differs from the fixture (no dead entr
 
 Deno.test("pins: xeroPostingFor answers every pre-campaign input exactly as before", () => {
   let checked = 0;
+  const inputHits = new Map<(typeof RULED_XERO_INPUTS)[number], number>();
   for (const [key, pinned] of Object.entries(pins.xero)) {
     const [t, p, c, d] = key.split("|");
     const num = (s: string) => (s === "null" ? null : Number(s));
@@ -96,7 +119,12 @@ Deno.test("pins: xeroPostingFor answers every pre-campaign input exactly as befo
       out = { threw: (e as Error).message };
     }
     const ruled = RULED_XERO[t];
-    if (ruled) {
+    const ruledInput = RULED_XERO_INPUTS.find((r) => r.matches(t, p, num(c), num(d)));
+    if (ruledInput) {
+      assert(JSON.stringify(strip(pinned)) !== JSON.stringify(ruledInput.expected), `${key} already matched`);
+      assertEquals(strip(out), ruledInput.expected, `${key} (ruled: ${ruledInput.why})`);
+      inputHits.set(ruledInput, (inputHits.get(ruledInput) ?? 0) + 1);
+    } else if (ruled) {
       // A ruled type is pinned by its own tests (`tests/xero-posting.test.ts`);
       // here it must merely have MOVED, so the fixture's old answer cannot
       // come back unnoticed.
@@ -107,4 +135,5 @@ Deno.test("pins: xeroPostingFor answers every pre-campaign input exactly as befo
     checked++;
   }
   assertEquals(checked, 32 * 64, "4 product types × 4 costs × 4 deltas per type");
+  for (const r of RULED_XERO_INPUTS) assertEquals(inputHits.get(r) ?? 0, r.count, r.why);
 });
