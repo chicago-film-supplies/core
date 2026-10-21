@@ -95,7 +95,8 @@ export const FirestoreTimestamp: z.ZodType<FirestoreTimestampType> = z.custom<Fi
   description: "Firestore Timestamp (serialized as an ISO datetime in the spec).",
 });
 
-const OOS_REASONS = ["cleaning", "damaged", "maintenance", "lost"] as const;
+/** Every out-of-service reason, in declaration order. */
+export const OOS_REASONS = ["cleaning", "damaged", "maintenance", "lost"] as const;
 /** Allowed values for out-of-service reason. */
 export type OOSReasonType = typeof OOS_REASONS[number];
 /** Zod schema for OOSReasonType. */

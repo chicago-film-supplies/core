@@ -12,7 +12,15 @@
  * @module
  */
 
-import type { ProductComponent, ProductTypeType, StockMethodType } from "../schemas/mod.ts";
+import {
+  type AuthoredProductComponent,
+  type ComponentPriceKeyType,
+  type ProductComponent,
+  type ProductTypeType,
+  roundComponentQuantity,
+  type StockMethodType,
+} from "../schemas/mod.ts";
+import { isDirectComponent } from "./order-lines.ts";
 
 /**
  * Re-exported from `schemas/product.ts`, where it must live so `ProductSchema`'s
@@ -110,4 +118,83 @@ export function buildComponentEntries<T extends ProductComponent>(
   }
 
   return entries;
+}
+
+// ── Authoring a parent's components (core#130 row 9) ────────────────
+
+/**
+ * A component entry as a writer assembles it, before
+ * {@link normalizeAuthoredComponents} fills the authored-side fields.
+ * `price_overridden` is on the AUTHORED shape (only a parent authors an
+ * override), so a draft may not carry it yet.
+ */
+export type ComponentDraft = ProductComponent & {
+  price_overridden?: ComponentPriceKeyType[];
+};
+
+/**
+ * **Normalize a parent's component drafts into the stored, authored shape** —
+ * the one author, for the api's product writers and the manager's optimistic
+ * `addComponent` alike (core#130 row 9). The manager did not sort, so its
+ * optimistic order differed from the server's echo.
+ *
+ * - `price_overridden` defaults to `[]` — every path here either derived it
+ *   already or built the entry from the source's own price, so nothing is
+ *   overridden by construction.
+ * - `inclusion_type` defaults to `"default"`; `zero_priced` to `false` (what an
+ *   absent value already resolved to — every reader tests `=== true`).
+ * - `quantity` is rounded to the stored 4dp ratio, and an OPTIONAL component's
+ *   is `0`.
+ * - Then {@link sortComponentsZeroPricedFirst}.
+ *
+ * Pure: returns fresh entries; the input is not mutated.
+ */
+export function normalizeAuthoredComponents(
+  drafts: readonly ComponentDraft[] | undefined,
+): AuthoredProductComponent[] {
+  if (!drafts?.length) return [];
+  const authored = drafts.map((c) => ({
+    ...c,
+    price_overridden: c.price_overridden ?? [],
+    inclusion_type: c.inclusion_type ?? "default",
+    zero_priced: c.zero_priced ?? false,
+    quantity: c.inclusion_type === "optional" ? 0 : roundComponentQuantity(c.quantity),
+  }));
+  return sortComponentsZeroPricedFirst(authored);
+}
+
+/**
+ * Stable-sort a `product.components` array so that within each parent's
+ * direct-children block (keyed by `path.at(-1)`, a path of length ≤ 1 being the
+ * root's), entries with `zero_priced === true` precede the rest. Position
+ * across parent blocks is preserved — only same-parent siblings swap.
+ * Mutates `components` in place and returns it; idempotent.
+ */
+export function sortComponentsZeroPricedFirst<T extends ProductComponent>(components: T[]): T[] {
+  if (!components || components.length < 2) return components;
+  const parentGroups = new Map<string, number[]>();
+  components.forEach((c, i) => {
+    const parentUid = isDirectComponent(c) ? "" : c.path[c.path.length - 1];
+    let bucket = parentGroups.get(parentUid);
+    if (!bucket) {
+      bucket = [];
+      parentGroups.set(parentUid, bucket);
+    }
+    bucket.push(i);
+  });
+  const sortedAt: T[] = components.slice();
+  for (const indices of parentGroups.values()) {
+    if (indices.length < 2) continue;
+    const sortedIndices = indices.slice().sort((a, b) => {
+      const az = components[a].zero_priced === true ? 0 : 1;
+      const bz = components[b].zero_priced === true ? 0 : 1;
+      if (az !== bz) return az - bz;
+      return a - b;
+    });
+    for (let k = 0; k < indices.length; k++) {
+      sortedAt[indices[k]] = components[sortedIndices[k]];
+    }
+  }
+  for (let i = 0; i < components.length; i++) components[i] = sortedAt[i];
+  return components;
 }

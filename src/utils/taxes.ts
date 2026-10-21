@@ -862,3 +862,110 @@ export function assignLineTaxes(items: LineItem[], ctx: DocumentTaxContext): Unr
   return [...stale.values()];
 }
 
+
+// ── Building the context (core#130 row 7) ───────────────────────────
+
+/**
+ * The two axes the rule reads off a document's customer snapshot — declared
+ * structurally so a caller's partial projection is COMPLETE against it rather
+ * than cast to a whole snapshot.
+ *
+ * 🔴 Both are optional, so a narrower projection is not a compile error: it
+ * yields `undefined` and degrades to "no claim, not exempt". A census that
+ * projects less than the writer does is measuring a different system.
+ */
+export interface TaxOrganizationAxes {
+  jurisdiction_claim?: JurisdictionType | null;
+  tax_exempt?: boolean | null;
+}
+
+/** What a stored order or invoice supplies to {@link buildDocumentTaxContext}. */
+export interface DocumentTaxInput {
+  /** The document's embedded customer snapshot — level 2 and half the exemption. */
+  organization?: TaxOrganizationAxes | null;
+  /** The document's own `tax_exempt` axis. */
+  documentExempt?: boolean | null;
+  /** The document's `destinations[]`, as stored. */
+  destinations: ReadonlyArray<TaxDestination | null | undefined> | undefined;
+  /** `stores/{uid}.jurisdiction` — the selling store's asserted origin. */
+  origin: JurisdictionType;
+  /** The tax catalog, unfiltered. */
+  catalog: TaxCatalog;
+  /**
+   * The instant the catalog resolves at — an order's earliest delivery start
+   * ({@link deriveOrderTaxAsOf}), an invoice's own ({@link invoiceTaxAsOf}).
+   */
+  asOf: string;
+}
+
+/**
+ * **Assemble the {@link DocumentTaxContext} the rule reads** — the one author,
+ * for the api's writers and the manager's optimistic reprice alike (core#130
+ * row 7). Both used to carry a copy whose docblock said the exempt fold
+ * happened "here and nowhere else".
+ *
+ * ⚠️ **Exemption is folded here.** `org.tax_exempt || doc.tax_exempt === true`,
+ * never `doc ?? org` — a `false` on the document must not un-exempt an exempt
+ * customer, and on a document `false` and absent mean the same thing.
+ *
+ * ⚠️ **Level 1 is passed through, never defaulted.** `null` and absent both
+ * mean "asserts nothing", which is what lets level 2 answer.
+ *
+ * 🔴 **Each pair is SPREAD, then normalized**, so the next field added to a pair
+ * is carried by construction. A projection that enumerated its fields dropped
+ * `uid` — the join key {@link destinationsForItems} matches on — and resolved
+ * every line on a multi-destination order to the ORIGIN, silently.
+ */
+export function buildDocumentTaxContext(input: DocumentTaxInput): DocumentTaxContext {
+  return {
+    destinations: (input.destinations ?? []).map((pair) => ({
+      ...pair,
+      jurisdiction: pair?.jurisdiction ?? null,
+      delivery: pair?.delivery,
+    })),
+    organizationClaim: input.organization?.jurisdiction_claim ?? null,
+    origin: input.origin,
+    exempt: input.organization?.tax_exempt === true || input.documentExempt === true,
+    catalog: input.catalog,
+    asOf: input.asOf,
+  };
+}
+
+/**
+ * The instant an INVOICE's taxes resolve at: the earliest `delivery_start`
+ * among its own destination pairs — {@link deriveOrderTaxAsOf}, the rule an
+ * order applies to its destinations — falling back to `invoice.date` only for
+ * a legacy invoice with no pairs (api-cloudrun#997 D8). Never the order's
+ * destinations: an invoice may override them, and it prices off its own.
+ */
+export function invoiceTaxAsOf(invoice: {
+  destinations?: ReadonlyArray<TaxSourcingDestination | null | undefined>;
+  date: string;
+}): string {
+  return deriveOrderTaxAsOf(invoice.destinations, invoice.date);
+}
+
+/**
+ * {@link buildDocumentTaxContext} for an INVOICE, resolved at
+ * {@link invoiceTaxAsOf}. The origin is the caller's — the invoice's OWN
+ * selling store, never the default store's.
+ */
+export function buildInvoiceTaxContext(
+  invoice: {
+    organization?: TaxOrganizationAxes | null;
+    tax_exempt?: boolean | null;
+    destinations?: ReadonlyArray<(TaxDestination & TaxSourcingDestination) | null | undefined>;
+    date: string;
+  },
+  catalog: TaxCatalog,
+  origin: JurisdictionType,
+): DocumentTaxContext {
+  return buildDocumentTaxContext({
+    organization: invoice.organization,
+    documentExempt: invoice.tax_exempt,
+    destinations: invoice.destinations,
+    origin,
+    catalog,
+    asOf: invoiceTaxAsOf(invoice),
+  });
+}

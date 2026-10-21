@@ -47,7 +47,7 @@ import {
 
 // ── Status enum ─────────────────────────────────────────────────────
 
-const CARD_STATUSES = [
+export const CARD_STATUSES = [
   "draft",
   "planned",
   "active",
@@ -369,10 +369,11 @@ export const CardDates: z.ZodType<CardDatesType> = z.strictObject({
  * `assertClientAuthoredCardShape` (`api-cloudrun/src/lib/serverOwnedCards.ts`)
  * refuses an event source from `POST /cards` and from a recurrence prototype,
  * which is what makes this predicate an authorization fact rather than a
- * heuristic. `manager/src/utils/cardKind.ts` spells it the same way.
+ * heuristic. Exported since core#130 row 6, so no consumer spells it again.
  */
-const isEventCard = (doc: Card): boolean =>
-  doc.sources.some((s) => s.collection === "fulfillments");
+export function isEventCard(doc: Pick<Card, "sources">): boolean {
+  return doc.sources.some((s) => s.collection === "fulfillments");
+}
 
 /**
  * Per-KIND requiredness: the five fields an event card always has, and a

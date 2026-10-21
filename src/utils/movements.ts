@@ -126,6 +126,149 @@ export function isReversing(m: Pick<Movement, "type" | "reverses">): boolean {
   return m.reverses !== null || MOVEMENT_CONTRACTS[m.type].undoes !== null;
 }
 
+// ── Standalone reversal (core#130 row 8) ────────────────────────────
+
+/**
+ * Why a movement may not be reversed ON ITS OWN through
+ * `POST /transactions/{uid}/reverse`, as a code — {@link standaloneReversalRefusal}.
+ * The api maps each to a 400's wording and the manager to a hint; neither
+ * restates which movements earn one.
+ */
+export type StandaloneReversalRefusalCode =
+  /** `count_open` / `count_close` — undone by the opposite stock-method change. */
+  | "count_boundary"
+  /** `enroll` / `unenroll` — the same, for a serialized product's roster. */
+  | "roster_boundary"
+  /** Half of a twin reclass — reversed only as a pair (`POST /stock-reclasses/{uid}/reverse`). */
+  | "reclass_pair"
+  /** A booking's movement — undone by lowering the booking's breakdown. */
+  | "booking"
+  /** A purchase receipt — reversed with the purchase line (`…/receipts/{uid}/reverse`). */
+  | "purchase_receipt"
+  /** A line with an `out-of-service` endpoint — the record's buckets are the other half. */
+  | "out_of_service"
+  /** A reason edit's flag SPLIT, naming two records. */
+  | "oos_split"
+  /** A transfer that moved a record's flagged units. */
+  | "oos_flagged_transfer"
+  /** Any other flagged movement (a shelf flag, a flagged write-off). */
+  | "oos_flagged";
+
+/** {@link standaloneReversalRefusal}'s answer: the class, and the document that owns the movement. */
+export interface StandaloneReversalRefusal {
+  code: StandaloneReversalRefusalCode;
+  /** The owning document — booking, purchase, record or reclass counterpart — when there is one. */
+  uid?: string;
+  /** Every record an `oos_split` names. */
+  uids?: string[];
+}
+
+/**
+ * **Why this movement may NOT be reversed on its own, or `null` when it may**
+ * — the one author of that rule, for the api's 400 and the manager's hidden
+ * Reverse button alike (core#130 row 8).
+ *
+ * A standalone reversal swaps a movement's ledger and location lines and
+ * touches nothing else. That is the whole of a manual movement, and only half
+ * of these:
+ *
+ * - **A count or roster boundary** — undone by the opposite stock-method
+ *   change; negating a `count_open` would subtract its units from a counted
+ *   ledger without making it uncounted.
+ * - 🔴 **Half of a twin reclass** (`reclass_out` / `reclass_in`, neither copy
+ *   refused it). Reversing one half double-counts: the units and their basis
+ *   return to one product while the other still holds them, and the Xero
+ *   mirror posts one side of a 2510 pair, unbalancing it. The pair reverses
+ *   together, at the original amounts.
+ * - **A booking's movement** — the booking's `breakdown` is the other half.
+ * - **A purchase receipt** — the purchase line's `quantity_received` is.
+ * - **An `out-of-service` endpoint, or a flag** (`service` set) — the record's
+ *   buckets and `stores[]` are. A reason edit's SPLIT names two records.
+ *
+ * Keyed on endpoints, sources and type — a shelf `write_off`
+ * (`locations → outside`) touches none of these and stays reversible.
+ */
+export function standaloneReversalRefusal(
+  m: Partial<Pick<Movement, "type" | "uid_booking" | "sources" | "lines" | "service">>,
+): StandaloneReversalRefusal | null {
+  if (m.type === "count_open" || m.type === "count_close") return { code: "count_boundary" };
+  if (m.type === "enroll" || m.type === "unenroll") return { code: "roster_boundary" };
+  if (m.type === "reclass_out" || m.type === "reclass_in") {
+    const partner = reclassPartnerUid({ type: m.type, sources: m.sources ?? [] });
+    return partner === null ? { code: "reclass_pair" } : { code: "reclass_pair", uid: partner };
+  }
+  if (m.uid_booking) return { code: "booking", uid: m.uid_booking };
+  const sources = m.sources ?? [];
+  const purchase = sources.find((s) => s.collection === "purchases");
+  if (purchase) return { code: "purchase_receipt", uid: purchase.uid };
+  const record = (m.lines ?? [])
+    .flatMap((line) => [line.location.from, line.location.to])
+    .find((place) => place?.collection === "out-of-service");
+  if (record) return { code: "out_of_service", uid: record.uid };
+  if (m.service != null) {
+    const records = sources.filter((s) => s.collection === "out-of-service");
+    const owner = records[0]?.uid;
+    if (records.length > 1) return { code: "oos_split", uid: owner, uids: records.map((r) => r.uid) };
+    const code = m.type === "transfer" ? "oos_flagged_transfer" : "oos_flagged";
+    return owner === undefined ? { code } : { code, uid: owner };
+  }
+  return null;
+}
+
+// ── Twin reclass pair (core#130 row 8, api-cloudrun Phase 2b) ────────
+
+/**
+ * The uid of a reclass half's counterpart movement — the `transactions` entry
+ * in its `sources[]`, which the reclass writer stamps on both halves — or
+ * `null` when `m` is not a reclass half or names none.
+ */
+export function reclassPartnerUid(m: Pick<Movement, "type" | "sources">): string | null {
+  if (m.type !== "reclass_out" && m.type !== "reclass_in") return null;
+  return m.sources.find((s) => s.collection === "transactions")?.uid ?? null;
+}
+
+/** Why {@link reclassPairReversal} refuses a pair. */
+export type ReclassPairRefusalCode =
+  /** The requested movement is not a reclass half. */
+  | "not_reclass"
+  /** The two halves do not name each other, or are not one `out` and one `in`. */
+  | "not_a_pair"
+  /** One of the two is itself a reversal; a reversal is not reversed again. */
+  | "is_reversal";
+
+/**
+ * **Plan the reversal of a twin reclass pair** from either half and its
+ * counterpart: validate that they are one pair, and order them.
+ *
+ * ⭐ **The `reclass_in` is reversed FIRST.** It is the half that can be refused
+ * — the target may no longer hold the units (a quantity shortfall), or no
+ * longer hold the basis they arrived with (a basis underflow) — so staging it
+ * first means a refusal writes nothing. Both reversals relieve and restore at
+ * the ORIGINAL amounts: the ledger fold already removes a reversed increase at
+ * exactly its stamped amount and adds back exactly what a reversed decrease
+ * relieved ({@link reversalReliefCents}), and the Xero mirror of each takes its
+ * forward's accounts, so 2510 nets to zero exactly. (Owner ruling 2026-10-20:
+ * exact original cost, refused when the target cannot cover it.)
+ */
+export function reclassPairReversal<M extends Pick<Movement, "uid" | "type" | "sources" | "reverses">>(
+  requested: M,
+  partner: M,
+): { first: M; second: M } | { refusal: ReclassPairRefusalCode } {
+  if (requested.type !== "reclass_out" && requested.type !== "reclass_in") return { refusal: "not_reclass" };
+  if (
+    partner.type === requested.type ||
+    (partner.type !== "reclass_out" && partner.type !== "reclass_in") ||
+    reclassPartnerUid(requested) !== partner.uid ||
+    reclassPartnerUid(partner) !== requested.uid
+  ) {
+    return { refusal: "not_a_pair" };
+  }
+  if (requested.reverses !== null || partner.reverses !== null) return { refusal: "is_reversal" };
+  return requested.type === "reclass_in"
+    ? { first: requested, second: partner }
+    : { first: partner, second: requested };
+}
+
 // ── Placement ───────────────────────────────────────────────────────
 
 /**

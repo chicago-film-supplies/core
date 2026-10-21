@@ -37,6 +37,7 @@ import {
   type CustodyRuleId,
   type CustodyServiceSide,
   custodyRule,
+  emptyBookingUnitSets,
   duplicateCustodySlots,
   isLossUndo,
   type Movement,
@@ -1737,4 +1738,201 @@ export function substitutionCapacity(
     return { prepped: 0, refusal: "Its units are tracked by number: unprep them, then prep the substitute's units." };
   }
   return { prepped: b.prepped, refusal: null };
+}
+
+// ── Rental extension: per-line rebook checks (core#130 row 12) ──────
+
+/** One requested extension line, with the facts its checks read. */
+export interface RebookLine {
+  /** The order row's `path` — its identity. */
+  path: readonly string[];
+  /** The order row's name, for the message. */
+  name: string;
+  uidProduct: string;
+  /** Units the request extends from this row. */
+  quantity: number;
+  /** The units it names — present exactly when the request named some. */
+  units?: readonly number[];
+  /** The ORDER row's quantity. */
+  orderQuantity: number;
+  /**
+   * The FULFILLMENT row's quantity at this path, or `null` when the warehouse
+   * has no line there. The two must agree before a row may extend.
+   */
+  pickedQuantity: number | null;
+  /** The product is `serialized`: the request names WHICH units stay out. */
+  serialized: boolean;
+  /** The booking id on the source leg A, or `null` when the row books nothing. */
+  from: string | null;
+  /** The booking id on the target leg B. */
+  to: string | null;
+}
+
+/** Why one extension (or undo) line may not rebook. */
+export type RebookProblemCode =
+  /** The fulfillment row's quantity disagrees with the order row's. */
+  | "picker_mismatch"
+  /** A serialized row named no units. */
+  | "units_required"
+  /** A non-serialized row named units. */
+  | "units_forbidden"
+  /** A unit is named on two rows of one booking. */
+  | "unit_named_twice"
+  /** The product has no unit roster yet. */
+  | "not_numbered"
+  /** More extended than are out on the booking. */
+  | "exceeds_out"
+  /** An EXTEND whose target leg already holds this booking. */
+  | "target_exists"
+  /** A named unit is neither out on the booking nor one of the roster's unrecorded units. */
+  | "unit_not_out"
+  /** More unrecorded units named than the booking's out leaves untracked. */
+  | "too_many_unrecorded"
+  /** A serialized row named a different count of units than its quantity. */
+  | "unit_count"
+  /** UNDO: the leg's booking has moved since the extension. */
+  | "booking_moved"
+  /** UNDO: returns fewer than the leg holds out. */
+  | "undo_partial"
+  /** UNDO: the leg's named units changed since the extension. */
+  | "undo_units_changed";
+
+/** One {@link rebookProblems} finding. */
+export interface RebookProblem {
+  code: RebookProblemCode;
+  message: string;
+  path?: readonly string[];
+  uid_booking?: string;
+  units?: number[];
+}
+
+/**
+ * **Every reason an extension's lines may not rebook** — the api's in-transaction
+ * checks (`stageRebook`) and the manager's form validation, as ONE list
+ * (core#130 row 12). The manager skipped the picker check: on a row the order
+ * books 10 of and the fulfillment holds 8, it offered the extension and the api
+ * 400'd. The api is right — extending a row the warehouse disagrees with
+ * rebooks units nobody knows the location of.
+ *
+ * Checked, per line then per booking grain (one product may sit at one grain
+ * on several rows, so quantities and units are FOLDED before the booking
+ * checks):
+ *
+ * 1. the fulfillment row holds what the order row does;
+ * 2. a serialized row names its units, a counted row names none, and a pick
+ *    names each unit once per booking and exactly `quantity` of them;
+ * 3. no more than the booking's `out` extend, and an `extend` never lands on a
+ *    leg that already holds the booking;
+ * 4. a named unit is out on the booking — or, up to the booking's untracked
+ *    count, one of the roster's `unattributed_out` units (owner, 2026-10-07);
+ * 5. an `undo` returns the leg exactly as the extension left it (every unit
+ *    out, nothing checked in or re-ordered, the same units).
+ *
+ * A line whose `from` booking does not exist is skipped, as the api skips it:
+ * a row booking nothing moves no custody.
+ *
+ * @param args.bookings - The stored bookings, by id — read inside the api's transaction
+ * @param args.unattributed - The roster's `unattributed_out` units for a product,
+ *   or `null` when the product has no roster (not numbered yet)
+ */
+export function rebookProblems(args: {
+  kind: "extend" | "undo";
+  lines: readonly RebookLine[];
+  bookings: ReadonlyMap<string, Pick<Booking, "uid" | "name" | "breakdown" | "quantity_ordered" | "units">>;
+  unattributed: (uidProduct: string) => readonly number[] | null;
+}): RebookProblem[] {
+  const problems: RebookProblem[] = [];
+  const grains = new Map<string, { line: RebookLine; quantity: number; units: number[] | null }>();
+  for (const line of args.lines) {
+    const path = line.path;
+    if (line.pickedQuantity !== null && line.pickedQuantity !== line.orderQuantity) {
+      problems.push({
+        code: "picker_mismatch",
+        path,
+        message: `${line.name}: the warehouse holds ${line.pickedQuantity} on this row against the order's ` +
+          `${line.orderQuantity} — align the fulfillment before extending it`,
+      });
+    }
+    if (line.serialized && line.units === undefined) {
+      problems.push({ code: "units_required", path, message: `${line.name}: its units are tracked by number — name the units that stay out` });
+    }
+    if (!line.serialized && line.units !== undefined) {
+      problems.push({ code: "units_forbidden", path, message: `${line.name}: its units are not tracked by number, so name none` });
+    }
+    if (line.serialized && line.units !== undefined && line.units.length !== line.quantity) {
+      const q = line.quantity;
+      problems.push({
+        code: "unit_count",
+        path,
+        message: `${line.name}: name ${q} unit${q === 1 ? "" : "s"}, ${line.units.length} named`,
+      });
+    }
+    if (line.from === null || !args.bookings.has(line.from)) continue;
+    const prior = grains.get(line.from);
+    const units = line.units === undefined ? null : [...(prior?.units ?? []), ...line.units];
+    if (units !== null && new Set(units).size !== units.length) {
+      problems.push({ code: "unit_named_twice", path, message: `${line.name}: a unit is named on two rows of the same booking` });
+    }
+    grains.set(line.from, {
+      line,
+      quantity: (prior?.quantity ?? 0) + line.quantity,
+      units: units === null ? null : [...new Set(units)].sort((a, b) => a - b),
+    });
+  }
+
+  for (const [from, grain] of grains) {
+    const a = args.bookings.get(from)!;
+    const out = a.breakdown.out;
+    if (args.kind === "undo") {
+      if (sumBookingBreakdown(a.breakdown) !== out || a.quantity_ordered !== out) {
+        problems.push({
+          code: "booking_moved",
+          uid_booking: a.uid,
+          message: `${a.name}: units on this leg have moved since the extension (checked in, marked or re-ordered), ` +
+            "so it cannot be undone",
+        });
+      } else if (grain.quantity !== out) {
+        problems.push({ code: "undo_partial", uid_booking: a.uid, message: `${a.name}: the undo returns ${grain.quantity} of the ${out} out on this leg` });
+      } else {
+        const named = a.units?.out ?? [];
+        if (grain.units !== null && (named.length !== out || named.some((n) => !grain.units!.includes(n)))) {
+          problems.push({ code: "undo_units_changed", uid_booking: a.uid, message: `${a.name}: this leg's units changed since the extension, so it cannot be undone` });
+        }
+      }
+    }
+    if (grain.quantity > out) {
+      problems.push({ code: "exceeds_out", uid_booking: a.uid, message: `${a.name}: extends ${grain.quantity}, but ${out} are out on this leg` });
+    }
+    if (args.kind === "extend" && grain.line.to !== null && args.bookings.has(grain.line.to)) {
+      problems.push({ code: "target_exists", uid_booking: grain.line.to, message: `${a.name}: the new leg already holds this booking` });
+    }
+    if (grain.units === null) continue;
+    const pool = args.unattributed(grain.line.uidProduct);
+    if (pool === null) {
+      problems.push({
+        code: "not_numbered",
+        uid_booking: a.uid,
+        message: `${a.name}: its units are not numbered yet — finish its conversion before extending it`,
+      });
+      continue;
+    }
+    // On a seeded product a booking still storing `null` reads as empty sets.
+    const aOut = (a.units ?? emptyBookingUnitSets()).out;
+    const unrecorded = new Set(pool);
+    const notOwn = grain.units.filter((n) => !aOut.includes(n));
+    const notOut = notOwn.filter((n) => !unrecorded.has(n));
+    if (notOut.length > 0) {
+      problems.push({ code: "unit_not_out", uid_booking: a.uid, units: notOut, message: `${a.name}: unit ${notOut.join(", ")} is not out on this leg` });
+    }
+    const untracked = Math.max(0, out - aOut.length);
+    if (notOwn.length > untracked) {
+      problems.push({
+        code: "too_many_unrecorded",
+        uid_booking: a.uid,
+        units: notOwn,
+        message: `${a.name}: names ${notOwn.length} unrecorded unit(s), but only ${untracked} of this leg's out are unrecorded`,
+      });
+    }
+  }
+  return problems;
 }

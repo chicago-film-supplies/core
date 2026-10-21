@@ -2464,6 +2464,119 @@ export function componentDepthOf(
   };
 }
 
+/** The money one visible row absorbs from the zero-priced components hidden beneath it. */
+export interface RolledUpMoney {
+  /** Σ the hidden rows' tax `amount_cents`. */
+  tax: number;
+  /** Σ the hidden rows' `subtotal_discounted_cents ?? subtotal_cents`. */
+  subtotal: number;
+  /** Σ the hidden rows' `total_cents`. */
+  total: number;
+}
+
+/** The item surface {@link documentRenderRows} reads. */
+export interface RenderRowItem {
+  uid: string;
+  type: string;
+  path?: string[];
+  zero_priced?: boolean | null;
+  price?: {
+    subtotal_cents?: number;
+    subtotal_discounted_cents?: number | null;
+    total_cents?: number;
+    taxes?: readonly { amount_cents: number }[] | null;
+  } | null;
+}
+
+/** {@link documentRenderRows}' answer — every set the quote and invoice grids draw from. */
+export interface DocumentRenderRows<T extends RenderRowItem> {
+  /** Every non-divider row. */
+  lineItems: T[];
+  /** {@link lineItems} without the document-level `transaction_fee` lines. */
+  shownLineItems: T[];
+  /** The rows to draw, in document order: dividers with a live descendant, lines that are not fees. */
+  shownItems: T[];
+  /** {@link shownItems} minus the hidden zero-priced components. */
+  renderedItems: T[];
+  /** Keyed by {@link pathKey}: the money a visible row absorbs from hidden components beneath it. */
+  rolledUp: Map<string, RolledUpMoney>;
+  /** Nesting depth under another LINE ({@link componentDepthOf}, over the full array). */
+  componentDepth: (item: { path?: readonly string[] | null }) => number;
+  /** A row's identity as a map key — its `path`, NUL-joined. Never its uid. */
+  pathKey: (item: { path?: readonly string[] | null }) => string;
+}
+
+/**
+ * **The rows a customer document draws** — the one author of what the quote and
+ * invoice templates hand-copied (core#130 row 11), which differed only in the
+ * `order` divider level.
+ *
+ * 1. A `transaction_fee` is stored in `items[]` but is NOT a line of the
+ *    document: it is priced from the total, and the totals block carries it
+ *    with its rate. Drawing both prints its money twice.
+ * 2. A divider is drawn only when a shown line hangs beneath it, so filtering
+ *    the fee cannot strand a `Transaction Fees` banner over nothing.
+ * 3. With `hideZeroPricedComponents`, a COMPONENT (depth > 0) with
+ *    `zero_priced === true` is hidden and its money rolls up to the nearest
+ *    visible LINE ancestor. A row with no visible ancestor STAYS: losing money
+ *    silently would make the table stop reconciling with its own footer. A
+ *    top-level zero-priced line is never hidden — it is something the customer
+ *    was given at no charge.
+ *
+ * Keyed by PATH, never by uid: `item.uid` repeats within one document.
+ *
+ * @param items - The document's full `items[]`
+ * @param levels - Its divider hierarchy — `ORDER_ITEM_LEVELS` for a quote,
+ *   `INVOICE_ITEM_LEVELS` for an invoice
+ * @param options.hideZeroPricedComponents - The family's declared param
+ */
+export function documentRenderRows<T extends RenderRowItem>(
+  items: readonly T[],
+  levels: readonly string[],
+  options: { hideZeroPricedComponents?: boolean } = {},
+): DocumentRenderRows<T> {
+  const levelSet = new Set(levels);
+  const isDivider = (i: T) => levelSet.has(i.type);
+  const isDocumentFee = (i: T) => i.type === "transaction_fee";
+  const lineItems = items.filter((i) => !isDivider(i));
+  const shownLineItems = lineItems.filter((i) => !isDocumentFee(i));
+  const liveAncestors = new Set(shownLineItems.flatMap((i) => i.path ?? []));
+  const shownItems = items.filter((i) => !isDocumentFee(i) && (!isDivider(i) || liveAncestors.has(i.uid)));
+
+  const componentDepth = componentDepthOf(items);
+  const SEP = String.fromCharCode(0);
+  const pathKey = (item: { path?: readonly string[] | null }) => (item.path ?? []).join(SEP);
+  const itemTaxCents = (item: T) => (item.price?.taxes ?? []).reduce((sum, t) => sum + t.amount_cents, 0);
+
+  const hiddenPaths = new Set<string>();
+  const rolledUp = new Map<string, RolledUpMoney>();
+  if (options.hideZeroPricedComponents === true) {
+    const byPath = new Map(lineItems.map((i) => [pathKey(i), i]));
+    const eligible = lineItems.filter((i) => i.zero_priced === true && componentDepth(i) > 0);
+    const eligibleKeys = new Set(eligible.map(pathKey));
+    for (const hidden of eligible) {
+      // Walk up to the nearest ancestor that is a line AND still visible, so a
+      // component of a hidden component rolls all the way to what renders.
+      let up = (hidden.path ?? []).slice(0, -1);
+      while (up.length > 0) {
+        const key = up.join(SEP);
+        if (byPath.has(key) && !eligibleKeys.has(key)) {
+          const acc = rolledUp.get(key) ?? { tax: 0, subtotal: 0, total: 0 };
+          acc.tax += itemTaxCents(hidden);
+          acc.subtotal += hidden.price?.subtotal_discounted_cents ?? hidden.price?.subtotal_cents ?? 0;
+          acc.total += hidden.price?.total_cents ?? 0;
+          rolledUp.set(key, acc);
+          hiddenPaths.add(pathKey(hidden));
+          break;
+        }
+        up = up.slice(0, -1);
+      }
+    }
+  }
+  const renderedItems = shownItems.filter((i) => !hiddenPaths.has(pathKey(i)));
+  return { lineItems, shownLineItems, shownItems, renderedItems, rolledUp, componentDepth, pathKey };
+}
+
 /**
  * A single uniqueness violation reported by {@link validateItemUniqueness}
  * (and the invoice-scoped variant in `@cfs/core/utils/invoices`).
@@ -2786,46 +2899,78 @@ const DELIVERY_TYPES = new Set(["rental", "sale"]);
 const COLLECTION_TYPES: ReadonlySet<string> = new Set(DOC_LINE_ITEM_TYPES.filter(isCollectionLineType));
 
 /**
- * Walk backwards from `index` to determine which destination and group
- * an item belongs to. Both are the DIVIDER's own `uid` (not its display name,
- * and not the endpoint it ships to) — keying on uid lets display names be
+ * The structural dividers a row sits under, keyed by divider level, plus its
+ * parent product — read off the row's own `path` (core#130 row 3).
+ *
+ * `path` is the row identity and `computeItemPaths` its one author, and it
+ * already names every divider in scope: `[…dividers outermost first, …kit
+ * ancestry, self]`. So this matches each segment against the dividers in
+ * `items` BY TYPE and never walks positions. A positional walk is how the
+ * manager's invoice copy went wrong: it stepped past a destination divider, so
+ * for `[O, A, G, X, B, Y]` it put Y in group G — collapsing G hid Y, and Y
+ * indented one level too deep. Y's path is `[O, B, Y]`; B closed G.
+ *
+ * The row's own uid is never one of its dividers: a group row reports the
+ * destination it sits in and `group: null`; a destination row reports only the
+ * levels above it.
+ *
+ * `product` is the parent product's uid (`path.at(-2)` when that is not a
+ * divider) and `productPath` its full path. Key anything per-parent on
+ * `productPath`: a uid repeats within one group (core#129).
+ *
+ * @param item - The row
+ * @param items - The document's items, to tell divider segments from kit ones
+ * @param levels - The document's divider hierarchy — `ORDER_ITEM_LEVELS`, or
+ *   `INVOICE_ITEM_LEVELS` from `@cfs/core/utils/invoices`
+ */
+export function itemDividers<L extends string>(
+  item: StructuralItem,
+  items: readonly StructuralItem[],
+  levels: readonly L[],
+): ItemDividers<L> {
+  const levelSet = new Set<string>(levels);
+  const dividerType = new Map<string, L>();
+  for (const it of items) if (levelSet.has(it.type)) dividerType.set(it.uid, it.type as L);
+
+  const dividers = Object.fromEntries(levels.map((l) => [l, null])) as Record<L, string | null>;
+  const path = item.path ?? [];
+  const ancestry = path.slice(0, -1);
+  for (const uid of ancestry) {
+    const type = dividerType.get(uid);
+    if (type !== undefined) dividers[type] = uid;
+  }
+  const parent = ancestry.at(-1);
+  const product = parent !== undefined && !dividerType.has(parent) ? parent : null;
+  return { ...dividers, product, productPath: product === null ? null : ancestry };
+}
+
+/** {@link itemDividers}' answer: one uid (or `null`) per divider level, plus the parent product. */
+export type ItemDividers<L extends string> = Record<L, string | null> & {
+  /** The parent product's uid — `null` for a non-component. Not a row identity. */
+  product: string | null;
+  /** The parent product's full `path` — `null` for a non-component. */
+  productPath: string[] | null;
+};
+
+/**
+ * Which destination and group an ORDER row belongs to — {@link itemDividers}
+ * over `ORDER_ITEM_LEVELS`. Both are the DIVIDER's own `uid` (not its display
+ * name, and not the endpoint it ships to) — keying on uid lets display names be
  * edited without losing collapse state, and stops two sections that happen to
  * deliver to one address from sharing a collapse key.
  *
- * ⚠️ **`destination` was the divider's `uid_delivery` until the pair re-key**
- * (api-cloudrun#662/#663/#664). Two dividers legitimately share one
- * `destinations/{uid}`, so that key collapsed both sections together; and the
- * field itself is deleted from the divider at the end of that campaign. This
- * value is only ever a UI collapse key, so nothing durable was keyed on the
- * old spelling.
+ * ⚠️ **Read off `path` since core#130**, not by walking back from `index`. The
+ * one visible difference is on a DIVIDER row: a destination row reports
+ * `destination: null` (it used to report the previous section's), and a group
+ * row reports its destination with `group: null`, as before.
  *
  * `product` is the parent product's UID and `productPath` its full path. Key
  * anything per-parent on `productPath`: a uid repeats within one group (a kit
  * standalone and nested in another kit), so `product` names both (core#129).
  */
 export function getGroupPath(items: LineItem[], index: number): GroupPath {
-  const item = items[index];
-  const structuralUids = getStructuralUids(items);
-  const product = getParentProductUid(item, structuralUids);
-  const result: GroupPath = {
-    destination: null,
-    group: null,
-    product,
-    productPath: product === null ? null : (item.path ?? []).slice(0, -1),
-  };
-
-  for (let i = index - 1; i >= 0; i--) {
-    const entry = items[i];
-    if (entry.type === "group" && result.group === null) {
-      result.group = entry.uid ?? null;
-    }
-    if (entry.type === "destination") {
-      result.destination = entry.uid ?? null;
-      break;
-    }
-  }
-
-  return result;
+  const { destination, group, product, productPath } = itemDividers(items[index], items, ORDER_ITEM_LEVELS);
+  return { destination, group, product, productPath };
 }
 
 /**

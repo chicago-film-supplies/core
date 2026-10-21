@@ -44,6 +44,8 @@ import {
   type StockMethodType,
   type ExchangedForEntryType,
   ExchangedForList,
+  OOS_REASONS,
+  type OOSReasonType,
   type InvoiceStatusType,
   InvoiceStatusEnum,
   NameField,
@@ -740,6 +742,18 @@ export interface ExchangedForViolation {
 }
 
 /**
+ * **The take-back reasons an exchange of `disposition` may give** — why a unit
+ * comes back on it (core#130 row 14). `lost` only on `send_now`: a lost unit
+ * cannot come back on the exchange's own trip. Every other disposition takes
+ * every other reason. The one author: {@link exchangedForViolations} refuses
+ * outside it, the api's fulfillment edit refuses outside it, and the manager
+ * offers exactly it.
+ */
+export function takeBackReasonsFor(disposition: ExchangeDispositionType): readonly OOSReasonType[] {
+  return disposition === "send_now" ? OOS_REASONS : OOS_REASONS.filter((r) => r !== "lost");
+}
+
+/**
  * {@link checkExchangedFor}'s rules as DATA, so a writer or a client can ask the
  * same question without a Zod context — the refinement is this function plus an
  * `addIssue` per entry, as {@link checkDestinationJoin} is for
@@ -785,7 +799,7 @@ export function exchangedForViolations(doc: {
             `against nor another exchange on it`,
         });
       }
-      if (entry.reason === "lost" && exchange.disposition !== "send_now") {
+      if (!takeBackReasonsFor(exchange.disposition).includes(entry.reason)) {
         out.push({
           index: i,
           entry: j,

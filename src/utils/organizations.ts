@@ -98,6 +98,38 @@ export function orgParentUid(node: Pick<Organization, "path">): string | null {
   return path.length < 2 ? null : path[path.length - 2].uid;
 }
 
+/**
+ * Is this node an auto-minted `(default)` placeholder — `derived` on its OWN
+ * `path` segment (core#130 row 10)?
+ *
+ * 🔴 **Hand this a Firestore row, never a Typesense hit.** The index declares
+ * `path` and `path.name` but not `path.derived`, so an index-sourced chain
+ * answers `undefined` for every segment and this reads `false` for a real
+ * placeholder.
+ *
+ * A placeholder states no business fact (invariants 10 and 12): no billing
+ * address, no tax axes, and its documents bill to its root's Xero contact.
+ */
+export function isOrgDerived(node: Pick<Organization, "path"> | null | undefined): boolean {
+  return node?.path?.at(-1)?.derived === true;
+}
+
+/**
+ * The derived `(default)` project directly under `orgUid` among `nodes`, or
+ * `null`. Same sourcing rule as {@link isOrgDerived}.
+ *
+ * ⚠️ **There can be more than one, and the server is what prevents it.**
+ * Sibling-name uniqueness is scoped to NON-derived siblings (invariant 6), so a
+ * second `(default)` would coexist rather than be refused; the mint-or-reuse
+ * path reuses the FIRST, and so does this.
+ */
+export function derivedProjectOf<T extends Pick<Organization, "uid" | "path">>(
+  nodes: readonly T[],
+  orgUid: string,
+): T | null {
+  return nodes.find((node) => node.uid !== orgUid && orgParentUid(node) === orgUid && isOrgDerived(node)) ?? null;
+}
+
 /** This node's OWN name — one segment, not the composed label. */
 export function orgOwnName(node: Pick<Organization, "path">): string {
   const path = node.path;

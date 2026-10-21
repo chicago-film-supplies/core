@@ -57,6 +57,7 @@ import {
   type LinePricingOptions,
   type PriceModifier,
   type PriceObject,
+  type StructuralItem,
   type Tax,
 } from "./orders.ts";
 import { billableDays } from "./dates.ts";
@@ -66,10 +67,13 @@ import { pricingTaxesOf } from "./tax-classes.ts";
 /**
  * Which document is being priced, and whether it may be.
  *
- * An invoice states its `status` and whether any settlement (payment or credit)
- * has been recorded against it. The refusal reads exactly what api-cloudrun's
- * `updateInvoice` gate reads — `invoiceHasSettlement || paid || void` — so the
- * two cannot disagree about what "settled" means.
+ * An invoice states its `status` and `has_settlement`, which every caller
+ * computes with `invoiceHasSettlement` (`utils/invoices.ts`) — money paid,
+ * credited or voided, or a live closure. The refusal therefore reads exactly
+ * what api-cloudrun's `updateInvoice` gate reads —
+ * `invoiceHasSettlement || paid || void` — so the two cannot disagree about
+ * what "settled" means. (An exported `hasSettlement` used to answer this with
+ * `> 0` over two buckets; core#130 row 2 deleted it.)
  */
 export type PriceDocumentKind =
   | { kind: "order"; status: OrderStatusType }
@@ -241,23 +245,6 @@ export interface PricedDocument<T extends LineItem> {
 }
 
 /**
- * Whether an invoice carries a settlement that freezes its money: cents PAID or
- * CREDITED on its own stored totals, which are the projection of the
- * settlements journal (stock campaign P1, gap G16).
- *
- * ⭐ **This definition wins over the manager's `settlements.length > 0`**, which
- * also counted void entries and $0 closures and so froze a reprice the server
- * would make: the manager then folded stale lines while the write repriced
- * them. A void is the invoice's `status`, not a settlement; a $0 closure moves
- * no money. The api's write gate (`firestoreWrite.ts`) is this rule.
- */
-export function hasSettlement(invoice: {
-  totals?: { amount_paid_cents?: number | null; amount_credited_cents?: number | null } | null;
-}): boolean {
-  return (invoice.totals?.amount_paid_cents ?? 0) > 0 || (invoice.totals?.amount_credited_cents ?? 0) > 0;
-}
-
-/**
  * Why a document's money may NOT move, or `null` when it may (D3): a void
  * invoice is retracted, and a paid or settled one is agreed. The rule
  * `priceDocument` refuses on, exported so the manager reads it instead of
@@ -405,7 +392,46 @@ export function windowChargeableDays(
   if (!daysFromWindows(item)) return null;
   const pair = pairOf(item, pairs);
   if (!pair) return null;
+  return pairBilledDays(pair);
+}
+
+/** A pair's billed days: Σ `max(d, 5)` over 2+ windows, the raw count over one. */
+function pairBilledDays(pair: PairChargeWindows): number {
   return pair.days.length >= 2 ? billableDays(pair.days) : pair.days[0];
+}
+
+/**
+ * **The `chargeable_days` to SEED on a rental line about to land under one
+ * destination divider** (core#130 row 5) — the same rule
+ * {@link windowChargeableDays} prices with, for a client building a line before
+ * the pricer has run.
+ *
+ * The manager seeded `chargedDays` (a plain Σ) and found the pair by its
+ * POSITION in `destinations[]`, so on a 2+ window pair `[8, 3]` it showed 11
+ * where the pricer bills 13, and on a reordered pair list it read the wrong
+ * pair. This joins by the divider's own `path` — `[pair.uid]` on an order,
+ * `[uid_order, pair.uid]` on an invoice — exactly as the pricer does.
+ *
+ * The seed is display-only for a live document (the server reprices); it
+ * matters because it is what the operator sees until then.
+ *
+ * @param items - The document's items, to read the divider's `path`
+ * @param destinations - The document's stored pairs
+ * @param dividerUid - The destination divider the line lands under
+ * @returns `null` when that pair states no windows, or the divider is unknown
+ */
+export function seedChargeableDays(
+  items: readonly StructuralItem[],
+  destinations: readonly ChargeWindowPair[],
+  dividerUid: string,
+): number | null {
+  const divider = items.find((it) => it.uid === dividerUid && it.type === "destination");
+  if (!divider?.path) return null;
+  const path = divider.path;
+  const pair = statedChargeWindows(destinations).find((p) =>
+    p.divider_path.length === path.length && p.divider_path.every((segment, i) => path[i] === segment)
+  );
+  return pair ? pairBilledDays(pair) : null;
 }
 
 /**

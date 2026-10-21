@@ -55,6 +55,7 @@
  * @module
  */
 import currency from "currency.js";
+import type { RateType } from "../schemas/mod.ts";
 
 /**
  * Widen dollars to exact integer cents.
@@ -216,6 +217,21 @@ export const parseRate = (s: string | null | undefined): number =>
  * denomination: `$6.39` should not read `$6.3900`. Money is the opposite and
  * pads to exactly 2, which is why these are two functions.
  *
+ * ⚠️ **A DOLLAR rate keeps at least two decimals, and groups its thousands**
+ * (core#130 row 4): `$43.60`, never `$43.6`, and `$1,250.50` as `formatCents`
+ * prints it. The trim stops at the cent and never below it, so `$0.055` still
+ * reads `$0.055` — rounding a flat rate to the cent is the beta.117 regression
+ * in display form, and it is exactly what the manager's private copy did
+ * (`$0.055` → `$0.06`). A percent or a bare number trims to the digit.
+ *
+ * ```ts
+ * formatRate(43.6, { symbol: "$" });  // "$43.60"
+ * formatRate(0.055, { symbol: "$" }); // "$0.055"
+ * ```
+ *
+ * For a `{ type, rate }` pair whose UNIT is the row's, use
+ * {@link formatDiscriminatedRate} rather than choosing the symbol at the site.
+ *
  * @param value - The rate, in whatever unit the field declares. NOT cents.
  * @param options.dp - Maximum decimal places. 4 — Xero's `DiscountRate` width.
  * @param options.symbol - `"$"` prefixes; `"%"` suffixes; `""` (default) neither.
@@ -225,12 +241,40 @@ export function formatRate(
   options: { dp?: number; symbol?: string } = {},
 ): string {
   const { dp = 4, symbol = "" } = options;
+  const dollars = symbol === "$";
   const fixed = value.toFixed(dp);
-  const trimmed = fixed.includes(".") ? fixed.replace(/\.?0+$/, "") : fixed;
-  const negative = trimmed.startsWith("-");
-  const magnitude = negative ? trimmed.slice(1) : trimmed;
+  let trimmed = fixed.includes(".") ? fixed.replace(/\.?0+$/, "") : fixed;
+  if (dollars) {
+    // Pad back to the cent: the trim's ceiling stays `dp`, its floor is 2.
+    const [whole, frac = ""] = trimmed.split(".");
+    trimmed = `${whole}.${frac.padEnd(2, "0")}`;
+  }
+  // `-0.00001` fixes to `-0.0000`, which is zero and must not print a sign.
+  const negative = trimmed.startsWith("-") && /[1-9]/.test(trimmed);
+  let magnitude = trimmed.startsWith("-") ? trimmed.slice(1) : trimmed;
+  if (dollars) magnitude = magnitude.replace(/^\d+/, (w) => w.replace(/\B(?=(\d{3})+(?!\d))/g, ","));
   if (symbol === "%") return `${negative ? "-" : ""}${magnitude}%`;
   return `${negative ? "-" : ""}${symbol}${magnitude}`;
+}
+
+/**
+ * Render a discriminated `{ type, rate }` — `Discount`, `PriceModifier`, `Tax`,
+ * `TaxRef` — in the unit its `type` names: `percent` → `10.25%`, `flat` →
+ * `$0.055` (dollars per unit, 4dp ceiling, 2dp floor). One switch, so a site
+ * cannot pick the wrong arm and a new {@link RateType} member is a compile
+ * error here rather than a silent `$` (core#130 row 4).
+ */
+export function formatDiscriminatedRate(r: { type: RateType; rate: number }): string {
+  switch (r.type) {
+    case "percent":
+      return formatRate(r.rate, { symbol: "%" });
+    case "flat":
+      return formatRate(r.rate, { symbol: "$" });
+    default: {
+      const unreachable: never = r.type;
+      throw new Error(`unknown rate type: ${String(unreachable)}`);
+    }
+  }
 }
 
 /**

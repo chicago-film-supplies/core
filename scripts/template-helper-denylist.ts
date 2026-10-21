@@ -101,7 +101,16 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   //     picker (api-cloudrun#591) — it prices nothing, so it renders nothing.
   // `cardPickBucket` is the `cards:pick_bucket` INDEX-TIME producer. It returns
   // a destination uid or a facet sentinel — a roll-up key, never printed text.
-  cards: ["cardPickBucket"],
+  cards: [
+    "cardPickBucket",
+    // core#130 row 6: the PATCH gate's field locks and status options, as a
+    // client asks them — edit affordances on a card, never printed text.
+    "cardNextStatus",
+    "cardStatusOptions",
+    "isCardFieldLocked",
+    "isCardStatusAuto",
+    "isEventCard",
+  ],
   // The one author of a booking's collection fields (api-cloudrun#1154) — a
   // WRITER decides them; a template reads `destinations.collection` off the
   // booking or order it renders.
@@ -118,6 +127,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "resolveDestinationJurisdictionSeed",
   ],
   organizations: [
+    // core#130 row 10: finds a node in a SUBTREE list, which no render context holds.
+    "derivedProjectOf",
     "assertOrgAncestorsComplete",
     "buildOrganizationSnapshot",
     "computeOrganizationNode",
@@ -181,6 +192,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   //   - the other six — still unreachable: each takes an `InventoryLedger` or a
   //     whole `Movement` document, and a session's items are neither.
   movements: [
+    // core#130 row 8: the reversal refusal and the reclass pair planner gate a
+    // WRITE; a rendered document reverses nothing.
+    "standaloneReversalRefusal",
+    "reclassPartnerUid",
+    "reclassPairReversal",
     "applyMovementToLedger", // the ledger fold — write-path only
     "deriveServiceQuantities", // ledger derivation — write-path only
     "endpointServiceReason", // ledger derivation — write-path only
@@ -238,6 +254,9 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "parseBookingId",
   ],
   orders: [
+    // core#130 row 3: collapse/indent keys for an editing table — divider uids,
+    // never printed. A template draws from `documentRenderRows` instead.
+    "itemDividers",
     // The divider ↔ pair join, derived at WRITE time and then stored as
     // `destinations[i].uid`. A render context reads that field directly; a
     // template re-deriving it would be recomputing an identity the document
@@ -318,6 +337,12 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "isTransactionFeePricingItem",
   ],
   invoices: [
+    // core#130 row 1: the status a balance write implies — write-path; a template
+    // reads the STORED status.
+    "deriveCreditNoteStatus",
+    "derivePurchaseCreditStatus",
+    // core#130 row 13: a pair's identity key — a join key, never printed.
+    "invoicePairKey",
     // The invoice totals AUDIT oracle (api-cloudrun#575, #997 step 2): re-derives
     // totals from line inputs to check stored ones. A template renders stored
     // totals, and re-deriving them is how a document disagrees with itself.
@@ -427,6 +452,10 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "quantityPerParentForSlot", // a line's kit ratio stamp, at build time
   ],
   products: [
+    // core#130 row 9: the authoring normalizer — write-path, and no render
+    // context holds a product.
+    "normalizeAuthoredComponents",
+    "sortComponentsZeroPricedFirst",
     // Denormalization machinery for `products.query_by_images`, re-exported here
     // from `schemas/product.ts` so writers have one import. Write-path only, and
     // a template could never call it usefully: no render context holds a product
@@ -627,6 +656,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // WRITE — a template renders a document whose custody already moved, and
   // "which action may the operator take next" has no reader on paper.
   custody: [
+    // core#130 row 12: an extension request's refusals — a write gate.
+    "rebookProblems",
     "applyCustodyActions",
     "canEditServiceBreakdown",
     "canonicalLossUndos",
@@ -702,6 +733,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // them at render time is how a document comes to disagree with the doc it
   // renders — so nothing here belongs in a render context.
   "price-document": [
+    // core#130 row 5: an AUTHORING-time seed for a line not yet priced.
+    "seedChargeableDays",
     // The write-path guard for the charge-window pair invariant (core#113). It
     // answers "should this document be REFUSED", which is a question about a
     // write; by the time a template runs, the write has already been accepted.

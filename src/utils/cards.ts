@@ -10,7 +10,16 @@
  *
  * @module
  */
-import { type Booking, type Card, type CardAction, type CardStatus, ownsKey } from "../schemas/mod.ts";
+import {
+  type Booking,
+  type Card,
+  type CardAction,
+  type CardLockKey,
+  CARD_STATUSES,
+  type CardStatus,
+  isEventCard,
+  ownsKey,
+} from "../schemas/mod.ts";
 import { sumBreakdownKeys, terminalQuantity } from "./bookings.ts";
 
 /**
@@ -273,4 +282,81 @@ export function cardPickBucket(
   if (inStore) return PICK_BUCKET_CUSTOMER_COLLECT;
   const uid = card.destination?.uid;
   return typeof uid === "string" && uid.length > 0 ? uid : null;
+}
+
+// ── Field locks and status options (core#130 row 6) ─────────────────
+
+export { isEventCard };
+
+/**
+ * Which lock key guards a PATCHable card field. `all_day` rides on the `dates`
+ * lock — they describe one calendar concept, so locking one locks both. Every
+ * other field is guarded by the lock of its own name.
+ */
+function lockKeyFor(field: string): string {
+  return field === "all_day" ? "dates" : field;
+}
+
+/**
+ * Is this field locked against an operator edit? The api's PATCH gate
+ * (`api-cloudrun/src/services/cards.ts`) refuses exactly these, so a client
+ * that disables on this answer cannot offer an edit the server 403s.
+ *
+ * ⚠️ **`status` under `status_auto` alone is NOT locked** — it is NARROWED, to
+ * `blocked` or its current value. Ask {@link cardStatusOptions} for that; this
+ * answers `true` for `status` only under a `status` lock.
+ */
+export function isCardFieldLocked(card: Pick<Card, "locked">, field: string): boolean {
+  return (card.locked as readonly string[]).includes(lockKeyFor(field));
+}
+
+/** Does the server compute this card's status (`status_auto`)? */
+export function isCardStatusAuto(card: Pick<Card, "locked">): boolean {
+  return card.locked.includes("status_auto" satisfies CardLockKey);
+}
+
+/**
+ * The statuses an operator may set on this card — the api's PATCH gate, as a
+ * list.
+ *
+ * - **`[]` under a `status` lock**: nothing is settable. The manager used to
+ *   offer the full list here and the api 403'd the pick.
+ * - Under `status_auto`: `[current, "blocked"]` (or just `["blocked"]` once
+ *   blocked), so an operator can flag a card blocked but cannot desync the
+ *   lifecycle from the booking roll-up.
+ * - Otherwise every status.
+ */
+export function cardStatusOptions(card: Pick<Card, "locked" | "status">): CardStatus[] {
+  if (isCardFieldLocked(card, "status")) return [];
+  if (!isCardStatusAuto(card)) return [...CARD_STATUSES];
+  return card.status === "blocked" ? [card.status] : [card.status, "blocked"];
+}
+
+/**
+ * The status one forward step takes this card to, or `null` when there is none
+ * (the card's default action disables). Always one of
+ * {@link cardStatusOptions}.
+ *
+ * - Under a `status` lock: `null`.
+ * - Under `status_auto`: toggles to `blocked`; once blocked the server reclaims
+ *   it on its next recompute, so there is no forward step from a client.
+ * - Otherwise `draft → planned → active → complete`, `blocked → active`, and
+ *   `complete` / `canceled` are terminal.
+ */
+export function cardNextStatus(card: Pick<Card, "locked" | "status">): CardStatus | null {
+  if (isCardFieldLocked(card, "status")) return null;
+  if (isCardStatusAuto(card)) return card.status === "blocked" ? null : "blocked";
+  switch (card.status) {
+    case "draft":
+      return "planned";
+    case "planned":
+      return "active";
+    case "active":
+      return "complete";
+    case "blocked":
+      return "active";
+    case "complete":
+    case "canceled":
+      return null;
+  }
 }
