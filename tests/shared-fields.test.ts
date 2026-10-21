@@ -415,7 +415,7 @@ const CAT: TaxCatalog = (() => {
 })();
 
 const ctx: PriceDocumentContext = {
-  document: { kind: "order", status: "draft" },
+  document: { kind: "order", status: "draft", stored_items: [] },
   // Two windows (3 + 4 days) under every path, so the derived `chargeable_days`
   // moves off the sentinel's 5 and the tag check sees the pricer write it.
   charge_windows: [{ divider_path: [], days: [3, 4] }],

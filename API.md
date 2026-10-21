@@ -43091,6 +43091,14 @@ what api-cloudrun's `updateInvoice` gate reads —
 what "settled" means. (An exported `hasSettlement` used to answer this with
 `> 0` over two buckets; core#130 row 2 deleted it.)
 
+An order also states `stored_items`: the rows the order carries IN STORAGE,
+before the edit being priced — `[]` for an order that does not exist yet. On
+a `complete`/`canceled` order they decide which lines keep their own days
+(see {@link lineChargeableDays}). ⚠️ **Required, with no default, because
+both defaults are wrong:** "every line is carried" is api-cloudrun#1341 (a
+line added to a finished order priced on whatever days the client sent), and
+"no line is carried" re-derives every frozen line's money.
+
 ```ts
 type PriceDocumentKind = typeLiteral | typeLiteral;
 ```
@@ -43122,6 +43130,27 @@ interface PricedDocument {
   warnings: UnreviewedTaxWarning[];
 }
 ```
+
+### `carriedLines(items: readonly T[], document: PriceDocumentKind): ReadonlySet<T>`
+
+**The lines that keep the day counts they carry**: on a `complete` or
+`canceled` order (charge-windows census decision, 2026-09-16), every line
+that pairs with a row of `stored_items`. Empty on any other document. A void,
+paid or settled invoice never reaches here: it is refused outright.
+
+The census decision protects days the order ALREADY carried. A line the edit
+adds has none to protect, so it derives its days from its pair's windows like
+any live line (api-cloudrun#1341) — a `custom-` line books nothing, so adding
+one does not reopen the order.
+
+⚠️ **Paired with `pairItemsAcrossRebuild`, never by exact `path` and never by
+`uid` alone.** A path changes when a line moves under another group or a
+divider is re-minted, and re-deriving a moved line would change a finished
+job's money — including one-window lines whose legacy days the census left
+alone on purpose. A uid repeats, so a uid set would let a second row of a
+product the order already carries keep the client's days. The pairing's
+`(uid, k-th occurrence)` fallback gives both: a moved row stays carried, an
+extra occurrence does not.
 
 ### `chargeWindowContext(destinations: readonly ChargeWindowPair[]): PairChargeWindows[]`
 
@@ -43178,7 +43207,7 @@ invoice is retracted, and a paid or settled one is agreed. The rule
 `priceDocument` refuses on, exported so the manager reads it instead of
 restating it (`invoiceIsRepriceable`). An order always reprices.
 
-### `lineChargeableDays(item: LineItem, ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">): typeLiteral`
+### `lineChargeableDays(item: LineItem, ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">, carried: ReadonlySet<LineItem>): typeLiteral`
 
 **A line's `chargeable_days`, the one derivation of it** (charge-windows
 decision 3), and the window days that price it.
@@ -43186,7 +43215,7 @@ decision 3), and the window days that price it.
 | line | `chargeable_days` |
 |---|---|
 | in an extension section | Σ its pair's window days (the days added) |
-| on a `complete`/`canceled` order | its own stored days |
+| in `carried` (a line a `complete`/`canceled` order already had) | its own stored days |
 | `rental` + `five_day_week` on a one-window pair | that window's days |
 | `rental` + `five_day_week` on a 2+ window pair | `billableDays(windows)` |
 | `rental` + `five_day_week` on no pair | refused |
@@ -43196,6 +43225,10 @@ A 2+ window pair stores its BILLABLE days, Σ `max(days, 5)`, so the line's
 own numbers multiply out to its subtotal: `quantity × base × days ÷ 5` (owner,
 2026-09-17, core#114). A one window pair keeps its raw count; the pricer's
 `max(days, 5)` floor is the same thing for one window.
+
+`carried` is {@link carriedLines} over the whole document, which needs every
+row at once, so a single-line call cannot work it out. Pass an empty set for
+a document that keeps no stored days.
 
 ### `priceCreditNote(selection: readonly CreditSelectionLine[], taxes: Tax[], extensions: readonly PriceDocumentExtension[]): PricedCreditNote`
 

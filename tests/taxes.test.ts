@@ -235,7 +235,7 @@ const ctx = (overrides: Partial<DocumentTaxContext> & { taxes?: LegacyTax[] } = 
  */
 function materialize(items: LineItem[], taxCtx: DocumentTaxContext) {
   return sited(items, (doc) => {
-    const priced = priceDocument(doc, { document: { kind: "order", status: "draft" }, tax: taxCtx, charge_windows: linePairs(doc) });
+    const priced = priceDocument(doc, { document: { kind: "order", status: "draft", stored_items: [] }, tax: taxCtx, charge_windows: linePairs(doc) });
     doc.splice(0, doc.length, ...priced.items);
     return priced.warnings;
   });

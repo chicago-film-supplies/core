@@ -61,6 +61,7 @@ import {
   type Tax,
 } from "./orders.ts";
 import { billableDays } from "./dates.ts";
+import { pairItemsAcrossRebuild, type PathedItem } from "./item-pairing.ts";
 import { assignLineTaxes, type DocumentTaxContext, type UnreviewedTaxWarning } from "./taxes.ts";
 import { pricingTaxesOf } from "./tax-classes.ts";
 
@@ -74,9 +75,17 @@ import { pricingTaxesOf } from "./tax-classes.ts";
  * `invoiceHasSettlement || paid || void` — so the two cannot disagree about
  * what "settled" means. (An exported `hasSettlement` used to answer this with
  * `> 0` over two buckets; core#130 row 2 deleted it.)
+ *
+ * An order also states `stored_items`: the rows the order carries IN STORAGE,
+ * before the edit being priced — `[]` for an order that does not exist yet. On
+ * a `complete`/`canceled` order they decide which lines keep their own days
+ * (see {@link lineChargeableDays}). ⚠️ **Required, with no default, because
+ * both defaults are wrong:** "every line is carried" is api-cloudrun#1341 (a
+ * line added to a finished order priced on whatever days the client sent), and
+ * "no line is carried" re-derives every frozen line's money.
  */
 export type PriceDocumentKind =
-  | { kind: "order"; status: OrderStatusType }
+  | { kind: "order"; status: OrderStatusType; stored_items: readonly PathedItem[] }
   | { kind: "invoice"; status: InvoiceStatusType; has_settlement: boolean };
 
 /**
@@ -315,13 +324,31 @@ function daysFromWindows(item: LineItem): boolean {
 }
 
 /**
- * Has this document been sent out or closed, so its lines keep the day counts
- * they carry? A `complete` or `canceled` order (charge-windows census decision,
- * 2026-09-16). A void, paid or settled invoice never reaches here: it is refused
- * outright.
+ * **The lines that keep the day counts they carry**: on a `complete` or
+ * `canceled` order (charge-windows census decision, 2026-09-16), every line
+ * that pairs with a row of `stored_items`. Empty on any other document. A void,
+ * paid or settled invoice never reaches here: it is refused outright.
+ *
+ * The census decision protects days the order ALREADY carried. A line the edit
+ * adds has none to protect, so it derives its days from its pair's windows like
+ * any live line (api-cloudrun#1341) — a `custom-` line books nothing, so adding
+ * one does not reopen the order.
+ *
+ * ⚠️ **Paired with `pairItemsAcrossRebuild`, never by exact `path` and never by
+ * `uid` alone.** A path changes when a line moves under another group or a
+ * divider is re-minted, and re-deriving a moved line would change a finished
+ * job's money — including one-window lines whose legacy days the census left
+ * alone on purpose. A uid repeats, so a uid set would let a second row of a
+ * product the order already carries keep the client's days. The pairing's
+ * `(uid, k-th occurrence)` fallback gives both: a moved row stays carried, an
+ * extra occurrence does not.
  */
-function keepsStoredDays(document: PriceDocumentKind): boolean {
-  return document.kind === "order" && TERMINAL_ORDER_STATUSES.includes(document.status);
+export function carriedLines<T extends PathedItem>(
+  items: readonly T[],
+  document: PriceDocumentKind,
+): ReadonlySet<T> {
+  if (document.kind !== "order" || !TERMINAL_ORDER_STATUSES.includes(document.status)) return new Set();
+  return new Set(pairItemsAcrossRebuild(items, document.stored_items).forward.keys());
 }
 
 /**
@@ -331,7 +358,7 @@ function keepsStoredDays(document: PriceDocumentKind): boolean {
  * | line | `chargeable_days` |
  * |---|---|
  * | in an extension section | Σ its pair's window days (the days added) |
- * | on a `complete`/`canceled` order | its own stored days |
+ * | in `carried` (a line a `complete`/`canceled` order already had) | its own stored days |
  * | `rental` + `five_day_week` on a one-window pair | that window's days |
  * | `rental` + `five_day_week` on a 2+ window pair | `billableDays(windows)` |
  * | `rental` + `five_day_week` on no pair | refused |
@@ -342,11 +369,16 @@ function keepsStoredDays(document: PriceDocumentKind): boolean {
  * 2026-09-17, core#114). A one window pair keeps its raw count; the pricer's
  * `max(days, 5)` floor is the same thing for one window.
  *
+ * `carried` is {@link carriedLines} over the whole document, which needs every
+ * row at once, so a single-line call cannot work it out. Pass an empty set for
+ * a document that keeps no stored days.
+ *
  * @throws Error on a rental `five_day_week` line that hangs under no pair.
  */
 export function lineChargeableDays(
   item: LineItem,
   ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">,
+  carried: ReadonlySet<LineItem>,
 ): { chargeable_days: number | null } {
   const stored = item.price?.chargeable_days ?? null;
   if (extensionFor(item, ctx.extensions)) {
@@ -356,7 +388,7 @@ export function lineChargeableDays(
     if (pair) return { chargeable_days: pair.days.reduce((total, d) => total + d, 0) };
     return { chargeable_days: stored };
   }
-  if (keepsStoredDays(ctx.document)) return { chargeable_days: stored };
+  if (carried.has(item)) return { chargeable_days: stored };
   if (!daysFromWindows(item)) return { chargeable_days: null };
   const days = windowChargeableDays(item, ctx.charge_windows);
   if (days === null) {
@@ -460,15 +492,20 @@ export interface ChargeWindowPairViolation {
  * Does this document keep the line day counts it already carries, rather than
  * re-deriving them from its windows?
  *
- * ⚠️ **Deliberately WIDER than the pricer's own `keepsStoredDays`, and it must
+ * ⚠️ **Deliberately WIDER than the pricer's own {@link carriedLines}, and it must
  * not be merged with it.** The pricer only ever sees orders in this state,
  * because {@link assertRepriceable} refuses a frozen invoice before
- * {@link lineChargeableDays} is reached — so `keepsStoredDays` correctly names
+ * {@link lineChargeableDays} is reached — so `carriedLines` correctly names
  * the order arm alone. A WRITE is the other case: a void, paid or settled
  * invoice is still written (`updateInvoice` admits non-money edits on one), and
  * it carries its stored days through by design (charge-windows decision 10).
  * A guard that used the pricer's predicate would therefore flag exactly the
  * documents the campaign promised never to re-derive.
+ *
+ * It is wider on an order too. The guard sees only the document being written,
+ * never the stored one, so it cannot tell a line the edit added from one the
+ * order carried, and exempts both. An added line is right by construction
+ * instead, because the pricer derives its days (api-cloudrun#1341).
  */
 function keepsStoredLineDays(document: PriceDocumentKind): boolean {
   if (document.kind === "order") return TERMINAL_ORDER_STATUSES.includes(document.status);
@@ -600,10 +637,11 @@ export function priceDocument<T extends LineItem>(
   const pricing = pricingTaxesOf(ctx.tax.catalog);
 
   // ── Stages 2 + 3: per-line money, assembled ──
+  const carried = carriedLines(out, ctx.document);
   for (const item of out) {
     if (!isPriceableItem(item)) continue;
     const extension = extensionFor(item, ctx.extensions);
-    const derived = isPreTaxItem(item) ? lineChargeableDays(item, ctx) : { chargeable_days: null };
+    const derived = isPreTaxItem(item) ? lineChargeableDays(item, ctx, carried) : { chargeable_days: null };
     if (isPreTaxItem(item)) item.price = { ...item.price, chargeable_days: derived.chargeable_days };
     const price = item.price;
     const money: LinePriceMoney = priceLine(item, pricing, extension && extensionDaysOf(item));

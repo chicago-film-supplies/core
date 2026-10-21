@@ -63,7 +63,7 @@ const taxCtx = (city = "Chicago", exempt = false): DocumentTaxContext => ({
   asOf: "2026-07-02T00:00:00.000-05:00",
 });
 
-const ORDER: PriceDocumentContext["document"] = { kind: "order", status: "draft" };
+const ORDER: PriceDocumentContext["document"] = { kind: "order", status: "draft", stored_items: [] };
 /**
  * `ctx()` leaves `charge_windows` to {@link priceDoc}, which gives every rental
  * line its own single-window pair carrying the line's days, so a test keeps the

@@ -38,6 +38,7 @@ import {
   chargeWindowContext,
   chargeWindowPairViolations,
   type CreditSourceLine,
+  carriedLines,
   lineChargeableDays,
   PriceRefusalError,
   type PriceDocumentContext,
@@ -382,7 +383,7 @@ const TAX: PriceDocumentContext["tax"] = {
   catalog: { codes: [], rates: [], classes: [] },
   asOf: "2026-10-05T00:00:00.000-05:00",
 };
-const priceCtx = (charge_windows: PriceDocumentContext["charge_windows"], document: PriceDocumentContext["document"] = { kind: "order", status: "active" }): PriceDocumentContext => ({ document, tax: TAX, charge_windows });
+const priceCtx = (charge_windows: PriceDocumentContext["charge_windows"], document: PriceDocumentContext["document"] = { kind: "order", status: "active", stored_items: [] }): PriceDocumentContext => ({ document, tax: TAX, charge_windows });
 const pairWith = (days: number[]) => chargeWindowContext([{
   uid: "D",
   dates: { charge_windows: days.map((d) => ({ days: d })) },
@@ -442,7 +443,8 @@ Deno.test("priceDocument: property — a single-window pair prices exactly as a 
     const quantity = 1 + rand(40);
     const windowed = priced(line(["D"], { ...price, chargeable_days: 999 }, { quantity }), priceCtx(pairWith([days])));
     // A complete order keeps the line's own stored days: the pricing before windows.
-    const legacy = priced(line(["D"], { ...price, chargeable_days: days }, { quantity }), priceCtx(pairWith([0]), { kind: "order", status: "complete" }));
+    const carried = line(["D"], { ...price, chargeable_days: days }, { quantity });
+    const legacy = priced(carried, priceCtx(pairWith([0]), { kind: "order", status: "complete", stored_items: [carried] }));
     assertEquals(windowed, legacy, `days ${days} ${JSON.stringify(price)} × ${quantity}`);
   }
   assert(factorBit > 1000, "anti-vacuity: the day factor was exercised");
@@ -462,13 +464,78 @@ Deno.test("priceDocument: a rental five_day_week line under no pair is refused",
   assertThrows(() => priceDocument([line(["order-divider"])], priceCtx(pairWith([5]))), PriceRefusalError, "under no destination pair with charge windows");
 });
 
-Deno.test("priceDocument: a complete or canceled order keeps its lines' stored days", () => {
+Deno.test("priceDocument: a complete or canceled order keeps the stored days of the lines it already carried", () => {
   for (const status of ["complete", "canceled"] as const) {
-    const out = priced(line(["D"], { chargeable_days: 5 }), priceCtx(pairWith([7]), { kind: "order", status }));
+    const carried = line(["D"], { chargeable_days: 5 });
+    const out = priced(carried, priceCtx(pairWith([7]), { kind: "order", status, stored_items: [carried] }));
     assertEquals([out.chargeable_days, out.subtotal_cents], [5, 10000], status);
   }
   const live = priced(line(["D"], { chargeable_days: 5 }), priceCtx(pairWith([7]), { kind: "invoice", status: "issued", has_settlement: false }));
   assertEquals(live.chargeable_days, 7, "an issued, unpaid invoice is re-derived");
+});
+
+// ── A line ADDED to a frozen order (api-cloudrun#1341) ────────────────────────
+// The census decision protects days a `complete` order already carried. A line
+// the edit adds — a `custom-` rental books nothing, so the order stays complete —
+// has none to protect, and derives its days like any live line.
+
+const frozen = (stored_items: LineItem[]): PriceDocumentContext["document"] => ({ kind: "order", status: "complete", stored_items });
+const pricedAll = (items: LineItem[], ctx: PriceDocumentContext) =>
+  priceDocument(items, ctx).items.map((it) => it.price as unknown as { chargeable_days: number | null; subtotal_cents: number });
+
+Deno.test("api-cloudrun#1341: a rental added to a complete 2-window order bills billableDays, not the client's seed", () => {
+  const carried = line(["D"], { chargeable_days: 4 }); // a legacy count the windows disagree with
+  const added = line(["D"], { chargeable_days: 11 }, { uid: "custom-x", path: ["D", "custom-x"] }); // 8 + 3 raw
+  const [keep, add] = pricedAll([carried, added], priceCtx(pairWith([8, 3]), frozen([carried])));
+  assertEquals([add.chargeable_days, add.subtotal_cents], [13, 26000], "Σ max(d,5) = 8 + 5");
+  assertEquals([keep.chargeable_days, keep.subtotal_cents], [4, 10000], "the carried line keeps its own days");
+});
+
+Deno.test("api-cloudrun#1341: a rental added to a complete one-window order bills that window", () => {
+  const added = line(["D"], { chargeable_days: 2 });
+  assertEquals(priced(added, priceCtx(pairWith([9]), frozen([]))).chargeable_days, 9);
+});
+
+Deno.test("api-cloudrun#1341: an added rental seeded null derives its days instead of billing the one-week floor", () => {
+  const added = line(["D"], { chargeable_days: null });
+  const out = priced(added, priceCtx(pairWith([8, 3]), frozen([])));
+  assertEquals([out.chargeable_days, out.subtotal_cents], [13, 26000]);
+});
+
+Deno.test("api-cloudrun#1341: an added rental under no pair is refused, not priced at one week", () => {
+  assertThrows(
+    () => priceDocument([line(["X"], { chargeable_days: null })], priceCtx(pairWith([8, 3]), frozen([]))),
+    PriceRefusalError,
+    "under no destination pair with charge windows",
+  );
+});
+
+Deno.test("api-cloudrun#1341: a carried line MOVED to another group still keeps its days", () => {
+  // A path changes on a move; re-deriving would change a finished job's money.
+  const stored = line(["D", "G1"], { chargeable_days: 4 });
+  const moved = { ...stored, path: ["D", "G2", stored.uid] } as LineItem;
+  assertEquals(priced(moved, priceCtx(pairWith([8, 3]), frozen([stored]))).chargeable_days, 4);
+});
+
+Deno.test("api-cloudrun#1341: a second row of a uid the order already carries is NOT carried", () => {
+  // A uid repeats, so a uid set would let the extra row keep the client's seed.
+  const stored = line(["D", "G1"], { chargeable_days: 4 });
+  const extra = { ...stored, path: ["D", "G2", stored.uid], price: { ...stored.price, chargeable_days: 11 } } as LineItem;
+  const [keep, add] = pricedAll([stored, extra], priceCtx(pairWith([8, 3]), frozen([stored])));
+  assertEquals([keep.chargeable_days, add.chargeable_days], [4, 13]);
+});
+
+Deno.test("carriedLines: empty on every document that is not a frozen order", () => {
+  const it = line(["D"]);
+  const live: PriceDocumentContext["document"][] = [
+    { kind: "order", status: "active", stored_items: [it] },
+    { kind: "order", status: "draft", stored_items: [it] },
+    { kind: "invoice", status: "issued", has_settlement: false },
+  ];
+  for (const document of live) {
+    assertEquals(carriedLines([it], document).size, 0, `${document.kind}/${document.status}`);
+  }
+  assertEquals(carriedLines([it], frozen([it])).size, 1, "…and the frozen arm is not vacuous");
 });
 
 Deno.test("chargeWindowContext: an EMPTY windows array is refused — null means none", () => {
@@ -481,15 +548,15 @@ Deno.test("chargeWindowContext: a pair whose windows are null bills no days and 
   // where it is priced, naming the line.
   assertEquals(chargeWindowContext([{ uid: "D", dates: { charge_windows: null } }]), []);
   const sale = { ...line(["D"]), type: "sale" as const, price: { ...line(["D"]).price, formula: "fixed" as const } };
-  assertEquals(lineChargeableDays(sale as never, priceCtx([])), { chargeable_days: null });
-  assertThrows(() => lineChargeableDays(line(["D"]), priceCtx([])), PriceRefusalError, "under no destination pair with charge windows");
+  assertEquals(lineChargeableDays(sale as never, priceCtx([]), new Set()), { chargeable_days: null });
+  assertThrows(() => lineChargeableDays(line(["D"]), priceCtx([]), new Set()), PriceRefusalError, "under no destination pair with charge windows");
 });
 
 Deno.test("chargeWindowContext: an invoice pair's divider path is [uid_order, uid]", () => {
   const ctx = chargeWindowContext([{ uid: "D", uid_order: "O", dates: { charge_windows: [{ days: 3 }, { days: 4 }] } }]);
   assertEquals(ctx, [{ divider_path: ["O", "D"], days: [3, 4] }]);
   const onInvoice = line(["O", "D"]);
-  assertEquals(lineChargeableDays(onInvoice, priceCtx(ctx)), { chargeable_days: 10 });
+  assertEquals(lineChargeableDays(onInvoice, priceCtx(ctx), new Set()), { chargeable_days: 10 });
 });
 
 Deno.test("priceDocument: an extension line bills its pair's added days, unfloored", () => {
@@ -528,7 +595,7 @@ Deno.test("priceCreditNote: a line billed on a multi-window pair is credited at 
 const storedLine = (days: number | null, path = ["D"]) => line(path, { chargeable_days: days });
 
 Deno.test("chargeWindowPairViolations: a 2+ window pair requires billableDays, and reports the difference", () => {
-  const ctx = (document: PriceDocumentContext["document"] = { kind: "order", status: "active" }) => ({
+  const ctx = (document: PriceDocumentContext["document"] = { kind: "order", status: "active", stored_items: [] }) => ({
     document,
     charge_windows: pairWith([3, 4, 2]),
   });
@@ -557,13 +624,13 @@ Deno.test("chargeWindowPairViolations: a 2+ window pair requires billableDays, a
 Deno.test("chargeWindowPairViolations: a SINGLE-window pair is out of scope", () => {
   // Legacy CRMS divergence the 2026-09-16 census measured and the backfill
   // settled. Re-asserting it here would refuse documents the campaign left alone.
-  const ctx = { document: { kind: "order", status: "active" } as const, charge_windows: pairWith([9]) };
+  const ctx = { document: { kind: "order", status: "active", stored_items: [] } as const, charge_windows: pairWith([9]) };
   assertEquals(chargeWindowPairViolations([storedLine(4)], ctx), []);
   assertEquals(chargeWindowPairViolations([storedLine(9)], ctx), []);
 });
 
 Deno.test("chargeWindowPairViolations: only a rental five_day_week line is checked", () => {
-  const ctx = { document: { kind: "order", status: "active" } as const, charge_windows: pairWith([3, 4, 2]) };
+  const ctx = { document: { kind: "order", status: "active", stored_items: [] } as const, charge_windows: pairWith([3, 4, 2]) };
   // A sale/service/surcharge is stored as five_day_week with null days and prices at factor 1.
   assertEquals(chargeWindowPairViolations([line(["D"], { chargeable_days: null }, { type: "sale" })], ctx), []);
   assertEquals(chargeWindowPairViolations([line(["D"], { chargeable_days: null, formula: "fixed" })], ctx), []);
@@ -575,8 +642,8 @@ Deno.test("chargeWindowPairViolations: a document that keeps its stored days is 
   const items = [storedLine(9)];
   const windows = pairWith([3, 4, 2]);
   const exempt: PriceDocumentContext["document"][] = [
-    { kind: "order", status: "complete" },
-    { kind: "order", status: "canceled" },
+    { kind: "order", status: "complete", stored_items: [] },
+    { kind: "order", status: "canceled", stored_items: [] },
     { kind: "invoice", status: "void", has_settlement: false },
     { kind: "invoice", status: "paid", has_settlement: false },
     { kind: "invoice", status: "issued", has_settlement: true },
@@ -587,8 +654,8 @@ Deno.test("chargeWindowPairViolations: a document that keeps its stored days is 
   }
   // …and the live ones are NOT exempt, so the arm above cannot pass vacuously.
   const live: PriceDocumentContext["document"][] = [
-    { kind: "order", status: "draft" },
-    { kind: "order", status: "active" },
+    { kind: "order", status: "draft", stored_items: [] },
+    { kind: "order", status: "active", stored_items: [] },
     { kind: "invoice", status: "issued", has_settlement: false },
   ];
   for (const document of live) {
