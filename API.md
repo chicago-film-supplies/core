@@ -31530,7 +31530,7 @@ named-key sum anywhere else in `src/`.
 
 Units that reached a terminal key: back, or out of service with a reason.
 
-### `untrackedUnitCount(booking: Pick<Booking, "breakdown" | "units">, key: BookingUnitBucketType): number`
+### `untrackedUnitCount(booking: Pick<Booking, "breakdown" | "units">, key: BookingUnitBucketType, seeded: boolean): number`
 
 How many of a bucket's units are UNTRACKED on a unit-tracked booking:
 `breakdown[k] − units[k].length`. Units a bulk → serialized conversion found
@@ -31539,8 +31539,15 @@ D1, D9).
 
 Derived, never stored: given the booking refine `units[k].length ≤
 breakdown[k]`, a stored copy could only restate this, so it could only drift.
-`0` on a booking that is not unit-tracked (`units` `null` or absent), where
-the question does not arise.
+
+🔴 **A stored `units: null` means two things, and only the roster tells them
+apart** — hence `seeded`, which is whether the product's unit roster exists.
+Unseeded (bulk, or serialized and not numbered yet), the booking is not
+unit-tracked and the question does not arise: `0`. Seeded, the booking IS
+tracked with nothing named yet — the order path stamps `null` on a new
+booking of a seeded product on purpose (serial-tracking D2, D5) — so every
+unit in the bucket is untracked: `breakdown[k]`. Reading `null` as `0` there
+is what made this disagree with `rebookProblems` (core#135).
 
 ## `@cfs/core/utils/custody`
 

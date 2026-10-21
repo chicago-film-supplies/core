@@ -58,14 +58,22 @@ export {
  *
  * Derived, never stored: given the booking refine `units[k].length ≤
  * breakdown[k]`, a stored copy could only restate this, so it could only drift.
- * `0` on a booking that is not unit-tracked (`units` `null` or absent), where
- * the question does not arise.
+ *
+ * 🔴 **A stored `units: null` means two things, and only the roster tells them
+ * apart** — hence `seeded`, which is whether the product's unit roster exists.
+ * Unseeded (bulk, or serialized and not numbered yet), the booking is not
+ * unit-tracked and the question does not arise: `0`. Seeded, the booking IS
+ * tracked with nothing named yet — the order path stamps `null` on a new
+ * booking of a seeded product on purpose (serial-tracking D2, D5) — so every
+ * unit in the bucket is untracked: `breakdown[k]`. Reading `null` as `0` there
+ * is what made this disagree with `rebookProblems` (core#135).
  */
 export function untrackedUnitCount(
   booking: Pick<Booking, "breakdown" | "units">,
   key: BookingUnitBucketType,
+  seeded: boolean,
 ): number {
-  if (booking.units == null) return 0;
+  if (booking.units == null) return seeded ? booking.breakdown[key] : 0;
   return booking.breakdown[key] - booking.units[key].length;
 }
 

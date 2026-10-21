@@ -14235,8 +14235,8 @@
         {
           "kind": "function",
           "name": "untrackedUnitCount",
-          "signature": "untrackedUnitCount(booking: Pick<Booking, \"breakdown\" | \"units\">, key: BookingUnitBucketType): number",
-          "doc": "How many of a bucket's units are UNTRACKED on a unit-tracked booking:\n`breakdown[k] − units[k].length`. Units a bulk → serialized conversion found\nalready prepped or out and could not name (`api-cloudrun/.claude/plans/serial-tracking.md`\nD1, D9).\n\nDerived, never stored: given the booking refine `units[k].length ≤\nbreakdown[k]`, a stored copy could only restate this, so it could only drift.\n`0` on a booking that is not unit-tracked (`units` `null` or absent), where\nthe question does not arise.",
+          "signature": "untrackedUnitCount(booking: Pick<Booking, \"breakdown\" | \"units\">, key: BookingUnitBucketType, seeded: boolean): number",
+          "doc": "How many of a bucket's units are UNTRACKED on a unit-tracked booking:\n`breakdown[k] − units[k].length`. Units a bulk → serialized conversion found\nalready prepped or out and could not name (`api-cloudrun/.claude/plans/serial-tracking.md`\nD1, D9).\n\nDerived, never stored: given the booking refine `units[k].length ≤\nbreakdown[k]`, a stored copy could only restate this, so it could only drift.\n\n🔴 **A stored `units: null` means two things, and only the roster tells them\napart** — hence `seeded`, which is whether the product's unit roster exists.\nUnseeded (bulk, or serialized and not numbered yet), the booking is not\nunit-tracked and the question does not arise: `0`. Seeded, the booking IS\ntracked with nothing named yet — the order path stamps `null` on a new\nbooking of a seeded product on purpose (serial-tracking D2, D5) — so every\nunit in the bucket is untracked: `breakdown[k]`. Reading `null` as `0` there\nis what made this disagree with `rebookProblems` (core#135).",
           "paramTags": [],
           "returnsTag": null
         }

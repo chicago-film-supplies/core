@@ -388,6 +388,22 @@ Deno.test("row 12: per-grain folds, units and the unrecorded pool", () => {
       .map((p) => p.code),
     ["unit_not_out"],
   );
+  // core#135: a unit in neither set is ONE problem — it does not also spend
+  // the unrecorded allowance (here 0: both out units are named).
+  assertEquals(
+    rebookProblems({ kind: "extend", lines: [serial([1, 9])], bookings: bookingOut(2, [1, 2]), unattributed: () => [7] })
+      .map((p) => p.code),
+    ["unit_not_out"],
+  );
+  // core#135: a seeded product's booking still storing `null` is every out
+  // unit untracked, so all three may come from the pool…
+  assertEquals(rebookProblems({ kind: "extend", lines: [serial([7, 8, 9])], bookings: bookingOut(3), unattributed: () => [6, 7, 8, 9] }), []);
+  // …and a fourth exceeds both the out count and the allowance.
+  assertEquals(
+    rebookProblems({ kind: "extend", lines: [serial([6, 7, 8, 9])], bookings: bookingOut(3), unattributed: () => [6, 7, 8, 9] })
+      .map((p) => p.code),
+    ["exceeds_out", "too_many_unrecorded"],
+  );
   assertEquals(
     rebookProblems({ kind: "extend", lines: [serial([1])], bookings: bookingOut(3, [1, 2]), unattributed: () => null })
       .map((p) => p.code),

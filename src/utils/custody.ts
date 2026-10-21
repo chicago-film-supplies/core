@@ -37,7 +37,6 @@ import {
   type CustodyRuleId,
   type CustodyServiceSide,
   custodyRule,
-  emptyBookingUnitSets,
   duplicateCustodySlots,
   isLossUndo,
   type Movement,
@@ -65,6 +64,7 @@ import {
   sumBookingBreakdown,
   sumBreakdownKeys,
   terminalQuantity,
+  untrackedUnitCount,
 } from "./bookings.ts";
 import { parseBookingId } from "./booking-id.ts";
 import { deriveOOSStatus, sumOOSBreakdown } from "./out-of-service.ts";
@@ -1916,21 +1916,24 @@ export function rebookProblems(args: {
       });
       continue;
     }
-    // On a seeded product a booking still storing `null` reads as empty sets.
-    const aOut = (a.units ?? emptyBookingUnitSets()).out;
+    const aOut = a.units?.out ?? [];
     const unrecorded = new Set(pool);
     const notOwn = grain.units.filter((n) => !aOut.includes(n));
     const notOut = notOwn.filter((n) => !unrecorded.has(n));
     if (notOut.length > 0) {
       problems.push({ code: "unit_not_out", uid_booking: a.uid, units: notOut, message: `${a.name}: unit ${notOut.join(", ")} is not out on this leg` });
     }
-    const untracked = Math.max(0, out - aOut.length);
-    if (notOwn.length > untracked) {
+    // Only the units drawn from the pool spend the untracked allowance: a unit
+    // in neither set is already `unit_not_out`, and counting it here too made
+    // one bad number read as two problems (core#135).
+    const drawn = notOwn.filter((n) => unrecorded.has(n));
+    const untracked = untrackedUnitCount(a, "out", true);
+    if (drawn.length > untracked) {
       problems.push({
         code: "too_many_unrecorded",
         uid_booking: a.uid,
-        units: notOwn,
-        message: `${a.name}: names ${notOwn.length} unrecorded unit(s), but only ${untracked} of this leg's out are unrecorded`,
+        units: drawn,
+        message: `${a.name}: names ${drawn.length} unrecorded unit(s), but only ${untracked} of this leg's out are unrecorded`,
       });
     }
   }

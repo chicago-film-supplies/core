@@ -167,7 +167,7 @@ Deno.test("units fold: a unit not in the source set is refused, beyond the untra
 Deno.test("units fold: an untracked count (a conversion's) is drawn on by naming units the booking does not hold", () => {
   // 3 prepped, 1 named: 2 untracked prepped units physically on the shelf.
   const b = tracked({ prepped: 3 }, { prepped: [1001] });
-  assertEquals(untrackedUnitCount(b, "prepped"), 2);
+  assertEquals(untrackedUnitCount(b, "prepped", true), 2);
   const r = applyCustodyActions(b, [act("check_out", [1001, 1007, 1008])]);
   assertEquals(r.units, sets({ out: [1001, 1007, 1008] }));
   assertThrows(
@@ -721,4 +721,14 @@ Deno.test("foldRosterUnits: a restage moves only the booking's prepped units, fr
   // And it still moves shelf stock, as before.
   const moved = foldRosterUnits(staged, placed("transfer", null, [1002], SHELF, STAGING_VAN, null));
   assertEquals(moved["1002"], shelfRoster([1002], STAGING_VAN)["1002"]);
+});
+
+Deno.test("untrackedUnitCount: a stored null is 0 unseeded and the whole bucket seeded (core#135)", () => {
+  const b = { breakdown: { ...tracked({ out: 3 }).breakdown }, units: null };
+  assertEquals(untrackedUnitCount(b, "out", false), 0);
+  assertEquals(untrackedUnitCount(b, "out", true), 3);
+  // A stated set is read the same either way.
+  const t = tracked({ out: 3 }, { out: [1001] });
+  assertEquals(untrackedUnitCount(t, "out", false), 2);
+  assertEquals(untrackedUnitCount(t, "out", true), 2);
 });
