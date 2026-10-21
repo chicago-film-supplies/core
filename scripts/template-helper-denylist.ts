@@ -853,11 +853,17 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // hold, and `applyDateEdit` is the date editor's rule set. The READERS —
   // `chargedDays`, `billableDays`, `chargeEnvelope`, `chargeWindowsOf` — read
   // stored values only and are emitted.
+  //
+  // `chicagoToday` is denied by the first argument above in its plainest form:
+  // its default reads the clock, so a template calling it prints the RENDER
+  // day, and a document re-rendered tomorrow would print a different one. A
+  // document's dates are stamped at write time (`invoice.date`, `as_of_*`).
   dates: [
     "addChicagoDays",
     "applyDateEdit",
     "canonicalChargeWindows",
     "chicagoDaysBetween",
+    "chicagoToday",
   ],
   // Serialized units (api-cloudrun serial-tracking P2). A document PRINTS units —
   // `formatUnitRanges` / `toUnitRanges` stay emitted for the packing list,

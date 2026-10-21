@@ -33093,6 +33093,28 @@ chicagoDaysBetween("2026-11-09T00:00:00.000-06:00", "2026-10-25T00:00:00.000-05:
 chicagoDaysBetween("2026-06-01T00:00:00.000-05:00", "2026-06-16T00:00:00.000-05:00"); // -15
 ```
 
+### `chicagoToday(_: unknown): string`
+
+Today's Chicago calendar date in `YYYY-MM-DD` form: the
+{@link toChicagoYmd} of `now`.
+
+🔴 **`new Date().toISOString().slice(0, 10)` is the UTC day, and it is
+tomorrow from 19:00 CDT (18:00 CST) until midnight.** Every "today" default,
+date-picker seed and `>= today` filter written that way drops the current
+Chicago day for those hours. Browser-zone forms (`getFullYear()`, a bare
+`format(new Date(), …)`) are right only in a browser that happens to sit in
+Chicago.
+
+`now` defaults to the clock and is a parameter so callers and tests can pin
+it. For the start-of-day OFFSET form (a `chicagoStartOfDay()` field such as
+`invoice.date`), use `toChicagoStartOfDay(chicagoToday())`.
+
+```ts
+chicagoToday(new Date("2026-07-04T00:30:00.000Z")); // "2026-07-03" (19:30 CDT)
+chicagoToday(new Date("2026-01-15T05:30:00.000Z")); // "2026-01-14" (23:30 CST)
+chicagoToday(new Date("2026-01-15T06:00:00.000Z")); // "2026-01-15" (00:00 CST)
+```
+
 ### `countCfsBusinessDays(start: Date, end: Date, holidays: string[]): BusinessDaysResult`
 
 Count CFS business days between two dates (excludes weekends and CFS holidays).

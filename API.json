@@ -15077,6 +15077,14 @@
         },
         {
           "kind": "function",
+          "name": "chicagoToday",
+          "signature": "chicagoToday(_: unknown): string",
+          "doc": "Today's Chicago calendar date in `YYYY-MM-DD` form: the\n{@link toChicagoYmd} of `now`.\n\n🔴 **`new Date().toISOString().slice(0, 10)` is the UTC day, and it is\ntomorrow from 19:00 CDT (18:00 CST) until midnight.** Every \"today\" default,\ndate-picker seed and `>= today` filter written that way drops the current\nChicago day for those hours. Browser-zone forms (`getFullYear()`, a bare\n`format(new Date(), …)`) are right only in a browser that happens to sit in\nChicago.\n\n`now` defaults to the clock and is a parameter so callers and tests can pin\nit. For the start-of-day OFFSET form (a `chicagoStartOfDay()` field such as\n`invoice.date`), use `toChicagoStartOfDay(chicagoToday())`.\n\n```ts\nchicagoToday(new Date(\"2026-07-04T00:30:00.000Z\")); // \"2026-07-03\" (19:30 CDT)\nchicagoToday(new Date(\"2026-01-15T05:30:00.000Z\")); // \"2026-01-14\" (23:30 CST)\nchicagoToday(new Date(\"2026-01-15T06:00:00.000Z\")); // \"2026-01-15\" (00:00 CST)\n```",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "countCfsBusinessDays",
           "signature": "countCfsBusinessDays(start: Date, end: Date, holidays: string[]): BusinessDaysResult",
           "doc": "Count CFS business days between two dates (excludes weekends and CFS holidays).",

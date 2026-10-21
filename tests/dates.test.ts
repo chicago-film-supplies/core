@@ -3,6 +3,7 @@ import { TZDate } from "@date-fns/tz";
 import {
   addChicagoDays,
   chicagoDaysBetween,
+  chicagoToday,
   countCfsBusinessDays,
   getDefaultStartDate,
   isNonTerminatingWindow,
@@ -493,6 +494,28 @@ Deno.test("toChicagoYmd interprets Z-form daytime in Chicago TZ (same day)", () 
 Deno.test("toChicagoYmd round-trips with toChicagoStartOfDay", () => {
   const start = toChicagoStartOfDay("2025-02-14");
   assertEquals(toChicagoYmd(start), "2025-02-14");
+});
+
+// ── chicagoToday ─────────────────────────────────────────────────
+//
+// The first two are the hours where the UTC slice is already tomorrow; the
+// third is the instant the Chicago day actually turns.
+
+Deno.test("chicagoToday is the Chicago day, not the UTC day, in the CDT evening", () => {
+  const now = new Date("2026-07-04T00:30:00.000Z"); // 19:30 CDT on the 3rd
+  assertEquals(now.toISOString().slice(0, 10), "2026-07-04");
+  assertEquals(chicagoToday(now), "2026-07-03");
+});
+
+Deno.test("chicagoToday is the Chicago day, not the UTC day, in the CST evening", () => {
+  const now = new Date("2026-01-15T05:30:00.000Z"); // 23:30 CST on the 14th
+  assertEquals(now.toISOString().slice(0, 10), "2026-01-15");
+  assertEquals(chicagoToday(now), "2026-01-14");
+});
+
+Deno.test("chicagoToday turns over at Chicago midnight", () => {
+  assertEquals(chicagoToday(new Date("2026-01-15T06:00:00.000Z")), "2026-01-15");
+  assertEquals(chicagoToday(new Date("2026-01-15T05:59:59.999Z")), "2026-01-14");
 });
 
 // ── addChicagoDays / chicagoDaysBetween ──────────────────────────
