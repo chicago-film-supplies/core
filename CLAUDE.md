@@ -1061,9 +1061,9 @@ repair on top of the seed helper at every fixture site in three repos.
 |---|---|---|
 | `getInitialValues(schema)` | `@cfs/core/schemas` (`schemas/initial.ts`) | a **bindable form seed**. `Partial<T>`, materializes optional objects, and **may not parse** |
 | `getTestDoc` / `getFullTestDoc` / `getTestDocPartial` | `@cfs/core/schemas/testing` (`schemas/testing.ts`) | a **fixture**. `z.output<S>`, required keys only, **parses or throws** |
-| `seedDoc(ref, Schema, overrides)` | **api-cloudrun only** | construct → validate → track → write |
+| `trackDoc("<collection>").set(getTestDoc(Schema, …))` | **api-cloudrun** (`api-cloudrun/tests/helpers/cleanup.ts`) | the write boundary: a ref typed from `api-cloudrun/src/db.ts`, so the compiler checks the write. No `seedDoc` helper exists; the untyped way out is `trackUntypedDoc` with a reason |
 
-🔴 **`seedDoc` must NOT move into core.** It needs `firebase-admin` and the
+🔴 **A seed-and-write helper must NOT live in core.** It needs `firebase-admin` and the
 test-run tracker; `src/` is platform-free by deliberate policy — manager pulls
 it into a **browser** and JSR serves it over `https:`. Core owns schema-derived
 *construction*; each repo owns its own *write boundary*.
