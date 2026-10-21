@@ -43556,6 +43556,7 @@ interface ReplacementSourceProduct {
   name: string;
   uid_linked_replacement?: string | null;
   price?: typeLiteral | null;
+  description?: string | null;
 }
 ```
 

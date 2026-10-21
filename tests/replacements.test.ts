@@ -116,24 +116,52 @@ Deno.test("seed: the description names each unit with the serial it carried at t
   const [seed] = seedReplacementLines(order, [lost], [], products, units);
   assertEquals(seed.units, [1017, 1042]);
   // 1017's number now carries a replacement radio; the line names the one lost.
-  assertEquals(seed.description, "Lost: unit 1017 (S/N 902ZAE5968), unit 1042");
+  assertEquals(seed.description, "Units 1017 (S/N 902ZAE5968), 1042");
 });
 
-Deno.test("seed: with no serial to name, the description is the ranges; with no units, the reason", () => {
+Deno.test("seed: with no serial to name, the description is the ranges; with nothing at all, the reason", () => {
   const damaged = record("oosVest", "vest", VEST_LINE, 4, {
     reason: "damaged",
     units: { away: [], flagged: [1017, 1018], returned_to_service: [1019], written_off: [1030] },
   });
   const [ranged] = seedReplacementLines(order, [damaged], [], products, noUnits);
-  assertEquals(ranged.description, "Damaged: units 1017–1019, 1030");
+  assertEquals(ranged.description, "Units 1017–1019, 1030");
 
   const [one] = seedReplacementLines(order, [record("oosVest", "vest", VEST_LINE, 1, {
     units: { away: [1017], flagged: [], returned_to_service: [], written_off: [] },
   })], [], products, noUnits);
-  assertEquals(one.description, "Lost: unit 1017");
+  assertEquals(one.description, "Unit 1017");
 
   const [bulk] = seedReplacementLines(order, [vests], [], products, noUnits);
   assertEquals([bulk.units, bulk.description], [[], "Lost"]);
+});
+
+Deno.test("seed: the description opens with the replacement twin's description, never the rental's", () => {
+  const described = new Map(products);
+  described.set("vest", { uid: "vest", name: "Safety Vest", uid_linked_replacement: "vest-r", description: "Rental vest — not this" });
+  described.set("vest-r", { uid: "vest-r", name: "Replacement: Safety Vest", price: { base_cents: 3000 }, description: "Otto Two Wire Surveillance Kit - V1-10176" });
+
+  // No units (invoice 2462's shape): the twin's description alone, no "Lost".
+  const [bulk] = seedReplacementLines(order, [vests], [], described, noUnits);
+  assertEquals(bulk.description, "Otto Two Wire Surveillance Kit - V1-10176");
+
+  const units = new Map<number, ReplacementSourceUnit>([
+    [1017, unitWith(1017, [["902ZAE5968", "2024-01-05T09:00:00.000-06:00", null, "initial"]])],
+  ]);
+  const [named] = seedReplacementLines(order, [record("oosVest", "vest", VEST_LINE, 2, {
+    units: { away: [1017, 1042], flagged: [], returned_to_service: [], written_off: [] },
+  })], [], described, units);
+  assertEquals(named.description, "Otto Two Wire Surveillance Kit - V1-10176\nUnits 1017 (S/N 902ZAE5968), 1042");
+});
+
+Deno.test("seed: a custom line (no twin) has no product description to carry", () => {
+  const stand = record("oosStand", "legacy", VEST_LINE, 1, { query_by_sources: [`orders:${ORDER}`] });
+  assertEquals(seedReplacementLines(order, [stand], [], products, noUnits)[0].description, "Lost");
+  const counted = record("oosStand", "legacy", VEST_LINE, 1, {
+    query_by_sources: [`orders:${ORDER}`],
+    units: { away: [7], flagged: [], returned_to_service: [], written_off: [] },
+  });
+  assertEquals(seedReplacementLines(order, [counted], [], products, noUnits)[0].description, "Unit 7");
 });
 
 Deno.test("billed sum excludes the invoice being rewritten", () => {

@@ -142,6 +142,8 @@ export interface ReplacementSourceProduct {
   name: string;
   uid_linked_replacement?: string | null;
   price?: { base_cents?: number | null } | null;
+  /** The twin's description opens its line's — never the rental's. */
+  description?: string | null;
 }
 
 /** One replacement line to offer, before it is placed on an invoice. */
@@ -176,11 +178,18 @@ export interface ReplacementLineSeed {
   /** Every unit the record names, ascending; `[]` when it names none. */
   units: number[];
   /**
-   * The line's description: the reason, then each unit with the serial it
-   * carried when it went out of service, where one was recorded —
-   * `"Lost: unit 1017 (S/N 902ZAE5968), unit 1042"`. With no serial to name it
-   * is the ranges alone (`"Lost: units 1017–1019"`), and with no units the
-   * reason alone (`"Lost"`). Owner, 2026-10-08: a replacement line names the
+   * The line's description: the replacement TWIN's own description (never the
+   * rental's), then on a second line each unit with the serial it carried when
+   * it went out of service, where one was recorded —
+   * `"Otto Two Wire Surveillance Kit\nUnits 1017 (S/N 902ZAE5968), 1042"`. With
+   * no serial to name, the units are ranges (`"Units 1017–1019"`); with no
+   * units, the twin's description alone. Only when both are empty does it fall
+   * back to the reason (`"Lost"`), so the line is never blank.
+   *
+   * The reason is otherwise left off: the line sits under a "Lost"/"Damaged"
+   * group since beta.588/589, and a line built from scratch here used to drop
+   * the product's description that every ordinary product line carries
+   * (invoice 2462, 2026-10-20). Owner, 2026-10-08: a replacement line names the
    * serial of what it bills for.
    */
   description: string;
@@ -305,17 +314,27 @@ function replacementDescription(
   record: Pick<ReplacementSourceRecord, "reason" | "dates">,
   numbers: readonly number[],
   units: ReadonlyMap<number, ReplacementSourceUnit>,
+  productDescription: string,
 ): string {
-  const label = reasonLabel(record.reason);
-  if (numbers.length === 0) return label;
+  const detail = unitDetail(record, numbers, units);
+  const parts = [productDescription, detail].filter((part) => part.length > 0);
+  return parts.length > 0 ? parts.join("\n") : reasonLabel(record.reason);
+}
+
+/** The units a record names, with the serial each carried at its start: `"Units 1017 (S/N …), 1042"`. */
+function unitDetail(
+  record: Pick<ReplacementSourceRecord, "dates">,
+  numbers: readonly number[],
+  units: ReadonlyMap<number, ReplacementSourceUnit>,
+): string {
+  if (numbers.length === 0) return "";
+  const noun = numbers.length === 1 ? "Unit" : "Units";
   const serials = numbers.map((n) => {
     const unit = units.get(n);
     return unit ? serialAt(unit, record.dates.start) : null;
   });
-  if (serials.every((s) => s === null)) {
-    return `${label}: ${numbers.length === 1 ? "unit" : "units"} ${formatUnitRanges(numbers)}`;
-  }
-  return `${label}: ${numbers.map((n, i) => serials[i] === null ? `unit ${n}` : `unit ${n} (S/N ${serials[i]})`).join(", ")}`;
+  if (serials.every((s) => s === null)) return `${noun} ${formatUnitRanges(numbers)}`;
+  return `${noun} ${numbers.map((n, i) => serials[i] === null ? `${n}` : `${n} (S/N ${serials[i]})`).join(", ")}`;
 }
 
 /**
@@ -367,7 +386,7 @@ export function seedReplacementLines(
       uid_pair,
       reason: record.reason,
       units: numbers,
-      description: replacementDescription(record, numbers, units),
+      description: replacementDescription(record, numbers, units, twin?.description ?? ""),
       warning: twin ? null : `${rentalName} has no linked replacement product; billed as a custom line`,
     });
   }

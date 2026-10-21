@@ -20356,7 +20356,7 @@
         {
           "kind": "interface",
           "name": "ReplacementSourceProduct",
-          "declaration": "interface ReplacementSourceProduct {\n  uid: string;\n  name: string;\n  uid_linked_replacement?: string | null;\n  price?: typeLiteral | null;\n}",
+          "declaration": "interface ReplacementSourceProduct {\n  uid: string;\n  name: string;\n  uid_linked_replacement?: string | null;\n  price?: typeLiteral | null;\n  description?: string | null;\n}",
           "doc": "The fields of a product the seed reads — the rental and its replacement twin."
         },
         {
