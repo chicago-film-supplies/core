@@ -43099,6 +43099,12 @@ both defaults are wrong:** "every line is carried" is api-cloudrun#1341 (a
 line added to a finished order priced on whatever days the client sent), and
 "no line is carried" re-derives every frozen line's money.
 
+🔴 **A carried line's days are read off its STORED row, never off the row
+being priced.** The order input schema strips `chargeable_days`, so on a PUT
+every incoming row arrives with none. Reading the incoming row is how an
+operator's quantity nudge on complete order 1013 nulled 25 lines' days and
+repriced it from $4,952.91 to $2,667.17 at the one-week floor (2026-10-08).
+
 ```ts
 type PriceDocumentKind = typeLiteral | typeLiteral;
 ```
@@ -43131,11 +43137,23 @@ interface PricedDocument {
 }
 ```
 
-### `carriedLines(items: readonly T[], document: PriceDocumentKind): ReadonlySet<T>`
+### `StoredDaysRow`
 
-**The lines that keep the day counts they carry**: on a `complete` or
-`canceled` order (charge-windows census decision, 2026-09-16), every line
-that pairs with a row of `stored_items`. Empty on any other document. A void,
+A stored order row as {@link carriedLines} reads it: its identity, and the days it carries.
+
+```ts
+interface StoredDaysRow {
+  readonly price?: typeLiteral | null;
+}
+```
+
+### `carriedLines(items: readonly T[], document: PriceDocumentKind): ReadonlyMap<T, number | null>`
+
+**The lines that keep the day counts they carry, and those days**: on a
+`complete` or `canceled` order (charge-windows census decision, 2026-09-16),
+every line that pairs with a row of `stored_items`, mapped to THAT STORED
+ROW's `chargeable_days` — never its own, which an API write has stripped (see
+{@link PriceDocumentKind}). Empty on any other document. A void,
 paid or settled invoice never reaches here: it is refused outright.
 
 The census decision protects days the order ALREADY carried. A line the edit
@@ -43207,7 +43225,7 @@ invoice is retracted, and a paid or settled one is agreed. The rule
 `priceDocument` refuses on, exported so the manager reads it instead of
 restating it (`invoiceIsRepriceable`). An order always reprices.
 
-### `lineChargeableDays(item: LineItem, ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">, carried: ReadonlySet<LineItem>): typeLiteral`
+### `lineChargeableDays(item: LineItem, ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">, carried: ReadonlyMap<LineItem, number | null>): typeLiteral`
 
 **A line's `chargeable_days`, the one derivation of it** (charge-windows
 decision 3), and the window days that price it.
@@ -43215,7 +43233,7 @@ decision 3), and the window days that price it.
 | line | `chargeable_days` |
 |---|---|
 | in an extension section | Σ its pair's window days (the days added) |
-| in `carried` (a line a `complete`/`canceled` order already had) | its own stored days |
+| in `carried` (a line a `complete`/`canceled` order already had) | its STORED row's days |
 | `rental` + `five_day_week` on a one-window pair | that window's days |
 | `rental` + `five_day_week` on a 2+ window pair | `billableDays(windows)` |
 | `rental` + `five_day_week` on no pair | refused |
@@ -43227,7 +43245,7 @@ own numbers multiply out to its subtotal: `quantity × base × days ÷ 5` (owner
 `max(days, 5)` floor is the same thing for one window.
 
 `carried` is {@link carriedLines} over the whole document, which needs every
-row at once, so a single-line call cannot work it out. Pass an empty set for
+row at once, so a single-line call cannot work it out. Pass an empty map for
 a document that keeps no stored days.
 
 ### `priceCreditNote(selection: readonly CreditSelectionLine[], taxes: Tax[], extensions: readonly PriceDocumentExtension[]): PricedCreditNote`

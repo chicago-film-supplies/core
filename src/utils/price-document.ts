@@ -83,10 +83,21 @@ import { pricingTaxesOf } from "./tax-classes.ts";
  * both defaults are wrong:** "every line is carried" is api-cloudrun#1341 (a
  * line added to a finished order priced on whatever days the client sent), and
  * "no line is carried" re-derives every frozen line's money.
+ *
+ * 🔴 **A carried line's days are read off its STORED row, never off the row
+ * being priced.** The order input schema strips `chargeable_days`, so on a PUT
+ * every incoming row arrives with none. Reading the incoming row is how an
+ * operator's quantity nudge on complete order 1013 nulled 25 lines' days and
+ * repriced it from $4,952.91 to $2,667.17 at the one-week floor (2026-10-08).
  */
 export type PriceDocumentKind =
-  | { kind: "order"; status: OrderStatusType; stored_items: readonly PathedItem[] }
+  | { kind: "order"; status: OrderStatusType; stored_items: readonly StoredDaysRow[] }
   | { kind: "invoice"; status: InvoiceStatusType; has_settlement: boolean };
+
+/** A stored order row as {@link carriedLines} reads it: its identity, and the days it carries. */
+export interface StoredDaysRow extends PathedItem {
+  readonly price?: { readonly chargeable_days?: number | null } | null;
+}
 
 /**
  * The charge windows of one destination pair, as the pricer reads them: stored
@@ -324,9 +335,11 @@ function daysFromWindows(item: LineItem): boolean {
 }
 
 /**
- * **The lines that keep the day counts they carry**: on a `complete` or
- * `canceled` order (charge-windows census decision, 2026-09-16), every line
- * that pairs with a row of `stored_items`. Empty on any other document. A void,
+ * **The lines that keep the day counts they carry, and those days**: on a
+ * `complete` or `canceled` order (charge-windows census decision, 2026-09-16),
+ * every line that pairs with a row of `stored_items`, mapped to THAT STORED
+ * ROW's `chargeable_days` — never its own, which an API write has stripped (see
+ * {@link PriceDocumentKind}). Empty on any other document. A void,
  * paid or settled invoice never reaches here: it is refused outright.
  *
  * The census decision protects days the order ALREADY carried. A line the edit
@@ -346,9 +359,10 @@ function daysFromWindows(item: LineItem): boolean {
 export function carriedLines<T extends PathedItem>(
   items: readonly T[],
   document: PriceDocumentKind,
-): ReadonlySet<T> {
-  if (document.kind !== "order" || !TERMINAL_ORDER_STATUSES.includes(document.status)) return new Set();
-  return new Set(pairItemsAcrossRebuild(items, document.stored_items).forward.keys());
+): ReadonlyMap<T, number | null> {
+  if (document.kind !== "order" || !TERMINAL_ORDER_STATUSES.includes(document.status)) return new Map();
+  const pairs = pairItemsAcrossRebuild(items, document.stored_items).forward;
+  return new Map([...pairs].map(([item, stored]) => [item, stored.price?.chargeable_days ?? null]));
 }
 
 /**
@@ -358,7 +372,7 @@ export function carriedLines<T extends PathedItem>(
  * | line | `chargeable_days` |
  * |---|---|
  * | in an extension section | Σ its pair's window days (the days added) |
- * | in `carried` (a line a `complete`/`canceled` order already had) | its own stored days |
+ * | in `carried` (a line a `complete`/`canceled` order already had) | its STORED row's days |
  * | `rental` + `five_day_week` on a one-window pair | that window's days |
  * | `rental` + `five_day_week` on a 2+ window pair | `billableDays(windows)` |
  * | `rental` + `five_day_week` on no pair | refused |
@@ -370,7 +384,7 @@ export function carriedLines<T extends PathedItem>(
  * `max(days, 5)` floor is the same thing for one window.
  *
  * `carried` is {@link carriedLines} over the whole document, which needs every
- * row at once, so a single-line call cannot work it out. Pass an empty set for
+ * row at once, so a single-line call cannot work it out. Pass an empty map for
  * a document that keeps no stored days.
  *
  * @throws Error on a rental `five_day_week` line that hangs under no pair.
@@ -378,7 +392,7 @@ export function carriedLines<T extends PathedItem>(
 export function lineChargeableDays(
   item: LineItem,
   ctx: Pick<PriceDocumentContext, "document" | "charge_windows" | "extensions">,
-  carried: ReadonlySet<LineItem>,
+  carried: ReadonlyMap<LineItem, number | null>,
 ): { chargeable_days: number | null } {
   const stored = item.price?.chargeable_days ?? null;
   if (extensionFor(item, ctx.extensions)) {
@@ -388,7 +402,7 @@ export function lineChargeableDays(
     if (pair) return { chargeable_days: pair.days.reduce((total, d) => total + d, 0) };
     return { chargeable_days: stored };
   }
-  if (carried.has(item)) return { chargeable_days: stored };
+  if (carried.has(item)) return { chargeable_days: carried.get(item) ?? null };
   if (!daysFromWindows(item)) return { chargeable_days: null };
   const days = windowChargeableDays(item, ctx.charge_windows);
   if (days === null) {

@@ -491,6 +491,16 @@ Deno.test("api-cloudrun#1341: a rental added to a complete 2-window order bills 
   assertEquals([keep.chargeable_days, keep.subtotal_cents], [4, 10000], "the carried line keeps its own days");
 });
 
+Deno.test("a carried line keeps its STORED row's days when the incoming row has none (order 1013)", () => {
+  // The order input schema strips `chargeable_days`, so a PUT's every row arrives
+  // without them. Reading the incoming row nulled 25 lines of complete order
+  // 1013 and repriced it at the one-week floor, $4,952.91 → $2,667.17.
+  const stored = line(["D"], { chargeable_days: 19 });
+  const incoming = { ...stored, price: { ...stored.price, chargeable_days: null } } as LineItem;
+  const out = priced(incoming, priceCtx(pairWith([7]), frozen([stored])));
+  assertEquals([out.chargeable_days, out.subtotal_cents], [19, 38000]);
+});
+
 Deno.test("api-cloudrun#1341: a rental added to a complete one-window order bills that window", () => {
   const added = line(["D"], { chargeable_days: 2 });
   assertEquals(priced(added, priceCtx(pairWith([9]), frozen([]))).chargeable_days, 9);
@@ -513,7 +523,8 @@ Deno.test("api-cloudrun#1341: an added rental under no pair is refused, not pric
 Deno.test("api-cloudrun#1341: a carried line MOVED to another group still keeps its days", () => {
   // A path changes on a move; re-deriving would change a finished job's money.
   const stored = line(["D", "G1"], { chargeable_days: 4 });
-  const moved = { ...stored, path: ["D", "G2", stored.uid] } as LineItem;
+  // Stripped, as every row of an API write is: the days come off the stored row.
+  const moved = { ...stored, path: ["D", "G2", stored.uid], price: { ...stored.price, chargeable_days: null } } as LineItem;
   assertEquals(priced(moved, priceCtx(pairWith([8, 3]), frozen([stored]))).chargeable_days, 4);
 });
 
@@ -548,15 +559,15 @@ Deno.test("chargeWindowContext: a pair whose windows are null bills no days and 
   // where it is priced, naming the line.
   assertEquals(chargeWindowContext([{ uid: "D", dates: { charge_windows: null } }]), []);
   const sale = { ...line(["D"]), type: "sale" as const, price: { ...line(["D"]).price, formula: "fixed" as const } };
-  assertEquals(lineChargeableDays(sale as never, priceCtx([]), new Set()), { chargeable_days: null });
-  assertThrows(() => lineChargeableDays(line(["D"]), priceCtx([]), new Set()), PriceRefusalError, "under no destination pair with charge windows");
+  assertEquals(lineChargeableDays(sale as never, priceCtx([]), new Map()), { chargeable_days: null });
+  assertThrows(() => lineChargeableDays(line(["D"]), priceCtx([]), new Map()), PriceRefusalError, "under no destination pair with charge windows");
 });
 
 Deno.test("chargeWindowContext: an invoice pair's divider path is [uid_order, uid]", () => {
   const ctx = chargeWindowContext([{ uid: "D", uid_order: "O", dates: { charge_windows: [{ days: 3 }, { days: 4 }] } }]);
   assertEquals(ctx, [{ divider_path: ["O", "D"], days: [3, 4] }]);
   const onInvoice = line(["O", "D"]);
-  assertEquals(lineChargeableDays(onInvoice, priceCtx(ctx), new Set()), { chargeable_days: 10 });
+  assertEquals(lineChargeableDays(onInvoice, priceCtx(ctx), new Map()), { chargeable_days: 10 });
 });
 
 Deno.test("priceDocument: an extension line bills its pair's added days, unfloored", () => {
