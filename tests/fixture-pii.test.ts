@@ -15,15 +15,19 @@ import {
   allocateOrganizationFakes,
   categoryForField,
   collectMaskedLeaves,
+  deriveMaskRouteProbes,
   FAKE_FIRST_NAMES,
   FAKE_LAST_NAMES,
   FAKE_ORGANIZATIONS,
   FAKE_PLACES,
   fakeForMask,
   type MaskCategory,
+  maskRouteProbes,
   maskVerdict,
   normalizeFieldPath,
+  organizationIdentityConflicts,
 } from "../src/utils/fixture-pii.ts";
+import { PickSheetScopeSchema } from "../src/schemas/pick-sheet.ts";
 
 /** A stand-in for the service's HMAC. Hex, which is all `fakeForMask` assumes. */
 function seedOf(fieldPath: string, value: string, n = 0): string {
@@ -509,4 +513,102 @@ Deno.test("re-running the masker is byte-stable", () => {
   );
   assertEquals(once, twice);
   assertEquals(maskVerdict(once, "organizations.name", siblings), "masked");
+});
+
+// ── Discriminant probes (templates#286) ─────────────────────────────
+
+Deno.test("probes: every arm of the scope.kind union has one, routed as the masker routes it", () => {
+  // The schema union is the authority on which arms EXIST, not the table — so
+  // read the arms off `PickSheetScopeSchema` and require a probe for each.
+  const kinds = (PickSheetScopeSchema as unknown as { shape: { kind: { options: string[] } } })
+    .shape.kind.options;
+  const probes = maskRouteProbes().filter((p) => p.route === "scope.name");
+  assertEquals(probes.map((p) => p.arm).sort(), [...kinds].sort());
+  const routed = Object.fromEntries(
+    probes.map((p) => [p.key, categoryForField(p.fieldPath, p.siblings)]),
+  );
+  assertEquals(routed, {
+    "scope.name[kind=destination]": "address_full",
+    "scope.name[kind=order]": "text",
+    "scope.name[kind=organization]": "organization",
+  });
+  // `order` routes to `text` ON PURPOSE, and the probe says so.
+  assert(probes.every((p) => p.declared), "every pick-sheet arm is a table decision");
+  // And the fingerprint differs from the sibling-less call, which is the bug.
+  assert(probes.some((p) => categoryForField(p.fieldPath) !== routed[p.key]));
+});
+
+Deno.test("probes: an arm only the SCHEMA knows still gets a probe, marked undeclared", () => {
+  // The derivation half: a `kind` added to a union with no table entry. It
+  // falls through to `text`, and `declared: false` is what tells that apart
+  // from `kind: "order"`'s deliberate `text`.
+  const planted = z.strictObject({
+    scope: z.strictObject({ kind: z.enum(["organization", "warehouse"]), name: z.string() }),
+  });
+  const probes = deriveMaskRouteProbes({ planted });
+  const warehouse = probes.find((p) => p.key === "scope.name[kind=warehouse]");
+  assert(warehouse, "the schema-only arm was not probed");
+  assertEquals(warehouse.declared, false);
+  assertEquals(categoryForField(warehouse.fieldPath, warehouse.siblings), "text");
+  assertEquals(probes.find((p) => p.key === "scope.name[kind=organization]")?.declared, true);
+});
+
+Deno.test("probes: a discriminant NOT beside the routed leaf adds nothing", () => {
+  // `AgingScope` has a `kind` and no `name` (core#92) — its `all` arm routes
+  // nothing and must not appear.
+  const planted = z.strictObject({ scope: z.strictObject({ kind: z.enum(["all"]) }) });
+  assertEquals(
+    deriveMaskRouteProbes({ planted }).filter((p) => p.arm === "all"),
+    [],
+  );
+});
+
+// ── Organization bijection (templates#288) ──────────────────────────
+
+const orgLeaf = (fieldPath: string, uid: string, value: string) => ({
+  fieldPath,
+  value,
+  siblings: { uid, name: value },
+});
+
+Deno.test("bijection: a clean document has no conflicts", () => {
+  assertEquals(
+    organizationIdentityConflicts([
+      orgLeaf("organization.path.name", "A", "Northwind Studios"),
+      orgLeaf("organizations.name", "A", "Northwind Studios"),
+      orgLeaf("organization.path.name", "B", "Harbor Light Media"),
+    ]),
+    [],
+  );
+});
+
+Deno.test("bijection: one uid under two names is a conflict, reported without the names", () => {
+  const conflicts = organizationIdentityConflicts([
+    orgLeaf("organization.path.name", "A", "Northwind Studios"),
+    orgLeaf("organizations.name", "A", "Harbor Light Media"),
+  ]);
+  assertEquals(conflicts.length, 1);
+  assertEquals(conflicts[0].kind, "uid-has-two-names");
+  assertEquals(conflicts[0].uids, ["A"]);
+  assert(!JSON.stringify(conflicts).includes("Northwind"), "a name leaked into the report");
+});
+
+Deno.test("bijection: one name over two uids is a conflict", () => {
+  const conflicts = organizationIdentityConflicts([
+    orgLeaf("organization.path.name", "A", "Northwind Studios"),
+    orgLeaf("organization.path.name", "B", "Northwind Studios"),
+  ]);
+  assertEquals(conflicts.map((c) => [c.kind, c.uids]), [["name-has-two-uids", ["A", "B"]]]);
+});
+
+Deno.test("bijection: a non-organization leaf and an identity-less one are out of scope", () => {
+  assertEquals(
+    organizationIdentityConflicts([
+      { fieldPath: "contact.name", value: "Ada Byrne", siblings: { uid: "A" } },
+      { fieldPath: "contact.name", value: "Bo Quint", siblings: { uid: "A" } },
+      { fieldPath: "organization.path.name", value: "Northwind Studios", siblings: {} },
+      { fieldPath: "organization.path.name", value: "Harbor Light Media", siblings: {} },
+    ]),
+    [],
+  );
 });

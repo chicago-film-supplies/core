@@ -72,8 +72,14 @@
  */
 
 import type { z } from "zod";
+import { FixtureMetaSchema } from "../schemas/template.ts";
 import { templateSchemaFor } from "../schemas/template-schemas.ts";
-import { categoryForField, collectMaskedLeaves, maskVerdict } from "./fixture-pii.ts";
+import {
+  categoryForField,
+  collectMaskedLeaves,
+  maskVerdict,
+  organizationIdentityConflicts,
+} from "./fixture-pii.ts";
 import {
   GOLDEN_FRAMES,
   type GoldenFrame,
@@ -162,12 +168,10 @@ export interface LintFinding {
    * nobody intends to enforce — an advisory with no plan to flip is a comment
    * that costs a CI run.
    *
-   * ⭐ **NO CHECK PRODUCES ONE TODAY, and that is the seam working rather than
-   * dead code.** Check 2b was the only producer; its corpus was repaired and it
-   * flipped on 2026-09-06. Kept because the next rule over an existing corpus
-   * needs exactly this, and because {@link LintReport.advisories} is a wire
-   * shape three repos already carry — but a caller reasoning about live
-   * advisories today is reasoning about an empty set.
+   * ⭐ **One check produces one today: 2c, {@link IDENTITY_CHECK}** (templates#288),
+   * which landed advisory because two committed fixtures predate core#91's
+   * identity seeding. Check 2b was the previous producer; its corpus was
+   * repaired and it flipped on 2026-09-06 — the same path 2c is on.
    */
   severity?: "advisory";
 }
@@ -229,9 +233,9 @@ export interface LintReport {
    * on them by accident, not so a caller can ignore them: an advisory nobody
    * ever sees is a check that does not exist.
    *
-   * ⚠️ **Empty since 2026-09-06** — see {@link LintFinding.severity}. A caller
-   * that drops this array is not currently losing anything, which is a fact
-   * about today's check set and not a licence: `api-cloudrun`'s
+   * ⚠️ **Carries check 2c's {@link IDENTITY_CHECK} findings** — see
+   * {@link LintFinding.severity}. It was empty from 2026-09-06 until 2c landed,
+   * and a caller that drops it now loses a real finding: `api-cloudrun`'s
    * `familyLintOutcome` already drops it, and did so while check 2b was still
    * advisory — so the family-wide lint the manager renders never showed a mask
    * finding at all until the flip made it blocking.
@@ -283,6 +287,16 @@ export interface LintReport {
  * exists to catch a placeholder, not to grade prose.
  */
 export const MIN_DESCRIPTION = 40;
+
+/**
+ * The `check` of the per-fixture organization bijection (templates#288).
+ *
+ * ⚠️ **ADVISORY today**, because two committed fixtures were masked under the
+ * pre-core#91 rule and still violate it. Exported so a caller can find it in
+ * {@link LintReport.advisories} by name — `templates`' `lint:fixtures` may treat
+ * it as blocking once those two are re-captured, before core flips it here.
+ */
+export const IDENTITY_CHECK = "pii-identity";
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const PHONE = /(?:\+?1[\s.-]?)?(?:\(\d{3}\)[\s.-]?|\d{3}[\s.-])\d{3}[\s.-]?\d{4}|\b\d{10}\b/g;
@@ -399,7 +413,8 @@ function sidecarFile(gitPath: string): string {
 /**
  * The checks answerable from ONE fixture plus its family's sidecar.
  *
- * This is what the API's fixture verbs call: schema (1), PII (2) and the
+ * This is what the API's fixture verbs call: schema (1), PII (2, incl. the
+ * advisory organization bijection 2c) and the
  * per-entry param-key check (5a). None of them consults another fixture, so a
  * caller holding one cannot produce a finding that is an artifact of the rest
  * being absent.
@@ -529,7 +544,8 @@ export function lintFixture(args: {
     // `text` accepts strictly less than any other category, so the omission
     // could only ever over-report. That is also why the corpus stayed green —
     // before core#91 every `scope.name` WAS the filler.
-    for (const { fieldPath, value, siblings } of collectMaskedLeaves(fixture.doc, resolved)) {
+    const leaves = collectMaskedLeaves(fixture.doc, resolved);
+    for (const { fieldPath, value, siblings } of leaves) {
       const verdict = maskVerdict(value, fieldPath, siblings);
       if (args.maskTally) {
         args.maskTally.examined++;
@@ -574,6 +590,29 @@ export function lintFixture(args: {
           `produced: ${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`,
       );
     }
+
+    // ── 2c. The organization bijection (templates#288) ─────────────
+    //
+    // 2b asks whether each leaf LOOKS masked. It cannot see that one
+    // organization is masked to two different names at two paths, or that two
+    // organizations share one — every leaf passes alone. Both are 0 after a
+    // fresh capture, so a breach means the fixture predates core#91's identity
+    // seeding (or was hand-edited) and should be re-captured.
+    //
+    // ⚠️ ADVISORY: two committed fixtures still violate it. Flip by deleting the
+    // severity argument once they are re-captured. Uids and paths only, never
+    // the names — see `organizationIdentityConflicts`.
+    for (const conflict of organizationIdentityConflicts(leaves)) {
+      const what = conflict.kind === "uid-has-two-names"
+        ? `organization ${conflict.uids[0]} is masked to ${conflict.names} different names`
+        : `${conflict.uids.length} organizations (${conflict.uids.join(", ")}) share one masked name`;
+      note(
+        IDENTITY_CHECK,
+        `${what} at ${conflict.fieldPaths.join(", ")}. One organization must be one name, ` +
+          `and two must be two, within a document — re-capture this fixture.`,
+        "advisory",
+      );
+    }
   }
 
   // ── 5a. Undeclared param key ──────────────────────────────────────
@@ -616,7 +655,9 @@ export function lintFixture(args: {
  *
  * Fails CLOSED on: a fixtures directory with no sidecar, a sidecar with no
  * `collection_source`, an unmapped collection, sidecar↔file drift in either
- * direction, a missing or placeholder coverage argument, an undeclared param
+ * direction, a sidecar entry `FixtureMetaSchema` refuses (an over-long
+ * description, label or slug included), a missing or placeholder coverage
+ * argument, an undeclared param
  * key, and a fixture taking a render frame's reserved golden slug. Checks 4 and
  * 5b fail OPEN by design — both are scoped to families that have GRADUATED,
  * because a family with no baseline has not chosen its fixture set yet and
@@ -708,6 +749,36 @@ export function lintFixtureSet(args: { families: LintFamily[] }): LintReport {
         "drift",
         `${fixtureFile(gitPath, slug)} exists but is not listed in \`fixtures[]\``,
       );
+    }
+
+    // ── 3a. Each entry against `FixtureMetaSchema` (core#104) ───────
+    //
+    // 🔴 The lint used to check a MINIMUM description length and nothing else,
+    // so a 2374-character description was green in CI and refused by the
+    // publish webhook's `validateBeforeWrite` in prod. Parsing with the schema
+    // itself means the lint and the write path cannot disagree about any bound
+    // — description, label, slug, params, and unknown keys alike.
+    //
+    // ⚠️ A missing or too-short description is check 3's, not this one's: its
+    // bound is stricter and its message says what to write. Those two issues
+    // are skipped here so one defect is not reported twice.
+    if (Array.isArray(sidecar.fixtures)) {
+      for (const [i, raw] of sidecar.fixtures.entries()) {
+        const parsed = FixtureMetaSchema.safeParse(raw);
+        if (parsed.success) continue;
+        const slug = raw !== null && typeof raw === "object" &&
+            typeof (raw as Record<string, unknown>).slug === "string"
+          ? `"${(raw as Record<string, unknown>).slug}"`
+          : `fixtures[${i}]`;
+        for (const issue of parsed.error.issues) {
+          if (
+            issue.path[0] === "description" &&
+            (issue.code === "too_small" || issue.code === "invalid_type")
+          ) continue;
+          const at = issue.path.length > 0 ? issue.path.join(".") : "<entry>";
+          note(sidecarPath, "fixture-meta", `${slug} \`${at}\`: ${issue.message}`);
+        }
+      }
     }
 
     // ── 3. The coverage argument ────────────────────────────────────

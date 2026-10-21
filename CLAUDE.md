@@ -178,6 +178,14 @@ This repo uses [semantic-release](https://github.com/semantic-release/semantic-r
 | `test` | No release | Adding or updating tests |
 | `docs` | No release | Documentation only |
 
+🔴 **Type by what a CONSUMER sees, and the `commit-msg` hook now enforces it (core#71).** If the
+staged `API.json`'s exported names or doc-stripped declarations differ from HEAD's, a non-releasing
+type is refused, listing what moved. Docstring-only changes pass. The stated exemption is a footer,
+`Internal-API-Change: <reason>`. It cannot see `--no-verify` or re-judge an `--amend` (it compares
+against the commit being amended), and a worktree runs the MAIN checkout's hooks, so it prints
+SKIPPED there until the main checkout has this hook. Replay a past commit with
+`deno run --allow-read --allow-run=git scripts/check-commit-msg.ts --api-before=<old API.json> --api-after=<new API.json> <message file>`.
+
 ### Scopes
 
 Use the schema/module name as the scope when the change is limited to one area:

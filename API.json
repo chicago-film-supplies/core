@@ -22032,6 +22032,12 @@
       "moduleDoc": "The fixture lint, as a pure fold.\n\n## Why this is one implementation and not three\n\n`templates/scripts/lint-fixtures.ts` was the ONLY implementation of these\nrules, and it ran only in CI. So the first time an author heard about a\nschema break, a PII leak, a missing coverage argument, an orphaned golden or\nan undeclared param key was on a pull request — after the work was committed,\nreleased and pushed. The API's `gateDraftContent` does `validateEtaSources` +\n`validateIncludeTargets` and nothing else, and the manager warned about none\nof it. templates#195.\n\nTwo of those gaps were defects rather than mere lateness: an undeclared param\nkey was accepted at save and only threw later inside `resolveRenderParams`,\ntaking the family's whole `visual-diff` run with it; and `PUT /fixtures/{slug}`\nneither sanitizes nor scans PII while being the manager's own JSON textarea —\nan unsanitized write path into git, against a dev database that mirrors\nproduction.\n\nThe alternative to extracting it is two implementations of one rule drifting,\nwhich is the thing this module exists to make impossible.\n\n## ⚠️ Why this is NOT in `utils/templates.ts`, where the plan put it\n\nThat module documents a hard invariant in its own docblock — **no runtime\ndependency on `@cfs/core/schemas`** — because its path helpers (`fixturePath`,\n`slugify`, `goldenPath`) are pulled by consumers that must not drag the schema\nbarrel and all of zod along with them. Check 1 resolves `templateSchemaFor`,\nwhich is exactly such a runtime value.\n\nSo the lint lives in its own module and its own subpath. That is a real cost —\na new `@cfs/core/utils/template-lint` line in every consumer's pin list, and a\nstranded subpath at the next bump is a documented recurrence — and it buys\nkeeping a zod-free module zod-free. ⚠️ **Do not \"tidy\" this back into\n`utils/templates.ts`.**\n\n⭐ **The schema resolver is imported, never injected.** Passing it in would let\na caller supply the Firestore collection registry instead, which is precisely\nthe bug the script's own header warns about: a template source names a\ndocument SHAPE and need not be a collection at all, so `isCollectionName`\nfails CLOSED on `movement-sessions` — the receipt's source, which the API's\nwrite path validates fine (api-cloudrun#700). An injected resolver makes that\nmistake reachable again from every call site.\n\n## The two entry points, and why the split is structural\n\n`lintFixture` — the checks that need ONE fixture and its family's sidecar.\n`lintFixtureSet` — the whole fold, which requires the COMPLETE family.\n\n⭐ **This split is what stops a partial caller reporting phantom findings.**\nThe API's fixture verbs hold a single fixture; the set-wide checks (sidecar\ndrift, golden parity, param coverage) would each read \"every other fixture is\nmissing\" from that input. Rather than police it with a `complete: boolean` a\ncaller can get wrong, a caller holding one fixture literally cannot reach the\nset-wide checks — they are not on the function it can call.\n\n## ⚠️ The check set is NOT fixed, and nothing here may assume it is\n\nIt ran six checks until templates#187 retired the org-derivation one. So\n`check` is a plain `string`, deliberately **not** a closed union a seventh\nwould have to widen, and no count appears anywhere in this module.\n\n⭐ **The EXAMINED tallies are load-bearing, not decoration.** Check 6 was\nretired *cleanly* only because it printed `0 org chain(s) compose to their own\nname` on the run after the fixtures were stripped — turning \"should this be\nremoved?\" into an observation rather than a judgement call. **A check that\ncannot fail is not coverage**, and a counter is what makes a vacuous check\nannounce itself. Every check here reports what it examined.",
       "symbols": [
         {
+          "kind": "variable",
+          "name": "IDENTITY_CHECK",
+          "declaration": "const IDENTITY_CHECK: \"pii-identity\";",
+          "doc": "The `check` of the per-fixture organization bijection (templates#288).\n\n⚠️ **ADVISORY today**, because two committed fixtures were masked under the\npre-core#91 rule and still violate it. Exported so a caller can find it in\n{@link LintReport.advisories} by name — `templates`' `lint:fixtures` may treat\nit as blocking once those two are re-captured, before core flips it here."
+        },
+        {
           "kind": "interface",
           "name": "LintFamily",
           "declaration": "interface LintFamily {\n  gitPath: string;\n  sidecar: LintSidecar | null;\n  fixtures: LintFixture[];\n  goldens: LintGoldenTree[];\n}",
@@ -22089,7 +22095,7 @@
           "kind": "function",
           "name": "lintFixture",
           "signature": "lintFixture(args: typeLiteral): LintFinding[]",
-          "doc": "The checks answerable from ONE fixture plus its family's sidecar.\n\nThis is what the API's fixture verbs call: schema (1), PII (2) and the\nper-entry param-key check (5a). None of them consults another fixture, so a\ncaller holding one cannot produce a finding that is an artifact of the rest\nbeing absent.\n\n⚠️ **The PII scan runs whether or not the schema check passed**, and on the\nraw document rather than a parsed one. A schema failure and a PII leak are\nindependent, and returning early on the first hides the second behind it —\nwhich matters most in exactly the case where it is most likely, a hand-pasted\ndocument that satisfies neither.",
+          "doc": "The checks answerable from ONE fixture plus its family's sidecar.\n\nThis is what the API's fixture verbs call: schema (1), PII (2, incl. the\nadvisory organization bijection 2c) and the\nper-entry param-key check (5a). None of them consults another fixture, so a\ncaller holding one cannot produce a finding that is an artifact of the rest\nbeing absent.\n\n⚠️ **The PII scan runs whether or not the schema check passed**, and on the\nraw document rather than a parsed one. A schema failure and a PII leak are\nindependent, and returning early on the first hides the second behind it —\nwhich matters most in exactly the case where it is most likely, a hand-pasted\ndocument that satisfies neither.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -22097,7 +22103,7 @@
           "kind": "function",
           "name": "lintFixtureSet",
           "signature": "lintFixtureSet(args: typeLiteral): LintReport",
-          "doc": "Every check, over completely-described families.\n\n⚠️ **Pass EVERY registered family, including ones with no fixtures.** The\ncaller decides what \"every family\" means; this fold reports what it was given\nand cannot detect an omission. A family left out is silently unchecked, which\nis the failure the `ungatedFamilies` output exists to make visible for the\nfamilies that ARE passed.\n\nFails CLOSED on: a fixtures directory with no sidecar, a sidecar with no\n`collection_source`, an unmapped collection, sidecar↔file drift in either\ndirection, a missing or placeholder coverage argument, an undeclared param\nkey, and a fixture taking a render frame's reserved golden slug. Checks 4 and\n5b fail OPEN by design — both are scoped to families that have GRADUATED,\nbecause a family with no baseline has not chosen its fixture set yet and\nsaying so on every PR would be noise rather than a finding.\n\n⚠️ **Check 4 has TWO graduation guards, at different grains.** The fixture\narms are scoped on the tree holding a fixture baseline; the frame arms are\nscoped on the tree holding a FRAME baseline. They are independent because\nevery family declares a `render.footer` and none had a baseline for it when\nthe frame arms shipped — so one guard would have reddened every family at\nonce (templates#137 half 2).",
+          "doc": "Every check, over completely-described families.\n\n⚠️ **Pass EVERY registered family, including ones with no fixtures.** The\ncaller decides what \"every family\" means; this fold reports what it was given\nand cannot detect an omission. A family left out is silently unchecked, which\nis the failure the `ungatedFamilies` output exists to make visible for the\nfamilies that ARE passed.\n\nFails CLOSED on: a fixtures directory with no sidecar, a sidecar with no\n`collection_source`, an unmapped collection, sidecar↔file drift in either\ndirection, a sidecar entry `FixtureMetaSchema` refuses (an over-long\ndescription, label or slug included), a missing or placeholder coverage\nargument, an undeclared param\nkey, and a fixture taking a render frame's reserved golden slug. Checks 4 and\n5b fail OPEN by design — both are scoped to families that have GRADUATED,\nbecause a family with no baseline has not chosen its fixture set yet and\nsaying so on every PR would be noise rather than a finding.\n\n⚠️ **Check 4 has TWO graduation guards, at different grains.** The fixture\narms are scoped on the tree holding a fixture baseline; the frame arms are\nscoped on the tree holding a FRAME baseline. They are independent because\nevery family declares a `render.footer` and none had a baseline for it when\nthe frame arms shipped — so one guard would have reddened every family at\nonce (templates#137 half 2).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -22170,6 +22176,12 @@
           "doc": "Optional per-document context for {@link fakeForMask}."
         },
         {
+          "kind": "interface",
+          "name": "MaskRouteProbe",
+          "declaration": "interface MaskRouteProbe {\n  key: string;\n  route: string;\n  on: string;\n  arm: string;\n  fieldPath: string;\n  siblings: Readonly<Record<string, unknown>>;\n  declared: boolean;\n}",
+          "doc": "One way to call {@link categoryForField} that exercises ONE arm of a\ndiscriminated route.\n\nA caller fingerprints a version's routing by calling\n`categoryForField(probe.fieldPath, probe.siblings)` for every probe and\nkeying the answer on {@link MaskRouteProbe.key}. Calling the router WITHOUT\nsiblings — what `templates/scripts/lint-capture-floor.ts` did — reads `text`\nfor every discriminated path at every version, so a re-route of one arm\nproduces no difference to detect (templates#286)."
+        },
+        {
           "kind": "typeAlias",
           "name": "MaskVerdict",
           "declaration": "type MaskVerdict = \"masked\" | \"not-masked\" | \"unverifiable\";",
@@ -22180,6 +22192,12 @@
           "name": "MaskedLeaf",
           "declaration": "interface MaskedLeaf {\n  fieldPath: string;\n  value: string;\n  siblings?: Readonly<Record<string, unknown>>;\n}",
           "doc": "One `pii: \"mask\"` string leaf, as the real walker offered it."
+        },
+        {
+          "kind": "interface",
+          "name": "OrganizationIdentityConflict",
+          "declaration": "interface OrganizationIdentityConflict {\n  kind: \"uid-has-two-names\" | \"name-has-two-uids\";\n  uids: string[];\n  names: number;\n  fieldPaths: string[];\n}",
+          "doc": "One breach of the per-document organization bijection."
         },
         {
           "kind": "typeAlias",
@@ -22213,6 +22231,14 @@
         },
         {
           "kind": "function",
+          "name": "deriveMaskRouteProbes",
+          "signature": "deriveMaskRouteProbes(schemas: Readonly<Record<string, z.ZodType | undefined>>): MaskRouteProbe[]",
+          "doc": "{@link maskRouteProbes} over an arbitrary schema registry — the derivation\nitself, uncached. Exported so the schema half can be exercised with a planted\nunion whose arm the discriminant table does not name.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "fakeForMask",
           "signature": "fakeForMask(value: string, fieldPath: string, seed: string, seedFor: SeedFor, _: unknown): string",
           "doc": "Mask transform — dispatched on the FIELD's category, never on the value.\n\n`seed` is the caller's HMAC of (salt, fieldPath, value) as lowercase hex;\n`seedFor` computes the same for another path. Both stay outside core so the\nsalt does. @see the module header.",
@@ -22224,6 +22250,14 @@
           "name": "maskIdentity",
           "signature": "maskIdentity(category: MaskCategory, value: string, siblings?: Readonly<Record<string, unknown>>): string | undefined",
           "doc": "The identity a fake for this category should be drawn on, or `undefined` when\nthe leaf has none and the caller's own path-derived seed must stand.\n\nReturning `undefined` is the FALLBACK, not a failure: a leaf whose sibling\nidentity is absent keeps exactly the behaviour it had before core#91, so\nnothing regresses for a shape this table does not know about.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "maskRouteProbes",
+          "signature": "maskRouteProbes(): readonly MaskRouteProbe[]",
+          "doc": "Every arm of every discriminated mask route, as {@link MaskRouteProbe}s.\n\n⭐ **The arms are the UNION of the table's arms and the schema's.** The schema\nhalf is read off `TEMPLATE_COLLECTION_SCHEMAS`: wherever a `<parent>.<on>`\nenum or literal sits beside the routed `<parent>.<leaf>` in one object, each\nof its values is an arm. So a `kind` added to a scope union with no table\nentry still gets a probe (`declared: false`), and a future discriminated route\ngets its probes with no edit here. A hand list could miss either.\n\nThrows if the schema walk is incomplete, because a probe set that silently\nmissed a subtree would fingerprint fewer arms than exist and still look whole.\n\nComputed on first call and cached; sorted by `key`.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -22248,6 +22282,14 @@
           "name": "organizationIdentities",
           "signature": "organizationIdentities(leaves: readonly MaskedLeaf[]): string[]",
           "doc": "Every distinct organization identity among a document's masked leaves — the\ninput {@link allocateOrganizationFakes} wants, computed from the same walk the\nmasker itself uses so the two cannot disagree about scope.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "organizationIdentityConflicts",
+          "signature": "organizationIdentityConflicts(leaves: readonly MaskedLeaf[]): OrganizationIdentityConflict[]",
+          "doc": "Check that ONE document's organization leaves are a bijection between uids\nand names: one uid never carries two names, and one name never covers two\nuids (templates#288).\n\nBoth are 0 by construction after a fresh capture — identity seeding gives the\nfirst, {@link allocateOrganizationFakes} the second. So a non-empty result on\na committed fixture means it was masked under the older path-seeded rule, or\nwas hand-edited, and should be re-captured.\n\n⚠️ **Per document, never per corpus.** Two fixtures legitimately reuse a\nname; injectivity is a fact about one document.\n\nThe scope is the same as {@link organizationIdentities}: leaves routed to\n`organization` that carry a sibling `uid`. A leaf with no identity cannot be\nchecked and is skipped. A conflict reports uids and paths, never the names,\nbecause a name that fails this check may not have been masked at all.",
           "paramTags": [],
           "returnsTag": null
         }

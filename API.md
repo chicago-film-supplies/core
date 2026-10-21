@@ -47126,6 +47126,19 @@ removed?" into an observation rather than a judgement call. **A check that
 cannot fail is not coverage**, and a counter is what makes a vacuous check
 announce itself. Every check here reports what it examined.
 
+### `IDENTITY_CHECK`
+
+The `check` of the per-fixture organization bijection (templates#288).
+
+⚠️ **ADVISORY today**, because two committed fixtures were masked under the
+pre-core#91 rule and still violate it. Exported so a caller can find it in
+{@link LintReport.advisories} by name — `templates`' `lint:fixtures` may treat
+it as blocking once those two are re-captured, before core flips it here.
+
+```ts
+const IDENTITY_CHECK: "pii-identity";
+```
+
 ### `LintFamily`
 
 One family, completely described.
@@ -47255,7 +47268,8 @@ interface MaskTally {
 
 The checks answerable from ONE fixture plus its family's sidecar.
 
-This is what the API's fixture verbs call: schema (1), PII (2) and the
+This is what the API's fixture verbs call: schema (1), PII (2, incl. the
+advisory organization bijection 2c) and the
 per-entry param-key check (5a). None of them consults another fixture, so a
 caller holding one cannot produce a finding that is an artifact of the rest
 being absent.
@@ -47278,7 +47292,9 @@ families that ARE passed.
 
 Fails CLOSED on: a fixtures directory with no sidecar, a sidecar with no
 `collection_source`, an unmapped collection, sidecar↔file drift in either
-direction, a missing or placeholder coverage argument, an undeclared param
+direction, a sidecar entry `FixtureMetaSchema` refuses (an over-long
+description, label or slug included), a missing or placeholder coverage
+argument, an undeclared param
 key, and a fixture taking a render frame's reserved golden slug. Checks 4 and
 5b fail OPEN by design — both are scoped to families that have GRADUATED,
 because a family with no baseline has not chosen its fixture set yet and
@@ -47449,6 +47465,30 @@ interface MaskContext {
 }
 ```
 
+### `MaskRouteProbe`
+
+One way to call {@link categoryForField} that exercises ONE arm of a
+discriminated route.
+
+A caller fingerprints a version's routing by calling
+`categoryForField(probe.fieldPath, probe.siblings)` for every probe and
+keying the answer on {@link MaskRouteProbe.key}. Calling the router WITHOUT
+siblings — what `templates/scripts/lint-capture-floor.ts` did — reads `text`
+for every discriminated path at every version, so a re-route of one arm
+produces no difference to detect (templates#286).
+
+```ts
+interface MaskRouteProbe {
+  key: string;
+  route: string;
+  on: string;
+  arm: string;
+  fieldPath: string;
+  siblings: Readonly<Record<string, unknown>>;
+  declared: boolean;
+}
+```
+
 ### `MaskVerdict`
 
 Whether a committed value could have come out of {@link fakeForMask}.
@@ -47472,6 +47512,19 @@ interface MaskedLeaf {
   fieldPath: string;
   value: string;
   siblings?: Readonly<Record<string, unknown>>;
+}
+```
+
+### `OrganizationIdentityConflict`
+
+One breach of the per-document organization bijection.
+
+```ts
+interface OrganizationIdentityConflict {
+  kind: "uid-has-two-names" | "name-has-two-uids";
+  uids: string[];
+  names: number;
+  fieldPaths: string[];
 }
 ```
 
@@ -47558,6 +47611,12 @@ a committed fixture, and the oracle has no fake shape to compare against.
 The walk is read-only — the strategy returns every value unchanged, which is
 also how `applyPii` is told to keep descending into a container.
 
+### `deriveMaskRouteProbes(schemas: Readonly<Record<string, z.ZodType | undefined>>): MaskRouteProbe[]`
+
+{@link maskRouteProbes} over an arbitrary schema registry — the derivation
+itself, uncached. Exported so the schema half can be exercised with a planted
+union whose arm the discriminant table does not name.
+
 ### `fakeForMask(value: string, fieldPath: string, seed: string, seedFor: SeedFor, _: unknown): string`
 
 Mask transform — dispatched on the FIELD's category, never on the value.
@@ -47574,6 +47633,22 @@ the leaf has none and the caller's own path-derived seed must stand.
 Returning `undefined` is the FALLBACK, not a failure: a leaf whose sibling
 identity is absent keeps exactly the behaviour it had before core#91, so
 nothing regresses for a shape this table does not know about.
+
+### `maskRouteProbes(): readonly MaskRouteProbe[]`
+
+Every arm of every discriminated mask route, as {@link MaskRouteProbe}s.
+
+⭐ **The arms are the UNION of the table's arms and the schema's.** The schema
+half is read off `TEMPLATE_COLLECTION_SCHEMAS`: wherever a `<parent>.<on>`
+enum or literal sits beside the routed `<parent>.<leaf>` in one object, each
+of its values is an arm. So a `kind` added to a scope union with no table
+entry still gets a probe (`declared: false`), and a future discriminated route
+gets its probes with no edit here. A hand list could miss either.
+
+Throws if the schema walk is incomplete, because a probe set that silently
+missed a subtree would fingerprint fewer arms than exist and still look whole.
+
+Computed on first call and cached; sorted by `key`.
 
 ### `maskVerdict(value: string, fieldPath: string, siblings?: Readonly<Record<string, unknown>>): MaskVerdict`
 
@@ -47601,6 +47676,25 @@ compare a static schema walk and a runtime walk directly.
 Every distinct organization identity among a document's masked leaves — the
 input {@link allocateOrganizationFakes} wants, computed from the same walk the
 masker itself uses so the two cannot disagree about scope.
+
+### `organizationIdentityConflicts(leaves: readonly MaskedLeaf[]): OrganizationIdentityConflict[]`
+
+Check that ONE document's organization leaves are a bijection between uids
+and names: one uid never carries two names, and one name never covers two
+uids (templates#288).
+
+Both are 0 by construction after a fresh capture — identity seeding gives the
+first, {@link allocateOrganizationFakes} the second. So a non-empty result on
+a committed fixture means it was masked under the older path-seeded rule, or
+was hand-edited, and should be re-captured.
+
+⚠️ **Per document, never per corpus.** Two fixtures legitimately reuse a
+name; injectivity is a fact about one document.
+
+The scope is the same as {@link organizationIdentities}: leaves routed to
+`organization` that carry a sibling `uid`. A leaf with no identity cannot be
+checked and is skipped. A conflict reports uids and paths, never the names,
+because a name that fails this check may not have been masked at all.
 
 ## `@cfs/core/utils/citations`
 

@@ -1,5 +1,8 @@
 #!/bin/sh
-# Reject commit messages release-please's PEG parser would choke on — an
-# unparseable message is silently omitted from CHANGELOG.md and the release
-# notes. See scripts/check-commit-msg.ts.
-deno run --allow-read scripts/check-commit-msg.ts "$1" || exit 1
+# Two checks on the message (see scripts/check-commit-msg.ts):
+#  1. it parses as a Conventional Commit;
+#  2. if the staged API.json's exported surface differs from HEAD's (docstrings
+#     ignored), its type must publish — feat/fix/perf or a breaking marker — or
+#     it must carry an `Internal-API-Change: <reason>` footer (core#71).
+# `--allow-run=git` reads HEAD:API.json and the staged :API.json.
+deno run --allow-read --allow-run=git scripts/check-commit-msg.ts "$1" || exit 1

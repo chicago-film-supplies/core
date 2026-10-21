@@ -498,11 +498,14 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "allocateOrganizationFakes",
     "categoryForField",
     "collectMaskedLeaves",
+    "deriveMaskRouteProbes",
     "fakeForMask",
     "maskIdentity",
+    "maskRouteProbes",
     "maskVerdict",
     "normalizeFieldPath",
     "organizationIdentities",
+    "organizationIdentityConflicts",
   ],
   // `bookingOccurrencesByBooking` derives WHICH ROW an aggregate booking's units
   // are counted under, from a fulfillment. No template needs it: a pick sheet

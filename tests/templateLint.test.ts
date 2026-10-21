@@ -10,7 +10,9 @@
  * vacuous run announce itself.
  */
 import { assert, assertEquals } from "@std/assert";
+import { FAKE_ORGANIZATIONS } from "../src/utils/fixture-pii.ts";
 import {
+  IDENTITY_CHECK,
   type LintFamily,
   lintFixture,
   lintFixtureSet,
@@ -770,4 +772,84 @@ Deno.test("a wrong-typed sidecar field is treated as absent, never thrown on", (
 Deno.test("stringLeaves reaches into arrays and nested objects, and yields paths", () => {
   const leaves = [...stringLeaves({ a: ["x", { b: "y" }], c: 1, d: null })];
   assertEquals(leaves, [["a[0]", "x"], ["a[1].b", "y"]]);
+});
+
+// ── Check 3a: the entry against FixtureMetaSchema (core#104) ────────
+
+const metaFindings = (entry: Record<string, unknown>) =>
+  lintFixtureSet({
+    families: [family({
+      sidecar: sidecar({ fixtures: [entry] }),
+      fixtures: [{ slug: String(entry.slug), ok: true, doc: NOT_AN_ORDER }],
+    })],
+  }).findings.filter((f) => f.check === "fixture-meta" || f.check === "description");
+
+Deno.test("check 3a — a description one past the schema's max is a finding; at the max it is clean", () => {
+  // templates PR #294: 2374 and 2063 characters were green in CI and refused by
+  // the publish webhook. The bound is the schema's own, not a second literal.
+  const over = metaFindings({ slug: "a", label: "A", description: "x".repeat(2001) });
+  assertEquals(over.map((f) => f.check), ["fixture-meta"]);
+  assert(over[0].message.includes("description"));
+  assertEquals(metaFindings({ slug: "a", label: "A", description: "x".repeat(2000) }), []);
+});
+
+Deno.test("check 3a — label and slug bounds, and unknown keys, come from the schema too", () => {
+  assertEquals(
+    metaFindings({ slug: "a", label: "L".repeat(201), description: GOOD_DESCRIPTION }).length,
+    1,
+  );
+  assertEquals(
+    metaFindings({ slug: "s".repeat(101), label: "A", description: GOOD_DESCRIPTION }).length,
+    1,
+  );
+  assertEquals(
+    metaFindings({ slug: "a", label: "A", description: GOOD_DESCRIPTION, notes: "x" }).length,
+    1,
+  );
+});
+
+Deno.test("check 3a — a short or missing description is reported ONCE, by check 3", () => {
+  assertEquals(metaFindings({ slug: "a", label: "A", description: "" }).map((f) => f.check), [
+    "description",
+  ]);
+  assertEquals(metaFindings({ slug: "a", label: "A" }).map((f) => f.check), ["description"]);
+});
+
+// ── Check 2c: the organization bijection (templates#288) ────────────
+
+const orgFixture = (path: { uid: string; name: string }[]) =>
+  lintFixtureSet({
+    families: [family({
+      sidecar: sidecar({ fixtures: [{ slug: "o", label: "O", description: GOOD_DESCRIPTION }] }),
+      fixtures: [{
+        slug: "o",
+        ok: true,
+        doc: { organization: { uid: path[0].uid, path } },
+      }],
+    })],
+  });
+
+Deno.test("check 2c — one uid masked to two names is an ADVISORY finding", () => {
+  const report = orgFixture([
+    { uid: "orgAAAAAAAAAAAAAAAAA", name: FAKE_ORGANIZATIONS[0] },
+    { uid: "orgAAAAAAAAAAAAAAAAA", name: FAKE_ORGANIZATIONS[1] },
+  ]);
+  assertEquals(report.advisories.map((f) => f.check), [IDENTITY_CHECK]);
+  assert(report.advisories[0].message.includes("orgAAAAAAAAAAAAAAAAA"));
+  assert(!checksIn(report.findings).has(IDENTITY_CHECK), "advisory, so it must not block yet");
+  assert(report.tally.maskLeaves.examined >= 2, "the org leaves were actually walked");
+});
+
+Deno.test("check 2c — two uids under one name is a finding; a clean chain is not", () => {
+  const shared = orgFixture([
+    { uid: "orgAAAAAAAAAAAAAAAAA", name: FAKE_ORGANIZATIONS[0] },
+    { uid: "orgBBBBBBBBBBBBBBBBB", name: FAKE_ORGANIZATIONS[0] },
+  ]);
+  assertEquals(shared.advisories.map((f) => f.check), [IDENTITY_CHECK]);
+  const clean = orgFixture([
+    { uid: "orgAAAAAAAAAAAAAAAAA", name: FAKE_ORGANIZATIONS[0] },
+    { uid: "orgBBBBBBBBBBBBBBBBB", name: FAKE_ORGANIZATIONS[1] },
+  ]);
+  assertEquals(clean.advisories, []);
+  assert(clean.tally.maskLeaves.examined >= 2, "and it examined the same leaves");
 });

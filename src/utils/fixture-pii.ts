@@ -63,6 +63,8 @@
 import type { z } from "zod";
 import type { PiiClassification } from "../schemas/pii/classification.ts";
 import { applyPii } from "../schemas/pii/walker.ts";
+import { TEMPLATE_COLLECTION_SCHEMAS } from "../schemas/template-schemas.ts";
+import { collectLeafPaths } from "../schemas/zod-walk.ts";
 
 // ── The category vocabulary ─────────────────────────────────────────
 
@@ -268,6 +270,141 @@ export function categoryForField(
   }
 
   return QUALIFIED_CATEGORY[qualified] ?? LEAF_CATEGORY[leaf] ?? "text";
+}
+
+// ── The discriminant probes ─────────────────────────────────────────
+
+/**
+ * One way to call {@link categoryForField} that exercises ONE arm of a
+ * discriminated route.
+ *
+ * A caller fingerprints a version's routing by calling
+ * `categoryForField(probe.fieldPath, probe.siblings)` for every probe and
+ * keying the answer on {@link MaskRouteProbe.key}. Calling the router WITHOUT
+ * siblings — what `templates/scripts/lint-capture-floor.ts` did — reads `text`
+ * for every discriminated path at every version, so a re-route of one arm
+ * produces no difference to detect (templates#286).
+ */
+export interface MaskRouteProbe {
+  /** Stable fingerprint key: `scope.name[kind=destination]`. */
+  key: string;
+  /** The routed `<parent>.<leaf>` — a key of the discriminant table. */
+  route: string;
+  /** The sibling that selects the arm (`kind`). */
+  on: string;
+  /** The discriminant value this probe selects. */
+  arm: string;
+  /** Pass to `categoryForField` as its first argument. */
+  fieldPath: string;
+  /** Pass to `categoryForField` as its second argument. */
+  siblings: Readonly<Record<string, unknown>>;
+  /**
+   * `true` when the discriminant table names this arm, INCLUDING an arm it
+   * deliberately routes to `text` (`kind: "order"`, whose identity is missing).
+   * `false` when the arm exists only in a schema union and falls through.
+   *
+   * ⚠️ **Do not read a `text` answer as "unrouted".** `kind: "order"` routes to
+   * `text` on purpose; a fingerprint that conflated it with a fall-through arm
+   * would be back where templates#286 started. This field is the distinction.
+   */
+  declared: boolean;
+}
+
+let probeCache: readonly MaskRouteProbe[] | undefined;
+
+/**
+ * Every arm of every discriminated mask route, as {@link MaskRouteProbe}s.
+ *
+ * ⭐ **The arms are the UNION of the table's arms and the schema's.** The schema
+ * half is read off `TEMPLATE_COLLECTION_SCHEMAS`: wherever a `<parent>.<on>`
+ * enum or literal sits beside the routed `<parent>.<leaf>` in one object, each
+ * of its values is an arm. So a `kind` added to a scope union with no table
+ * entry still gets a probe (`declared: false`), and a future discriminated route
+ * gets its probes with no edit here. A hand list could miss either.
+ *
+ * Throws if the schema walk is incomplete, because a probe set that silently
+ * missed a subtree would fingerprint fewer arms than exist and still look whole.
+ *
+ * Computed on first call and cached; sorted by `key`.
+ */
+export function maskRouteProbes(): readonly MaskRouteProbe[] {
+  probeCache ??= deriveMaskRouteProbes(TEMPLATE_COLLECTION_SCHEMAS);
+  return probeCache;
+}
+
+/**
+ * {@link maskRouteProbes} over an arbitrary schema registry — the derivation
+ * itself, uncached. Exported so the schema half can be exercised with a planted
+ * union whose arm the discriminant table does not name.
+ */
+export function deriveMaskRouteProbes(
+  schemas: Readonly<Record<string, z.ZodType | undefined>>,
+): MaskRouteProbe[] {
+  const out = new Map<string, MaskRouteProbe>();
+  const add = (route: string, on: string, arm: string, declared: boolean) => {
+    const key = `${route}[${on}=${arm}]`;
+    const prior = out.get(key);
+    if (prior) {
+      if (declared && !prior.declared) out.set(key, { ...prior, declared });
+      return;
+    }
+    out.set(key, { key, route, on, arm, fieldPath: route, siblings: { [on]: arm }, declared });
+  };
+
+  for (const [route, { on, arms }] of Object.entries(DISCRIMINANT_CATEGORY)) {
+    for (const arm of Object.keys(arms)) add(route, on, arm, true);
+  }
+
+  for (const [collection, schema] of Object.entries(schemas)) {
+    if (!schema) continue;
+    const walked = collectLeafPaths(schema);
+    if (walked.unhandled.length > 0) {
+      throw new Error(
+        `fixture-pii: maskRouteProbes could not walk \`${collection}\` completely ` +
+          `(${walked.unhandled.map((u) => `${u.path}: ${u.type}`).join(", ")}), so ` +
+          `the probe set would be missing arms.`,
+      );
+    }
+    // Group leaves by their containing object's path, so a discriminant only
+    // counts when it sits beside the routed leaf in the SAME object.
+    // Values are ARRAYS: a union of objects emits one leaf per member at the
+    // same path, and each member's `z.literal` is one more arm.
+    const byParent = new Map<string, Map<string, z.ZodType[]>>();
+    for (const leaf of walked.leaves) {
+      const dot = leaf.path.lastIndexOf(".");
+      const parentPath = dot === -1 ? "" : leaf.path.slice(0, dot);
+      const name = leaf.path.slice(dot + 1);
+      let siblings = byParent.get(parentPath);
+      if (!siblings) byParent.set(parentPath, siblings = new Map());
+      siblings.set(name, [...(siblings.get(name) ?? []), leaf.node]);
+    }
+    for (const [parentPath, siblings] of byParent) {
+      const parent = normalizeFieldPath(parentPath).at(-1) ?? "";
+      for (const [route, { on }] of Object.entries(DISCRIMINANT_CATEGORY)) {
+        const [routeParent, routeLeaf] = route.split(".");
+        if (parent !== routeParent || !siblings.has(routeLeaf)) continue;
+        for (const node of siblings.get(on) ?? []) {
+          for (const arm of discriminantValues(node)) add(route, on, arm, false);
+        }
+      }
+    }
+  }
+
+  return [...out.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+/** The string values an enum or literal leaf admits; `[]` for anything else. */
+function discriminantValues(node: z.ZodType): string[] {
+  const def = (node as unknown as {
+    _zod?: { def?: { type?: string; entries?: Record<string, unknown>; values?: unknown[] } };
+  })._zod?.def;
+  if (def?.type === "enum" && def.entries) {
+    return Object.values(def.entries).filter((v): v is string => typeof v === "string");
+  }
+  if (def?.type === "literal" && def.values) {
+    return def.values.filter((v): v is string => typeof v === "string");
+  }
+  return [];
 }
 
 // ── The fake vocabularies ───────────────────────────────────────────
@@ -1035,4 +1172,78 @@ export function organizationIdentities(leaves: readonly MaskedLeaf[]): string[] 
     if (identity !== undefined) out.add(identity);
   }
   return [...out];
+}
+
+/** One breach of the per-document organization bijection. */
+export interface OrganizationIdentityConflict {
+  /**
+   * `uid-has-two-names` — one organization renders under several labels (the
+   * core#91 §1 defect). `name-has-two-uids` — several organizations render
+   * under one label (the collision {@link allocateOrganizationFakes} prevents).
+   */
+  kind: "uid-has-two-names" | "name-has-two-uids";
+  /** The organization uids involved, sorted. Never the names: see below. */
+  uids: string[];
+  /** How many distinct names the uid(s) carry. */
+  names: number;
+  /** The walker paths of the leaves involved, sorted and deduped. */
+  fieldPaths: string[];
+}
+
+/**
+ * Check that ONE document's organization leaves are a bijection between uids
+ * and names: one uid never carries two names, and one name never covers two
+ * uids (templates#288).
+ *
+ * Both are 0 by construction after a fresh capture — identity seeding gives the
+ * first, {@link allocateOrganizationFakes} the second. So a non-empty result on
+ * a committed fixture means it was masked under the older path-seeded rule, or
+ * was hand-edited, and should be re-captured.
+ *
+ * ⚠️ **Per document, never per corpus.** Two fixtures legitimately reuse a
+ * name; injectivity is a fact about one document.
+ *
+ * The scope is the same as {@link organizationIdentities}: leaves routed to
+ * `organization` that carry a sibling `uid`. A leaf with no identity cannot be
+ * checked and is skipped. A conflict reports uids and paths, never the names,
+ * because a name that fails this check may not have been masked at all.
+ */
+export function organizationIdentityConflicts(
+  leaves: readonly MaskedLeaf[],
+): OrganizationIdentityConflict[] {
+  const namesByUid = new Map<string, Map<string, Set<string>>>();
+  const uidsByName = new Map<string, Map<string, Set<string>>>();
+  for (const leaf of leaves) {
+    const category = categoryForField(leaf.fieldPath, leaf.siblings);
+    if (category !== "organization") continue;
+    const uid = maskIdentity(category, leaf.value, leaf.siblings);
+    if (uid === undefined) continue;
+    const name = leaf.value;
+    const atUid = namesByUid.get(uid) ?? new Map<string, Set<string>>();
+    namesByUid.set(uid, atUid);
+    atUid.set(name, (atUid.get(name) ?? new Set()).add(leaf.fieldPath));
+    const atName = uidsByName.get(name) ?? new Map<string, Set<string>>();
+    uidsByName.set(name, atName);
+    atName.set(uid, (atName.get(uid) ?? new Set()).add(leaf.fieldPath));
+  }
+
+  const paths = (groups: Map<string, Set<string>>) =>
+    [...new Set([...groups.values()].flatMap((s) => [...s]))].sort();
+  const out: OrganizationIdentityConflict[] = [];
+  for (const [uid, names] of [...namesByUid].sort(([a], [b]) => a.localeCompare(b))) {
+    if (names.size < 2) continue;
+    out.push({ kind: "uid-has-two-names", uids: [uid], names: names.size, fieldPaths: paths(names) });
+  }
+  const nameConflicts: OrganizationIdentityConflict[] = [];
+  for (const uids of uidsByName.values()) {
+    if (uids.size < 2) continue;
+    nameConflicts.push({
+      kind: "name-has-two-uids",
+      uids: [...uids.keys()].sort(),
+      names: 1,
+      fieldPaths: paths(uids),
+    });
+  }
+  nameConflicts.sort((a, b) => a.uids.join().localeCompare(b.uids.join()));
+  return [...out, ...nameConflicts];
 }
