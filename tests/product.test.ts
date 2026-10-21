@@ -796,3 +796,24 @@ for (const [label, schema] of [
     if (parsed.success) assertEquals("taxes" in (parsed.data.price ?? {}), false);
   });
 }
+
+Deno.test("core#78: a component price cannot declare percent_of_total, nor a base_percent beside fixed", () => {
+  const component = {
+    uid: "testcomp100000000000",
+    path: ["testproduct100000000"],
+    name: "Battery",
+    type: "rental",
+    stock_method: "bulk",
+    crms_id: 200,
+    quantity: 2,
+    price: { base_cents: 0, replacement_cents: 10000, formula: "fixed", discountable: false },
+  };
+  // The control: the same component parses, so each refusal below is the price's alone.
+  assertEquals(ComponentSchema.safeParse(component).success, true);
+  // The half that matters — a percent with no rate — is unrepresentable.
+  const percent = { ...component, price: { ...component.price, formula: "percent_of_total", base_percent: null } };
+  assertEquals(ComponentSchema.safeParse(percent).success, false);
+  // And the mirror half: a rate beside a formula that never reads one.
+  const stray = { ...component, price: { ...component.price, base_percent: 3 } };
+  assertEquals(ComponentSchema.safeParse(stray).success, false);
+});
