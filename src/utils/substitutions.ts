@@ -371,6 +371,36 @@ export function substitutionCredit(
   return credit;
 }
 
+/**
+ * The LIVE anchors: those whose X the order still carries. An anchor whose X
+ * the order no longer has is spent (owner, 2026-09-16) and offsets nothing.
+ *
+ * @param orderItems - The order's rows (dividers included; only `path` is read)
+ * @param anchors - The downstream document's substitution anchors
+ */
+export function liveSubstitutionAnchors(
+  orderItems: readonly Pick<CreditableRow, "path">[],
+  anchors: readonly SubstitutionAnchor[],
+): SubstitutionAnchor[] {
+  const orderKeys = new Set(orderItems.map((it) => (it.path ?? []).join("/")));
+  return anchors.filter((a) => orderKeys.has(a.substitutedFor.join("/")));
+}
+
+/**
+ * Units substitutes name each X for directly, keyed by X's path — the `direct`
+ * input of {@link substitutionCredit}. Anchors sharing one X sum.
+ *
+ * @param anchors - Usually {@link liveSubstitutionAnchors}' result
+ */
+export function directSubstitutionCredit(anchors: readonly SubstitutionAnchor[]): Map<string, number> {
+  const direct = new Map<string, number>();
+  for (const a of anchors) {
+    const x = a.substitutedFor.join("/");
+    direct.set(x, (direct.get(x) ?? 0) + a.quantity);
+  }
+  return direct;
+}
+
 
 /** @see {@link substitutionResync} */
 export interface SubstitutionResync {
@@ -427,26 +457,21 @@ export function substitutionResync(
   nextOrderItems: readonly CreditableRow[],
   toPath: (path: readonly string[]) => readonly string[] | undefined = () => undefined,
 ): SubstitutionResync {
-  const keys = (items: readonly CreditableRow[]) => new Set(items.map((it) => (it.path ?? []).join("/")));
-  const prevKeys = keys(prevOrderItems);
-  const nextKeys = keys(nextOrderItems);
+  const nextKeys = new Set(nextOrderItems.map((it) => (it.path ?? []).join("/")));
   const xNext = (x: readonly string[]): readonly string[] => toPath(x) ?? x;
 
-  const anchorsPrev = collectSubstitutionAnchors(rows.map((r) => ({ path: r.path, substituted_for: r.substituted_for })))
-    .filter((a) => prevKeys.has(a.substitutedFor.join("/")));
-  const anchorsNext = anchorsPrev
-    .map((a) => ({ ...a, substitutedFor: [...xNext(a.substitutedFor)] }))
-    .filter((a) => nextKeys.has(a.substitutedFor.join("/")));
+  const anchorsPrev = liveSubstitutionAnchors(
+    prevOrderItems,
+    collectSubstitutionAnchors(rows.map((r) => ({ path: r.path, substituted_for: r.substituted_for }))),
+  );
+  const anchorsNext = liveSubstitutionAnchors(
+    nextOrderItems,
+    anchorsPrev.map((a) => ({ ...a, substitutedFor: [...xNext(a.substitutedFor)] })),
+  );
 
   const offsets = (anchors: readonly SubstitutionAnchor[], orderItems: readonly CreditableRow[]) => {
-    const direct = new Map<string, number>();
-    const liveX = new Set<string>();
-    for (const a of anchors) {
-      const x = a.substitutedFor.join("/");
-      liveX.add(x);
-      direct.set(x, (direct.get(x) ?? 0) + a.quantity);
-    }
-    return { credit: substitutionCredit(orderItems, direct), liveX };
+    const direct = directSubstitutionCredit(anchors);
+    return { credit: substitutionCredit(orderItems, direct), liveX: new Set(direct.keys()) };
   };
   const prev = offsets(anchorsPrev, prevOrderItems);
   const next = offsets(anchorsNext, nextOrderItems);

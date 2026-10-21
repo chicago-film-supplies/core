@@ -21,6 +21,7 @@ import type {
   BookingBreakdownKeyType,
   BookingDestinationRef,
   BookingUnitBucketType,
+  BookingUnitSetsType,
   ComponentTypeType,
   Order,
   OrderStatusType,
@@ -29,6 +30,7 @@ import {
   BOOKING_BREAKDOWN_KEYS,
   BOOKING_BREAKDOWN_TERMINAL_KEYS,
   CUSTODY_HISTORY_KEYS,
+  emptyBookingUnitSets,
   isCollectionLineType,
   ORDER_STATUS_TRAITS,
   ownsKey,
@@ -75,6 +77,28 @@ export function untrackedUnitCount(
 ): number {
   if (booking.units == null) return seeded ? booking.breakdown[key] : 0;
   return booking.breakdown[key] - booking.units[key].length;
+}
+
+/**
+ * A booking's unit sets as the custody rules must read them: on a SEEDED
+ * product a stored `units: null` is empty sets, not "not tracked".
+ *
+ * 🔴 The same two readings of `null` as {@link untrackedUnitCount}: the order
+ * path stamps `null` on a new booking of a seeded product on purpose
+ * (serial-tracking D2, D5), so trackedness comes from the roster (`seeded`),
+ * never from the stored value. Unseeded, the stored value is returned as is —
+ * `null` stays `null`.
+ *
+ * Pass `seeded: true` where the caller has already established the booking is
+ * tracked, and the result is never `null`.
+ */
+export function trackedUnitSets<S extends boolean>(
+  booking: Pick<Booking, "units">,
+  seeded: S,
+): S extends true ? BookingUnitSetsType : BookingUnitSetsType | null {
+  type R = S extends true ? BookingUnitSetsType : BookingUnitSetsType | null;
+  if (booking.units != null) return booking.units as R;
+  return (seeded ? emptyBookingUnitSets() : null) as R;
 }
 
 /**

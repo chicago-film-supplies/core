@@ -174,18 +174,31 @@ export type SetAvailabilityTerm = { quantity_available: number | null } | null;
 
 /**
  * How many whole SETS a window can supply: the parent's own availability and
- * `floor(component available ÷ per-set quantity)` per component, minimised —
+ * `floor(component available × sets ÷ quantity)` for each component, minimised —
  * moved from the manager's `availableSetsOf` (stock campaign P1).
  *
+ * ⚠️ **`quantity ÷ sets` is the per-set ratio, applied as `× sets ÷ quantity` in
+ * integers.** An order line's component carries its TOTAL quantity — 8 legs
+ * under a kit of 2 — so dividing availability by 8 halved the answer for any
+ * kit ordered more than once (core#136: this copy did exactly that until the
+ * manager's corrected one replaced it). The ratio is read off the document
+ * rather than the `quantity_per_parent` stamp, because a hand edit changes
+ * `quantity` and it is the order's own quantity the answer has to cover. A
+ * component asking for nothing (`quantity <= 0`) places no ceiling.
+ *
  * `quantity_available: null` from the engine means UNBOUNDED, never 0, so an
- * uncounted term places no ceiling and drops out of the min. A `none` parent
- * passes `"unbounded"`. A term that has not loaded (`null`) makes the whole
- * answer `null`, because a partial min would read too high. With nothing
- * bounded at all the answer is `null`, which renders as no number.
+ * uncounted term places no ceiling and drops out of the min rather than zeroing
+ * it. A `none` parent passes `"unbounded"`: it is uncounted whether or not the
+ * API has minted its ledger yet. A term that has not loaded (`null`) makes the
+ * whole answer `null` — a partial min would read too high. With nothing bounded
+ * at all the answer is `null`, which renders as no number.
+ *
+ * @param components - Each component's quantity on the document, the parent's
+ *   `sets` (default 1), and its availability
  */
 export function availableSetsOf(
   parent: SetAvailabilityTerm | "unbounded",
-  components: ReadonlyArray<{ quantity: number; availability: SetAvailabilityTerm }>,
+  components: ReadonlyArray<{ quantity: number; sets?: number; availability: SetAvailabilityTerm }>,
 ): number | null {
   let min = Infinity;
   if (parent !== "unbounded") {
@@ -195,7 +208,9 @@ export function availableSetsOf(
   for (const comp of components) {
     if (!comp.availability) return null;
     const available = comp.availability.quantity_available;
-    if (available !== null) min = Math.min(min, Math.floor(available / comp.quantity));
+    if (available !== null && comp.quantity > 0) {
+      min = Math.min(min, Math.floor((available * (comp.sets ?? 1)) / comp.quantity));
+    }
   }
   return min === Infinity ? null : min;
 }

@@ -676,3 +676,14 @@ Deno.test("availableSetsOf: min of the parent and floor(component ÷ per-set), n
   assertEquals(availableSetsOf(term(5), [{ quantity: 1, availability: null }]), null, "a term still loading");
   assertEquals(availableSetsOf(null, []), null);
 });
+
+Deno.test("availableSetsOf: reads an order line's TOTAL component quantity through the parent's sets (core#136)", () => {
+  const term = (n: number | null) => ({ quantity_available: n });
+  // 8 legs under a kit of 2 is 4 per kit: 9 legs free make 2 kits, not floor(9 ÷ 8) = 1.
+  assertEquals(availableSetsOf("unbounded", [{ quantity: 8, sets: 2, availability: term(9) }]), 2);
+  // × sets first, ÷ quantity once: 9 × 3 ÷ 6 = 4.5 → 4. Dividing first floors early: floor(9 ÷ 6) × 3 = 3.
+  assertEquals(availableSetsOf("unbounded", [{ quantity: 6, sets: 3, availability: term(9) }]), 4);
+  // A component asking for nothing places no ceiling (it used to divide by 0).
+  assertEquals(availableSetsOf(term(6), [{ quantity: 0, sets: 2, availability: term(0) }]), 6);
+  assertEquals(availableSetsOf("unbounded", [{ quantity: 0, availability: term(4) }]), null, "nothing bounded");
+});

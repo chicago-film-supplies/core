@@ -1,4 +1,5 @@
-import { assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
+import { emptyBookingUnitSets } from "../src/schemas/mod.ts";
 import {
   apportionBreakdown,
   applyBookingBreakdownDelta,
@@ -17,6 +18,7 @@ import {
   sumBookingsBreakdown,
   sumBreakdownKeys,
   terminalQuantity,
+  trackedUnitSets,
   BOOKING_BREAKDOWN_KEYS,
 } from "../src/utils/bookings.ts";
 import type { Booking, OrderStatusType } from "../src/schemas/mod.ts";
@@ -611,4 +613,15 @@ Deno.test("cancelRefusal: refused while any booking holds prepped or owned out, 
   ]);
   assertEquals(r?.bookings, [{ uid: "a", prepped: 0, out: 1 }, { uid: "b", prepped: 2, out: 0 }]);
   assertEquals(r?.message.includes("3 unit(s) on 2 booking(s)"), true);
+});
+
+Deno.test("trackedUnitSets: a stored null reads as empty sets on a SEEDED product only", () => {
+  const named = { units: { ...emptyBookingUnitSets(), reserved: [1], out: [2] } };
+  const unnamed = { units: null };
+  assertEquals(trackedUnitSets(unnamed, true), emptyBookingUnitSets(), "seeded: null is empty sets");
+  assertEquals(trackedUnitSets(unnamed, false), null, "unseeded: null stays null");
+  assertEquals(trackedUnitSets(named, true), named.units, "stated sets are returned as stored");
+  assertEquals(trackedUnitSets(named, false), named.units);
+  // A fresh object each call — a caller that mutates one must not alias the next.
+  assert(trackedUnitSets(unnamed, true) !== trackedUnitSets(unnamed, true));
 });

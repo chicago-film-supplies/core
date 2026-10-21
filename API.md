@@ -31530,6 +31530,20 @@ named-key sum anywhere else in `src/`.
 
 Units that reached a terminal key: back, or out of service with a reason.
 
+### `trackedUnitSets(booking: Pick<Booking, "units">, seeded: S): conditional`
+
+A booking's unit sets as the custody rules must read them: on a SEEDED
+product a stored `units: null` is empty sets, not "not tracked".
+
+🔴 The same two readings of `null` as {@link untrackedUnitCount}: the order
+path stamps `null` on a new booking of a seeded product on purpose
+(serial-tracking D2, D5), so trackedness comes from the roster (`seeded`),
+never from the stored value. Unseeded, the stored value is returned as is —
+`null` stays `null`.
+
+Pass `seeded: true` where the caller has already established the booking is
+tracked, and the result is never `null`.
+
 ### `untrackedUnitCount(booking: Pick<Booking, "breakdown" | "units">, key: BookingUnitBucketType, seeded: boolean): number`
 
 How many of a bucket's units are UNTRACKED on a unit-tracked booking:
@@ -38959,14 +38973,29 @@ uncounted arm of the availability arithmetic is written.
 ### `availableSetsOf(parent: SetAvailabilityTerm | "unbounded", components: ReadonlyArray<typeLiteral>): number | null`
 
 How many whole SETS a window can supply: the parent's own availability and
-`floor(component available ÷ per-set quantity)` per component, minimised —
+`floor(component available × sets ÷ quantity)` for each component, minimised —
 moved from the manager's `availableSetsOf` (stock campaign P1).
 
+⚠️ **`quantity ÷ sets` is the per-set ratio, applied as `× sets ÷ quantity` in
+integers.** An order line's component carries its TOTAL quantity — 8 legs
+under a kit of 2 — so dividing availability by 8 halved the answer for any
+kit ordered more than once (core#136: this copy did exactly that until the
+manager's corrected one replaced it). The ratio is read off the document
+rather than the `quantity_per_parent` stamp, because a hand edit changes
+`quantity` and it is the order's own quantity the answer has to cover. A
+component asking for nothing (`quantity <= 0`) places no ceiling.
+
 `quantity_available: null` from the engine means UNBOUNDED, never 0, so an
-uncounted term places no ceiling and drops out of the min. A `none` parent
-passes `"unbounded"`. A term that has not loaded (`null`) makes the whole
-answer `null`, because a partial min would read too high. With nothing
-bounded at all the answer is `null`, which renders as no number.
+uncounted term places no ceiling and drops out of the min rather than zeroing
+it. A `none` parent passes `"unbounded"`: it is uncounted whether or not the
+API has minted its ledger yet. A term that has not loaded (`null`) makes the
+whole answer `null` — a partial min would read too high. With nothing bounded
+at all the answer is `null`, which renders as no number.
+
+**Parameters**
+
+- `components` — Each component's quantity on the document, the parent's
+`sets` (default 1), and its availability
 
 ### `bookingHoldsStock(b: typeLiteral): boolean`
 
@@ -39462,6 +39491,15 @@ it is that `[]` must not LICENSE anything.
 
 **Returns** — One anchor per (subtree root, X), with a non-empty path on both sides
 
+### `directSubstitutionCredit(anchors: readonly SubstitutionAnchor[]): Map<string, number>`
+
+Units substitutes name each X for directly, keyed by X's path — the `direct`
+input of {@link substitutionCredit}. Anchors sharing one X sum.
+
+**Parameters**
+
+- `anchors` — Usually {@link liveSubstitutionAnchors}' result
+
 ### `exchangeClaimedOn(rows: ReadonlyArray<Omit<ExchangeRow, "path">>, path: readonly string[]): number`
 
 Σ `exchanged_for[].quantity` claimed against `path` across the document's rows.
@@ -39581,6 +39619,16 @@ wire boundary, use {@link isInSubstitutedSubtree} and check Y separately.
 - `anchors` — The downstream document's substitution anchors
 
 **Returns** — Whether the row is a substitution's own row or one of its components
+
+### `liveSubstitutionAnchors(orderItems: readonly Pick<CreditableRow, "path">[], anchors: readonly SubstitutionAnchor[]): SubstitutionAnchor[]`
+
+The LIVE anchors: those whose X the order still carries. An anchor whose X
+the order no longer has is spent (owner, 2026-09-16) and offsets nothing.
+
+**Parameters**
+
+- `orderItems` — The order's rows (dividers included; only `path` is read)
+- `anchors` — The downstream document's substitution anchors
 
 ### `overclaimedExchanges(prev: ReadonlyArray<ExchangeRow>, next: ReadonlyArray<ExchangeRow & typeLiteral>): OverclaimedRow[]`
 

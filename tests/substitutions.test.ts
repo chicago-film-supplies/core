@@ -2,6 +2,8 @@ import { assert, assertEquals, assertFalse } from "@std/assert";
 
 import {
   collectSubstitutionAnchors,
+  directSubstitutionCredit,
+  liveSubstitutionAnchors,
   findSubtreeAnchor,
   isAtOrBelow,
   isInSubstitutedSubtree,
@@ -448,4 +450,23 @@ Deno.test("exchangeEligibility: a rental with units out, on an original leg with
   assertEquals(why(exchangeEligibility({ booking: { type: "sale", breakdown: { out: 2 } }, leg: { uid: "A", exchange: null }, pairs })).includes("customer's"), true);
   assertEquals(why(exchangeEligibility({ booking: rental, leg: { uid: "N", exchange: null }, pairs })).includes("return trip"), true);
   assertEquals(why(exchangeEligibility({ booking: { type: "rental", breakdown: { out: 0 } }, leg: { uid: "A", exchange: null }, pairs })).includes("No units are out"), true);
+});
+
+Deno.test("liveSubstitutionAnchors: keeps only anchors whose X the order still carries", () => {
+  const anchors = [
+    { path: ["y"], substitutedFor: ["kit", "x"], quantity: 2 },
+    { path: ["z"], substitutedFor: ["gone"], quantity: 1 },
+  ];
+  const order = [{ type: "rental", path: ["kit"] }, { type: "rental", path: ["kit", "x"] }];
+  assertEquals(liveSubstitutionAnchors(order, anchors), [anchors[0]]);
+  assertEquals(liveSubstitutionAnchors([], anchors), []);
+});
+
+Deno.test("directSubstitutionCredit: anchors sharing one X sum, keyed by X's joined path", () => {
+  const direct = directSubstitutionCredit([
+    { path: ["y"], substitutedFor: ["kit", "x"], quantity: 2 },
+    { path: ["w"], substitutedFor: ["kit", "x"], quantity: 3 },
+    { path: ["v"], substitutedFor: ["a"], quantity: 1 },
+  ]);
+  assertEquals([...direct], [["kit/x", 5], ["a", 1]]);
 });

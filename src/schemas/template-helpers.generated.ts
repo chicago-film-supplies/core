@@ -47,6 +47,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "sumBookingsBreakdown", expr: "it.bookings.sumBookingsBreakdown(bookings)", desc: "Sum a list of booking breakdowns into the order's roll-up shape.", returns: "FullBookingBreakdown" },
     { name: "sumBreakdownKeys", expr: "it.bookings.sumBreakdownKeys(b, keys)", desc: "Σ of the named buckets — **the ONE place a breakdown is summed.**", returns: "number" },
     { name: "terminalQuantity", expr: "it.bookings.terminalQuantity(b)", desc: "Units that reached a terminal key: back, or out of service with a reason.", returns: "number" },
+    { name: "trackedUnitSets", expr: "it.bookings.trackedUnitSets(booking, seeded)", desc: "A booking's unit sets as the custody rules must read them: on a SEEDED product a stored `units: null` is empty sets, not \"not tracked\".", returns: "conditional" },
     { name: "untrackedUnitCount", expr: "it.bookings.untrackedUnitCount(booking, key, seeded)", desc: "How many of a bucket's units are UNTRACKED on a unit-tracked booking: `breakdown[k] − units[k].length`. Units a bulk → serialized conversion found already prepped or out and could not name (`api-cloudrun/.claude/plans/serial-tracking.md` D1, D9).", returns: "number" },
   ],
   "cards": [
@@ -317,16 +318,18 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "deriveProjectionCollection", expr: "it.shared-fields.deriveProjectionCollection(merged, stored, projectionItems)", desc: "**Settle a projection pair's collection leg after the three-way merge** — the fulfillment's or invoice's answer to what the order's `normalizeCollectionLegs` (`@cfs/core/utils/orders`) decides on the order.", returns: "P" },
   ],
   "stock": [
-    { name: "availableSetsOf", expr: "it.stock.availableSetsOf(parent, components)", desc: "How many whole SETS a window can supply: the parent's own availability and `floor(component available ÷ per-set quantity)` per component, minimised — moved from the manager's `availableSetsOf` (stock campaign P1).", returns: "number | null" },
+    { name: "availableSetsOf", expr: "it.stock.availableSetsOf(parent, components)", desc: "How many whole SETS a window can supply: the parent's own availability and `floor(component available × sets ÷ quantity)` for each component, minimised — moved from the manager's `availableSetsOf` (stock campaign P1).", returns: "number | null" },
     { name: "checkoutUnits", expr: "it.stock.checkoutUnits(b)", desc: "Units a booking still has to take OFF a shelf — `reserved + prepped`, the demand a check-out will draw (stock campaign P1). The api's staged-units sum, the unsourceable-bookings audit and the manager's shelf aggregation (`onShelfDemand`) each spelled it by hand.", returns: "number" },
   ],
   "stored-only-rows": [
 
   ],
   "substitutions": [
+    { name: "directSubstitutionCredit", expr: "it.substitutions.directSubstitutionCredit(anchors)", desc: "Units substitutes name each X for directly, keyed by X's path — the `direct` input of {@link substitutionCredit}. Anchors sharing one X sum.", returns: "Map<string, number>" },
     { name: "exchangeClaimedOn", expr: "it.substitutions.exchangeClaimedOn(rows, path)", desc: "Σ `exchanged_for[].quantity` claimed against `path` across the document's rows.", returns: "number" },
     { name: "exchangeClaimsByPath", expr: "it.substitutions.exchangeClaimsByPath(rows)", desc: "Σ `exchanged_for[].quantity` claimed against each row path, over every row of ONE document — the claims {@link overclaimedExchanges} compares, exposed so the manager's exchange offer reads the same sum (it kept `claimedOn`). Keyed by an internal path key; read one path with {@link exchangeClaimedOn}.", returns: "Map<string, number>" },
     { name: "exchangeEligibility", expr: "it.substitutions.exchangeEligibility(args)", desc: "Whether a line's booking can be EXCHANGED — a unit on set swapped for another — and against which leg: the api's staging refusals, which the manager's exchange offer did not all check (gap G11 (f)).", returns: "ExchangeEligibility" },
+    { name: "liveSubstitutionAnchors", expr: "it.substitutions.liveSubstitutionAnchors(orderItems, anchors)", desc: "The LIVE anchors: those whose X the order still carries. An anchor whose X the order no longer has is spent (owner, 2026-09-16) and offsets nothing.", returns: "SubstitutionAnchor[]" },
   ],
   "tax-classes": [
 

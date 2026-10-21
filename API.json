@@ -14234,6 +14234,14 @@
         },
         {
           "kind": "function",
+          "name": "trackedUnitSets",
+          "signature": "trackedUnitSets(booking: Pick<Booking, \"units\">, seeded: S): conditional",
+          "doc": "A booking's unit sets as the custody rules must read them: on a SEEDED\nproduct a stored `units: null` is empty sets, not \"not tracked\".\n\n🔴 The same two readings of `null` as {@link untrackedUnitCount}: the order\npath stamps `null` on a new booking of a seeded product on purpose\n(serial-tracking D2, D5), so trackedness comes from the roster (`seeded`),\nnever from the stored value. Unseeded, the stored value is returned as is —\n`null` stays `null`.\n\nPass `seeded: true` where the caller has already established the booking is\ntracked, and the result is never `null`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "untrackedUnitCount",
           "signature": "untrackedUnitCount(booking: Pick<Booking, \"breakdown\" | \"units\">, key: BookingUnitBucketType, seeded: boolean): number",
           "doc": "How many of a bucket's units are UNTRACKED on a unit-tracked booking:\n`breakdown[k] − units[k].length`. Units a bulk → serialized conversion found\nalready prepped or out and could not name (`api-cloudrun/.claude/plans/serial-tracking.md`\nD1, D9).\n\nDerived, never stored: given the booking refine `units[k].length ≤\nbreakdown[k]`, a stored copy could only restate this, so it could only drift.\n\n🔴 **A stored `units: null` means two things, and only the roster tells them\napart** — hence `seeded`, which is whether the product's unit roster exists.\nUnseeded (bulk, or serialized and not numbered yet), the booking is not\nunit-tracked and the question does not arise: `0`. Seeded, the booking IS\ntracked with nothing named yet — the order path stamps `null` on a new\nbooking of a seeded product on purpose (serial-tracking D2, D5) — so every\nunit in the bucket is untracked: `breakdown[k]`. Reading `null` as `0` there\nis what made this disagree with `rebookProblems` (core#135).",
@@ -18132,8 +18140,13 @@
           "kind": "function",
           "name": "availableSetsOf",
           "signature": "availableSetsOf(parent: SetAvailabilityTerm | \"unbounded\", components: ReadonlyArray<typeLiteral>): number | null",
-          "doc": "How many whole SETS a window can supply: the parent's own availability and\n`floor(component available ÷ per-set quantity)` per component, minimised —\nmoved from the manager's `availableSetsOf` (stock campaign P1).\n\n`quantity_available: null` from the engine means UNBOUNDED, never 0, so an\nuncounted term places no ceiling and drops out of the min. A `none` parent\npasses `\"unbounded\"`. A term that has not loaded (`null`) makes the whole\nanswer `null`, because a partial min would read too high. With nothing\nbounded at all the answer is `null`, which renders as no number.",
-          "paramTags": [],
+          "doc": "How many whole SETS a window can supply: the parent's own availability and\n`floor(component available × sets ÷ quantity)` for each component, minimised —\nmoved from the manager's `availableSetsOf` (stock campaign P1).\n\n⚠️ **`quantity ÷ sets` is the per-set ratio, applied as `× sets ÷ quantity` in\nintegers.** An order line's component carries its TOTAL quantity — 8 legs\nunder a kit of 2 — so dividing availability by 8 halved the answer for any\nkit ordered more than once (core#136: this copy did exactly that until the\nmanager's corrected one replaced it). The ratio is read off the document\nrather than the `quantity_per_parent` stamp, because a hand edit changes\n`quantity` and it is the order's own quantity the answer has to cover. A\ncomponent asking for nothing (`quantity <= 0`) places no ceiling.\n\n`quantity_available: null` from the engine means UNBOUNDED, never 0, so an\nuncounted term places no ceiling and drops out of the min rather than zeroing\nit. A `none` parent passes `\"unbounded\"`: it is uncounted whether or not the\nAPI has minted its ledger yet. A term that has not loaded (`null`) makes the\nwhole answer `null` — a partial min would read too high. With nothing bounded\nat all the answer is `null`, which renders as no number.",
+          "paramTags": [
+            {
+              "name": "components",
+              "doc": "Each component's quantity on the document, the parent's\n`sets` (default 1), and its availability"
+            }
+          ],
           "returnsTag": null
         },
         {
@@ -18319,6 +18332,19 @@
         },
         {
           "kind": "function",
+          "name": "directSubstitutionCredit",
+          "signature": "directSubstitutionCredit(anchors: readonly SubstitutionAnchor[]): Map<string, number>",
+          "doc": "Units substitutes name each X for directly, keyed by X's path — the `direct`\ninput of {@link substitutionCredit}. Anchors sharing one X sum.",
+          "paramTags": [
+            {
+              "name": "anchors",
+              "doc": "Usually {@link liveSubstitutionAnchors}' result"
+            }
+          ],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "exchangeClaimedOn",
           "signature": "exchangeClaimedOn(rows: ReadonlyArray<Omit<ExchangeRow, \"path\">>, path: readonly string[]): number",
           "doc": "Σ `exchanged_for[].quantity` claimed against `path` across the document's rows.",
@@ -18442,6 +18468,23 @@
             }
           ],
           "returnsTag": "Whether the row is a substitution's own row or one of its components"
+        },
+        {
+          "kind": "function",
+          "name": "liveSubstitutionAnchors",
+          "signature": "liveSubstitutionAnchors(orderItems: readonly Pick<CreditableRow, \"path\">[], anchors: readonly SubstitutionAnchor[]): SubstitutionAnchor[]",
+          "doc": "The LIVE anchors: those whose X the order still carries. An anchor whose X\nthe order no longer has is spent (owner, 2026-09-16) and offsets nothing.",
+          "paramTags": [
+            {
+              "name": "orderItems",
+              "doc": "The order's rows (dividers included; only `path` is read)"
+            },
+            {
+              "name": "anchors",
+              "doc": "The downstream document's substitution anchors"
+            }
+          ],
+          "returnsTag": null
         },
         {
           "kind": "function",
