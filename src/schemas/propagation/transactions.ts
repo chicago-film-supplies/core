@@ -118,7 +118,7 @@ const LEDGER_NON_NEGATIVE: EnforcementRef = {
  * deliberately absent: it declares its own two edges in `store-transfers.ts`,
  * because a rule id is owned by the file that declares it.
  */
-type MovementTransactionId = "create-transaction" | "reverse-transaction" | "reclass-stock";
+type MovementTransactionId = "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass";
 
 /** The ledger edge, shared by the forward and the reversing transaction. */
 function ledgerRule(
@@ -306,6 +306,32 @@ const reclassStockTransaction: TransactionDefinition = {
   ],
 };
 
+// ── Reversing a reclass pair ────────────────────────────────────
+
+const reverseStockReclassRules: CollectionRule[] = [
+  ledgerRule(
+    "reverse-stock-reclass",
+    "A reclass is reversed as a PAIR or not at all: both halves' reversals fold in one Firestore transaction, the `reclass_in`'s FIRST. Each is an ordinary reversal — the original's lines swapped — so the target's ledger gives up exactly the basis it was stamped with and the source's gets back exactly what it relieved, at the ORIGINAL cost and never the current average (owner, 2026-10-20). The `reclass_in` is the half that can be refused: a target that no longer holds the units fails the non-negative check, and one that no longer holds their basis fails the basis-underflow check, so the pair writes nothing. Reversing ONE half alone would return the units and basis to one product while the other still holds them (core#130 row 8).",
+    [REVERSAL_IS_THE_NEGATION, MOVEMENT_FOLD, LEDGER_NON_NEGATIVE, LEDGER_REPLAY],
+  ),
+  locationsRule(
+    "reverse-stock-reclass",
+    "Both negated halves put the units back where the reclass took them from: off the target's shelf, back onto the source's. Only an INBOUND side into an inactive location is refused, as for any reversal.",
+    [REVERSAL_LOCATIONS, MOVEMENT_LOCATION_STAGING],
+  ),
+];
+
+const reverseStockReclassTransaction: TransactionDefinition = {
+  id: "reverse-stock-reclass",
+  description:
+    "Undoes a twin reclass from either half, by appending the reversal of BOTH halves in one Firestore transaction — the `reclass_in` on the target first, then the `reclass_out` on the source. Each reversal's id derives from its original, so a replay is idempotent and a half already reversed on its own refuses the pair. The two Xero mirrors take their forwards' accounts at the forwards' amounts, so 2510 nets to zero exactly; each half enqueues its own bill push. Rebuilds `stock/{P}` for BOTH products via {@link STOCK_STEPS} — fires on: every pair reversal, since both halves move quantity_held by construction.",
+  steps: [
+    "reverse-stock-reclass:transaction-to-ledger",
+    "reverse-stock-reclass:transaction-to-locations",
+    ...STOCK_STEPS,
+  ],
+};
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/transactions.ts` contributes to the propagation catalog. */
 export const transactions: PropagationModule = {
@@ -313,10 +339,12 @@ export const transactions: PropagationModule = {
     ...createTransactionRules,
     ...reverseTransactionRules,
     ...reclassStockRules,
+    ...reverseStockReclassRules,
   ],
   transactions: [
     createTransactionTransaction,
     reverseTransactionTransaction,
     reclassStockTransaction,
+    reverseStockReclassTransaction,
   ],
 };

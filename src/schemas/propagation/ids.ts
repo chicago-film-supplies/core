@@ -68,6 +68,7 @@ export type TransactionId =
   | "create-transaction"
   | "reverse-transaction"
   | "reclass-stock"
+  | "reverse-stock-reclass"
   // purchases.ts
   | "create-purchase"
   | "update-purchase"
@@ -266,6 +267,8 @@ export type RuleId =
   | "reverse-transaction:transaction-to-locations"
   | "reclass-stock:transaction-to-ledger"
   | "reclass-stock:transaction-to-locations"
+  | "reverse-stock-reclass:transaction-to-ledger"
+  | "reverse-stock-reclass:transaction-to-locations"
   // store-transfers.ts
   | "create-store-transfer:transaction-to-ledger"
   | "create-store-transfer:transaction-to-locations"
