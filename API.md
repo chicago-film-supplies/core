@@ -4234,9 +4234,9 @@ untaxed and their *orders* were taxed, and only CRMS stamping
 `order.tax_profile` from the opportunity header hid it.
 
 ⚠️ **Sharing the schema pins WHERE the snapshot is built, not WHAT it holds**
-— the Ratchet-G lesson in the workspace CLAUDE.md (untracked and
-machine-local, api-cloudrun#530), where a single allowed
-renderer of the money `_str` mirror was singular and wrong for five months.
+— the Ratchet-G lesson in the `cfs-money` skill (`cfs-skills` plugin),
+where a single allowed renderer of the money `_str` mirror was singular and
+wrong for five months.
 The value assertion that sits beside this is api-cloudrun's writer-parity
 test: one order created natively and one created through the CRMS opportunity
 path, same commercial facts, must produce byte-identical `organization`
@@ -15984,9 +15984,9 @@ untaxed and their *orders* were taxed, and only CRMS stamping
 `order.tax_profile` from the opportunity header hid it.
 
 ⚠️ **Sharing the schema pins WHERE the snapshot is built, not WHAT it holds**
-— the Ratchet-G lesson in the workspace CLAUDE.md (untracked and
-machine-local, api-cloudrun#530), where a single allowed
-renderer of the money `_str` mirror was singular and wrong for five months.
+— the Ratchet-G lesson in the `cfs-money` skill (`cfs-skills` plugin),
+where a single allowed renderer of the money `_str` mirror was singular and
+wrong for five months.
 The value assertion that sits beside this is api-cloudrun's writer-parity
 test: one order created natively and one created through the CRMS opportunity
 path, same commercial facts, must produce byte-identical `organization`

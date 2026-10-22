@@ -2554,8 +2554,8 @@ export interface DocumentOrganizationSnapshotType {
    * ⭐ **REQUIRED as of 2026-09-01 — the contract third of
    * expand/migrate/contract** (core#77), and the direction is the SAFE one.
    * Adding a requirement to a field every stored document already carries
-   * strands no reader; it is the mirror image of the removal hazard in
-   * `~/cfs/CLAUDE.md` (readers stop first, then the writer, then the corpus
+   * strands no reader; it is the mirror image of the removal hazard in the
+   * `cfs-release-order` skill (readers stop first, then the writer, then the corpus
    * purge, then the schema contract), and it needs no cross-product deploy
    * order at all.
    *
@@ -2756,9 +2756,9 @@ export const OrgSnapshotCore: {
  * `order.tax_profile` from the opportunity header hid it.
  *
  * ⚠️ **Sharing the schema pins WHERE the snapshot is built, not WHAT it holds**
- * — the Ratchet-G lesson in the workspace CLAUDE.md (untracked and
- * machine-local, api-cloudrun#530), where a single allowed
- * renderer of the money `_str` mirror was singular and wrong for five months.
+ * — the Ratchet-G lesson in the `cfs-money` skill (`cfs-skills` plugin),
+ * where a single allowed renderer of the money `_str` mirror was singular and
+ * wrong for five months.
  * The value assertion that sits beside this is api-cloudrun's writer-parity
  * test: one order created natively and one created through the CRMS opportunity
  * path, same commercial facts, must produce byte-identical `organization`

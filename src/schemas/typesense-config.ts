@@ -28,6 +28,14 @@ export interface TypesenseConfig {
   updates?: number;
   last_reindex?: FirestoreTimestampType;
   last_reindex_stats?: TypesenseConfigReindexStats;
+  /**
+   * Consecutive builds since the last promotion — `0` after any build that
+   * swapped in. A default column (api-cloudrun#896) because
+   * `last_reindex_stats` is written for a wholly-failed run too, so a config
+   * that has never indexed anything and one that just finished a small
+   * reindex carry the same SHAPE there; a non-zero count here is the signal
+   * that tells them apart.
+   */
   reindex_attempts?: number;
 }
 
@@ -46,12 +54,12 @@ export const TypesenseConfigSchema: z.ZodType<TypesenseConfig> = z.strictObject(
   updates: z.number().optional().meta({ column: true, label: "Updates" }),
   last_reindex: FirestoreTimestamp.optional().meta({ column: true, label: "Last Reindex" }),
   last_reindex_stats: ReindexStats.optional(),
-  reindex_attempts: z.number().optional(),
+  reindex_attempts: z.number().optional().meta({ column: true, label: "Reindex Attempts" }),
 }).meta({
   title: "TypesenseConfig",
   collection: "typesense",
   displayDefaults: {
-    columns: ["current_collection", "last_reindex", "updates"],
+    columns: ["current_collection", "last_reindex", "reindex_attempts", "updates"],
     filters: {},
     sort: { column: null, direction: "desc" },
   },
