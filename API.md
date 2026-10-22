@@ -3500,10 +3500,6 @@ const CreditNoteDocLineItem: z.ZodType<CreditNoteDocLineItem>;
 
 _(reference — see source)_
 
-### `CreditNoteDocLineItemType`
-
-_(reference — see source)_
-
 ### `CreditNoteDocTotals`
 
 Credit-note totals.

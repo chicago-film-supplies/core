@@ -222,8 +222,19 @@ async function main(): Promise<void> {
     const fileNode = Object.values(root.nodes)[0];
     if (!fileNode) continue;
 
+    // Drop byte-identical summaries. `deno doc` 2.9.2 emits an aliased type
+    // re-export (`type X as XType` beside the value `X`) as TWO `reference`
+    // declarations and 2.9.7 as one, so without this the output — and
+    // `--check` — depends on which Deno ran it (core#98: CI went red on it).
+    const seen = new Set<string>();
     const symbols = (fileNode.symbols ?? [])
       .flatMap(summarize)
+      .filter((s) => {
+        const key = JSON.stringify(s);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
     entrypoints.push({

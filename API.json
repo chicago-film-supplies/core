@@ -1543,12 +1543,6 @@
           "doc": ""
         },
         {
-          "kind": "other",
-          "name": "CreditNoteDocLineItemType",
-          "declaredKind": "reference",
-          "doc": ""
-        },
-        {
           "kind": "interface",
           "name": "CreditNoteDocTotals",
           "declaration": "interface CreditNoteDocTotals {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  total_cents: number;\n}",
