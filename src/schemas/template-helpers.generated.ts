@@ -148,7 +148,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
 
   ],
   "invoice-xero-sync": [
-
+    { name: "invoiceStatusTracksXeroEdits", expr: "it.invoice-xero-sync.invoiceStatusTracksXeroEdits(status)", desc: "**May an invoice in this status track CFS edits in Xero?** The status half of {@link invoiceXeroSyncStatus}, for a caller that has not read the watermark — the Eventarc enqueue gate, the edit task's liveness check, `push_to_xero`'s offer. `true` for `paid`, whose hash is then the question: ask `invoiceXeroSyncStatus` with the real watermark, never with `null` standing in for \"status only\".", returns: "boolean" },
   ],
   "invoices": [
     { name: "buildInvoiceDestinationDivider", expr: "it.invoices.buildInvoiceDestinationDivider(source, arg2)", desc: "Build an invoice destination divider from a source order's destination item. Single source of truth for the divider shape — reused by `projectOrderItemToInvoiceItem` (order→invoice projection) and the destination-divider backfill. ⚠️ **It had a third caller, the CRMS invoice webhook, and that whole ingest is deleted with the cutover.**", returns: "OrderDocDestinationItemType" },

@@ -4,6 +4,7 @@ import {
   canonicalJson,
   hash48,
   invoiceSettlementsHeldByXero,
+  invoiceStatusTracksXeroEdits,
   invoiceXeroProjectionHash,
   invoiceXeroSyncStatus,
   shouldPushInvoiceToXero,
@@ -46,9 +47,33 @@ Deno.test("invoiceXeroSyncStatus: unknown without a recorded hash; out of sync w
   assertEquals(invoiceXeroSyncStatus(invoice(), null), "unknown");
   assertEquals(invoiceXeroSyncStatus(invoice(), { pushed_hash: "v7" }), "unknown", "the pre-hash spelling");
   assertEquals(invoiceXeroSyncStatus(invoice({ xero_id: null }), null), "out_of_sync", "issued, never reached Xero");
-  for (const over of [{ status: "draft" }, { status: "paid" }, { status: "void" }]) {
+  for (const over of [{ status: "draft" }, { status: "void" }]) {
     assertEquals(invoiceXeroSyncStatus(invoice(over), { pushed_hash: "x" }), "not_applicable", JSON.stringify(over));
   }
+});
+
+Deno.test("invoiceXeroSyncStatus: CFS paid is tracked once a push has recorded a hash, and not before", () => {
+  // Prod #2399: the card fee was added, then a CFS-only payment flipped it `paid`
+  // before the push ran. Xero holds no payment, so the edit must still reach it.
+  const pushed = invoice();
+  const state = { pushed_hash: invoiceXeroProjectionHash(pushed) };
+  const lines = [{ uid: "o", type: "order", path: ["o"] }, line("tent", 5000), line("fee", 200)];
+  const paid = (over: Record<string, unknown> = {}) =>
+    invoice({ status: "paid", totals: { total_cents: 5010, amount_paid_cents: 5010 }, ...over });
+  assertEquals(invoiceXeroSyncStatus(paid(), state), "in_sync");
+  assertEquals(invoiceXeroSyncStatus(paid({ items: lines }), state), "out_of_sync");
+  // No hash: 979 of 1,026 prod paid invoices, nearly all Xero-paid. Tracking them
+  // would enqueue on every write and report an edit nobody made.
+  assertEquals(invoiceXeroSyncStatus(paid(), null), "not_applicable", "no sidecar");
+  assertEquals(invoiceXeroSyncStatus(paid(), { pushed_hash: "v7" }), "not_applicable", "the pre-hash spelling");
+  assertEquals(invoiceXeroSyncStatus(paid({ xero_id: null }), state), "not_applicable", "unlinked");
+});
+
+Deno.test("invoiceStatusTracksXeroEdits: the status half, true for paid — whose watermark then decides", () => {
+  for (const status of ["issued", "part_paid", "paid"]) assertEquals(invoiceStatusTracksXeroEdits(status), true, status);
+  for (const status of ["draft", "void"]) assertEquals(invoiceStatusTracksXeroEdits(status), false, status);
+  // The trap it exists for: `null` is not "status only" for paid.
+  assertEquals(invoiceXeroSyncStatus(invoice({ status: "paid" }), null), "not_applicable");
 });
 
 Deno.test("canonicalJson/hash48: key order does not move the hash; content does", () => {
@@ -95,9 +120,11 @@ Deno.test("shouldPushInvoiceToXero: unlinked old side, unknown watermark, and th
   assertEquals(shouldPushInvoiceToXero(null, invoice(), state), false, "a create");
   assertEquals(shouldPushInvoiceToXero(invoice(), invoice(), null), true, "no sidecar ⇒ unknown ⇒ push");
   assertEquals(shouldPushInvoiceToXero(invoice(), invoice(), { pushed_hash: "v7" }), true, "legacy watermark ⇒ unknown ⇒ push");
-  for (const status of ["paid", "void", "draft"]) {
+  for (const status of ["void", "draft"]) {
     assertEquals(shouldPushInvoiceToXero(invoice(), invoice({ status }), state), false, status);
   }
+  assertEquals(shouldPushInvoiceToXero(invoice(), invoice({ status: "paid" }), state), true, "paid, stale against a hash");
+  assertEquals(shouldPushInvoiceToXero(invoice(), invoice({ status: "paid" }), null), false, "paid, no hash");
 });
 
 // ── settlements Xero holds ───────────────────────────────────────────

@@ -322,7 +322,7 @@ Deno.test("D8 edit_items: always offered; money frozen with the freeze, labels n
 
 // ── push to Xero (api-cloudrun#1332) ─────────────────────────────────
 
-Deno.test("api-cloudrun#1332 push_to_xero: a linked issued/part_paid invoice whose Xero twin is not known in sync", () => {
+Deno.test("api-cloudrun#1332 push_to_xero: a linked issued/part_paid/paid invoice whose Xero twin is not known in sync", () => {
   // Exhaustiveness of the hand-written list: an `InvoiceXeroSyncStatus` member
   // missing from it would be a status this block never tries.
   const _all: Record<InvoiceXeroSyncStatus, true> = { in_sync: true, out_of_sync: true, unknown: true, not_applicable: true };
@@ -331,7 +331,7 @@ Deno.test("api-cloudrun#1332 push_to_xero: a linked issued/part_paid invoice who
   for (const status of INVOICE_STATUSES) {
     for (const xero_sync_status of XERO_SYNC_STATUSES) {
       const inv = { ...invoice(status), xero_id: "x-1" };
-      const expected = (status === "issued" || status === "part_paid") &&
+      const expected = (status === "issued" || status === "part_paid" || status === "paid") &&
         (xero_sync_status === "out_of_sync" || xero_sync_status === "unknown");
       assertEquals(has(invoiceActionsFor(inv, { xero_sync_status }), "push_to_xero"), expected, `${status}/${xero_sync_status}`);
       if (expected) assertInvoiceAction(inv, { xero_sync_status }, { action: "push_to_xero" });
@@ -358,6 +358,10 @@ Deno.test("api-cloudrun#1332 push_to_xero: a linked issued/part_paid invoice who
   // A CFS-recorded payment does not block it: the task decides on what Xero holds.
   const paidInCfs = { ...invoice("part_paid", { amount_paid_cents: 1_000 }), xero_id: "x-1" };
   assertEquals(has(invoiceActionsFor(paidInCfs, { xero_sync_status: "out_of_sync" }), "push_to_xero"), true);
+  // Nor does CFS `paid` (prod #2399, #2413) — a hashless one arrives `not_applicable`.
+  const fullyPaidInCfs = { ...invoice("paid", { amount_paid_cents: 5_000 }), xero_id: "x-1" };
+  assertEquals(has(invoiceActionsFor(fullyPaidInCfs, { xero_sync_status: "out_of_sync" }), "push_to_xero"), true);
+  assertEquals(has(invoiceActionsFor(fullyPaidInCfs, { xero_sync_status: "not_applicable" }), "push_to_xero"), false);
 });
 
 // ── credit notes (D4–D6) ─────────────────────────────────────────────

@@ -36920,8 +36920,9 @@ Every action the UI may offer on this invoice.
 - `add_credit_note` (D3) — a status live in Xero, with credit left on a line.
 - `edit_items` (D8) — always; `money_frozen` says whether line money is.
 - `edit_organization` / `edit_date` — while not {@link invoiceIsFrozen}.
-- `push_to_xero` — `issued` / `part_paid`, linked to Xero, and the caller's
-  `xero_sync_status` is `out_of_sync` or `unknown`.
+- `push_to_xero` — `issued` / `part_paid` / `paid`, linked to Xero, and the
+  caller's `xero_sync_status` is `out_of_sync` or `unknown`. `paid` is CFS's
+  status, not Xero's: whether Xero holds the payment is the task's question.
 
 ### `orderInvoiceActionsFor(order: OfferOrder, _: unknown): InvoiceActionOffer[]`
 
@@ -36986,8 +36987,8 @@ invoice re-enqueues until a push lands. This is the order-quote push's design
 - `unknown` — linked and live, but no push has recorded a projection hash: no
   sidecar, or one written before this carried a hash (its `pushed_hash` is the
   old `v<version>` spelling). Not a claim either way.
-- `not_applicable` — no Xero twin to keep in step: a draft, a void, or a paid
-  invoice (exempt by owner rule).
+- `not_applicable` — no Xero twin to keep in step: a draft or a void. A `paid`
+  invoice with no recorded hash reads this too — see {@link TRACKED_ONCE_PUSHED}.
 
 ```ts
 type InvoiceXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" | "not_applicable";
@@ -37027,6 +37028,14 @@ ValidationException is the seam.
 Reversed rows are skipped ({@link liveSettlements}); reversers carry no Xero id
 by contract, so they never count.
 
+### `invoiceStatusTracksXeroEdits(status: string): boolean`
+
+**May an invoice in this status track CFS edits in Xero?** The status half of
+{@link invoiceXeroSyncStatus}, for a caller that has not read the watermark — the
+Eventarc enqueue gate, the edit task's liveness check, `push_to_xero`'s offer.
+`true` for `paid`, whose hash is then the question: ask `invoiceXeroSyncStatus`
+with the real watermark, never with `null` standing in for "status only".
+
 ### `invoiceXeroProjection(invoice: Partial<Invoice>): unknown`
 
 The part of an invoice that the Xero update body is built from.
@@ -37063,8 +37072,9 @@ issued invoice (api-cloudrun#1332).
   side is what tells the two apart.
 - The new state must read `out_of_sync` or `unknown` against the watermark.
   `unknown` enqueues because no push has recorded a hash yet, and a push that
-  finds nothing to change is cheap. `paid`, `void` and `draft` read
-  `not_applicable`, so they never enqueue.
+  finds nothing to change is cheap. `void` and `draft` read
+  `not_applicable`, so they never enqueue; so does a `paid` invoice no push has
+  recorded a hash for.
 
 Nothing here compares `old` to `next`. A write that changes no Xero-carried
 field still enqueues while an earlier edit's push has not landed. That is the

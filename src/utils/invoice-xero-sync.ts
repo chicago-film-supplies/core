@@ -94,8 +94,8 @@ export function invoiceXeroProjectionHash(invoice: Partial<Invoice>): string {
  * - `unknown` — linked and live, but no push has recorded a projection hash: no
  *   sidecar, or one written before this carried a hash (its `pushed_hash` is the
  *   old `v<version>` spelling). Not a claim either way.
- * - `not_applicable` — no Xero twin to keep in step: a draft, a void, or a paid
- *   invoice (exempt by owner rule).
+ * - `not_applicable` — no Xero twin to keep in step: a draft or a void. A `paid`
+ *   invoice with no recorded hash reads this too — see {@link TRACKED_ONCE_PUSHED}.
  */
 export type InvoiceXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" | "not_applicable";
 
@@ -109,15 +109,45 @@ const LEGACY_VERSION_WATERMARK = /^v\d+$/;
 /** Statuses whose Xero twin is live and should track CFS edits. */
 const TRACKED_STATUSES: ReadonlySet<string> = new Set(["issued", "part_paid"]);
 
+/**
+ * **CFS `paid` is not Xero paid** (owner, 2026-10-22). An operator records a
+ * settlement in CFS ahead of Xero's bank feed — to issue a paid invoice at once —
+ * and Xero's payment matches that row a day later. Until it does, Xero holds no
+ * payment and accepts an edit, so CFS's status must not stop the push: the edit
+ * task's Xero-held-settlements check ({@link invoiceSettlementsHeldByXero}) is the
+ * gate. Prod #2399 and #2413 lost their card-fee lines to the old `paid` exemption.
+ *
+ * ⚠️ **Tracked only once a push has recorded a hash.** Without one, `unknown`
+ * would enqueue on every write — and of 1,026 prod paid invoices (2026-10-22),
+ * 979 have no hash and a Xero-held payment, so each write would cost a task that
+ * ends at the `invoice_edit_has_settlements` seam reporting an edit nobody made.
+ * A paid invoice with no hash reads `not_applicable`, as before.
+ */
+const TRACKED_ONCE_PUSHED: ReadonlySet<string> = new Set(["paid"]);
+
+/**
+ * **May an invoice in this status track CFS edits in Xero?** The status half of
+ * {@link invoiceXeroSyncStatus}, for a caller that has not read the watermark — the
+ * Eventarc enqueue gate, the edit task's liveness check, `push_to_xero`'s offer.
+ * `true` for `paid`, whose hash is then the question: ask `invoiceXeroSyncStatus`
+ * with the real watermark, never with `null` standing in for "status only".
+ */
+export function invoiceStatusTracksXeroEdits(status: string): boolean {
+  return TRACKED_STATUSES.has(status) || TRACKED_ONCE_PUSHED.has(status);
+}
+
 /** See {@link InvoiceXeroSyncStatus}. `state` is the watermark, or `null` when absent. */
 export function invoiceXeroSyncStatus(
   invoice: Pick<Invoice, "status" | "xero_id"> & Partial<Invoice>,
   state: Pick<XeroSyncState, "pushed_hash"> | null,
 ): InvoiceXeroSyncStatus {
-  if (!TRACKED_STATUSES.has(invoice.status)) return "not_applicable";
-  if (!invoice.xero_id) return "out_of_sync";
   const pushed = state?.pushed_hash ?? null;
-  if (pushed === null || LEGACY_VERSION_WATERMARK.test(pushed)) return "unknown";
+  const hashless = pushed === null || LEGACY_VERSION_WATERMARK.test(pushed);
+  if (TRACKED_ONCE_PUSHED.has(invoice.status)) {
+    if (!invoice.xero_id || hashless) return "not_applicable";
+  } else if (!TRACKED_STATUSES.has(invoice.status)) return "not_applicable";
+  if (!invoice.xero_id) return "out_of_sync";
+  if (hashless) return "unknown";
   return pushed === invoiceXeroProjectionHash(invoice) ? "in_sync" : "out_of_sync";
 }
 
@@ -131,8 +161,9 @@ export function invoiceXeroSyncStatus(
  *   side is what tells the two apart.
  * - The new state must read `out_of_sync` or `unknown` against the watermark.
  *   `unknown` enqueues because no push has recorded a hash yet, and a push that
- *   finds nothing to change is cheap. `paid`, `void` and `draft` read
- *   `not_applicable`, so they never enqueue.
+ *   finds nothing to change is cheap. `void` and `draft` read
+ *   `not_applicable`, so they never enqueue; so does a `paid` invoice no push has
+ *   recorded a hash for.
  *
  * Nothing here compares `old` to `next`. A write that changes no Xero-carried
  * field still enqueues while an earlier edit's push has not landed. That is the

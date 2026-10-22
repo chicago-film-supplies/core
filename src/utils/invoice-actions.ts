@@ -82,7 +82,7 @@ import {
   SETTLEMENT_CONTRACTS,
 } from "../schemas/mod.ts";
 import { invoiceHasMoneySettlement, invoiceIsFrozen, type InvoiceSettledTotals, liveSettlements } from "./invoices.ts";
-import type { InvoiceXeroSyncStatus } from "./invoice-xero-sync.ts";
+import { invoiceStatusTracksXeroEdits, type InvoiceXeroSyncStatus } from "./invoice-xero-sync.ts";
 import {
   type AccountedCreditNote,
   type AccountedInvoice,
@@ -338,8 +338,9 @@ function reversalRefusal(row: OfferSettlement, rows: readonly OfferSettlement[])
  * - `add_credit_note` (D3) — a status live in Xero, with credit left on a line.
  * - `edit_items` (D8) — always; `money_frozen` says whether line money is.
  * - `edit_organization` / `edit_date` — while not {@link invoiceIsFrozen}.
- * - `push_to_xero` — `issued` / `part_paid`, linked to Xero, and the caller's
- *   `xero_sync_status` is `out_of_sync` or `unknown`.
+ * - `push_to_xero` — `issued` / `part_paid` / `paid`, linked to Xero, and the
+ *   caller's `xero_sync_status` is `out_of_sync` or `unknown`. `paid` is CFS's
+ *   status, not Xero's: whether Xero holds the payment is the task's question.
  */
 export function invoiceActionsFor(invoice: OfferInvoice, ctx: InvoiceOfferContext = {}): InvoiceActionOffer[] {
   const contract = invoiceContract(invoice.status);
@@ -374,11 +375,10 @@ export function invoiceActionsFor(invoice: OfferInvoice, ctx: InvoiceOfferContex
   return offers;
 }
 
-/** Statuses whose Xero twin tracks CFS edits — the same set `invoiceXeroSyncStatus` reads. */
-const PUSHABLE_STATUSES: ReadonlySet<InvoiceStatusType> = new Set(["issued", "part_paid"]);
-
+// A hashless `paid` invoice passes the status half and is refused by its
+// `not_applicable` sync status below.
 function pushRefusal(invoice: OfferInvoice, ctx: InvoiceOfferContext): string | null {
-  if (!PUSHABLE_STATUSES.has(invoice.status)) return `a ${invoice.status} invoice is not pushed to Xero`;
+  if (!invoiceStatusTracksXeroEdits(invoice.status)) return `a ${invoice.status} invoice is not pushed to Xero`;
   if (!invoice.xero_id) return "the invoice is not linked to Xero; it is pushed by issuing it";
   const status = ctx.xero_sync_status;
   if (status === undefined) return "the invoice's Xero sync status is unknown to the caller";
