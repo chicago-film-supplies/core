@@ -168,10 +168,10 @@ export interface LintFinding {
    * nobody intends to enforce — an advisory with no plan to flip is a comment
    * that costs a CI run.
    *
-   * ⭐ **One check produces one today: 2c, {@link IDENTITY_CHECK}** (templates#288),
-   * which landed advisory because two committed fixtures predate core#91's
-   * identity seeding. Check 2b was the previous producer; its corpus was
-   * repaired and it flipped on 2026-09-06 — the same path 2c is on.
+   * ⭐ **No check produces one today.** Both producers so far took this path to
+   * completion: check 2b flipped on 2026-09-06, and 2c ({@link IDENTITY_CHECK},
+   * templates#288) on 2026-10-22 (core#137). The seam is idle and kept for the
+   * next staged rule — removing it would make that rollout a shape change.
    */
   severity?: "advisory";
 }
@@ -233,12 +233,11 @@ export interface LintReport {
    * on them by accident, not so a caller can ignore them: an advisory nobody
    * ever sees is a check that does not exist.
    *
-   * ⚠️ **Carries check 2c's {@link IDENTITY_CHECK} findings** — see
-   * {@link LintFinding.severity}. It was empty from 2026-09-06 until 2c landed,
-   * and a caller that drops it now loses a real finding: `api-cloudrun`'s
-   * `familyLintOutcome` already drops it, and did so while check 2b was still
-   * advisory — so the family-wide lint the manager renders never showed a mask
-   * finding at all until the flip made it blocking.
+   * ⚠️ **Empty since 2026-10-22, when check 2c flipped** — see
+   * {@link LintFinding.severity}. A future advisory check must know that
+   * `api-cloudrun`'s `familyLintOutcome` DROPS this array: while 2b and then
+   * 2c were advisory, the family-wide lint the manager renders showed neither
+   * at all. Each became visible there only when it flipped to blocking.
    */
   advisories: LintFinding[];
   tally: LintTally;
@@ -599,9 +598,11 @@ export function lintFixture(args: {
     // fresh capture, so a breach means the fixture predates core#91's identity
     // seeding (or was hand-edited) and should be re-captured.
     //
-    // ⚠️ ADVISORY: two committed fixtures still violate it. Flip by deleting the
-    // severity argument once they are re-captured. Uids and paths only, never
-    // the names — see `organizationIdentityConflicts`.
+    // 🔴 BLOCKING since 2026-10-22 (core#137) — same path as 2b. It shipped
+    // advisory in beta.680 because two committed fixtures predated core#91's
+    // identity seeding; `templates` #482 re-captured both, and #484 enforced
+    // it in templates CI first. Uids and paths only, never the names — see
+    // `organizationIdentityConflicts`.
     for (const conflict of organizationIdentityConflicts(leaves)) {
       const what = conflict.kind === "uid-has-two-names"
         ? `organization ${conflict.uids[0]} is masked to ${conflict.names} different names`
@@ -610,7 +611,6 @@ export function lintFixture(args: {
         IDENTITY_CHECK,
         `${what} at ${conflict.fieldPaths.join(", ")}. One organization must be one name, ` +
           `and two must be two, within a document — re-capture this fixture.`,
-        "advisory",
       );
     }
   }

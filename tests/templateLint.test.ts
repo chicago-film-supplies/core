@@ -829,27 +829,33 @@ const orgFixture = (path: { uid: string; name: string }[]) =>
     })],
   });
 
-Deno.test("check 2c — one uid masked to two names is an ADVISORY finding", () => {
+// 🔴 The flip (2026-10-22, core#137), asserted on the PARTITION as 2b's is: a
+// re-added `"advisory"` argument would move a real breach into the array
+// `api-cloudrun`'s `familyLintOutcome` drops — green everywhere, shown nowhere.
+Deno.test("check 2c — one uid masked to two names BLOCKS, and never lands in advisories", () => {
   const report = orgFixture([
     { uid: "orgAAAAAAAAAAAAAAAAA", name: FAKE_ORGANIZATIONS[0] },
     { uid: "orgAAAAAAAAAAAAAAAAA", name: FAKE_ORGANIZATIONS[1] },
   ]);
-  assertEquals(report.advisories.map((f) => f.check), [IDENTITY_CHECK]);
-  assert(report.advisories[0].message.includes("orgAAAAAAAAAAAAAAAAA"));
-  assert(!checksIn(report.findings).has(IDENTITY_CHECK), "advisory, so it must not block yet");
+  const identity = report.findings.filter((f) => f.check === IDENTITY_CHECK);
+  assertEquals(identity.length, 1, "expected one BLOCKING pii-identity finding");
+  assert(identity[0].message.includes("orgAAAAAAAAAAAAAAAAA"));
+  assertEquals(report.advisories, [], "nothing produces an advisory since the flip");
   assert(report.tally.maskLeaves.examined >= 2, "the org leaves were actually walked");
 });
 
-Deno.test("check 2c — two uids under one name is a finding; a clean chain is not", () => {
+Deno.test("check 2c — two uids under one name BLOCKS; a clean chain does not", () => {
   const shared = orgFixture([
     { uid: "orgAAAAAAAAAAAAAAAAA", name: FAKE_ORGANIZATIONS[0] },
     { uid: "orgBBBBBBBBBBBBBBBBB", name: FAKE_ORGANIZATIONS[0] },
   ]);
-  assertEquals(shared.advisories.map((f) => f.check), [IDENTITY_CHECK]);
+  assert(checksIn(shared.findings).has(IDENTITY_CHECK), "expected a BLOCKING pii-identity finding");
+  assertEquals(shared.advisories, []);
   const clean = orgFixture([
     { uid: "orgAAAAAAAAAAAAAAAAA", name: FAKE_ORGANIZATIONS[0] },
     { uid: "orgBBBBBBBBBBBBBBBBB", name: FAKE_ORGANIZATIONS[1] },
   ]);
+  assert(!checksIn(clean.findings).has(IDENTITY_CHECK));
   assertEquals(clean.advisories, []);
   assert(clean.tally.maskLeaves.examined >= 2, "and it examined the same leaves");
 });
