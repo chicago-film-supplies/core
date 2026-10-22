@@ -17,7 +17,14 @@ import {
   PurchaseSchema,
   ReceivePurchaseInput,
 } from "../src/schemas/mod.ts";
-import { cumulativeShareCents, remainingToBill, remainingToReceive } from "../src/utils/purchases.ts";
+import {
+  cumulativeShareCents,
+  expandPurchaseLines,
+  type PurchaseExpansionComponent,
+  type PurchaseExpansionProduct,
+  remainingToBill,
+  remainingToReceive,
+} from "../src/utils/purchases.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 // ── the cumulative share ─────────────────────────────────────────────
@@ -452,4 +459,133 @@ Deno.test("PurchaseCreditSchema: a rebate may carry only direct lines, but a cre
 
 Deno.test("PurchaseCreditSchema: a PUSHED credit's total is its lines', at the credit's own total_cents", () => {
   assertEquals(issuePaths(PurchaseCreditSchema, credit({ total_cents: 47000, remaining_credit_cents: 47000 })), ["total_cents"]);
+});
+
+// ── pack expansion (api-cloudrun#1081) ───────────────────────────────
+
+/** A catalog component row, shaped as prod stores them (`path` names the parent chain). */
+function comp(
+  uid: string,
+  path: string[],
+  quantity: number,
+  stock_method: PurchaseExpansionComponent["stock_method"],
+  extra: Partial<PurchaseExpansionComponent> = {},
+): PurchaseExpansionComponent {
+  return { uid, name: uid, path, quantity, stock_method, type: "sale", inclusion_type: "mandatory", ...extra };
+}
+
+function product(
+  uid: string,
+  stock_method: PurchaseExpansionProduct["stock_method"],
+  components: PurchaseExpansionComponent[] = [],
+): PurchaseExpansionProduct {
+  return { uid, name: uid, type: "sale", stock_method, components };
+}
+
+// The prod warmer family: 118 (40 Pairs) → 410 × 40; 353 (240 Pairs) → 118 × 6 → 410 × 40.
+const CATALOG = new Map<string, PurchaseExpansionProduct>([
+  ["410", product("410", "bulk")],
+  ["118", product("118", "none", [comp("410", ["118"], 40, "bulk")])],
+  ["353", product("353", "none", [comp("118", ["353"], 6, "none"), comp("410", ["353", "118"], 40, "bulk")])],
+  // A pallet of counted cases of uncounted bottles: the walk stops at the case.
+  ["611", product("611", "none", [comp("case", ["611"], 40, "bulk"), comp("bottle", ["611", "case"], 24, "none")])],
+  ["case", product("case", "bulk")],
+  // A counted case of counted units: the frontier is the case alone, never both.
+  ["crate", product("crate", "none", [comp("case", ["crate"], 2, "bulk"), comp("410", ["crate", "case"], 12, "bulk")])],
+  ["bare", product("bare", "none")],
+  ["hollow", product("hollow", "none", [comp("ring", ["hollow"], 4, "none", { type: "rental" })])],
+  ["set", product("set", "none", [comp("hanger", ["set"], 50, "bulk"), comp("stacker", ["set"], 1, "bulk")])],
+  ["opt", product("opt", "none", [comp("410", ["opt"], 10, "bulk"), comp("case", ["opt"], 1, "bulk", { inclusion_type: "optional" })])],
+  ["frac", product("frac", "none", [comp("410", ["frac"], 0.07, "bulk")])],
+  ["svc", product("svc", "none", [comp("labor", ["svc"], 1, "bulk", { type: "service" })])],
+]);
+
+const D1 = "2026-11-02T00:00:00.000-06:00";
+const D2 = "2026-11-09T00:00:00.000-06:00";
+
+Deno.test("expandPurchaseLines: a stocked product passes through unchanged", () => {
+  const lines = [{ uid_product: "410", quantity: 7, amount_cents: 700, expected_date: D1 }];
+  assertEquals(expandPurchaseLines(lines, CATALOG), { ok: true, lines });
+});
+
+Deno.test("expandPurchaseLines: a pack becomes its stocked component at ×N, carrying the pack's amount", () => {
+  assertEquals(expandPurchaseLines([{ uid_product: "118", quantity: 12, amount_cents: 36_000 }], CATALOG), {
+    ok: true,
+    lines: [{ uid_product: "410", quantity: 480, amount_cents: 36_000 }],
+  });
+});
+
+Deno.test("expandPurchaseLines: a nested pack reaches the stocked leaf through the uncounted middle", () => {
+  assertEquals(expandPurchaseLines([{ uid_product: "353", quantity: 1, amount_cents: 9_000 }], CATALOG), {
+    ok: true,
+    lines: [{ uid_product: "410", quantity: 240, amount_cents: 9_000 }],
+  });
+});
+
+Deno.test("expandPurchaseLines: the walk stops at the first counted node, not the uncounted leaf below it", () => {
+  assertEquals(expandPurchaseLines([{ uid_product: "611", quantity: 2, amount_cents: 50_000 }], CATALOG), {
+    ok: true,
+    lines: [{ uid_product: "case", quantity: 80, amount_cents: 50_000 }],
+  });
+});
+
+Deno.test("expandPurchaseLines: a counted node under a counted node is not a second frontier node", () => {
+  assertEquals(expandPurchaseLines([{ uid_product: "crate", quantity: 3, amount_cents: 600 }], CATALOG), {
+    ok: true,
+    lines: [{ uid_product: "case", quantity: 6, amount_cents: 600 }],
+  });
+});
+
+Deno.test("expandPurchaseLines: an optional component is not part of the pack", () => {
+  assertEquals(expandPurchaseLines([{ uid_product: "opt", quantity: 3, amount_cents: 300 }], CATALOG), {
+    ok: true,
+    lines: [{ uid_product: "410", quantity: 30, amount_cents: 300 }],
+  });
+});
+
+Deno.test("expandPurchaseLines: the ratio ceils once in integers — 0.07 × 100 is 7, not 8", () => {
+  const result = expandPurchaseLines([{ uid_product: "frac", quantity: 100, amount_cents: 100 }], CATALOG);
+  assert(result.ok);
+  assertEquals(result.lines[0].quantity, 7);
+});
+
+Deno.test("expandPurchaseLines: a pack and its stocked product on one purchase merge into one line", () => {
+  const result = expandPurchaseLines([
+    { uid_product: "410", quantity: 20, amount_cents: 1_000, expected_date: D2 },
+    { uid_product: "118", quantity: 2, amount_cents: 6_000, expected_date: D1 },
+    { uid_product: "353", quantity: 1, amount_cents: 9_000, expected_date: null },
+  ], CATALOG);
+  assertEquals(result, {
+    ok: true,
+    lines: [{ uid_product: "410", quantity: 20 + 80 + 240, amount_cents: 16_000, expected_date: D1 }],
+  });
+});
+
+Deno.test("expandPurchaseLines: a merge keeps null when no line states a date", () => {
+  const result = expandPurchaseLines([
+    { uid_product: "410", quantity: 1, amount_cents: 10, expected_date: null },
+    { uid_product: "118", quantity: 1, amount_cents: 10, expected_date: null },
+  ], CATALOG);
+  assert(result.ok);
+  assertEquals(result.lines[0].expected_date, null);
+});
+
+Deno.test("expandPurchaseLines: refuses a pack with no stocked component — it would receive nothing", () => {
+  for (const uid of ["bare", "hollow", "svc"]) {
+    const result = expandPurchaseLines([{ uid_product: uid, quantity: 1, amount_cents: 100 }], CATALOG);
+    assert(!result.ok, uid);
+    assertEquals(result.refusal.reason, "no_stocked_component", uid);
+    assertEquals(result.refusal.uid_product, uid);
+  }
+});
+
+Deno.test("expandPurchaseLines: refuses a kit of several stocked products — one amount has no split rule", () => {
+  const result = expandPurchaseLines([{ uid_product: "set", quantity: 1, amount_cents: 100 }], CATALOG);
+  assert(!result.ok);
+  assertEquals(result.refusal.reason, "several_stocked_components");
+  assert(result.refusal.message.includes("hanger") && result.refusal.message.includes("stacker"));
+});
+
+Deno.test("expandPurchaseLines: a product the caller did not read is the caller's bug, thrown", () => {
+  assertThrows(() => expandPurchaseLines([{ uid_product: "nope", quantity: 1, amount_cents: 1 }], CATALOG));
 });

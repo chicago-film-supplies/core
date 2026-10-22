@@ -39,7 +39,13 @@
  * One line per product, refined below. A receipt's subject is already
  * `uid_product`, so a movement needs no line slot in `sources[]` to say which
  * line it received against. A second price for the same product is a second
- * PURCHASE, never a second line (see the plan's *Money rules*).
+ * PURCHASE, never a second line (see the plan's *Money rules*) — with one
+ * exception: a PACK (`expandPurchaseLines`, `@cfs/core/utils/purchases`) is
+ * stored as its stocked component, and when that product already has a line
+ * the two MERGE, amounts summed (owner, 2026-10-22, api-cloudrun#1081). The
+ * ledger averages the cost either way. Merging into a line already received or
+ * billed changes its amount, which the API's amend refuses, so that case still
+ * becomes a second purchase.
  *
  * ## Money
  *

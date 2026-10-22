@@ -23420,7 +23420,13 @@ copies every part of it:
 One line per product, refined below. A receipt's subject is already
 `uid_product`, so a movement needs no line slot in `sources[]` to say which
 line it received against. A second price for the same product is a second
-PURCHASE, never a second line (see the plan's *Money rules*).
+PURCHASE, never a second line (see the plan's *Money rules*) — with one
+exception: a PACK (`expandPurchaseLines`, `@cfs/core/utils/purchases`) is
+stored as its stocked component, and when that product already has a line
+the two MERGE, amounts summed (owner, 2026-10-22, api-cloudrun#1081). The
+ledger averages the cost either way. Merging into a line already received or
+billed changes its amount, which the API's amend refuses, so that case still
+becomes a second purchase.
 
 ## Money
 
@@ -43447,6 +43453,53 @@ pushed bill line, the per-line headroom, and the status rule.
 
 Design: api-cloudrun#1210.
 
+### `PurchaseExpansionComponent`
+
+A catalog `components[]` row as {@link expandPurchaseLines} reads it.
+
+```ts
+interface PurchaseExpansionComponent {
+  uid: string;
+  name?: string;
+  type: ProductTypeType;
+  stock_method: StockMethodType;
+}
+```
+
+### `PurchaseExpansionProduct`
+
+The product facts {@link expandPurchaseLines} reads, keyed by uid in its map.
+
+```ts
+interface PurchaseExpansionProduct {
+  uid: string;
+  name: string;
+  type: ProductTypeType;
+  stock_method: StockMethodType;
+  components?: readonly PurchaseExpansionComponent[];
+}
+```
+
+### `PurchaseExpansionRefusal`
+
+Why a line could not be expanded into one stockable line.
+
+```ts
+interface PurchaseExpansionRefusal {
+  uid_product: string;
+  reason: "no_stocked_component" | "several_stocked_components";
+  message: string;
+}
+```
+
+### `PurchaseExpansionResult`
+
+The result of {@link expandPurchaseLines}.
+
+```ts
+type PurchaseExpansionResult = typeLiteral | typeLiteral;
+```
+
 ### `cumulativeShareCents(amountCents: number, quantity: number, before: number, after: number): number`
 
 The cents a line's units `(before, after]` cost — the k-th receipt or the
@@ -43503,6 +43556,34 @@ to show.
 Lives in the schema module, not in `utils/`, because the document refine
 calls it and `utils/` imports `schemas/` one way only.
 `@cfs/core/utils/purchases` re-exports it.
+
+### `expandPurchaseLines(lines: readonly PurchaseLineInputType[], products: ReadonlyMap<string, PurchaseExpansionProduct>): PurchaseExpansionResult`
+
+Replace every pack line with the stocked product it is a pack of, so a stored
+purchase only ever names a product that can be RECEIVED.
+
+A pack is a `stock_method: "none"` product with `components` — the same
+relation a sale already draws through (`118 Hot Hands (40 Pairs)` →
+`410 (1 Pair) × 40`). Sales keep the pack as a priced parent over $0
+component lines; a purchase deliberately does NOT (owner, 2026-10-22): the
+line's money is the stocked product's cost, so it must sit on the line the
+receipt lands on. `118 × 12 @ $360` becomes `410 × 480 @ $360`, the ratio
+applied once, here, through {@link componentQuantities} — the one quantity
+rule the order expander uses.
+
+The receivable FRONTIER of a pack is every component that counts stock and
+has no counted ancestor in the walk: `353 (240 Pairs)` reaches `410` through
+the uncounted `118`, and a pallet stops at its counted case rather than the
+uncounted bottle under it. Exactly one frontier node expands; none is a
+refusal (buying it would receive nothing), and several is a refusal too —
+one amount has no rule for splitting across two products' cost.
+
+Lines that land on one product MERGE — quantities and amounts summed, the
+earliest `expected_date` kept — because a purchase holds one line per product
+and the ledger averages the cost anyway (owner, 2026-10-22).
+
+Returns rather than throws: a refusal is an operator-facing 400, and core
+throws plain `Error`, which a consumer's middleware reads as a 500.
 
 ### `purchaseCreditRemainingFromJournal(totalCents: number, settlements: readonly typeLiteral[]): number`
 

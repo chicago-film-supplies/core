@@ -680,11 +680,13 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "sumOOSBreakdown",
   ],
   // Write-path rules (api-cloudrun#1210): the price of a receipt or bill line,
-  // the per-line headroom, the status rule. A template renders a purchase that
-  // has already been written.
+  // the per-line headroom, the status rule, and the pack expansion that runs
+  // before a line is stored (api-cloudrun#1081). A template renders a purchase
+  // that has already been written.
   purchases: [
     "cumulativeShareCents",
     "derivePurchaseStatus",
+    "expandPurchaseLines",
     "remainingToBill",
     "remainingToReceive",
   ],
