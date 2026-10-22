@@ -8,6 +8,11 @@
  * sorted alphabetically within each entrypoint, entrypoints rendered in
  * the order declared in deno.json. The JSON file mirrors the markdown
  * structure so consumers can pick whichever format suits them.
+ *
+ * `--check` renders both and compares them to the files on disk WITHOUT writing
+ * (core#98) — it runs with no `--allow-write`, so proving the docs current
+ * cannot change them. That is the CI backstop for the pre-commit regeneration,
+ * which a `--no-verify` commit skips.
  */
 
 import {
@@ -230,6 +235,22 @@ async function main(): Promise<void> {
 
   const md = renderMarkdown(pkgName, entrypoints);
   const json = renderJson(pkgName, entrypoints);
+
+  if (Deno.args.includes("--check")) {
+    const stale: string[] = [];
+    for (const [path, rendered] of [["API.md", md], ["API.json", json]]) {
+      const onDisk = await Deno.readTextFile(path).catch(() => null);
+      if (onDisk !== rendered) stale.push(path);
+    }
+    if (stale.length > 0) {
+      console.error(
+        `Stale: ${stale.join(", ")} — run \`deno task docs\` and commit the result.`,
+      );
+      Deno.exit(1);
+    }
+    console.error("API.md and API.json are current.");
+    return;
+  }
 
   await Deno.writeTextFile("API.md", md);
   await Deno.writeTextFile("API.json", json);

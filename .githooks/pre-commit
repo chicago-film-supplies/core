@@ -37,10 +37,37 @@ deno task check:declarations
 #
 # What stays here is the set that is cheap and answers a question the suite
 # cannot: measured 2026-08-24 on a warm cache, lint 0.2s + check 0.1s +
-# check:generated 1.0s + check:declarations 2.3s + docs 5.4s, against 12.3s for
+# check:generated 1.0s + check:declarations 2.3s + docs 5.4s (~8.5s since
+# core#98 regenerates from an extracted tree), against 12.3s for
 # the suite alone. Run `deno task test` yourself while iterating; pre-push runs
 # it for real.
 
-echo "Regenerating API docs..."
-deno task docs
-git add API.md API.json
+# 🔴 Regenerate from the COMMIT'S OWN TREE, never the working tree (core#98).
+# `deno doc` over the working tree swept a peer's uncommitted `src/` signature
+# into an unrelated commit — and, the silent direction, a commit from a clean
+# index reverted API.md under a peer's still-uncommitted change. `git write-tree`
+# reads `GIT_INDEX_FILE`, which for a pathspec commit is git's temporary index:
+# exactly what this commit will contain. Extracting it with `git archive` needs
+# no worktree registration and nothing to clean up but a directory.
+#
+# The result is copied back and staged ONLY when it differs from the index, so
+# a commit that changes no API surface leaves a peer's working-tree API.md alone.
+# `deno task docs:check` in `.github/workflows/checks.yaml` is the backstop for
+# a `--no-verify` commit. `.githooks/post-commit` is still needed: the `git add`
+# below lands in the temporary index on a pathspec commit, never `.git/index`.
+echo "Regenerating API docs from the commit's tree..."
+_docs_tree=$(git write-tree)
+_docs_dir=$(mktemp -d "${TMPDIR:-/tmp}/cfs-docs-core-XXXXXX")
+trap 'rm -rf "$_docs_dir"' EXIT
+trap 'exit 1' INT TERM
+git archive -o "$_docs_dir/tree.tar" "$_docs_tree"
+mkdir "$_docs_dir/tree"
+tar -xf "$_docs_dir/tree.tar" -C "$_docs_dir/tree"
+rm -f "$_docs_dir/tree.tar"
+(cd "$_docs_dir/tree" && deno run --allow-run --allow-read --allow-write scripts/generate-api-docs.ts)
+for _f in API.md API.json; do
+  if [ "$(git hash-object "$_docs_dir/tree/$_f")" != "$(git rev-parse -q --verify ":$_f" || true)" ]; then
+    cp "$_docs_dir/tree/$_f" "$_f"
+    git add "$_f"
+  fi
+done

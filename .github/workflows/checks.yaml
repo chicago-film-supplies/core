@@ -58,6 +58,13 @@ jobs:
       - name: Declarations
         run: deno task check:declarations
 
+      # API.md / API.json had NO staleness gate in either direction (core#98).
+      # `.githooks/pre-commit` regenerates them from the commit's own tree, and a
+      # `--no-verify` commit skips that. `--check` runs without `--allow-write`,
+      # so it can only compare, never repair.
+      - name: API docs
+        run: deno task docs:check
+
       - name: Test
         run: deno task test
 

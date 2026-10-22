@@ -87,8 +87,15 @@ The single shared CFS package, published to JSR as `@cfs/core`. Two namespaces w
 - `deno task check:generated` — the staleness gate for the two committed `src/schemas/*.generated.ts`
   files. **Non-destructive by construction**: each generator takes `--stdout` and the task pipes that
   render into `diff -u` against the committed copy, so proving the file is current never writes it.
-  Runs in `.githooks/pre-commit` and `.github/workflows/checks.yaml`. Contrast `docs:check`, which is
-  the older regenerate-then-`git diff` shape and is wired into neither.
+  Runs in `.githooks/pre-commit` and `.github/workflows/checks.yaml`.
+- `deno task docs:check` — the same non-destructive shape for `API.md` / `API.json` (core#98): it
+  renders both and compares, with no `--allow-write`. Runs in `.github/workflows/checks.yaml` as the
+  backstop for a `--no-verify` commit. ⚠️ **`.githooks/pre-commit` regenerates them from the
+  COMMIT'S OWN TREE** — `git write-tree` (which reads the pathspec commit's temporary index), then
+  `git archive` into a temp dir — never the working tree. The working-tree form swept a peer's
+  uncommitted `src/` signature into an unrelated commit, and in the silent direction a commit from a
+  clean index reverted API.md under a peer's still-uncommitted change. Both files are copied back
+  and staged only when they differ from the index.
 - `deno task audit:citations` — check every backticked `path.ext` citation in this package's
   prose (`CLAUDE.md`, `README.md`, `.claude/`, `src/`, `scripts/`, `tests/`, `.github/`,
   `.githooks/`) still resolves. ⚠️ **Do not read that list as the definition** — the
