@@ -872,6 +872,8 @@ export {
   type UpdateBookingResponseType,
   PrepShortfall,
   type PrepShortfallType,
+  ShelfShortfall,
+  type ShelfShortfallType,
 } from "./booking.ts";
 export {
   BookingAction,

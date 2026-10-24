@@ -531,7 +531,7 @@
         {
           "kind": "interface",
           "name": "BulkBookingUpdateResponseType",
-          "declaration": "interface BulkBookingUpdateResponseType {\n  success: boolean;\n  oos_records_written: number;\n  results: Array<typeLiteral>;\n  failures: Array<typeLiteral>;\n  chunks: number;\n  prep_shortfalls?: PrepShortfallType[];\n}",
+          "declaration": "interface BulkBookingUpdateResponseType {\n  success: boolean;\n  oos_records_written: number;\n  results: Array<typeLiteral>;\n  failures: Array<typeLiteral>;\n  chunks: number;\n  prep_shortfalls?: PrepShortfallType[];\n  shelf_shortfalls?: ShelfShortfallType[];\n}",
           "doc": "Response from `PUT /fulfillments/{uid}/bookings`. Per-row `results` carry the\npost-write booking versions in input order.\n\n⚠️ **`success` is a boolean, not `true`** — and that is a fact about the\nserver, not a loosening. Rows commit in transaction-sized chunks\n(api-cloudrun#391), so a failure after an earlier chunk has committed is a\nPARTIAL success: the earlier writes exist and cannot be rolled back. A\n`z.literal(true)` cannot describe that state, so the route restated the whole\nshape inline rather than use this one — which is the drift api-cloudrun#624\nitem 3 names. `failures` + `chunks` are what make the partial case legible to\na client (manager#272).\n\nThere is deliberately **no `order_completed`**. It was edge-triggered — true\nonly when THIS run flipped the order into `complete` — while its name read\nlevel-triggered, so a replayed request reported `false` for an order that IS\ncomplete. Completion is level-triggered at the call site, where the client's\norder listener already holds `status === \"complete\"`."
         },
         {
@@ -4771,6 +4771,18 @@
           "doc": "One settlement event's kind. @see {@link SETTLEMENT_CONTRACTS}"
         },
         {
+          "kind": "variable",
+          "name": "ShelfShortfall",
+          "declaration": "const ShelfShortfall: z.ZodType<ShelfShortfallType>;",
+          "doc": "Zod schema for {@link ShelfShortfallType}."
+        },
+        {
+          "kind": "interface",
+          "name": "ShelfShortfallType",
+          "declaration": "interface ShelfShortfallType {\n  uid: string;\n  requested: number;\n  moved: number;\n}",
+          "doc": "A check-out the shelves could not fully cover. The server moved what the\nshelves hold (`moved`, possibly 0) and left the rest of the row's units in the\nbucket they were in before the request — reserved or prepped. Never a 400:\nthe operator is told, and recounts, receives stock, or checks out the rest.\n\nA row clamped to 0 wrote nothing, so it is absent from `results` and is not a\n`failures` entry either: nothing failed."
+        },
+        {
           "kind": "interface",
           "name": "StatementDocument",
           "declaration": "interface StatementDocument {\n  uid: string;\n  uid_organization: string;\n  organization_path: OrgPathNodeType[];\n  version: number;\n  number: number;\n  request: StatementRequestSnapshot;\n  closing_balance_cents: number;\n  uploadcare_uuid: string | null;\n  params: Record<string, boolean>;\n  params_context: RenderParamsContext | null;\n  deleted_at: FirestoreTimestampType | null;\n  created_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
@@ -5691,7 +5703,7 @@
         {
           "kind": "interface",
           "name": "UpdateBookingResponseType",
-          "declaration": "interface UpdateBookingResponseType {\n  success: boolean;\n  version: number;\n  oos_records_written: number;\n  prep_shortfalls?: PrepShortfallType[];\n}",
+          "declaration": "interface UpdateBookingResponseType {\n  success: boolean;\n  version: number;\n  oos_records_written: number;\n  prep_shortfalls?: PrepShortfallType[];\n  shelf_shortfalls?: ShelfShortfallType[];\n}",
           "doc": "Response from `PUT /bookings/{uid}` — the single-row form.\n\nOne row plans to exactly one chunk, so it cannot partially succeed and\ncarries no `failures`/`chunks`. Kept a distinct shape from\n{@link BulkBookingUpdateResponseType} for that reason rather than sharing\none loosened type: N rows and one row genuinely differ in what can go wrong."
         },
         {
@@ -8261,7 +8273,7 @@
         {
           "kind": "interface",
           "name": "BulkBookingUpdateResponseType",
-          "declaration": "interface BulkBookingUpdateResponseType {\n  success: boolean;\n  oos_records_written: number;\n  results: Array<typeLiteral>;\n  failures: Array<typeLiteral>;\n  chunks: number;\n  prep_shortfalls?: PrepShortfallType[];\n}",
+          "declaration": "interface BulkBookingUpdateResponseType {\n  success: boolean;\n  oos_records_written: number;\n  results: Array<typeLiteral>;\n  failures: Array<typeLiteral>;\n  chunks: number;\n  prep_shortfalls?: PrepShortfallType[];\n  shelf_shortfalls?: ShelfShortfallType[];\n}",
           "doc": "Response from `PUT /fulfillments/{uid}/bookings`. Per-row `results` carry the\npost-write booking versions in input order.\n\n⚠️ **`success` is a boolean, not `true`** — and that is a fact about the\nserver, not a loosening. Rows commit in transaction-sized chunks\n(api-cloudrun#391), so a failure after an earlier chunk has committed is a\nPARTIAL success: the earlier writes exist and cannot be rolled back. A\n`z.literal(true)` cannot describe that state, so the route restated the whole\nshape inline rather than use this one — which is the drift api-cloudrun#624\nitem 3 names. `failures` + `chunks` are what make the partial case legible to\na client (manager#272).\n\nThere is deliberately **no `order_completed`**. It was edge-triggered — true\nonly when THIS run flipped the order into `complete` — while its name read\nlevel-triggered, so a replayed request reported `false` for an order that IS\ncomplete. Completion is level-triggered at the call site, where the client's\norder listener already holds `status === \"complete\"`."
         },
         {
@@ -8302,6 +8314,18 @@
         },
         {
           "kind": "variable",
+          "name": "ShelfShortfall",
+          "declaration": "const ShelfShortfall: z.ZodType<ShelfShortfallType>;",
+          "doc": "Zod schema for {@link ShelfShortfallType}."
+        },
+        {
+          "kind": "interface",
+          "name": "ShelfShortfallType",
+          "declaration": "interface ShelfShortfallType {\n  uid: string;\n  requested: number;\n  moved: number;\n}",
+          "doc": "A check-out the shelves could not fully cover. The server moved what the\nshelves hold (`moved`, possibly 0) and left the rest of the row's units in the\nbucket they were in before the request — reserved or prepped. Never a 400:\nthe operator is told, and recounts, receives stock, or checks out the rest.\n\nA row clamped to 0 wrote nothing, so it is absent from `results` and is not a\n`failures` entry either: nothing failed."
+        },
+        {
+          "kind": "variable",
           "name": "UpdateBookingInput",
           "declaration": "const UpdateBookingInput: z.ZodType<UpdateBookingInputType>;",
           "doc": "Zod schema for UpdateBookingInput."
@@ -8321,7 +8345,7 @@
         {
           "kind": "interface",
           "name": "UpdateBookingResponseType",
-          "declaration": "interface UpdateBookingResponseType {\n  success: boolean;\n  version: number;\n  oos_records_written: number;\n  prep_shortfalls?: PrepShortfallType[];\n}",
+          "declaration": "interface UpdateBookingResponseType {\n  success: boolean;\n  version: number;\n  oos_records_written: number;\n  prep_shortfalls?: PrepShortfallType[];\n  shelf_shortfalls?: ShelfShortfallType[];\n}",
           "doc": "Response from `PUT /bookings/{uid}` — the single-row form.\n\nOne row plans to exactly one chunk, so it cannot partially succeed and\ncarries no `failures`/`chunks`. Kept a distinct shape from\n{@link BulkBookingUpdateResponseType} for that reason rather than sharing\none loosened type: N rows and one row genuinely differ in what can go wrong."
         },
         {
@@ -13107,7 +13131,7 @@
         {
           "kind": "variable",
           "name": "DOMAIN_EVENT_MSGS",
-          "declaration": "const DOMAIN_EVENT_MSGS: \"afterOrderWrite_order_not_found\" | \"store_destination_no_default\" | \"after_order_write_no_changes\" | \"after_product_write_no_changes\" | \"after_product_write_not_found\" | \"after_product_write_skip_create\" | \"update_order_no_changes\" | \"order_invoice_count_high\" | \"invoice_created\" | \"invoice_updated\" | \"organization_check_failed\" | \"organization_no_xero_id\" | \"organization_xero_id_shared\" | \"organization_merged\" | \"item_path_invariant_failed\" | \"order_invoice_mirror_repaired\" | \"cascade_converged\" | \"location_cascade_skip\" | \"location_reversal_skip\" | \"location_quantity_negative\" | \"stock_recalc_item_added\" | \"stock_recalc_item_modified\" | \"stock_recalc_item_removed\" | \"stock_recalc_items\" | \"stock_recalc_status_changed\" | \"stock_oversold\" | \"oos_overbilled\" | \"custody_delta_unmatched\" | \"substitution_custody_kept\" | \"invoice_action_unoffered\" | \"fulfillment_custom_item_qty_override\" | \"fulfillment_sync_items_skipped_no_bookings\" | \"fulfillment_sync_frozen_rows\" | \"recurrence_horizon_failed\" | \"tax_priced_on_unreviewed_rate\" | \"invoice_sync_organization_kept\" | \"destination_pair_unjoined\"[];",
+          "declaration": "const DOMAIN_EVENT_MSGS: \"afterOrderWrite_order_not_found\" | \"store_destination_no_default\" | \"after_order_write_no_changes\" | \"after_product_write_no_changes\" | \"after_product_write_not_found\" | \"after_product_write_skip_create\" | \"update_order_no_changes\" | \"order_invoice_count_high\" | \"invoice_created\" | \"invoice_updated\" | \"organization_check_failed\" | \"organization_no_xero_id\" | \"organization_xero_id_shared\" | \"organization_merged\" | \"item_path_invariant_failed\" | \"order_invoice_mirror_repaired\" | \"cascade_converged\" | \"location_cascade_skip\" | \"location_reversal_skip\" | \"location_quantity_negative\" | \"stock_recalc_item_added\" | \"stock_recalc_item_modified\" | \"stock_recalc_item_removed\" | \"stock_recalc_items\" | \"stock_recalc_status_changed\" | \"stock_oversold\" | \"oos_overbilled\" | \"checkout_shelf_shortfall\" | \"custody_delta_unmatched\" | \"substitution_custody_kept\" | \"invoice_action_unoffered\" | \"fulfillment_custom_item_qty_override\" | \"fulfillment_sync_items_skipped_no_bookings\" | \"fulfillment_sync_frozen_rows\" | \"recurrence_horizon_failed\" | \"tax_priced_on_unreviewed_rate\" | \"invoice_sync_organization_kept\" | \"destination_pair_unjoined\"[];",
           "doc": "Msg literals this archetype absorbs."
         },
         {

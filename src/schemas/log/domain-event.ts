@@ -135,6 +135,14 @@ export const DOMAIN_EVENT_MSGS = [
   // one line per over-billed record. Emitted from
   // `api-cloudrun/src/lib/replacementBilling.ts`.
   "oos_overbilled",
+  // A booking write asked to take more units off the shelves than they hold,
+  // and the server moved what they hold instead of refusing (api-cloudrun
+  // `clampToShelves`). **ADVISORY**: the response carries `shelf_shortfalls`
+  // and the operator is told; this line is the durable trail. One line per
+  // request, at `warn`: `{ uid_orders, shelf_shortfalls: [{ uid, uid_product,
+  // requested, moved }] }`. A product whose ledger holds 0 is usually a count
+  // that was never received, not stock that is gone.
+  "checkout_shelf_shortfall",
   // A booking PUT on an operator route sent an absolute breakdown whose delta
   // `decomposeCustodyDelta` (`@cfs/core/utils/custody`) could not pair into
   // custody rules — a change the journal records nothing for. **SHADOW, not a

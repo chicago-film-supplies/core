@@ -446,7 +446,33 @@ export interface BulkBookingUpdateResponseType {
   chunks: number;
   /** See {@link PrepShortfallType}. Absent when every prep was covered. */
   prep_shortfalls?: PrepShortfallType[];
+  /** See {@link ShelfShortfallType}. Absent when every check-out was covered. */
+  shelf_shortfalls?: ShelfShortfallType[];
 }
+
+/**
+ * A check-out the shelves could not fully cover. The server moved what the
+ * shelves hold (`moved`, possibly 0) and left the rest of the row's units in the
+ * bucket they were in before the request — reserved or prepped. Never a 400:
+ * the operator is told, and recounts, receives stock, or checks out the rest.
+ *
+ * A row clamped to 0 wrote nothing, so it is absent from `results` and is not a
+ * `failures` entry either: nothing failed.
+ */
+export interface ShelfShortfallType {
+  uid: string;
+  /** The units the row would have taken off the shelves. */
+  requested: number;
+  /** The units it did take. `0 <= moved < requested`. */
+  moved: number;
+}
+
+/** Zod schema for {@link ShelfShortfallType}. */
+export const ShelfShortfall: z.ZodType<ShelfShortfallType> = z.object({
+  uid: BookingId,
+  requested: z.int().min(1),
+  moved: z.int().min(0),
+});
 
 /**
  * A prep the shelves could not fully cover (api-cloudrun#1302 ruling 8). The
@@ -479,6 +505,7 @@ export const BulkBookingUpdateResponse: z.ZodType<BulkBookingUpdateResponseType>
     })),
     chunks: z.int().min(1),
     prep_shortfalls: z.array(PrepShortfall).optional(),
+    shelf_shortfalls: z.array(ShelfShortfall).optional(),
   });
 
 /**
@@ -495,6 +522,8 @@ export interface UpdateBookingResponseType {
   oos_records_written: number;
   /** See {@link PrepShortfallType}. Absent when the prep was covered. */
   prep_shortfalls?: PrepShortfallType[];
+  /** See {@link ShelfShortfallType}. Absent when the check-out was covered. */
+  shelf_shortfalls?: ShelfShortfallType[];
 }
 
 export const UpdateBookingResponse: z.ZodType<UpdateBookingResponseType> = z.object({
@@ -502,6 +531,7 @@ export const UpdateBookingResponse: z.ZodType<UpdateBookingResponseType> = z.obj
   version: z.int().min(0),
   oos_records_written: z.int().min(0),
   prep_shortfalls: z.array(PrepShortfall).optional(),
+  shelf_shortfalls: z.array(ShelfShortfall).optional(),
 });
 
 /**
