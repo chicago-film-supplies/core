@@ -1,13 +1,15 @@
 /**
- * Stock propagation rules — the three edges that rebuild `stock/{productUid}`.
+ * Stock propagation rules — the edges that rebuild `stock/{productUid}`.
  *
- * `stock/{P}` caches the *inputs* to an availability answer, and it has exactly
- * three of them: the ledger's `quantity_held`, the product's live booking
- * intervals, and its non-terminal OOS intervals. Every transaction that rebuilds
- * the projection moves all three, so the same three edges recur, per
- * transaction, and are minted here rather than copy-pasted into six rule files.
+ * `stock/{P}` caches the *inputs* to an availability answer: the ledger's
+ * `quantity_held` (and `quantity_rented_in`), the product's live booking
+ * intervals, its non-terminal OOS intervals, and — since subrents — the SUPPLY
+ * intervals of its live subrent purchases. Every rebuild reads all of them, so
+ * the same edges recur, per transaction, and are minted here rather than
+ * copy-pasted into the rule files. ⚠️ This said "exactly three" inputs until
+ * the supply edge arrived; do not write a count back.
  *
- * ⚠️ **THREE edges, not four — the public twin is gone.** `stock-summaries` and
+ * ⚠️ **No public-twin edge — the twin is gone.** `stock-summaries` and
  * `public-stock-summaries` collapsed into this one collection: the entries are
  * **pre-reduced and anonymous** (`{start, end, quantity, kind}`), so there is
  * nothing left to sanitize and no second document to project into. That deleted
@@ -33,9 +35,9 @@ import type {
   PropagationModule,
 } from "./types.ts";
 
-// ── What checks these three edges ───────────────────────────────────
+// ── What checks these shared edges ───────────────────────────────────
 //
-// All three edges are declared ONCE and fired by many transactions, so their
+// The shared edges are declared ONCE and fired by many transactions, so their
 // enforcement is declared once too — one edit site, four rules. ⚠️ This said
 // "seven transactions" until 2026-08-18 and the real figure was ELEVEN by then:
 // a count of firing contexts goes stale every time a transaction adds
@@ -91,6 +93,29 @@ const FOLD: EnforcementRef = {
  * stored shape is read, not about whether it is fresh. No corpus walk can see
  * it; it is a property of `computeStockAvailability`, and it is asserted directly.
  */
+/**
+ * The supply half of the corpus detector. ⚠️ The anchor is the api-cloudrun
+ * finding code the subrent writer phase adds to `audit-stock.ts`; until it
+ * lands, api-cloudrun's `enforcedByResolves` reports this ref unresolved — a
+ * forcing function on that phase, not a stale pointer.
+ */
+const SUPPLY_FOLD: EnforcementRef = {
+  kind: "audit",
+  ref: "api-cloudrun/scripts/audit-stock.ts::supply_stale",
+  clause:
+    "`supply[]` is multiset-equal to the fold of the product's live subrent purchases through `supplyFromPurchase`, in BOTH directions (`supply_stale`)",
+  gates: true,
+};
+
+/** The supply MODEL — the minimum over a window, and the peak at a supply end. */
+const SUPPLY_MODEL: EnforcementRef = {
+  kind: "test",
+  ref: "core/tests/stock.test.ts",
+  clause:
+    "the `minimum over the window` half — *order 1074 reads 0*, *a hire ending 10-22 leaves the window −10, and the peak −10 at 10-22 + 1ms*, *two staggered hires — the window takes the MINIMUM, not the sum*; and the reducer's liveness (`supplyFromPurchase`)",
+  gates: true,
+};
+
 const INTERVAL_MODEL: EnforcementRef = {
   kind: "test",
   ref: "core/tests/stock.test.ts",
@@ -114,13 +139,13 @@ const STOCK_BICONDITIONAL: EnforcementRef = {
 };
 
 /**
- * The three shared stock edges, in the order `assembleStockResult` performs them.
+ * The shared stock edges, in the order `assembleStockResult` performs them.
  *
  * ⚠️ **These are STEP IDS other modules reference, and that is why this file has
  * a second export.** The one-module-per-file convention (`propagation/types.ts`
  * `PropagationModule`) is about what a file contributes to the *catalog*; a
  * shared `as const` step tuple is the sanctioned companion, because the
- * alternative is the same three ids hand-copied into every transaction that
+ * alternative is the same ids hand-copied into every transaction that
  * rebuilds the projection, across four files — the exact defect the convention
  * exists to remove, and a cost that GROWS with each new firing context rather
  * than sitting at the "39 across seven transactions" this line used to assert.
@@ -132,10 +157,11 @@ export const STOCK_STEPS = [
   "stock:ledger-to-stock",
   "stock:bookings-to-stock",
   "stock:oos-to-stock",
+  "stock:purchases-to-stock",
 ] as const;
 
 /**
- * Where the rebuild actually runs — the `trigger` on all three shared edges.
+ * Where the rebuild actually runs — the `trigger` on every shared edge.
  *
  * ⚠️ **INLINE, post-commit, in the same request** — not on the queue. This used
  * to read `cloud-task:/tasks/rebuild-stock-summary`, and that was true of the
@@ -149,8 +175,8 @@ const REBUILD_TRIGGER =
   "inline:post-commit (retry ladder: cloud-task:/tasks/rebuild-stock-summary)";
 
 /**
- * The stock projection's edges — THREE rules, fired by every transaction that
- * moves stock, plus the seed. **Do not write the number of them here** (item 17):
+ * The stock projection's edges — the shared rules, fired by every transaction
+ * that moves stock, plus the seed. **Do not write the number of them here** (item 17):
  * it was "seven" and was eleven by 2026-08-18. Derive it with
  * `api-cloudrun/scripts/audit-propagation-corpus.ts`.
  *
@@ -189,7 +215,7 @@ const REBUILD_TRIGGER =
  * inputs under a `stock-locks/{P}` precondition rather than reading this
  * document. So the atomicity traded bought display consistency, not an invariant.
  *
- * ⚠️ **`transaction` is deliberately absent on the three shared edges.** That
+ * ⚠️ **`transaction` is deliberately absent on the shared edges.** That
  * field means "grouped into this atomic operation", and with many firing
  * contexts it could only ever name one of them — it would be the single
  * outright false claim in the file. The ids live in each owning definition's
@@ -208,6 +234,11 @@ const rules: CollectionRule[] = [
     trigger: REBUILD_TRIGGER,
     fields: [
       { source: ["quantity_held"], target: ["quantity_held"] },
+      {
+        source: ["quantity_rented_in"],
+        target: ["quantity_rented_in"],
+        transform: "copied, absent read as 0 — the part of quantity_held that is custody without ownership, so a reader takes OWNED units off one document",
+      },
     ],
   },
   {
@@ -275,10 +306,46 @@ const rules: CollectionRule[] = [
     ],
   },
   {
+    id: "stock:purchases-to-stock",
+    source: "purchases",
+    target: "stock",
+    mode: "fan-out",
+    invariant:
+      'stock.supply[] is re-derived from every live (status active) SUBRENT purchase naming the product (`query_by_products`), each line PRE-REDUCED by `supplyFromPurchase` (@cfs/core/utils/stock) to an anonymous {start, end, quantity, kind:"subrent"} interval over its hire window. Supply counts from the moment the purchase exists — receipt is custody only — so a write of a subrent purchase is a supply change and bumps `stock-locks/{P}` like any other input. A SEPARATE array from unavailable[], because the fold takes the MINIMUM of supply over a window where it sums consumption. Anonymous for the reason unavailable[] is: no purchase uid, no supplier.',
+    enforced_by: [SUPPLY_FOLD, SUPPLY_MODEL],
+    trigger: REBUILD_TRIGGER,
+    fields: [
+      { source: ["lines", "dates", "start"], target: ["supply", "start"] },
+      { source: ["lines", "dates", "end"], target: ["supply", "end"] },
+      {
+        source: ["lines", "quantity"],
+        target: ["supply", "quantity"],
+        transform: "quantity − quantity_canceled − quantity_returned; an entry supplying nothing is DROPPED, not stored as a zero",
+      },
+      { source: ["lines", "quantity_canceled"], target: ["supply", "quantity"], transform: "subtracted — see quantity" },
+      { source: ["lines", "quantity_returned"], target: ["supply", "quantity"], transform: "subtracted — see quantity" },
+      {
+        source: ["status"],
+        target: [],
+        transform: "the LIVENESS filter — only an `active` purchase supplies; `complete` and `canceled` reduce to nothing",
+      },
+      {
+        source: ["kind"],
+        target: [],
+        transform: "the KIND filter — only a `subrent` supplies; a buy's units arrive as owned stock through its receipts",
+      },
+      {
+        source: [],
+        target: ["supply", "kind"],
+        transform: '"subrent" — the one fact a reader learns beyond the number, so the operator panel can draw a Sub-rent row',
+      },
+    ],
+  },
+  {
     // The seed/teardown edge. Inlined here from the former `seedStockRules()`
     // factory, and re-prefixed `stock:` so no file declares another file's id.
     //
-    // ⚠️ **Kept SEPARATE from the three above, and it is a co-write, not a
+    // ⚠️ **Kept SEPARATE from the shared edges above, and it is a co-write, not a
     // fan-out.** The create-product seed writes the projection inside its own
     // transaction and legitimately can: a brand-new product has no bookings and
     // no OOS records, so the seed issues no queries at all and none of #358's
@@ -302,6 +369,16 @@ const rules: CollectionRule[] = [
         source: [],
         target: ["unavailable"],
         transform: "[] — a product with no bookings and no OOS records yet",
+      },
+      {
+        source: [],
+        target: ["supply"],
+        transform: "[] — a brand-new product has no subrent naming it",
+      },
+      {
+        source: ["quantity_rented_in"],
+        target: ["quantity_rented_in"],
+        transform: "0 — a new ledger has rented nothing in",
       },
       {
         source: [],

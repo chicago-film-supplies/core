@@ -75,6 +75,8 @@ export type TransactionId =
   | "close-purchase"
   | "receive-purchase"
   | "reverse-purchase-receipt"
+  | "return-purchase"
+  | "reverse-purchase-return"
   | "create-purchase-bill"
   | "settle-purchase-bill"
   | "void-purchase-bill-from-xero"
@@ -251,6 +253,9 @@ export type RuleId =
   | "void-purchase-credit-from-xero:settlements-to-bill"
   | "void-purchase-credit-from-xero:settlements-to-credit"
   | "void-purchase-credit-from-xero:credit-to-purchase"
+  | "return-purchase:return-to-purchase"
+  | "reverse-purchase-return:return-to-purchase"
+  | "purchase-card:purchases-to-card"
   // out-of-service.ts
   | "create-out-of-service-record:sources-to-record"
   | "create-out-of-service-record:record-to-transactions"
@@ -489,6 +494,7 @@ export type RuleId =
   | "stock:ledger-to-stock"
   | "stock:bookings-to-stock"
   | "stock:oos-to-stock"
+  | "stock:purchases-to-stock"
   | "stock:seed-ledger-to-stock"
   // units.ts
   | "units:transactions-to-roster"
