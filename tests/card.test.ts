@@ -1,6 +1,15 @@
 import { assertEquals } from "@std/assert";
 import { CardSchema, CreateCardInput, UpdateCardInput } from "../src/schemas/card.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
+import { getTestDoc } from "../src/schemas/testing.ts";
+import {
+  computeCardActionFromPurchase,
+  computeCardStatusFromPurchase,
+  isPurchaseCard,
+  PURCHASE_CARD_LOCKED,
+  purchaseCardDue,
+} from "../src/utils/cards.ts";
+import type { PurchaseLine } from "../src/schemas/purchase.ts";
 
 /**
  * A genuine ORDER-DERIVED EVENT CARD — `sources` names an order, so
@@ -405,4 +414,103 @@ Deno.test("the retired `orders` label: its payload key is REFUSED, and its sourc
   // passes the per-kind nulls.
   const todo = { ...validTodoCard, sources: [{ collection: "orders", uid: "order100000000000000" }] };
   assertEquals(CardSchema.safeParse(todo).success, true);
+});
+
+// ── A subrent's return-to-supplier card ──────────────────────────────
+
+const PO = "testpurch10000000000";
+
+/** Every field a purchase writer states, built through the fixture contract so it must PARSE. */
+function purchaseCard(over: Record<string, unknown> = {}) {
+  return getTestDoc(CardSchema, {
+    uid: "testcard100000000000",
+    uid_list: "field-service",
+    uid_thread: "testcard100000000000",
+    status: "active",
+    action: { source: "purchase", value: "return_to_supplier" },
+    subject: "Return 10 × J-2000 to Baycom (PO-212)",
+    dates: { start: "2026-10-25T17:00:00.000-05:00", end: null },
+    date_fs: mockTimestamp,
+    destination: null,
+    organization: null,
+    sources: [{ collection: "purchases", uid: PO }],
+    purchases: { number: 212, supplier: { uid: "testsupp100000000000", name: "Baycom" } },
+    locked: [...PURCHASE_CARD_LOCKED],
+    ...over,
+  } as never, { now: mockTimestamp });
+}
+
+const cardPaths = (doc: unknown) => {
+  const r = CardSchema.safeParse(doc);
+  return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+};
+
+Deno.test("purchase card: getTestDoc builds one, and it is a purchase card, not an event card", () => {
+  const card = purchaseCard();
+  assertEquals(cardPaths(card), []);
+  assertEquals(isPurchaseCard(card), true);
+});
+
+Deno.test("purchase card: the payload names exactly one purchase source; the source alone is a to-do", () => {
+  assertEquals(cardPaths({ ...purchaseCard(), sources: [] }), ["sources"]);
+  assertEquals(
+    cardPaths({ ...purchaseCard(), sources: [{ collection: "purchases", uid: PO }, { collection: "purchases", uid: "testpurch20000000000" }] }),
+    ["sources"],
+  );
+  // A hand-authored to-do linking a PO: no payload, no action — legal, and NOT the projection's.
+  const todo = { ...purchaseCard(), action: null };
+  delete (todo as Record<string, unknown>).purchases;
+  assertEquals(cardPaths(todo), []);
+  assertEquals(isPurchaseCard(todo), false);
+});
+
+Deno.test("purchase card: a purchase action sits only on a purchase card, and a purchase card carries no other", () => {
+  const todo = { ...purchaseCard() };
+  delete (todo as Record<string, unknown>).purchases;
+  assertEquals(cardPaths(todo), ["action"]);
+  assertEquals(cardPaths({ ...purchaseCard(), action: { source: "fulfillment", value: "return" } }), ["action"]);
+  assertEquals(cardPaths({ ...purchaseCard(), action: null }), []);
+});
+
+const pline = (over: Partial<PurchaseLine> = {}): PurchaseLine => ({
+  uid_product: "testprod100000000000",
+  name: "J-2000",
+  quantity: 10,
+  amount_cents: 50_000,
+  expected_date: null,
+  quantity_received: 0,
+  quantity_billed: 0,
+  quantity_canceled: 0,
+  dates: { start: "2026-10-18T09:00:00.000-05:00", end: "2026-10-25T17:00:00.000-05:00" },
+  quantity_returned: 0,
+  uid_orders: [],
+  ...over,
+});
+
+Deno.test("computeCardStatusFromPurchase / computeCardActionFromPurchase — the table", () => {
+  const cases: [string, "active" | "canceled" | "complete", Partial<PurchaseLine>, string, string | null][] = [
+    ["nothing received", "active", {}, "planned", null],
+    ["received, none returned", "active", { quantity_received: 10 }, "active", "return_to_supplier"],
+    ["partly returned", "active", { quantity_received: 10, quantity_returned: 4 }, "active", "return_to_supplier"],
+    ["all received returned, more to come", "active", { quantity_received: 6, quantity_returned: 6 }, "planned", null],
+    ["all returned, rest canceled (unbilled)", "active", { quantity_received: 6, quantity_returned: 6, quantity_canceled: 4 }, "complete", null],
+    ["all returned and billed", "complete", { quantity_received: 10, quantity_returned: 10, quantity_billed: 10 }, "complete", null],
+    ["canceled outright", "canceled", { quantity_canceled: 10 }, "canceled", null],
+  ];
+  for (const [name, status, over, want, action] of cases) {
+    const p = { status, lines: [pline(over)] };
+    assertEquals(computeCardStatusFromPurchase(p, "planned"), want, name);
+    assertEquals(computeCardActionFromPurchase(p)?.value ?? null, action, name);
+  }
+  // An operator's `blocked` is theirs.
+  assertEquals(computeCardStatusFromPurchase({ status: "active", lines: [pline({ quantity_received: 10 })] }, "blocked"), "blocked");
+});
+
+Deno.test("purchaseCardDue: the earliest due-back among OPEN lines, else among all", () => {
+  const early = "2026-10-22T17:00:00.000-05:00";
+  const late = "2026-10-25T17:00:00.000-05:00";
+  const a = pline({ uid_product: "a", dates: { start: early, end: early }, quantity_received: 3, quantity_returned: 3, quantity_canceled: 7 });
+  const b = pline({ uid_product: "b", dates: { start: early, end: late }, quantity_received: 10 });
+  assertEquals(purchaseCardDue({ lines: [a, b] }), late, "a is settled, so b's date leads");
+  assertEquals(purchaseCardDue({ lines: [a, { ...b, quantity_returned: 10 }] }), early, "nothing open: the earliest of all");
 });

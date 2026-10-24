@@ -1576,6 +1576,7 @@ interface Card {
   organization: CardOrganizationType | null;
   sources: DocSourceType[];
   fulfillments?: CardFulfillmentsSourceType;
+  purchases?: CardPurchasesSourceType;
   attachments: CardAttachmentType[];
   uid_assignees: string[];
   locked: CardLockKey[];
@@ -1593,7 +1594,9 @@ interface Card {
 ### `CardAction`
 
 Denormalized "next action" for a card's primary button, computed server-side
-on every booking write (alongside `status`). Surfaces on Dashboard/Calendar
+on every booking write (alongside `status`) — or, on a subrent's return card,
+on every write of its purchase (`{ source: "purchase" }`, singular like
+`"fulfillment"`). Surfaces on Dashboard/Calendar
 surfaces where no bookings are loaded, so the button can show the *next* step
 without a join.
 
@@ -1603,7 +1606,7 @@ without a cross-repo field rename. `null` when nothing is actionable
 (terminal status, or no pending step on this side).
 
 ```ts
-type CardAction = typeLiteral;
+type CardAction = typeLiteral | typeLiteral;
 ```
 
 ### `CardActionSchema`
@@ -1845,6 +1848,61 @@ such cards exist in dev.
 interface CardOrganizationType {
   uid: string | null;
   path: OrgPathNodeType[];
+}
+```
+
+### `CardPurchaseAction`
+
+The next step a subrent's return card surfaces on its button.
+
+```ts
+type CardPurchaseAction = indexedAccess;
+```
+
+### `CardPurchaseActionEnum`
+
+Zod schema for CardPurchaseAction.
+
+```ts
+const CardPurchaseActionEnum: z.ZodType<CardPurchaseAction>;
+```
+
+### `CardPurchasesSource`
+
+Zod schema for CardPurchasesSourceType.
+
+```ts
+const CardPurchasesSource: z.ZodType<CardPurchasesSourceType>;
+```
+
+### `CardPurchasesSourceType`
+
+The `purchases` SOURCE PAYLOAD — what a subrent's "return to supplier" card
+surface reads off its purchase, under the purchase's own names: the PO
+number and the supplier the units go back to.
+
+One card per subrent purchase, written by the purchase writers (id
+`derivedDocId("purchase-return-card:" + uid_purchase)`, minted in
+`api-cloudrun/src/lib/derivedId.ts`, so it is an ordinary `FirestoreId` and
+no composite id joins `_uid.ts`). Its status and action are
+`computeCardStatusFromPurchase` / `computeCardActionFromPurchase`
+(`@cfs/core/utils/cards`).
+
+🔴 **This follows the {@link CardFulfillmentsSource} pattern with ONE stated
+exception: the payload implies its source, but the source does NOT imply the
+payload.** The server-owned discriminator is the PAYLOAD
+({@link isPurchaseCard}), not the bare `purchases` source, because a
+hand-authored to-do may legitimately link a PO ("chase the supplier about
+PO-212") without being the projection's — keying on the source would
+reclassify it, and the projection would then own (and lock) a card it never
+built. Measured 2026-10-24: 0 of 1,528 prod / 1,542 dev cards name a
+`purchases` source, so nothing exists either way yet; the choice is about
+what the next to-do may be.
+
+```ts
+interface CardPurchasesSourceType {
+  number: number;
+  supplier: UidNameRefType;
 }
 ```
 
@@ -15172,6 +15230,11 @@ from the booking-specific module that consumes it.
 
 Narrow a settlement to {@link PurchaseBillSettlement}.
 
+### `isPurchaseCard(doc: Pick<Card, "purchases">): boolean`
+
+A purchase card is one a subrent's purchase writers OWN — its return to the
+supplier. Keyed on the PAYLOAD, not the source; see {@link CardPurchasesSource}.
+
 ### `isReceivableSettlement(s: Settlement): s is ReceivableSettlement`
 
 Narrow a settlement to {@link ReceivableSettlement}. A reader that scans the
@@ -18931,6 +18994,7 @@ interface Card {
   organization: CardOrganizationType | null;
   sources: DocSourceType[];
   fulfillments?: CardFulfillmentsSourceType;
+  purchases?: CardPurchasesSourceType;
   attachments: CardAttachmentType[];
   uid_assignees: string[];
   locked: CardLockKey[];
@@ -18948,7 +19012,9 @@ interface Card {
 ### `CardAction`
 
 Denormalized "next action" for a card's primary button, computed server-side
-on every booking write (alongside `status`). Surfaces on Dashboard/Calendar
+on every booking write (alongside `status`) — or, on a subrent's return card,
+on every write of its purchase (`{ source: "purchase" }`, singular like
+`"fulfillment"`). Surfaces on Dashboard/Calendar
 surfaces where no bookings are loaded, so the button can show the *next* step
 without a join.
 
@@ -18958,7 +19024,7 @@ without a cross-repo field rename. `null` when nothing is actionable
 (terminal status, or no pending step on this side).
 
 ```ts
-type CardAction = typeLiteral;
+type CardAction = typeLiteral | typeLiteral;
 ```
 
 ### `CardActionSchema`
@@ -19182,6 +19248,61 @@ interface CardOrganizationType {
 }
 ```
 
+### `CardPurchaseAction`
+
+The next step a subrent's return card surfaces on its button.
+
+```ts
+type CardPurchaseAction = indexedAccess;
+```
+
+### `CardPurchaseActionEnum`
+
+Zod schema for CardPurchaseAction.
+
+```ts
+const CardPurchaseActionEnum: z.ZodType<CardPurchaseAction>;
+```
+
+### `CardPurchasesSource`
+
+Zod schema for CardPurchasesSourceType.
+
+```ts
+const CardPurchasesSource: z.ZodType<CardPurchasesSourceType>;
+```
+
+### `CardPurchasesSourceType`
+
+The `purchases` SOURCE PAYLOAD — what a subrent's "return to supplier" card
+surface reads off its purchase, under the purchase's own names: the PO
+number and the supplier the units go back to.
+
+One card per subrent purchase, written by the purchase writers (id
+`derivedDocId("purchase-return-card:" + uid_purchase)`, minted in
+`api-cloudrun/src/lib/derivedId.ts`, so it is an ordinary `FirestoreId` and
+no composite id joins `_uid.ts`). Its status and action are
+`computeCardStatusFromPurchase` / `computeCardActionFromPurchase`
+(`@cfs/core/utils/cards`).
+
+🔴 **This follows the {@link CardFulfillmentsSource} pattern with ONE stated
+exception: the payload implies its source, but the source does NOT imply the
+payload.** The server-owned discriminator is the PAYLOAD
+({@link isPurchaseCard}), not the bare `purchases` source, because a
+hand-authored to-do may legitimately link a PO ("chase the supplier about
+PO-212") without being the projection's — keying on the source would
+reclassify it, and the projection would then own (and lock) a card it never
+built. Measured 2026-10-24: 0 of 1,528 prod / 1,542 dev cards name a
+`purchases` source, so nothing exists either way yet; the choice is about
+what the next to-do may be.
+
+```ts
+interface CardPurchasesSourceType {
+  number: number;
+  supplier: UidNameRefType;
+}
+```
+
 ### `CardSchema`
 
 ```ts
@@ -19334,6 +19455,11 @@ from every other rule here, which is backwards.
 refuses an event source from `POST /cards` and from a recurrence prototype,
 which is what makes this predicate an authorization fact rather than a
 heuristic. Exported since core#130 row 6, so no consumer spells it again.
+
+### `isPurchaseCard(doc: Pick<Card, "purchases">): boolean`
+
+A purchase card is one a subrent's purchase writers OWN — its return to the
+supplier. Keyed on the PAYLOAD, not the source; see {@link CardPurchasesSource}.
 
 ## `@cfs/core/schemas/chart-of-accounts`
 
@@ -32886,6 +33012,20 @@ facet with one function.
 const PICK_BUCKET_CUSTOMER_COLLECT: "customer-collect";
 ```
 
+### `PURCHASE_CARD_LOCKED`
+
+The locks a subrent's return card carries — the `ORDER_CARD_LOCKED`
+analogue (`api-cloudrun/src/lib/eventCards.ts`), stated here because the
+card's whole shape is core's. `card` because the purchase owns the card's
+lifetime; `subject`, `sources` and `attachments` because the purchase writer
+derives them; `status_auto` because status is computed from the purchase.
+`dates` stays editable: an operator may want the reminder earlier than the
+due-back date, and the writer carries an edited date forward.
+
+```ts
+const PURCHASE_CARD_LOCKED: readonly CardLockKey[];
+```
+
 ### `ParsedEventCardUid`
 
 The three parts of an event card id.
@@ -32981,6 +33121,13 @@ never reports `prep`/`checkout` — unlike the manager's destination-wide
 - `siblings` — Bookings filtered to the relevant destination side.
 - `current` — The card's current status — non-actionable statuses null out.
 
+### `computeCardActionFromPurchase(purchase: Pick<Purchase, "lines">): CardAction | null`
+
+A subrent return card's next action: `return_to_supplier` while any unit is
+in custody, `null` otherwise. Derived from the same buckets as
+{@link computeCardStatusFromPurchase}, so the two cannot disagree about
+whether there is a return to make.
+
 ### `computeCardStatusFromBookings(side: CardSide, siblings: CardSiblingBooking[], current: CardStatus): CardStatus`
 
 Recompute an event card's `status` from its sibling bookings on the
@@ -33041,6 +33188,21 @@ which sibling set the caller is expected to have prepared.
 - `current` — The card's current status — preserved if `blocked` or
 `canceled` so manual overrides aren't clobbered.
 
+### `computeCardStatusFromPurchase(purchase: Pick<Purchase, "status" | "lines">, current: CardStatus): CardStatus`
+
+A subrent return card's status, from its purchase's buckets.
+
+- `canceled` — the purchase is canceled (closed with nothing received).
+- `active` — some line holds units received and not yet returned: there is a
+  return to make.
+- `complete` — nothing is in custody and nothing more is coming: every unit
+  ordered was received or canceled, and every unit received went back.
+- `planned` otherwise — waiting on the supplier's delivery.
+
+`blocked` is an operator's statement and is preserved, as on event cards.
+Billing does not enter: the card is the RETURN, and an unbilled hire is the
+purchase's own `active`.
+
 ### `eventCardUid(fulfillmentUid: string, pairUid: string, side: CardSide): string`
 
 An event card's document id: `{uid_fulfillment}:{uid_pair}:{side}`.
@@ -33085,6 +33247,11 @@ refuses an event source from `POST /cards` and from a recurrence prototype,
 which is what makes this predicate an authorization fact rather than a
 heuristic. Exported since core#130 row 6, so no consumer spells it again.
 
+### `isPurchaseCard(doc: Pick<Card, "purchases">): boolean`
+
+A purchase card is one a subrent's purchase writers OWN — its return to the
+supplier. Keyed on the PAYLOAD, not the source; see {@link CardPurchasesSource}.
+
 ### `parseEventCardUid(cardUid: string): ParsedEventCardUid | null`
 
 Split an event card id into its fulfillment, pair and side, or `null` when it
@@ -33093,6 +33260,14 @@ is not one — a to-do or list card, or an id from before the pair re-key.
 ⚠️ **Strict on the pair segment.** An address-keyed id (the pre-2026-09 form)
 returns `null` rather than a pair that names no leg: both corpora hold 0 of
 them, so one reaching here is a card nothing should treat as a leg.
+
+### `purchaseCardDue(purchase: Pick<Purchase, "lines">): string | null`
+
+The instant a subrent return card is dated at: the EARLIEST due-back
+(`dates.end`) among lines still OPEN — units in custody, or units still to
+arrive — or, once nothing is open, the earliest due-back of any line, so a
+completed card keeps a stable date. `null` only for a purchase whose lines
+carry no hire, which is not a subrent.
 
 ## `@cfs/core/utils/contact-name`
 

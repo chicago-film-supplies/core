@@ -110,6 +110,12 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "isCardFieldLocked",
     "isCardStatusAuto",
     "isEventCard",
+    // A subrent's return card: its kind predicate, and the projection rules
+    // its purchase writers run — a WRITER decides a card's status and action.
+    "computeCardActionFromPurchase",
+    "computeCardStatusFromPurchase",
+    "isPurchaseCard",
+    "purchaseCardDue",
   ],
   // The one author of a booking's collection fields (api-cloudrun#1154) — a
   // WRITER decides them; a template reads `destinations.collection` off the

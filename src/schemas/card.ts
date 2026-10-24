@@ -38,6 +38,8 @@ import {
   OrgSnapshotCore,
   type OrgPathNodeType,
   TimestampFields,
+  UidNameRef,
+  type UidNameRefType,
 } from "./common.ts";
 import { CommentBody, type CommentBodyJson } from "./comment.ts";
 import {
@@ -70,9 +72,17 @@ export const CardFulfillmentActionEnum: z.ZodType<CardFulfillmentAction> = z.enu
   CARD_FULFILLMENT_ACTIONS,
 );
 
+const CARD_PURCHASE_ACTIONS = ["return_to_supplier"] as const;
+/** The next step a subrent's return card surfaces on its button. */
+export type CardPurchaseAction = typeof CARD_PURCHASE_ACTIONS[number];
+/** Zod schema for CardPurchaseAction. */
+export const CardPurchaseActionEnum: z.ZodType<CardPurchaseAction> = z.enum(CARD_PURCHASE_ACTIONS);
+
 /**
  * Denormalized "next action" for a card's primary button, computed server-side
- * on every booking write (alongside `status`). Surfaces on Dashboard/Calendar
+ * on every booking write (alongside `status`) — or, on a subrent's return card,
+ * on every write of its purchase (`{ source: "purchase" }`, singular like
+ * `"fulfillment"`). Surfaces on Dashboard/Calendar
  * surfaces where no bookings are loaded, so the button can show the *next* step
  * without a join.
  *
@@ -81,10 +91,13 @@ export const CardFulfillmentActionEnum: z.ZodType<CardFulfillmentAction> = z.enu
  * without a cross-repo field rename. `null` when nothing is actionable
  * (terminal status, or no pending step on this side).
  */
-export type CardAction = { source: "fulfillment"; value: CardFulfillmentAction };
+export type CardAction =
+  | { source: "fulfillment"; value: CardFulfillmentAction }
+  | { source: "purchase"; value: CardPurchaseAction };
 /** Zod schema for CardAction (discriminated on `source`; JSR no-slow-types-safe). */
 export const CardActionSchema: z.ZodType<CardAction> = z.discriminatedUnion("source", [
   z.strictObject({ source: z.literal("fulfillment"), value: CardFulfillmentActionEnum }),
+  z.strictObject({ source: z.literal("purchase"), value: CardPurchaseActionEnum }),
 ]);
 
 // ── Lock keys ───────────────────────────────────────────────────────
@@ -292,6 +305,42 @@ export const CardFulfillmentsSource: z.ZodType<CardFulfillmentsSourceType> = z.d
   z.strictObject({ leg: z.literal("end"), customer_returning: z.boolean() }),
 ]);
 
+/**
+ * The `purchases` SOURCE PAYLOAD — what a subrent's "return to supplier" card
+ * surface reads off its purchase, under the purchase's own names: the PO
+ * number and the supplier the units go back to.
+ *
+ * One card per subrent purchase, written by the purchase writers (id
+ * `derivedDocId("purchase-return-card:" + uid_purchase)`, minted in
+ * `api-cloudrun/src/lib/derivedId.ts`, so it is an ordinary `FirestoreId` and
+ * no composite id joins `_uid.ts`). Its status and action are
+ * `computeCardStatusFromPurchase` / `computeCardActionFromPurchase`
+ * (`@cfs/core/utils/cards`).
+ *
+ * 🔴 **This follows the {@link CardFulfillmentsSource} pattern with ONE stated
+ * exception: the payload implies its source, but the source does NOT imply the
+ * payload.** The server-owned discriminator is the PAYLOAD
+ * ({@link isPurchaseCard}), not the bare `purchases` source, because a
+ * hand-authored to-do may legitimately link a PO ("chase the supplier about
+ * PO-212") without being the projection's — keying on the source would
+ * reclassify it, and the projection would then own (and lock) a card it never
+ * built. Measured 2026-10-24: 0 of 1,528 prod / 1,542 dev cards name a
+ * `purchases` source, so nothing exists either way yet; the choice is about
+ * what the next to-do may be.
+ */
+export interface CardPurchasesSourceType {
+  /** The purchase's `number`, displayed `PO-n`. */
+  number: number;
+  /** The purchase's `supplier` snapshot — who the units go back to. */
+  supplier: UidNameRefType;
+}
+
+/** Zod schema for CardPurchasesSourceType. */
+export const CardPurchasesSource: z.ZodType<CardPurchasesSourceType> = z.strictObject({
+  number: z.int().min(1),
+  supplier: UidNameRef.meta({ label: "Supplier" }),
+});
+
 // ── Firestore document ──────────────────────────────────────────────
 
 /**
@@ -325,6 +374,12 @@ export interface Card {
   sources: DocSourceType[];
   /** The `fulfillments` source payload — present iff `sources` names a fulfillment. See {@link CardFulfillmentsSource}. */
   fulfillments?: CardFulfillmentsSourceType;
+  /**
+   * The `purchases` source payload — present only on a subrent's return card,
+   * and then `sources` names exactly that purchase. See {@link CardPurchasesSource}
+   * for why a `purchases` source alone does not imply it.
+   */
+  purchases?: CardPurchasesSourceType;
   attachments: CardAttachmentType[];
   uid_assignees: string[];
   locked: CardLockKey[];
@@ -397,6 +452,48 @@ export function isEventCard(doc: Pick<Card, "sources">): boolean {
  * because the order they project from has an endpoint with no address; the fix
  * is upstream and the tightening lands with it.
  */
+/**
+ * A purchase card is one a subrent's purchase writers OWN — its return to the
+ * supplier. Keyed on the PAYLOAD, not the source; see {@link CardPurchasesSource}.
+ */
+export function isPurchaseCard(doc: Pick<Card, "purchases">): boolean {
+  return doc.purchases !== undefined;
+}
+
+/**
+ * The purchase card's arm: the payload names its purchase in `sources` (and
+ * only one), the card is not also an event card, and a `purchase` action sits
+ * only on a purchase card — the mirror of a fulfillment action needing a
+ * fulfillment source.
+ */
+function checkPurchaseCard(doc: Card, ctx: z.RefinementCtx): void {
+  const purchaseAction = doc.action?.source === "purchase";
+  if (!isPurchaseCard(doc)) {
+    if (purchaseAction) {
+      ctx.addIssue({ code: "custom", path: ["action"], message: "a purchase action sits only on a subrent's return card" });
+    }
+    return;
+  }
+  const purchases = doc.sources.filter((s) => s.collection === "purchases").length;
+  if (purchases !== 1) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["sources"],
+      message: "a subrent's return card names exactly ONE purchase in sources — the one its payload describes",
+    });
+  }
+  if (isEventCard(doc)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["purchases"],
+      message: "a card is the fulfillment projection's or a purchase's, never both",
+    });
+  }
+  if (doc.action !== null && !purchaseAction) {
+    ctx.addIssue({ code: "custom", path: ["action"], message: "a subrent's return card carries a purchase action or none" });
+  }
+}
+
 function checkEventCard(doc: Card, ctx: z.RefinementCtx): void {
   if (!isEventCard(doc)) {
     // The payload is present IFF its source is — a to-do carrying a
@@ -504,6 +601,8 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   // ABSENT rather than null off an event card, by rule — see
   // `CardFulfillmentsSource`. Required ON an event card by `checkEventCard`.
   fulfillments: CardFulfillmentsSource.optional(),
+  // ABSENT off a subrent's return card — see `CardPurchasesSource`.
+  purchases: CardPurchasesSource.meta({ label: "Purchase" }).optional(),
   // **REQUIRED ×3 — inert `.default([])` removed 2026-09-11 (core#95 batch 8).**
   // 1,159 prod / 1,166 dev cards state all three, and dev is a genuine second
   // sample here: its 7 extra documents are the only hand-authored cards in
@@ -522,7 +621,7 @@ export const CardSchema: z.ZodType<Card> = z.strictObject({
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
-}).superRefine(checkEventCard).meta({
+}).superRefine(checkEventCard).superRefine(checkPurchaseCard).meta({
   title: "Card",
   collection: "cards",
   displayDefaults: {

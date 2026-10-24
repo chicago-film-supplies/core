@@ -18,7 +18,9 @@ import {
   CARD_STATUSES,
   type CardStatus,
   isEventCard,
+  isPurchaseCard,
   ownsKey,
+  type Purchase,
 } from "../schemas/mod.ts";
 import { sumBreakdownKeys, terminalQuantity } from "./bookings.ts";
 
@@ -286,7 +288,73 @@ export function cardPickBucket(
 
 // ── Field locks and status options (core#130 row 6) ─────────────────
 
-export { isEventCard };
+export { isEventCard, isPurchaseCard };
+
+// ── A subrent's return-to-supplier card ──────────────────────────────
+
+/**
+ * The locks a subrent's return card carries — the `ORDER_CARD_LOCKED`
+ * analogue (`api-cloudrun/src/lib/eventCards.ts`), stated here because the
+ * card's whole shape is core's. `card` because the purchase owns the card's
+ * lifetime; `subject`, `sources` and `attachments` because the purchase writer
+ * derives them; `status_auto` because status is computed from the purchase.
+ * `dates` stays editable: an operator may want the reminder earlier than the
+ * due-back date, and the writer carries an edited date forward.
+ */
+export const PURCHASE_CARD_LOCKED: readonly CardLockKey[] = ["card", "subject", "sources", "attachments", "status_auto"];
+
+/**
+ * A subrent return card's status, from its purchase's buckets.
+ *
+ * - `canceled` — the purchase is canceled (closed with nothing received).
+ * - `active` — some line holds units received and not yet returned: there is a
+ *   return to make.
+ * - `complete` — nothing is in custody and nothing more is coming: every unit
+ *   ordered was received or canceled, and every unit received went back.
+ * - `planned` otherwise — waiting on the supplier's delivery.
+ *
+ * `blocked` is an operator's statement and is preserved, as on event cards.
+ * Billing does not enter: the card is the RETURN, and an unbilled hire is the
+ * purchase's own `active`.
+ */
+export function computeCardStatusFromPurchase(
+  purchase: Pick<Purchase, "status" | "lines">,
+  current: CardStatus,
+): CardStatus {
+  if (current === "blocked") return current;
+  if (purchase.status === "canceled") return "canceled";
+  const out = purchase.lines.some((l) => l.quantity_received > (l.quantity_returned ?? 0));
+  if (out) return "active";
+  const settled = purchase.lines.every((l) => l.quantity_received + l.quantity_canceled === l.quantity);
+  return settled ? "complete" : "planned";
+}
+
+/**
+ * A subrent return card's next action: `return_to_supplier` while any unit is
+ * in custody, `null` otherwise. Derived from the same buckets as
+ * {@link computeCardStatusFromPurchase}, so the two cannot disagree about
+ * whether there is a return to make.
+ */
+export function computeCardActionFromPurchase(purchase: Pick<Purchase, "lines">): CardAction | null {
+  const out = purchase.lines.some((l) => l.quantity_received > (l.quantity_returned ?? 0));
+  return out ? { source: "purchase", value: "return_to_supplier" } : null;
+}
+
+/**
+ * The instant a subrent return card is dated at: the EARLIEST due-back
+ * (`dates.end`) among lines still OPEN — units in custody, or units still to
+ * arrive — or, once nothing is open, the earliest due-back of any line, so a
+ * completed card keeps a stable date. `null` only for a purchase whose lines
+ * carry no hire, which is not a subrent.
+ */
+export function purchaseCardDue(purchase: Pick<Purchase, "lines">): string | null {
+  const open = purchase.lines.filter((l) =>
+    l.quantity_received > (l.quantity_returned ?? 0) || l.quantity_received + l.quantity_canceled < l.quantity
+  );
+  const pool = (open.length > 0 ? open : purchase.lines).map((l) => l.dates?.end).filter((d): d is string => d !== undefined);
+  if (pool.length === 0) return null;
+  return pool.reduce((a, b) => (Date.parse(b) < Date.parse(a) ? b : a));
+}
 
 /**
  * Which lock key guards a PATCHable card field. `all_day` rides on the `dates`
