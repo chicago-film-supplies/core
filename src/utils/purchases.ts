@@ -8,6 +8,8 @@
  */
 import {
   derivePurchaseStatus,
+  deriveQueryByOrders,
+  deriveQueryByProducts,
   type ProductTypeType,
   type PurchaseLine,
   type PurchaseLineInputType,
@@ -22,6 +24,8 @@ import { derivePurchaseCreditStatus, purchaseCreditRemainingFromJournal, recompu
 // `utils/invoices.ts`, which owns the one fold; re-exported here so a purchase
 // writer finds them in its own namespace.
 export { derivePurchaseCreditStatus, derivePurchaseStatus, purchaseCreditRemainingFromJournal, recomputePurchaseBillTotals };
+// The two mirror authors live beside the refine that checks them.
+export { deriveQueryByOrders, deriveQueryByProducts };
 
 /**
  * The cents a line's units `(before, after]` cost — the k-th receipt or the
@@ -85,6 +89,15 @@ export function remainingToBill(line: Pick<PurchaseLine, "quantity" | "quantity_
   return line.quantity - line.quantity_canceled - line.quantity_billed;
 }
 
+/**
+ * Units of a SUBRENT line still to go back to the supplier: `received − returned`.
+ * Bounded by what came in, not by what was ordered — an unreceived unit owes no
+ * return. `0` on a buy line, which carries no `quantity_returned`.
+ */
+export function remainingToReturn(line: Pick<PurchaseLine, "quantity_received" | "quantity_returned">): number {
+  return line.quantity_returned === undefined ? 0 : line.quantity_received - line.quantity_returned;
+}
+
 // ── Pack expansion (api-cloudrun#1081) ───────────────────────────
 
 /** A catalog `components[]` row as {@link expandPurchaseLines} reads it. */
@@ -107,7 +120,7 @@ export interface PurchaseExpansionProduct {
 /** Why a line could not be expanded into one stockable line. */
 export interface PurchaseExpansionRefusal {
   uid_product: string;
-  reason: "no_stocked_component" | "several_stocked_components";
+  reason: "no_stocked_component" | "several_stocked_components" | "different_hire_windows";
   message: string;
 }
 
@@ -139,6 +152,12 @@ export type PurchaseExpansionResult =
  * Lines that land on one product MERGE — quantities and amounts summed, the
  * earliest `expected_date` kept — because a purchase holds one line per product
  * and the ledger averages the cost anyway (owner, 2026-10-22).
+ *
+ * A SUBRENT line expands exactly as a buy line does, carrying its `dates` and
+ * `uid_orders` onto the stocked product. Two subrent lines merge only when they
+ * name the SAME hire window (their `uid_orders` union): one product has one
+ * window per purchase, so a second window is a second purchase — the rule a
+ * second price already follows — and that merge is a refusal.
  *
  * Returns rather than throws: a refusal is an operator-facing 400, and core
  * throws plain `Error`, which a consumer's middleware reads as a 500.
@@ -183,9 +202,11 @@ export function expandPurchaseLines(
       quantity: leaf.quantity,
       amount_cents: line.amount_cents,
       ...(line.expected_date !== undefined ? { expected_date: line.expected_date } : {}),
+      ...(line.dates !== undefined ? { dates: { ...line.dates } } : {}),
+      ...(line.uid_orders !== undefined ? { uid_orders: [...line.uid_orders] } : {}),
     });
   }
-  return { ok: true, lines: mergeByProduct(expanded) };
+  return mergeByProduct(expanded, products);
 }
 
 function stockedFrontier(
@@ -203,18 +224,45 @@ function stockedFrontier(
   return frontier;
 }
 
-function mergeByProduct(lines: readonly PurchaseLineInputType[]): PurchaseLineInputType[] {
+function sameHire(a: PurchaseLineInputType["dates"], b: PurchaseLineInputType["dates"]): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return Date.parse(a.start) === Date.parse(b.start) && Date.parse(a.end) === Date.parse(b.end);
+}
+
+function mergeByProduct(
+  lines: readonly PurchaseLineInputType[],
+  products: ReadonlyMap<string, PurchaseExpansionProduct>,
+): PurchaseExpansionResult {
   const byProduct = new Map<string, PurchaseLineInputType>();
   for (const line of lines) {
     const prev = byProduct.get(line.uid_product);
     if (!prev) {
-      byProduct.set(line.uid_product, { ...line });
+      byProduct.set(line.uid_product, {
+        ...line,
+        ...(line.dates !== undefined ? { dates: { ...line.dates } } : {}),
+        ...(line.uid_orders !== undefined ? { uid_orders: [...line.uid_orders] } : {}),
+      });
       continue;
+    }
+    if (!sameHire(prev.dates, line.dates)) {
+      const name = products.get(line.uid_product)?.name ?? line.uid_product;
+      return {
+        ok: false,
+        refusal: {
+          uid_product: line.uid_product,
+          reason: "different_hire_windows",
+          message: `${name} is named twice with different hire windows. ` +
+            "A purchase holds one window per product — raise the second window as its own subrent.",
+        },
+      };
+    }
+    if (prev.uid_orders !== undefined || line.uid_orders !== undefined) {
+      prev.uid_orders = [...new Set([...(prev.uid_orders ?? []), ...(line.uid_orders ?? [])])];
     }
     prev.quantity += line.quantity;
     prev.amount_cents += line.amount_cents;
     const dates = [prev.expected_date, line.expected_date].filter((d): d is string => typeof d === "string");
     if (dates.length > 0) prev.expected_date = dates.reduce((a, b) => (Date.parse(b) < Date.parse(a) ? b : a));
   }
-  return [...byProduct.values()];
+  return { ok: true, lines: [...byProduct.values()] };
 }

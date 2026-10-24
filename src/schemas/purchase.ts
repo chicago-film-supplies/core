@@ -60,6 +60,28 @@
  * sale or rent is bought resale-exempt and the tax is collected from the end
  * user, so `priceDocument` never runs here.
  *
+ * ## Two kinds: a buy and a subrent
+ *
+ * `kind` says what CFS is getting from the supplier. A **buy** transfers
+ * ownership: its receipts are `purchase` movements that raise `quantity_held`
+ * and the cost basis. A **subrent** borrows units for a hire window and gives
+ * them back: its receipts are `hire_in` movements and its returns `hire_out`,
+ * both cost-forbidden, so the units are in CFS's CUSTODY without ever being
+ * OWNED (`InventoryLedger.quantity_rented_in`). Everything else — supplier,
+ * store, number, bills, credits, the Xero ACCPAY and the thread — is shared, so
+ * a subrent is the same document rather than a second collection.
+ *
+ * A subrent line carries three members a buy line never does, and the document
+ * refine below holds the arm strictly in both directions: `dates` (the hire
+ * window, which is SUPPLY in availability from the moment the purchase exists —
+ * owner, 2026-10-24), `quantity_returned`, and `uid_orders` (the orders it was
+ * raised for, for margin; never a reservation — the units stay fungible).
+ *
+ * The document stays one `z.strictObject` with a `superRefine` rather than a
+ * root `discriminatedUnion`: no registered document schema has one, and the
+ * column walker, `getInitialValues`, `getTestDoc` and the stored-defaults walk
+ * all assume a root object (the precedent is the card's per-kind refine).
+ *
  * @module
  */
 import { z } from "zod";
@@ -99,7 +121,38 @@ export type PurchaseStatusType = typeof PURCHASE_STATUSES[number];
 /** Zod schema for PurchaseStatusType. */
 export const PurchaseStatusEnum: z.ZodType<PurchaseStatusType> = z.enum(PURCHASE_STATUSES);
 
+// ── Kind ─────────────────────────────────────────────────────────
+
+/**
+ * What a purchase gets from its supplier — see the module docblock. `buy` is
+ * FIRST so `getInitialValues` seeds a buy.
+ */
+export const PURCHASE_KINDS = ["buy", "subrent"] as const;
+/** Allowed purchase kinds. See {@link PURCHASE_KINDS}. */
+export type PurchaseKindType = typeof PURCHASE_KINDS[number];
+/** Zod schema for PurchaseKindType. */
+export const PurchaseKindEnum: z.ZodType<PurchaseKindType> = z.enum(PURCHASE_KINDS);
+
 // ── Lines ────────────────────────────────────────────────────────
+
+/**
+ * A subrent line's hire window — two Chicago instants. `end` is when the units
+ * are due back to the SUPPLIER, not when the customer returns them.
+ *
+ * Named `dates` after out-of-service, bookings and cards. The object carries no
+ * label of its own; its children are labelled, so the composed heading stays
+ * "Line Hire Start" rather than doubling a word.
+ */
+export interface PurchaseLineDates {
+  start: string;
+  end: string;
+}
+
+/** Zod schema for PurchaseLineDates. */
+export const PurchaseLineDatesSchema: z.ZodType<PurchaseLineDates> = z.strictObject({
+  start: chicagoInstant().meta({ column: true, label: "Hire Start" }),
+  end: chicagoInstant().meta({ column: true, label: "Hire End" }),
+});
 
 /** One product ordered on a purchase. */
 export interface PurchaseLine {
@@ -122,6 +175,25 @@ export interface PurchaseLine {
   quantity_billed: number;
   /** Units that will never be received — set by a short close or a cancel. */
   quantity_canceled: number;
+  /**
+   * SUBRENT ONLY — the hire window. Required on every subrent line and refused
+   * on a buy line by the document refine; optional here because a buy never
+   * carries it, not because a subrent may omit it.
+   */
+  dates?: PurchaseLineDates;
+  /**
+   * SUBRENT ONLY — units given back to the supplier: Σ of the `hire_out`
+   * movements naming this purchase for this product, net of reversals. Never
+   * more than received. Present-iff-subrent, as `dates`.
+   */
+  quantity_returned?: number;
+  /**
+   * SUBRENT ONLY — the orders this line was raised for, possibly none. For
+   * margin and for raising a subrent from an order's shortage; it is NOT a
+   * reservation, and the units stay fungible across every booking.
+   * Present-iff-subrent, as `dates`.
+   */
+  uid_orders?: string[];
 }
 
 /** Zod schema for PurchaseLine. */
@@ -134,6 +206,9 @@ export const PurchaseLineSchema: z.ZodType<PurchaseLine> = z.strictObject({
   quantity_received: z.int().min(0).meta({ column: true, label: "Received" }),
   quantity_billed: z.int().min(0).meta({ column: true, label: "Billed" }),
   quantity_canceled: z.int().min(0).meta({ column: true, label: "Canceled" }),
+  dates: PurchaseLineDatesSchema.optional(),
+  quantity_returned: z.int().min(0).meta({ column: true, label: "Returned" }).optional(),
+  uid_orders: z.array(FirestoreId).optional(),
 }).superRefine((line, ctx) => {
   // Two invariants, not one Σ: receiving and billing are independent axes, so
   // `received + billed` means nothing. Each axis is bounded by what is still
@@ -153,6 +228,17 @@ export const PurchaseLineSchema: z.ZodType<PurchaseLine> = z.strictObject({
         "a short close that leaves more billed than received credits the excess",
     });
   }
+  // A unit can only go back to the supplier once it has come in.
+  if (line.quantity_returned !== undefined && line.quantity_returned > line.quantity_received) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["quantity_returned"],
+      message: `returned ${line.quantity_returned} exceeds the ${line.quantity_received} received`,
+    });
+  }
+  if (line.dates && Date.parse(line.dates.end) < Date.parse(line.dates.start)) {
+    ctx.addIssue({ code: "custom", path: ["dates", "end"], message: "a hire ends at or after it starts" });
+  }
 });
 
 /**
@@ -162,7 +248,9 @@ export const PurchaseLineSchema: z.ZodType<PurchaseLine> = z.strictObject({
  *   left billed. A cancel is a close with nothing received.
  * - `complete` when every line is RESOLVED on BOTH axes: each unit either
  *   received or canceled, and billed for exactly what was not canceled. Payment
- *   is the bill's business and does not hold a purchase open.
+ *   is the bill's business and does not hold a purchase open. A SUBRENT adds a
+ *   third axis: every unit received has also been RETURNED, because a hire with
+ *   units still in CFS's custody is not finished.
  * - `active` otherwise.
  *
  * ⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's
@@ -174,17 +262,38 @@ export const PurchaseLineSchema: z.ZodType<PurchaseLine> = z.strictObject({
  * calls it and `utils/` imports `schemas/` one way only.
  * `@cfs/core/utils/purchases` re-exports it.
  */
-export function derivePurchaseStatus(purchase: Pick<Purchase, "lines">): PurchaseStatusType {
+export function derivePurchaseStatus(purchase: Pick<Purchase, "lines" | "kind">): PurchaseStatusType {
   const { lines } = purchase;
+  const subrent = purchase.kind === "subrent";
   if (lines.length === 0) return "active";
   if (lines.every((l) => l.quantity_canceled === l.quantity && l.quantity_billed === 0)) {
     return "canceled";
   }
   const resolved = lines.every((l) =>
     l.quantity_received + l.quantity_canceled === l.quantity &&
-    l.quantity_billed + l.quantity_canceled === l.quantity
+    l.quantity_billed + l.quantity_canceled === l.quantity &&
+    (!subrent || (l.quantity_returned ?? 0) === l.quantity_received)
   );
   return resolved ? "complete" : "active";
+}
+
+/**
+ * Derive `query_by_products` — every line's product, in line order. The one
+ * author of the mirror, called by every writer; it lives here because the
+ * document refine needs it and `utils/` imports `schemas/` one way only.
+ * `@cfs/core/utils/purchases` re-exports it.
+ */
+export function deriveQueryByProducts(lines: readonly Pick<PurchaseLine, "uid_product">[]): string[] {
+  return lines.map((l) => l.uid_product);
+}
+
+/**
+ * Derive `query_by_orders` — the distinct union of the lines' `uid_orders`, in
+ * first-seen order. `[]` on a buy. Same home and re-export as
+ * {@link deriveQueryByProducts}.
+ */
+export function deriveQueryByOrders(lines: readonly Pick<PurchaseLine, "uid_orders">[]): string[] {
+  return [...new Set(lines.flatMap((l) => l.uid_orders ?? []))];
 }
 
 // ── Document ─────────────────────────────────────────────────────
@@ -195,6 +304,15 @@ export interface Purchase {
   /** Monotonic per-collection sequence (`counters/purchases`). Displayed `PO-n`; stored bare. */
   number: number;
   status: PurchaseStatusType;
+  /**
+   * `buy` or `subrent` — see the module docblock. Fixed at create.
+   *
+   * Optional ONLY for the expand/contract step: absent on every purchase written
+   * before subrents (303 in prod at 2026-10-24) and read as `buy`. Writers stamp
+   * it from the release that introduces it; the backfill stamps `buy` on the
+   * rest; then it becomes required.
+   */
+  kind?: PurchaseKindType;
   /**
    * Who CFS is buying from — a point-in-time `{uid, name}` snapshot. Every
    * receipt's `Movement.supplier` and every bill's `supplier` must equal it;
@@ -213,6 +331,24 @@ export interface Purchase {
   lines: PurchaseLine[];
   /** Σ `lines[].amount_cents` — refined. */
   total_cents: number;
+  /**
+   * Mirror of every line's `uid_product` ({@link deriveQueryByProducts}), for
+   * "which purchases name this product" as one `array-contains` — the stock
+   * rebuild's subrent-supply read. On both kinds.
+   *
+   * Optional for the expand/contract step: absent on the pre-subrent purchases
+   * until the backfill stamps it, then required. Unlike the invoice's mirror an
+   * absent key is NOT read as `[]` — every purchase has a line, so that reading
+   * would refuse all of them — it is read as "not yet stamped", and a PRESENT
+   * mirror must be exact.
+   */
+  query_by_products?: string[];
+  /**
+   * Mirror of the lines' `uid_orders` ({@link deriveQueryByOrders}): "which
+   * subrents were raised for this order". `[]` on a buy. Optional and refined
+   * exactly as `query_by_products`.
+   */
+  query_by_orders?: string[];
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -221,7 +357,43 @@ export interface Purchase {
   updated_at: FirestoreTimestampType;
 }
 
+const SUBRENT_LINE_MEMBERS = ["dates", "quantity_returned", "uid_orders"] as const;
+
+function sameMembers(mirror: readonly string[], derived: readonly string[]): boolean {
+  const want = new Set(derived);
+  return mirror.length === want.size && mirror.every((u) => want.has(u));
+}
+
 function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
+  // The kind arm, strict in both directions: no subrent document predates it,
+  // so there is nothing for a lenient arm to protect.
+  const subrent = p.kind === "subrent";
+  p.lines.forEach((line, i) => {
+    for (const key of SUBRENT_LINE_MEMBERS) {
+      const present = line[key] !== undefined;
+      if (subrent && !present) {
+        ctx.addIssue({ code: "custom", path: ["lines", i, key], message: `a subrent line states ${key}` });
+      } else if (!subrent && present) {
+        ctx.addIssue({ code: "custom", path: ["lines", i, key], message: `${key} is a subrent line's; a buy line never carries it` });
+      }
+    }
+  });
+
+  if (p.query_by_products !== undefined && !sameMembers(p.query_by_products, deriveQueryByProducts(p.lines))) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["query_by_products"],
+      message: "query_by_products must list exactly the lines' products",
+    });
+  }
+  if (p.query_by_orders !== undefined && !sameMembers(p.query_by_orders, deriveQueryByOrders(p.lines))) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["query_by_orders"],
+      message: "query_by_orders must list exactly the distinct uid_orders on the lines",
+    });
+  }
+
   const seen = new Set<string>();
   p.lines.forEach((line, i) => {
     if (seen.has(line.uid_product)) {
@@ -258,6 +430,7 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   uid: FirestoreId,
   number: z.int().min(1).meta({ column: true, label: "#", linkTo: "purchaseDetail", serverSortVia: "number" }),
   status: PurchaseStatusEnum.meta({ column: true, label: "Status" }),
+  kind: PurchaseKindEnum.meta({ column: true, label: "Kind" }).optional(),
   supplier: UidNameRef.meta({ label: "Supplier" }),
   store: UidNameRef.meta({ label: "Store" }),
   date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
@@ -266,6 +439,8 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   notes: z.string().meta({ pii: "mask", column: true, label: "Notes" }).nullable(),
   lines: z.array(PurchaseLineSchema).min(1).meta({ label: "Line" }),
   total_cents: z.int().min(0).meta({ column: true, label: "Total" }),
+  query_by_products: z.array(FirestoreId).optional(),
+  query_by_orders: z.array(FirestoreId).optional(),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
@@ -293,6 +468,10 @@ export interface PurchaseLineInputType {
   quantity: number;
   amount_cents: number;
   expected_date?: string | null;
+  /** Subrent only — the hire window. Required on a subrent create; the document refine holds it. */
+  dates?: PurchaseLineDates;
+  /** Subrent only — the orders the line was raised for. Absent is `[]`: the writer states it. */
+  uid_orders?: string[];
 }
 
 /** Zod schema for PurchaseLineInputType. */
@@ -301,7 +480,34 @@ export const PurchaseLineInput: z.ZodType<PurchaseLineInputType> = z.object({
   quantity: z.int().min(1),
   amount_cents: z.int().min(0),
   expected_date: chicagoStartOfDay().nullable().optional(),
+  dates: z.object({ start: chicagoInstant(), end: chicagoInstant() }).optional(),
+  uid_orders: z.array(FirestoreId).optional(),
+}).superRefine((l, ctx) => {
+  if (l.dates && Date.parse(l.dates.end) < Date.parse(l.dates.start)) {
+    ctx.addIssue({ code: "custom", path: ["dates", "end"], message: "a hire ends at or after it starts" });
+  }
 });
+
+/**
+ * The input-side kind arm: a subrent names a hire on every line, a buy names
+ * none. Only CREATE can check it — an update does not restate the kind, so its
+ * writer checks against the stored one.
+ */
+function kindLines(kind: PurchaseKindType | undefined, lines: readonly PurchaseLineInputType[], ctx: z.RefinementCtx): void {
+  const subrent = kind === "subrent";
+  lines.forEach((line, i) => {
+    if (subrent && line.dates === undefined) {
+      ctx.addIssue({ code: "custom", path: ["lines", i, "dates"], message: "a subrent line names its hire window" });
+    }
+    if (!subrent) {
+      for (const key of ["dates", "uid_orders"] as const) {
+        if (line[key] !== undefined) {
+          ctx.addIssue({ code: "custom", path: ["lines", i, key], message: `${key} is a subrent line's; a buy line never carries it` });
+        }
+      }
+    }
+  });
+}
 
 function uniqueProducts(lines: readonly { uid_product: string }[], ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
@@ -325,6 +531,8 @@ function uniqueProducts(lines: readonly { uid_product: string }[], ctx: z.Refine
  * its document.
  */
 export interface CreatePurchaseInputType {
+  /** Absent is `buy`; the WRITER states it on the document (never an input `.default()`). */
+  kind?: PurchaseKindType;
   supplier: { uid: string };
   store: { uid: string };
   date: string;
@@ -341,6 +549,7 @@ export interface CreatePurchaseInputType {
 
 /** Zod schema for CreatePurchaseInputType. */
 export const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType> = z.object({
+  kind: PurchaseKindEnum.optional(),
   supplier: z.object({ uid: FirestoreId }),
   store: z.object({ uid: FirestoreId }),
   date: chicagoStartOfDay(),
@@ -348,7 +557,10 @@ export const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType> = z.object(
   notes: z.string().meta({ pii: "mask" }).nullable().optional(),
   lines: z.array(PurchaseLineInput).min(1),
   uuid_session: z.uuid(),
-}).superRefine((p, ctx) => uniqueProducts(p.lines, ctx));
+}).superRefine((p, ctx) => {
+  uniqueProducts(p.lines, ctx);
+  kindLines(p.kind, p.lines, ctx);
+});
 
 /**
  * Input for amending a purchase — a PATCH.
@@ -359,6 +571,15 @@ export const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType> = z.object(
  * goods or a bill exist is a short close plus a new purchase (the plan's *Money
  * rules*), because every receipt already carries its share of the old price.
  * Those are cross-document facts the writer holds, so they are not refined here.
+ *
+ * ⚠️ **A SUBRENT line's price is not frozen by a receipt**, because its receipts
+ * carry no cost (`hire_in` is cost-forbidden). So on a subrent the writer lets
+ * `amount_cents` and `dates.end` move after receipt — a paid hire extension —
+ * with `quantity` still floored at what is received. Without that, an
+ * extension is unwritable: a close is refused while units are out.
+ *
+ * `kind` is not here: it is fixed at create, and the writer checks the lines'
+ * subrent members against the stored kind.
  */
 export interface UpdatePurchaseInputType {
   date?: string;
@@ -488,6 +709,77 @@ export interface ReversePurchaseReceiptInputType {
 
 /** Zod schema for ReversePurchaseReceiptInputType. */
 export const ReversePurchaseReceiptInput: z.ZodType<ReversePurchaseReceiptInputType> = z.object({
+  uuid_session: z.uuid(),
+  reference: z.string().optional(),
+  version: z.int().min(0),
+});
+
+/** One product given back to the supplier on a subrent. */
+export interface ReturnPurchaseLineInputType {
+  uid_product: string;
+  quantity: number;
+  /**
+   * Which locations the units leave FROM. Absent means the writer picks the
+   * shelves, as a check-out does. Never names units: a subrent product is
+   * never serialized (refused at create).
+   */
+  allocations?: MovementAllocationInputType[];
+}
+
+/** Zod schema for ReturnPurchaseLineInputType. */
+export const ReturnPurchaseLineInput: z.ZodType<ReturnPurchaseLineInputType> = z.object({
+  uid_product: FirestoreId,
+  quantity: z.int().min(1),
+  allocations: z.array(MovementAllocationInput).min(1).optional(),
+}).superRefine((l, ctx) => {
+  if (l.allocations && l.quantity !== l.allocations.reduce((sum, a) => sum + a.quantity, 0)) {
+    ctx.addIssue({ code: "custom", path: ["quantity"], message: "quantity must equal the sum of per-location allocation quantities" });
+  }
+  if (l.allocations?.some((a) => a.units !== undefined)) {
+    ctx.addIssue({ code: "custom", path: ["allocations"], message: "a subrent return never names units" });
+  }
+});
+
+/**
+ * Input for returning subrented units to the supplier
+ * (`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.
+ *
+ * Each line becomes ONE `hire_out` movement naming the purchase in `sources[]`,
+ * in one transaction with the `quantity_returned` co-write. The movement id is
+ * `{uuid_session}|hire_out|{uid_product}`, so a retry lands on the same
+ * movements. There is no cost: a returned unit was never owned.
+ */
+export interface ReturnPurchaseInputType {
+  /** The physical instant the units left for the supplier. */
+  date: string;
+  reference?: string;
+  lines: ReturnPurchaseLineInputType[];
+  uuid_session: string;
+  version: number;
+}
+
+/** Zod schema for ReturnPurchaseInputType. */
+export const ReturnPurchaseInput: z.ZodType<ReturnPurchaseInputType> = z.object({
+  date: chicagoInstant(),
+  reference: z.string().optional(),
+  lines: z.array(ReturnPurchaseLineInput).min(1),
+  uuid_session: z.uuid(),
+  version: z.int().min(0),
+}).superRefine((p, ctx) => uniqueProducts(p.lines, ctx));
+
+/**
+ * Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)
+ * — the mirror of {@link ReversePurchaseReceiptInput}: it reverses the
+ * `hire_out` AND decrements `quantity_returned` in one transaction.
+ */
+export interface ReversePurchaseReturnInputType {
+  uuid_session: string;
+  reference?: string;
+  version: number;
+}
+
+/** Zod schema for ReversePurchaseReturnInputType. */
+export const ReversePurchaseReturnInput: z.ZodType<ReversePurchaseReturnInputType> = z.object({
   uuid_session: z.uuid(),
   reference: z.string().optional(),
   version: z.int().min(0),

@@ -16,14 +16,19 @@ import {
   PurchaseCreditSchema,
   PurchaseSchema,
   ReceivePurchaseInput,
+  ReturnPurchaseInput,
+  UpdatePurchaseInput,
 } from "../src/schemas/mod.ts";
 import {
   cumulativeShareCents,
   expandPurchaseLines,
   type PurchaseExpansionComponent,
   type PurchaseExpansionProduct,
+  deriveQueryByOrders,
+  deriveQueryByProducts,
   remainingToBill,
   remainingToReceive,
+  remainingToReturn,
 } from "../src/utils/purchases.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -588,4 +593,153 @@ Deno.test("expandPurchaseLines: refuses a kit of several stocked products — on
 
 Deno.test("expandPurchaseLines: a product the caller did not read is the caller's bug, thrown", () => {
   assertThrows(() => expandPurchaseLines([{ uid_product: "nope", quantity: 1, amount_cents: 1 }], CATALOG));
+});
+
+// ── subrents ─────────────────────────────────────────────────────────
+
+const HIRE = { start: "2026-10-18T09:00:00.000-05:00", end: "2026-10-25T17:00:00.000-05:00" };
+const ORDER_1074 = "testorder1074000000a";
+
+/** A subrent line of 10 steamers, received and returned per `over`. */
+const hireLine = (over: Partial<PurchaseLine> = {}): PurchaseLine =>
+  line({ quantity: 10, amount_cents: 50_000, dates: HIRE, quantity_returned: 0, uid_orders: [ORDER_1074], ...over });
+
+function subrent(over: Record<string, unknown> = {}) {
+  const lines = (over.lines as PurchaseLine[] | undefined) ?? [hireLine()];
+  return purchase({
+    kind: "subrent",
+    lines,
+    total_cents: lines.reduce((sum, l) => sum + l.amount_cents, 0),
+    query_by_products: deriveQueryByProducts(lines),
+    query_by_orders: deriveQueryByOrders(lines),
+    ...over,
+  });
+}
+
+Deno.test("derivePurchaseStatus — a subrent is complete only once every received unit is RETURNED", () => {
+  // Each negative case breaks exactly ONE of the three axes.
+  const done = { quantity_received: 10, quantity_billed: 10, quantity_returned: 10 };
+  const cases: [string, Partial<PurchaseLine>, string][] = [
+    ["received, billed, returned", done, "complete"],
+    ["…not returned", { ...done, quantity_returned: 9 }, "active"],
+    ["…not billed", { ...done, quantity_billed: 9 }, "active"],
+    ["…not received (and so not returned)", { ...done, quantity_received: 9, quantity_returned: 9 }, "active"],
+    ["short-closed after 6, billed 6, returned 6", { quantity_received: 6, quantity_billed: 6, quantity_returned: 6, quantity_canceled: 4 }, "complete"],
+    ["canceled outright", { quantity_canceled: 10 }, "canceled"],
+  ];
+  for (const [name, over, want] of cases) {
+    assertEquals(derivePurchaseStatus({ kind: "subrent", lines: [hireLine(over)] }), want, name);
+  }
+  // The return axis is a subrent's alone: the same buckets on a buy read complete.
+  assertEquals(derivePurchaseStatus({ lines: [line({ quantity: 10, ...done, quantity_returned: undefined })] }), "complete");
+});
+
+Deno.test("remainingToReturn is received − returned, and 0 on a buy line", () => {
+  assertEquals(remainingToReturn(hireLine({ quantity_received: 7, quantity_returned: 3 })), 4);
+  assertEquals(remainingToReturn(line({ quantity_received: 3 })), 0);
+});
+
+Deno.test("PurchaseSchema accepts a valid subrent", () => {
+  assertEquals(issuePaths(PurchaseSchema, subrent()), []);
+});
+
+Deno.test("PurchaseSchema: the kind arm — a subrent line states all three members, a buy line none", () => {
+  for (const key of ["dates", "quantity_returned", "uid_orders"] as const) {
+    const without = hireLine();
+    delete without[key];
+    assertEquals(issuePaths(PurchaseSchema, subrent({ lines: [without], query_by_orders: deriveQueryByOrders([without]) })), [
+      `lines.0.${key}`,
+    ], `subrent without ${key}`);
+  }
+  for (const [key, value] of [["dates", HIRE], ["quantity_returned", 0], ["uid_orders", []]] as const) {
+    assertEquals(issuePaths(PurchaseSchema, purchase({ lines: [line({ [key]: value })] })), [`lines.0.${key}`], `buy with ${key}`);
+    assertEquals(
+      issuePaths(PurchaseSchema, purchase({ kind: "buy", lines: [line({ [key]: value })] })),
+      [`lines.0.${key}`],
+      `explicit buy with ${key}`,
+    );
+  }
+});
+
+Deno.test("PurchaseSchema: returned may not exceed received, and a hire may not end before it starts", () => {
+  assertEquals(issuePaths(PurchaseSchema, subrent({ lines: [hireLine({ quantity_received: 3, quantity_returned: 4 })] })), [
+    "lines.0.quantity_returned",
+  ]);
+  assertEquals(issuePaths(PurchaseSchema, subrent({ lines: [hireLine({ dates: { start: HIRE.end, end: HIRE.start } })] })), [
+    "lines.0.dates.end",
+  ]);
+});
+
+Deno.test("PurchaseSchema: the mirrors — absent is not-yet-stamped, present must be exact", () => {
+  assertEquals(issuePaths(PurchaseSchema, purchase()), [], "a pre-subrent purchase carries neither");
+  assertEquals(issuePaths(PurchaseSchema, purchase({ query_by_products: ["testprod100000000000"], query_by_orders: [] })), []);
+  assertEquals(issuePaths(PurchaseSchema, purchase({ query_by_products: [] })), ["query_by_products"]);
+  assertEquals(issuePaths(PurchaseSchema, purchase({ query_by_products: ["testprod200000000000"] })), ["query_by_products"]);
+  assertEquals(issuePaths(PurchaseSchema, subrent({ query_by_orders: [] })), ["query_by_orders"]);
+  assertEquals(issuePaths(PurchaseSchema, purchase({ query_by_orders: [ORDER_1074] })), ["query_by_orders"]);
+});
+
+Deno.test("deriveQueryByOrders is the distinct union, first-seen order", () => {
+  assertEquals(deriveQueryByOrders([{ uid_orders: ["a", "b"] }, { uid_orders: ["b", "c"] }, {}]), ["a", "b", "c"]);
+});
+
+Deno.test("CreatePurchaseInput: a subrent names a hire on every line, a buy names none", () => {
+  const l = { uid_product: "testprod100000000000", quantity: 10, amount_cents: 50_000 };
+  const create = (over: Record<string, unknown>) => ({
+    supplier: { uid: SUPPLIER.uid },
+    store: { uid: "teststore10000000000" },
+    date: "2026-10-17T00:00:00.000-05:00",
+    uuid_session: "0199a1f2-3b4c-7d8e-9f01-234567890abc",
+    lines: [l],
+    ...over,
+  });
+  assertEquals(issuePaths(CreatePurchaseInput, create({ kind: "subrent", lines: [{ ...l, dates: HIRE }] })), []);
+  assertEquals(issuePaths(CreatePurchaseInput, create({ kind: "subrent" })), ["lines.0.dates"]);
+  assertEquals(issuePaths(CreatePurchaseInput, create({ lines: [{ ...l, dates: HIRE }] })), ["lines.0.dates"]);
+  assertEquals(issuePaths(CreatePurchaseInput, create({ kind: "buy", lines: [{ ...l, uid_orders: [] }] })), ["lines.0.uid_orders"]);
+  assertEquals(
+    issuePaths(CreatePurchaseInput, create({ kind: "subrent", lines: [{ ...l, dates: { start: HIRE.end, end: HIRE.start } }] })),
+    ["lines.0.dates.end"],
+  );
+  // An update cannot see the kind; it carries the members and its writer checks them.
+  assertEquals(issuePaths(UpdatePurchaseInput, { version: 0, lines: [{ ...l, dates: HIRE }] }), []);
+});
+
+Deno.test("ReturnPurchaseInput: allocations sum to the quantity and never name units", () => {
+  const ret = (lineOver: Record<string, unknown>) => ({
+    date: "2026-10-25T10:00:00.000-05:00",
+    lines: [{ uid_product: "testprod100000000000", quantity: 10, ...lineOver }],
+    uuid_session: "0199a1f2-3b4c-7d8e-9f01-234567890abc",
+    version: 3,
+  });
+  assertEquals(issuePaths(ReturnPurchaseInput, ret({})), []);
+  assertEquals(issuePaths(ReturnPurchaseInput, ret({ allocations: [{ uid_location: "testloc1000000000000", quantity: 9 }] })), [
+    "lines.0.quantity",
+  ]);
+  assertEquals(
+    issuePaths(ReturnPurchaseInput, ret({ quantity: 1, allocations: [{ uid_location: "testloc1000000000000", quantity: 1, units: [4] }] })),
+    ["lines.0.allocations"],
+  );
+});
+
+Deno.test("expandPurchaseLines: a subrent pack expands carrying its hire and orders", () => {
+  assertEquals(
+    expandPurchaseLines([{ uid_product: "118", quantity: 1, amount_cents: 900, dates: HIRE, uid_orders: [ORDER_1074] }], CATALOG),
+    { ok: true, lines: [{ uid_product: "410", quantity: 40, amount_cents: 900, dates: HIRE, uid_orders: [ORDER_1074] }] },
+  );
+});
+
+Deno.test("expandPurchaseLines: two subrent lines on one product merge only within one hire window", () => {
+  const same = expandPurchaseLines([
+    { uid_product: "410", quantity: 10, amount_cents: 100, dates: HIRE, uid_orders: ["o1"] },
+    { uid_product: "118", quantity: 1, amount_cents: 900, dates: { ...HIRE }, uid_orders: ["o2", "o1"] },
+  ], CATALOG);
+  assertEquals(same, { ok: true, lines: [{ uid_product: "410", quantity: 50, amount_cents: 1_000, dates: HIRE, uid_orders: ["o1", "o2"] }] });
+
+  const other = expandPurchaseLines([
+    { uid_product: "410", quantity: 10, amount_cents: 100, dates: HIRE, uid_orders: [] },
+    { uid_product: "118", quantity: 1, amount_cents: 900, dates: { start: HIRE.start, end: "2026-10-26T17:00:00.000-05:00" }, uid_orders: [] },
+  ], CATALOG);
+  assert(!other.ok);
+  assertEquals(other.refusal.reason, "different_hire_windows");
 });

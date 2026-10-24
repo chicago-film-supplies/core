@@ -1359,7 +1359,7 @@
         {
           "kind": "interface",
           "name": "CreatePurchaseInputType",
-          "declaration": "interface CreatePurchaseInputType {\n  supplier: typeLiteral;\n  store: typeLiteral;\n  date: string;\n  reference?: string | null;\n  notes?: string | null;\n  lines: PurchaseLineInputType[];\n  uuid_session: string;\n}",
+          "declaration": "interface CreatePurchaseInputType {\n  kind?: PurchaseKindType;\n  supplier: typeLiteral;\n  store: typeLiteral;\n  date: string;\n  reference?: string | null;\n  notes?: string | null;\n  lines: PurchaseLineInputType[];\n  uuid_session: string;\n}",
           "doc": "Input for creating a purchase.\n\n`supplier` and `store` are uids only — the server resolves the names, as\n`CreateTransactionInput.supplier` does, so a snapshot never disagrees with\nits document."
         },
         {
@@ -3734,6 +3734,12 @@
         },
         {
           "kind": "variable",
+          "name": "PURCHASE_KINDS",
+          "declaration": "const PURCHASE_KINDS: \"buy\" | \"subrent\"[];",
+          "doc": "What a purchase gets from its supplier — see the module docblock. `buy` is\nFIRST so `getInitialValues` seeds a buy."
+        },
+        {
+          "kind": "variable",
           "name": "PURCHASE_STATUSES",
           "declaration": "const PURCHASE_STATUSES: \"active\" | \"complete\" | \"canceled\"[];",
           "doc": "Derived by {@link derivePurchaseStatus}, never client-set. The out-of-service\nvocabulary, for the reason `OOS_STATUSES` gives: orders, bookings and cards\nall say `active` for \"in progress\".\n\nPartial progress — some received, some billed — is read off the buckets, not\nencoded here. A status per stage (`partially_received`, `billed`, …) would be\na second rendering of numbers the line already carries."
@@ -4077,7 +4083,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  lines: PurchaseLine[];\n  total_cents: number;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  kind?: PurchaseKindType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  lines: PurchaseLine[];\n  total_cents: number;\n  query_by_products?: string[];\n  query_by_orders?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -4207,10 +4213,34 @@
           "doc": "One {@link PURCHASE_DOCUMENT_ORIGINS} member."
         },
         {
+          "kind": "variable",
+          "name": "PurchaseKindEnum",
+          "declaration": "const PurchaseKindEnum: z.ZodType<PurchaseKindType>;",
+          "doc": "Zod schema for PurchaseKindType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseKindType",
+          "declaration": "type PurchaseKindType = indexedAccess;",
+          "doc": "Allowed purchase kinds. See {@link PURCHASE_KINDS}."
+        },
+        {
           "kind": "interface",
           "name": "PurchaseLine",
-          "declaration": "interface PurchaseLine {\n  uid_product: string;\n  name: string;\n  quantity: number;\n  amount_cents: number;\n  expected_date: string | null;\n  quantity_received: number;\n  quantity_billed: number;\n  quantity_canceled: number;\n}",
+          "declaration": "interface PurchaseLine {\n  uid_product: string;\n  name: string;\n  quantity: number;\n  amount_cents: number;\n  expected_date: string | null;\n  quantity_received: number;\n  quantity_billed: number;\n  quantity_canceled: number;\n  dates?: PurchaseLineDates;\n  quantity_returned?: number;\n  uid_orders?: string[];\n}",
           "doc": "One product ordered on a purchase."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseLineDates",
+          "declaration": "interface PurchaseLineDates {\n  start: string;\n  end: string;\n}",
+          "doc": "A subrent line's hire window — two Chicago instants. `end` is when the units\nare due back to the SUPPLIER, not when the customer returns them.\n\nNamed `dates` after out-of-service, bookings and cards. The object carries no\nlabel of its own; its children are labelled, so the composed heading stays\n\"Line Hire Start\" rather than doubling a word."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseLineDatesSchema",
+          "declaration": "const PurchaseLineDatesSchema: z.ZodType<PurchaseLineDates>;",
+          "doc": "Zod schema for PurchaseLineDates."
         },
         {
           "kind": "variable",
@@ -4221,7 +4251,7 @@
         {
           "kind": "interface",
           "name": "PurchaseLineInputType",
-          "declaration": "interface PurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  expected_date?: string | null;\n}",
+          "declaration": "interface PurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  expected_date?: string | null;\n  dates?: PurchaseLineDates;\n  uid_orders?: string[];\n}",
           "doc": "One line as an operator orders it — the buckets are the server's."
         },
         {
@@ -4514,6 +4544,30 @@
         },
         {
           "kind": "variable",
+          "name": "ReturnPurchaseInput",
+          "declaration": "const ReturnPurchaseInput: z.ZodType<ReturnPurchaseInputType>;",
+          "doc": "Zod schema for ReturnPurchaseInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ReturnPurchaseInputType",
+          "declaration": "interface ReturnPurchaseInputType {\n  date: string;\n  reference?: string;\n  lines: ReturnPurchaseLineInputType[];\n  uuid_session: string;\n  version: number;\n}",
+          "doc": "Input for returning subrented units to the supplier\n(`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.\n\nEach line becomes ONE `hire_out` movement naming the purchase in `sources[]`,\nin one transaction with the `quantity_returned` co-write. The movement id is\n`{uuid_session}|hire_out|{uid_product}`, so a retry lands on the same\nmovements. There is no cost: a returned unit was never owned."
+        },
+        {
+          "kind": "variable",
+          "name": "ReturnPurchaseLineInput",
+          "declaration": "const ReturnPurchaseLineInput: z.ZodType<ReturnPurchaseLineInputType>;",
+          "doc": "Zod schema for ReturnPurchaseLineInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ReturnPurchaseLineInputType",
+          "declaration": "interface ReturnPurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n}",
+          "doc": "One product given back to the supplier on a subrent."
+        },
+        {
+          "kind": "variable",
           "name": "ReversePurchaseCreditAllocationInput",
           "declaration": "const ReversePurchaseCreditAllocationInput: z.ZodType<ReversePurchaseCreditAllocationInputType>;",
           "doc": "Zod schema for ReversePurchaseCreditAllocationInputType."
@@ -4535,6 +4589,18 @@
           "name": "ReversePurchaseReceiptInputType",
           "declaration": "interface ReversePurchaseReceiptInputType {\n  uuid_session: string;\n  reference?: string;\n  version: number;\n}",
           "doc": "Input for reversing one receipt (`POST /purchases/{uid}/receipts/{movementUid}/reverse`).\n\nA standalone reversal of a receipt is refused; this lever reverses it AND\ndecrements `quantity_received` in one transaction. It posts nothing to Xero —\na receipt never did."
+        },
+        {
+          "kind": "variable",
+          "name": "ReversePurchaseReturnInput",
+          "declaration": "const ReversePurchaseReturnInput: z.ZodType<ReversePurchaseReturnInputType>;",
+          "doc": "Zod schema for ReversePurchaseReturnInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ReversePurchaseReturnInputType",
+          "declaration": "interface ReversePurchaseReturnInputType {\n  uuid_session: string;\n  reference?: string;\n  version: number;\n}",
+          "doc": "Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)\n— the mirror of {@link ReversePurchaseReceiptInput}: it reverses the\n`hire_out` AND decrements `quantity_returned` in one transaction."
         },
         {
           "kind": "variable",
@@ -5890,7 +5956,7 @@
           "kind": "interface",
           "name": "UpdatePurchaseInputType",
           "declaration": "interface UpdatePurchaseInputType {\n  date?: string;\n  reference?: string | null;\n  notes?: string | null;\n  lines?: PurchaseLineInputType[];\n  version: number;\n}",
-          "doc": "Input for amending a purchase — a PATCH.\n\n`lines`, when present, is the complete next set. The writer refuses to change\na line's `quantity` below what is received or billed, and refuses to change\nits `amount_cents` once it has any receipt or bill: a price that moved after\ngoods or a bill exist is a short close plus a new purchase (the plan's *Money\nrules*), because every receipt already carries its share of the old price.\nThose are cross-document facts the writer holds, so they are not refined here."
+          "doc": "Input for amending a purchase — a PATCH.\n\n`lines`, when present, is the complete next set. The writer refuses to change\na line's `quantity` below what is received or billed, and refuses to change\nits `amount_cents` once it has any receipt or bill: a price that moved after\ngoods or a bill exist is a short close plus a new purchase (the plan's *Money\nrules*), because every receipt already carries its share of the old price.\nThose are cross-document facts the writer holds, so they are not refined here.\n\n⚠️ **A SUBRENT line's price is not frozen by a receipt**, because its receipts\ncarry no cost (`hire_in` is cost-forbidden). So on a subrent the writer lets\n`amount_cents` and `dates.end` move after receipt — a paid hire extension —\nwith `quantity` still floored at what is received. Without that, an\nextension is unwritable: a close is refused while units are out.\n\n`kind` is not here: it is fixed at create, and the writer checks the lines'\nsubrent members against the stored kind."
         },
         {
           "kind": "variable",
@@ -6426,8 +6492,24 @@
         {
           "kind": "function",
           "name": "derivePurchaseStatus",
-          "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"lines\">): PurchaseStatusType",
-          "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every line is canceled in full: nothing received, nothing\n  left billed. A cancel is a close with nothing received.\n- `complete` when every line is RESOLVED on BOTH axes: each unit either\n  received or canceled, and billed for exactly what was not canceled. Payment\n  is the bill's business and does not hold a purchase open.\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.\n\nLives in the schema module, not in `utils/`, because the document refine\ncalls it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
+          "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"lines\" | \"kind\">): PurchaseStatusType",
+          "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every line is canceled in full: nothing received, nothing\n  left billed. A cancel is a close with nothing received.\n- `complete` when every line is RESOLVED on BOTH axes: each unit either\n  received or canceled, and billed for exactly what was not canceled. Payment\n  is the bill's business and does not hold a purchase open. A SUBRENT adds a\n  third axis: every unit received has also been RETURNED, because a hire with\n  units still in CFS's custody is not finished.\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.\n\nLives in the schema module, not in `utils/`, because the document refine\ncalls it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveQueryByOrders",
+          "signature": "deriveQueryByOrders(lines: readonly Pick<PurchaseLine, \"uid_orders\">[]): string[]",
+          "doc": "Derive `query_by_orders` — the distinct union of the lines' `uid_orders`, in\nfirst-seen order. `[]` on a buy. Same home and re-export as\n{@link deriveQueryByProducts}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveQueryByProducts",
+          "signature": "deriveQueryByProducts(lines: readonly Pick<PurchaseLine, \"uid_product\">[]): string[]",
+          "doc": "Derive `query_by_products` — every line's product, in line order. The one\nauthor of the mirror, called by every writer; it lives here because the\ndocument refine needs it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10685,7 +10767,7 @@
     },
     {
       "entrypoint": "@cfs/core/schemas/purchase",
-      "moduleDoc": "Purchase document schema — Firestore collection: `purchases`\n\nWhat CFS ORDERED from a supplier: one line per product, each with the\nquantity and the amount agreed. It moves nothing. api-cloudrun#1210 split a\n`purchase` movement, which used to be the order, the delivery, the bill and\n(through Xero) the debt all at once, into four facts with four homes:\n\n| fact     | home                                                   | moves                         |\n|----------|--------------------------------------------------------|-------------------------------|\n| ordered  | this document                                          | nothing                       |\n| received | `purchase` movements naming it in `sources[]`          | `quantity_held`, basis, units |\n| billed   | `purchase-bills` / `purchase-credits` naming it        | the Xero document             |\n| paid     | `settlements` rows against a bill                      | the bill's `totals`           |\n\nThe owner's real sequence is order → bill → delivery (days or weeks later,\npossibly partial) → payment, and before this document nothing could hold\n\"billed, not received\" — movement #3882 recorded three radios that had not\narrived. Design: api-cloudrun#1210.\n\n## The shape is the out-of-service record's, on purpose\n\n`schemas/out-of-service.ts` is the package's parent-with-movements shape and this\ncopies every part of it:\n\n- **Its receipts name it in `sources[]`** and it finds them through\n  `query_by_sources`. There is no `Movement.purchase` field and no back-list\n  of movement ids here — the HISTORY of a purchase is the journal.\n- **Co-written buckets** per line (`quantity_received`, `quantity_billed`,\n  `quantity_canceled`), each written in the same transaction as the receipt,\n  bill or close that moves it — the analogue of the record's `breakdown`.\n- **A derived status** in the record's vocabulary (`active | complete |\n  canceled`), authored by {@link derivePurchaseStatus} and refined here, so a\n  document asserting one status and holding buckets that say another does not\n  parse.\n\n## A line is `(purchase, uid_product)`\n\nOne line per product, refined below. A receipt's subject is already\n`uid_product`, so a movement needs no line slot in `sources[]` to say which\nline it received against. A second price for the same product is a second\nPURCHASE, never a second line (see the plan's *Money rules*) — with one\nexception: a PACK (`expandPurchaseLines`, `@cfs/core/utils/purchases`) is\nstored as its stocked component, and when that product already has a line\nthe two MERGE, amounts summed (owner, 2026-10-22, api-cloudrun#1081). The\nledger averages the cost either way. Merging into a line already received or\nbilled changes its amount, which the API's amend refuses, so that case still\nbecomes a second purchase.\n\n## Money\n\n`amount_cents` is what the whole line costs, integer cents. The k-th receipt\nor bill against a line is priced by `cumulativeShareCents`\n(`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the\npartials sum to `amount_cents` exactly with no remainder rule. There is no\nstored `unit_cost`: it is a display rate, derivable by `perUnitCostAt4dp`, and\na stored copy beside the amount it derives from is a second source of truth.\n\nThere is no tax anywhere on a purchase (owner, 2026-10-05): stock bought for\nsale or rent is bought resale-exempt and the tax is collected from the end\nuser, so `priceDocument` never runs here.",
+      "moduleDoc": "Purchase document schema — Firestore collection: `purchases`\n\nWhat CFS ORDERED from a supplier: one line per product, each with the\nquantity and the amount agreed. It moves nothing. api-cloudrun#1210 split a\n`purchase` movement, which used to be the order, the delivery, the bill and\n(through Xero) the debt all at once, into four facts with four homes:\n\n| fact     | home                                                   | moves                         |\n|----------|--------------------------------------------------------|-------------------------------|\n| ordered  | this document                                          | nothing                       |\n| received | `purchase` movements naming it in `sources[]`          | `quantity_held`, basis, units |\n| billed   | `purchase-bills` / `purchase-credits` naming it        | the Xero document             |\n| paid     | `settlements` rows against a bill                      | the bill's `totals`           |\n\nThe owner's real sequence is order → bill → delivery (days or weeks later,\npossibly partial) → payment, and before this document nothing could hold\n\"billed, not received\" — movement #3882 recorded three radios that had not\narrived. Design: api-cloudrun#1210.\n\n## The shape is the out-of-service record's, on purpose\n\n`schemas/out-of-service.ts` is the package's parent-with-movements shape and this\ncopies every part of it:\n\n- **Its receipts name it in `sources[]`** and it finds them through\n  `query_by_sources`. There is no `Movement.purchase` field and no back-list\n  of movement ids here — the HISTORY of a purchase is the journal.\n- **Co-written buckets** per line (`quantity_received`, `quantity_billed`,\n  `quantity_canceled`), each written in the same transaction as the receipt,\n  bill or close that moves it — the analogue of the record's `breakdown`.\n- **A derived status** in the record's vocabulary (`active | complete |\n  canceled`), authored by {@link derivePurchaseStatus} and refined here, so a\n  document asserting one status and holding buckets that say another does not\n  parse.\n\n## A line is `(purchase, uid_product)`\n\nOne line per product, refined below. A receipt's subject is already\n`uid_product`, so a movement needs no line slot in `sources[]` to say which\nline it received against. A second price for the same product is a second\nPURCHASE, never a second line (see the plan's *Money rules*) — with one\nexception: a PACK (`expandPurchaseLines`, `@cfs/core/utils/purchases`) is\nstored as its stocked component, and when that product already has a line\nthe two MERGE, amounts summed (owner, 2026-10-22, api-cloudrun#1081). The\nledger averages the cost either way. Merging into a line already received or\nbilled changes its amount, which the API's amend refuses, so that case still\nbecomes a second purchase.\n\n## Money\n\n`amount_cents` is what the whole line costs, integer cents. The k-th receipt\nor bill against a line is priced by `cumulativeShareCents`\n(`@cfs/core/utils/purchases`), which rounds the CUMULATIVE share once, so the\npartials sum to `amount_cents` exactly with no remainder rule. There is no\nstored `unit_cost`: it is a display rate, derivable by `perUnitCostAt4dp`, and\na stored copy beside the amount it derives from is a second source of truth.\n\nThere is no tax anywhere on a purchase (owner, 2026-10-05): stock bought for\nsale or rent is bought resale-exempt and the tax is collected from the end\nuser, so `priceDocument` never runs here.\n\n## Two kinds: a buy and a subrent\n\n`kind` says what CFS is getting from the supplier. A **buy** transfers\nownership: its receipts are `purchase` movements that raise `quantity_held`\nand the cost basis. A **subrent** borrows units for a hire window and gives\nthem back: its receipts are `hire_in` movements and its returns `hire_out`,\nboth cost-forbidden, so the units are in CFS's CUSTODY without ever being\nOWNED (`InventoryLedger.quantity_rented_in`). Everything else — supplier,\nstore, number, bills, credits, the Xero ACCPAY and the thread — is shared, so\na subrent is the same document rather than a second collection.\n\nA subrent line carries three members a buy line never does, and the document\nrefine below holds the arm strictly in both directions: `dates` (the hire\nwindow, which is SUPPLY in availability from the moment the purchase exists —\nowner, 2026-10-24), `quantity_returned`, and `uid_orders` (the orders it was\nraised for, for margin; never a reservation — the units stay fungible).\n\nThe document stays one `z.strictObject` with a `superRefine` rather than a\nroot `discriminatedUnion`: no registered document schema has one, and the\ncolumn walker, `getInitialValues`, `getTestDoc` and the stored-defaults walk\nall assume a root object (the precedent is the card's per-kind refine).",
       "symbols": [
         {
           "kind": "variable",
@@ -10708,8 +10790,14 @@
         {
           "kind": "interface",
           "name": "CreatePurchaseInputType",
-          "declaration": "interface CreatePurchaseInputType {\n  supplier: typeLiteral;\n  store: typeLiteral;\n  date: string;\n  reference?: string | null;\n  notes?: string | null;\n  lines: PurchaseLineInputType[];\n  uuid_session: string;\n}",
+          "declaration": "interface CreatePurchaseInputType {\n  kind?: PurchaseKindType;\n  supplier: typeLiteral;\n  store: typeLiteral;\n  date: string;\n  reference?: string | null;\n  notes?: string | null;\n  lines: PurchaseLineInputType[];\n  uuid_session: string;\n}",
           "doc": "Input for creating a purchase.\n\n`supplier` and `store` are uids only — the server resolves the names, as\n`CreateTransactionInput.supplier` does, so a snapshot never disagrees with\nits document."
+        },
+        {
+          "kind": "variable",
+          "name": "PURCHASE_KINDS",
+          "declaration": "const PURCHASE_KINDS: \"buy\" | \"subrent\"[];",
+          "doc": "What a purchase gets from its supplier — see the module docblock. `buy` is\nFIRST so `getInitialValues` seeds a buy."
         },
         {
           "kind": "variable",
@@ -10720,14 +10808,38 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  lines: PurchaseLine[];\n  total_cents: number;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  kind?: PurchaseKindType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  lines: PurchaseLine[];\n  total_cents: number;\n  query_by_products?: string[];\n  query_by_orders?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseKindEnum",
+          "declaration": "const PurchaseKindEnum: z.ZodType<PurchaseKindType>;",
+          "doc": "Zod schema for PurchaseKindType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "PurchaseKindType",
+          "declaration": "type PurchaseKindType = indexedAccess;",
+          "doc": "Allowed purchase kinds. See {@link PURCHASE_KINDS}."
         },
         {
           "kind": "interface",
           "name": "PurchaseLine",
-          "declaration": "interface PurchaseLine {\n  uid_product: string;\n  name: string;\n  quantity: number;\n  amount_cents: number;\n  expected_date: string | null;\n  quantity_received: number;\n  quantity_billed: number;\n  quantity_canceled: number;\n}",
+          "declaration": "interface PurchaseLine {\n  uid_product: string;\n  name: string;\n  quantity: number;\n  amount_cents: number;\n  expected_date: string | null;\n  quantity_received: number;\n  quantity_billed: number;\n  quantity_canceled: number;\n  dates?: PurchaseLineDates;\n  quantity_returned?: number;\n  uid_orders?: string[];\n}",
           "doc": "One product ordered on a purchase."
+        },
+        {
+          "kind": "interface",
+          "name": "PurchaseLineDates",
+          "declaration": "interface PurchaseLineDates {\n  start: string;\n  end: string;\n}",
+          "doc": "A subrent line's hire window — two Chicago instants. `end` is when the units\nare due back to the SUPPLIER, not when the customer returns them.\n\nNamed `dates` after out-of-service, bookings and cards. The object carries no\nlabel of its own; its children are labelled, so the composed heading stays\n\"Line Hire Start\" rather than doubling a word."
+        },
+        {
+          "kind": "variable",
+          "name": "PurchaseLineDatesSchema",
+          "declaration": "const PurchaseLineDatesSchema: z.ZodType<PurchaseLineDates>;",
+          "doc": "Zod schema for PurchaseLineDates."
         },
         {
           "kind": "variable",
@@ -10738,7 +10850,7 @@
         {
           "kind": "interface",
           "name": "PurchaseLineInputType",
-          "declaration": "interface PurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  expected_date?: string | null;\n}",
+          "declaration": "interface PurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  amount_cents: number;\n  expected_date?: string | null;\n  dates?: PurchaseLineDates;\n  uid_orders?: string[];\n}",
           "doc": "One line as an operator orders it — the buckets are the server's."
         },
         {
@@ -10791,6 +10903,30 @@
         },
         {
           "kind": "variable",
+          "name": "ReturnPurchaseInput",
+          "declaration": "const ReturnPurchaseInput: z.ZodType<ReturnPurchaseInputType>;",
+          "doc": "Zod schema for ReturnPurchaseInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ReturnPurchaseInputType",
+          "declaration": "interface ReturnPurchaseInputType {\n  date: string;\n  reference?: string;\n  lines: ReturnPurchaseLineInputType[];\n  uuid_session: string;\n  version: number;\n}",
+          "doc": "Input for returning subrented units to the supplier\n(`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.\n\nEach line becomes ONE `hire_out` movement naming the purchase in `sources[]`,\nin one transaction with the `quantity_returned` co-write. The movement id is\n`{uuid_session}|hire_out|{uid_product}`, so a retry lands on the same\nmovements. There is no cost: a returned unit was never owned."
+        },
+        {
+          "kind": "variable",
+          "name": "ReturnPurchaseLineInput",
+          "declaration": "const ReturnPurchaseLineInput: z.ZodType<ReturnPurchaseLineInputType>;",
+          "doc": "Zod schema for ReturnPurchaseLineInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ReturnPurchaseLineInputType",
+          "declaration": "interface ReturnPurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n}",
+          "doc": "One product given back to the supplier on a subrent."
+        },
+        {
+          "kind": "variable",
           "name": "ReversePurchaseReceiptInput",
           "declaration": "const ReversePurchaseReceiptInput: z.ZodType<ReversePurchaseReceiptInputType>;",
           "doc": "Zod schema for ReversePurchaseReceiptInputType."
@@ -10803,6 +10939,18 @@
         },
         {
           "kind": "variable",
+          "name": "ReversePurchaseReturnInput",
+          "declaration": "const ReversePurchaseReturnInput: z.ZodType<ReversePurchaseReturnInputType>;",
+          "doc": "Zod schema for ReversePurchaseReturnInputType."
+        },
+        {
+          "kind": "interface",
+          "name": "ReversePurchaseReturnInputType",
+          "declaration": "interface ReversePurchaseReturnInputType {\n  uuid_session: string;\n  reference?: string;\n  version: number;\n}",
+          "doc": "Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)\n— the mirror of {@link ReversePurchaseReceiptInput}: it reverses the\n`hire_out` AND decrements `quantity_returned` in one transaction."
+        },
+        {
+          "kind": "variable",
           "name": "UpdatePurchaseInput",
           "declaration": "const UpdatePurchaseInput: z.ZodType<UpdatePurchaseInputType>;",
           "doc": "Zod schema for UpdatePurchaseInputType."
@@ -10811,13 +10959,29 @@
           "kind": "interface",
           "name": "UpdatePurchaseInputType",
           "declaration": "interface UpdatePurchaseInputType {\n  date?: string;\n  reference?: string | null;\n  notes?: string | null;\n  lines?: PurchaseLineInputType[];\n  version: number;\n}",
-          "doc": "Input for amending a purchase — a PATCH.\n\n`lines`, when present, is the complete next set. The writer refuses to change\na line's `quantity` below what is received or billed, and refuses to change\nits `amount_cents` once it has any receipt or bill: a price that moved after\ngoods or a bill exist is a short close plus a new purchase (the plan's *Money\nrules*), because every receipt already carries its share of the old price.\nThose are cross-document facts the writer holds, so they are not refined here."
+          "doc": "Input for amending a purchase — a PATCH.\n\n`lines`, when present, is the complete next set. The writer refuses to change\na line's `quantity` below what is received or billed, and refuses to change\nits `amount_cents` once it has any receipt or bill: a price that moved after\ngoods or a bill exist is a short close plus a new purchase (the plan's *Money\nrules*), because every receipt already carries its share of the old price.\nThose are cross-document facts the writer holds, so they are not refined here.\n\n⚠️ **A SUBRENT line's price is not frozen by a receipt**, because its receipts\ncarry no cost (`hire_in` is cost-forbidden). So on a subrent the writer lets\n`amount_cents` and `dates.end` move after receipt — a paid hire extension —\nwith `quantity` still floored at what is received. Without that, an\nextension is unwritable: a close is refused while units are out.\n\n`kind` is not here: it is fixed at create, and the writer checks the lines'\nsubrent members against the stored kind."
         },
         {
           "kind": "function",
           "name": "derivePurchaseStatus",
-          "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"lines\">): PurchaseStatusType",
-          "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every line is canceled in full: nothing received, nothing\n  left billed. A cancel is a close with nothing received.\n- `complete` when every line is RESOLVED on BOTH axes: each unit either\n  received or canceled, and billed for exactly what was not canceled. Payment\n  is the bill's business and does not hold a purchase open.\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.\n\nLives in the schema module, not in `utils/`, because the document refine\ncalls it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
+          "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"lines\" | \"kind\">): PurchaseStatusType",
+          "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every line is canceled in full: nothing received, nothing\n  left billed. A cancel is a close with nothing received.\n- `complete` when every line is RESOLVED on BOTH axes: each unit either\n  received or canceled, and billed for exactly what was not canceled. Payment\n  is the bill's business and does not hold a purchase open. A SUBRENT adds a\n  third axis: every unit received has also been RETURNED, because a hire with\n  units still in CFS's custody is not finished.\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.\n\nLives in the schema module, not in `utils/`, because the document refine\ncalls it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveQueryByOrders",
+          "signature": "deriveQueryByOrders(lines: readonly Pick<PurchaseLine, \"uid_orders\">[]): string[]",
+          "doc": "Derive `query_by_orders` — the distinct union of the lines' `uid_orders`, in\nfirst-seen order. `[]` on a buy. Same home and re-export as\n{@link deriveQueryByProducts}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveQueryByProducts",
+          "signature": "deriveQueryByProducts(lines: readonly Pick<PurchaseLine, \"uid_product\">[]): string[]",
+          "doc": "Derive `query_by_products` — every line's product, in line order. The one\nauthor of the mirror, called by every writer; it lives here because the\ndocument refine needs it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -20386,7 +20550,7 @@
         {
           "kind": "interface",
           "name": "PurchaseExpansionRefusal",
-          "declaration": "interface PurchaseExpansionRefusal {\n  uid_product: string;\n  reason: \"no_stocked_component\" | \"several_stocked_components\";\n  message: string;\n}",
+          "declaration": "interface PurchaseExpansionRefusal {\n  uid_product: string;\n  reason: \"no_stocked_component\" | \"several_stocked_components\" | \"different_hire_windows\";\n  message: string;\n}",
           "doc": "Why a line could not be expanded into one stockable line."
         },
         {
@@ -20423,8 +20587,24 @@
         {
           "kind": "function",
           "name": "derivePurchaseStatus",
-          "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"lines\">): PurchaseStatusType",
-          "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every line is canceled in full: nothing received, nothing\n  left billed. A cancel is a close with nothing received.\n- `complete` when every line is RESOLVED on BOTH axes: each unit either\n  received or canceled, and billed for exactly what was not canceled. Payment\n  is the bill's business and does not hold a purchase open.\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.\n\nLives in the schema module, not in `utils/`, because the document refine\ncalls it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
+          "signature": "derivePurchaseStatus(purchase: Pick<Purchase, \"lines\" | \"kind\">): PurchaseStatusType",
+          "doc": "The purchase's status, derived — never client-set.\n\n- `canceled` when every line is canceled in full: nothing received, nothing\n  left billed. A cancel is a close with nothing received.\n- `complete` when every line is RESOLVED on BOTH axes: each unit either\n  received or canceled, and billed for exactly what was not canceled. Payment\n  is the bill's business and does not hold a purchase open. A SUBRENT adds a\n  third axis: every unit received has also been RETURNED, because a hire with\n  units still in CFS's custody is not finished.\n- `active` otherwise.\n\n⚠️ **Received in full but unbilled is `active`, deliberately.** The owner's\nsequence bills before delivery as often as after, and a purchase that reads\n`complete` while a bill is still owed hides exactly the work the split exists\nto show.\n\nLives in the schema module, not in `utils/`, because the document refine\ncalls it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveQueryByOrders",
+          "signature": "deriveQueryByOrders(lines: readonly Pick<PurchaseLine, \"uid_orders\">[]): string[]",
+          "doc": "Derive `query_by_orders` — the distinct union of the lines' `uid_orders`, in\nfirst-seen order. `[]` on a buy. Same home and re-export as\n{@link deriveQueryByProducts}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "deriveQueryByProducts",
+          "signature": "deriveQueryByProducts(lines: readonly Pick<PurchaseLine, \"uid_product\">[]): string[]",
+          "doc": "Derive `query_by_products` — every line's product, in line order. The one\nauthor of the mirror, called by every writer; it lives here because the\ndocument refine needs it and `utils/` imports `schemas/` one way only.\n`@cfs/core/utils/purchases` re-exports it.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -20432,7 +20612,7 @@
           "kind": "function",
           "name": "expandPurchaseLines",
           "signature": "expandPurchaseLines(lines: readonly PurchaseLineInputType[], products: ReadonlyMap<string, PurchaseExpansionProduct>): PurchaseExpansionResult",
-          "doc": "Replace every pack line with the stocked product it is a pack of, so a stored\npurchase only ever names a product that can be RECEIVED.\n\nA pack is a `stock_method: \"none\"` product with `components` — the same\nrelation a sale already draws through (`118 Hot Hands (40 Pairs)` →\n`410 (1 Pair) × 40`). Sales keep the pack as a priced parent over $0\ncomponent lines; a purchase deliberately does NOT (owner, 2026-10-22): the\nline's money is the stocked product's cost, so it must sit on the line the\nreceipt lands on. `118 × 12 @ $360` becomes `410 × 480 @ $360`, the ratio\napplied once, here, through {@link componentQuantities} — the one quantity\nrule the order expander uses.\n\nThe receivable FRONTIER of a pack is every component that counts stock and\nhas no counted ancestor in the walk: `353 (240 Pairs)` reaches `410` through\nthe uncounted `118`, and a pallet stops at its counted case rather than the\nuncounted bottle under it. Exactly one frontier node expands; none is a\nrefusal (buying it would receive nothing), and several is a refusal too —\none amount has no rule for splitting across two products' cost.\n\nLines that land on one product MERGE — quantities and amounts summed, the\nearliest `expected_date` kept — because a purchase holds one line per product\nand the ledger averages the cost anyway (owner, 2026-10-22).\n\nReturns rather than throws: a refusal is an operator-facing 400, and core\nthrows plain `Error`, which a consumer's middleware reads as a 500.",
+          "doc": "Replace every pack line with the stocked product it is a pack of, so a stored\npurchase only ever names a product that can be RECEIVED.\n\nA pack is a `stock_method: \"none\"` product with `components` — the same\nrelation a sale already draws through (`118 Hot Hands (40 Pairs)` →\n`410 (1 Pair) × 40`). Sales keep the pack as a priced parent over $0\ncomponent lines; a purchase deliberately does NOT (owner, 2026-10-22): the\nline's money is the stocked product's cost, so it must sit on the line the\nreceipt lands on. `118 × 12 @ $360` becomes `410 × 480 @ $360`, the ratio\napplied once, here, through {@link componentQuantities} — the one quantity\nrule the order expander uses.\n\nThe receivable FRONTIER of a pack is every component that counts stock and\nhas no counted ancestor in the walk: `353 (240 Pairs)` reaches `410` through\nthe uncounted `118`, and a pallet stops at its counted case rather than the\nuncounted bottle under it. Exactly one frontier node expands; none is a\nrefusal (buying it would receive nothing), and several is a refusal too —\none amount has no rule for splitting across two products' cost.\n\nLines that land on one product MERGE — quantities and amounts summed, the\nearliest `expected_date` kept — because a purchase holds one line per product\nand the ledger averages the cost anyway (owner, 2026-10-22).\n\nA SUBRENT line expands exactly as a buy line does, carrying its `dates` and\n`uid_orders` onto the stocked product. Two subrent lines merge only when they\nname the SAME hire window (their `uid_orders` union): one product has one\nwindow per purchase, so a second window is a second purchase — the rule a\nsecond price already follows — and that merge is a refusal.\n\nReturns rather than throws: a refusal is an operator-facing 400, and core\nthrows plain `Error`, which a consumer's middleware reads as a 500.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -20483,6 +20663,14 @@
           "name": "remainingToReceive",
           "signature": "remainingToReceive(line: Pick<PurchaseLine, \"quantity\" | \"quantity_received\" | \"quantity_canceled\">): number",
           "doc": "Units of a line still to be received: `quantity − canceled − received`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "remainingToReturn",
+          "signature": "remainingToReturn(line: Pick<PurchaseLine, \"quantity_received\" | \"quantity_returned\">): number",
+          "doc": "Units of a SUBRENT line still to go back to the supplier: `received − returned`.\nBounded by what came in, not by what was ordered — an unreceived unit owes no\nreturn. `0` on a buy line, which carries no `quantity_returned`.",
           "paramTags": [],
           "returnsTag": null
         }
