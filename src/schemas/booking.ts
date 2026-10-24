@@ -442,7 +442,10 @@ export interface BulkBookingUpdateResponseType {
   results: Array<{ uid: string; version: number }>;
   /** Rows no chunk committed. Empty whenever `success` is true. */
   failures: Array<{ uid: string; error: string }>;
-  /** Transactions the rows were split across. 1 for the p50 order. */
+  /**
+   * Transactions the rows were split across. 1 for the p50 order; 0 when every
+   * row was cut to nothing by a short shelf (see {@link ShelfShortfallType}).
+   */
   chunks: number;
   /** See {@link PrepShortfallType}. Absent when every prep was covered. */
   prep_shortfalls?: PrepShortfallType[];
@@ -503,7 +506,7 @@ export const BulkBookingUpdateResponse: z.ZodType<BulkBookingUpdateResponseType>
       uid: BookingId,
       error: z.string(),
     })),
-    chunks: z.int().min(1),
+    chunks: z.int().min(0),
     prep_shortfalls: z.array(PrepShortfall).optional(),
     shelf_shortfalls: z.array(ShelfShortfall).optional(),
   });
