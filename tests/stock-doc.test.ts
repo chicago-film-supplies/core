@@ -155,3 +155,17 @@ Deno.test("StockLockSchema requires uid and uid_product", () => {
     assertEquals(StockLockSchema.safeParse(doc).success, false, key);
   }
 });
+
+Deno.test("StockSchema: supply[] and quantity_rented_in are optional (expand/contract), and a supply entry is well-formed", () => {
+  const start = "2026-10-18T09:00:00.000-05:00";
+  const end = "2026-10-25T17:00:00.000-05:00";
+  const ok = { ...validStock, quantity_rented_in: 0, supply: [{ start, end, quantity: 10, kind: "subrent" }] };
+  assertEquals(StockSchema.safeParse(ok).success, true);
+  const paths = (doc: unknown) => {
+    const r = StockSchema.safeParse(doc);
+    return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+  };
+  assertEquals(paths({ ...ok, supply: [{ start: end, end: start, quantity: 10, kind: "subrent" }] }), ["supply.0.end"]);
+  assertEquals(paths({ ...ok, supply: [{ start, end, quantity: 0, kind: "subrent" }] }), ["supply.0.quantity"]);
+  assertEquals(paths({ ...ok, supply: [{ start, end: null, quantity: 1, kind: "subrent" }] }), ["supply.0.end"]);
+});

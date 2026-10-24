@@ -4712,6 +4712,12 @@
         },
         {
           "kind": "variable",
+          "name": "STOCK_SUPPLY_KINDS",
+          "declaration": "const STOCK_SUPPLY_KINDS: \"subrent\"[];",
+          "doc": "What added time-bounded SUPPLY. Each kind is drawn as its own row by the\noperator panel, and api-cloudrun#1228's expected inbound from a buy will be\na second member."
+        },
+        {
+          "kind": "variable",
           "name": "STOCK_UNAVAILABLE_KINDS",
           "declaration": "const STOCK_UNAVAILABLE_KINDS: \"booking\" | \"oos\"[];",
           "doc": "What made an interval unavailable. The only non-quantitative fact a reader gets."
@@ -4905,7 +4911,7 @@
         {
           "kind": "interface",
           "name": "Stock",
-          "declaration": "interface Stock {\n  uid: string;\n  uid_product: string;\n  quantity_held: number | null;\n  unavailable: StockUnavailableEntry[];\n  claim_seq: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Stock {\n  uid: string;\n  uid_product: string;\n  quantity_held: number | null;\n  quantity_rented_in?: number;\n  unavailable: StockUnavailableEntry[];\n  supply?: StockSupplyEntry[];\n  claim_seq: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Window-independent availability inputs for one product. Doc id == `uid` ==\n`uid_product` == the product's / inventory-ledger's Firestore id.\n\nThe window enters only as an overlap filter, so **any** window is derivable\nfrom this one document by `computeStockAvailability`\n(`@cfs/core/utils/stock`) — on the server, in the browser against an\n`onSnapshot`, or over a plain JSON fixture, with no round-trip and no document\nminted per question asked."
         },
         {
@@ -4943,6 +4949,24 @@
           "name": "StockSchema",
           "declaration": "const StockSchema: z.ZodType<Stock>;",
           "doc": "Zod schema for {@link Stock}."
+        },
+        {
+          "kind": "interface",
+          "name": "StockSupplyEntry",
+          "declaration": "interface StockSupplyEntry {\n  start: string;\n  end: string;\n  quantity: number;\n  kind: StockSupplyKindType;\n}",
+          "doc": "One pre-reduced, anonymous SUPPLY interval: units that will be in CFS's\nhands over `[start, end]` without CFS owning them — a live subrent's line,\ncounted from the moment the purchase exists (owner, 2026-10-24), not from\nreceipt.\n\nAnonymous for the reason {@link StockUnavailableEntry} is: no purchase uid,\nno supplier. A SEPARATE array, never a third `STOCK_UNAVAILABLE_KINDS`\nmember, because the fold SUMS every unavailable entry overlapping a window\nand must take the MINIMUM of supply over it — the two are opposite\nreductions.\n\n`quantity` is what the line still supplies: `quantity − canceled − returned`.\n\n⚠️ **Both bounds are non-null, and that is a fact about `subrent` only.**\nA hire has a due-back date. api-cloudrun#1228's buy inbound is\n`[expected_date, +∞)`, so adding that kind must widen `end` to nullable for\nit — this is not \"no schema change needed\" for that issue."
+        },
+        {
+          "kind": "variable",
+          "name": "StockSupplyKindEnum",
+          "declaration": "const StockSupplyKindEnum: z.ZodType<StockSupplyKindType>;",
+          "doc": "Zod enum for {@link StockSupplyKindType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "StockSupplyKindType",
+          "declaration": "type StockSupplyKindType = indexedAccess;",
+          "doc": "Union of {@link STOCK_SUPPLY_KINDS}."
         },
         {
           "kind": "interface",
@@ -11483,6 +11507,12 @@
       "symbols": [
         {
           "kind": "variable",
+          "name": "STOCK_SUPPLY_KINDS",
+          "declaration": "const STOCK_SUPPLY_KINDS: \"subrent\"[];",
+          "doc": "What added time-bounded SUPPLY. Each kind is drawn as its own row by the\noperator panel, and api-cloudrun#1228's expected inbound from a buy will be\na second member."
+        },
+        {
+          "kind": "variable",
           "name": "STOCK_UNAVAILABLE_KINDS",
           "declaration": "const STOCK_UNAVAILABLE_KINDS: \"booking\" | \"oos\"[];",
           "doc": "What made an interval unavailable. The only non-quantitative fact a reader gets."
@@ -11490,7 +11520,7 @@
         {
           "kind": "interface",
           "name": "Stock",
-          "declaration": "interface Stock {\n  uid: string;\n  uid_product: string;\n  quantity_held: number | null;\n  unavailable: StockUnavailableEntry[];\n  claim_seq: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Stock {\n  uid: string;\n  uid_product: string;\n  quantity_held: number | null;\n  quantity_rented_in?: number;\n  unavailable: StockUnavailableEntry[];\n  supply?: StockSupplyEntry[];\n  claim_seq: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Window-independent availability inputs for one product. Doc id == `uid` ==\n`uid_product` == the product's / inventory-ledger's Firestore id.\n\nThe window enters only as an overlap filter, so **any** window is derivable\nfrom this one document by `computeStockAvailability`\n(`@cfs/core/utils/stock`) — on the server, in the browser against an\n`onSnapshot`, or over a plain JSON fixture, with no round-trip and no document\nminted per question asked."
         },
         {
@@ -11510,6 +11540,24 @@
           "name": "StockSchema",
           "declaration": "const StockSchema: z.ZodType<Stock>;",
           "doc": "Zod schema for {@link Stock}."
+        },
+        {
+          "kind": "interface",
+          "name": "StockSupplyEntry",
+          "declaration": "interface StockSupplyEntry {\n  start: string;\n  end: string;\n  quantity: number;\n  kind: StockSupplyKindType;\n}",
+          "doc": "One pre-reduced, anonymous SUPPLY interval: units that will be in CFS's\nhands over `[start, end]` without CFS owning them — a live subrent's line,\ncounted from the moment the purchase exists (owner, 2026-10-24), not from\nreceipt.\n\nAnonymous for the reason {@link StockUnavailableEntry} is: no purchase uid,\nno supplier. A SEPARATE array, never a third `STOCK_UNAVAILABLE_KINDS`\nmember, because the fold SUMS every unavailable entry overlapping a window\nand must take the MINIMUM of supply over it — the two are opposite\nreductions.\n\n`quantity` is what the line still supplies: `quantity − canceled − returned`.\n\n⚠️ **Both bounds are non-null, and that is a fact about `subrent` only.**\nA hire has a due-back date. api-cloudrun#1228's buy inbound is\n`[expected_date, +∞)`, so adding that kind must widen `end` to nullable for\nit — this is not \"no schema change needed\" for that issue."
+        },
+        {
+          "kind": "variable",
+          "name": "StockSupplyKindEnum",
+          "declaration": "const StockSupplyKindEnum: z.ZodType<StockSupplyKindType>;",
+          "doc": "Zod enum for {@link StockSupplyKindType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "StockSupplyKindType",
+          "declaration": "type StockSupplyKindType = indexedAccess;",
+          "doc": "Union of {@link STOCK_SUPPLY_KINDS}."
         },
         {
           "kind": "interface",
@@ -18291,7 +18339,7 @@
         {
           "kind": "interface",
           "name": "StockAvailability",
-          "declaration": "interface StockAvailability {\n  quantity_held: number | null;\n  quantity_booked: number;\n  quantity_out_of_service: number;\n  quantity_available: number | null;\n}",
+          "declaration": "interface StockAvailability {\n  quantity_held: number | null;\n  quantity_owned: number | null;\n  quantity_booked: number;\n  quantity_out_of_service: number;\n  quantity_supplied: number;\n  quantity_available: number | null;\n}",
           "doc": "Everything a consumer needs from one product over one window.\n\n## An uncounted product: `quantity_held: null` ⟹ `quantity_available: null`\n\n`null` held is an uncounted ledger (`InventoryLedger.quantity_held`), and its\navailability is **unbounded**, spelled `null` — never a number, and never 0.\n`quantity_booked` and `quantity_out_of_service` are still computed in full:\nfor an uncounted product they are the tracker the ledger exists to be.\n\n⚠️ **Every consumer has to choose what `null` means to it**, and the type forces\nthe choice: a gate passes it (nothing to oversell), a display renders\n\"Unlimited\", a kit's available-sets `min` drops the term, a valuation sum\nskips it. Coercing it to a number anywhere — `?? 0` refuses everything,\n`?? Infinity` poisons a sum — is the defect this shape exists to prevent."
         },
         {
@@ -18307,10 +18355,22 @@
           "doc": "Just enough of a booking to answer either consumption question."
         },
         {
+          "kind": "typeAlias",
+          "name": "StockEngineInput",
+          "declaration": "type StockEngineInput = Pick<Stock, \"quantity_held\" | \"unavailable\"> & typeLiteral;",
+          "doc": "The projection fields every engine read REQUIRES. `supply` and\n`quantity_rented_in` are optional on the stored document (expand/contract)\nand deliberately NOT here: a caller building its own inputs — the oversell\ngate does — must pass both, so it fails to compile rather than silently\nignoring supply and firing `stock_oversold` on every subrented product. A\nreader of a stored `stock/{P}` writes `?? []` / `?? 0` at the read."
+        },
+        {
           "kind": "interface",
           "name": "StockOOSSource",
           "declaration": "interface StockOOSSource {\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: Pick<OOSBreakdown, \"written_off\" | \"returned_to_service\">;\n  dates: typeLiteral;\n}",
           "doc": "Just enough of an out-of-service record to reduce it to an unavailable interval."
+        },
+        {
+          "kind": "interface",
+          "name": "StockPurchaseSource",
+          "declaration": "interface StockPurchaseSource {\n  kind?: PurchaseKindType;\n  status: PurchaseStatusType;\n  lines: readonly typeLiteral[];\n}",
+          "doc": "Just enough of a purchase to reduce it to the supply it adds."
         },
         {
           "kind": "variable",
@@ -18366,8 +18426,8 @@
         {
           "kind": "function",
           "name": "computeStockAvailability",
-          "signature": "computeStockAvailability(stock: Pick<Stock, \"quantity_held\" | \"unavailable\">, window: AvailabilityWindow): StockAvailability",
-          "doc": "Compute availability for one product over one window, from the pre-reduced\nprojection.\n\n```\nquantity_available = quantity_held − quantity_booked(w) − quantity_out_of_service(w)\n```\n\nNegative results are preserved, never clamped: an oversold product must stay\nvisibly oversold, and #424 makes that the intended shortage signal for\noperators rather than an error state.\n\nAn uncounted product (`quantity_held: null`) answers `quantity_available:\nnull` — unbounded — with booked and out-of-service still summed. See\n{@link StockAvailability}.\n\n`quantity_in_service` is not returned — it is `quantity_held −\nquantity_out_of_service`, and no current consumer asks for it.\n\n⚠️ **This must not be decomposed into a per-day rollup.** With `held = 2`, a\nbooking on days 1–2 and another on days 4–5, the answer for window `[1, 5]` is\nexactly **0** — no single unit is free for the whole span — while a\nmin-over-days curve says 1. Overstating availability oversells. Intervals give\nthe exact answer; a daily curve does not.",
+          "signature": "computeStockAvailability(stock: StockEngineInput, window: AvailabilityWindow): StockAvailability",
+          "doc": "Compute availability for one product over one window, from the pre-reduced\nprojection.\n\n```\nquantity_owned     = quantity_held − quantity_rented_in\nquantity_available = quantity_owned − quantity_booked(w) − quantity_out_of_service(w) + quantity_supplied(w)\n```\n\n⚠️ **The base is OWNED, not held.** A rented-in unit is in `quantity_held`\nonce received, and it is also in `supply` from the moment its purchase exists;\nstarting from held would count a received rented unit twice. Supply is the\nMINIMUM over the window (see `minSupplyOver`), the opposite reduction to\nconsumption's sum.\n\nNegative results are preserved, never clamped: an oversold product must stay\nvisibly oversold, and #424 makes that the intended shortage signal for\noperators rather than an error state.\n\nAn uncounted product (`quantity_held: null`) answers `quantity_available:\nnull` — unbounded — with booked and out-of-service still summed. See\n{@link StockAvailability}.\n\n`quantity_in_service` is not returned — it is `quantity_held −\nquantity_out_of_service`, and no current consumer asks for it.\n\n⚠️ **This must not be decomposed into a per-day rollup.** With `held = 2`, a\nbooking on days 1–2 and another on days 4–5, the answer for window `[1, 5]` is\nexactly **0** — no single unit is free for the whole span — while a\nmin-over-days curve says 1. Overstating availability oversells. Intervals give\nthe exact answer; a daily curve does not.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -18398,8 +18458,16 @@
         {
           "kind": "function",
           "name": "peakStockConsumption",
-          "signature": "peakStockConsumption(stock: Pick<Stock, \"quantity_held\" | \"unavailable\">): PeakStockConsumption",
-          "doc": "The instant at which this product's units are most consumed **at once** — the\nphysical peak, across all time, with no window named.\n\n`quantity_available < 0` here means the product is oversold *physically*: at\none moment more units are claimed than exist. That is the operator advisory\nsignal (api-cloudrun#510 P4) — the operator, order and CRMS paths deliberately\nnever refuse a claim, so this is what records the fact.\n\n⚠️ **This is NOT \"the worst answer `computeStockAvailability` could give\", and\nthe inequality runs the opposite way to the intuition.** A window's\nconsumption sums every entry *overlapping* it, so it can sum entries that never\ncoexist; an instant's sums only entries live *at* it. Every entry live at an\ninstant inside a window also overlaps that window, so:\n\n```\npeak consumption  ≤  any window's consumption that contains the peak\npeak available    ≥  that window's available\n```\n\nThe witness is the same fixture that forbids a per-day rollup: `held = 2`,\nbookings on days 1–2 and 4–5. Window `[1, 5]` consumes **2** and reports 0\navailable — correct, because no single unit is free for the whole span — while\nthe peak consumes **1** and reports 1 available, also correct, because the\nshop never holds more than one unit out at a time.\n\nSo the two answer different questions and neither bounds the other usefully in\nthe direction one expects:\n\n| | question | a shortage means |\n|---|---|---|\n| {@link computeStockAvailability} | what can I **promise** over this span? | ordinary business — #424's advisory signal, seen on every busy product |\n| {@link peakStockConsumption} | how many units are **out at once**? | a physical impossibility — the units do not exist |\n\n**Log the second, not the first.** A window shortage is routine and alerting on\nit would be pure noise; a physical oversell is the *\"a `reserved` order for 100\nunits of a 2-unit product commits silently\"* case, and it is rare.\n\nEvaluated at candidate points rather than by a sweep with epsilon handling,\nbecause the bounds are closed (`[start, end]`, both inclusive) and an interval\nwith `end: null` never ends: coverage is piecewise constant and only ever\n*rises* at a start, so a maximum is attained at some entry's `start` — or, when\nany entry is open on the left, in the region before every real start, where\nexactly the `start: null` entries are live. Both cases are candidates below.\n\nO(n²) on purpose: `n` is one product's live entries (26 is the corpus max\nacross both environments), and the quadratic form is `intervalsOverlap` applied\ndirectly at each candidate — no boundary arithmetic to get subtly wrong, and no\nsecond definition of what \"live at t\" means.\n\n## The peak is a CONSUMPTION maximum, so it survives an uncounted product\n\nThe search maximises `booked + out_of_service`, which for a counted product is\nthe same instant as minimising `available` (`held` is a constant). For an\nuncounted one (`quantity_held: null`) there is no `available` to minimise, but\nthe busiest instant is still a real answer — it is the per-product demand peak\n— so it is still returned, with `quantity_available: null`. A `null` is never\n`< 0`, so the physical-oversell advisory cannot fire on an uncounted product,\nwhich is correct: there is no count for the demand to exceed.\n\nOn a TIE the earliest candidate wins (strict `>`), exactly as the strict `<`\non `available` did.",
+          "signature": "peakStockConsumption(stock: StockEngineInput): PeakStockConsumption",
+          "doc": "The instant at which this product's units are most consumed **at once** — the\nphysical peak, across all time, with no window named.\n\n`quantity_available < 0` here means the product is oversold *physically*: at\none moment more units are claimed than exist. That is the operator advisory\nsignal (api-cloudrun#510 P4) — the operator, order and CRMS paths deliberately\nnever refuse a claim, so this is what records the fact.\n\n⚠️ **This is NOT \"the worst answer `computeStockAvailability` could give\", and\nthe inequality runs the opposite way to the intuition.** A window's\nconsumption sums every entry *overlapping* it, so it can sum entries that never\ncoexist; an instant's sums only entries live *at* it. Every entry live at an\ninstant inside a window also overlaps that window, so:\n\n```\npeak consumption  ≤  any window's consumption that contains the peak\npeak available    ≥  that window's available\n```\n\nThe witness is the same fixture that forbids a per-day rollup: `held = 2`,\nbookings on days 1–2 and 4–5. Window `[1, 5]` consumes **2** and reports 0\navailable — correct, because no single unit is free for the whole span — while\nthe peak consumes **1** and reports 1 available, also correct, because the\nshop never holds more than one unit out at a time.\n\nSo the two answer different questions and neither bounds the other usefully in\nthe direction one expects:\n\n| | question | a shortage means |\n|---|---|---|\n| {@link computeStockAvailability} | what can I **promise** over this span? | ordinary business — #424's advisory signal, seen on every busy product |\n| {@link peakStockConsumption} | how many units are **out at once**? | a physical impossibility — the units do not exist |\n\n**Log the second, not the first.** A window shortage is routine and alerting on\nit would be pure noise; a physical oversell is the *\"a `reserved` order for 100\nunits of a 2-unit product commits silently\"* case, and it is rare.\n\nEvaluated at candidate points rather than by a sweep with epsilon handling,\nbecause the bounds are closed (`[start, end]`, both inclusive) and an interval\nwith `end: null` never ends. The quantity maximised is `consumption(t) −\nsupply(t)`, which is piecewise constant and RISES only where consumption\nrises (an unavailable entry's start) or supply falls (the millisecond after a\nsupply entry's end) — so a maximum is attained at one of those, or, when any\nentry is open on the left, in the region before every real start, where\nexactly the `start: null` entries are live and no supply is (a supply entry\nalways has a start). All three are candidates below.\n\n⚠️ This used to say coverage \"only ever rises at a start\". That stays true of\nconsumption; with supply in the subtraction, the end of a hire is a rise too.\n\nO(n²) on purpose: `n` is one product's live entries (26 is the corpus max\nacross both environments), and the quadratic form is `intervalsOverlap` applied\ndirectly at each candidate — no boundary arithmetic to get subtly wrong, and no\nsecond definition of what \"live at t\" means.\n\n## The peak is a CONSUMPTION maximum, so it survives an uncounted product\n\nThe search maximises `booked + out_of_service − supplied`, which for a counted\nproduct is the same instant as minimising `available` (`owned` is a constant). For an\nuncounted one (`quantity_held: null`) there is no `available` to minimise, but\nthe busiest instant is still a real answer — it is the per-product demand peak\n— so it is still returned, with `quantity_available: null`. A `null` is never\n`< 0`, so the physical-oversell advisory cannot fire on an uncounted product,\nwhich is correct: there is no count for the demand to exceed.\n\nOn a TIE the earliest candidate wins (strict `>`), exactly as the strict `<`\non `available` did.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "supplyFromPurchase",
+          "signature": "supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): StockSupplyEntry[]",
+          "doc": "Reduce a purchase to the supply intervals it adds for ONE product — one\nentry per live subrent line naming it (a purchase holds one line per\nproduct, so at most one), and `[]` otherwise.\n\nLiveness is the reducers' one filter, as for bookings and out-of-service:\nonly an `active` SUBRENT supplies anything, and a line supplying nothing is\ndropped rather than stored as a zero. A line supplies\n`quantity − canceled − returned`: what was ordered and not called off, less\nwhat has already gone back. RECEIPT does not enter — supply counts from the\nmoment the purchase exists (owner, 2026-10-24); receipt is custody only.\n\n⚠️ A unit that has not gone back by `dates.end` stops counting as supply at\n`end` while it is still in CFS's custody (`quantity_rented_in`). That is the\nconservative direction — late but valid; the return card shows it overdue.",
           "paramTags": [],
           "returnsTag": null
         },

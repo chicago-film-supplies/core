@@ -10603,6 +10603,16 @@ application order.
 const STATEMENT_FORMATS: "open_item" | "balance_forward"[];
 ```
 
+### `STOCK_SUPPLY_KINDS`
+
+What added time-bounded SUPPLY. Each kind is drawn as its own row by the
+operator panel, and api-cloudrun#1228's expected inbound from a buy will be
+a second member.
+
+```ts
+const STOCK_SUPPLY_KINDS: "subrent"[];
+```
+
 ### `STOCK_UNAVAILABLE_KINDS`
 
 What made an interval unavailable. The only non-quantitative fact a reader gets.
@@ -11044,7 +11054,9 @@ interface Stock {
   uid: string;
   uid_product: string;
   quantity_held: number | null;
+  quantity_rented_in?: number;
   unavailable: StockUnavailableEntry[];
+  supply?: StockSupplyEntry[];
   claim_seq: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -11137,6 +11149,51 @@ Zod schema for {@link Stock}.
 
 ```ts
 const StockSchema: z.ZodType<Stock>;
+```
+
+### `StockSupplyEntry`
+
+One pre-reduced, anonymous SUPPLY interval: units that will be in CFS's
+hands over `[start, end]` without CFS owning them — a live subrent's line,
+counted from the moment the purchase exists (owner, 2026-10-24), not from
+receipt.
+
+Anonymous for the reason {@link StockUnavailableEntry} is: no purchase uid,
+no supplier. A SEPARATE array, never a third `STOCK_UNAVAILABLE_KINDS`
+member, because the fold SUMS every unavailable entry overlapping a window
+and must take the MINIMUM of supply over it — the two are opposite
+reductions.
+
+`quantity` is what the line still supplies: `quantity − canceled − returned`.
+
+⚠️ **Both bounds are non-null, and that is a fact about `subrent` only.**
+A hire has a due-back date. api-cloudrun#1228's buy inbound is
+`[expected_date, +∞)`, so adding that kind must widen `end` to nullable for
+it — this is not "no schema change needed" for that issue.
+
+```ts
+interface StockSupplyEntry {
+  start: string;
+  end: string;
+  quantity: number;
+  kind: StockSupplyKindType;
+}
+```
+
+### `StockSupplyKindEnum`
+
+Zod enum for {@link StockSupplyKindType}.
+
+```ts
+const StockSupplyKindEnum: z.ZodType<StockSupplyKindType>;
+```
+
+### `StockSupplyKindType`
+
+Union of {@link STOCK_SUPPLY_KINDS}.
+
+```ts
+type StockSupplyKindType = indexedAccess;
 ```
 
 ### `StockUnavailableEntry`
@@ -25188,6 +25245,16 @@ payable rows too and MUST filter before treating `uid_organization` as set.
 
 ## `@cfs/core/schemas/stock`
 
+### `STOCK_SUPPLY_KINDS`
+
+What added time-bounded SUPPLY. Each kind is drawn as its own row by the
+operator panel, and api-cloudrun#1228's expected inbound from a buy will be
+a second member.
+
+```ts
+const STOCK_SUPPLY_KINDS: "subrent"[];
+```
+
 ### `STOCK_UNAVAILABLE_KINDS`
 
 What made an interval unavailable. The only non-quantitative fact a reader gets.
@@ -25212,7 +25279,9 @@ interface Stock {
   uid: string;
   uid_product: string;
   quantity_held: number | null;
+  quantity_rented_in?: number;
   unavailable: StockUnavailableEntry[];
+  supply?: StockSupplyEntry[];
   claim_seq: number;
   created_at: FirestoreTimestampType;
   updated_at: FirestoreTimestampType;
@@ -25276,6 +25345,51 @@ Zod schema for {@link Stock}.
 
 ```ts
 const StockSchema: z.ZodType<Stock>;
+```
+
+### `StockSupplyEntry`
+
+One pre-reduced, anonymous SUPPLY interval: units that will be in CFS's
+hands over `[start, end]` without CFS owning them — a live subrent's line,
+counted from the moment the purchase exists (owner, 2026-10-24), not from
+receipt.
+
+Anonymous for the reason {@link StockUnavailableEntry} is: no purchase uid,
+no supplier. A SEPARATE array, never a third `STOCK_UNAVAILABLE_KINDS`
+member, because the fold SUMS every unavailable entry overlapping a window
+and must take the MINIMUM of supply over it — the two are opposite
+reductions.
+
+`quantity` is what the line still supplies: `quantity − canceled − returned`.
+
+⚠️ **Both bounds are non-null, and that is a fact about `subrent` only.**
+A hire has a due-back date. api-cloudrun#1228's buy inbound is
+`[expected_date, +∞)`, so adding that kind must widen `end` to nullable for
+it — this is not "no schema change needed" for that issue.
+
+```ts
+interface StockSupplyEntry {
+  start: string;
+  end: string;
+  quantity: number;
+  kind: StockSupplyKindType;
+}
+```
+
+### `StockSupplyKindEnum`
+
+Zod enum for {@link StockSupplyKindType}.
+
+```ts
+const StockSupplyKindEnum: z.ZodType<StockSupplyKindType>;
+```
+
+### `StockSupplyKindType`
+
+Union of {@link STOCK_SUPPLY_KINDS}.
+
+```ts
+type StockSupplyKindType = indexedAccess;
 ```
 
 ### `StockUnavailableEntry`
@@ -39325,8 +39439,10 @@ skips it. Coercing it to a number anywhere — `?? 0` refuses everything,
 ```ts
 interface StockAvailability {
   quantity_held: number | null;
+  quantity_owned: number | null;
   quantity_booked: number;
   quantity_out_of_service: number;
+  quantity_supplied: number;
   quantity_available: number | null;
 }
 ```
@@ -39356,6 +39472,19 @@ interface StockConsumingBooking {
 }
 ```
 
+### `StockEngineInput`
+
+The projection fields every engine read REQUIRES. `supply` and
+`quantity_rented_in` are optional on the stored document (expand/contract)
+and deliberately NOT here: a caller building its own inputs — the oversell
+gate does — must pass both, so it fails to compile rather than silently
+ignoring supply and firing `stock_oversold` on every subrented product. A
+reader of a stored `stock/{P}` writes `?? []` / `?? 0` at the read.
+
+```ts
+type StockEngineInput = Pick<Stock, "quantity_held" | "unavailable"> & typeLiteral;
+```
+
 ### `StockOOSSource`
 
 Just enough of an out-of-service record to reduce it to an unavailable interval.
@@ -39366,6 +39495,18 @@ interface StockOOSSource {
   quantity: number;
   breakdown: Pick<OOSBreakdown, "written_off" | "returned_to_service">;
   dates: typeLiteral;
+}
+```
+
+### `StockPurchaseSource`
+
+Just enough of a purchase to reduce it to the supply it adds.
+
+```ts
+interface StockPurchaseSource {
+  kind?: PurchaseKindType;
+  status: PurchaseStatusType;
+  lines: readonly typeLiteral[];
 }
 ```
 
@@ -39434,14 +39575,21 @@ demand a check-out will draw (stock campaign P1). The api's staged-units
 sum, the unsourceable-bookings audit and the manager's shelf aggregation
 (`onShelfDemand`) each spelled it by hand.
 
-### `computeStockAvailability(stock: Pick<Stock, "quantity_held" | "unavailable">, window: AvailabilityWindow): StockAvailability`
+### `computeStockAvailability(stock: StockEngineInput, window: AvailabilityWindow): StockAvailability`
 
 Compute availability for one product over one window, from the pre-reduced
 projection.
 
 ```
-quantity_available = quantity_held − quantity_booked(w) − quantity_out_of_service(w)
+quantity_owned     = quantity_held − quantity_rented_in
+quantity_available = quantity_owned − quantity_booked(w) − quantity_out_of_service(w) + quantity_supplied(w)
 ```
+
+⚠️ **The base is OWNED, not held.** A rented-in unit is in `quantity_held`
+once received, and it is also in `supply` from the moment its purchase exists;
+starting from held would count a received rented unit twice. Supply is the
+MINIMUM over the window (see `minSupplyOver`), the opposite reduction to
+consumption's sum.
 
 Negative results are preserved, never clamped: an oversold product must stay
 visibly oversold, and #424 makes that the intended shortage signal for
@@ -39527,7 +39675,7 @@ Throws on a record with no `breakdown` rather than defaulting it: a field mask
 that forgot it would otherwise read as "nothing resolved" and consume the whole
 record, silently.
 
-### `peakStockConsumption(stock: Pick<Stock, "quantity_held" | "unavailable">): PeakStockConsumption`
+### `peakStockConsumption(stock: StockEngineInput): PeakStockConsumption`
 
 The instant at which this product's units are most consumed **at once** — the
 physical peak, across all time, with no window named.
@@ -39568,10 +39716,16 @@ units of a 2-unit product commits silently"* case, and it is rare.
 
 Evaluated at candidate points rather than by a sweep with epsilon handling,
 because the bounds are closed (`[start, end]`, both inclusive) and an interval
-with `end: null` never ends: coverage is piecewise constant and only ever
-*rises* at a start, so a maximum is attained at some entry's `start` — or, when
-any entry is open on the left, in the region before every real start, where
-exactly the `start: null` entries are live. Both cases are candidates below.
+with `end: null` never ends. The quantity maximised is `consumption(t) −
+supply(t)`, which is piecewise constant and RISES only where consumption
+rises (an unavailable entry's start) or supply falls (the millisecond after a
+supply entry's end) — so a maximum is attained at one of those, or, when any
+entry is open on the left, in the region before every real start, where
+exactly the `start: null` entries are live and no supply is (a supply entry
+always has a start). All three are candidates below.
+
+⚠️ This used to say coverage "only ever rises at a start". That stays true of
+consumption; with supply in the subtraction, the end of a hire is a rise too.
 
 O(n²) on purpose: `n` is one product's live entries (26 is the corpus max
 across both environments), and the quadratic form is `intervalsOverlap` applied
@@ -39580,8 +39734,8 @@ second definition of what "live at t" means.
 
 ## The peak is a CONSUMPTION maximum, so it survives an uncounted product
 
-The search maximises `booked + out_of_service`, which for a counted product is
-the same instant as minimising `available` (`held` is a constant). For an
+The search maximises `booked + out_of_service − supplied`, which for a counted
+product is the same instant as minimising `available` (`owned` is a constant). For an
 uncounted one (`quantity_held: null`) there is no `available` to minimise, but
 the busiest instant is still a real answer — it is the per-product demand peak
 — so it is still returned, with `quantity_available: null`. A `null` is never
@@ -39590,6 +39744,23 @@ which is correct: there is no count for the demand to exceed.
 
 On a TIE the earliest candidate wins (strict `>`), exactly as the strict `<`
 on `available` did.
+
+### `supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): StockSupplyEntry[]`
+
+Reduce a purchase to the supply intervals it adds for ONE product — one
+entry per live subrent line naming it (a purchase holds one line per
+product, so at most one), and `[]` otherwise.
+
+Liveness is the reducers' one filter, as for bookings and out-of-service:
+only an `active` SUBRENT supplies anything, and a line supplying nothing is
+dropped rather than stored as a zero. A line supplies
+`quantity − canceled − returned`: what was ordered and not called off, less
+what has already gone back. RECEIPT does not enter — supply counts from the
+moment the purchase exists (owner, 2026-10-24); receipt is custody only.
+
+⚠️ A unit that has not gone back by `dates.end` stops counting as supply at
+`end` while it is still in CFS's custody (`quantity_rented_in`). That is the
+conservative direction — late but valid; the return card shows it overdue.
 
 ### `unavailableFromBooking(b: StockBookingSource): StockUnavailableEntry | null`
 

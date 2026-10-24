@@ -27,6 +27,7 @@ import {
   peakStockConsumption,
   type StockBookingSource,
   type StockOOSSource,
+  supplyFromPurchase,
   TERMINAL_OOS_STATUSES,
   unavailableFromBooking,
   unavailableFromOOS,
@@ -35,6 +36,7 @@ import {
 import type {
   BookingBreakdown,
   ComponentTypeType,
+  StockSupplyEntry,
   StockUnavailableEntry,
 } from "../src/schemas/mod.ts";
 
@@ -259,9 +261,16 @@ Deno.test("unavailableFromOOS: the unresolved units until terminal", () => {
 
 // ── The fold ───────────────────────────────────────────────────────────────
 
-const stock = (quantity_held: number | null, unavailable: StockUnavailableEntry[]) => ({
+const stock = (
+  quantity_held: number | null,
+  unavailable: StockUnavailableEntry[],
+  supply: StockSupplyEntry[] = [],
+  quantity_rented_in = 0,
+) => ({
   quantity_held,
   unavailable,
+  supply,
+  quantity_rented_in,
 });
 
 const iv = (
@@ -300,8 +309,10 @@ Deno.test("computeStockAvailability: `kind` splits the two counts, and only over
   ]);
   assertEquals(computeStockAvailability(s, win("2026-06-01", "2026-06-05")), {
     quantity_held: 10,
+    quantity_owned: 10,
     quantity_booked: 3,
     quantity_out_of_service: 2,
+    quantity_supplied: 0,
     quantity_available: 5,
   });
 });
@@ -350,8 +361,10 @@ Deno.test("peakStockConsumption: the peak is the overlap, and `since` names wher
   ]);
   assertEquals(peakStockConsumption(s), {
     quantity_held: 10,
+    quantity_owned: 10,
     quantity_booked: 7,
     quantity_out_of_service: 2,
+    quantity_supplied: 0,
     quantity_available: 1,
     since: D3,
   });
@@ -370,8 +383,10 @@ Deno.test("peakStockConsumption: an open-ended entry carries the peak, and `sinc
   const s = stock(4, [iv(null, null, 5, "booking")]);
   assertEquals(peakStockConsumption(s), {
     quantity_held: 4,
+    quantity_owned: 4,
     quantity_booked: 5,
     quantity_out_of_service: 0,
+    quantity_supplied: 0,
     quantity_available: -1,
     since: null,
   });
@@ -391,8 +406,10 @@ Deno.test("peakStockConsumption: an open-ended sale keeps consuming AFTER its st
 Deno.test("peakStockConsumption: nothing unavailable means held, everywhere", () => {
   assertEquals(peakStockConsumption(stock(7, [])), {
     quantity_held: 7,
+    quantity_owned: 7,
     quantity_booked: 0,
     quantity_out_of_service: 0,
+    quantity_supplied: 0,
     quantity_available: 7,
     since: null,
   });
@@ -604,8 +621,10 @@ Deno.test("computeStockAvailability: an uncounted product still sums booked and 
   const s = stock(null, [iv(D1, D5, 3, "booking"), iv(D1, D5, 2, "oos")]);
   assertEquals(computeStockAvailability(s, win("2026-06-01", "2026-06-05")), {
     quantity_held: null,
+    quantity_owned: null,
     quantity_booked: 3,
     quantity_out_of_service: 2,
+    quantity_supplied: 0,
     quantity_available: null,
   });
 });
@@ -619,8 +638,10 @@ Deno.test("peakStockConsumption: an uncounted product reports its demand peak an
   const peak = peakStockConsumption(s);
   assertEquals(peak, {
     quantity_held: null,
+    quantity_owned: null,
     quantity_booked: 9,
     quantity_out_of_service: 0,
+    quantity_supplied: 0,
     quantity_available: null,
     since: "2026-06-02T00:00:00.000-05:00",
   });
@@ -631,8 +652,10 @@ Deno.test("peakStockConsumption: an uncounted product reports its demand peak an
 Deno.test("peakStockConsumption: an empty uncounted projection is a zero peak, not a missing one", () => {
   assertEquals(peakStockConsumption(stock(null, [])), {
     quantity_held: null,
+    quantity_owned: null,
     quantity_booked: 0,
     quantity_out_of_service: 0,
+    quantity_supplied: 0,
     quantity_available: null,
     since: null,
   });
@@ -652,11 +675,11 @@ Deno.test("property: nulling quantity_held changes ONLY quantity_available, in b
 
     const a = computeStockAvailability(counted, c.window);
     const u = computeStockAvailability(uncounted, c.window);
-    assertEquals(u, { ...a, quantity_held: null, quantity_available: null }, `seed ${seed}: window fold`);
+    assertEquals(u, { ...a, quantity_held: null, quantity_owned: null, quantity_available: null }, `seed ${seed}: window fold`);
 
     const pa = peakStockConsumption(counted);
     const pu = peakStockConsumption(uncounted);
-    assertEquals(pu, { ...pa, quantity_held: null, quantity_available: null }, `seed ${seed}: peak`);
+    assertEquals(pu, { ...pa, quantity_held: null, quantity_owned: null, quantity_available: null }, `seed ${seed}: peak`);
     if (pa.quantity_booked + pa.quantity_out_of_service > 0) peaksWithDemand++;
   }
   // Non-degeneracy: a corpus with no demand would pass the peak half vacuously.
@@ -686,4 +709,84 @@ Deno.test("availableSetsOf: reads an order line's TOTAL component quantity throu
   // A component asking for nothing places no ceiling (it used to divide by 0).
   assertEquals(availableSetsOf(term(6), [{ quantity: 0, sets: 2, availability: term(0) }]), 6);
   assertEquals(availableSetsOf("unbounded", [{ quantity: 0, availability: term(4) }]), null, "nothing bounded");
+});
+
+// ── Supply: subrents ─────────────────────────────────────────────────────────
+//
+// Order 1074: 20 Jiffy Steamers booked 10-19 → 10-24, 10 owned, 10 subrented.
+
+const H_START = "2026-10-18T09:00:00.000-05:00";
+const H_END = "2026-10-25T17:00:00.000-05:00";
+const B_START = "2026-10-19T08:00:00.000-05:00";
+const B_END = "2026-10-24T18:00:00.000-05:00";
+const sup = (start: string, end: string, quantity: number): StockSupplyEntry => ({ start, end, quantity, kind: "subrent" });
+
+Deno.test("supply: order 1074 — 10 owned, 20 booked, 10 subrented over the job reads 0, and the peak 0", () => {
+  const before = stock(10, [iv(B_START, B_END, 20)]);
+  assertEquals(computeStockAvailability(before, win("2026-10-19", "2026-10-24")).quantity_available, -10, "the shortage the PO answers");
+  const s = stock(10, [iv(B_START, B_END, 20)], [sup(H_START, H_END, 10)]);
+  const a = computeStockAvailability(s, win("2026-10-19", "2026-10-24"));
+  assertEquals([a.quantity_owned, a.quantity_supplied, a.quantity_available], [10, 10, 0]);
+  assertEquals(peakStockConsumption(s).quantity_available, 0);
+});
+
+Deno.test("supply: once RECEIVED the rented units are in held, and owned — not held — is the base", () => {
+  // Same answer after receipt: held 20 with 10 rented in, supply still 10.
+  const s = stock(20, [iv(B_START, B_END, 20)], [sup(H_START, H_END, 10)], 10);
+  const a = computeStockAvailability(s, win("2026-10-19", "2026-10-24"));
+  assertEquals([a.quantity_held, a.quantity_owned, a.quantity_available], [20, 10, 0]);
+});
+
+Deno.test("supply: a hire ending 10-22 leaves the window −10, and the peak −10 at 10-22 + 1ms", () => {
+  const end = "2026-10-22T17:00:00.000-05:00";
+  const s = stock(10, [iv(B_START, B_END, 20)], [sup(H_START, end, 10)]);
+  assertEquals(computeStockAvailability(s, win("2026-10-19", "2026-10-24")).quantity_supplied, 0);
+  assertEquals(computeStockAvailability(s, win("2026-10-19", "2026-10-24")).quantity_available, -10);
+  // A window inside the hire still promises the 10.
+  assertEquals(computeStockAvailability(s, win("2026-10-19", "2026-10-21")).quantity_available, 0);
+  const p = peakStockConsumption(s);
+  assertEquals(p.quantity_available, -10);
+  assertEquals(p.since, "2026-10-22T17:00:00.001-05:00");
+});
+
+Deno.test("supply: two staggered hires — the window takes the MINIMUM, not the sum", () => {
+  // 5 over 10-18..10-21 and 5 over 10-20..10-25: never more than 10 at once,
+  // and only 5 for the whole of 10-19..10-24.
+  const s = stock(10, [iv(B_START, B_END, 20)], [
+    sup(H_START, "2026-10-21T17:00:00.000-05:00", 5),
+    sup("2026-10-20T09:00:00.000-05:00", H_END, 5),
+  ]);
+  const a = computeStockAvailability(s, win("2026-10-19", "2026-10-24"));
+  assertEquals([a.quantity_supplied, a.quantity_available], [5, -5]);
+  assertEquals(peakStockConsumption(s).quantity_available, -5);
+});
+
+Deno.test("supply: with no demand, availability is owned + supply over the hire, owned outside it", () => {
+  const s = stock(10, [], [sup(H_START, H_END, 10)]);
+  assertEquals(computeStockAvailability(s, win("2026-10-19", "2026-10-24")).quantity_available, 20);
+  assertEquals(computeStockAvailability(s, win("2026-10-01", "2026-10-30")).quantity_available, 10);
+  // Supply alone never makes a peak: consumption − supply ≤ 0 everywhere.
+  assertEquals(peakStockConsumption(s), {
+    quantity_held: 10,
+    quantity_owned: 10,
+    quantity_booked: 0,
+    quantity_out_of_service: 0,
+    quantity_supplied: 0,
+    quantity_available: 10,
+    since: null,
+  });
+});
+
+Deno.test("supplyFromPurchase: a live subrent's line, net of canceled and returned; [] for anything else", () => {
+  const line = { uid_product: "P", quantity: 10, quantity_canceled: 0, quantity_returned: 0, dates: { start: H_START, end: H_END } };
+  const p = { kind: "subrent" as const, status: "active" as const, lines: [line, { ...line, uid_product: "Q" }] };
+  assertEquals(supplyFromPurchase(p, "P"), [sup(H_START, H_END, 10)]);
+  assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, quantity_canceled: 4, quantity_returned: 3 }] }, "P"), [sup(H_START, H_END, 3)]);
+  // Liveness and zero are ONE filter.
+  assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, quantity_returned: 10 }] }, "P"), []);
+  assertEquals(supplyFromPurchase({ ...p, status: "complete" }, "P"), []);
+  assertEquals(supplyFromPurchase({ ...p, status: "canceled" }, "P"), []);
+  assertEquals(supplyFromPurchase({ ...p, kind: "buy" }, "P"), []);
+  assertEquals(supplyFromPurchase({ status: "active", lines: [line] }, "P"), [], "an absent kind is a buy");
+  assertEquals(supplyFromPurchase(p, "R"), []);
 });

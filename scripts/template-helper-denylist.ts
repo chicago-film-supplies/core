@@ -168,9 +168,11 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "intervalsOverlap",
     "windowMs",
     // The reducers and the fold: one takes a booking, one an OOS record, one a
-    // `stock/{P}` document. Same reason as the rest of the namespace.
+    // subrent purchase, one a `stock/{P}` document. Same reason as the rest of
+    // the namespace.
     "unavailableFromBooking",
     "unavailableFromOOS",
+    "supplyFromPurchase",
     "computeStockAvailability",
     "peakStockConsumption",
     // The uncounted arm of the fold's arithmetic. Its inputs are a ledger's

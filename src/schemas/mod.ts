@@ -1106,6 +1106,10 @@ export {
   StockUnavailableKindEnum,
   type StockUnavailableEntry,
   type StockUnavailableKindType,
+  STOCK_SUPPLY_KINDS,
+  StockSupplyKindEnum,
+  type StockSupplyEntry,
+  type StockSupplyKindType,
 } from "./stock.ts";
 
 export {

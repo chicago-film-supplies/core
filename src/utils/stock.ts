@@ -13,7 +13,8 @@
  *    {@link windowMs}. The rules that are easy to get subtly wrong.
  * 2. **Reducers** — {@link unavailableFromBooking}, {@link unavailableFromOOS}:
  *    one source document → the pre-reduced anonymous interval stored in
- *    `stock/{P}.unavailable[]`.
+ *    `stock/{P}.unavailable[]`; and {@link supplyFromPurchase}, a subrent →
+ *    the SUPPLY intervals stored in `stock/{P}.supply[]`.
  * 3. **The folds** — {@link computeStockAvailability}: that array + a window →
  *    the numbers. {@link peakStockConsumption}: that array alone → the instant
  *    at which most units are out at once, which is the window-free *"is this
@@ -90,10 +91,13 @@ import type {
   FirestoreTimestampValue,
   OOSBreakdown,
   OOSStatusType,
+  PurchaseKindType,
+  PurchaseStatusType,
   Stock,
+  StockSupplyEntry,
   StockUnavailableEntry,
 } from "../schemas/mod.ts";
-import { toChicagoEndOfDay, toChicagoStartOfDay } from "./dates.ts";
+import { toChicagoEndOfDay, toChicagoInstant, toChicagoStartOfDay } from "./dates.ts";
 import { sumBreakdownKeys } from "./bookings.ts";
 
 /** The keys a booking holds units out of `quantity_held` in, before ownership is read. */
@@ -424,6 +428,84 @@ export function unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | n
   return { start: o.dates.start, end: o.dates.end, quantity, kind: "oos" };
 }
 
+/** Just enough of a purchase to reduce it to the supply it adds. */
+export interface StockPurchaseSource {
+  kind?: PurchaseKindType;
+  status: PurchaseStatusType;
+  lines: readonly {
+    uid_product: string;
+    quantity: number;
+    quantity_canceled: number;
+    quantity_returned?: number;
+    dates?: { start: string; end: string };
+  }[];
+}
+
+/**
+ * Reduce a purchase to the supply intervals it adds for ONE product — one
+ * entry per live subrent line naming it (a purchase holds one line per
+ * product, so at most one), and `[]` otherwise.
+ *
+ * Liveness is the reducers' one filter, as for bookings and out-of-service:
+ * only an `active` SUBRENT supplies anything, and a line supplying nothing is
+ * dropped rather than stored as a zero. A line supplies
+ * `quantity − canceled − returned`: what was ordered and not called off, less
+ * what has already gone back. RECEIPT does not enter — supply counts from the
+ * moment the purchase exists (owner, 2026-10-24); receipt is custody only.
+ *
+ * ⚠️ A unit that has not gone back by `dates.end` stops counting as supply at
+ * `end` while it is still in CFS's custody (`quantity_rented_in`). That is the
+ * conservative direction — late but valid; the return card shows it overdue.
+ */
+export function supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): StockSupplyEntry[] {
+  if (p.kind !== "subrent" || p.status !== "active") return [];
+  const entries: StockSupplyEntry[] = [];
+  for (const line of p.lines) {
+    if (line.uid_product !== uidProduct || !line.dates) continue;
+    const quantity = line.quantity - line.quantity_canceled - (line.quantity_returned ?? 0);
+    if (quantity <= 0) continue;
+    entries.push({ start: line.dates.start, end: line.dates.end, quantity, kind: "subrent" });
+  }
+  return entries;
+}
+
+/** Supply live at the instant `t` — Σ entries whose closed `[start, end]` contains it. */
+function supplyAt(supply: readonly { startMs: number; endMs: number; quantity: number }[], t: number): number {
+  let total = 0;
+  for (const e of supply) if (e.startMs <= t && t <= e.endMs) total += e.quantity;
+  return total;
+}
+
+function supplyMs(supply: readonly StockSupplyEntry[]): { startMs: number; endMs: number; quantity: number }[] {
+  return supply.map((e) => ({ startMs: Date.parse(e.start), endMs: Date.parse(e.end), quantity: e.quantity }));
+}
+
+/**
+ * The supply a window can PROMISE: the minimum, over every instant of
+ * `[startMs, endMs]`, of the supply live at that instant.
+ *
+ * ⚠️ **This is the inversion of how consumption is read, and both are
+ * conservative.** Consumption SUBTRACTS, so the window sums every entry that
+ * overlaps it (a unit claimed at any moment is unavailable for the span).
+ * Supply ADDS, so the window takes the LEAST supply at any moment: a unit
+ * present for only part of the span cannot be promised for all of it. Order
+ * 1074 is the witness — 10 owned, 20 booked 10-19 → 10-24, 10 subrented
+ * 10-18 → 10-25 reads 0; shorten the hire to end 10-22 and the window reads
+ * −10, because for the last two days the 10 rented units are gone.
+ *
+ * Supply is piecewise constant and only FALLS just after an entry's end, so the
+ * minimum over the window is attained at its start or at some `end + 1ms`
+ * inside it (closed bounds).
+ */
+function minSupplyOver(supply: readonly { startMs: number; endMs: number; quantity: number }[], startMs: number, endMs: number): number {
+  let min = supplyAt(supply, startMs);
+  for (const e of supply) {
+    const t = e.endMs + 1;
+    if (t > startMs && t <= endMs) min = Math.min(min, supplyAt(supply, t));
+  }
+  return min;
+}
+
 // ── The fold ────────────────────────────────────────────────────────────────
 
 /**
@@ -443,10 +525,32 @@ export function unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | n
  * `?? Infinity` poisons a sum — is the defect this shape exists to prevent.
  */
 export interface StockAvailability {
+  /** Units in CFS's custody — rented-in units included. Not the base of availability; see `quantity_owned`. */
   quantity_held: number | null;
+  /** `quantity_held − quantity_rented_in`: the units CFS owns, which availability starts from. `null` when uncounted. */
+  quantity_owned: number | null;
   quantity_booked: number;
   quantity_out_of_service: number;
+  /** Time-bounded supply (subrents) the window can promise — the minimum over it. `0` with no supply. */
+  quantity_supplied: number;
   quantity_available: number | null;
+}
+
+/**
+ * The projection fields every engine read REQUIRES. `supply` and
+ * `quantity_rented_in` are optional on the stored document (expand/contract)
+ * and deliberately NOT here: a caller building its own inputs — the oversell
+ * gate does — must pass both, so it fails to compile rather than silently
+ * ignoring supply and firing `stock_oversold` on every subrented product. A
+ * reader of a stored `stock/{P}` writes `?? []` / `?? 0` at the read.
+ */
+export type StockEngineInput = Pick<Stock, "quantity_held" | "unavailable"> & {
+  supply: readonly StockSupplyEntry[];
+  quantity_rented_in: number;
+};
+
+function ownedOf(stock: StockEngineInput): number | null {
+  return stock.quantity_held === null ? null : stock.quantity_held - stock.quantity_rented_in;
 }
 
 /**
@@ -462,8 +566,15 @@ export function availableFrom(held: number | null, consumed: number): number | n
  * projection.
  *
  * ```
- * quantity_available = quantity_held − quantity_booked(w) − quantity_out_of_service(w)
+ * quantity_owned     = quantity_held − quantity_rented_in
+ * quantity_available = quantity_owned − quantity_booked(w) − quantity_out_of_service(w) + quantity_supplied(w)
  * ```
+ *
+ * ⚠️ **The base is OWNED, not held.** A rented-in unit is in `quantity_held`
+ * once received, and it is also in `supply` from the moment its purchase exists;
+ * starting from held would count a received rented unit twice. Supply is the
+ * MINIMUM over the window (see `minSupplyOver`), the opposite reduction to
+ * consumption's sum.
  *
  * Negative results are preserved, never clamped: an oversold product must stay
  * visibly oversold, and #424 makes that the intended shortage signal for
@@ -483,7 +594,7 @@ export function availableFrom(held: number | null, consumed: number): number | n
  * the exact answer; a daily curve does not.
  */
 export function computeStockAvailability(
-  stock: Pick<Stock, "quantity_held" | "unavailable">,
+  stock: StockEngineInput,
   window: AvailabilityWindow,
 ): StockAvailability {
   const { startMs, endMs } = windowMs(window);
@@ -499,12 +610,15 @@ export function computeStockAvailability(
     else quantity_out_of_service += u.quantity;
   }
 
-  const quantity_held = stock.quantity_held;
+  const quantity_owned = ownedOf(stock);
+  const quantity_supplied = minSupplyOver(supplyMs(stock.supply), startMs, endMs);
   return {
-    quantity_held,
+    quantity_held: stock.quantity_held,
+    quantity_owned,
     quantity_booked,
     quantity_out_of_service,
-    quantity_available: availableFrom(quantity_held, quantity_booked + quantity_out_of_service),
+    quantity_supplied,
+    quantity_available: availableFrom(quantity_owned, quantity_booked + quantity_out_of_service - quantity_supplied),
   };
 }
 
@@ -513,9 +627,11 @@ export function computeStockAvailability(
 /** {@link peakStockConsumption}'s answer: the numbers, plus where they occur. */
 export interface PeakStockConsumption extends StockAvailability {
   /**
-   * The instant the peak opens, as the offset-carrying ISO string of the entry
-   * whose start opens it — or `null` when the peak is reached before any entry
-   * starts, i.e. it is carried by open-ended (`start: null`) entries alone.
+   * The instant the peak opens, as an offset-carrying Chicago ISO string — the
+   * start of the entry that opens it, or the millisecond after a supply
+   * interval's END when the peak opens because supply fell away — or `null`
+   * when the peak is reached before any entry starts, i.e. it is carried by
+   * open-ended (`start: null`) entries alone.
    *
    * `null` is therefore a real answer ("as far back as this projection goes"),
    * never "not found": {@link peakStockConsumption} always returns a point,
@@ -564,10 +680,16 @@ export interface PeakStockConsumption extends StockAvailability {
  *
  * Evaluated at candidate points rather than by a sweep with epsilon handling,
  * because the bounds are closed (`[start, end]`, both inclusive) and an interval
- * with `end: null` never ends: coverage is piecewise constant and only ever
- * *rises* at a start, so a maximum is attained at some entry's `start` — or, when
- * any entry is open on the left, in the region before every real start, where
- * exactly the `start: null` entries are live. Both cases are candidates below.
+ * with `end: null` never ends. The quantity maximised is `consumption(t) −
+ * supply(t)`, which is piecewise constant and RISES only where consumption
+ * rises (an unavailable entry's start) or supply falls (the millisecond after a
+ * supply entry's end) — so a maximum is attained at one of those, or, when any
+ * entry is open on the left, in the region before every real start, where
+ * exactly the `start: null` entries are live and no supply is (a supply entry
+ * always has a start). All three are candidates below.
+ *
+ * ⚠️ This used to say coverage "only ever rises at a start". That stays true of
+ * consumption; with supply in the subtraction, the end of a hire is a rise too.
  *
  * O(n²) on purpose: `n` is one product's live entries (26 is the corpus max
  * across both environments), and the quadratic form is `intervalsOverlap` applied
@@ -576,8 +698,8 @@ export interface PeakStockConsumption extends StockAvailability {
  *
  * ## The peak is a CONSUMPTION maximum, so it survives an uncounted product
  *
- * The search maximises `booked + out_of_service`, which for a counted product is
- * the same instant as minimising `available` (`held` is a constant). For an
+ * The search maximises `booked + out_of_service − supplied`, which for a counted
+ * product is the same instant as minimising `available` (`owned` is a constant). For an
  * uncounted one (`quantity_held: null`) there is no `available` to minimise, but
  * the busiest instant is still a real answer — it is the per-product demand peak
  * — so it is still returned, with `quantity_available: null`. A `null` is never
@@ -588,9 +710,11 @@ export interface PeakStockConsumption extends StockAvailability {
  * on `available` did.
  */
 export function peakStockConsumption(
-  stock: Pick<Stock, "quantity_held" | "unavailable">,
+  stock: StockEngineInput,
 ): PeakStockConsumption {
   const quantity_held = stock.quantity_held;
+  const quantity_owned = ownedOf(stock);
+  const supply = supplyMs(stock.supply);
   const entries = stock.unavailable.map((u) => ({
     startMs: u.start === null ? null : Date.parse(u.start),
     endMs: u.end === null ? null : Date.parse(u.end),
@@ -606,15 +730,23 @@ export function peakStockConsumption(
   const candidates: { at: number; iso: string | null }[] = [];
   if (entries.some((e) => e.startMs === null)) candidates.push({ at: -Infinity, iso: null });
   for (const e of entries) if (e.startMs !== null) candidates.push({ at: e.startMs, iso: e.startIso });
+  // Where supply falls away. The ISO is built in Chicago form, since there is no
+  // entry whose own bound it could be.
+  for (const e of supply) {
+    const at = e.endMs + 1;
+    candidates.push({ at, iso: toChicagoInstant(new Date(at).toISOString()) });
+  }
 
   let peak: PeakStockConsumption = {
     quantity_held,
+    quantity_owned,
     quantity_booked: 0,
     quantity_out_of_service: 0,
-    quantity_available: availableFrom(quantity_held, 0),
+    quantity_supplied: 0,
+    quantity_available: availableFrom(quantity_owned, 0),
     since: null,
   };
-  let peakConsumed = 0;
+  let peakNet = 0;
 
   for (const c of candidates) {
     let quantity_booked = 0;
@@ -624,14 +756,17 @@ export function peakStockConsumption(
       if (e.kind === "booking") quantity_booked += e.quantity;
       else quantity_out_of_service += e.quantity;
     }
-    const consumed = quantity_booked + quantity_out_of_service;
-    if (consumed > peakConsumed) {
-      peakConsumed = consumed;
+    const quantity_supplied = c.at === -Infinity ? 0 : supplyAt(supply, c.at);
+    const net = quantity_booked + quantity_out_of_service - quantity_supplied;
+    if (net > peakNet) {
+      peakNet = net;
       peak = {
         quantity_held,
+        quantity_owned,
         quantity_booked,
         quantity_out_of_service,
-        quantity_available: availableFrom(quantity_held, consumed),
+        quantity_supplied,
+        quantity_available: availableFrom(quantity_owned, net),
         since: c.iso,
       };
     }

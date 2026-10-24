@@ -99,6 +99,43 @@ export interface StockUnavailableEntry {
 }
 
 /**
+ * What added time-bounded SUPPLY. Each kind is drawn as its own row by the
+ * operator panel, and api-cloudrun#1228's expected inbound from a buy will be
+ * a second member.
+ */
+export const STOCK_SUPPLY_KINDS = ["subrent"] as const;
+/** Union of {@link STOCK_SUPPLY_KINDS}. */
+export type StockSupplyKindType = typeof STOCK_SUPPLY_KINDS[number];
+/** Zod enum for {@link StockSupplyKindType}. */
+export const StockSupplyKindEnum: z.ZodType<StockSupplyKindType> = z.enum(STOCK_SUPPLY_KINDS);
+
+/**
+ * One pre-reduced, anonymous SUPPLY interval: units that will be in CFS's
+ * hands over `[start, end]` without CFS owning them — a live subrent's line,
+ * counted from the moment the purchase exists (owner, 2026-10-24), not from
+ * receipt.
+ *
+ * Anonymous for the reason {@link StockUnavailableEntry} is: no purchase uid,
+ * no supplier. A SEPARATE array, never a third `STOCK_UNAVAILABLE_KINDS`
+ * member, because the fold SUMS every unavailable entry overlapping a window
+ * and must take the MINIMUM of supply over it — the two are opposite
+ * reductions.
+ *
+ * `quantity` is what the line still supplies: `quantity − canceled − returned`.
+ *
+ * ⚠️ **Both bounds are non-null, and that is a fact about `subrent` only.**
+ * A hire has a due-back date. api-cloudrun#1228's buy inbound is
+ * `[expected_date, +∞)`, so adding that kind must widen `end` to nullable for
+ * it — this is not "no schema change needed" for that issue.
+ */
+export interface StockSupplyEntry {
+  start: string;
+  end: string;
+  quantity: number;
+  kind: StockSupplyKindType;
+}
+
+/**
  * Window-independent availability inputs for one product. Doc id == `uid` ==
  * `uid_product` == the product's / inventory-ledger's Firestore id.
  *
@@ -112,14 +149,30 @@ export interface Stock {
   uid: string;
   uid_product: string;
   /**
-   * A copy of `inventory-ledgers/{P}.quantity_held` — **`null` when the product is
+   * A copy of `inventory-ledgers/{P}.quantity_held` — units in CFS's CUSTODY,
+   * rented-in units included (see {@link quantity_rented_in}) — **`null` when the product is
    * uncounted**, which availability reads as unbounded: `quantity_available` is
    * `null`, while `quantity_booked` and `quantity_out_of_service` are still
    * computed, because for an uncounted product they are the whole point (the
    * Booked tab, per-day demand). See `InventoryLedger.quantity_held`.
    */
   quantity_held: number | null;
+  /**
+   * A copy of `inventory-ledgers/{P}.quantity_rented_in` — the part of
+   * {@link quantity_held} that is rented in, so a reader can take OWNED units
+   * (`held − rented_in`) without a second document.
+   *
+   * Optional ONLY for the expand/contract step: absent on every projection
+   * until its first rebuild under the writer that stamps it (read as `0`),
+   * required after the sweep has rebuilt them all.
+   */
+  quantity_rented_in?: number;
   unavailable: StockUnavailableEntry[];
+  /**
+   * Time-bounded supply — see {@link StockSupplyEntry}. Optional and read as
+   * `[]` on the same expand/contract terms as {@link quantity_rented_in}.
+   */
+  supply?: StockSupplyEntry[];
   /**
    * The value of `stock-locks/{P}.seq` this projection was built from — a
    * **watchdog** field, not a client token and not a concurrency guard.
@@ -227,6 +280,14 @@ const StockUnavailableEntrySchema: z.ZodType<StockUnavailableEntry> = z.strictOb
   kind: StockUnavailableKindEnum.meta({ column: true, label: "Kind" }),
 });
 
+const StockSupplyEntrySchema: z.ZodType<StockSupplyEntry> = z.strictObject({
+  start: chicagoInstant().meta({ column: true, label: "Start" }),
+  end: chicagoInstant().meta({ column: true, label: "End" }),
+  // An entry that supplies nothing is never written, as on `unavailable[]`.
+  quantity: z.int().min(1).meta({ column: true, label: "Quantity" }),
+  kind: StockSupplyKindEnum.meta({ column: true, label: "Kind" }),
+}).refine((e) => Date.parse(e.end) >= Date.parse(e.start), { message: "a supply interval ends at or after it starts", path: ["end"] });
+
 /** Zod schema for {@link Stock}. */
 export const StockSchema: z.ZodType<Stock> = z.strictObject({
   uid: FirestoreId,
@@ -238,7 +299,9 @@ export const StockSchema: z.ZodType<Stock> = z.strictObject({
   // created the situation. Nullable for the same reason: the ledger's `null`
   // (uncounted) has to survive the copy.
   quantity_held: z.number().min(0).meta({ column: true, label: "Quantity Held" }).nullable(),
+  quantity_rented_in: z.int().min(0).meta({ column: true, label: "Rented In" }).optional(),
   unavailable: z.array(StockUnavailableEntrySchema).meta({ label: "Unavailable" }),
+  supply: z.array(StockSupplyEntrySchema).meta({ label: "Supply" }).optional(),
   claim_seq: z.int().min(0).meta({ column: true, label: "Claim Seq" }),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
   updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),
