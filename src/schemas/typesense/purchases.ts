@@ -21,21 +21,28 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * ⚠️ `reference` is `optional: true` because its Zod leaf is `.nullable()`:
  * the translate path omits a null rather than sending one, and a non-optional
  * declaration over a nullable leaf is a permanent, invisible sync 400.
+ *
+ * v2 (subrent purchase orders): `kind` (a facet, so the list can split buys
+ * from subrents) and `lines.quantity_returned`. Both `optional: true` because
+ * both storage leaves are optional — `kind` until the backfill stamps the
+ * pre-subrent purchases and the field becomes required, `quantity_returned`
+ * for good, since a buy line never carries it.
  */
 export const purchases: TypesenseCollectionConfig = {
   alias: "purchases",
-  version: 1,
+  version: 2,
   firestoreCollection: "purchases",
-  collectionName: "purchases_v1",
+  collectionName: "purchases_v2",
   enabled: true,
   schema: {
-    name: "purchases_v1",
+    name: "purchases_v2",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
       { name: "number", type: "int64", sort: true, index: true, facet: false },
       { name: "number_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "status", type: "string", facet: true },
+      { name: "kind", type: "string", facet: true, optional: true },
       { name: "supplier", type: "object" },
       { name: "supplier.uid", type: "string", facet: false, optional: true },
       { name: "supplier.name", type: "string", sort: true, stem: true, facet: false },
@@ -46,6 +53,7 @@ export const purchases: TypesenseCollectionConfig = {
       { name: "lines", type: "object[]", optional: true },
       { name: "lines.uid_product", type: "string[]", facet: false, optional: true },
       { name: "lines.name", type: "string[]", stem: true, optional: true },
+      { name: "lines.quantity_returned", type: "int32[]", facet: false, optional: true },
       { name: "total_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "created_by", type: "object", optional: true },

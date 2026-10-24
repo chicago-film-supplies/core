@@ -27749,6 +27749,7 @@ interface PurchaseDocument {
   number: number;
   number_str?: string;
   status: string;
+  kind?: string;
   supplier: typeLiteral;
   store: typeLiteral;
   reference?: string;
@@ -28545,6 +28546,12 @@ someone wants to search on it.
 ⚠️ `reference` is `optional: true` because its Zod leaf is `.nullable()`:
 the translate path omits a null rather than sending one, and a non-optional
 declaration over a nullable leaf is a permanent, invisible sync 400.
+
+v2 (subrent purchase orders): `kind` (a facet, so the list can split buys
+from subrents) and `lines.quantity_returned`. Both `optional: true` because
+both storage leaves are optional — `kind` until the backfill stamps the
+pre-subrent purchases and the field becomes required, `quantity_returned`
+for good, since a buy line never carries it.
 
 ```ts
 const purchases: TypesenseCollectionConfig;

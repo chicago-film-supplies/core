@@ -1143,10 +1143,12 @@ export interface PurchaseDocument {
   number: number;
   number_str?: string;
   status: string;
+  /** `buy` | `subrent`; absent on a pre-subrent purchase until the backfill. */
+  kind?: string;
   supplier: { uid?: string; name: string };
   store: { uid?: string; name: string };
   reference?: string;
-  lines?: Array<{ uid_product?: string; name?: string }>;
+  lines?: Array<{ uid_product?: string; name?: string; quantity_returned?: number }>;
   total_cents?: number;
   total_cents_str?: string;
   created_by?: TypesenseActorRef;
