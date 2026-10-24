@@ -312,6 +312,35 @@ export const MOVEMENT_TYPES = [
   // decrease relieved, which only a paired writer can do.
   "reclass_out",
   "reclass_in",
+  // ── subrent custody: in CFS's hands, not CFS's (api-cloudrun subrent POs) ──
+  //
+  // A subrent borrows units from a supplier for a hire window: they go out and
+  // come back through the ordinary ladder, then go back to the supplier. Until
+  // these existed nothing could say "in our custody, not owned" — every
+  // `outside → locations` type ENTERS OWNERSHIP and requires a cost, so a $0
+  // `purchase` of 10 rented steamers would have diluted the owned average to
+  // half and a weighted-relief return would have destroyed owned basis.
+  //
+  // 🔴 **`hire_in` is NOT `purchase`, `find` or `adjustment_increase`.** It
+  // raises `quantity_held` — which counts CUSTODY — and also raises
+  // `InventoryLedger.quantity_rented_in` by the same amount, so the units CFS
+  // OWNS (`held − rented_in`) and the basis averaged over them do not move.
+  // `hire_out` is its mirror. Both are cost-forbidden, so
+  // `getTransactionMultiplier` reads their custody direction off `places` and
+  // `xeroPostingFor` skips them on `no_cost_contract`: a subrent's money is a
+  // job cost on its bill, never an asset cost on a movement.
+  //
+  // The supplier end is `outside`, for the reason the reclass pair gives: a
+  // line nets `(to ? +q) + (from ? −q)`, so a non-null supplier endpoint would
+  // net `hire_in` to zero and `quantity_held` would never rise.
+  //
+  // Each names its purchase in `sources[]` and its supplier, like a receipt.
+  // Neither is manual (they are raised from the purchase, which co-writes
+  // `quantity_received` / `quantity_returned`), neither has an undo type — a
+  // mistake is a `reverses` reversal through the purchase's own lever — and
+  // neither names units: a subrent product is never serialized.
+  "hire_in",
+  "hire_out",
   // Placement only — nets to zero on ownership and touches no cost.
   "transfer",
   "return_to_service",
@@ -417,7 +446,10 @@ export const MovementTypeEnum: z.ZodType<MovementTypeType> = z.enum(MOVEMENT_TYP
 
 /**
  * The kinds of place a unit can be in. `"outside"` is the absence of a place —
- * a `null` side of `location`, meaning outside CFS ownership entirely.
+ * a `null` side of `location`, meaning outside CFS's CUSTODY entirely: the
+ * supplier a unit was bought from or is rented from, the customer a unit was
+ * sold to, the void a write-off sends it to. Ownership is a separate question
+ * since subrents (`hire_in` / `hire_out` cross this boundary without owning).
  */
 export const PLACE_KINDS = ["locations", "bookings", "out-of-service", "outside"] as const;
 /** One kind of place a unit can occupy. */
@@ -782,6 +814,32 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
     units: "forbidden",
     uncounted: "refused",
   },
+  // ── subrent custody (see `MOVEMENT_TYPES`) ──
+  // `custody: "forbidden"` is about the BOOKING ladder, not the place: the
+  // units enter and leave CFS's custody at a shelf, and a booking then claims
+  // them like any other unit. `cost: "forbidden"` is the whole point. `units:
+  // "forbidden"` because a serialized product cannot be subrented (its roster
+  // would mint permanent numbers), and `service: "forbidden"` because a
+  // damaged rented unit's resolution is not modelled yet — a flagged unit
+  // cannot be handed back.
+  hire_in: {
+    custody: "forbidden",
+    cost: "forbidden",
+    places: { from: ["outside"], to: ["locations"] },
+    booking: "forbidden",
+    service: "forbidden",
+    units: "forbidden",
+    uncounted: "refused",
+  },
+  hire_out: {
+    custody: "forbidden",
+    cost: "forbidden",
+    places: { from: ["locations"], to: ["outside"] },
+    booking: "forbidden",
+    service: "forbidden",
+    units: "forbidden",
+    uncounted: "refused",
+  },
   // No custody: the booking keeps `damaged: N` forever — a terminal key and part
   // of its history — so removing it would break `sum(breakdown) === quantity`.
   // A write-off removes ownership, not history.
@@ -1029,9 +1087,12 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
 })();
 
 /**
- * Returns +1 for movements that increase owned quantity, -1 for those that
+ * Returns +1 for movements that increase HELD quantity, -1 for those that
  * decrease it, and 0 for those that leave it untouched (a `transfer`, or a
- * custody-only fulfillment step). ⚠️ It used to list "a cost-only adjustment"
+ * custody-only fulfillment step). Held is CUSTODY, which since subrents is not
+ * the same as ownership: `hire_in` is +1 and owns nothing. A caller asking an
+ * OWNERSHIP question pairs this with `hasCosts` — every type that changes
+ * ownership carries a cost, and the subrent pair is cost-forbidden. ⚠️ It used to list "a cost-only adjustment"
  * as a third case; there is no such member, and there cannot be one until the
  * two gates in the depreciation note on {@link MOVEMENT_TYPES} are opened
  * (core#75).
@@ -1097,8 +1158,10 @@ export function getDisplayTransactionTypes(increaseOnly?: boolean): MovementType
 /**
  * One physical movement of `quantity` units between two places.
  *
- * A `null` side means "outside CFS ownership". Both sides non-null is a move
- * that leaves `quantity_held` untouched.
+ * A `null` side means "outside CFS custody" — for most types that is also
+ * outside ownership, but a `hire_in` / `hire_out` line crosses custody alone
+ * (the units are the supplier's). Both sides non-null is a move that leaves
+ * `quantity_held` untouched.
  *
  * Note `lines[]` is NOT directly queryable — Firestore `array-contains` works on
  * scalar arrays, not nested object fields. Query paths come from the flat
@@ -1393,8 +1456,9 @@ export interface Movement {
   xero_id?: string | null;
 
   /**
-   * Who the stock was bought from, snapshotted `{uid, name}` at the time of
-   * purchase. `null` on every non-`purchase` type.
+   * Who the stock was bought from — or, on `hire_in` / `hire_out`, rented from
+   * — snapshotted `{uid, name}` at the time. `null` on every other type; never
+   * `null` on the subrent pair.
    *
    * ⚠️ **Optional, not required-nullable, and for the same reason as `xero_id`
    * directly above** — 1,159 prod / 1,414 dev movements predate the field
@@ -2021,17 +2085,33 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
         "so the bill it posts has to be billed to somebody",
     });
   }
+  // The subrent pair has no history, so its rule is strict where the
+  // purchase's above must tolerate an absent key: the units belong to the
+  // supplier, and a hire that cannot say whose units they are cannot be
+  // returned to anybody.
+  const hire = doc.type === "hire_in" || doc.type === "hire_out";
+  if (hire && (doc.supplier === null || doc.supplier === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["supplier"],
+      message: `a ${doc.type} names the supplier the units are rented from`,
+    });
+  }
 
   // A receipt names the purchase it receives against (api-cloudrun#1210), and
   // the purchase finds its receipts — and their reversals, which carry the same
   // `sources[]` — only through `query_by_sources`, the out-of-service shape.
   // ONE purchase: its line is `(purchase, uid_product)`, so a second would make
-  // the bucket the receipt moves ambiguous. Only a `purchase` may name one:
-  // every other type moves stock CFS already owns.
+  // the bucket the receipt moves ambiguous. Only the types that cross the
+  // boundary WITH the supplier may name one — a `purchase` receipt, and a
+  // subrent's `hire_in` / `hire_out`. Every other type moves stock that is
+  // already in CFS's custody, or leaves it for somebody who is not a supplier.
   //
-  // ⚠️ "At most one", not "exactly one". The 406 historic purchases name none
-  // until the backfill links them, and an unlinked purchase stays writable
-  // until P6 retires that path — refusing it is a separate, ordered step.
+  // ⚠️ For a `purchase`, "at most one", not "exactly one". The 406 historic
+  // purchases name none until the backfill links them, and an unlinked
+  // purchase stays writable until P6 retires that path — refusing it is a
+  // separate, ordered step. The subrent pair has no history, so for it the
+  // rule is exactly one: a hire that names no purchase moves no bucket.
   const purchases = doc.sources.filter((s) => s.collection === "purchases").length;
   if (doc.type === "purchase" && purchases > 1) {
     ctx.addIssue({
@@ -2040,7 +2120,14 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
       message: "a purchase receipt names exactly ONE purchase in sources[]",
     });
   }
-  if (doc.type !== "purchase" && purchases > 0) {
+  if (hire && purchases !== 1) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["sources"],
+      message: `a ${doc.type} names exactly ONE purchase in sources[] — the subrent it is part of`,
+    });
+  }
+  if (doc.type !== "purchase" && !hire && purchases > 0) {
     ctx.addIssue({
       code: "custom",
       path: ["sources"],

@@ -6504,7 +6504,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "hire_in" | "hire_out" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
 ```
 
 ### `MOVEMENT_UNDOES`
@@ -6842,8 +6842,10 @@ const MovementLine: z.ZodType<MovementLineType>;
 
 One physical movement of `quantity` units between two places.
 
-A `null` side means "outside CFS ownership". Both sides non-null is a move
-that leaves `quantity_held` untouched.
+A `null` side means "outside CFS custody" — for most types that is also
+outside ownership, but a `hire_in` / `hire_out` line crosses custody alone
+(the units are the supplier's). Both sides non-null is a move that leaves
+`quantity_held` untouched.
 
 Note `lines[]` is NOT directly queryable — Firestore `array-contains` works on
 scalar arrays, not nested object fields. Query paths come from the flat
@@ -8444,7 +8446,10 @@ const PICK_SHEET_LEGS: "delivery" | "collection"[];
 ### `PLACE_KINDS`
 
 The kinds of place a unit can be in. `"outside"` is the absence of a place —
-a `null` side of `location`, meaning outside CFS ownership entirely.
+a `null` side of `location`, meaning outside CFS's CUSTODY entirely: the
+supplier a unit was bought from or is rented from, the customer a unit was
+sold to, the void a write-off sends it to. Ownership is a separate question
+since subrents (`hire_in` / `hire_out` cross this boundary without owning).
 
 ```ts
 const PLACE_KINDS: "locations" | "bookings" | "out-of-service" | "outside"[];
@@ -14827,9 +14832,12 @@ after it. Type carries direction, reason carries why, and the contract's
 
 ### `getTransactionMultiplier(type: MovementTypeType): 1 | -1 | 0`
 
-Returns +1 for movements that increase owned quantity, -1 for those that
+Returns +1 for movements that increase HELD quantity, -1 for those that
 decrease it, and 0 for those that leave it untouched (a `transfer`, or a
-custody-only fulfillment step). ⚠️ It used to list "a cost-only adjustment"
+custody-only fulfillment step). Held is CUSTODY, which since subrents is not
+the same as ownership: `hire_in` is +1 and owns nothing. A caller asking an
+OWNERSHIP question pairs this with `hasCosts` — every type that changes
+ownership carries a cost, and the subrent pair is cost-forbidden. ⚠️ It used to list "a cost-only adjustment"
 as a third case; there is no such member, and there cannot be one until the
 two gates in the depreciation note on {@link MOVEMENT_TYPES} are opened
 (core#75).
@@ -25843,7 +25851,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "hire_in" | "hire_out" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
 ```
 
 ### `MOVEMENT_UNDOES`
@@ -26012,8 +26020,10 @@ const MovementLine: z.ZodType<MovementLineType>;
 
 One physical movement of `quantity` units between two places.
 
-A `null` side means "outside CFS ownership". Both sides non-null is a move
-that leaves `quantity_held` untouched.
+A `null` side means "outside CFS custody" — for most types that is also
+outside ownership, but a `hire_in` / `hire_out` line crosses custody alone
+(the units are the supplier's). Both sides non-null is a move that leaves
+`quantity_held` untouched.
 
 Note `lines[]` is NOT directly queryable — Firestore `array-contains` works on
 scalar arrays, not nested object fields. Query paths come from the flat
@@ -26143,7 +26153,10 @@ interface MovementUnitType {
 ### `PLACE_KINDS`
 
 The kinds of place a unit can be in. `"outside"` is the absence of a place —
-a `null` side of `location`, meaning outside CFS ownership entirely.
+a `null` side of `location`, meaning outside CFS's CUSTODY entirely: the
+supplier a unit was bought from or is rented from, the customer a unit was
+sold to, the void a write-off sends it to. Ownership is a separate question
+since subrents (`hire_in` / `hire_out` cross this boundary without owning).
 
 ```ts
 const PLACE_KINDS: "locations" | "bookings" | "out-of-service" | "outside"[];
@@ -26304,9 +26317,12 @@ transaction on a product.
 
 ### `getTransactionMultiplier(type: MovementTypeType): 1 | -1 | 0`
 
-Returns +1 for movements that increase owned quantity, -1 for those that
+Returns +1 for movements that increase HELD quantity, -1 for those that
 decrease it, and 0 for those that leave it untouched (a `transfer`, or a
-custody-only fulfillment step). ⚠️ It used to list "a cost-only adjustment"
+custody-only fulfillment step). Held is CUSTODY, which since subrents is not
+the same as ownership: `hire_in` is +1 and owns nothing. A caller asking an
+OWNERSHIP question pairs this with `hasCosts` — every type that changes
+ownership carries a cost, and the subrent pair is cost-forbidden. ⚠️ It used to list "a cost-only adjustment"
 as a third case; there is no such member, and there cannot be one until the
 two gates in the depreciation note on {@link MOVEMENT_TYPES} are opened
 (core#75).
@@ -40568,7 +40584,7 @@ The api maps each to a 400's wording and the manager to a hint; neither
 restates which movements earn one.
 
 ```ts
-type StandaloneReversalRefusalCode = "count_boundary" | "roster_boundary" | "reclass_pair" | "booking" | "purchase_receipt" | "out_of_service" | "oos_split" | "oos_flagged_transfer" | "oos_flagged";
+type StandaloneReversalRefusalCode = "count_boundary" | "roster_boundary" | "reclass_pair" | "booking" | "purchase_receipt" | "purchase_return" | "out_of_service" | "oos_split" | "oos_flagged_transfer" | "oos_flagged";
 ```
 
 ### `XERO_ASSET_ACCOUNTS`
@@ -40902,7 +40918,9 @@ of these:
   mirror posts one side of a 2510 pair, unbalancing it. The pair reverses
   together, at the original amounts.
 - **A booking's movement** — the booking's `breakdown` is the other half.
-- **A purchase receipt** — the purchase line's `quantity_received` is.
+- **A purchase receipt** — the purchase line's `quantity_received` is; and
+  a subrent's **return** (`hire_out`), whose other half is
+  `quantity_returned`, so it earns its own code and lever.
 - **An `out-of-service` endpoint, or a flag** (`service` set) — the record's
   buckets and `stores[]` are. A reason edit's SPLIT names two records.
 

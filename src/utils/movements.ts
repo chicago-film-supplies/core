@@ -143,8 +143,10 @@ export type StandaloneReversalRefusalCode =
   | "reclass_pair"
   /** A booking's movement — undone by lowering the booking's breakdown. */
   | "booking"
-  /** A purchase receipt — reversed with the purchase line (`…/receipts/{uid}/reverse`). */
+  /** A purchase receipt — `purchase` or a subrent's `hire_in` — reversed with the purchase line (`…/receipts/{uid}/reverse`). */
   | "purchase_receipt"
+  /** A subrent's `hire_out` — reversed with the purchase line (`…/returns/{uid}/reverse`). */
+  | "purchase_return"
   /** A line with an `out-of-service` endpoint — the record's buckets are the other half. */
   | "out_of_service"
   /** A reason edit's flag SPLIT, naming two records. */
@@ -181,7 +183,9 @@ export interface StandaloneReversalRefusal {
  *   mirror posts one side of a 2510 pair, unbalancing it. The pair reverses
  *   together, at the original amounts.
  * - **A booking's movement** — the booking's `breakdown` is the other half.
- * - **A purchase receipt** — the purchase line's `quantity_received` is.
+ * - **A purchase receipt** — the purchase line's `quantity_received` is; and
+ *   a subrent's **return** (`hire_out`), whose other half is
+ *   `quantity_returned`, so it earns its own code and lever.
  * - **An `out-of-service` endpoint, or a flag** (`service` set) — the record's
  *   buckets and `stores[]` are. A reason edit's SPLIT names two records.
  *
@@ -200,7 +204,7 @@ export function standaloneReversalRefusal(
   if (m.uid_booking) return { code: "booking", uid: m.uid_booking };
   const sources = m.sources ?? [];
   const purchase = sources.find((s) => s.collection === "purchases");
-  if (purchase) return { code: "purchase_receipt", uid: purchase.uid };
+  if (purchase) return { code: m.type === "hire_out" ? "purchase_return" : "purchase_receipt", uid: purchase.uid };
   const record = (m.lines ?? [])
     .flatMap((line) => [line.location.from, line.location.to])
     .find((place) => place?.collection === "out-of-service");

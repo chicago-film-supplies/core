@@ -95,6 +95,8 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     write_off: null,
     reclass_out: null,
     reclass_in: null,
+    hire_in: null,
+    hire_out: null,
     transfer: null,
     return_to_service: null,
     // `with_booking`: the fixture attaches a booking, so it names the one
@@ -145,6 +147,8 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     write_off: null,
     reclass_out: null,
     reclass_in: null,
+    hire_in: null,
+    hire_out: null,
     transfer: null,
     return_to_service: null,
     flag: { from: null, to: "damaged" },
@@ -159,6 +163,8 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
 
   // A roster boundary numbers units where they stand, so it names them.
   const rosterBoundary = type === "enroll" || type === "unenroll";
+  // The subrent pair names its supplier and exactly one purchase.
+  const hire = type === "hire_in" || type === "hire_out";
 
   let lines: unknown[] = [];
   if (contract.places) {
@@ -192,7 +198,7 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     // which resolves a nullable to `null`, and a stored purchase with an
     // explicit `null` supplier is exactly what the schema now refuses. This is
     // the documented "a form seed may not parse" contract biting a fixture.
-    supplier: type === "purchase" ? { uid: SUPPLIER, name: "Test Supplier" } : null,
+    supplier: type === "purchase" || hire ? { uid: SUPPLIER, name: "Test Supplier" } : null,
     lines,
     date: "2026-03-01T00:00:00Z",
     date_fs: mockTimestamp,
@@ -208,7 +214,11 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     created_at: mockTimestamp,
     updated_at: mockTimestamp,
     // A change of service state belongs to a record, named in `sources[]`.
-    sources: ("service" in over ? over.service : serviceFor[type]) ? [{ collection: "out-of-service", uid: OOS }] : [],
+    sources: ("service" in over ? over.service : serviceFor[type])
+      ? [{ collection: "out-of-service", uid: OOS }]
+      : hire
+      ? [{ collection: "purchases", uid: "testpurch10000000000" }]
+      : [],
     ...over,
   };
 }
@@ -250,11 +260,11 @@ Deno.test("a purchase naming TWO purchases is refused — its bucket would be am
   assertEquals(issuePaths(two), ["sources"]);
 });
 
-Deno.test("only a purchase may name a purchase: every other type is refused", () => {
+Deno.test("only a purchase or a hire may name a purchase: every other type is refused", () => {
   // Swept over every type rather than one example, so a new type defaults to
   // being checked. Each fixture is otherwise valid, so the ONE issue is this rule.
   for (const type of MOVEMENT_TYPES) {
-    if (type === "purchase") continue;
+    if (type === "purchase" || type === "hire_in" || type === "hire_out") continue;
     const base = movement(type);
     const doc = { ...base, sources: [...(base.sources as unknown[]), atPurchase] };
     assertEquals(issuePaths(doc), ["sources"], type);
@@ -1161,12 +1171,14 @@ function issuePaths(doc: unknown): string[] {
   return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
 }
 
-Deno.test("rule 5: only the twin reclass and the count boundaries forbid units", () => {
+Deno.test("rule 5: only the twin reclass, the subrent pair and the count boundaries forbid units", () => {
   // A reclass moves units between two products' rosters; a count boundary is
   // not where a serialized product's units are placed (its roster's `enroll`
-  // is), so naming one there would place it twice.
+  // is), so naming one there would place it twice. A subrent's units are never
+  // numbered: a serialized product cannot be subrented, because its roster
+  // would mint permanent numbers for units CFS gives back.
   const forbidden = MOVEMENT_TYPES.filter((t) => MOVEMENT_CONTRACTS[t].units === "forbidden");
-  assertEquals(forbidden, ["reclass_out", "reclass_in", "count_open", "count_close"]);
+  assertEquals(forbidden, ["reclass_out", "reclass_in", "hire_in", "hire_out", "count_open", "count_close"]);
 });
 
 Deno.test("rule 5: every type accepts empty unit keys (the scaffold) and refuses absent ones", () => {
@@ -1376,4 +1388,32 @@ Deno.test("rule 6: an unenroll cannot take units off a booking — a teardown wa
     lines: [{ quantity: 1, location: { from: atBooking, to: atBooking }, units: [3] }],
   });
   assertEquals(issuePaths(doc).sort(), ["lines.0.location.from", "lines.0.location.to"]);
+});
+
+// ── the subrent pair: custody without ownership ──────────────────────
+
+Deno.test("hire_in / hire_out: cost-forbidden, custody direction off places, no Xero posting", () => {
+  assertEquals(getTransactionMultiplier("hire_in"), 1);
+  assertEquals(getTransactionMultiplier("hire_out"), -1);
+  assertEquals(hasCosts("hire_in"), false);
+  assertEquals(hasCosts("hire_out"), false);
+  // A cost on either is a contract violation, not a free extra.
+  for (const type of ["hire_in", "hire_out"] as const) {
+    const costed = movement(type, { cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [0, 0] } });
+    assertEquals(issuePaths(costed), ["cost"], type);
+  }
+});
+
+Deno.test("hire_in / hire_out name exactly ONE purchase and a supplier — strict, no history to tolerate", () => {
+  for (const type of ["hire_in", "hire_out"] as const) {
+    assertEquals(issuePaths(movement(type, { sources: [] })), ["sources"], `${type} naming none`);
+    assertEquals(
+      issuePaths(movement(type, { sources: [atPurchase, { collection: "purchases", uid: "testpurch20000000000" }] })),
+      ["sources"],
+      `${type} naming two`,
+    );
+    assertEquals(issuePaths(movement(type, { supplier: null })), ["supplier"], `${type} null supplier`);
+    const { supplier: _absent, ...noKey } = movement(type);
+    assertEquals(issuePaths(noKey), ["supplier"], `${type} absent supplier`);
+  }
 });
