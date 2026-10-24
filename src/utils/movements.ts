@@ -432,6 +432,18 @@ export interface LedgerFoldResult {
    * WRITER-refuses / SCAN-counts split {@link basisUnderflowCents} uses.
    */
   countClosedHeld: number;
+  /**
+   * Units of a cost-bearing DECREASE beyond what CFS OWNS before it — the
+   * part that could only have come out of rented-in units
+   * (`quantity_held − quantity_rented_in`). `0` on every other movement.
+   *
+   * v1 says owned units depart first, so a write-off, sale or loss that takes
+   * owned units below zero is ambiguous: it is either a rented unit lost (a
+   * supplier charge, not modelled) or a miscount. The relief is capped at the
+   * basis by `costOfUnits` either way. WRITER refuses, SCAN counts — the split
+   * {@link basisUnderflowCents} uses.
+   */
+  ownedUnderflowUnits: number;
 }
 
 /**
@@ -445,6 +457,7 @@ export interface LedgerFoldResult {
 function openedCountBase(ledger: InventoryLedger): InventoryLedger {
   return {
     ...ledger,
+    ...rentedInZeroed(ledger),
     quantity_held: 0,
     quantity_in_service: 0,
     store_breakdown: [],
@@ -455,6 +468,20 @@ function openedCountBase(ledger: InventoryLedger): InventoryLedger {
     out_of_service_breakdown: { cleaning: 0, damaged: 0, maintenance: 0, lost: 0 },
     quantity_out_of_service: 0,
   };
+}
+
+/**
+ * `quantity_rented_in: 0` when the ledger carries the key, nothing when it does
+ * not — so a boundary zeroes the count without minting the key on a ledger
+ * written before subrents. Presence is the writer's to stamp, not the fold's.
+ */
+function rentedInZeroed(ledger: InventoryLedger): Pick<InventoryLedger, "quantity_rented_in"> {
+  return ledger.quantity_rented_in === undefined ? {} : { quantity_rented_in: 0 };
+}
+
+/** Whether a movement type moves units in or out of a SUBRENT (custody without ownership). */
+function isHire(type: MovementTypeType): boolean {
+  return type === "hire_in" || type === "hire_out";
 }
 
 /** A shallow-cloned store entry, so the fold never mutates its input. */
@@ -569,6 +596,17 @@ export interface LocationPlacement {
  * what makes #286 (a costed transfer corrupting the basis) structurally
  * impossible rather than gated: a transfer has no cost object to mis-gate.
  *
+ * ## Owned, not held
+ *
+ * `quantity_held` counts CUSTODY and the basis belongs to the units CFS OWNS,
+ * which is `held − quantity_rented_in`. So the weighted-average share and the
+ * average itself are taken over OWNED units, before and after. A `hire_in` /
+ * `hire_out` moves held and `quantity_rented_in` together (by its lines' net,
+ * so a reversal moves both back), which leaves owned, the basis and the
+ * average exactly where they were — a $0 receipt of 10 rented units cannot
+ * dilute the average and their return cannot relieve owned basis. A
+ * cost-bearing decrease beyond owned reports `ownedUnderflowUnits`.
+ *
  * ## An uncounted ledger (`quantity_held: null`)
  *
  * Holds no count and no basis, so the fold moves **neither**: `quantity_held`
@@ -621,6 +659,10 @@ export function applyMovementToLedger(
     return {
       ledger: {
         ...ledger,
+        // The writer refuses a close while units are rented in; zeroing here
+        // keeps the fold complete rather than leaving an uncounted ledger
+        // claiming rented-in units it has no count for.
+        ...rentedInZeroed(ledger),
         quantity_held: null,
         quantity_in_service: null,
         store_breakdown: [],
@@ -639,6 +681,7 @@ export function applyMovementToLedger(
       uncountedCostCents: 0,
       linelessCountedQuantity: 0,
       countClosedHeld: ledger.quantity_held ?? 0,
+      ownedUnderflowUnits: 0,
     };
   }
   // ── The roster boundaries ──
@@ -658,6 +701,7 @@ export function applyMovementToLedger(
       uncountedCostCents: 0,
       linelessCountedQuantity: 0,
       countClosedHeld: 0,
+      ownedUnderflowUnits: 0,
     };
   }
   const source = movement.type === "count_open" && ledger.quantity_held === null
@@ -682,7 +726,13 @@ export function applyMovementToLedger(
   let unitCost = 0;
   let basisUnderflowCents = 0;
   let uncountedCostCents = 0;
+  let ownedUnderflowUnits = 0;
   const heldBefore = next.quantity_held;
+  const rentedBefore = next.quantity_rented_in ?? 0;
+  const rentedAfter = isHire(movement.type) ? rentedBefore + delta : rentedBefore;
+  // Owned = held − rented-in. Only a hire moves the second term, so for every
+  // other type owned moves exactly as held does.
+  const ownedBefore = heldBefore === null ? null : heldBefore - rentedBefore;
   if (carriesCost && heldBefore === null) {
     if (delta > 0) uncountedCostCents = movement.cost?.amount_cents ?? 0;
   } else if (carriesCost && heldBefore !== null) {
@@ -694,8 +744,10 @@ export function applyMovementToLedger(
       next.total_cost_basis_cents = Number(basisCents + addCents);
     } else if (delta < 0) {
       const units = -delta;
+      const owned = ownedBefore ?? heldBefore;
+      if (units > owned) ownedUnderflowUnits = units - Math.max(owned, 0);
       const outCents = reversalReliefCents(movement) ??
-        costOfUnits(basisCents, heldBefore, units);
+        costOfUnits(basisCents, owned, units);
       // 🔴 A reversal may relieve more basis than is there, and the shortfall
       // is REPORTED rather than clamped — see `basisUnderflowCents`. The
       // weighted-average branch cannot underflow: `costOfUnits` caps at the
@@ -712,15 +764,20 @@ export function applyMovementToLedger(
   if (heldBefore !== null) {
     const heldAfter = heldBefore + delta;
     next.quantity_held = heldAfter;
-    if (heldAfter > 0) {
+    // Presence is the writer's: the key is written when the ledger already
+    // carries it or a hire moves it, never minted by an unrelated movement.
+    if (next.quantity_rented_in !== undefined || isHire(movement.type)) next.quantity_rented_in = rentedAfter;
+    const ownedAfter = heldAfter - rentedAfter;
+    if (ownedAfter > 0) {
       next.average_unit_cost = perUnitCostAt4dp(
         BigInt(next.total_cost_basis_cents),
-        BigInt(heldAfter),
+        BigInt(ownedAfter),
       );
     } else if (carriesCost) {
-      // No units held after a cost-bearing move (a sale of the last unit) means no
-      // carrying cost. Zero both, so a residual basis cannot corrupt the average of
-      // the next purchase — held→0 then buy 1 must not inherit.
+      // No units OWNED after a cost-bearing move (a sale of the last unit) means
+      // no carrying cost — whatever rented units are still in custody. Zero both,
+      // so a residual basis cannot corrupt the average of the next purchase —
+      // owned→0 then buy 1 must not inherit.
       next.average_unit_cost = 0;
       next.total_cost_basis_cents = 0;
     }
@@ -784,6 +841,7 @@ export function applyMovementToLedger(
       ? movement.quantity
       : 0,
     countClosedHeld: 0,
+    ownedUnderflowUnits,
   };
 }
 

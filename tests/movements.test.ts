@@ -1696,3 +1696,148 @@ Deno.test("the fold stamps a placement's role onto the ledger location; an absen
   const again = applyMovementToLedger(folded, back, placements, mockTimestamp).ledger;
   assertEquals(again.store_breakdown[0].locations.find((l) => l.uid_location === LOC_B)?.role, "staging");
 });
+
+// ── Subrents: custody without ownership ─────────────────────────────
+//
+// `quantity_held` counts custody; the basis belongs to the units CFS OWNS
+// (`held − quantity_rented_in`). The steamer is order 1074's real product:
+// 10 owned at a 262,627¢ basis, 10 more rented in for the hire.
+
+type FoldMovement = Parameters<typeof applyMovementToLedger>[1];
+
+const hireIn = (q: number): FoldMovement => ({
+  reverses: null, service: null, type: "hire_in", custody: null, quantity: q, lines: [line(q, null, at(LOC_A))], cost: null,
+});
+const hireOut = (q: number): FoldMovement => ({
+  reverses: null, service: null, type: "hire_out", custody: null, quantity: q, lines: [line(q, at(LOC_A), null)], cost: null,
+});
+const writeOff = (q: number): FoldMovement => ({
+  reverses: null,
+  service: null,
+  type: "write_off",
+  custody: null,
+  quantity: q,
+  lines: [line(q, at(LOC_A), null)],
+  cost: { amount_cents: 0, unit_cost: 0, unit_costs_cents: [] },
+});
+
+const steamer = () => ledgerAtShelfA(10, { total_cost_basis_cents: 262627, average_unit_cost: 262.627, quantity_rented_in: 0 });
+
+Deno.test("subrent: the steamer — hire 10 in, hire 10 out, and basis and average never move", () => {
+  const a = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp);
+  assertEquals([a.ledger.quantity_held, a.ledger.quantity_rented_in], [20, 10]);
+  assertEquals([a.ledger.total_cost_basis_cents, a.ledger.average_unit_cost], [262627, 262.627], "a $0 receipt of 10 must not dilute to 131.31");
+  assertEquals(a.costAppliedCents, 0);
+  assertEquals(InventoryLedgerSchema.safeParse(a.ledger).success, true);
+
+  const b = applyMovementToLedger(a.ledger, hireOut(10), placements, mockTimestamp);
+  assertEquals([b.ledger.quantity_held, b.ledger.quantity_rented_in], [10, 0]);
+  assertEquals(
+    [b.ledger.total_cost_basis_cents, b.ledger.average_unit_cost],
+    [262627, 262.627],
+    "returning 10 must not relieve the 131,314¢ a weighted share over 20 would take",
+  );
+  assertEquals(b.costAppliedCents, 0);
+});
+
+Deno.test("subrent: a reversal of a hire moves held and rented-in back together", () => {
+  const a = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger;
+  const reversed = { ...hireIn(10), reverses: "m-hire", lines: negateLines(hireIn(10).lines) };
+  const b = applyMovementToLedger(a, reversed, placements, mockTimestamp).ledger;
+  assertEquals([b.quantity_held, b.quantity_rented_in, b.total_cost_basis_cents], [10, 0, 262627]);
+});
+
+Deno.test("subrent: a write-off of 1 mid-hire relieves an OWNED unit's share — 26,263¢, not half that", () => {
+  const hired = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger;
+  const r = applyMovementToLedger(hired, writeOff(1), placements, mockTimestamp);
+  assertEquals(r.costAppliedCents, -26263);
+  assertEquals(r.ownedUnderflowUnits, 0);
+  assertEquals([r.ledger.quantity_held, r.ledger.quantity_rented_in], [19, 10]);
+  assertEquals(r.ledger.total_cost_basis_cents, 262627 - 26263);
+  assertEquals(r.ledger.average_unit_cost, 262.6267, "236,364¢ over the 9 still owned — over 19 held it would be 124.4");
+});
+
+Deno.test("subrent: a write-off beyond what is OWNED is reported, and relieves no more than the basis", () => {
+  const hired = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger;
+  const r = applyMovementToLedger(hired, writeOff(11), placements, mockTimestamp);
+  assertEquals(r.ownedUnderflowUnits, 1);
+  assertEquals(r.costAppliedCents, -262627, "capped at the basis by costOfUnits");
+  assertEquals(r.ledger.total_cost_basis_cents, 0);
+  // Held 9 under 10 rented in: the stored ledger refuses it, so the writer must 400 first.
+  assertEquals(InventoryLedgerSchema.safeParse(r.ledger).success, false);
+});
+
+Deno.test("subrent: no other movement mints quantity_rented_in on a ledger written before it", () => {
+  const legacy = ledgerAtShelfA(10, { total_cost_basis_cents: 262627, average_unit_cost: 262.627 });
+  const r = applyMovementToLedger(legacy, writeOff(1), placements, mockTimestamp).ledger;
+  assertEquals("quantity_rented_in" in r, false);
+  const h = applyMovementToLedger(legacy, hireIn(2), placements, mockTimestamp).ledger;
+  assertEquals(h.quantity_rented_in, 2, "a hire writes it even when absent");
+});
+
+Deno.test("subrent: count_close zeroes rented-in where the ledger carries it, and mints nothing where it does not", () => {
+  const close = { reverses: null, service: null, type: "count_close" as const, custody: null, quantity: 0, lines: [], cost: null };
+  const withKey = applyMovementToLedger(ledger({ quantity_held: 3, quantity_in_service: 3, quantity_rented_in: 3 }), close, placements, mockTimestamp).ledger;
+  assertEquals(withKey.quantity_rented_in, 0);
+  const without = applyMovementToLedger(ledger({ quantity_held: 3, quantity_in_service: 3 }), close, placements, mockTimestamp).ledger;
+  assertEquals("quantity_rented_in" in without, false);
+});
+
+Deno.test("InventoryLedgerSchema: rented-in is a subset of held, and 0 on an uncounted ledger", () => {
+  assertEquals(InventoryLedgerSchema.safeParse(ledgerAtShelfA(10, { quantity_rented_in: 10 })).success, true);
+  const over = InventoryLedgerSchema.safeParse(ledgerAtShelfA(10, { quantity_rented_in: 11 }));
+  assertEquals(over.success ? [] : over.error.issues.map((i) => i.path.join(".")), ["quantity_rented_in"]);
+  const none = InventoryLedgerSchema.safeParse(
+    ledger({ stock_method: "none", quantity_held: null, quantity_in_service: null, quantity_rented_in: 1 }),
+  );
+  assertEquals(none.success ? [] : none.error.issues.map((i) => i.path.join(".")), ["quantity_rented_in"]);
+});
+
+Deno.test("subrent property: interleaving hire_in / hire_out never changes a cost-bearing result (200k steps)", () => {
+  let seed = 424242;
+  const rand = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  const cost = (cents: number) => ({ amount_cents: cents, unit_cost: 0, unit_costs_cents: [] });
+  let steps = 0;
+  let disagreements = 0;
+  let first: string | null = null;
+  while (steps < 200_000) {
+    let plain = ledger({ quantity_rented_in: 0 });
+    let hired = ledger({ quantity_rented_in: 0 });
+    for (let k = 0; k < 10; k++, steps++) {
+      // Interleave a random hire on the second ledger only, bounded by what is rented in.
+      const rented = hired.quantity_rented_in ?? 0;
+      if (rand(2) === 0) {
+        const m = rented > 0 && rand(2) === 0 ? hireOut(rand(rented) + 1) : hireIn(rand(40) + 1);
+        hired = applyMovementToLedger(hired, m, placements, mockTimestamp).ledger;
+      }
+      const owned = (plain.quantity_held ?? 0);
+      const q = owned > 0 && rand(2) === 0 ? -(rand(owned) + 1) : rand(30) + 1;
+      const m: FoldMovement = q > 0
+        ? { reverses: null, service: null, type: "purchase", custody: null, quantity: q, lines: [line(q, null, at(LOC_A))], cost: cost(rand(5_000_00)) }
+        : { ...writeOff(-q) };
+      const a = applyMovementToLedger(plain, m, placements, mockTimestamp);
+      const b = applyMovementToLedger(hired, m, placements, mockTimestamp);
+      plain = a.ledger;
+      hired = b.ledger;
+      const got = [b.costAppliedCents, b.unitCost, hired.total_cost_basis_cents, hired.average_unit_cost, b.ownedUnderflowUnits];
+      const want = [a.costAppliedCents, a.unitCost, plain.total_cost_basis_cents, plain.average_unit_cost, 0];
+      if (JSON.stringify(got) !== JSON.stringify(want)) {
+        disagreements++;
+        first ??= `step ${steps}: ${m.type} ${q} → got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`;
+      }
+    }
+  }
+  assertEquals(disagreements, 0, first ?? "");
+});
+
+Deno.test("subrent property companion: a fold averaging over HELD would disagree — the sweep can fail", () => {
+  // The same comparison against a hand-held "average over custody" reading of
+  // one step, so the property above is not vacuous: a hire_in of 10 onto the
+  // steamer under a held-denominator fold would report 131.3135, not 262.627.
+  const hired = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger;
+  const heldAverage = Number(BigInt(hired.total_cost_basis_cents) * 10000n / BigInt(hired.quantity_held ?? 1)) / 10000;
+  assertEquals(heldAverage === hired.average_unit_cost, false);
+});

@@ -5335,6 +5335,7 @@ interface InventoryLedger {
   stock_method: InventoryStockMethodType;
   quantity_held: number | null;
   quantity_in_service: number | null;
+  quantity_rented_in?: number;
   quantity_out_of_service: number;
   average_unit_cost: number;
   total_cost_basis_cents: number;
@@ -19865,6 +19866,7 @@ interface InventoryLedger {
   stock_method: InventoryStockMethodType;
   quantity_held: number | null;
   quantity_in_service: number | null;
+  quantity_rented_in?: number;
   quantity_out_of_service: number;
   average_unit_cost: number;
   total_cost_basis_cents: number;
@@ -40518,6 +40520,7 @@ interface LedgerFoldResult {
   uncountedCostCents: number;
   linelessCountedQuantity: number;
   countClosedHeld: number;
+  ownedUnderflowUnits: number;
 }
 ```
 
@@ -40705,6 +40708,17 @@ itself is money and is unchanged.
 A type whose contract forbids cost never touches the basis at all. That is
 what makes #286 (a costed transfer corrupting the basis) structurally
 impossible rather than gated: a transfer has no cost object to mis-gate.
+
+## Owned, not held
+
+`quantity_held` counts CUSTODY and the basis belongs to the units CFS OWNS,
+which is `held − quantity_rented_in`. So the weighted-average share and the
+average itself are taken over OWNED units, before and after. A `hire_in` /
+`hire_out` moves held and `quantity_rented_in` together (by its lines' net,
+so a reversal moves both back), which leaves owned, the basis and the
+average exactly where they were — a $0 receipt of 10 rented units cannot
+dilute the average and their return cannot relieve owned basis. A
+cost-bearing decrease beyond owned reports `ownedUnderflowUnits`.
 
 ## An uncounted ledger (`quantity_held: null`)
 

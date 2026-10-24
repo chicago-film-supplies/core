@@ -29,8 +29,15 @@ export interface InventoryLedger {
   type: ProductTypeType;
   stock_method: InventoryStockMethodType;
   /**
-   * Units CFS owns, or **`null` when the product is uncounted** — and `null` is
-   * not 0.
+   * Units in CFS's CUSTODY, or **`null` when the product is uncounted** — and
+   * `null` is not 0.
+   *
+   * ⚠️ **Custody, not ownership, since subrents.** It counts every unit CFS
+   * holds — on a shelf, out at a booking, away at a record — including units
+   * rented in from a supplier, so `held = Σ store_breakdown + out + away` still
+   * holds and the shelves, check-out and the allocator need no change. The
+   * units CFS OWNS are `quantity_held − quantity_rented_in`, and that is what
+   * the cost basis is spread over.
    *
    * An uncounted ledger belongs to a `stock_method: "none"` rental/sale product:
    * supply on demand (gas, ice), a no-stock kit parent, an owned item nobody has
@@ -51,6 +58,18 @@ export interface InventoryLedger {
   quantity_held: number | null;
   /** `quantity_held − quantity_out_of_service`; `null` exactly when `quantity_held` is. */
   quantity_in_service: number | null;
+  /**
+   * The part of {@link quantity_held} that is rented IN from a supplier on a
+   * live subrent — in CFS's custody, never owned. Moved only by `hire_in` /
+   * `hire_out` and their reversals, so it equals Σ (received − returned) over
+   * the product's subrent purchases. Never more than held; `0` on an uncounted
+   * ledger (a subrent of an uncounted product is refused).
+   *
+   * Optional ONLY for the expand/contract step: absent on every ledger written
+   * before subrents and read as `0`. Writers stamp it; the backfill stamps `0`
+   * on the rest; then it becomes required.
+   */
+  quantity_rented_in?: number;
   quantity_out_of_service: number;
   /** A per-unit RATE at 4dp — dollars, NOT cents. See {@link MovementCostType.unit_cost}. */
   average_unit_cost: number;
@@ -83,6 +102,7 @@ export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject(
   // `null` = uncounted (see the interface), never a stand-in for 0.
   quantity_held: z.number().min(0).meta({ column: true, label: "Quantity Held" }).nullable(),
   quantity_in_service: z.number().min(0).nullable(),
+  quantity_rented_in: z.int().min(0).meta({ column: true, label: "Rented In" }).optional(),
   quantity_out_of_service: z.number().min(0),
   // 4dp DOLLARS, deliberately not `_cents` — the beta.117 regression was
   // exactly this field quantized to the cent. Its neighbour below is cents.
@@ -122,7 +142,23 @@ export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject(
       message: "quantity_in_service is null exactly when quantity_held is",
     });
   }
+  // Rented-in units are a subset of the units held.
+  const rentedIn = ledger.quantity_rented_in ?? 0;
+  if (!uncounted && rentedIn > (ledger.quantity_held ?? 0)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["quantity_rented_in"],
+      message: `quantity_rented_in ${rentedIn} exceeds the ${ledger.quantity_held} held — rented-in units are a subset of custody`,
+    });
+  }
   if (!uncounted) return;
+  if (rentedIn !== 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["quantity_rented_in"],
+      message: "an uncounted ledger (quantity_held: null) has no rented-in units",
+    });
+  }
   // One direction only: a COUNTED ledger may legitimately have no shelves (every
   // unit out on a job, or held 0). An uncounted one has no shelves by
   // definition — a check-out folds no shelf leg — so a shelf here means some
