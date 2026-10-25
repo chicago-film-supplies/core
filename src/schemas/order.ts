@@ -2438,11 +2438,13 @@ export function isLineItem(item: OrderDocItemType): item is OrderDocLineItemType
 }
 
 /**
- * Narrows an order doc item to one that can be PICKED — the `fulfillable` axis,
- * which additionally excludes `transaction_fee`.
+ * Narrows an order doc item to one the fulfillment carries — the `fulfillable`
+ * axis, which additionally excludes `transaction_fee`, `replacement` and
+ * `surcharge`.
  *
  * Lives beside {@link isLineItem} because the two are constantly confused: a fee
- * is a line (it is billed) and is not fulfillable (there is nothing on a shelf).
+ * is a line (it is billed) and is not fulfillable (the warehouse has nothing to
+ * do for it). The same holds for a replacement and a surcharge.
  * `isFulfillableItemType` alone cannot do this job — a type predicate on
  * `item.type` narrows the property, not the union — which is why both
  * `services/fulfillment.ts` and `services/fulfillmentEdits.ts` had grown their

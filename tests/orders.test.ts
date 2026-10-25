@@ -3135,7 +3135,17 @@ Deno.test("the type predicates answer from the contract, and the three axes stay
   for (const t of ["rental", "replacement", "sale", "service", "surcharge"] as const) {
     assertEquals(isLineItemType(t), true, `${t} is a line`);
     assertEquals(isDividerItemType(t), false, `${t} is not a divider`);
+  }
+  // Hard-coded, like the substitutable test: this pins the OWNER'S rule
+  // (2026-10-25, api-cloudrun#1369). A replacement is the charge for a lost
+  // item and a surcharge is a charge on the job; neither belongs on warehouse
+  // paperwork. A service (delivery, labour) does.
+  assertEquals([...FULFILLMENT_LINE_ITEM_TYPES].sort(), ["rental", "sale", "service"]);
+  for (const t of ["rental", "sale", "service"] as const) {
     assertEquals(isFulfillableItemType(t), true, `${t} is fulfillable`);
+  }
+  for (const t of ["replacement", "surcharge"] as const) {
+    assertEquals(isFulfillableItemType(t), false, `${t} is not fulfillable`);
   }
 
   // The one row where "is a line" and "can be picked off a shelf" disagree.

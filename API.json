@@ -2055,8 +2055,8 @@
         {
           "kind": "variable",
           "name": "FULFILLMENT_LINE_ITEM_TYPES",
-          "declaration": "const FULFILLMENT_LINE_ITEM_TYPES: \"rental\" | \"replacement\" | \"sale\" | \"service\" | \"surcharge\"[];",
-          "doc": "Line item types a fulfillment carries — the `fulfillable: true` members.\n`transaction_fee` is excluded because a fee has no stock and is never picked\noff a shelf, so this is NOT a narrower spelling of {@link DOC_LINE_ITEM_TYPES}\nwaiting to be collapsed into it; the exclusion IS the contract.\n\nLives here rather than in `fulfillment.ts` so the list, the table it must\nagree with, and the assertion below are one thing to read."
+          "declaration": "const FULFILLMENT_LINE_ITEM_TYPES: \"rental\" | \"sale\" | \"service\"[];",
+          "doc": "Line item types a fulfillment carries — the `fulfillable: true` members.\n`transaction_fee`, `replacement` and `surcharge` are excluded because each is\na billing fact with nothing for the warehouse to do: a fee is priced from the\ntotal, a replacement is the charge billed when a customer loses something,\nand a surcharge is a charge on the job. `service` stays, because delivery and\nlabour belong on warehouse paperwork. So this is NOT a narrower spelling of\n{@link DOC_LINE_ITEM_TYPES} waiting to be collapsed into it; the exclusion IS\nthe contract (api-cloudrun#1369).\n\nLives here rather than in `fulfillment.ts` so the list, the table it must\nagree with, and the assertion below are one thing to read."
         },
         {
           "kind": "interface",
@@ -6815,7 +6815,7 @@
           "kind": "function",
           "name": "isFulfillableItem",
           "signature": "isFulfillableItem(item: OrderDocItemType): item is OrderDocLineItemType",
-          "doc": "Narrows an order doc item to one that can be PICKED — the `fulfillable` axis,\nwhich additionally excludes `transaction_fee`.\n\nLives beside {@link isLineItem} because the two are constantly confused: a fee\nis a line (it is billed) and is not fulfillable (there is nothing on a shelf).\n`isFulfillableItemType` alone cannot do this job — a type predicate on\n`item.type` narrows the property, not the union — which is why both\n`services/fulfillment.ts` and `services/fulfillmentEdits.ts` had grown their\nown item-level copy.\n\nThe narrowing is deliberately imprecise in the same way `isLineItem` is: it\nreports `OrderDocLineItemType`, whose `type` still nominally includes\n`transaction_fee`. Every field a caller reads after this guard is shared\nacross all line types, so the imprecision costs nothing.",
+          "doc": "Narrows an order doc item to one the fulfillment carries — the `fulfillable`\naxis, which additionally excludes `transaction_fee`, `replacement` and\n`surcharge`.\n\nLives beside {@link isLineItem} because the two are constantly confused: a fee\nis a line (it is billed) and is not fulfillable (the warehouse has nothing to\ndo for it). The same holds for a replacement and a surcharge.\n`isFulfillableItemType` alone cannot do this job — a type predicate on\n`item.type` narrows the property, not the union — which is why both\n`services/fulfillment.ts` and `services/fulfillmentEdits.ts` had grown their\nown item-level copy.\n\nThe narrowing is deliberately imprecise in the same way `isLineItem` is: it\nreports `OrderDocLineItemType`, whose `type` still nominally includes\n`transaction_fee`. Every field a caller reads after this guard is shared\nacross all line types, so the imprecision costs nothing.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -6823,7 +6823,7 @@
           "kind": "function",
           "name": "isFulfillableItemType",
           "signature": "isFulfillableItemType(type: string): type is FulfillableItemType",
-          "doc": "Whether an item type can be picked off a shelf — the `fulfillable` axis.\n\nNOT a synonym for {@link isLineItemType}: `transaction_fee` is a line and is\nnot fulfillable. Two predicates seven lines apart in `services/fulfillment.ts`\ndrew exactly that distinction by hand and read as if they disagreed.",
+          "doc": "Whether a line of this type appears on the fulfillment — the `fulfillable`\naxis. It is not \"picked off a shelf\": a `service` line is fulfillable and\nbooks nothing (see `productHasLedger` for that question).\n\nNOT a synonym for {@link isLineItemType}: `transaction_fee`, `replacement`\nand `surcharge` are lines and are not fulfillable. Two predicates seven lines\napart in `services/fulfillment.ts` drew the fee half of that distinction by\nhand and read as if they disagreed.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -7543,8 +7543,8 @@
         {
           "kind": "variable",
           "name": "FULFILLMENT_LINE_ITEM_TYPES",
-          "declaration": "const FULFILLMENT_LINE_ITEM_TYPES: \"rental\" | \"replacement\" | \"sale\" | \"service\" | \"surcharge\"[];",
-          "doc": "Line item types a fulfillment carries — the `fulfillable: true` members.\n`transaction_fee` is excluded because a fee has no stock and is never picked\noff a shelf, so this is NOT a narrower spelling of {@link DOC_LINE_ITEM_TYPES}\nwaiting to be collapsed into it; the exclusion IS the contract.\n\nLives here rather than in `fulfillment.ts` so the list, the table it must\nagree with, and the assertion below are one thing to read."
+          "declaration": "const FULFILLMENT_LINE_ITEM_TYPES: \"rental\" | \"sale\" | \"service\"[];",
+          "doc": "Line item types a fulfillment carries — the `fulfillable: true` members.\n`transaction_fee`, `replacement` and `surcharge` are excluded because each is\na billing fact with nothing for the warehouse to do: a fee is priced from the\ntotal, a replacement is the charge billed when a customer loses something,\nand a surcharge is a charge on the job. `service` stays, because delivery and\nlabour belong on warehouse paperwork. So this is NOT a narrower spelling of\n{@link DOC_LINE_ITEM_TYPES} waiting to be collapsed into it; the exclusion IS\nthe contract (api-cloudrun#1369).\n\nLives here rather than in `fulfillment.ts` so the list, the table it must\nagree with, and the assertion below are one thing to read."
         },
         {
           "kind": "interface",
@@ -8184,7 +8184,7 @@
           "kind": "function",
           "name": "isFulfillableItemType",
           "signature": "isFulfillableItemType(type: string): type is FulfillableItemType",
-          "doc": "Whether an item type can be picked off a shelf — the `fulfillable` axis.\n\nNOT a synonym for {@link isLineItemType}: `transaction_fee` is a line and is\nnot fulfillable. Two predicates seven lines apart in `services/fulfillment.ts`\ndrew exactly that distinction by hand and read as if they disagreed.",
+          "doc": "Whether a line of this type appears on the fulfillment — the `fulfillable`\naxis. It is not \"picked off a shelf\": a `service` line is fulfillable and\nbooks nothing (see `productHasLedger` for that question).\n\nNOT a synonym for {@link isLineItemType}: `transaction_fee`, `replacement`\nand `surcharge` are lines and are not fulfillable. Two predicates seven lines\napart in `services/fulfillment.ts` drew the fee half of that distinction by\nhand and read as if they disagreed.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10372,7 +10372,7 @@
           "kind": "function",
           "name": "isFulfillableItem",
           "signature": "isFulfillableItem(item: OrderDocItemType): item is OrderDocLineItemType",
-          "doc": "Narrows an order doc item to one that can be PICKED — the `fulfillable` axis,\nwhich additionally excludes `transaction_fee`.\n\nLives beside {@link isLineItem} because the two are constantly confused: a fee\nis a line (it is billed) and is not fulfillable (there is nothing on a shelf).\n`isFulfillableItemType` alone cannot do this job — a type predicate on\n`item.type` narrows the property, not the union — which is why both\n`services/fulfillment.ts` and `services/fulfillmentEdits.ts` had grown their\nown item-level copy.\n\nThe narrowing is deliberately imprecise in the same way `isLineItem` is: it\nreports `OrderDocLineItemType`, whose `type` still nominally includes\n`transaction_fee`. Every field a caller reads after this guard is shared\nacross all line types, so the imprecision costs nothing.",
+          "doc": "Narrows an order doc item to one the fulfillment carries — the `fulfillable`\naxis, which additionally excludes `transaction_fee`, `replacement` and\n`surcharge`.\n\nLives beside {@link isLineItem} because the two are constantly confused: a fee\nis a line (it is billed) and is not fulfillable (the warehouse has nothing to\ndo for it). The same holds for a replacement and a surcharge.\n`isFulfillableItemType` alone cannot do this job — a type predicate on\n`item.type` narrows the property, not the union — which is why both\n`services/fulfillment.ts` and `services/fulfillmentEdits.ts` had grown their\nown item-level copy.\n\nThe narrowing is deliberately imprecise in the same way `isLineItem` is: it\nreports `OrderDocLineItemType`, whose `type` still nominally includes\n`transaction_fee`. Every field a caller reads after this guard is shared\nacross all line types, so the imprecision costs nothing.",
           "paramTags": [],
           "returnsTag": null
         },

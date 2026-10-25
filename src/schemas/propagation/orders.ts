@@ -137,14 +137,15 @@ const BOOKING_ALLOCATION_DIAGNOSTIC: EnforcementRef = {
  * The fulfillment view's "stripped of …" clause is a schema fact, not a
  * behaviour: `FulfillmentSchema` is a strictObject with no `totals`,
  * `invoices`, `notes`, `crms_id` or `xero_id` key, and
- * `FULFILLMENT_LINE_ITEM_TYPES` omits `transaction_fee`, so a fee line fails
- * the discriminated union. A leak is a rejected write.
+ * `FULFILLMENT_LINE_ITEM_TYPES` omits `transaction_fee`, `replacement` and
+ * `surcharge`, so a line of any of them fails the discriminated union. A leak
+ * is a rejected write.
  */
 const FULFILLMENT_SHAPE_STRIPS: EnforcementRef = {
   kind: "construction",
   ref: "core/src/schemas/fulfillment.ts::export const FulfillmentSchema",
   clause:
-    "every `stripped` clause — the strictObject has no key for the financial fields and `FULFILLMENT_LINE_ITEM_TYPES` has no `transaction_fee` member, so both the field strip and the item drop are write rejections",
+    "every `stripped` clause — the strictObject has no key for the financial fields and `FULFILLMENT_LINE_ITEM_TYPES` has no `transaction_fee`, `replacement` or `surcharge` member, so both the field strip and the item drop are write rejections",
   gates: true,
 };
 

@@ -1106,7 +1106,14 @@ export interface ItemContract {
   pricing: "pre_tax" | "from_total" | "none";
   /** Whether `price.replacement` must appear. Rentals need one once stocked. */
   replacement: "required_when_stocked" | "optional" | "forbidden";
-  /** Whether the type can be picked off a shelf — the source of `FULFILLMENT_LINE_ITEM_TYPES`. */
+  /**
+   * Whether a line of this type appears on the fulfillment (the warehouse's
+   * paperwork) — the source of `FULFILLMENT_LINE_ITEM_TYPES`. NOT "picked off a
+   * shelf": a `service` line (delivery, labour) is fulfillable and books
+   * nothing. Whether a line is picked is the product's question
+   * (`productHasLedger`, rental and sale). `replacement` and `surcharge` are
+   * not fulfillable (owner, 2026-10-25, api-cloudrun#1369).
+   */
   fulfillable: boolean;
   /**
    * Whether a line of this type may be swapped for another product, and whether
@@ -1175,13 +1182,15 @@ const ITEM_CONTRACTS_INNER = {
   group: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
   // ── lines ──
   rental: { kind: "line", pricing: "pre_tax", replacement: "required_when_stocked", fulfillable: true, substitutable: true },
-  replacement: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, substitutable: false },
+  replacement: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: false, substitutable: false },
   sale: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, substitutable: true },
   service: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, substitutable: false },
-  surcharge: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, substitutable: false },
-  // A fee is priced FROM the document total, has no replacement value, and is
-  // never picked off a shelf — which is why `FULFILLMENT_LINE_ITEM_TYPES`
-  // excludes it rather than collapsing to `DOC_LINE_ITEM_TYPES`.
+  surcharge: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: false, substitutable: false },
+  // A fee is priced FROM the document total and has no replacement value. It,
+  // a replacement (the charge for a lost item) and a surcharge are billing
+  // facts with nothing for the warehouse to do, which is why
+  // `FULFILLMENT_LINE_ITEM_TYPES` excludes all three rather than collapsing to
+  // `DOC_LINE_ITEM_TYPES`.
   transaction_fee: { kind: "line", pricing: "from_total", replacement: "forbidden", fulfillable: false, substitutable: false },
 } as const;
 
@@ -1735,11 +1744,14 @@ export function isDividerItemType(type: string): type is DividerItemType {
 }
 
 /**
- * Whether an item type can be picked off a shelf — the `fulfillable` axis.
+ * Whether a line of this type appears on the fulfillment — the `fulfillable`
+ * axis. It is not "picked off a shelf": a `service` line is fulfillable and
+ * books nothing (see `productHasLedger` for that question).
  *
- * NOT a synonym for {@link isLineItemType}: `transaction_fee` is a line and is
- * not fulfillable. Two predicates seven lines apart in `services/fulfillment.ts`
- * drew exactly that distinction by hand and read as if they disagreed.
+ * NOT a synonym for {@link isLineItemType}: `transaction_fee`, `replacement`
+ * and `surcharge` are lines and are not fulfillable. Two predicates seven lines
+ * apart in `services/fulfillment.ts` drew the fee half of that distinction by
+ * hand and read as if they disagreed.
  */
 export function isFulfillableItemType(type: string): type is FulfillableItemType {
   return itemContract(type)?.fulfillable === true;
@@ -1747,14 +1759,18 @@ export function isFulfillableItemType(type: string): type is FulfillableItemType
 
 /**
  * Line item types a fulfillment carries — the `fulfillable: true` members.
- * `transaction_fee` is excluded because a fee has no stock and is never picked
- * off a shelf, so this is NOT a narrower spelling of {@link DOC_LINE_ITEM_TYPES}
- * waiting to be collapsed into it; the exclusion IS the contract.
+ * `transaction_fee`, `replacement` and `surcharge` are excluded because each is
+ * a billing fact with nothing for the warehouse to do: a fee is priced from the
+ * total, a replacement is the charge billed when a customer loses something,
+ * and a surcharge is a charge on the job. `service` stays, because delivery and
+ * labour belong on warehouse paperwork. So this is NOT a narrower spelling of
+ * {@link DOC_LINE_ITEM_TYPES} waiting to be collapsed into it; the exclusion IS
+ * the contract (api-cloudrun#1369).
  *
  * Lives here rather than in `fulfillment.ts` so the list, the table it must
  * agree with, and the assertion below are one thing to read.
  */
-export const FULFILLMENT_LINE_ITEM_TYPES = ["rental", "replacement", "sale", "service", "surcharge"] as const;
+export const FULFILLMENT_LINE_ITEM_TYPES = ["rental", "sale", "service"] as const;
 /** @see {@link FULFILLMENT_LINE_ITEM_TYPES} */
 export type FulfillableItemType = typeof FULFILLMENT_LINE_ITEM_TYPES[number];
 
