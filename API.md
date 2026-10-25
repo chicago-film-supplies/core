@@ -9260,8 +9260,6 @@ interface ProductPrice {
 
 ### `ProductSchema`
 
-Zod schema for a Product document.
-
 ```ts
 const ProductSchema: z.ZodType<Product>;
 ```
@@ -23763,8 +23761,6 @@ interface ProductPrice {
 ```
 
 ### `ProductSchema`
-
-Zod schema for a Product document.
 
 ```ts
 const ProductSchema: z.ZodType<Product>;

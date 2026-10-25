@@ -1133,7 +1133,9 @@ the other way round.
   purely structural, and it is what carries `product` and `templates-versions`.
   ⚠️ **So the default product fixture is a SALE** — a `rental` obliges
   `price.replacement_cents` through a `superRefine`. A caller wanting a rental
-  supplies the replacement price.
+  supplies the replacement price. A `replacement` obliges `stock_method: "none"`
+  (manager#685); the retry reaches `none` on its own when the caller names
+  only the type, but a caller that also names a counted method gets a throw.
 - **Coverage is 55 of 56 registry schemas with no per-schema knowledge**;
   `transactions` is the one escape hatch (every movement type demands either a
   booking-scoped custody transition or a cost plus a line, so no single choice

@@ -627,6 +627,25 @@ export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = exte
 ).superRefine(checkItemContract);
 
 /** Zod schema for a Product document. */
+/**
+ * A `replacement` product is the lost-item charge, so it is never counted:
+ * its `stock_method` is always `none` (owner rule, api-cloudrun#1369). Held on
+ * the document and on `CreateProductInput`, beside the rental
+ * `replacement_cents` refine. `UpdateProductInput` is partial, so the update
+ * path is held by `validateBeforeWrite` parsing the merged document.
+ *
+ * Landed against a clean corpus: 235 of 235 prod replacement products were
+ * `none` on 2026-10-25, and the manager form stopped producing any other
+ * method first (manager#685, released in 27.62.3) — the REFINE ordering.
+ * The API's own replacement writer (the rental twin) already writes `none`.
+ */
+const isUncountedIfReplacement = (p: { type: ProductTypeType; stock_method: StockMethodType }): boolean =>
+  p.type !== "replacement" || p.stock_method === "none";
+const REPLACEMENT_STOCK_METHOD_ISSUE = {
+  message: "a replacement product is never counted — stock_method must be none",
+  path: ["stock_method"],
+};
+
 export const ProductSchema: z.ZodType<Product> = z.strictObject({
   uid: FirestoreId,
   name: z.string().min(1).max(200).meta({ column: true, label: "Name", linkTo: "productDetail" }),
@@ -775,7 +794,7 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     message: "price.replacement_cents is required for rental products",
     path: ["price", "replacement_cents"],
   },
-).refine(
+).refine(isUncountedIfReplacement, REPLACEMENT_STOCK_METHOD_ISSUE).refine(
   (p) => {
     // Skip only when BOTH are absent — that is the ~531 pre-images product
     // docs, which must keep validating unchanged. One side present without the
@@ -965,7 +984,7 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
     message: "price.replacement_cents is required for rental products",
     path: ["price", "replacement_cents"],
   },
-);
+).refine(isUncountedIfReplacement, REPLACEMENT_STOCK_METHOD_ISSUE);
 
 /** Input type for updating a product. */
 export interface UpdateProductInputType {

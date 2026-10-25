@@ -119,6 +119,35 @@ Deno.test("ProductSchema accepts rental with stock_method none and no price.repl
   assertEquals(ProductSchema.safeParse(doc).success, true);
 });
 
+// manager#685 / api-cloudrun#1369: a replacement is the lost-item charge and is
+// never counted. Each case moves exactly ONE field off a valid replacement, so
+// the refine — not some other constraint — is what decides it.
+const validReplacement = {
+  ...validProduct,
+  type: "replacement",
+  stock_method: "none",
+  price: { ...(validProduct.price as Record<string, unknown>), formula: "fixed", replacement_cents: null },
+  webshop: { available: false },
+};
+
+Deno.test("ProductSchema accepts a replacement with stock_method none", () => {
+  assertEquals(ProductSchema.safeParse(validReplacement).success, true);
+});
+
+for (const stock_method of ["bulk", "serialized"] as const) {
+  Deno.test(`ProductSchema rejects a replacement with stock_method ${stock_method}, at stock_method (manager#685)`, () => {
+    const result = ProductSchema.safeParse({ ...validReplacement, stock_method });
+    assertEquals(result.success, false);
+    assertEquals(result.error?.issues.map((i) => i.path.join(".")), ["stock_method"]);
+  });
+}
+
+Deno.test("ProductSchema leaves a counted stock_method legal on every other type", () => {
+  for (const type of ["rental", "sale", "service", "surcharge", "transaction_fee"] as const) {
+    assertEquals(ProductSchema.safeParse({ ...validReplacement, type, stock_method: "bulk", price: validProduct.price }).success, true, type);
+  }
+});
+
 Deno.test("ProductSchema rejects rental component without price.replacement_cents", () => {
   const doc = {
     ...validProduct,
@@ -235,6 +264,16 @@ Deno.test("CreateProductInput requires price.replacement_cents for rental produc
   assertEquals(CreateProductInput.safeParse(validCreateInput).success, true);
   assertEquals(CreateProductInput.safeParse({ ...input, type: "sale" }).success, true);
   assertEquals(CreateProductInput.safeParse({ ...input, stock_method: "none" }).success, true);
+});
+
+Deno.test("CreateProductInput refuses a counted replacement (manager#685)", () => {
+  const input = { ...validCreateInput, type: "replacement", price: { ...validCreateInput.price, formula: "fixed", replacement_cents: null } };
+  assertEquals(CreateProductInput.safeParse({ ...input, stock_method: "none" }).success, true);
+  for (const stock_method of ["bulk", "serialized"] as const) {
+    const result = CreateProductInput.safeParse({ ...input, stock_method });
+    assertEquals(result.success, false, stock_method);
+    assertEquals(result.error?.issues.map((i) => i.path.join(".")), ["stock_method"]);
+  }
 });
 
 // api-cloudrun#1269 (owner ruling 2, 2026-10-09): `createProduct` authors no
