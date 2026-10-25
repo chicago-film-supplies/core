@@ -307,12 +307,11 @@ export interface Purchase {
   /**
    * `buy` or `subrent` — see the module docblock. Fixed at create.
    *
-   * Optional ONLY for the expand/contract step: absent on every purchase written
-   * before subrents (303 in prod at 2026-10-24) and read as `buy`. Writers stamp
-   * it from the release that introduces it; the backfill stamps `buy` on the
-   * rest; then it becomes required.
+   * Required since beta B: the 303 pre-subrent purchases were stamped `buy` by
+   * `api-cloudrun/scripts/backfill-purchase-kind.ts` on 2026-10-24 (prod, dev and
+   * the `test` database, 0 missing after).
    */
-  kind?: PurchaseKindType;
+  kind: PurchaseKindType;
   /**
    * Who CFS is buying from — a point-in-time `{uid, name}` snapshot. Every
    * receipt's `Movement.supplier` and every bill's `supplier` must equal it;
@@ -334,21 +333,16 @@ export interface Purchase {
   /**
    * Mirror of every line's `uid_product` ({@link deriveQueryByProducts}), for
    * "which purchases name this product" as one `array-contains` — the stock
-   * rebuild's subrent-supply read. On both kinds.
-   *
-   * Optional for the expand/contract step: absent on the pre-subrent purchases
-   * until the backfill stamps it, then required. Unlike the invoice's mirror an
-   * absent key is NOT read as `[]` — every purchase has a line, so that reading
-   * would refuse all of them — it is read as "not yet stamped", and a PRESENT
-   * mirror must be exact.
+   * rebuild's subrent-supply read. On both kinds. Refused when it disagrees
+   * with the lines. Required since beta B (backfilled 2026-10-24, as `kind`).
    */
-  query_by_products?: string[];
+  query_by_products: string[];
   /**
    * Mirror of the lines' `uid_orders` ({@link deriveQueryByOrders}): "which
-   * subrents were raised for this order". `[]` on a buy. Optional and refined
+   * subrents were raised for this order". `[]` on a buy. Required and refined
    * exactly as `query_by_products`.
    */
-  query_by_orders?: string[];
+  query_by_orders: string[];
   uid_thread?: string;
   version: number;
   created_by: ActorRefType;
@@ -379,14 +373,14 @@ function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
     }
   });
 
-  if (p.query_by_products !== undefined && !sameMembers(p.query_by_products, deriveQueryByProducts(p.lines))) {
+  if (!sameMembers(p.query_by_products, deriveQueryByProducts(p.lines))) {
     ctx.addIssue({
       code: "custom",
       path: ["query_by_products"],
       message: "query_by_products must list exactly the lines' products",
     });
   }
-  if (p.query_by_orders !== undefined && !sameMembers(p.query_by_orders, deriveQueryByOrders(p.lines))) {
+  if (!sameMembers(p.query_by_orders, deriveQueryByOrders(p.lines))) {
     ctx.addIssue({
       code: "custom",
       path: ["query_by_orders"],
@@ -430,7 +424,7 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   uid: FirestoreId,
   number: z.int().min(1).meta({ column: true, label: "#", linkTo: "purchaseDetail", serverSortVia: "number" }),
   status: PurchaseStatusEnum.meta({ column: true, label: "Status" }),
-  kind: PurchaseKindEnum.meta({ column: true, label: "Kind" }).optional(),
+  kind: PurchaseKindEnum.meta({ column: true, label: "Kind" }),
   supplier: UidNameRef.meta({ label: "Supplier" }),
   store: UidNameRef.meta({ label: "Store" }),
   date: chicagoStartOfDay().meta({ serverSortVia: "date_fs", column: true, label: "Date" }),
@@ -439,8 +433,8 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
   notes: z.string().meta({ pii: "mask", column: true, label: "Notes" }).nullable(),
   lines: z.array(PurchaseLineSchema).min(1).meta({ label: "Line" }),
   total_cents: z.int().min(0).meta({ column: true, label: "Total" }),
-  query_by_products: z.array(FirestoreId).optional(),
-  query_by_orders: z.array(FirestoreId).optional(),
+  query_by_products: z.array(FirestoreId),
+  query_by_orders: z.array(FirestoreId),
   uid_thread: ThreadId.optional(),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),

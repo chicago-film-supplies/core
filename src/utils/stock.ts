@@ -537,12 +537,11 @@ export interface StockAvailability {
 }
 
 /**
- * The projection fields every engine read REQUIRES. `supply` and
- * `quantity_rented_in` are optional on the stored document (expand/contract)
- * and deliberately NOT here: a caller building its own inputs — the oversell
- * gate does — must pass both, so it fails to compile rather than silently
- * ignoring supply and firing `stock_oversold` on every subrented product. A
- * reader of a stored `stock/{P}` writes `?? []` / `?? 0` at the read.
+ * The projection fields every engine read REQUIRES — all four, so a caller
+ * building its own inputs (the oversell gate does) fails to compile rather than
+ * silently ignoring supply and firing `stock_oversold` on every subrented
+ * product. A stored `stock/{P}` satisfies it as-is (both subrent keys required
+ * since beta B); `supply` is `readonly` here so a caller may pass a frozen array.
  */
 export type StockEngineInput = Pick<Stock, "quantity_held" | "unavailable"> & {
   supply: readonly StockSupplyEntry[];

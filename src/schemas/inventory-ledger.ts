@@ -65,11 +65,10 @@ export interface InventoryLedger {
    * the product's subrent purchases. Never more than held; `0` on an uncounted
    * ledger (a subrent of an uncounted product is refused).
    *
-   * Optional ONLY for the expand/contract step: absent on every ledger written
-   * before subrents and read as `0`. Writers stamp it; the backfill stamps `0`
-   * on the rest; then it becomes required.
+   * Required since beta B: every pre-subrent ledger was stamped `0` by
+   * `api-cloudrun/scripts/backfill-purchase-kind.ts` on 2026-10-24.
    */
-  quantity_rented_in?: number;
+  quantity_rented_in: number;
   quantity_out_of_service: number;
   /** A per-unit RATE at 4dp — dollars, NOT cents. See {@link MovementCostType.unit_cost}. */
   average_unit_cost: number;
@@ -102,7 +101,7 @@ export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject(
   // `null` = uncounted (see the interface), never a stand-in for 0.
   quantity_held: z.number().min(0).meta({ column: true, label: "Quantity Held" }).nullable(),
   quantity_in_service: z.number().min(0).nullable(),
-  quantity_rented_in: z.int().min(0).meta({ column: true, label: "Rented In" }).optional(),
+  quantity_rented_in: z.int().min(0).meta({ column: true, label: "Rented In" }),
   quantity_out_of_service: z.number().min(0),
   // 4dp DOLLARS, deliberately not `_cents` — the beta.117 regression was
   // exactly this field quantized to the cent. Its neighbour below is cents.
@@ -143,7 +142,7 @@ export const InventoryLedgerSchema: z.ZodType<InventoryLedger> = z.strictObject(
     });
   }
   // Rented-in units are a subset of the units held.
-  const rentedIn = ledger.quantity_rented_in ?? 0;
+  const rentedIn = ledger.quantity_rented_in;
   if (!uncounted && rentedIn > (ledger.quantity_held ?? 0)) {
     ctx.addIssue({
       code: "custom",

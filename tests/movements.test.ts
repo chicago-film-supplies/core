@@ -60,6 +60,7 @@ function ledger(over: Partial<InventoryLedger> = {}): InventoryLedger {
     stock_method: "bulk",
     quantity_held: 0,
     quantity_in_service: 0,
+    quantity_rented_in: 0,
     quantity_out_of_service: 0,
     average_unit_cost: 0,
     total_cost_basis_cents: 0,
@@ -1767,20 +1768,18 @@ Deno.test("subrent: a write-off beyond what is OWNED is reported, and relieves n
   assertEquals(InventoryLedgerSchema.safeParse(r.ledger).success, false);
 });
 
-Deno.test("subrent: no other movement mints quantity_rented_in on a ledger written before it", () => {
-  const legacy = ledgerAtShelfA(10, { total_cost_basis_cents: 262627, average_unit_cost: 262.627 });
-  const r = applyMovementToLedger(legacy, writeOff(1), placements, mockTimestamp).ledger;
-  assertEquals("quantity_rented_in" in r, false);
-  const h = applyMovementToLedger(legacy, hireIn(2), placements, mockTimestamp).ledger;
-  assertEquals(h.quantity_rented_in, 2, "a hire writes it even when absent");
+Deno.test("subrent: only a hire moves quantity_rented_in", () => {
+  const base = ledgerAtShelfA(10, { total_cost_basis_cents: 262627, average_unit_cost: 262.627 });
+  const r = applyMovementToLedger(base, writeOff(1), placements, mockTimestamp).ledger;
+  assertEquals(r.quantity_rented_in, 0);
+  const h = applyMovementToLedger(base, hireIn(2), placements, mockTimestamp).ledger;
+  assertEquals(h.quantity_rented_in, 2);
 });
 
-Deno.test("subrent: count_close zeroes rented-in where the ledger carries it, and mints nothing where it does not", () => {
+Deno.test("subrent: count_close zeroes rented-in", () => {
   const close = { reverses: null, service: null, type: "count_close" as const, custody: null, quantity: 0, lines: [], cost: null };
-  const withKey = applyMovementToLedger(ledger({ quantity_held: 3, quantity_in_service: 3, quantity_rented_in: 3 }), close, placements, mockTimestamp).ledger;
-  assertEquals(withKey.quantity_rented_in, 0);
-  const without = applyMovementToLedger(ledger({ quantity_held: 3, quantity_in_service: 3 }), close, placements, mockTimestamp).ledger;
-  assertEquals("quantity_rented_in" in without, false);
+  const closed = applyMovementToLedger(ledger({ quantity_held: 3, quantity_in_service: 3, quantity_rented_in: 3 }), close, placements, mockTimestamp).ledger;
+  assertEquals(closed.quantity_rented_in, 0);
 });
 
 Deno.test("InventoryLedgerSchema: rented-in is a subset of held, and 0 on an uncounted ledger", () => {
@@ -1808,7 +1807,7 @@ Deno.test("subrent property: interleaving hire_in / hire_out never changes a cos
     let hired = ledger({ quantity_rented_in: 0 });
     for (let k = 0; k < 10; k++, steps++) {
       // Interleave a random hire on the second ledger only, bounded by what is rented in.
-      const rented = hired.quantity_rented_in ?? 0;
+      const rented = hired.quantity_rented_in;
       if (rand(2) === 0) {
         const m = rented > 0 && rand(2) === 0 ? hireOut(rand(rented) + 1) : hireIn(rand(40) + 1);
         hired = applyMovementToLedger(hired, m, placements, mockTimestamp).ledger;

@@ -160,19 +160,17 @@ export interface Stock {
   /**
    * A copy of `inventory-ledgers/{P}.quantity_rented_in` — the part of
    * {@link quantity_held} that is rented in, so a reader can take OWNED units
-   * (`held − rented_in`) without a second document.
-   *
-   * Optional ONLY for the expand/contract step: absent on every projection
-   * until its first rebuild under the writer that stamps it (read as `0`),
-   * required after the sweep has rebuilt them all.
+   * (`held − rented_in`) without a second document. Required since beta B: every
+   * projection was rebuilt by `api-cloudrun/scripts/backfill-purchase-kind.ts`
+   * on 2026-10-24.
    */
-  quantity_rented_in?: number;
+  quantity_rented_in: number;
   unavailable: StockUnavailableEntry[];
   /**
-   * Time-bounded supply — see {@link StockSupplyEntry}. Optional and read as
-   * `[]` on the same expand/contract terms as {@link quantity_rented_in}.
+   * Time-bounded supply — see {@link StockSupplyEntry}. `[]` when nothing is
+   * hired in. Required on the same terms as {@link quantity_rented_in}.
    */
-  supply?: StockSupplyEntry[];
+  supply: StockSupplyEntry[];
   /**
    * The value of `stock-locks/{P}.seq` this projection was built from — a
    * **watchdog** field, not a client token and not a concurrency guard.
@@ -299,9 +297,9 @@ export const StockSchema: z.ZodType<Stock> = z.strictObject({
   // created the situation. Nullable for the same reason: the ledger's `null`
   // (uncounted) has to survive the copy.
   quantity_held: z.number().min(0).meta({ column: true, label: "Quantity Held" }).nullable(),
-  quantity_rented_in: z.int().min(0).meta({ column: true, label: "Rented In" }).optional(),
+  quantity_rented_in: z.int().min(0).meta({ column: true, label: "Rented In" }),
   unavailable: z.array(StockUnavailableEntrySchema).meta({ label: "Unavailable" }),
-  supply: z.array(StockSupplyEntrySchema).meta({ label: "Supply" }).optional(),
+  supply: z.array(StockSupplyEntrySchema).meta({ label: "Supply" }),
   claim_seq: z.int().min(0).meta({ column: true, label: "Claim Seq" }),
   created_at: FirestoreTimestamp.meta({ column: true, label: "Created" }),
   updated_at: FirestoreTimestamp.meta({ column: true, label: "Updated" }),

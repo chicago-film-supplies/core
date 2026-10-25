@@ -172,7 +172,7 @@ Deno.test("derivePurchaseStatus — the table", () => {
     ["one line done, one open", [{ quantity_received: 3, quantity_billed: 3 }, {}], "active"],
   ];
   for (const [name, lines, want] of cases) {
-    assertEquals(derivePurchaseStatus({ lines: lines.map((l) => line(l)) }), want, name);
+    assertEquals(derivePurchaseStatus({ kind: "buy", lines: lines.map((l) => line(l)) }), want, name);
   }
 });
 
@@ -188,18 +188,22 @@ const actor = { uid: "testuser100000000000", name: "Test User" };
 const SUPPLIER = { uid: "testsupp100000000000", name: "Baycom" };
 
 function purchase(over: Record<string, unknown> = {}) {
+  const lines = (over.lines as PurchaseLine[] | undefined) ?? [line()];
   return {
     uid: "testpurch10000000000",
     number: 1,
     status: "active",
+    kind: "buy",
     supplier: SUPPLIER,
     store: { uid: "teststore10000000000", name: "Main" },
     date: "2026-10-01T00:00:00.000-05:00",
     date_fs: mockTimestamp,
     reference: "Q-1182",
     notes: null,
-    lines: [line()],
+    lines,
     total_cents: 140985,
+    query_by_products: deriveQueryByProducts(lines),
+    query_by_orders: deriveQueryByOrders(lines),
     version: 0,
     created_by: actor,
     updated_by: actor,
@@ -232,7 +236,7 @@ Deno.test("PurchaseSchema: billed + canceled may not exceed the quantity ordered
 
 Deno.test("PurchaseSchema: one line per product", () => {
   assertEquals(
-    issuePaths(PurchaseSchema, purchase({ lines: [line(), line()], total_cents: 281970 })),
+    issuePaths(PurchaseSchema, purchase({ lines: [line(), line()], total_cents: 281970, query_by_products: [line().uid_product] })),
     ["lines.1.uid_product"],
   );
 });
@@ -631,7 +635,7 @@ Deno.test("derivePurchaseStatus — a subrent is complete only once every receiv
     assertEquals(derivePurchaseStatus({ kind: "subrent", lines: [hireLine(over)] }), want, name);
   }
   // The return axis is a subrent's alone: the same buckets on a buy read complete.
-  assertEquals(derivePurchaseStatus({ lines: [line({ quantity: 10, ...done, quantity_returned: undefined })] }), "complete");
+  assertEquals(derivePurchaseStatus({ kind: "buy", lines: [line({ quantity: 10, ...done, quantity_returned: undefined })] }), "complete");
 });
 
 Deno.test("remainingToReturn is received − returned, and 0 on a buy line", () => {
@@ -670,9 +674,14 @@ Deno.test("PurchaseSchema: returned may not exceed received, and a hire may not 
   ]);
 });
 
-Deno.test("PurchaseSchema: the mirrors — absent is not-yet-stamped, present must be exact", () => {
-  assertEquals(issuePaths(PurchaseSchema, purchase()), [], "a pre-subrent purchase carries neither");
-  assertEquals(issuePaths(PurchaseSchema, purchase({ query_by_products: ["testprod100000000000"], query_by_orders: [] })), []);
+Deno.test("PurchaseSchema: kind and both mirrors are required, and a mirror must be exact", () => {
+  assertEquals(issuePaths(PurchaseSchema, purchase()), []);
+  const { kind: _k, ...noKind } = purchase();
+  assertEquals(issuePaths(PurchaseSchema, noKind), ["kind"]);
+  const { query_by_products: _p, ...noProducts } = purchase();
+  assertEquals(issuePaths(PurchaseSchema, noProducts), ["query_by_products"]);
+  const { query_by_orders: _o, ...noOrders } = purchase();
+  assertEquals(issuePaths(PurchaseSchema, noOrders), ["query_by_orders"]);
   assertEquals(issuePaths(PurchaseSchema, purchase({ query_by_products: [] })), ["query_by_products"]);
   assertEquals(issuePaths(PurchaseSchema, purchase({ query_by_products: ["testprod200000000000"] })), ["query_by_products"]);
   assertEquals(issuePaths(PurchaseSchema, subrent({ query_by_orders: [] })), ["query_by_orders"]);

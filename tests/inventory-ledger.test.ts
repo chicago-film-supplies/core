@@ -9,6 +9,7 @@ const validLedger = {
   stock_method: "bulk",
   quantity_held: 20,
   quantity_in_service: 18,
+  quantity_rented_in: 0,
   quantity_out_of_service: 2,
   average_unit_cost: 250.50,
   total_cost_basis_cents: 501000,

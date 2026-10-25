@@ -24,6 +24,8 @@ const validStock = {
   uid: PRODUCT,
   uid_product: PRODUCT,
   quantity_held: 20,
+  quantity_rented_in: 0,
+  supply: [],
   unavailable: [
     {
       start: "2026-03-01T00:00:00.000-06:00",

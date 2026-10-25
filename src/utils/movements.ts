@@ -457,7 +457,7 @@ export interface LedgerFoldResult {
 function openedCountBase(ledger: InventoryLedger): InventoryLedger {
   return {
     ...ledger,
-    ...rentedInZeroed(ledger),
+    quantity_rented_in: 0,
     quantity_held: 0,
     quantity_in_service: 0,
     store_breakdown: [],
@@ -468,15 +468,6 @@ function openedCountBase(ledger: InventoryLedger): InventoryLedger {
     out_of_service_breakdown: { cleaning: 0, damaged: 0, maintenance: 0, lost: 0 },
     quantity_out_of_service: 0,
   };
-}
-
-/**
- * `quantity_rented_in: 0` when the ledger carries the key, nothing when it does
- * not — so a boundary zeroes the count without minting the key on a ledger
- * written before subrents. Presence is the writer's to stamp, not the fold's.
- */
-function rentedInZeroed(ledger: InventoryLedger): Pick<InventoryLedger, "quantity_rented_in"> {
-  return ledger.quantity_rented_in === undefined ? {} : { quantity_rented_in: 0 };
 }
 
 /** Whether a movement type moves units in or out of a SUBRENT (custody without ownership). */
@@ -662,7 +653,7 @@ export function applyMovementToLedger(
         // The writer refuses a close while units are rented in; zeroing here
         // keeps the fold complete rather than leaving an uncounted ledger
         // claiming rented-in units it has no count for.
-        ...rentedInZeroed(ledger),
+        quantity_rented_in: 0,
         quantity_held: null,
         quantity_in_service: null,
         store_breakdown: [],
@@ -728,7 +719,7 @@ export function applyMovementToLedger(
   let uncountedCostCents = 0;
   let ownedUnderflowUnits = 0;
   const heldBefore = next.quantity_held;
-  const rentedBefore = next.quantity_rented_in ?? 0;
+  const rentedBefore = next.quantity_rented_in;
   const rentedAfter = isHire(movement.type) ? rentedBefore + delta : rentedBefore;
   // Owned = held − rented-in. Only a hire moves the second term, so for every
   // other type owned moves exactly as held does.
@@ -764,9 +755,7 @@ export function applyMovementToLedger(
   if (heldBefore !== null) {
     const heldAfter = heldBefore + delta;
     next.quantity_held = heldAfter;
-    // Presence is the writer's: the key is written when the ledger already
-    // carries it or a hire moves it, never minted by an unrelated movement.
-    if (next.quantity_rented_in !== undefined || isHire(movement.type)) next.quantity_rented_in = rentedAfter;
+    next.quantity_rented_in = rentedAfter;
     const ownedAfter = heldAfter - rentedAfter;
     if (ownedAfter > 0) {
       next.average_unit_cost = perUnitCostAt4dp(

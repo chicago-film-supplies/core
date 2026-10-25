@@ -2385,7 +2385,7 @@
         {
           "kind": "interface",
           "name": "InventoryLedger",
-          "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number | null;\n  quantity_in_service: number | null;\n  quantity_rented_in?: number;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis_cents: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number | null;\n  quantity_in_service: number | null;\n  quantity_rented_in: number;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis_cents: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An inventory ledger document tracking stock quantities and costs per product."
         },
         {
@@ -4107,7 +4107,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  kind?: PurchaseKindType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  lines: PurchaseLine[];\n  total_cents: number;\n  query_by_products?: string[];\n  query_by_orders?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  kind: PurchaseKindType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  lines: PurchaseLine[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -4935,7 +4935,7 @@
         {
           "kind": "interface",
           "name": "Stock",
-          "declaration": "interface Stock {\n  uid: string;\n  uid_product: string;\n  quantity_held: number | null;\n  quantity_rented_in?: number;\n  unavailable: StockUnavailableEntry[];\n  supply?: StockSupplyEntry[];\n  claim_seq: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Stock {\n  uid: string;\n  uid_product: string;\n  quantity_held: number | null;\n  quantity_rented_in: number;\n  unavailable: StockUnavailableEntry[];\n  supply: StockSupplyEntry[];\n  claim_seq: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Window-independent availability inputs for one product. Doc id == `uid` ==\n`uid_product` == the product's / inventory-ledger's Firestore id.\n\nThe window enters only as an overlap filter, so **any** window is derivable\nfrom this one document by `computeStockAvailability`\n(`@cfs/core/utils/stock`) — on the server, in the browser against an\n`onSnapshot`, or over a plain JSON fixture, with no round-trip and no document\nminted per question asked."
         },
         {
@@ -9199,7 +9199,7 @@
         {
           "kind": "interface",
           "name": "InventoryLedger",
-          "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number | null;\n  quantity_in_service: number | null;\n  quantity_rented_in?: number;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis_cents: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface InventoryLedger {\n  uid: string;\n  uid_product: string;\n  type: ProductTypeType;\n  stock_method: InventoryStockMethodType;\n  quantity_held: number | null;\n  quantity_in_service: number | null;\n  quantity_rented_in: number;\n  quantity_out_of_service: number;\n  average_unit_cost: number;\n  total_cost_basis_cents: number;\n  out_of_service_breakdown: typeLiteral;\n  store_breakdown: StoreBreakdownEntry[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An inventory ledger document tracking stock quantities and costs per product."
         },
         {
@@ -10896,7 +10896,7 @@
         {
           "kind": "interface",
           "name": "Purchase",
-          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  kind?: PurchaseKindType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  lines: PurchaseLine[];\n  total_cents: number;\n  query_by_products?: string[];\n  query_by_orders?: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Purchase {\n  uid: string;\n  number: number;\n  status: PurchaseStatusType;\n  kind: PurchaseKindType;\n  supplier: UidNameRefType;\n  store: UidNameRefType;\n  date: string;\n  date_fs: FirestoreTimestampType;\n  reference: string | null;\n  notes: string | null;\n  lines: PurchaseLine[];\n  total_cents: number;\n  query_by_products: string[];\n  query_by_orders: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A purchase order placed with a supplier."
         },
         {
@@ -11584,7 +11584,7 @@
         {
           "kind": "interface",
           "name": "Stock",
-          "declaration": "interface Stock {\n  uid: string;\n  uid_product: string;\n  quantity_held: number | null;\n  quantity_rented_in?: number;\n  unavailable: StockUnavailableEntry[];\n  supply?: StockSupplyEntry[];\n  claim_seq: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Stock {\n  uid: string;\n  uid_product: string;\n  quantity_held: number | null;\n  quantity_rented_in: number;\n  unavailable: StockUnavailableEntry[];\n  supply: StockSupplyEntry[];\n  claim_seq: number;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "Window-independent availability inputs for one product. Doc id == `uid` ==\n`uid_product` == the product's / inventory-ledger's Firestore id.\n\nThe window enters only as an overlap filter, so **any** window is derivable\nfrom this one document by `computeStockAvailability`\n(`@cfs/core/utils/stock`) — on the server, in the browser against an\n`onSnapshot`, or over a plain JSON fixture, with no round-trip and no document\nminted per question asked."
         },
         {
@@ -18460,7 +18460,7 @@
           "kind": "typeAlias",
           "name": "StockEngineInput",
           "declaration": "type StockEngineInput = Pick<Stock, \"quantity_held\" | \"unavailable\"> & typeLiteral;",
-          "doc": "The projection fields every engine read REQUIRES. `supply` and\n`quantity_rented_in` are optional on the stored document (expand/contract)\nand deliberately NOT here: a caller building its own inputs — the oversell\ngate does — must pass both, so it fails to compile rather than silently\nignoring supply and firing `stock_oversold` on every subrented product. A\nreader of a stored `stock/{P}` writes `?? []` / `?? 0` at the read."
+          "doc": "The projection fields every engine read REQUIRES — all four, so a caller\nbuilding its own inputs (the oversell gate does) fails to compile rather than\nsilently ignoring supply and firing `stock_oversold` on every subrented\nproduct. A stored `stock/{P}` satisfies it as-is (both subrent keys required\nsince beta B); `supply` is `readonly` here so a caller may pass a frozen array."
         },
         {
           "kind": "interface",

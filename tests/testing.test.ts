@@ -112,6 +112,14 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
     destinations: { delivery: { uid: "AAAAAAAAAAAAAAAAAAAA", address: null } },
     uid_destination_delivery: "AAAAAAAAAAAAAAAAAAAA",
   },
+  // ⚠️ **Seventh entry, added when the purchase mirrors became required** (the
+  // subrent plan's beta B). `query_by_products === lines.map(l => l.uid_product)`
+  // is a cross-field equality; while the mirror was optional the walker simply
+  // left it absent. `query_by_orders` stays `[]`, which a buy line (no
+  // `uid_orders`) derives.
+  purchase: {
+    query_by_products: ["AAAAAAAAAAAAAAAAAAAA"],
+  },
 };
 
 /** Distinct schemas from the registry, keyed by their first (singular) name. */
@@ -167,8 +175,9 @@ Deno.test("corpus gate — every registry schema has a minimal fixture that pars
   // The escape hatch is the measurement. Structural coverage is 61/63 without
   // it; if this grows for a reason OTHER than a new cross-field refinement, the
   // walker has stopped keeping up with the schemas.
-  // 6 since core#103's booking delivery mirror — a new cross-field refinement.
-  assertEquals(Object.keys(OVERRIDES).length, 6, "a schema now needs hand-written fixture knowledge");
+  // 6 since core#103's booking delivery mirror, 7 since the purchase mirrors
+  // became required — each a new cross-field refinement.
+  assertEquals(Object.keys(OVERRIDES).length, 7, "a schema now needs hand-written fixture knowledge");
 });
 
 Deno.test("corpus gate companion — an unsatisfiable invariant still throws, naming its path", () => {
