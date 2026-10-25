@@ -1269,6 +1269,10 @@ export function computeDocumentDiffs(
     const invoicedByRecord = billedOutOfService(invoices as unknown as ReplacementBillingInvoice[]);
     const crms_blocked = crmsAuthoredInvoices(coverage.alignedInvoices).length > 0;
     for (const record of records) {
+      // ⚠️ Deliberately NOT every terminal bucket. A unit settled to its
+      // supplier (`returned_to_supplier`) was still lost or damaged at the
+      // customer, so it stays billable to them; only a unit back in service
+      // stops being owed (api-cloudrun#1360, D6).
       const fulfilled = record.status === "canceled" ? 0 : record.quantity - record.breakdown.returned_to_service;
       const invoiced = invoicedByRecord.get(record.uid) ?? 0;
       if (fulfilled === invoiced) continue;

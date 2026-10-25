@@ -8,6 +8,11 @@ import { mockTimestamp } from "./helpers/timestamp.ts";
 
 const fs = mockTimestamp;
 
+function issuePaths(doc: unknown): string[] {
+  const r = OutOfServiceSchema.safeParse(doc);
+  return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+}
+
 const validOOS = {
   uid: "testoos1000000000000",
   uid_product: "testprod100000000000",
@@ -181,6 +186,39 @@ Deno.test("CreateOutOfServiceInput: allocations must sum to the quantity", () =>
 Deno.test("OutOfServiceSchema: the breakdown may not place more units than the record holds", () => {
   const doc = { ...validOOS, breakdown: { flagged: 2, away: 1, written_off: 0, returned_to_service: 0 } };
   assertEquals(OutOfServiceSchema.safeParse(doc).success, false);
+});
+
+Deno.test("OutOfServiceSchema: returned_to_supplier is OPTIONAL during its expand — absent parses, stated parses", () => {
+  // Every stored record predates the key (api-cloudrun#1360).
+  assertEquals(OutOfServiceSchema.safeParse(validOOS).success, true);
+  const settled = { ...validOOS, breakdown: { flagged: 1, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 1 } };
+  assertEquals(OutOfServiceSchema.safeParse(settled).success, true);
+  const negative = { ...validOOS, breakdown: { ...validOOS.breakdown, returned_to_supplier: -1 } };
+  assertEquals(OutOfServiceSchema.safeParse(negative).success, false);
+});
+
+Deno.test("OutOfServiceSchema: the over-placement guard still fires with returned_to_supplier ABSENT and when it is the overflow", () => {
+  // 🔴 The NaN hazard: `undefined` in a raw sum is NaN, and `NaN > quantity` is
+  // false, so the guard would go silent rather than loud.
+  const absentOver = { ...validOOS, breakdown: { flagged: 2, away: 1, written_off: 0, returned_to_service: 0 } };
+  assertEquals(issuePaths(absentOver), ["breakdown"]);
+  const supplierOver = { ...validOOS, breakdown: { flagged: 2, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 1 } };
+  assertEquals(issuePaths(supplierOver), ["breakdown"]);
+});
+
+Deno.test("OutOfServiceSchema: units — an absent returned_to_supplier set reads as [], and a stated one is counted", () => {
+  const units = { away: [], flagged: [1, 2], returned_to_service: [], written_off: [] };
+  assertEquals(OutOfServiceSchema.safeParse({ ...validOOS, units }).success, true);
+  const settledUnits = { ...units, flagged: [2], returned_to_supplier: [1] };
+  const settled = { ...validOOS, breakdown: { flagged: 1, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 1 }, units: settledUnits };
+  assertEquals(OutOfServiceSchema.safeParse(settled).success, true);
+  // More named than the bucket holds, with the bucket absent (read as 0).
+  assertEquals(issuePaths({ ...validOOS, units: { ...units, flagged: [2], returned_to_supplier: [1] } }), ["units.returned_to_supplier"]);
+  // A unit in two buckets, one of them the new one.
+  assertEquals(
+    issuePaths({ ...settled, units: { ...settledUnits, flagged: [1] } }).includes("units.returned_to_supplier"),
+    true,
+  );
 });
 
 Deno.test("OutOfServiceSchema: uid_destination mirrors destination", () => {

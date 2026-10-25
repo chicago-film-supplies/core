@@ -45,6 +45,11 @@ import {
   type OOSBreakdown,
   type OOSBreakdownKeyType,
   OOS_BREAKDOWN_KEYS,
+  OOS_BREAKDOWN_TERMINAL_KEYS,
+  fullOOSBreakdown,
+  oosBucketQuantity,
+  oosBucketUnits,
+  sumOOSBuckets,
   type OOSUnitsType,
   type OOSReasonType,
   type OutOfService,
@@ -877,7 +882,8 @@ export type ServiceMovePlan =
     message: string;
     /**
      * `true` for a caller mistake rather than an operator one: units leaving
-     * `written_off` must be resolved into a reversal before planning.
+     * `written_off` or `returned_to_supplier` must be resolved into a reversal
+     * before planning.
      */
     internal: boolean;
   };
@@ -890,17 +896,23 @@ export type ServiceMovePlan =
  *
  * Each INCREASE is fed from the buckets that DECREASED, in a fixed preference:
  *
- * | into                  | drawn from, in order   |
- * |-----------------------|------------------------|
- * | `written_off`         | `away`, `flagged`, then `unplaced` |
- * | `returned_to_service` | `away`, `flagged`, then `unplaced` |
- * | `away`                | `flagged`, then `unplaced` |
- * | `flagged`             | `away`, then `unplaced` |
+ * | into                   | drawn from, in order   |
+ * |------------------------|------------------------|
+ * | `written_off`          | `away`, `flagged`, then `unplaced` |
+ * | `returned_to_service`  | `away`, `flagged`, then `unplaced` |
+ * | `returned_to_supplier` | `away`, `flagged` — never `unplaced` |
+ * | `away`                 | `flagged`, then `unplaced` |
+ * | `flagged`              | `away`, then `unplaced` |
  *
  * Refused: leaving `returned_to_service` (out of service again is a NEW
- * record); leaving `written_off` (resolve found units into a reversal first);
- * going back to `unplaced` (an effect that happened cannot un-happen); a `lost`
- * record's units into `flagged` (lost is a place, not a flag — R3).
+ * record); leaving `written_off` or `returned_to_supplier` (resolve those units
+ * into reversals first); going back to `unplaced` (an effect that happened
+ * cannot un-happen); a `lost` record's units into `flagged` (lost is a place,
+ * not a flag — R3); a record not yet in effect settling to its supplier (a unit
+ * still in service on its shelf is a plain `subrent_out`).
+ *
+ * Every bucket is read through `oosBucketQuantity`, so a stored record with no
+ * `returned_to_supplier` key plans exactly as one stating 0.
  */
 export function serviceMovesFor(
   record: Pick<OutOfService, "quantity" | "reason" | "breakdown">,
@@ -910,10 +922,7 @@ export function serviceMovesFor(
   const placed = sumOOSBreakdown;
   const level = (b: OOSBreakdown): Record<ServicePlace, number> => ({
     unplaced: quantity - placed(b),
-    flagged: b.flagged,
-    away: b.away,
-    written_off: b.written_off,
-    returned_to_service: b.returned_to_service,
+    ...fullOOSBreakdown(b),
   });
   const before = level(record.breakdown);
   const after = level(next);
@@ -927,6 +936,9 @@ export function serviceMovesFor(
   }
   if (after.written_off < before.written_off) {
     return refuse("serviceMovesFor: resolve found units into reversals before planning", true);
+  }
+  if (after.returned_to_supplier < before.returned_to_supplier) {
+    return refuse("serviceMovesFor: resolve un-settled units into reversals before planning", true);
   }
   if (after.unplaced > before.unplaced) {
     return refuse(
@@ -975,6 +987,9 @@ export function serviceMovesFor(
 export const SERVICE_MOVE_PREFERENCE: ReadonlyArray<readonly [ServicePlace, readonly ServicePlace[]]> = [
   ["written_off", ["away", "flagged", "unplaced"]],
   ["returned_to_service", ["away", "flagged", "unplaced"]],
+  // No `unplaced`: a unit not yet in effect is still in service on its shelf,
+  // and handing it back is a plain `subrent_out` on the purchase.
+  ["returned_to_supplier", ["away", "flagged"]],
   ["away", ["flagged", "unplaced"]],
   ["flagged", ["away", "unplaced"]],
 ];
@@ -991,6 +1006,19 @@ export type ServiceUnitMovePlan = { ok: true; moves: ServiceUnitMove[] } | { ok:
 const FOUND_LANDINGS: readonly ServicePlace[] = ["away", "flagged", "returned_to_service"];
 
 /**
+ * Where an UN-SETTLED unit lands: back where its `return_to_supplier` took it
+ * from. Never `returned_to_service` — a settle that was a mistake puts the unit
+ * back out of service, and returning it to service is then its own move.
+ */
+const UNSETTLE_LANDINGS: readonly ServicePlace[] = ["away", "flagged"];
+
+/** The buckets a unit leaves only by reversing the movement that put it there. */
+const REVERSED_BUCKETS: ReadonlyArray<readonly [ServicePlace, readonly ServicePlace[]]> = [
+  ["written_off", FOUND_LANDINGS],
+  ["returned_to_supplier", UNSETTLE_LANDINGS],
+];
+
+/**
  * The moves a UNIT-TRACKED record makes from its stored breakdown and unit sets
  * to `next` / `nextUnits`, each naming its units, in the journal's order —
  * lifted from `api-cloudrun/src/lib/oosUnits.ts` `planUnitMoves`, with the
@@ -1005,8 +1033,10 @@ const FOUND_LANDINGS: readonly ServicePlace[] = ["away", "flagged", "returned_to
  * - a unit whose move is no row of {@link SERVICE_MOVE_PREFERENCE} — so out of
  *   `returned_to_service` is refused;
  * - a FOUND unit (leaving `written_off`) landing anywhere but `away`,
- *   `flagged` or `returned_to_service`. Found moves come FIRST, for the writer
- *   to resolve into reversals of the write-off that named each unit;
+ *   `flagged` or `returned_to_service`, or an UN-SETTLED unit (leaving
+ *   `returned_to_supplier`) landing anywhere but `away` or `flagged`. These
+ *   moves come FIRST, for the writer to resolve into reversals of the
+ *   movement that named each unit;
  * - a count change the named units do not account for, other than the unnamed
  *   `unplaced → returned_to_service` (a scheduled record resolved before it
  *   took effect).
@@ -1018,15 +1048,20 @@ export function serviceUnitMovesFor(
   options: { shelf?: readonly number[] } = {},
 ): ServiceUnitMovePlan {
   const refuse = (message: string): ServiceUnitMovePlan => ({ ok: false, message });
-  if (next.written_off >= record.breakdown.written_off) {
+  const reverses = REVERSED_BUCKETS.some(([k]) =>
+    oosBucketQuantity(next, k as OOSBreakdownKeyType) < oosBucketQuantity(record.breakdown, k as OOSBreakdownKeyType)
+  );
+  if (!reverses) {
     const counts = serviceMovesFor(record, next);
     if (!counts.ok) return refuse(counts.message);
   }
   const placements = new Map<number, number>();
-  for (const key of OOS_BREAKDOWN_KEYS) for (const n of nextUnits[key]) placements.set(n, (placements.get(n) ?? 0) + 1);
+  for (const key of OOS_BREAKDOWN_KEYS) {
+    for (const n of oosBucketUnits(nextUnits, key)) placements.set(n, (placements.get(n) ?? 0) + 1);
+  }
   const twice = [...placements].filter(([, c]) => c > 1).map(([n]) => n);
   if (twice.length > 0) return refuse(`Unit ${twice[0]} is in two of this record's buckets; a unit is in one at a time.`);
-  const held = new Set(OOS_BREAKDOWN_KEYS.flatMap((k) => record.units[k]));
+  const held = new Set(OOS_BREAKDOWN_KEYS.flatMap((k) => oosBucketUnits(record.units, k)));
   const added = [...placements.keys()].filter((n) => !held.has(n));
   if (options.shelf !== undefined) {
     const shelf = new Set(options.shelf);
@@ -1039,7 +1074,7 @@ export function serviceUnitMovesFor(
   }
 
   const bucketOf = (sets: OOSUnitsType, n: number): ServicePlace =>
-    OOS_BREAKDOWN_KEYS.find((k) => sets[k].includes(n)) ?? "unplaced";
+    OOS_BREAKDOWN_KEYS.find((k) => oosBucketUnits(sets, k).includes(n)) ?? "unplaced";
   const allowed = new Set(SERVICE_MOVE_PREFERENCE.flatMap(([to, froms]) => froms.map((from) => `${from}>${to}`)));
   const groups = new Map<string, number[]>();
   for (const n of [...new Set([...held, ...placements.keys()])].sort((a, b) => a - b)) {
@@ -1058,20 +1093,29 @@ export function serviceUnitMovesFor(
           `flagged or returned to service — never to ${to}`,
       );
     }
-    if (from !== "written_off" && !allowed.has(`${from}>${to}`)) {
+    if (from === "returned_to_supplier" && !UNSETTLE_LANDINGS.includes(to)) {
+      return refuse(
+        `Unit ${n} was returned to its supplier, so undoing that puts it back where it was — away or ` +
+          `flagged — never ${to}`,
+      );
+    }
+    if (from !== "written_off" && from !== "returned_to_supplier" && !allowed.has(`${from}>${to}`)) {
       return refuse(`Unit ${n} cannot move from ${from} to ${to} on an out-of-service record`);
     }
     groups.set(`${from}>${to}`, [...(groups.get(`${from}>${to}`) ?? []), n]);
   }
 
   const named: ServiceUnitMove[] = [];
-  const level: OOSBreakdown = { ...record.breakdown };
-  for (const to of FOUND_LANDINGS) {
-    const units = groups.get(`written_off>${to}`);
-    if (!units || to === "unplaced" || to === "written_off") continue;
-    named.push({ from: "written_off", to, quantity: units.length, units });
-    level.written_off -= units.length;
-    level[to] += units.length;
+  const level = fullOOSBreakdown(record.breakdown);
+  for (const [from, landings] of REVERSED_BUCKETS) {
+    if (from === "unplaced") continue;
+    for (const to of landings) {
+      const units = groups.get(`${from}>${to}`);
+      if (!units || to === "unplaced" || to === from) continue;
+      named.push({ from, to, quantity: units.length, units });
+      level[from] -= units.length;
+      level[to] += units.length;
+    }
   }
   for (const [to, froms] of SERVICE_MOVE_PREFERENCE) {
     for (const from of froms) {
@@ -1087,6 +1131,9 @@ export function serviceUnitMovesFor(
   }
   if (next.written_off < level.written_off) {
     return refuse("This product tracks units, so bringing written-off units back must name the units that were found");
+  }
+  if (oosBucketQuantity(next, "returned_to_supplier") < level.returned_to_supplier) {
+    return refuse("This product tracks units, so undoing a return to supplier must name the units it brings back");
   }
   const residual = serviceMovesFor({ quantity: record.quantity, reason: record.reason, breakdown: level }, next);
   if (!residual.ok) return refuse(residual.message);
@@ -1115,25 +1162,35 @@ type BoundsRecord = Pick<OutOfService, "status" | "reason" | "quantity" | "break
  *
  * - `returned_to_service` never goes down, on any record.
  * - A `lost` record flags nothing: its `flagged` bucket is pinned at 0.
- * - A complete/canceled record admits ONE edit: units LEAVING `written_off`
- *   ("found after write-off"), into any other bucket. The api re-opens it.
+ * - A complete/canceled record admits ONE kind of edit: units LEAVING a
+ *   reversible terminal bucket — `written_off` ("found after write-off") or
+ *   `returned_to_supplier` (a settle that was a mistake) — into another
+ *   bucket. The api re-opens it.
  */
 export function serviceBucketBounds(
   record: Pick<BoundsRecord, "status" | "reason" | "breakdown">,
   key: OOSBreakdownKeyType,
 ): ServiceBucketBounds {
-  const stored = record.breakdown[key];
+  const stored = oosBucketQuantity(record.breakdown, key);
   const closed = TERMINAL_OOS_STATUSES.has(record.status);
   if (key === "flagged" && record.reason === "lost") return { min: 0, max: 0 };
-  if (closed) return key === "written_off" ? { min: 0, max: stored } : { min: stored, max: null };
+  if (closed) return isReversibleTerminal(key) ? { min: 0, max: stored } : { min: stored, max: null };
   if (key === "returned_to_service") return { min: stored, max: null };
   return { min: 0, max: null };
 }
 
-/** Whether a record's breakdown can be edited at all. A closed record with nothing written off cannot. */
+/** `written_off` and `returned_to_supplier`: terminal, and left only by reversing their movement. */
+function isReversibleTerminal(key: OOSBreakdownKeyType): boolean {
+  return REVERSED_BUCKETS.some(([k]) => k === key);
+}
+
+/**
+ * Whether a record's breakdown can be edited at all. A closed record with
+ * nothing written off or returned to its supplier cannot.
+ */
 export function canEditServiceBreakdown(record: Pick<OutOfService, "status" | "breakdown">): boolean {
   const closed = TERMINAL_OOS_STATUSES.has(record.status);
-  return !closed || record.breakdown.written_off > 0;
+  return !closed || OOS_BREAKDOWN_KEYS.some((k) => isReversibleTerminal(k) && oosBucketQuantity(record.breakdown, k) > 0);
 }
 
 /**
@@ -1144,7 +1201,7 @@ export function canEditServiceBreakdown(record: Pick<OutOfService, "status" | "b
 export function serviceBreakdownViolation(record: BoundsRecord, next: OOSBreakdown): string | null {
   for (const key of OOS_BREAKDOWN_KEYS) {
     const { min, max } = serviceBucketBounds(record, key);
-    const value = next[key];
+    const value = oosBucketQuantity(next, key);
     if (value < min) {
       return key === "returned_to_service"
         ? "Units returned to service cannot go back out of it — record a new out-of-service record instead"
@@ -1296,10 +1353,10 @@ export function lossUndoRefusal(
         `damaged model; adjust the OOS record itself (${at}).`,
     );
   }
-  if (record.breakdown.written_off > 0 || record.breakdown.returned_to_service > 0) {
+  if (sumOOSBuckets(record.breakdown, OOS_BREAKDOWN_TERMINAL_KEYS) > 0) {
     return refuse(
       "resolved",
-      `Cannot undo ${label}: it already has units written off or returned to service. ` +
+      `Cannot undo ${label}: it already has units written off, returned to service or returned to their supplier. ` +
         `A unit that was lost and has turned up goes back through the record (${at}).`,
     );
   }
@@ -1442,11 +1499,11 @@ export function planReclassification(args: {
     );
   }
   if (uncounted) {
-    const resolved = record.breakdown.written_off + record.breakdown.returned_to_service;
+    const resolved = sumOOSBuckets(record.breakdown, OOS_BREAKDOWN_TERMINAL_KEYS);
     if (resolved > 0) {
       return refuse(
         `Cannot change the reason of ${label}: its product is uncounted, so the record is relabelled whole, ` +
-          `and ${resolved} of its units are already written off or returned to service. Open a new record ` +
+          `and ${resolved} of its units are already resolved (written off, returned to service or to their supplier). Open a new record ` +
           "for the units still away instead.",
       );
     }

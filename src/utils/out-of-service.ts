@@ -8,13 +8,21 @@
  * @module
  */
 import {
-  OOS_BREAKDOWN_KEYS,
+  OOS_BREAKDOWN_TERMINAL_KEYS,
   type OOSBreakdown,
   type OOSStatusType,
   type OutOfService,
+  sumOOSBuckets,
 } from "../schemas/mod.ts";
 
-/** A breakdown with every bucket at zero. */
+/**
+ * A breakdown with every bucket at zero.
+ *
+ * ⚠️ **It does not state `returned_to_supplier` yet, deliberately.** It is a
+ * WRITER — the api seeds every new record from it — and a record carrying the
+ * key 400s against a strict reader that predates it. It states the key in a
+ * later beta, once prod manager reads it (release order step 5).
+ */
 export function emptyOOSBreakdown(): OOSBreakdown {
   return { flagged: 0, away: 0, written_off: 0, returned_to_service: 0 };
 }
@@ -24,14 +32,15 @@ export function emptyOOSBreakdown(): OOSBreakdown {
  * in effect (a future start), whose units are still in service on their shelf.
  */
 export function sumOOSBreakdown(breakdown: OOSBreakdown): number {
-  return OOS_BREAKDOWN_KEYS.reduce((sum, k) => sum + breakdown[k], 0);
+  return sumOOSBuckets(breakdown);
 }
 
 /**
  * The record's status, derived — never client-set.
  *
  * - `canceled` once `canceled_at` is set;
- * - `complete` once every unit is written off or back in service;
+ * - `complete` once every unit is RESOLVED — written off, back in service, or
+ *   settled to its supplier (`OOS_BREAKDOWN_TERMINAL_KEYS`);
  * - `active` otherwise — including a record not yet in effect, whose units are
  *   in no bucket.
  *
@@ -43,7 +52,7 @@ export function deriveOOSStatus(
 ): OOSStatusType {
   if (record.canceled_at != null) return "canceled";
   const { breakdown, quantity } = record;
-  if (quantity > 0 && breakdown.written_off + breakdown.returned_to_service === quantity) {
+  if (quantity > 0 && sumOOSBuckets(breakdown, OOS_BREAKDOWN_TERMINAL_KEYS) === quantity) {
     return "complete";
   }
   return "active";
@@ -60,9 +69,9 @@ export function oosCancelRefusal(
   record: Pick<OutOfService, "quantity" | "breakdown" | "canceled_at">,
 ): string | null {
   if (deriveOOSStatus(record) === "canceled") return "This out-of-service record is already canceled.";
-  const held = record.breakdown.flagged + record.breakdown.away;
+  const held = sumOOSBuckets(record.breakdown, ["flagged", "away"]);
   if (held > 0) {
-    return `Cannot cancel: ${held} unit(s) are still out of service. Return them to service or write them off first.`;
+    return `Cannot cancel: ${held} unit(s) are still out of service. Return them to service, write them off or return them to their supplier first.`;
   }
   return null;
 }

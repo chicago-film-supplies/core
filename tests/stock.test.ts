@@ -127,6 +127,15 @@ Deno.test("oosConsumes: the units still OUT of service, zero once terminal", () 
     1,
   );
 
+  // A unit settled to its supplier (api-cloudrun#1360) posted its
+  // `return_to_supplier` in the same save: it has left held, so it consumes
+  // nothing either. An absent key (every pre-#1360 record) reads as 0.
+  assertEquals(
+    oosConsumes({ status: "active", quantity: 5, breakdown: { written_off: 1, returned_to_service: 1, returned_to_supplier: 2 } }),
+    1,
+  );
+  assertEquals(oosConsumes({ status: "active", quantity: 5, breakdown: { written_off: 1, returned_to_service: 1 } }), 3);
+
   // A read that masked the breakdown away must fail, not consume the whole record.
   assertThrows(() => oosConsumes({ status: "active", quantity: 5 } as never));
 
@@ -246,6 +255,26 @@ Deno.test("unavailableFromOOS: the unresolved units until terminal", () => {
       dates: { start: D1, end: D5 },
     })?.quantity,
     2,
+  );
+  // A record wholly settled to its supplier contributes nothing; a mixed one only
+  // its unresolved part (api-cloudrun#1360).
+  assertEquals(
+    unavailableFromOOS({
+      status: "active",
+      quantity: 3,
+      breakdown: { written_off: 0, returned_to_service: 0, returned_to_supplier: 3 },
+      dates: { start: D1, end: D5 },
+    }),
+    null,
+  );
+  assertEquals(
+    unavailableFromOOS({
+      status: "active",
+      quantity: 5,
+      breakdown: { written_off: 1, returned_to_service: 1, returned_to_supplier: 2 },
+      dates: { start: D1, end: D5 },
+    })?.quantity,
+    1,
   );
   // Fully resolved but not yet closed contributes nothing, not a zero-quantity entry.
   assertEquals(

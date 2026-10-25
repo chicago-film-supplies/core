@@ -81,7 +81,7 @@
  * `returned > 0`**, i.e. the path has never been exercised end to end, and
  * fulfillment support for it is incomplete (api-cloudrun#513).
  */
-import { ownsKey } from "../schemas/mod.ts";
+import { OOS_BREAKDOWN_TERMINAL_KEYS, ownsKey, sumOOSBuckets } from "../schemas/mod.ts";
 import type {
   BookingBreakdown,
   BookingBreakdownKeyType,
@@ -90,6 +90,7 @@ import type {
   FirestoreTimestampType,
   FirestoreTimestampValue,
   OOSBreakdown,
+  OOSBreakdownTerminalKeyType,
   OOSStatusType,
   PurchaseKindType,
   PurchaseStatusType,
@@ -236,17 +237,21 @@ export const TERMINAL_OOS_STATUSES: ReadonlySet<string> = new Set(["complete", "
 
 /**
  * Units an out-of-service record consumes — the units still OUT of service:
- * `quantity − written_off − returned_to_service` until it reaches a terminal
+ * `quantity − Σ OOS_BREAKDOWN_TERMINAL_KEYS` (`written_off`,
+ * `returned_to_service`, `returned_to_supplier`) until it reaches a terminal
  * status, then zero.
  *
- * ## ⭐ The two resolution buckets are applied to the ledger the moment units enter them
+ * ## ⭐ The resolution buckets are applied to the ledger the moment units enter them
  *
  * api-cloudrun#1094 step 6 (owner, 2026-09-23: *"write off is a state"*). A unit
  * moved into `written_off` posts its `write_off` movement in that same save, so it
  * has already left `quantity_held`; a unit moved into `returned_to_service` posts
  * its `return_to_service` movement (or, for a record that flags units in place,
  * was on its shelf all along), so it is back in service. Counting either here
- * would subtract it from availability a SECOND time.
+ * would subtract it from availability a SECOND time. A unit moved into
+ * `returned_to_supplier` posts its `return_to_supplier` in the same save too
+ * (api-cloudrun#1360): it has left `quantity_held` AND `quantity_rented_in`, so
+ * its supply and its consumption both fall and the window nets as before.
  *
  * 🔴 **This INVERTS the rule that stood here until then, so do not re-derive it
  * from the old warning.** It said *"never reduce this by
@@ -265,16 +270,13 @@ export const TERMINAL_OOS_STATUSES: ReadonlySet<string> = new Set(["complete", "
 export function oosConsumes(o: {
   status: string;
   quantity: number;
-  breakdown: Pick<OOSBreakdown, "written_off" | "returned_to_service">;
+  breakdown: Pick<OOSBreakdown, OOSBreakdownTerminalKeyType>;
 }): number {
   if (TERMINAL_OOS_STATUSES.has(o.status)) return 0;
   if (!o.breakdown) {
     throw new Error("oosConsumes: an out-of-service record read without its breakdown");
   }
-  return Math.max(
-    0,
-    o.quantity - o.breakdown.written_off - o.breakdown.returned_to_service,
-  );
+  return Math.max(0, o.quantity - sumOOSBuckets(o.breakdown, OOS_BREAKDOWN_TERMINAL_KEYS));
 }
 
 /**
@@ -377,7 +379,7 @@ export interface StockBookingSource extends StockConsumingBooking {
 export interface StockOOSSource {
   status: OOSStatusType;
   quantity: number;
-  breakdown: Pick<OOSBreakdown, "written_off" | "returned_to_service">;
+  breakdown: Pick<OOSBreakdown, OOSBreakdownTerminalKeyType>;
   dates: { start: string | null; end: string | null };
 }
 

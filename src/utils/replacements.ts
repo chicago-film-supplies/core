@@ -42,7 +42,7 @@
 import { componentSignatureHash, parseBookingId } from "./booking-id.ts";
 import { formatUnitRanges, serialAt } from "./units.ts";
 import type { OOSReasonType } from "../schemas/common.ts";
-import { CUSTODY_RULES, OUT_OF_SERVICE_KEYS, type OOSUnitsType, type UnitType } from "../schemas/mod.ts";
+import { CUSTODY_RULES, OOS_BREAKDOWN_KEYS, oosBucketUnits, OUT_OF_SERVICE_KEYS, type OOSUnitsType, type UnitType } from "../schemas/mod.ts";
 
 /**
  * Whether a unit marked into `reason` off `out` may be billed to the customer:
@@ -306,7 +306,7 @@ function reasonLabel(reason: string): string {
 /** Every unit a record names, in any bucket, ascending. */
 function recordUnits(units: OOSUnitsType | null): number[] {
   if (units === null) return [];
-  return [...units.away, ...units.flagged, ...units.returned_to_service, ...units.written_off].sort((a, b) => a - b);
+  return OOS_BREAKDOWN_KEYS.flatMap((k) => oosBucketUnits(units, k)).sort((a, b) => a - b);
 }
 
 /** See {@link ReplacementLineSeed.description}. */

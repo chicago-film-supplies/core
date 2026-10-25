@@ -25,6 +25,8 @@ export const outOfService: TypesenseCollectionConfig = {
       { name: "breakdown.away", type: "int32", sort: true, index: true, facet: false },
       { name: "breakdown.written_off", type: "int32", sort: true, index: true, facet: false },
       { name: "breakdown.returned_to_service", type: "int32", sort: true, index: true, facet: false },
+      // Optional while the stored key is (api-cloudrun#1360): no record carries it before the backfill.
+      { name: "breakdown.returned_to_supplier", type: "int32", sort: true, index: true, facet: false, optional: true },
       { name: "organization", type: "object", optional: true },
       { name: "organization.uid", type: "string", facet: false, optional: true },
       { name: "organization.name", type: "string", sort: true, stem: true, facet: false, optional: true },

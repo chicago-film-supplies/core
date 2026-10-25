@@ -17,6 +17,13 @@
  * | `away`                | at the record: lost, or at `destination`   | `send_away` / `mark_lost`     |
  * | `written_off`         | gone                                       | `write_off`                   |
  * | `returned_to_service` | back in service                            | `return_to_service`, a clear  |
+ * | `returned_to_supplier`| settled to the supplier's account (subrent)| `return_to_supplier`          |
+ *
+ * `returned_to_supplier` is a RENTED unit that cannot go back — lost at the
+ * customer, or damaged — settled to the supplier's account rather than
+ * physically returned (api-cloudrun#1360). ⚠️ The record's `supplier` field is
+ * the REPAIR vendor, not this; the subrent is named only in the settling
+ * movement's `sources[]`.
  *
  * ⭐ **The booking analogy.** A unit at a customer is `out` and stands AT THE
  * BOOKING, which names its destination; a unit at a vendor is `away` and stands
@@ -94,9 +101,24 @@ export const OOS_USER_STATUSES = ["canceled"] as const;
 // ── Breakdown ───────────────────────────────────────────────────────
 
 /** Where a record's units are — see the module docblock's table. */
-export const OOS_BREAKDOWN_KEYS = ["flagged", "away", "written_off", "returned_to_service"] as const;
+export const OOS_BREAKDOWN_KEYS = ["flagged", "away", "written_off", "returned_to_service", "returned_to_supplier"] as const;
 /** One out-of-service breakdown bucket. */
 export type OOSBreakdownKeyType = typeof OOS_BREAKDOWN_KEYS[number];
+
+/**
+ * The RESOLVED buckets: a unit in one of them is no longer out of service at
+ * this record — gone, back in service, or settled to its supplier. A record
+ * whose every unit is resolved is `complete` (`deriveOOSStatus`), and an open
+ * record consumes stock only for its unresolved units (`oosConsumes`).
+ *
+ * 🔴 **Sum resolved units through this list, never by naming keys.** A sum
+ * spelled `written_off + returned_to_service` compiled straight through the
+ * arrival of `returned_to_supplier` and would have left a settled record
+ * `active` and consuming stock forever.
+ */
+export const OOS_BREAKDOWN_TERMINAL_KEYS = ["written_off", "returned_to_service", "returned_to_supplier"] as const;
+/** One {@link OOS_BREAKDOWN_TERMINAL_KEYS} member. */
+export type OOSBreakdownTerminalKeyType = typeof OOS_BREAKDOWN_TERMINAL_KEYS[number];
 
 /** Operator-facing labels, one per {@link OOS_BREAKDOWN_KEYS} member. */
 export const OOS_BREAKDOWN_LABELS: Readonly<Record<OOSBreakdownKeyType, string>> = {
@@ -104,14 +126,27 @@ export const OOS_BREAKDOWN_LABELS: Readonly<Record<OOSBreakdownKeyType, string>>
   away: "Away",
   written_off: "Written Off",
   returned_to_service: "Returned To Service",
+  returned_to_supplier: "Returned To Supplier",
 };
 
-/** Per-bucket quantities. Σ ≤ `quantity` — the shortfall is "not yet in effect". */
+/**
+ * Per-bucket quantities. Σ ≤ `quantity` — the shortfall is "not yet in effect".
+ *
+ * ⚠️ **`returned_to_supplier` is OPTIONAL during its expand** (the add-field
+ * order, `cfs-release-order`; precedent the booking `cleaning`/`maintenance`
+ * keys, `schemas/_breakdown.ts`). No stored record carries it yet, and a
+ * strict reader that required it would refuse every one. An absent key reads
+ * as 0 — always through {@link oosBucketQuantity}, never a per-site `?? 0`.
+ * Writers state it once prod manager reads it, a backfill zero-fills every
+ * record, and a later beta makes it required.
+ */
 export interface OOSBreakdown {
   flagged: number;
   away: number;
   written_off: number;
   returned_to_service: number;
+  /** Settled to the supplier's account (subrent). Optional until backfilled — see above. */
+  returned_to_supplier?: number;
 }
 
 /** Zod schema for OOSBreakdown. */
@@ -120,7 +155,38 @@ export const OOSBreakdownSchema: z.ZodType<OOSBreakdown> = z.strictObject({
   away: z.int().min(0).meta({ column: true, label: "Away" }),
   written_off: z.int().min(0).meta({ column: true, label: "Written Off" }),
   returned_to_service: z.int().min(0).meta({ column: true, label: "Returned To Service" }),
+  // Optional during its expand: 0 stored records carry it (2026-10-25). Made
+  // required once the writers state it and the backfill reads 0 missing.
+  returned_to_supplier: z.int().min(0).meta({ column: true, label: "Returned To Supplier" }).optional(),
 });
+
+/**
+ * One bucket of a breakdown, reading an ABSENT key as 0 — the only way any
+ * reader touches a bucket while `returned_to_supplier` is optional. An absent
+ * key read raw is `undefined`, and `undefined` in a sum is `NaN`, which a `>`
+ * comparison then reads as false: the guards that refuse over-placement go
+ * silent rather than loud.
+ */
+export function oosBucketQuantity(b: Partial<OOSBreakdown>, key: OOSBreakdownKeyType): number {
+  return b[key] ?? 0;
+}
+
+/** Σ of `keys` (every bucket by default), each read through {@link oosBucketQuantity}. */
+export function sumOOSBuckets(
+  b: Partial<OOSBreakdown>,
+  keys: readonly OOSBreakdownKeyType[] = OOS_BREAKDOWN_KEYS,
+): number {
+  let total = 0;
+  for (const key of keys) total += oosBucketQuantity(b, key);
+  return total;
+}
+
+/** Every bucket stated, an absent one as 0 — for a caller that needs the full shape. */
+export function fullOOSBreakdown(b: Partial<OOSBreakdown>): Required<OOSBreakdown> {
+  const full = {} as Required<OOSBreakdown>;
+  for (const key of OOS_BREAKDOWN_KEYS) full[key] = oosBucketQuantity(b, key);
+  return full;
+}
 
 /**
  * Which units sit in each bucket of a record, on a serialized product
@@ -136,6 +202,8 @@ export interface OOSUnitsType {
   flagged: number[];
   returned_to_service: number[];
   written_off: number[];
+  /** Optional during its expand, as {@link OOSBreakdown.returned_to_supplier}. */
+  returned_to_supplier?: number[];
 }
 
 /** Zod schema for {@link OOSUnitsType}. */
@@ -144,10 +212,12 @@ export const OOSUnitsSchema: z.ZodType<OOSUnitsType> = z.strictObject({
   flagged: UnitSet,
   returned_to_service: UnitSet,
   written_off: UnitSet,
+  // Optional during its expand — see `OOSBreakdownSchema.returned_to_supplier`.
+  returned_to_supplier: UnitSet.optional(),
 }).superRefine((sets, ctx) => {
   const seen = new Map<number, OOSBreakdownKeyType>();
   for (const key of OOS_BREAKDOWN_KEYS) {
-    for (const n of sets[key]) {
+    for (const n of oosBucketUnits(sets, key)) {
       const other = seen.get(n);
       if (other !== undefined) {
         ctx.addIssue({
@@ -161,6 +231,11 @@ export const OOSUnitsSchema: z.ZodType<OOSUnitsType> = z.strictObject({
   }
 });
 
+/** One bucket's unit set, reading an ABSENT set as `[]` — {@link oosBucketQuantity}'s twin. */
+export function oosBucketUnits(units: Partial<OOSUnitsType>, key: OOSBreakdownKeyType): number[] {
+  return units[key] ?? [];
+}
+
 function unitsOverBreakdown(
   units: OOSUnitsType,
   breakdown: OOSBreakdown,
@@ -168,11 +243,13 @@ function unitsOverBreakdown(
   path: (string | number)[],
 ): void {
   for (const key of OOS_BREAKDOWN_KEYS) {
-    if (units[key].length > breakdown[key]) {
+    const named = oosBucketUnits(units, key).length;
+    const held = oosBucketQuantity(breakdown, key);
+    if (named > held) {
       ctx.addIssue({
         code: "custom",
         path: [...path, key],
-        message: `"${key}" names ${units[key].length} units but holds ${breakdown[key]}`,
+        message: `"${key}" names ${named} units but holds ${held}`,
       });
     }
   }
@@ -339,7 +416,7 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
   ...TimestampFields,
 }).superRefine((doc, ctx) => {
-  const placed = OOS_BREAKDOWN_KEYS.reduce((sum, k) => sum + doc.breakdown[k], 0);
+  const placed = sumOOSBuckets(doc.breakdown);
   if (placed > doc.quantity) {
     ctx.addIssue({
       code: "custom",

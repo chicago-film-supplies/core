@@ -78,6 +78,8 @@ import {
   serviceMovesFor,
   serviceUnitMovesFor,
 } from "../src/utils/custody.ts";
+import { deriveOOSStatus } from "../src/utils/out-of-service.ts";
+import { oosConsumes } from "../src/utils/stock.ts";
 import * as oracle from "./helpers/custody-oracle.ts";
 
 /** Every key stated, as `applyCustodyActions` returns it. */
@@ -864,12 +866,20 @@ Deno.test("custody - PARITY: serviceMovesFor ≡ the api's planBucketMoves over 
   for (let f = 0; f <= q; f++) {
     for (let a = 0; a <= q - f; a++) {
       for (let w = 0; w <= q - f - a; w++) {
-        for (let r = 0; r <= q - f - a - w; r++) oos.push({ flagged: f, away: a, written_off: w, returned_to_service: r });
+        for (let r = 0; r <= q - f - a - w; r++) {
+          for (let s = 0; s <= q - f - a - w - r; s++) {
+            oos.push({ flagged: f, away: a, written_off: w, returned_to_service: r, returned_to_supplier: s });
+            // A stored record with NO `returned_to_supplier` key must plan
+            // exactly as one stating 0 — the expand-phase shape of every record.
+            if (s === 0) oos.push({ flagged: f, away: a, written_off: w, returned_to_service: r });
+          }
+        }
       }
     }
   }
   let ok = 0;
   let refused = 0;
+  let settles = 0;
   for (const reason of ["damaged", "cleaning", "maintenance", "lost"] as OOSReasonType[]) {
     for (const prev of oos) {
       for (const next of oos) {
@@ -885,6 +895,7 @@ Deno.test("custody - PARITY: serviceMovesFor ≡ the api's planBucketMoves over 
           assert(got.ok, `${reason} ${JSON.stringify(prev)} → ${JSON.stringify(next)}`);
           assertEquals(got.moves, want);
           ok++;
+          if (got.moves.some((m) => m.to === "returned_to_supplier")) settles++;
         } else {
           assert(!got.ok);
           assertEquals(got.internal, wantErr === "internal");
@@ -894,6 +905,34 @@ Deno.test("custody - PARITY: serviceMovesFor ≡ the api's planBucketMoves over 
     }
   }
   assert(ok > 1000 && refused > 1000, `${ok} ok / ${refused} refused`);
+  assert(settles > 100, `only ${settles} plans moved units into returned_to_supplier`);
+});
+
+Deno.test("custody - settle: into returned_to_supplier from away or flagged, never from unplaced", () => {
+  const rec = (b: Partial<OOSBreakdown>) => ({ quantity: 3, reason: "lost" as const, breakdown: ob(b) });
+  assertEquals(serviceMovesFor(rec({ away: 2 }), ob({ away: 1, returned_to_supplier: 1 })), {
+    ok: true,
+    moves: [{ from: "away", to: "returned_to_supplier", quantity: 1 }],
+  });
+  const damaged = { quantity: 2, reason: "damaged" as const, breakdown: ob({ flagged: 2 }) };
+  assertEquals(serviceMovesFor(damaged, ob({ flagged: 1, returned_to_supplier: 1 })), {
+    ok: true,
+    moves: [{ from: "flagged", to: "returned_to_supplier", quantity: 1 }],
+  });
+  // A unit not yet in effect is still in service on its shelf: a plain subrent_out.
+  const notYet = serviceMovesFor(rec({}), ob({ returned_to_supplier: 1 }));
+  assert(!notYet.ok && !notYet.internal);
+  // Leaving it is a reversal the writer resolves first, exactly like a found write-off.
+  const back = serviceMovesFor(rec({ returned_to_supplier: 1 }), ob({ away: 1 }));
+  assert(!back.ok && back.internal);
+});
+
+Deno.test("custody - settle: a record whose units are all settled is complete and consumes nothing", () => {
+  const settled = { quantity: 2, breakdown: ob({ returned_to_supplier: 2 }), canceled_at: null };
+  assertEquals(deriveOOSStatus(settled), "complete");
+  const mixed = { quantity: 3, breakdown: ob({ away: 1, written_off: 1, returned_to_supplier: 1 }), canceled_at: null };
+  assertEquals(deriveOOSStatus(mixed), "active");
+  assertEquals(oosConsumes({ status: "active", ...mixed }), 1, "only the unresolved unit");
 });
 
 Deno.test("custody - record bounds: returned-to-service never falls, lost never flags, closed only un-writes-off", () => {
@@ -908,6 +947,46 @@ Deno.test("custody - record bounds: returned-to-service never falls, lost never 
   assertEquals(serviceBreakdownViolation(open, { ...open.breakdown, returned_to_service: 0, flagged: 2 }) !== null, true);
   assertEquals(serviceBreakdownViolation(open, { ...open.breakdown, away: 1 }), null);
   for (const key of OOS_BREAKDOWN_KEYS) assert(serviceBucketBounds(open, key).min >= 0);
+  // A settle that was a mistake re-opens a closed record, like a found write-off.
+  const settled = { ...open, status: "complete" as const, breakdown: { flagged: 0, away: 0, written_off: 0, returned_to_service: 1, returned_to_supplier: 2 } };
+  assertEquals(serviceBucketBounds(settled, "returned_to_supplier"), { min: 0, max: 2 });
+  assertEquals(canEditServiceBreakdown(settled), true);
+  // An absent key reads as 0: a closed record with nothing reversible stays locked.
+  assertEquals(canEditServiceBreakdown({ ...closed, breakdown: { flagged: 0, away: 0, written_off: 0, returned_to_service: 3 } }), false);
+  assertEquals(serviceBucketBounds({ ...open, breakdown: { flagged: 1, away: 0, written_off: 0, returned_to_service: 1 } }, "returned_to_supplier"), { min: 0, max: null });
+});
+
+Deno.test("serviceUnitMovesFor: a settle names its units; undoing one lands away or flagged and must name them too", () => {
+  assertEquals(unitPlan(ob({ flagged: 2 }), ou({ flagged: [1, 2] }), ob({ flagged: 1, returned_to_supplier: 1 }), ou({ flagged: [2], returned_to_supplier: [1] }), 2, "damaged"), {
+    ok: true,
+    moves: [{ from: "flagged", to: "returned_to_supplier", quantity: 1, units: [1] }],
+  });
+  // Un-settling comes FIRST, for the writer to resolve into a reversal.
+  assertEquals(unitPlan(ob({ returned_to_supplier: 1, away: 1 }), ou({ returned_to_supplier: [1], away: [2] }), ob({ away: 2 }), ou({ away: [1, 2] }), 2, "lost"), {
+    ok: true,
+    moves: [{ from: "returned_to_supplier", to: "away", quantity: 1, units: [1] }],
+  });
+  refusedWith(
+    unitPlan(ob({ returned_to_supplier: 1 }), ou({ returned_to_supplier: [1] }), ob({ returned_to_service: 1 }), ou({ returned_to_service: [1] }), 1, "damaged"),
+    "away or flagged",
+  );
+  // Two settled, one of them historic and unnamed: bringing both back names only one.
+  refusedWith(
+    unitPlan(ob({ returned_to_supplier: 2 }), ou({ returned_to_supplier: [1] }), ob({ away: 2 }), ou({ away: [1] }), 2, "lost"),
+    "must name the units it brings back",
+  );
+  // A record stored before the key existed plans as if it stated [] / 0.
+  assertEquals(
+    unitPlan(
+      { flagged: 1, away: 0, written_off: 0, returned_to_service: 0 },
+      { away: [], flagged: [5], returned_to_service: [], written_off: [] },
+      ob({ returned_to_supplier: 1 }),
+      ou({ returned_to_supplier: [5] }),
+      1,
+      "damaged",
+    ),
+    { ok: true, moves: [{ from: "flagged", to: "returned_to_supplier", quantity: 1, units: [5] }] },
+  );
 });
 
 Deno.test("custody - every core enforced_by ref names a file that contains its anchor", async () => {

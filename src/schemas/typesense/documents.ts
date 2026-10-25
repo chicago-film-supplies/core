@@ -535,6 +535,7 @@ export interface OutOfServiceDocument {
     away: number;
     written_off: number;
     returned_to_service: number;
+    returned_to_supplier?: number;
   };
   uid_destination?: string;
   supplier?: {

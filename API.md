@@ -7313,12 +7313,21 @@ const OAuthRefreshLogRecordSchema: z.ZodType<OAuthRefreshLogRecord>;
 
 Per-bucket quantities. Σ ≤ `quantity` — the shortfall is "not yet in effect".
 
+⚠️ **`returned_to_supplier` is OPTIONAL during its expand** (the add-field
+order, `cfs-release-order`; precedent the booking `cleaning`/`maintenance`
+keys, `schemas/_breakdown.ts`). No stored record carries it yet, and a
+strict reader that required it would refuse every one. An absent key reads
+as 0 — always through {@link oosBucketQuantity}, never a per-site `?? 0`.
+Writers state it once prod manager reads it, a backfill zero-fills every
+record, and a later beta makes it required.
+
 ```ts
 interface OOSBreakdown {
   flagged: number;
   away: number;
   written_off: number;
   returned_to_service: number;
+  returned_to_supplier?: number;
 }
 ```
 
@@ -7336,6 +7345,14 @@ Zod schema for OOSBreakdown.
 
 ```ts
 const OOSBreakdownSchema: z.ZodType<OOSBreakdown>;
+```
+
+### `OOSBreakdownTerminalKeyType`
+
+One {@link OOS_BREAKDOWN_TERMINAL_KEYS} member.
+
+```ts
+type OOSBreakdownTerminalKeyType = indexedAccess;
 ```
 
 ### `OOSDates`
@@ -7479,6 +7496,7 @@ interface OOSUnitsType {
   flagged: number[];
   returned_to_service: number[];
   written_off: number[];
+  returned_to_supplier?: number[];
 }
 ```
 
@@ -7487,7 +7505,7 @@ interface OOSUnitsType {
 Where a record's units are — see the module docblock's table.
 
 ```ts
-const OOS_BREAKDOWN_KEYS: "flagged" | "away" | "written_off" | "returned_to_service"[];
+const OOS_BREAKDOWN_KEYS: "flagged" | "away" | "written_off" | "returned_to_service" | "returned_to_supplier"[];
 ```
 
 ### `OOS_BREAKDOWN_LABELS`
@@ -7496,6 +7514,22 @@ Operator-facing labels, one per {@link OOS_BREAKDOWN_KEYS} member.
 
 ```ts
 const OOS_BREAKDOWN_LABELS: Readonly<Record<OOSBreakdownKeyType, string>>;
+```
+
+### `OOS_BREAKDOWN_TERMINAL_KEYS`
+
+The RESOLVED buckets: a unit in one of them is no longer out of service at
+this record — gone, back in service, or settled to its supplier. A record
+whose every unit is resolved is `complete` (`deriveOOSStatus`), and an open
+record consumes stock only for its unresolved units (`oosConsumes`).
+
+🔴 **Sum resolved units through this list, never by naming keys.** A sum
+spelled `written_off + returned_to_service` compiled straight through the
+arrival of `returned_to_supplier` and would have left a settled record
+`active` and consuming stock forever.
+
+```ts
+const OOS_BREAKDOWN_TERMINAL_KEYS: "written_off" | "returned_to_service" | "returned_to_supplier"[];
 ```
 
 ### `OOS_FLAG_REASONS`
@@ -14843,6 +14877,10 @@ Stored as `DepartmentType.name_key`, and the uniqueness guard compares on it.
 ⚠️ `toLowerCase`, not `toLocaleLowerCase` — the result is a stored key, so it
 must not depend on the runtime's locale (Turkish `I` folds differently).
 
+### `fullOOSBreakdown(b: Partial<OOSBreakdown>): Required<OOSBreakdown>`
+
+Every bucket stated, an absent one as 0 — for a caller that needs the full shape.
+
 ### `getDisplayTransactionTypes(increaseOnly?: boolean): MovementTypeType[]`
 
 Movement types suitable for the manual transaction form.
@@ -15406,6 +15444,18 @@ The grain key mirrors `componentAncestry` exactly: the leg is `path[0]` (an
 order's top divider), the ancestry is `path`'s product-shaped segments minus
 the line's own.
 
+### `oosBucketQuantity(b: Partial<OOSBreakdown>, key: OOSBreakdownKeyType): number`
+
+One bucket of a breakdown, reading an ABSENT key as 0 — the only way any
+reader touches a bucket while `returned_to_supplier` is optional. An absent
+key read raw is `undefined`, and `undefined` in a sum is `NaN`, which a `>`
+comparison then reads as false: the guards that refuse over-placement go
+silent rather than loud.
+
+### `oosBucketUnits(units: Partial<OOSUnitsType>, key: OOSBreakdownKeyType): number[]`
+
+One bucket's unit set, reading an ABSENT set as `[]` — {@link oosBucketQuantity}'s twin.
+
 ### `ownsKey(bookingType: string, key: BookingBreakdownKeyType): boolean`
 
 Whether CFS still OWNS a booking's units in `key` — **the one author of "a
@@ -15551,6 +15601,10 @@ const schemas: mapped;
 The contract for a settlement `type`, or `undefined` for a value outside
 {@link SETTLEMENT_TYPES}. Tolerant of a `string` for the same reason
 {@link itemContract} is — callers hold types from loosely-typed sources.
+
+### `sumOOSBuckets(b: Partial<OOSBreakdown>, _: unknown): number`
+
+Σ of `keys` (every bucket by default), each read through {@link oosBucketQuantity}.
 
 ### `takeBackReasonsFor(disposition: ExchangeDispositionType): readonly OOSReasonType[]`
 
@@ -23211,12 +23265,21 @@ interface CreateOutOfServiceInputType {
 
 Per-bucket quantities. Σ ≤ `quantity` — the shortfall is "not yet in effect".
 
+⚠️ **`returned_to_supplier` is OPTIONAL during its expand** (the add-field
+order, `cfs-release-order`; precedent the booking `cleaning`/`maintenance`
+keys, `schemas/_breakdown.ts`). No stored record carries it yet, and a
+strict reader that required it would refuse every one. An absent key reads
+as 0 — always through {@link oosBucketQuantity}, never a per-site `?? 0`.
+Writers state it once prod manager reads it, a backfill zero-fills every
+record, and a later beta makes it required.
+
 ```ts
 interface OOSBreakdown {
   flagged: number;
   away: number;
   written_off: number;
   returned_to_service: number;
+  returned_to_supplier?: number;
 }
 ```
 
@@ -23234,6 +23297,14 @@ Zod schema for OOSBreakdown.
 
 ```ts
 const OOSBreakdownSchema: z.ZodType<OOSBreakdown>;
+```
+
+### `OOSBreakdownTerminalKeyType`
+
+One {@link OOS_BREAKDOWN_TERMINAL_KEYS} member.
+
+```ts
+type OOSBreakdownTerminalKeyType = indexedAccess;
 ```
 
 ### `OOSDates`
@@ -23353,6 +23424,7 @@ interface OOSUnitsType {
   flagged: number[];
   returned_to_service: number[];
   written_off: number[];
+  returned_to_supplier?: number[];
 }
 ```
 
@@ -23361,7 +23433,7 @@ interface OOSUnitsType {
 Where a record's units are — see the module docblock's table.
 
 ```ts
-const OOS_BREAKDOWN_KEYS: "flagged" | "away" | "written_off" | "returned_to_service"[];
+const OOS_BREAKDOWN_KEYS: "flagged" | "away" | "written_off" | "returned_to_service" | "returned_to_supplier"[];
 ```
 
 ### `OOS_BREAKDOWN_LABELS`
@@ -23370,6 +23442,22 @@ Operator-facing labels, one per {@link OOS_BREAKDOWN_KEYS} member.
 
 ```ts
 const OOS_BREAKDOWN_LABELS: Readonly<Record<OOSBreakdownKeyType, string>>;
+```
+
+### `OOS_BREAKDOWN_TERMINAL_KEYS`
+
+The RESOLVED buckets: a unit in one of them is no longer out of service at
+this record — gone, back in service, or settled to its supplier. A record
+whose every unit is resolved is `complete` (`deriveOOSStatus`), and an open
+record consumes stock only for its unresolved units (`oosConsumes`).
+
+🔴 **Sum resolved units through this list, never by naming keys.** A sum
+spelled `written_off + returned_to_service` compiled straight through the
+arrival of `returned_to_supplier` and would have left a settled record
+`active` and consuming stock forever.
+
+```ts
+const OOS_BREAKDOWN_TERMINAL_KEYS: "written_off" | "returned_to_service" | "returned_to_supplier"[];
 ```
 
 ### `OOS_STATUSES`
@@ -23474,6 +23562,26 @@ interface UpdateOutOfServiceInputType {
   version: number;
 }
 ```
+
+### `fullOOSBreakdown(b: Partial<OOSBreakdown>): Required<OOSBreakdown>`
+
+Every bucket stated, an absent one as 0 — for a caller that needs the full shape.
+
+### `oosBucketQuantity(b: Partial<OOSBreakdown>, key: OOSBreakdownKeyType): number`
+
+One bucket of a breakdown, reading an ABSENT key as 0 — the only way any
+reader touches a bucket while `returned_to_supplier` is optional. An absent
+key read raw is `undefined`, and `undefined` in a sum is `NaN`, which a `>`
+comparison then reads as false: the guards that refuse over-placement go
+silent rather than loud.
+
+### `oosBucketUnits(units: Partial<OOSUnitsType>, key: OOSBreakdownKeyType): number[]`
+
+One bucket's unit set, reading an ABSENT set as `[]` — {@link oosBucketQuantity}'s twin.
+
+### `sumOOSBuckets(b: Partial<OOSBreakdown>, _: unknown): number`
+
+Σ of `keys` (every bucket by default), each read through {@link oosBucketQuantity}.
 
 ## `@cfs/core/schemas/password-reset`
 
@@ -32724,7 +32832,8 @@ overwrite — the lost-update bug the absolute-breakdown wire had.
 
 ### `canEditServiceBreakdown(record: Pick<OutOfService, "status" | "breakdown">): boolean`
 
-Whether a record's breakdown can be edited at all. A closed record with nothing written off cannot.
+Whether a record's breakdown can be edited at all. A closed record with
+nothing written off or returned to its supplier cannot.
 
 ### `canonicalLossUndos(prev: BookingBreakdown, next: BookingBreakdown): CustodyLossUndo[]`
 
@@ -33031,8 +33140,10 @@ util, since deleted: its out-of-service breakdown editor calls these now.
 
 - `returned_to_service` never goes down, on any record.
 - A `lost` record flags nothing: its `flagged` bucket is pinned at 0.
-- A complete/canceled record admits ONE edit: units LEAVING `written_off`
-  ("found after write-off"), into any other bucket. The api re-opens it.
+- A complete/canceled record admits ONE kind of edit: units LEAVING a
+  reversible terminal bucket — `written_off` ("found after write-off") or
+  `returned_to_supplier` (a settle that was a mistake) — into another
+  bucket. The api re-opens it.
 
 ### `serviceMovesFor(record: Pick<OutOfService, "quantity" | "reason" | "breakdown">, next: OOSBreakdown): ServiceMovePlan`
 
@@ -33043,17 +33154,23 @@ this is deterministic: there is nothing to infer.
 
 Each INCREASE is fed from the buckets that DECREASED, in a fixed preference:
 
-| into                  | drawn from, in order   |
-|-----------------------|------------------------|
-| `written_off`         | `away`, `flagged`, then `unplaced` |
-| `returned_to_service` | `away`, `flagged`, then `unplaced` |
-| `away`                | `flagged`, then `unplaced` |
-| `flagged`             | `away`, then `unplaced` |
+| into                   | drawn from, in order   |
+|------------------------|------------------------|
+| `written_off`          | `away`, `flagged`, then `unplaced` |
+| `returned_to_service`  | `away`, `flagged`, then `unplaced` |
+| `returned_to_supplier` | `away`, `flagged` — never `unplaced` |
+| `away`                 | `flagged`, then `unplaced` |
+| `flagged`              | `away`, then `unplaced` |
 
 Refused: leaving `returned_to_service` (out of service again is a NEW
-record); leaving `written_off` (resolve found units into a reversal first);
-going back to `unplaced` (an effect that happened cannot un-happen); a `lost`
-record's units into `flagged` (lost is a place, not a flag — R3).
+record); leaving `written_off` or `returned_to_supplier` (resolve those units
+into reversals first); going back to `unplaced` (an effect that happened
+cannot un-happen); a `lost` record's units into `flagged` (lost is a place,
+not a flag — R3); a record not yet in effect settling to its supplier (a unit
+still in service on its shelf is a plain `subrent_out`).
+
+Every bucket is read through `oosBucketQuantity`, so a stored record with no
+`returned_to_supplier` key plans exactly as one stating 0.
 
 ### `serviceUnitMovesFor(record: Pick<OutOfService, "quantity" | "reason" | "breakdown"> & typeLiteral, next: OOSBreakdown, nextUnits: OOSUnitsType, _: unknown): ServiceUnitMovePlan`
 
@@ -33071,8 +33188,10 @@ Refused, beside everything {@link serviceMovesFor} refuses:
 - a unit whose move is no row of {@link SERVICE_MOVE_PREFERENCE} — so out of
   `returned_to_service` is refused;
 - a FOUND unit (leaving `written_off`) landing anywhere but `away`,
-  `flagged` or `returned_to_service`. Found moves come FIRST, for the writer
-  to resolve into reversals of the write-off that named each unit;
+  `flagged` or `returned_to_service`, or an UN-SETTLED unit (leaving
+  `returned_to_supplier`) landing anywhere but `away` or `flagged`. These
+  moves come FIRST, for the writer to resolve into reversals of the
+  movement that named each unit;
 - a count change the named units do not account for, other than the unnamed
   `unplaced → returned_to_service` (a scheduled record resolved before it
   took effect).
@@ -39807,7 +39926,7 @@ Just enough of an out-of-service record to reduce it to an unavailable interval.
 interface StockOOSSource {
   status: OOSStatusType;
   quantity: number;
-  breakdown: Pick<OOSBreakdown, "written_off" | "returned_to_service">;
+  breakdown: Pick<OOSBreakdown, OOSBreakdownTerminalKeyType>;
   dates: typeLiteral;
 }
 ```
@@ -39963,17 +40082,21 @@ filtering can use this function directly.
 ### `oosConsumes(o: typeLiteral): number`
 
 Units an out-of-service record consumes — the units still OUT of service:
-`quantity − written_off − returned_to_service` until it reaches a terminal
+`quantity − Σ OOS_BREAKDOWN_TERMINAL_KEYS` (`written_off`,
+`returned_to_service`, `returned_to_supplier`) until it reaches a terminal
 status, then zero.
 
-## ⭐ The two resolution buckets are applied to the ledger the moment units enter them
+## ⭐ The resolution buckets are applied to the ledger the moment units enter them
 
 api-cloudrun#1094 step 6 (owner, 2026-09-23: *"write off is a state"*). A unit
 moved into `written_off` posts its `write_off` movement in that same save, so it
 has already left `quantity_held`; a unit moved into `returned_to_service` posts
 its `return_to_service` movement (or, for a record that flags units in place,
 was on its shelf all along), so it is back in service. Counting either here
-would subtract it from availability a SECOND time.
+would subtract it from availability a SECOND time. A unit moved into
+`returned_to_supplier` posts its `return_to_supplier` in the same save too
+(api-cloudrun#1360): it has left `quantity_held` AND `quantity_rented_in`, so
+its supply and its consumption both fall and the window nets as before.
 
 🔴 **This INVERTS the rule that stood here until then, so do not re-derive it
 from the old warning.** It said *"never reduce this by
@@ -41505,7 +41628,8 @@ one author: both writers and the manager's preview read this.
 The record's status, derived — never client-set.
 
 - `canceled` once `canceled_at` is set;
-- `complete` once every unit is written off or back in service;
+- `complete` once every unit is RESOLVED — written off, back in service, or
+  settled to its supplier (`OOS_BREAKDOWN_TERMINAL_KEYS`);
 - `active` otherwise — including a record not yet in effect, whose units are
   in no bucket.
 
@@ -41515,6 +41639,11 @@ The old `number` parameter is gone: it existed only to tell `draft` from
 ### `emptyOOSBreakdown(): OOSBreakdown`
 
 A breakdown with every bucket at zero.
+
+⚠️ **It does not state `returned_to_supplier` yet, deliberately.** It is a
+WRITER — the api seeds every new record from it — and a record carrying the
+key 400s against a strict reader that predates it. It states the key in a
+later beta, once prod manager reads it (release order step 5).
 
 ### `oosCancelRefusal(record: Pick<OutOfService, "quantity" | "breakdown" | "canceled_at">): string | null`
 

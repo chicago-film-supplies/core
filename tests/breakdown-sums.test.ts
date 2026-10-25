@@ -23,7 +23,10 @@ import { assert, assertEquals } from "@std/assert";
 
 const SRC_DIR = new URL("../src/", import.meta.url);
 
-const KEY = "(?:quoted|reserved|prepped|out|returned|lost|damaged|cleaning|maintenance)";
+// Booking keys, then the out-of-service record's (api-cloudrun#1360: a named
+// `written_off + returned_to_service` would silently skip `returned_to_supplier`).
+const KEY =
+  "(?:quoted|reserved|prepped|out|returned|lost|damaged|cleaning|maintenance|flagged|away|written_off|returned_to_service|returned_to_supplier)";
 /** `x.key + y.key` (a member sum), or `key + key` (destructured locals). */
 const NAMED_SUM_RE = new RegExp(
   `(?:\\.${KEY}\\b\\s*\\+\\s*[\\w.\\])]*\\.${KEY}\\b)|(?:(?<![\\w.])${KEY}\\s*\\+\\s*${KEY}\\b)`,
@@ -55,6 +58,8 @@ Deno.test("the detector fires on each spelling it claims, and not on prose", () 
   assert(namesABreakdownSum("preDelivery += b.breakdown.quoted + b.breakdown.reserved;"));
   assert(namesABreakdownSum("  return prepped + out + returned + lost + damaged > 0;"));
   assert(namesABreakdownSum("  const carry = prev.prepped + prev.out;"));
+  assert(namesABreakdownSum("  if (breakdown.written_off + breakdown.returned_to_service === quantity) {"));
+  assert(namesABreakdownSum("  const held = record.breakdown.flagged + record.breakdown.away;"));
   assert(!namesABreakdownSum(" * `returned + lost + damaged` in a docblock"));
   assert(!namesABreakdownSum('  invariant: "reserved + prepped, PLUS out unless a sale",'));
   assert(!namesABreakdownSum("  const delta = next.out - prev.out;"));

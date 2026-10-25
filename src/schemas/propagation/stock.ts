@@ -279,7 +279,7 @@ const rules: CollectionRule[] = [
     target: "stock",
     mode: "fan-out",
     invariant:
-      "The OOS half of stock.unavailable[] is re-derived from every non-terminal (not complete/canceled) OOS record for the product, pre-reduced by `unavailableFromOOS` to the same anonymous interval shape. Same interval model as bookings; an open-ended record (end: null) reduces availability in every window from its start onward. ⚠️ An OOS record claims its UNRESOLVED units until terminal — quantity − breakdown.written_off − breakdown.returned_to_service — because the API posts both resolutions to the ledger the moment units enter those buckets (api-cloudrun#1094 step 6): a written-off unit has already left quantity_held, a returned one is back in service. This inverted the earlier full-quantity rule, which was right only while the writer posted resolutions at close; the count and the writer's posting moment must move together.",
+      "The OOS half of stock.unavailable[] is re-derived from every non-terminal (not complete/canceled) OOS record for the product, pre-reduced by `unavailableFromOOS` to the same anonymous interval shape. Same interval model as bookings; an open-ended record (end: null) reduces availability in every window from its start onward. ⚠️ An OOS record claims its UNRESOLVED units until terminal — quantity minus the terminal buckets (OOS_BREAKDOWN_TERMINAL_KEYS: written_off, returned_to_service, returned_to_supplier) — because the API posts every resolution to the ledger the moment units enter those buckets (api-cloudrun#1094 step 6): a written-off unit has already left quantity_held, a returned one is back in service, and a unit settled to its supplier has left quantity_held and quantity_rented_in together (api-cloudrun#1360). This inverted the earlier full-quantity rule, which was right only while the writer posted resolutions at close; the count and the writer's posting moment must move together.",
     enforced_by: [FOLD, INTERVAL_MODEL],
     trigger: REBUILD_TRIGGER,
     fields: [
@@ -290,7 +290,7 @@ const rules: CollectionRule[] = [
         source: ["status"],
         target: [],
         transform:
-          "the liveness filter — `complete` (every unit written off or returned to service) and `canceled` (the operator voided the record) both hold zero units, so neither survives the reducer",
+          "the liveness filter — `complete` (every unit written off, returned to service or returned to its supplier) and `canceled` (the operator voided the record) both hold zero units, so neither survives the reducer",
       },
       {
         source: ["reason"],

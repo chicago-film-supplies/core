@@ -149,7 +149,10 @@ export function deriveWithLossUndos(
 
 // ── the record side ──
 
-type OOSPlace = "unplaced" | "flagged" | "away" | "written_off" | "returned_to_service";
+// `returned_to_supplier` widened by hand (api-cloudrun#1360): this oracle is
+// independent of `serviceMovesFor`, so it spells the fifth bucket out itself —
+// including reading an ABSENT key as 0 — rather than borrowing the helpers.
+type OOSPlace = "unplaced" | "flagged" | "away" | "written_off" | "returned_to_service" | "returned_to_supplier";
 
 export function planBucketMoves(
   prev: OOSBreakdown,
@@ -157,22 +160,32 @@ export function planBucketMoves(
   quantity: number,
   reason: OOSReasonType,
 ): { from: OOSPlace; to: OOSPlace; quantity: number }[] {
-  const placed = (b: OOSBreakdown) => b.flagged + b.away + b.written_off + b.returned_to_service;
+  const supplier = (b: OOSBreakdown) => (b.returned_to_supplier === undefined ? 0 : b.returned_to_supplier);
+  const placed = (b: OOSBreakdown) => b.flagged + b.away + b.written_off + b.returned_to_service + supplier(b);
   const level = (b: OOSBreakdown): Record<OOSPlace, number> => ({
     unplaced: quantity - placed(b),
     flagged: b.flagged,
     away: b.away,
     written_off: b.written_off,
     returned_to_service: b.returned_to_service,
+    returned_to_supplier: supplier(b),
   });
   const before = level(prev);
   const after = level(next);
   if (after.unplaced < 0) throw new Error("over");
   if (after.returned_to_service < before.returned_to_service) throw new Error("rts");
   if (after.written_off < before.written_off) throw new Error("internal");
+  if (after.returned_to_supplier < before.returned_to_supplier) throw new Error("internal");
   if (after.unplaced > before.unplaced) throw new Error("unplace");
   if (reason === "lost" && after.flagged > 0) throw new Error("lostflag");
-  const spare: Record<OOSPlace, number> = { unplaced: 0, flagged: 0, away: 0, written_off: 0, returned_to_service: 0 };
+  const spare: Record<OOSPlace, number> = {
+    unplaced: 0,
+    flagged: 0,
+    away: 0,
+    written_off: 0,
+    returned_to_service: 0,
+    returned_to_supplier: 0,
+  };
   const need: Record<OOSPlace, number> = { ...spare };
   for (const p of Object.keys(before) as OOSPlace[]) {
     const d = after[p] - before[p];
@@ -182,6 +195,7 @@ export function planBucketMoves(
   const PREFERENCE: ReadonlyArray<[OOSPlace, readonly OOSPlace[]]> = [
     ["written_off", ["away", "flagged", "unplaced"]],
     ["returned_to_service", ["away", "flagged", "unplaced"]],
+    ["returned_to_supplier", ["away", "flagged"]],
     ["away", ["flagged", "unplaced"]],
     ["flagged", ["away", "unplaced"]],
   ];
