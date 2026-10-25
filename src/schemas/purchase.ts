@@ -65,7 +65,7 @@
  * `kind` says what CFS is getting from the supplier. A **buy** transfers
  * ownership: its receipts are `purchase` movements that raise `quantity_held`
  * and the cost basis. A **subrent** borrows units for a hire window and gives
- * them back: its receipts are `hire_in` movements and its returns `hire_out`,
+ * them back: its receipts are `subrent_in` movements and its returns `subrent_out`,
  * both cost-forbidden, so the units are in CFS's CUSTODY without ever being
  * OWNED (`InventoryLedger.quantity_rented_in`). Everything else — supplier,
  * store, number, bills, credits, the Xero ACCPAY and the thread — is shared, so
@@ -182,9 +182,17 @@ export interface PurchaseLine {
    */
   dates?: PurchaseLineDates;
   /**
-   * SUBRENT ONLY — units given back to the supplier: Σ of the `hire_out`
-   * movements naming this purchase for this product, net of reversals. Never
-   * more than received. Present-iff-subrent, as `dates`.
+   * SUBRENT ONLY — units no longer owed to the supplier: Σ of the
+   * `subrent_out` (handed back) and `return_to_supplier` (lost or damaged,
+   * settled to the supplier's account) movements naming this purchase for this
+   * product, net of reversals. Never more than received.
+   *
+   * ⚠️ **A settled unit counts as returned** (api-cloudrun#1360, D3). Every
+   * reader means "no longer owed" — `remainingToReturn`, the return card,
+   * `derivePurchaseStatus` and supply — so the "Returned" column includes units
+   * that were never physically handed back. A separate counter was rejected:
+   * `quantity_canceled` earns its own bucket by bounding billing, and a settle
+   * bounds nothing differently. Present-iff-subrent, as `dates`.
    */
   quantity_returned?: number;
   /**
@@ -567,7 +575,7 @@ export const CreatePurchaseInput: z.ZodType<CreatePurchaseInputType> = z.object(
  * Those are cross-document facts the writer holds, so they are not refined here.
  *
  * ⚠️ **A SUBRENT line's price is not frozen by a receipt**, because its receipts
- * carry no cost (`hire_in` is cost-forbidden). So on a subrent the writer lets
+ * carry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets
  * `amount_cents` and `dates.end` move after receipt — a paid hire extension —
  * with `quantity` still floored at what is received. Without that, an
  * extension is unwritable: a close is refused while units are out.
@@ -738,7 +746,7 @@ export const ReturnPurchaseLineInput: z.ZodType<ReturnPurchaseLineInputType> = z
  * Input for returning subrented units to the supplier
  * (`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.
  *
- * Each line becomes ONE `hire_out` movement naming the purchase in `sources[]`,
+ * Each line becomes ONE `subrent_out` movement naming the purchase in `sources[]`,
  * in one transaction with the `quantity_returned` co-write. The movement id is
  * `{uuid_session}|hire_out|{uid_product}`, so a retry lands on the same
  * movements. There is no cost: a returned unit was never owned.
@@ -764,7 +772,7 @@ export const ReturnPurchaseInput: z.ZodType<ReturnPurchaseInputType> = z.object(
 /**
  * Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)
  * — the mirror of {@link ReversePurchaseReceiptInput}: it reverses the
- * `hire_out` AND decrements `quantity_returned` in one transaction.
+ * `subrent_out` AND decrements `quantity_returned` in one transaction.
  */
 export interface ReversePurchaseReturnInputType {
   uuid_session: string;

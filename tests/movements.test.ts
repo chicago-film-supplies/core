@@ -7,7 +7,7 @@
  * multiplied by it, quantizing the per-unit average before scaling it. See the
  * "divide last" test.
  */
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import {
   allocationSide,
   applyMovementToLedger,
@@ -1707,10 +1707,37 @@ Deno.test("the fold stamps a placement's role onto the ledger location; an absen
 type FoldMovement = Parameters<typeof applyMovementToLedger>[1];
 
 const hireIn = (q: number): FoldMovement => ({
-  reverses: null, service: null, type: "hire_in", custody: null, quantity: q, lines: [line(q, null, at(LOC_A))], cost: null,
+  reverses: null, service: null, type: "subrent_in", custody: null, quantity: q, lines: [line(q, null, at(LOC_A))], cost: null,
 });
 const hireOut = (q: number): FoldMovement => ({
-  reverses: null, service: null, type: "hire_out", custody: null, quantity: q, lines: [line(q, at(LOC_A), null)], cost: null,
+  reverses: null, service: null, type: "subrent_out", custody: null, quantity: q, lines: [line(q, at(LOC_A), null)], cost: null,
+});
+/** Settle `q` lost rented units from their out-of-service record (api-cloudrun#1360). */
+const settleLost = (q: number): FoldMovement => ({
+  reverses: null,
+  service: { from: "lost", to: null },
+  type: "return_to_supplier",
+  custody: null,
+  quantity: q,
+  lines: [line(q, atOos, null)],
+  cost: null,
+});
+/** Settle `q` damaged rented units off the shelf they are flagged on. */
+const settleFlagged = (q: number): FoldMovement => ({
+  reverses: null,
+  service: { from: "damaged", to: null },
+  type: "return_to_supplier",
+  custody: null,
+  quantity: q,
+  lines: [line(q, at(LOC_A), null)],
+  cost: null,
+});
+/** The fold's reversal of `m`: lines negated and the service axis swapped, as `reverseTransaction` writes it. */
+const reversalOf = (m: FoldMovement): FoldMovement => ({
+  ...m,
+  reverses: "m-original",
+  lines: negateLines(m.lines),
+  service: m.service === null ? null : { from: m.service.to, to: m.service.from },
 });
 const writeOff = (q: number): FoldMovement => ({
   reverses: null,
@@ -1768,12 +1795,95 @@ Deno.test("subrent: a write-off beyond what is OWNED is reported, and relieves n
   assertEquals(InventoryLedgerSchema.safeParse(r.ledger).success, false);
 });
 
-Deno.test("subrent: only a hire moves quantity_rented_in", () => {
+Deno.test("subrent: only a subrent type moves quantity_rented_in", () => {
   const base = ledgerAtShelfA(10, { total_cost_basis_cents: 262627, average_unit_cost: 262.627 });
   const r = applyMovementToLedger(base, writeOff(1), placements, mockTimestamp).ledger;
   assertEquals(r.quantity_rented_in, 0);
   const h = applyMovementToLedger(base, hireIn(2), placements, mockTimestamp).ledger;
   assertEquals(h.quantity_rented_in, 2);
+});
+
+Deno.test("subrent: the deprecated hire_in / hire_out fold exactly as subrent_in / subrent_out", () => {
+  const alias = (m: FoldMovement): FoldMovement => ({ ...m, type: m.type === "subrent_in" ? "hire_in" : "hire_out" });
+  const viaNew = applyMovementToLedger(applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger, hireOut(4), placements, mockTimestamp);
+  const viaOld = applyMovementToLedger(
+    applyMovementToLedger(steamer(), alias(hireIn(10)), placements, mockTimestamp).ledger,
+    alias(hireOut(4)),
+    placements,
+    mockTimestamp,
+  );
+  assertEquals(viaOld, viaNew);
+  assertEquals([viaNew.ledger.quantity_held, viaNew.ledger.quantity_rented_in], [16, 6]);
+});
+
+Deno.test("settle: a 10-unit hire, 1 flagged and settled off its shelf, 9 returned — back to pre-hire, basis untouched", () => {
+  const hired = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger;
+  const flag: FoldMovement = {
+    reverses: null, service: { from: null, to: "damaged" }, type: "flag", custody: null, quantity: 1,
+    lines: [line(1, at(LOC_A), at(LOC_A))], cost: null,
+  };
+  const flagged = applyMovementToLedger(hired, flag, placements, mockTimestamp).ledger;
+  assertEquals(flagged.out_of_service_breakdown.damaged, 1);
+
+  const settled = applyMovementToLedger(flagged, settleFlagged(1), placements, mockTimestamp);
+  assertEquals([settled.ledger.quantity_held, settled.ledger.quantity_rented_in], [19, 9]);
+  assertEquals(settled.costAppliedCents, 0, "a settle relieves no owned basis");
+  assertEquals(settled.ownedUnderflowUnits, 0);
+  assertEquals(settled.ledger.out_of_service_breakdown.damaged, 0, "the flag leaves with the unit");
+  assertEquals(shelf(settled.ledger, LOC_A)?.quantity_out_of_service, 0);
+  assertEquals(InventoryLedgerSchema.safeParse(settled.ledger).success, true);
+
+  const done = applyMovementToLedger(settled.ledger, hireOut(9), placements, mockTimestamp).ledger;
+  assertEquals([done.quantity_held, done.quantity_rented_in], [10, 0]);
+  assertEquals([done.total_cost_basis_cents, done.average_unit_cost], [262627, 262.627]);
+  assertEquals(shelf(done, LOC_A)?.quantity, 10);
+});
+
+Deno.test("settle: the same hire with 1 unit lost at the record — settled from the record place", () => {
+  const hired = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger;
+  const lose: FoldMovement = {
+    reverses: null, service: { from: null, to: "lost" }, type: "send_away", custody: null, quantity: 1,
+    lines: [line(1, at(LOC_A), atOos)], cost: null,
+  };
+  const lost = applyMovementToLedger(hired, lose, placements, mockTimestamp).ledger;
+  assertEquals([lost.quantity_held, lost.out_of_service_breakdown.lost], [20, 1], "a lost unit is still in custody");
+
+  const settled = applyMovementToLedger(lost, settleLost(1), placements, mockTimestamp);
+  assertEquals([settled.ledger.quantity_held, settled.ledger.quantity_rented_in], [19, 9]);
+  assertEquals(settled.ledger.out_of_service_breakdown.lost, 0);
+  assertEquals(settled.ledger.quantity_out_of_service, 0);
+  assertEquals(settled.costAppliedCents, 0);
+
+  const done = applyMovementToLedger(settled.ledger, hireOut(9), placements, mockTimestamp).ledger;
+  assertEquals([done.quantity_held, done.quantity_rented_in], [10, 0]);
+  assertEquals([done.total_cost_basis_cents, done.average_unit_cost], [262627, 262.627]);
+});
+
+Deno.test("settle: each reversal restores the ledger exactly", () => {
+  const hired = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger;
+  const lost = applyMovementToLedger(hired, {
+    reverses: null, service: { from: null, to: "lost" }, type: "send_away", custody: null, quantity: 1,
+    lines: [line(1, at(LOC_A), atOos)], cost: null,
+  }, placements, mockTimestamp).ledger;
+  const fromRecord = applyMovementToLedger(lost, settleLost(1), placements, mockTimestamp).ledger;
+  assertEquals(applyMovementToLedger(fromRecord, reversalOf(settleLost(1)), placements, mockTimestamp).ledger, lost);
+
+  const flagged = applyMovementToLedger(hired, {
+    reverses: null, service: { from: null, to: "damaged" }, type: "flag", custody: null, quantity: 1,
+    lines: [line(1, at(LOC_A), at(LOC_A))], cost: null,
+  }, placements, mockTimestamp).ledger;
+  const fromShelf = applyMovementToLedger(flagged, settleFlagged(1), placements, mockTimestamp).ledger;
+  assertEquals(applyMovementToLedger(fromShelf, reversalOf(settleFlagged(1)), placements, mockTimestamp).ledger, flagged);
+});
+
+Deno.test("settle: more than is rented in is refused by the ledger schema, not as an owned underflow", () => {
+  // `ownedUnderflowUnits` is a cost-bearing report; a settle carries no cost, so
+  // the guard is `quantity_rented_in: z.int().min(0)` — the writer must 400 first.
+  const r = applyMovementToLedger(steamer(), settleLost(1), placements, mockTimestamp);
+  assertEquals(r.ownedUnderflowUnits, 0);
+  assertEquals(r.ledger.quantity_rented_in, -1);
+  const parsed = InventoryLedgerSchema.safeParse(r.ledger);
+  assertEquals(parsed.success ? [] : parsed.error.issues.map((i) => i.path.join(".")), ["quantity_rented_in"]);
 });
 
 Deno.test("subrent: count_close zeroes rented-in", () => {
@@ -1792,7 +1902,7 @@ Deno.test("InventoryLedgerSchema: rented-in is a subset of held, and 0 on an unc
   assertEquals(none.success ? [] : none.error.issues.map((i) => i.path.join(".")), ["quantity_rented_in"]);
 });
 
-Deno.test("subrent property: interleaving hire_in / hire_out never changes a cost-bearing result (200k steps)", () => {
+Deno.test("subrent property: interleaving subrent_in / subrent_out / return_to_supplier never changes a cost-bearing result (200k steps)", () => {
   let seed = 424242;
   const rand = (n: number) => {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff;
@@ -1800,16 +1910,20 @@ Deno.test("subrent property: interleaving hire_in / hire_out never changes a cos
   };
   const cost = (cents: number) => ({ amount_cents: cents, unit_cost: 0, unit_costs_cents: [] });
   let steps = 0;
+  let settles = 0;
   let disagreements = 0;
   let first: string | null = null;
   while (steps < 200_000) {
     let plain = ledger({ quantity_rented_in: 0 });
     let hired = ledger({ quantity_rented_in: 0 });
     for (let k = 0; k < 10; k++, steps++) {
-      // Interleave a random hire on the second ledger only, bounded by what is rented in.
+      // Interleave a random hire on the second ledger only, bounded by what is
+      // rented in: a receipt, a return, or a settle of lost units.
       const rented = hired.quantity_rented_in;
       if (rand(2) === 0) {
-        const m = rented > 0 && rand(2) === 0 ? hireOut(rand(rented) + 1) : hireIn(rand(40) + 1);
+        const pick = rented > 0 ? rand(3) : 0;
+        const m = pick === 0 ? hireIn(rand(40) + 1) : pick === 1 ? hireOut(rand(rented) + 1) : settleLost(rand(rented) + 1);
+        if (m.type === "return_to_supplier") settles++;
         hired = applyMovementToLedger(hired, m, placements, mockTimestamp).ledger;
       }
       const owned = (plain.quantity_held ?? 0);
@@ -1830,6 +1944,8 @@ Deno.test("subrent property: interleaving hire_in / hire_out never changes a cos
     }
   }
   assertEquals(disagreements, 0, first ?? "");
+  // The settle arm must actually be exercised, or the sweep says nothing about it.
+  assert(settles > 1_000, `only ${settles} settles drawn`);
 });
 
 Deno.test("subrent property companion: a fold averaging over HELD would disagree — the sweep can fail", () => {

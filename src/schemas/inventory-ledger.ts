@@ -60,10 +60,12 @@ export interface InventoryLedger {
   quantity_in_service: number | null;
   /**
    * The part of {@link quantity_held} that is rented IN from a supplier on a
-   * live subrent — in CFS's custody, never owned. Moved only by `hire_in` /
-   * `hire_out` and their reversals, so it equals Σ (received − returned) over
-   * the product's subrent purchases. Never more than held; `0` on an uncounted
-   * ledger (a subrent of an uncounted product is refused).
+   * live subrent — in CFS's custody, never owned. Moved only by the
+   * `SUBRENT_MOVEMENT_TYPES` (`subrent_in`, `subrent_out`, `return_to_supplier`)
+   * and their reversals, so it equals Σ (received − returned) over the product's
+   * subrent purchases, where `quantity_returned` counts settled units too. Never
+   * more than held; `0` on an uncounted ledger (a subrent of an uncounted
+   * product is refused).
    *
    * Required since beta B: every pre-subrent ledger was stamped `0` by
    * `api-cloudrun/scripts/backfill-purchase-kind.ts` on 2026-10-24.

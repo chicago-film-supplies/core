@@ -28,7 +28,7 @@ import type {
   StoreBreakdownEntry,
   StoreBreakdownLocation,
 } from "../schemas/mod.ts";
-import { getTransactionMultiplier, hasCosts, MOVEMENT_CONTRACTS } from "../schemas/mod.ts";
+import { getTransactionMultiplier, hasCosts, isSubrentMovementType, MOVEMENT_CONTRACTS } from "../schemas/mod.ts";
 import { perUnitCostAt4dp, roundDivHalfUp } from "./money.ts";
 
 // ── Money ───────────────────────────────────────────────────────────
@@ -143,9 +143,9 @@ export type StandaloneReversalRefusalCode =
   | "reclass_pair"
   /** A booking's movement — undone by lowering the booking's breakdown. */
   | "booking"
-  /** A purchase receipt — `purchase` or a subrent's `hire_in` — reversed with the purchase line (`…/receipts/{uid}/reverse`). */
+  /** A purchase receipt — `purchase` or a subrent's `subrent_in` (or deprecated `hire_in`) — reversed with the purchase line (`…/receipts/{uid}/reverse`). */
   | "purchase_receipt"
-  /** A subrent's `hire_out` — reversed with the purchase line (`…/returns/{uid}/reverse`). */
+  /** A subrent's `subrent_out` (or deprecated `hire_out`) — reversed with the purchase line (`…/returns/{uid}/reverse`). */
   | "purchase_return"
   /** A line with an `out-of-service` endpoint — the record's buckets are the other half. */
   | "out_of_service"
@@ -184,10 +184,14 @@ export interface StandaloneReversalRefusal {
  *   together, at the original amounts.
  * - **A booking's movement** — the booking's `breakdown` is the other half.
  * - **A purchase receipt** — the purchase line's `quantity_received` is; and
- *   a subrent's **return** (`hire_out`), whose other half is
+ *   a subrent's **return** (`subrent_out`), whose other half is
  *   `quantity_returned`, so it earns its own code and lever.
  * - **An `out-of-service` endpoint, or a flag** (`service` set) — the record's
  *   buckets and `stores[]` are. A reason edit's SPLIT names two records.
+ * - **A `return_to_supplier`** — it names a purchase too, but its lever is the
+ *   RECORD PUT lowering `returned_to_supplier`, which moves the purchase's
+ *   `quantity_returned` back in the same write. So it answers `out_of_service`
+ *   with the record, checked before the purchase branch.
  *
  * Keyed on endpoints, sources and type — a shelf `write_off`
  * (`locations → outside`) touches none of these and stays reversible.
@@ -203,8 +207,15 @@ export function standaloneReversalRefusal(
   }
   if (m.uid_booking) return { code: "booking", uid: m.uid_booking };
   const sources = m.sources ?? [];
+  if (m.type === "return_to_supplier") {
+    const owner = sources.find((s) => s.collection === "out-of-service");
+    return owner ? { code: "out_of_service", uid: owner.uid } : { code: "out_of_service" };
+  }
   const purchase = sources.find((s) => s.collection === "purchases");
-  if (purchase) return { code: m.type === "hire_out" ? "purchase_return" : "purchase_receipt", uid: purchase.uid };
+  if (purchase) {
+    const returned = m.type === "subrent_out" || m.type === "hire_out";
+    return { code: returned ? "purchase_return" : "purchase_receipt", uid: purchase.uid };
+  }
   const record = (m.lines ?? [])
     .flatMap((line) => [line.location.from, line.location.to])
     .find((place) => place?.collection === "out-of-service");
@@ -470,11 +481,6 @@ function openedCountBase(ledger: InventoryLedger): InventoryLedger {
   };
 }
 
-/** Whether a movement type moves units in or out of a SUBRENT (custody without ownership). */
-function isHire(type: MovementTypeType): boolean {
-  return type === "hire_in" || type === "hire_out";
-}
-
 /** A shallow-cloned store entry, so the fold never mutates its input. */
 function cloneStoreBreakdown(entries: readonly StoreBreakdownEntry[]): StoreBreakdownEntry[] {
   return entries.map((s) => ({ ...s, locations: s.locations.map((l) => ({ ...l })) }));
@@ -591,12 +597,15 @@ export interface LocationPlacement {
  *
  * `quantity_held` counts CUSTODY and the basis belongs to the units CFS OWNS,
  * which is `held − quantity_rented_in`. So the weighted-average share and the
- * average itself are taken over OWNED units, before and after. A `hire_in` /
- * `hire_out` moves held and `quantity_rented_in` together (by its lines' net,
- * so a reversal moves both back), which leaves owned, the basis and the
- * average exactly where they were — a $0 receipt of 10 rented units cannot
- * dilute the average and their return cannot relieve owned basis. A
- * cost-bearing decrease beyond owned reports `ownedUnderflowUnits`.
+ * average itself are taken over OWNED units, before and after. Every
+ * `SUBRENT_MOVEMENT_TYPES` member — `subrent_in`, `subrent_out`,
+ * `return_to_supplier` — moves held and `quantity_rented_in` together (by its
+ * lines' net, so a reversal moves both back), which leaves owned, the basis
+ * and the average exactly where they were — a $0 receipt of 10 rented units
+ * cannot dilute the average, and neither their return nor settling a lost one
+ * to the supplier can relieve owned basis. A cost-bearing decrease beyond
+ * owned reports `ownedUnderflowUnits`. Settling more units than are rented in
+ * takes `quantity_rented_in` below 0, which `InventoryLedgerSchema` refuses.
  *
  * ## An uncounted ledger (`quantity_held: null`)
  *
@@ -720,9 +729,9 @@ export function applyMovementToLedger(
   let ownedUnderflowUnits = 0;
   const heldBefore = next.quantity_held;
   const rentedBefore = next.quantity_rented_in;
-  const rentedAfter = isHire(movement.type) ? rentedBefore + delta : rentedBefore;
-  // Owned = held − rented-in. Only a hire moves the second term, so for every
-  // other type owned moves exactly as held does.
+  const rentedAfter = isSubrentMovementType(movement.type) ? rentedBefore + delta : rentedBefore;
+  // Owned = held − rented-in. Only a subrent type moves the second term, so for
+  // every other type owned moves exactly as held does.
   const ownedBefore = heldBefore === null ? null : heldBefore - rentedBefore;
   if (carriesCost && heldBefore === null) {
     if (delta > 0) uncountedCostCents = movement.cost?.amount_cents ?? 0;

@@ -6568,7 +6568,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "hire_in" | "hire_out" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "hire_in" | "hire_out" | "subrent_in" | "subrent_out" | "return_to_supplier" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
 ```
 
 ### `MOVEMENT_UNDOES`
@@ -6907,7 +6907,7 @@ const MovementLine: z.ZodType<MovementLineType>;
 One physical movement of `quantity` units between two places.
 
 A `null` side means "outside CFS custody" — for most types that is also
-outside ownership, but a `hire_in` / `hire_out` line crosses custody alone
+outside ownership, but a subrent line (`subrent_in`, `subrent_out`, `return_to_supplier`) crosses custody alone
 (the units are the supplier's). Both sides non-null is a move that leaves
 `quantity_held` untouched.
 
@@ -8513,7 +8513,7 @@ The kinds of place a unit can be in. `"outside"` is the absence of a place —
 a `null` side of `location`, meaning outside CFS's CUSTODY entirely: the
 supplier a unit was bought from or is rented from, the customer a unit was
 sold to, the void a write-off sends it to. Ownership is a separate question
-since subrents (`hire_in` / `hire_out` cross this boundary without owning).
+since subrents (the {@link SUBRENT_MOVEMENT_TYPES} cross this boundary without owning).
 
 ```ts
 const PLACE_KINDS: "locations" | "bookings" | "out-of-service" | "outside"[];
@@ -10315,7 +10315,7 @@ const ReturnPurchaseInput: z.ZodType<ReturnPurchaseInputType>;
 Input for returning subrented units to the supplier
 (`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.
 
-Each line becomes ONE `hire_out` movement naming the purchase in `sources[]`,
+Each line becomes ONE `subrent_out` movement naming the purchase in `sources[]`,
 in one transaction with the `quantity_returned` co-write. The movement id is
 `{uuid_session}|hire_out|{uid_product}`, so a retry lands on the same
 movements. There is no cost: a returned unit was never owned.
@@ -10406,7 +10406,7 @@ const ReversePurchaseReturnInput: z.ZodType<ReversePurchaseReturnInputType>;
 
 Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)
 — the mirror of {@link ReversePurchaseReceiptInput}: it reverses the
-`hire_out` AND decrements `quantity_returned` in one transaction.
+`subrent_out` AND decrements `quantity_returned` in one transaction.
 
 ```ts
 interface ReversePurchaseReturnInputType {
@@ -10680,6 +10680,21 @@ What made an interval unavailable. The only non-quantitative fact a reader gets.
 
 ```ts
 const STOCK_UNAVAILABLE_KINDS: "booking" | "oos"[];
+```
+
+### `SUBRENT_MOVEMENT_TYPES`
+
+Every type that moves units into or out of a SUBRENT — custody without
+ownership. Each one moves `InventoryLedger.quantity_rented_in` with
+`quantity_held`, names exactly one purchase in `sources[]`, and names its
+supplier.
+
+The ONE list: the schema's purchase-source rule and the ledger fold both read
+it, so a type added here reaches both. ⚠️ It carries the deprecated
+`hire_in` / `hire_out` until they are removed (see {@link MOVEMENT_TYPES}).
+
+```ts
+const SUBRENT_MOVEMENT_TYPES: "subrent_in" | "subrent_out" | "return_to_supplier" | "hire_in" | "hire_out"[];
 ```
 
 ### `SUBSTITUTABLE_ITEM_TYPES`
@@ -11436,6 +11451,14 @@ interface StoreTransferLineInputType {
 
 ```ts
 type StoreUpdated = EventEnvelope<Store> & typeLiteral;
+```
+
+### `SubrentMovementTypeType`
+
+One {@link SUBRENT_MOVEMENT_TYPES} member.
+
+```ts
+type SubrentMovementTypeType = indexedAccess;
 ```
 
 ### `SubstitutableItemType`
@@ -13545,7 +13568,7 @@ rules*), because every receipt already carries its share of the old price.
 Those are cross-document facts the writer holds, so they are not refined here.
 
 ⚠️ **A SUBRENT line's price is not frozen by a receipt**, because its receipts
-carry no cost (`hire_in` is cost-forbidden). So on a subrent the writer lets
+carry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets
 `amount_cents` and `dates.end` move after receipt — a paid hire extension —
 with `quantity` still floored at what is received. Without that, an
 extension is unwritable: a close is refused while units are out.
@@ -14970,7 +14993,7 @@ after it. Type carries direction, reason carries why, and the contract's
 Returns +1 for movements that increase HELD quantity, -1 for those that
 decrease it, and 0 for those that leave it untouched (a `transfer`, or a
 custody-only fulfillment step). Held is CUSTODY, which since subrents is not
-the same as ownership: `hire_in` is +1 and owns nothing. A caller asking an
+the same as ownership: `subrent_in` is +1 and owns nothing. A caller asking an
 OWNERSHIP question pairs this with `hasCosts` — every type that changes
 ownership carries a cost, and the subrent pair is cost-forbidden. ⚠️ It used to list "a cost-only adjustment"
 as a third case; there is no such member, and there cannot be one until the
@@ -15264,6 +15287,10 @@ supplier. Keyed on the PAYLOAD, not the source; see {@link CardPurchasesSource}.
 Narrow a settlement to {@link ReceivableSettlement}. A reader that scans the
 collection (an audit, a per-customer statement built from a full read) holds
 payable rows too and MUST filter before treating `uid_organization` as set.
+
+### `isSubrentMovementType(type: MovementTypeType): type is SubrentMovementTypeType`
+
+Whether a movement type is a {@link SUBRENT_MOVEMENT_TYPES} member.
 
 ### `isSubstitutableItemType(type: string): type is SubstitutableItemType`
 
@@ -23926,7 +23953,7 @@ user, so `priceDocument` never runs here.
 `kind` says what CFS is getting from the supplier. A **buy** transfers
 ownership: its receipts are `purchase` movements that raise `quantity_held`
 and the cost basis. A **subrent** borrows units for a hire window and gives
-them back: its receipts are `hire_in` movements and its returns `hire_out`,
+them back: its receipts are `subrent_in` movements and its returns `subrent_out`,
 both cost-forbidden, so the units are in CFS's CUSTODY without ever being
 OWNED (`InventoryLedger.quantity_rented_in`). Everything else — supplier,
 store, number, bills, credits, the Xero ACCPAY and the thread — is shared, so
@@ -24227,7 +24254,7 @@ const ReturnPurchaseInput: z.ZodType<ReturnPurchaseInputType>;
 Input for returning subrented units to the supplier
 (`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.
 
-Each line becomes ONE `hire_out` movement naming the purchase in `sources[]`,
+Each line becomes ONE `subrent_out` movement naming the purchase in `sources[]`,
 in one transaction with the `quantity_returned` co-write. The movement id is
 `{uuid_session}|hire_out|{uid_product}`, so a retry lands on the same
 movements. There is no cost: a returned unit was never owned.
@@ -24298,7 +24325,7 @@ const ReversePurchaseReturnInput: z.ZodType<ReversePurchaseReturnInputType>;
 
 Input for reversing one return (`POST /purchases/{uid}/returns/{movementUid}/reverse`)
 — the mirror of {@link ReversePurchaseReceiptInput}: it reverses the
-`hire_out` AND decrements `quantity_returned` in one transaction.
+`subrent_out` AND decrements `quantity_returned` in one transaction.
 
 ```ts
 interface ReversePurchaseReturnInputType {
@@ -24328,7 +24355,7 @@ rules*), because every receipt already carries its share of the old price.
 Those are cross-document facts the writer holds, so they are not refined here.
 
 ⚠️ **A SUBRENT line's price is not frozen by a receipt**, because its receipts
-carry no cost (`hire_in` is cost-forbidden). So on a subrent the writer lets
+carry no cost (`subrent_in` is cost-forbidden). So on a subrent the writer lets
 `amount_cents` and `dates.end` move after receipt — a paid hire extension —
 with `quantity` still floored at what is received. Without that, an
 extension is unwritable: a close is refused while units are out.
@@ -26172,7 +26199,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "hire_in" | "hire_out" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "hire_in" | "hire_out" | "subrent_in" | "subrent_out" | "return_to_supplier" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
 ```
 
 ### `MOVEMENT_UNDOES`
@@ -26342,7 +26369,7 @@ const MovementLine: z.ZodType<MovementLineType>;
 One physical movement of `quantity` units between two places.
 
 A `null` side means "outside CFS custody" — for most types that is also
-outside ownership, but a `hire_in` / `hire_out` line crosses custody alone
+outside ownership, but a subrent line (`subrent_in`, `subrent_out`, `return_to_supplier`) crosses custody alone
 (the units are the supplier's). Both sides non-null is a move that leaves
 `quantity_held` untouched.
 
@@ -26477,7 +26504,7 @@ The kinds of place a unit can be in. `"outside"` is the absence of a place —
 a `null` side of `location`, meaning outside CFS's CUSTODY entirely: the
 supplier a unit was bought from or is rented from, the customer a unit was
 sold to, the void a write-off sends it to. Ownership is a separate question
-since subrents (`hire_in` / `hire_out` cross this boundary without owning).
+since subrents (the {@link SUBRENT_MOVEMENT_TYPES} cross this boundary without owning).
 
 ```ts
 const PLACE_KINDS: "locations" | "bookings" | "out-of-service" | "outside"[];
@@ -26513,6 +26540,21 @@ interface ReverseTransactionInputType {
 }
 ```
 
+### `SUBRENT_MOVEMENT_TYPES`
+
+Every type that moves units into or out of a SUBRENT — custody without
+ownership. Each one moves `InventoryLedger.quantity_rented_in` with
+`quantity_held`, names exactly one purchase in `sources[]`, and names its
+supplier.
+
+The ONE list: the schema's purchase-source rule and the ledger fold both read
+it, so a type added here reaches both. ⚠️ It carries the deprecated
+`hire_in` / `hire_out` until they are removed (see {@link MOVEMENT_TYPES}).
+
+```ts
+const SUBRENT_MOVEMENT_TYPES: "subrent_in" | "subrent_out" | "return_to_supplier" | "hire_in" | "hire_out"[];
+```
+
 ### `StoreTransferLineInput`
 
 Zod schema for {@link StoreTransferLineInputType}.
@@ -26544,6 +26586,14 @@ interface StoreTransferLineInputType {
   units?: number[];
   uid_booking?: string;
 }
+```
+
+### `SubrentMovementTypeType`
+
+One {@link SUBRENT_MOVEMENT_TYPES} member.
+
+```ts
+type SubrentMovementTypeType = indexedAccess;
 ```
 
 ### `UNDO_MOVEMENT_TYPES`
@@ -26641,7 +26691,7 @@ transaction on a product.
 Returns +1 for movements that increase HELD quantity, -1 for those that
 decrease it, and 0 for those that leave it untouched (a `transfer`, or a
 custody-only fulfillment step). Held is CUSTODY, which since subrents is not
-the same as ownership: `hire_in` is +1 and owns nothing. A caller asking an
+the same as ownership: `subrent_in` is +1 and owns nothing. A caller asking an
 OWNERSHIP question pairs this with `hasCosts` — every type that changes
 ownership carries a cost, and the subrent pair is cost-forbidden. ⚠️ It used to list "a cost-only adjustment"
 as a third case; there is no such member, and there cannot be one until the
@@ -26671,6 +26721,10 @@ produced; a type-level prediction can.
 ### `hasCosts(type: MovementTypeType): boolean`
 
 Whether a movement type carries a cost object. Derived from the contract.
+
+### `isSubrentMovementType(type: MovementTypeType): type is SubrentMovementTypeType`
+
+Whether a movement type is a {@link SUBRENT_MOVEMENT_TYPES} member.
 
 ## `@cfs/core/schemas/unit`
 
@@ -41144,12 +41198,15 @@ impossible rather than gated: a transfer has no cost object to mis-gate.
 
 `quantity_held` counts CUSTODY and the basis belongs to the units CFS OWNS,
 which is `held − quantity_rented_in`. So the weighted-average share and the
-average itself are taken over OWNED units, before and after. A `hire_in` /
-`hire_out` moves held and `quantity_rented_in` together (by its lines' net,
-so a reversal moves both back), which leaves owned, the basis and the
-average exactly where they were — a $0 receipt of 10 rented units cannot
-dilute the average and their return cannot relieve owned basis. A
-cost-bearing decrease beyond owned reports `ownedUnderflowUnits`.
+average itself are taken over OWNED units, before and after. Every
+`SUBRENT_MOVEMENT_TYPES` member — `subrent_in`, `subrent_out`,
+`return_to_supplier` — moves held and `quantity_rented_in` together (by its
+lines' net, so a reversal moves both back), which leaves owned, the basis
+and the average exactly where they were — a $0 receipt of 10 rented units
+cannot dilute the average, and neither their return nor settling a lost one
+to the supplier can relieve owned basis. A cost-bearing decrease beyond
+owned reports `ownedUnderflowUnits`. Settling more units than are rented in
+takes `quantity_rented_in` below 0, which `InventoryLedgerSchema` refuses.
 
 ## An uncounted ledger (`quantity_held: null`)
 
@@ -41364,10 +41421,14 @@ of these:
   together, at the original amounts.
 - **A booking's movement** — the booking's `breakdown` is the other half.
 - **A purchase receipt** — the purchase line's `quantity_received` is; and
-  a subrent's **return** (`hire_out`), whose other half is
+  a subrent's **return** (`subrent_out`), whose other half is
   `quantity_returned`, so it earns its own code and lever.
 - **An `out-of-service` endpoint, or a flag** (`service` set) — the record's
   buckets and `stores[]` are. A reason edit's SPLIT names two records.
+- **A `return_to_supplier`** — it names a purchase too, but its lever is the
+  RECORD PUT lowering `returned_to_supplier`, which moves the purchase's
+  `quantity_returned` back in the same write. So it answers `out_of_service`
+  with the record, checked before the purchase branch.
 
 Keyed on endpoints, sources and type — a shelf `write_off`
 (`locations → outside`) touches none of these and stays reversible.

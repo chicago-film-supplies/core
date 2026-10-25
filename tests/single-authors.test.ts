@@ -229,14 +229,33 @@ Deno.test("row 8: the seven older classes, and a shelf write-off stays reversibl
     standaloneReversalRefusal({ type: "purchase", sources: [{ collection: "purchases", uid: "PO" }] as never }),
     { code: "purchase_receipt", uid: "PO" },
   );
-  // A subrent's receipt is a receipt; its return has its own lever.
+  // A subrent's receipt is a receipt; its return has its own lever. The
+  // deprecated spellings answer exactly as the new ones.
+  for (const type of ["subrent_in", "hire_in"] as const) {
+    assertEquals(
+      standaloneReversalRefusal({ type, sources: [{ collection: "purchases", uid: "PO" }] as never }),
+      { code: "purchase_receipt", uid: "PO" },
+      type,
+    );
+  }
+  for (const type of ["subrent_out", "hire_out"] as const) {
+    assertEquals(
+      standaloneReversalRefusal({ type, sources: [{ collection: "purchases", uid: "PO" }] as never }),
+      { code: "purchase_return", uid: "PO" },
+      type,
+    );
+  }
+  // A settle names a purchase too, but its lever is the RECORD PUT — so the
+  // record answers, checked before the purchase branch, from either source:
+  // off a flagged shelf the record is in `sources[]` only.
   assertEquals(
-    standaloneReversalRefusal({ type: "hire_in", sources: [{ collection: "purchases", uid: "PO" }] as never }),
-    { code: "purchase_receipt", uid: "PO" },
-  );
-  assertEquals(
-    standaloneReversalRefusal({ type: "hire_out", sources: [{ collection: "purchases", uid: "PO" }] as never }),
-    { code: "purchase_return", uid: "PO" },
+    standaloneReversalRefusal({
+      type: "return_to_supplier",
+      sources: [{ collection: "purchases", uid: "PO" }, { collection: "out-of-service", uid: "R" }] as never,
+      lines: [{ location: { from: { collection: "locations", uid: "L" }, to: null } }] as never,
+      service: { from: "damaged", to: null },
+    }),
+    { code: "out_of_service", uid: "R" },
   );
   assertEquals(
     standaloneReversalRefusal({

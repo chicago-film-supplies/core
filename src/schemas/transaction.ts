@@ -339,8 +339,38 @@ export const MOVEMENT_TYPES = [
   // `quantity_received` / `quantity_returned`), neither has an undo type — a
   // mistake is a `reverses` reversal through the purchase's own lever — and
   // neither names units: a subrent product is never serialized.
+  //
+  // ⚠️ **`hire_in` / `hire_out` are DEPRECATED aliases of `subrent_in` /
+  // `subrent_out`** (owner, 2026-10-25: every other surface says subrent —
+  // `kind: "subrent"`, `assertSubrentable`, "Sub-Rent" labels — and "hire" came
+  // from the subrent plan with no recorded rationale). Their contracts are
+  // identical and every reader treats both pairs the same through
+  // {@link SUBRENT_MOVEMENT_TYPES}. Writers emit only the new names; the old
+  // pair is removed in a later beta once a census reads 0 stored in prod, dev
+  // and `test` (`api-cloudrun/.claude/plans/subrent-loss-and-margin.md` D1b).
   "hire_in",
   "hire_out",
+  "subrent_in",
+  "subrent_out",
+  // A rented unit that cannot go back: lost at the customer, or damaged
+  // (api-cloudrun#1360). It is SETTLED to the supplier's account rather than
+  // physically returned — the supplier bills a loss or damage charge on the
+  // hire's bill — so the units leave CFS's custody and stop being owed.
+  //
+  // 🔴 **Not a widened `subrent_out`, and not a `write_off`.** A `subrent_out`
+  // is the PO's returns route and draws clean units off a shelf; this is the
+  // out-of-service RECORD's resolution, raised by the record PUT moving units
+  // into its `returned_to_supplier` bucket — the type pairs with the bucket it
+  // produces, as `write_off` pairs with `written_off`. A `write_off` removes
+  // OWNED units and relieves basis, and the fold refuses it when CFS owns no
+  // units; this lowers `quantity_rented_in` with `quantity_held`, so owned
+  // units, basis and the average never move. The operator chooses which one a
+  // loss is (D9), because on a bulk product nothing can infer it.
+  //
+  // Names the record, the purchase and the supplier. Not manual, no undo type:
+  // a mistake is the record PUT LOWERING `returned_to_supplier`, as a found
+  // write-off lowers `written_off`.
+  "return_to_supplier",
   // Placement only — nets to zero on ownership and touches no cost.
   "transfer",
   "return_to_service",
@@ -442,6 +472,31 @@ export type MovementTypeType = typeof MOVEMENT_TYPES[number];
 /** Zod schema for MovementTypeType. */
 export const MovementTypeEnum: z.ZodType<MovementTypeType> = z.enum(MOVEMENT_TYPES);
 
+/**
+ * Every type that moves units into or out of a SUBRENT — custody without
+ * ownership. Each one moves `InventoryLedger.quantity_rented_in` with
+ * `quantity_held`, names exactly one purchase in `sources[]`, and names its
+ * supplier.
+ *
+ * The ONE list: the schema's purchase-source rule and the ledger fold both read
+ * it, so a type added here reaches both. ⚠️ It carries the deprecated
+ * `hire_in` / `hire_out` until they are removed (see {@link MOVEMENT_TYPES}).
+ */
+export const SUBRENT_MOVEMENT_TYPES = [
+  "subrent_in",
+  "subrent_out",
+  "return_to_supplier",
+  "hire_in",
+  "hire_out",
+] as const;
+/** One {@link SUBRENT_MOVEMENT_TYPES} member. */
+export type SubrentMovementTypeType = typeof SUBRENT_MOVEMENT_TYPES[number];
+
+/** Whether a movement type is a {@link SUBRENT_MOVEMENT_TYPES} member. */
+export function isSubrentMovementType(type: MovementTypeType): type is SubrentMovementTypeType {
+  return (SUBRENT_MOVEMENT_TYPES as readonly string[]).includes(type);
+}
+
 // ── Placement kinds ─────────────────────────────────────────────────
 
 /**
@@ -449,7 +504,7 @@ export const MovementTypeEnum: z.ZodType<MovementTypeType> = z.enum(MOVEMENT_TYP
  * a `null` side of `location`, meaning outside CFS's CUSTODY entirely: the
  * supplier a unit was bought from or is rented from, the customer a unit was
  * sold to, the void a write-off sends it to. Ownership is a separate question
- * since subrents (`hire_in` / `hire_out` cross this boundary without owning).
+ * since subrents (the {@link SUBRENT_MOVEMENT_TYPES} cross this boundary without owning).
  */
 export const PLACE_KINDS = ["locations", "bookings", "out-of-service", "outside"] as const;
 /** One kind of place a unit can occupy. */
@@ -819,9 +874,11 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
   // units enter and leave CFS's custody at a shelf, and a booking then claims
   // them like any other unit. `cost: "forbidden"` is the whole point. `units:
   // "forbidden"` because a serialized product cannot be subrented (its roster
-  // would mint permanent numbers), and `service: "forbidden"` because a
-  // damaged rented unit's resolution is not modelled yet — a flagged unit
-  // cannot be handed back.
+  // would mint permanent numbers). `service: "forbidden"` on the in/out pair
+  // because they move clean units only: a flagged or lost rented unit is
+  // settled by `return_to_supplier` from its out-of-service record.
+  //
+  // `hire_in` / `hire_out` are the deprecated spellings and stay identical.
   hire_in: {
     custody: "forbidden",
     cost: "forbidden",
@@ -837,6 +894,43 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
     places: { from: ["locations"], to: ["outside"] },
     booking: "forbidden",
     service: "forbidden",
+    units: "forbidden",
+    uncounted: "refused",
+  },
+  subrent_in: {
+    custody: "forbidden",
+    cost: "forbidden",
+    places: { from: ["outside"], to: ["locations"] },
+    booking: "forbidden",
+    service: "forbidden",
+    units: "forbidden",
+    uncounted: "refused",
+  },
+  subrent_out: {
+    custody: "forbidden",
+    cost: "forbidden",
+    places: { from: ["locations"], to: ["outside"] },
+    booking: "forbidden",
+    service: "forbidden",
+    units: "forbidden",
+    uncounted: "refused",
+  },
+  // `write_off`'s places — a flagged unit off its shelf, or a lost or away unit
+  // from the record — with no cost: the units were never owned.
+  //
+  // `service: "required"`, not `write_off`'s `nullable`. `write_off` is
+  // nullable because a clean or unplaced unit is written off with no service
+  // change; a clean rented unit is a plain `subrent_out`. Required also makes a
+  // settle without a record unrepresentable: the record-naming rule runs only
+  // when the axis is set. At an out-of-service place the per-endpoint rule
+  // forces `from` to name the reason; off a shelf `from` is the flag, and the
+  // `outside` end forces `to: null` either way.
+  return_to_supplier: {
+    custody: "forbidden",
+    cost: "forbidden",
+    places: { from: ["out-of-service", "locations"], to: ["outside"] },
+    booking: "forbidden",
+    service: "required",
     units: "forbidden",
     uncounted: "refused",
   },
@@ -1090,7 +1184,7 @@ export const MOVEMENT_CONTRACTS: Readonly<Record<MovementTypeType, MovementContr
  * Returns +1 for movements that increase HELD quantity, -1 for those that
  * decrease it, and 0 for those that leave it untouched (a `transfer`, or a
  * custody-only fulfillment step). Held is CUSTODY, which since subrents is not
- * the same as ownership: `hire_in` is +1 and owns nothing. A caller asking an
+ * the same as ownership: `subrent_in` is +1 and owns nothing. A caller asking an
  * OWNERSHIP question pairs this with `hasCosts` — every type that changes
  * ownership carries a cost, and the subrent pair is cost-forbidden. ⚠️ It used to list "a cost-only adjustment"
  * as a third case; there is no such member, and there cannot be one until the
@@ -1159,7 +1253,7 @@ export function getDisplayTransactionTypes(increaseOnly?: boolean): MovementType
  * One physical movement of `quantity` units between two places.
  *
  * A `null` side means "outside CFS custody" — for most types that is also
- * outside ownership, but a `hire_in` / `hire_out` line crosses custody alone
+ * outside ownership, but a subrent line (`subrent_in`, `subrent_out`, `return_to_supplier`) crosses custody alone
  * (the units are the supplier's). Both sides non-null is a move that leaves
  * `quantity_held` untouched.
  *
@@ -1456,9 +1550,9 @@ export interface Movement {
   xero_id?: string | null;
 
   /**
-   * Who the stock was bought from — or, on `hire_in` / `hire_out`, rented from
+   * Who the stock was bought from — or, on a subrent movement, rented from
    * — snapshotted `{uid, name}` at the time. `null` on every other type; never
-   * `null` on the subrent pair.
+   * `null` on a subrent type.
    *
    * ⚠️ **Optional, not required-nullable, and for the same reason as `xero_id`
    * directly above** — 1,159 prod / 1,414 dev movements predate the field
@@ -1964,7 +2058,19 @@ function checkMovementService(
       message: `"send_away" puts units out of service at the record and must name why`,
     });
   }
-  if ((m.type === "write_off" || m.type === "return_to_service") && forward.to !== null) {
+  // A settle resolves ONE record's units: its bucket is the one that moves,
+  // and off a flagged shelf `sources[]` is the only place the record appears.
+  if (m.type === "return_to_supplier" && m.sources.filter((s) => s.collection === "out-of-service").length !== 1) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["sources"],
+      message: `"return_to_supplier" settles one record's units and names exactly ONE out-of-service record in sources[]`,
+    });
+  }
+  if (
+    (m.type === "write_off" || m.type === "return_to_service" || m.type === "return_to_supplier") &&
+    forward.to !== null
+  ) {
     ctx.addIssue({
       code: "custom",
       path: ["service", "to"],
@@ -2085,12 +2191,12 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
         "so the bill it posts has to be billed to somebody",
     });
   }
-  // The subrent pair has no history, so its rule is strict where the
+  // The subrent types have no history, so their rule is strict where the
   // purchase's above must tolerate an absent key: the units belong to the
   // supplier, and a hire that cannot say whose units they are cannot be
   // returned to anybody.
-  const hire = doc.type === "hire_in" || doc.type === "hire_out";
-  if (hire && (doc.supplier === null || doc.supplier === undefined)) {
+  const subrent = isSubrentMovementType(doc.type);
+  if (subrent && (doc.supplier === null || doc.supplier === undefined)) {
     ctx.addIssue({
       code: "custom",
       path: ["supplier"],
@@ -2103,15 +2209,16 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   // `sources[]` — only through `query_by_sources`, the out-of-service shape.
   // ONE purchase: its line is `(purchase, uid_product)`, so a second would make
   // the bucket the receipt moves ambiguous. Only the types that cross the
-  // boundary WITH the supplier may name one — a `purchase` receipt, and a
-  // subrent's `hire_in` / `hire_out`. Every other type moves stock that is
+  // boundary WITH the supplier may name one — a `purchase` receipt, and every
+  // {@link SUBRENT_MOVEMENT_TYPES} member. Every other type moves stock that is
   // already in CFS's custody, or leaves it for somebody who is not a supplier.
   //
   // ⚠️ For a `purchase`, "at most one", not "exactly one". The 406 historic
   // purchases name none until the backfill links them, and an unlinked
   // purchase stays writable until P6 retires that path — refusing it is a
-  // separate, ordered step. The subrent pair has no history, so for it the
-  // rule is exactly one: a hire that names no purchase moves no bucket.
+  // separate, ordered step. The subrent types have no history, so for them the
+  // rule is exactly one: a hire that names no purchase moves no bucket, and a
+  // settle that names none lowers no `quantity_returned`.
   const purchases = doc.sources.filter((s) => s.collection === "purchases").length;
   if (doc.type === "purchase" && purchases > 1) {
     ctx.addIssue({
@@ -2120,14 +2227,14 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
       message: "a purchase receipt names exactly ONE purchase in sources[]",
     });
   }
-  if (hire && purchases !== 1) {
+  if (subrent && purchases !== 1) {
     ctx.addIssue({
       code: "custom",
       path: ["sources"],
       message: `a ${doc.type} names exactly ONE purchase in sources[] — the subrent it is part of`,
     });
   }
-  if (doc.type !== "purchase" && !hire && purchases > 0) {
+  if (doc.type !== "purchase" && !subrent && purchases > 0) {
     ctx.addIssue({
       code: "custom",
       path: ["sources"],
@@ -2180,6 +2287,12 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
  * `MovementSchema`, which still accepts the type. Stock found since then is a
  * `find`; stock bought is a purchase. Refusing the type outright needs no date
  * boundary, so there is none to get wrong across the Chicago offset.
+ *
+ * ⚠️ **No {@link SUBRENT_MOVEMENT_TYPES} member is either.** Each moves a
+ * purchase's bucket in the same write — `quantity_received` /
+ * `quantity_returned` — and `return_to_supplier` an out-of-service record's
+ * `returned_to_supplier` too, so a keyed one would move custody with neither
+ * document knowing.
  */
 const MANUAL_MOVEMENT_TYPES = [
   "find",
