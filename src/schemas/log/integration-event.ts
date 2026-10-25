@@ -96,6 +96,13 @@ export const INTEGRATION_EVENT_MSGS = [
   // on a field its arm does not declare fails `alertRuleContract`.
   "organization_tree_check",
   "organization_tree_check_failed",
+  // The product component-graph watch (api-cloudrun#657). The organization-tree
+  // shape exactly, for the same reasons: one record per DEFECT finding carrying
+  // `invariant` (the audit bucket) + `doc_id` + `detail`, and one summary per
+  // run carrying `checked`, emitted on every run so `checked: 0` and silence are
+  // both visible. No new fields — the alert groups on the reused ones.
+  "component_graph_check",
+  "component_graph_check_failed",
   // The backstop under the DEFERRED stock rebuild (api-cloudrun#358). The
   // rebuild's enqueue is post-commit and therefore not transactional with Firestore,
   // so a crash or an exhausted retry budget leaves a summary stale with nothing
@@ -262,7 +269,7 @@ export interface IntegrationEventLogRecord {
   lag_ms?: number;
   // ── Scheduled-watch counters ─────────────────────────────────────
   // `il_tax_rate_check`, `tax_expiry_check`, `settlement_totals_sweep`,
-  // `stock_summary_sweep`, `organization_tree_check`, `booking_drift_sweep`. Each emits on EVERY run
+  // `stock_summary_sweep`, `organization_tree_check`, `component_graph_check`, `booking_drift_sweep`. Each emits on EVERY run
   // including clean ones, so
   // these are the state an alert reads — not an event count.
   /** Cells / rows / ledgers examined this run. A `checked: 0` run is a finding. */
