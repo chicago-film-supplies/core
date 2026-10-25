@@ -12,7 +12,9 @@ import {
   isDividerItemType,
   isFulfillableItemType,
   isLineItemType,
+  isSubstitutableItemType,
   ITEM_CONTRACTS,
+  SUBSTITUTABLE_ITEM_TYPES,
   type ItemTypeType,
   type PreTaxItemType,
   type FromTotalItemType,
@@ -3095,6 +3097,30 @@ Deno.test("ITEM_CONTRACTS covers every item type, and the derived lists agree", 
   // FULFILLMENT_LINE_ITEM_TYPES is not a spelling of DOC_LINE_ITEM_TYPES.
   assertEquals(ITEM_CONTRACTS.transaction_fee.kind, "line");
   assertEquals(ITEM_CONTRACTS.transaction_fee.fulfillable, false);
+});
+
+Deno.test("substitutable is rental and sale only — on both sides of a substitution", () => {
+  // Hard-coded rather than derived from the table: the derived-list parity is the
+  // compile-time check's job, and this pins the OWNER'S rule (2026-10-25). A
+  // replacement-type product offered as an alternate for a rental line is the
+  // fulfillment 1085 failure.
+  assertEquals([...SUBSTITUTABLE_ITEM_TYPES].sort(), ["rental", "sale"]);
+  const fromTable = Object.keys(ITEM_CONTRACTS)
+    .filter((t) => ITEM_CONTRACTS[t as ItemTypeType].substitutable)
+    .sort();
+  assertEquals(fromTable, ["rental", "sale"]);
+
+  for (const t of ["rental", "sale"]) {
+    assertEquals(isSubstitutableItemType(t), true, `${t} is substitutable`);
+  }
+  // Every other item type, and the product-only vocabulary passed as a product's
+  // `type` — the predicate is asked of the candidate product, not only the line.
+  for (const t of [
+    "replacement", "service", "surcharge", "transaction_fee",
+    "order", "destination", "group", "not_a_type",
+  ]) {
+    assertEquals(isSubstitutableItemType(t), false, `${t} is not substitutable`);
+  }
 });
 
 Deno.test("the type predicates answer from the contract, and the three axes stay distinct", () => {

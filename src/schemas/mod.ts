@@ -361,6 +361,7 @@ export {
   isLineItemType,
   isDividerItemType,
   isFulfillableItemType,
+  isSubstitutableItemType,
   // The ARRAY-level `zero_priced` refinement and its two halves (core#100).
   // ⚠️ Listed here BY HAND, like everything else on this barrel — a symbol in
   // `schemas/common.ts` is unreachable as `@cfs/core/schemas` until it appears in
@@ -375,6 +376,7 @@ export {
   type ZeroPricedComponentFinding,
   type ZeroPricedItemLike,
   FULFILLMENT_LINE_ITEM_TYPES,
+  SUBSTITUTABLE_ITEM_TYPES,
   CfsSourceCollectionEnum,
   CFS_SOURCE_COLLECTIONS,
   SettlementTypeEnum,
@@ -415,6 +417,7 @@ export {
   type ItemTypeType,
   type ItemContract,
   type FulfillableItemType,
+  type SubstitutableItemType,
   type PreTaxItemType,
   type FromTotalItemType,
   type DividerItemType,

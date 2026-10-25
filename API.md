@@ -5989,6 +5989,7 @@ interface ItemContract {
   pricing: "pre_tax" | "from_total" | "none";
   replacement: "required_when_stocked" | "optional" | "forbidden";
   fulfillable: boolean;
+  substitutable: boolean;
   parentable_by: readonly ItemTypeType[];
 }
 ```
@@ -10679,6 +10680,16 @@ What made an interval unavailable. The only non-quantitative fact a reader gets.
 const STOCK_UNAVAILABLE_KINDS: "booking" | "oos"[];
 ```
 
+### `SUBSTITUTABLE_ITEM_TYPES`
+
+Item / product types that may be substituted, and may substitute — the
+`substitutable: true` members. The one list behind the API's substitution
+guard and the manager's substitute and alternate searches.
+
+```ts
+const SUBSTITUTABLE_ITEM_TYPES: "rental" | "sale"[];
+```
+
 ### `SaveQuoteVersionInput`
 
 Zod schema for SaveQuoteVersionInput.
@@ -11423,6 +11434,12 @@ interface StoreTransferLineInputType {
 
 ```ts
 type StoreUpdated = EventEnvelope<Store> & typeLiteral;
+```
+
+### `SubstitutableItemType`
+
+```ts
+type SubstitutableItemType = indexedAccess;
 ```
 
 ### `SubstitutedForEntry`
@@ -15241,6 +15258,16 @@ Narrow a settlement to {@link ReceivableSettlement}. A reader that scans the
 collection (an audit, a per-customer statement built from a full read) holds
 payable rows too and MUST filter before treating `uid_organization` as set.
 
+### `isSubstitutableItemType(type: string): type is SubstitutableItemType`
+
+Whether an item type may be substituted — the `substitutable` axis.
+
+Asked of BOTH sides of a substitution: the line being swapped out (a service
+or surcharge line has no valid substitute, so offer none) and the product
+standing in for it (a replacement-type product is never a valid alternate).
+Takes a `string` so a product's `type` can be passed as-is; a value outside
+{@link ITEM_TYPES} has no contract and answers `false`.
+
 ### `isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: "manual" | "propagation"): boolean`
 
 Server-side gate for an order status write. `source: "manual"` rejects
@@ -16631,6 +16658,7 @@ interface ItemContract {
   pricing: "pre_tax" | "from_total" | "none";
   replacement: "required_when_stocked" | "optional" | "forbidden";
   fulfillable: boolean;
+  substitutable: boolean;
   parentable_by: readonly ItemTypeType[];
 }
 ```
@@ -17394,6 +17422,16 @@ settlement refine reads this to decide which party key the row must carry.
 const SETTLEMENT_TARGET_SIDE: Readonly<Record<SettlementTargetType, "receivable" | "payable">>;
 ```
 
+### `SUBSTITUTABLE_ITEM_TYPES`
+
+Item / product types that may be substituted, and may substitute — the
+`substitutable: true` members. The one list behind the API's substitution
+guard and the manager's substitute and alternate searches.
+
+```ts
+const SUBSTITUTABLE_ITEM_TYPES: "rental" | "sale"[];
+```
+
 ### `SeededRoleName`
 
 One of the six git-declared roles. @see {@link SEEDED_ROLE_NAMES}
@@ -17548,6 +17586,12 @@ stored. Tighten to required — if at all — in a later release.
 
 ```ts
 const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation>;
+```
+
+### `SubstitutableItemType`
+
+```ts
+type SubstitutableItemType = indexedAccess;
 ```
 
 ### `SubstitutedForEntry`
@@ -17917,6 +17961,16 @@ and the two are distinguishable by this one check because a `FirestoreId`
 never contains a `-`. This is `core/src/utils/booking-id.ts`'s
 `componentAncestry` filter, exported from the grammar it reads rather than
 from the booking-specific module that consumes it.
+
+### `isSubstitutableItemType(type: string): type is SubstitutableItemType`
+
+Whether an item type may be substituted — the `substitutable` axis.
+
+Asked of BOTH sides of a substitution: the line being swapped out (a service
+or surcharge line has no valid substitute, so offer none) and the product
+standing in for it (a replacement-type product is never a valid alternate).
+Takes a `string` so a product's `type` can be passed as-is; a value outside
+{@link ITEM_TYPES} has no contract and answers `false`.
 
 ### `itemContract(type: string): ItemContract | undefined`
 

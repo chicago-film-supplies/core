@@ -1099,6 +1099,16 @@ export interface ItemContract {
   /** Whether the type can be picked off a shelf — the source of `FULFILLMENT_LINE_ITEM_TYPES`. */
   fulfillable: boolean;
   /**
+   * Whether a line of this type may be swapped for another product, and whether
+   * a product of this type may stand in for one — the source of
+   * `SUBSTITUTABLE_ITEM_TYPES`. Only `rental` and `sale`: a substitution swaps
+   * one shelf item for another, and a rental ↔ sale swap is the legitimate fix
+   * when an operator picked the wrong twin. A replacement is the CHARGE for a
+   * lost item, and a service or surcharge is not a shelf item at all, so none
+   * of them is ever a valid substitute or alternate.
+   */
+  substitutable: boolean;
+  /**
    * Types that may be this item's immediate structural parent (`path.at(-2)`).
    * The document root is always legal and is not listed.
    *
@@ -1141,27 +1151,28 @@ const DIVIDER_PARENTS: readonly ItemTypeType[] = ["order", "destination", "group
  * altogether. Everything left here is a bare literal, which a syntactic emitter
  * can always copy.
  *
- * Keep it that way: this object's literal types are load-bearing for the five
+ * Keep it that way: this object's literal types are load-bearing for the
  * mapped types below (`LINE_ITEM_TYPES`, `PRE_TAX_ITEM_TYPES`,
- * `FROM_TOTAL_ITEM_TYPES`, `DIVIDER_ITEM_TYPES`, `FULFILLMENT_LINE_ITEM_TYPES`),
+ * `FROM_TOTAL_ITEM_TYPES`, `DIVIDER_ITEM_TYPES`, `FULFILLMENT_LINE_ITEM_TYPES`,
+ * `SUBSTITUTABLE_ITEM_TYPES`),
  * which is why it cannot simply take an explicit annotation the way
  * {@link ITEM_CONTRACTS} does. **Never put a non-literal in here.**
  */
 const ITEM_CONTRACTS_INNER = {
   // ── dividers ──
-  order: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false },
-  destination: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false },
-  group: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false },
+  order: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
+  destination: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
+  group: { kind: "divider", pricing: "none", replacement: "forbidden", fulfillable: false, substitutable: false },
   // ── lines ──
-  rental: { kind: "line", pricing: "pre_tax", replacement: "required_when_stocked", fulfillable: true },
-  replacement: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true },
-  sale: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true },
-  service: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true },
-  surcharge: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true },
+  rental: { kind: "line", pricing: "pre_tax", replacement: "required_when_stocked", fulfillable: true, substitutable: true },
+  replacement: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, substitutable: false },
+  sale: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, substitutable: true },
+  service: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, substitutable: false },
+  surcharge: { kind: "line", pricing: "pre_tax", replacement: "optional", fulfillable: true, substitutable: false },
   // A fee is priced FROM the document total, has no replacement value, and is
   // never picked off a shelf — which is why `FULFILLMENT_LINE_ITEM_TYPES`
   // excludes it rather than collapsing to `DOC_LINE_ITEM_TYPES`.
-  transaction_fee: { kind: "line", pricing: "from_total", replacement: "forbidden", fulfillable: false },
+  transaction_fee: { kind: "line", pricing: "from_total", replacement: "forbidden", fulfillable: false, substitutable: false },
 } as const;
 
 /**
@@ -1748,6 +1759,38 @@ type _FulfillableParity = [FulfillableItemType] extends [_FulfillableTypes]
   : never;
 const _fulfillableParity: _FulfillableParity = true;
 void _fulfillableParity;
+
+/**
+ * Whether an item type may be substituted — the `substitutable` axis.
+ *
+ * Asked of BOTH sides of a substitution: the line being swapped out (a service
+ * or surcharge line has no valid substitute, so offer none) and the product
+ * standing in for it (a replacement-type product is never a valid alternate).
+ * Takes a `string` so a product's `type` can be passed as-is; a value outside
+ * {@link ITEM_TYPES} has no contract and answers `false`.
+ */
+export function isSubstitutableItemType(type: string): type is SubstitutableItemType {
+  return itemContract(type)?.substitutable === true;
+}
+
+/**
+ * Item / product types that may be substituted, and may substitute — the
+ * `substitutable: true` members. The one list behind the API's substitution
+ * guard and the manager's substitute and alternate searches.
+ */
+export const SUBSTITUTABLE_ITEM_TYPES = ["rental", "sale"] as const;
+/** @see {@link SUBSTITUTABLE_ITEM_TYPES} */
+export type SubstitutableItemType = typeof SUBSTITUTABLE_ITEM_TYPES[number];
+
+// Same bidirectional parity for the substitutable axis.
+type _SubstitutableTypes = {
+  [K in ItemTypeType]: typeof ITEM_CONTRACTS_INNER[K]["substitutable"] extends true ? K : never;
+}[ItemTypeType];
+type _SubstitutableParity = [SubstitutableItemType] extends [_SubstitutableTypes]
+  ? [_SubstitutableTypes] extends [SubstitutableItemType] ? true : never
+  : never;
+const _substitutableParity: _SubstitutableParity = true;
+void _substitutableParity;
 
 // `ComponentSchema` reuses `checkItemContract`, which is only sound while every
 // catalog component type is also an item type — a component that expanded into

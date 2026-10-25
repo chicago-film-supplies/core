@@ -2631,7 +2631,7 @@
         {
           "kind": "interface",
           "name": "ItemContract",
-          "declaration": "interface ItemContract {\n  kind: \"divider\" | \"line\";\n  pricing: \"pre_tax\" | \"from_total\" | \"none\";\n  replacement: \"required_when_stocked\" | \"optional\" | \"forbidden\";\n  fulfillable: boolean;\n  parentable_by: readonly ItemTypeType[];\n}",
+          "declaration": "interface ItemContract {\n  kind: \"divider\" | \"line\";\n  pricing: \"pre_tax\" | \"from_total\" | \"none\";\n  replacement: \"required_when_stocked\" | \"optional\" | \"forbidden\";\n  fulfillable: boolean;\n  substitutable: boolean;\n  parentable_by: readonly ItemTypeType[];\n}",
           "doc": "The per-type rules an `items[]` entry must satisfy, one entry per\n{@link ITEM_TYPES} member. Modelled on `MOVEMENT_CONTRACTS` in\n`schemas/transaction.ts`: a table the schema reads, so a contradiction is reported by\nthe schema instead of restated in every consumer.\n\n**The table carries only the axes that vary by TYPE.** The axes that vary by\nCOLLECTION are already the three documents' shapes and are not repeated here —\nan invoice line has no `stock_method` key and its price has no `replacement`\nkey, a fulfillment line has no `price` at all, and every one of those objects\nis a `z.strictObject`. Restating \"forbidden\" for them would be a second source\nof truth for something the shape already makes inexpressible.\n\nMeasured against prod `cfs-3100` (951 orders / 958 invoices / 952\nfulfillments, 2026-07-29) before each axis was written — three axes an earlier\ndraft proposed are absent because the corpus refutes them:\n\n- **no `taxable` axis.** Every line type carries taxes on some rows and not\n  others (surcharges: 149 of 151 order rows ARE taxed). Whether a line is\n  taxed is the line's tax class resolved in its jurisdiction — a\n  property of WHERE the goods went as much as of the line, so it is not a\n  type invariant. (This bullet named `tax_class` and `tax_profile` until\n  2026-08-22; neither is a field any more.)\n- **no per-type `formula` whitelist.** Order `sale`/`service`/`surcharge` rows\n  are `fixed` while their invoice projections are `five_day_week` (617 sale,\n  643 service, 137 surcharge). A whitelist keyed on type would reject the\n  invoice side of the same line.\n- **`replacement` is `optional`, not `forbidden`, off the rental arm.** All\n  1,480 non-rental order line items carry a `price.replacement`; the builder\n  writes it for every type."
         },
         {
@@ -4748,6 +4748,12 @@
         },
         {
           "kind": "variable",
+          "name": "SUBSTITUTABLE_ITEM_TYPES",
+          "declaration": "const SUBSTITUTABLE_ITEM_TYPES: \"rental\" | \"sale\"[];",
+          "doc": "Item / product types that may be substituted, and may substitute — the\n`substitutable: true` members. The one list behind the API's substitution\nguard and the manager's substitute and alternate searches."
+        },
+        {
+          "kind": "variable",
           "name": "SaveQuoteVersionInput",
           "declaration": "const SaveQuoteVersionInput: z.ZodType<SaveQuoteVersionInputType>;",
           "doc": "Zod schema for SaveQuoteVersionInput."
@@ -5068,6 +5074,12 @@
           "kind": "typeAlias",
           "name": "StoreUpdated",
           "declaration": "type StoreUpdated = EventEnvelope<Store> & typeLiteral;",
+          "doc": ""
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SubstitutableItemType",
+          "declaration": "type SubstitutableItemType = indexedAccess;",
           "doc": ""
         },
         {
@@ -6921,6 +6933,14 @@
         },
         {
           "kind": "function",
+          "name": "isSubstitutableItemType",
+          "signature": "isSubstitutableItemType(type: string): type is SubstitutableItemType",
+          "doc": "Whether an item type may be substituted — the `substitutable` axis.\n\nAsked of BOTH sides of a substitution: the line being swapped out (a service\nor surcharge line has no valid substitute, so offer none) and the product\nstanding in for it (a replacement-type product is never a valid alternate).\nTakes a `string` so a product's `type` can be passed as-is; a value outside\n{@link ITEM_TYPES} has no contract and answers `false`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "isValidOrderStatusTransition",
           "signature": "isValidOrderStatusTransition(prev: OrderStatusType, next: OrderStatusType, source: \"manual\" | \"propagation\"): boolean",
           "doc": "Server-side gate for an order status write. `source: \"manual\"` rejects\nwrites that move into a computed status or out of a computed status into\nanything other than the same value (no-op). `source: \"propagation\"`\ntrusts the booking write path that sets `active` or `complete`.",
@@ -7601,7 +7621,7 @@
         {
           "kind": "interface",
           "name": "ItemContract",
-          "declaration": "interface ItemContract {\n  kind: \"divider\" | \"line\";\n  pricing: \"pre_tax\" | \"from_total\" | \"none\";\n  replacement: \"required_when_stocked\" | \"optional\" | \"forbidden\";\n  fulfillable: boolean;\n  parentable_by: readonly ItemTypeType[];\n}",
+          "declaration": "interface ItemContract {\n  kind: \"divider\" | \"line\";\n  pricing: \"pre_tax\" | \"from_total\" | \"none\";\n  replacement: \"required_when_stocked\" | \"optional\" | \"forbidden\";\n  fulfillable: boolean;\n  substitutable: boolean;\n  parentable_by: readonly ItemTypeType[];\n}",
           "doc": "The per-type rules an `items[]` entry must satisfy, one entry per\n{@link ITEM_TYPES} member. Modelled on `MOVEMENT_CONTRACTS` in\n`schemas/transaction.ts`: a table the schema reads, so a contradiction is reported by\nthe schema instead of restated in every consumer.\n\n**The table carries only the axes that vary by TYPE.** The axes that vary by\nCOLLECTION are already the three documents' shapes and are not repeated here —\nan invoice line has no `stock_method` key and its price has no `replacement`\nkey, a fulfillment line has no `price` at all, and every one of those objects\nis a `z.strictObject`. Restating \"forbidden\" for them would be a second source\nof truth for something the shape already makes inexpressible.\n\nMeasured against prod `cfs-3100` (951 orders / 958 invoices / 952\nfulfillments, 2026-07-29) before each axis was written — three axes an earlier\ndraft proposed are absent because the corpus refutes them:\n\n- **no `taxable` axis.** Every line type carries taxes on some rows and not\n  others (surcharges: 149 of 151 order rows ARE taxed). Whether a line is\n  taxed is the line's tax class resolved in its jurisdiction — a\n  property of WHERE the goods went as much as of the line, so it is not a\n  type invariant. (This bullet named `tax_class` and `tax_profile` until\n  2026-08-22; neither is a field any more.)\n- **no per-type `formula` whitelist.** Order `sale`/`service`/`surcharge` rows\n  are `fixed` while their invoice projections are `five_day_week` (617 sale,\n  643 service, 137 surcharge). A whitelist keyed on type would reject the\n  invoice side of the same line.\n- **`replacement` is `optional`, not `forbidden`, off the rental arm.** All\n  1,480 non-rental order line items carry a `price.replacement`; the builder\n  writes it for every type."
         },
         {
@@ -7893,6 +7913,12 @@
           "doc": "Which side of the ledger a target sits on. A receivable row names\n`uid_organization` (the customer); a payable row names `uid_supplier`. The\nsettlement refine reads this to decide which party key the row must carry."
         },
         {
+          "kind": "variable",
+          "name": "SUBSTITUTABLE_ITEM_TYPES",
+          "declaration": "const SUBSTITUTABLE_ITEM_TYPES: \"rental\" | \"sale\"[];",
+          "doc": "Item / product types that may be substituted, and may substitute — the\n`substitutable: true` members. The one list behind the API's substitution\nguard and the manager's substitute and alternate searches."
+        },
+        {
           "kind": "typeAlias",
           "name": "SeededRoleName",
           "declaration": "type SeededRoleName = indexedAccess;",
@@ -7975,6 +8001,12 @@
           "name": "StoreBreakdownLocationSchema",
           "declaration": "const StoreBreakdownLocationSchema: z.ZodType<StoreBreakdownLocation>;",
           "doc": "Zod schema for StoreBreakdownLocation.\n\n🔴 **`quantity` is what is ON the shelf, not what is AVAILABLE from it**, and\nthe two stopped being the same number the moment `damaged` became a state\nrather than a place (`CUSTODY_PLACE_KINDS`). A damaged unit is physically\npresent and counted here, and is not available to book. Anything computing\navailability from a shelf reads `quantity - (quantity_out_of_service ?? 0)`;\nanything asking \"what would I find if I walked to this shelf\" reads\n`quantity`. Fusing them is correct only while nothing is flagged.\n\n⚠️ **`quantity_out_of_service` is OPTIONAL, and that is a release-ordering\nfact rather than a modelling one.** This is a `z.strictObject` with live\nreaders in another repo on an independent release train, so the field ships\noptional, the readers pin and deploy, and only then does the writer populate\nit. `undefined` means \"this ledger has not been rebuilt since the field\nlanded\", which is why every reader coalesces rather than assuming zero is\nstored. Tighten to required — if at all — in a later release."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SubstitutableItemType",
+          "declaration": "type SubstitutableItemType = indexedAccess;",
+          "doc": ""
         },
         {
           "kind": "variable",
@@ -8171,6 +8203,14 @@
           "name": "isProductShapedUid",
           "signature": "isProductShapedUid(uid: string): boolean",
           "doc": "Whether an `ItemUid`-shaped `path` segment names a PRODUCT (including a\ncustom product) rather than a structural (destination/group) divider — see\nthe \"`BookingId`'s 4th segment\" section above. A bare `z.uuid()` is always a\ndivider; a `FirestoreId` or a `custom-`-prefixed uid is always a product,\nand the two are distinguishable by this one check because a `FirestoreId`\nnever contains a `-`. This is `core/src/utils/booking-id.ts`'s\n`componentAncestry` filter, exported from the grammar it reads rather than\nfrom the booking-specific module that consumes it.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "isSubstitutableItemType",
+          "signature": "isSubstitutableItemType(type: string): type is SubstitutableItemType",
+          "doc": "Whether an item type may be substituted — the `substitutable` axis.\n\nAsked of BOTH sides of a substitution: the line being swapped out (a service\nor surcharge line has no valid substitute, so offer none) and the product\nstanding in for it (a replacement-type product is never a valid alternate).\nTakes a `string` so a product's `type` can be passed as-is; a value outside\n{@link ITEM_TYPES} has no contract and answers `false`.",
           "paramTags": [],
           "returnsTag": null
         },
