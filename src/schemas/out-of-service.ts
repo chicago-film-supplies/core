@@ -567,6 +567,15 @@ export interface UpdateOutOfServiceInputType {
   dates?: { start?: string | null; end?: string | null };
   destination?: OOSDestinationInputType | null;
   supplier?: { uid: string } | null;
+  /**
+   * INPUT-ONLY, never stored: the subrent purchase a `returned_to_supplier`
+   * increase is settled against (api-cloudrun#1360). Required by the writer
+   * when that bucket rises, and validated there as a subrent of this record's
+   * product with at least that many units still owed. The link is stored only
+   * in the settling movement's `sources[]` — the record's own `supplier` is
+   * the REPAIR vendor and is not reused. Sent with the breakdown it settles.
+   */
+  uid_purchase?: string;
   /** Client-minted per operator action; names the movements this save writes. */
   uuid_session: string;
   version: number;
@@ -584,9 +593,18 @@ export const UpdateOutOfServiceInput: z.ZodType<UpdateOutOfServiceInputType> = z
   }).optional(),
   destination: OOSDestinationInput.nullable().optional(),
   supplier: z.object({ uid: FirestoreId }).nullable().optional(),
+  // Optional: only a save that raises `returned_to_supplier` names a purchase.
+  uid_purchase: FirestoreId.optional(),
   uuid_session: z.uuid(),
   version: z.int().min(0),
 }).superRefine((u, ctx) => {
+  if (u.uid_purchase !== undefined && u.breakdown === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_purchase"],
+      message: "uid_purchase names the subrent a returned_to_supplier increase settles against, so it is sent with the breakdown",
+    });
+  }
   if (u.units === undefined) return;
   if (u.breakdown === undefined) {
     ctx.addIssue({ code: "custom", path: ["units"], message: "units are sent with the breakdown they name units for" });

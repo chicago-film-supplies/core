@@ -293,3 +293,13 @@ Deno.test("OOS destination input: { kind: uid } or { kind: address }, or null to
     "update takes the same union",
   );
 });
+
+Deno.test("UpdateOutOfServiceInput: uid_purchase is optional, input-only, and sent with the breakdown it settles", () => {
+  const base = { uuid_session: "0199a1f2-3b4c-7d8e-9f01-234567890abc", version: 0 };
+  const breakdown = { flagged: 1, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 1 };
+  assertEquals(UpdateOutOfServiceInput.safeParse({ ...base, breakdown, uid_purchase: "testpurch10000000000" }).success, true);
+  assertEquals(UpdateOutOfServiceInput.safeParse({ ...base, breakdown }).success, true, "the writer, not the schema, requires it");
+  const alone = UpdateOutOfServiceInput.safeParse({ ...base, uid_purchase: "testpurch10000000000" });
+  assertEquals(alone.success ? [] : alone.error.issues.map((i) => i.path.join(".")), ["uid_purchase"]);
+  assertEquals(UpdateOutOfServiceInput.safeParse({ ...base, breakdown, uid_purchase: "not an id" }).success, false);
+});

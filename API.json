@@ -6015,7 +6015,7 @@
         {
           "kind": "interface",
           "name": "UpdateOutOfServiceInputType",
-          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  units?: OOSUnitsType;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uuid_session: string;\n  version: number;\n}",
+          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  units?: OOSUnitsType;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uid_purchase?: string;\n  uuid_session: string;\n  version: number;\n}",
           "doc": "Input for updating an out-of-service record.\n\n`breakdown` (when supplied) is the complete next state, Σ ≤ `quantity`. The\nwriter turns each bucket change into the movement that makes it true —\n`flag`, `send_away`, `return_to_service`, `write_off`, or a reversal of one.\n`status` is server-derived; only `\"canceled\"` is honored.\n\n`reason` edits the record IN PLACE, and only among the flag reasons: a\n`lost` ↔ other change is a change of PLACE, not of reason (R3). The writer\nrecords it as a `flag` `{r → r′}`, so the journal keeps the history.\n\n`dates.start` is honored only on a record with no sources (ad-hoc); a\nsource-bound record's start reflects the upstream event that pinned it."
         },
         {
@@ -10816,7 +10816,7 @@
         {
           "kind": "interface",
           "name": "UpdateOutOfServiceInputType",
-          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  units?: OOSUnitsType;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uuid_session: string;\n  version: number;\n}",
+          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  units?: OOSUnitsType;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uid_purchase?: string;\n  uuid_session: string;\n  version: number;\n}",
           "doc": "Input for updating an out-of-service record.\n\n`breakdown` (when supplied) is the complete next state, Σ ≤ `quantity`. The\nwriter turns each bucket change into the movement that makes it true —\n`flag`, `send_away`, `return_to_service`, `write_off`, or a reversal of one.\n`status` is server-derived; only `\"canceled\"` is honored.\n\n`reason` edits the record IN PLACE, and only among the flag reasons: a\n`lost` ↔ other change is a change of PLACE, not of reason (R3). The writer\nrecords it as a `flag` `{r → r′}`, so the journal keeps the history.\n\n`dates.start` is honored only on a record with no sources (ad-hoc); a\nsource-bound record's start reflects the upstream event that pinned it."
         },
         {

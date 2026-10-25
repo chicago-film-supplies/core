@@ -13537,6 +13537,7 @@ interface UpdateOutOfServiceInputType {
   dates?: typeLiteral;
   destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
+  uid_purchase?: string;
   uuid_session: string;
   version: number;
 }
@@ -23558,6 +23559,7 @@ interface UpdateOutOfServiceInputType {
   dates?: typeLiteral;
   destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
+  uid_purchase?: string;
   uuid_session: string;
   version: number;
 }
