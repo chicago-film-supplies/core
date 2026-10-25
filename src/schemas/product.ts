@@ -27,6 +27,7 @@ import {
   type StockMethodType,
   TimestampFields,
   UidNameRef,
+  UidNameRefInput,
   type UidNameRefType,
   checkZeroPricedAmount,
 } from "./common.ts";
@@ -499,11 +500,33 @@ export const ComponentSchema: z.ZodType<ProductComponent> = ComponentObject
   .superRefine(checkZeroPricedAmount);
 
 /**
+ * {@link ComponentSchema} for the product INPUT schemas — the same node with
+ * unknown keys STRIPPED rather than refused, on the entry and on its `price`.
+ *
+ * 🔴 **This is what lets a product the API wrote be PUT back** (api-cloudrun#879).
+ * A stored `components` entry carries the writer-derived `price_overridden`, and
+ * `ComponentSchema` is a `z.strictObject` shared with storage, so echoing a read
+ * product 400'd on a key the client never authored. Stripping it is the rule
+ * § *Document vs input schemas* already states; the writer re-derives it.
+ *
+ * ⚠️ Not declared optional here: that would name a server-derived field in the
+ * wire contract. And not `z.object(ComponentObject.shape)`, which silently drops
+ * both object-level refinements — `.strip()` keeps a node's checks, and the two
+ * superRefines are re-applied below exactly as on `ComponentSchema`.
+ */
+const ComponentInputSchema: z.ZodType<ProductComponent> = extendChecked(ComponentObject, {
+  // `price` has no `.meta()` of its own, so the re-declaration drops nothing.
+  price: ComponentObject.shape.price.strip(),
+}).strip()
+  .superRefine(checkItemContract)
+  .superRefine(checkZeroPricedAmount);
+
+/**
  * Schema for an authored `components` entry — {@link ComponentSchema} with
  * `inclusion_type` required.
  *
  * **Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep
- * `ComponentSchema`, so a client may omit `inclusion_type` and the WRITER fills
+ * the unauthored shape (their stripping twin of `ComponentSchema`), so a client may omit `inclusion_type` and the WRITER fills
  * `"default"` — the reading manager's new-component form already takes, as did
  * `crmsProduct.ts` before it was deleted on 2026-09-05 with the outbound CRMS
  * half. Requiring it at the boundary instead would 400 any client that
@@ -542,9 +565,11 @@ export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = exte
      * divergence unambiguously a MISSED CASCADE, and therefore auditable, while
      * a `components` divergence needs this field to be decidable at all.
      *
-     * ⚠️ **DERIVED by the writer, never sent by a client.** `CreateProductInput`
-     * / `UpdateProductInput` keep the unauthored `ComponentSchema`, so this
-     * cannot arrive on the wire. The API computes it at parent-write time — the
+     * ⚠️ **DERIVED by the writer, never accepted from a client.**
+     * `CreateProductInput` / `UpdateProductInput` STRIP it (their component node
+     * is a stripping twin of `ComponentSchema`), so an echoed stored product
+     * parses and the value it carried is discarded rather than refused
+     * (api-cloudrun#879). The API computes it at parent-write time — the
      * one instant both the submitted entry and the component's catalog price are
      * in hand — as the set of keys where they differ.
      *
@@ -583,7 +608,7 @@ export const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent> = exte
      * **Bounded on the authored side only: ≥ 0 and at most 4 decimals.** A ratio
      * is expanded as `ceil(ratio × parent quantity)`, and a ratio with more
      * decimals than the expander's integer scale cannot be applied exactly. The
-     * input schemas keep the unbounded `ComponentSchema` field; the API writer
+     * input schemas keep the unbounded field (their stripping twin of `ComponentSchema`); the API writer
      * rounds to 4 decimals, so only a negative reaches this check (the same
      * normalize-at-the-writer, guard-at-storage split as `inclusion_type`).
      * Measured 2026-10-11: 180 of 180 entries in each env already conform.
@@ -908,10 +933,10 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   //
   // ⚠️ **Ordering, if this is ever revisited:** `ProductSchema` requires all four,
   // so the writer must state them BEFORE these defaults come off, never after.
-  alternates: z.array(UidNameRef).optional(),
-  components: z.array(ComponentSchema).optional(),
-  component_of: z.array(ComponentSchema).optional(),
-  tags: z.array(UidNameRef).optional(),
+  alternates: z.array(UidNameRefInput).optional(),
+  components: z.array(ComponentInputSchema).optional(),
+  component_of: z.array(ComponentInputSchema).optional(),
+  tags: z.array(UidNameRefInput).optional(),
   uid_tracking_category: FirestoreId.nullable().optional(),
   uid_tax_class: FirestoreId.nullable().optional(),
   uid_linked_rental: FirestoreId.nullable().optional(),
@@ -1018,10 +1043,10 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
     air_hazardous: z.boolean(),
     air_un: z.number().nullable(),
   }).optional(),
-  alternates: z.array(UidNameRef).optional(),
-  components: z.array(ComponentSchema).optional(),
-  component_of: z.array(ComponentSchema).optional(),
-  tags: z.array(UidNameRef).optional(),
+  alternates: z.array(UidNameRefInput).optional(),
+  components: z.array(ComponentInputSchema).optional(),
+  component_of: z.array(ComponentInputSchema).optional(),
+  tags: z.array(UidNameRefInput).optional(),
   uid_tracking_category: FirestoreId.nullable().optional(),
   uid_tax_class: FirestoreId.nullable().optional(),
   uid_linked_rental: FirestoreId.optional(),

@@ -653,6 +653,8 @@ The guards are all in `tests/typesenseFieldCoverage.test.ts`, named by the quest
 
 This applies to nested objects too — if a field inside an input schema contains an object, use `z.object()` so extra properties are silently stripped rather than rejected.
 
+🔴 **Ratcheted by `tests/input-strictness.test.ts`, and its frozen list is DEBT, not license.** The rule went unenforced long enough for 150 strict paths across 27 inputs to accumulate, most of them a storage `z.strictObject` reused inside an input. The one that cost something was `UpdateProductInput.components[]`: a product the API wrote could not be PUT back, because the server-derived `price_overridden` was refused on echo (api-cloudrun#879). Products are converted. The other 138 paths are pinned exactly, so a NEW strict node fails, and so does a conversion that does not delete its entry. To convert one, give the node a stripping twin. Use `.strip()`, which keeps the node's checks; never use `z.object(X.shape)`, which silently drops its superRefines. Re-apply any object-level `.meta()` (for example `Address`'s `pii: "mask"`), and remember a nested strict child needs its own `.strip()`. `UidNameRefInput` and products' component input node are the worked examples. ⚠️ The order/invoice divider arms are strict ON PURPOSE.
+
 ### `.default()` and `.optional()` — the wrapper order decides whether either fires
 
 Three spellings, three different claims. Pick the one that is true; do not stack them.

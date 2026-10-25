@@ -262,7 +262,7 @@
           "kind": "variable",
           "name": "AuthoredComponentSchema",
           "declaration": "const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent>;",
-          "doc": "Schema for an authored `components` entry — {@link ComponentSchema} with\n`inclusion_type` required.\n\n**Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep\n`ComponentSchema`, so a client may omit `inclusion_type` and the WRITER fills\n`\"default\"` — the reading manager's new-component form already takes, as did\n`crmsProduct.ts` before it was deleted on 2026-09-05 with the outbound CRMS\nhalf. Requiring it at the boundary instead would 400 any client that\nhas not been rebuilt, and manager is pinned several betas back on purpose\n(manager#265). Normalize at the writer, guard at storage: no undefined can\nreach a stored document either way, which is what the expanders need."
+          "doc": "Schema for an authored `components` entry — {@link ComponentSchema} with\n`inclusion_type` required.\n\n**Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep\nthe unauthored shape (their stripping twin of `ComponentSchema`), so a client may omit `inclusion_type` and the WRITER fills\n`\"default\"` — the reading manager's new-component form already takes, as did\n`crmsProduct.ts` before it was deleted on 2026-09-05 with the outbound CRMS\nhalf. Requiring it at the boundary instead would 400 any client that\nhas not been rebuilt, and manager is pinned several betas back on purpose\n(manager#265). Normalize at the writer, guard at storage: no undefined can\nreach a stored document either way, which is what the expanders need."
         },
         {
           "kind": "interface",
@@ -8063,6 +8063,12 @@
           "doc": "Zod schema for a uid + name reference."
         },
         {
+          "kind": "variable",
+          "name": "UidNameRefInput",
+          "declaration": "const UidNameRefInput: z.ZodType<UidNameRefType>;",
+          "doc": "{@link UidNameRef} for an INPUT schema — unknown keys are stripped, not\nrefused (§ *Document vs input schemas*). Same leaf instances, so every\n`.meta()` survives; `.strip()` keeps the object's checks, where\n`z.object(X.shape)` would drop them."
+        },
+        {
           "kind": "interface",
           "name": "UidNameRefType",
           "declaration": "interface UidNameRefType {\n  uid: string;\n  name: string;\n}",
@@ -10765,7 +10771,7 @@
           "kind": "variable",
           "name": "AuthoredComponentSchema",
           "declaration": "const AuthoredComponentSchema: z.ZodType<AuthoredProductComponent>;",
-          "doc": "Schema for an authored `components` entry — {@link ComponentSchema} with\n`inclusion_type` required.\n\n**Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep\n`ComponentSchema`, so a client may omit `inclusion_type` and the WRITER fills\n`\"default\"` — the reading manager's new-component form already takes, as did\n`crmsProduct.ts` before it was deleted on 2026-09-05 with the outbound CRMS\nhalf. Requiring it at the boundary instead would 400 any client that\nhas not been rebuilt, and manager is pinned several betas back on purpose\n(manager#265). Normalize at the writer, guard at storage: no undefined can\nreach a stored document either way, which is what the expanders need."
+          "doc": "Schema for an authored `components` entry — {@link ComponentSchema} with\n`inclusion_type` required.\n\n**Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep\nthe unauthored shape (their stripping twin of `ComponentSchema`), so a client may omit `inclusion_type` and the WRITER fills\n`\"default\"` — the reading manager's new-component form already takes, as did\n`crmsProduct.ts` before it was deleted on 2026-09-05 with the outbound CRMS\nhalf. Requiring it at the boundary instead would 400 any client that\nhas not been rebuilt, and manager is pinned several betas back on purpose\n(manager#265). Normalize at the writer, guard at storage: no undefined can\nreach a stored document either way, which is what the expanders need."
         },
         {
           "kind": "interface",

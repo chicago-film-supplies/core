@@ -562,6 +562,102 @@ Deno.test("components require inclusion_type, price_overridden and zero_priced; 
   assertEquals(CreateProductInput.safeParse({ ...validCreateInput, components: [backRef] }).success, true);
 });
 
+// ── api-cloudrun#879: a product the API wrote can be PUT back ─────
+//
+// A stored `components` entry carries the writer-derived `price_overridden`, and
+// the input node used to be the storage `z.strictObject`, so echoing a read
+// product 400'd. The input node now STRIPS unknown keys — on the entry and on its
+// `price` — while keeping both object-level refinements.
+
+const componentBaseForEcho = {
+  uid: "testparent1000000000",
+  path: ["testparent1000000000"],
+  name: "Kit",
+  type: "rental",
+  stock_method: "bulk",
+  crms_id: 300,
+  quantity: 1,
+  price: { base_cents: 2500, replacement_cents: 10000, formula: "fixed", discountable: false },
+};
+
+const storedComponent = {
+  uid: "testcomp100000000000",
+  path: ["testproduct100000000"],
+  name: "Battery",
+  type: "rental",
+  stock_method: "bulk",
+  crms_id: 200,
+  quantity: 2,
+  inclusion_type: "default",
+  zero_priced: false,
+  price_overridden: ["base_cents"],
+  price: { base_cents: 1500, replacement_cents: 10000, formula: "fixed", discountable: false },
+};
+
+Deno.test("an echoed stored product's components parse through both inputs, price_overridden stripped (api-cloudrun#879)", () => {
+  // The fixture is a real stored document: the storage schema must accept it,
+  // or the echo below proves nothing about a product the API wrote.
+  const stored = { ...validProduct, components: [storedComponent], component_of: [componentBaseForEcho] };
+  assertEquals(ProductSchema.safeParse(stored).success, true);
+
+  const update = UpdateProductInput.safeParse({
+    uid: stored.uid,
+    version: 1,
+    components: stored.components,
+    component_of: stored.component_of,
+    tags: stored.tags,
+  });
+  assertEquals(update.success, true, JSON.stringify(update.error?.issues));
+  const entry: Record<string, unknown> = { ...update.data!.components![0] };
+  assertEquals("price_overridden" in entry, false);
+  // Everything the client DID author survives the strip.
+  assertEquals(entry.inclusion_type, "default");
+  assertEquals(entry.zero_priced, false);
+  assertEquals((entry.price as Record<string, unknown>).base_cents, 1500);
+
+  const create = CreateProductInput.safeParse({ ...validCreateInput, components: [storedComponent] });
+  assertEquals(create.success, true, JSON.stringify(create.error?.issues));
+  assertEquals("price_overridden" in create.data!.components![0], false);
+
+  // The nested `price` strips too, and so do `tags` / `alternates`.
+  const nested = UpdateProductInput.safeParse({
+    uid: stored.uid,
+    version: 1,
+    components: [{ ...storedComponent, price: { ...storedComponent.price, junk: 1 } }],
+    alternates: [{ uid: "testalt1000000000000", name: "Alt", junk: 1 }],
+    tags: [{ uid: "testt100000000000000", name: "Camera", junk: 1 }],
+  });
+  assertEquals(nested.success, true, JSON.stringify(nested.error?.issues));
+  assertEquals("junk" in (nested.data!.components![0].price as Record<string, unknown>), false);
+  assertEquals("junk" in nested.data!.alternates![0], false);
+  assertEquals("junk" in nested.data!.tags![0], false);
+});
+
+Deno.test("the stripping input component node keeps both object-level refinements", () => {
+  const parse = (entry: Record<string, unknown>) =>
+    UpdateProductInput.safeParse({ uid: "testproduct100000000", version: 1, components: [entry] });
+
+  // checkZeroPricedAmount: a zero-priced entry carrying a price still fails.
+  const zeroPriced = parse({ ...storedComponent, zero_priced: true });
+  assertEquals(zeroPriced.success, false);
+  assertEquals(parse({ ...storedComponent, zero_priced: true, price: { ...storedComponent.price, base_cents: 0 } }).success, true);
+
+  // checkItemContract: a rental with no replacement price still fails.
+  const { replacement_cents: _r, ...noReplacement } = storedComponent.price;
+  assertEquals(parse({ ...storedComponent, price: noReplacement }).success, false);
+
+  // checkPriceBaseUnit on the nested price: base_percent beside a two-member formula.
+  assertEquals(parse({ ...storedComponent, price: { ...storedComponent.price, base_percent: 5 } }).success, false);
+
+  // And the same on component_of.
+  const back = UpdateProductInput.safeParse({
+    uid: "testproduct100000000",
+    version: 1,
+    component_of: [{ ...storedComponent, zero_priced: true }],
+  });
+  assertEquals(back.success, false);
+});
+
 // ── An authored component quantity is a ratio: ≥ 0, at most 4 decimals ─────
 //
 // Bounded on the AUTHORED side only — the input keeps the loose field and the

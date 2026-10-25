@@ -598,7 +598,7 @@ Schema for an authored `components` entry — {@link ComponentSchema} with
 `inclusion_type` required.
 
 **Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep
-`ComponentSchema`, so a client may omit `inclusion_type` and the WRITER fills
+the unauthored shape (their stripping twin of `ComponentSchema`), so a client may omit `inclusion_type` and the WRITER fills
 `"default"` — the reading manager's new-component form already takes, as did
 `crmsProduct.ts` before it was deleted on 2026-09-05 with the outbound CRMS
 half. Requiring it at the boundary instead would 400 any client that
@@ -17714,6 +17714,17 @@ Zod schema for a uid + name reference.
 const UidNameRef: z.ZodType<UidNameRefType>;
 ```
 
+### `UidNameRefInput`
+
+{@link UidNameRef} for an INPUT schema — unknown keys are stripped, not
+refused (§ *Document vs input schemas*). Same leaf instances, so every
+`.meta()` survives; `.strip()` keeps the object's checks, where
+`z.object(X.shape)` would drop them.
+
+```ts
+const UidNameRefInput: z.ZodType<UidNameRefType>;
+```
+
 ### `UidNameRefType`
 
 Generic uid + name reference used across many collections.
@@ -23452,7 +23463,7 @@ Schema for an authored `components` entry — {@link ComponentSchema} with
 `inclusion_type` required.
 
 **Storage only.** `CreateProductInput` / `UpdateProductInput` deliberately keep
-`ComponentSchema`, so a client may omit `inclusion_type` and the WRITER fills
+the unauthored shape (their stripping twin of `ComponentSchema`), so a client may omit `inclusion_type` and the WRITER fills
 `"default"` — the reading manager's new-component form already takes, as did
 `crmsProduct.ts` before it was deleted on 2026-09-05 with the outbound CRMS
 half. Requiring it at the boundary instead would 400 any client that

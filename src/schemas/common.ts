@@ -670,8 +670,7 @@ export interface UidNameRefType {
   name: string;
 }
 
-/** Zod schema for a uid + name reference. */
-export const UidNameRef: z.ZodType<UidNameRefType> = z.strictObject({
+const UidNameRefObject = z.strictObject({
   // Generic/polymorphic reference — AnyUid covers every known id shape.
   uid: AnyUid,
   // A reference's name IS the column, and the heading is the key that holds it
@@ -679,6 +678,17 @@ export const UidNameRef: z.ZodType<UidNameRefType> = z.strictObject({
   // without a `label` of its own: every key holding a `UidNameRef` must name it.
   name: z.string().min(1).max(100).meta({ pii: "none", column: true }),
 });
+
+/** Zod schema for a uid + name reference. */
+export const UidNameRef: z.ZodType<UidNameRefType> = UidNameRefObject;
+
+/**
+ * {@link UidNameRef} for an INPUT schema — unknown keys are stripped, not
+ * refused (§ *Document vs input schemas*). Same leaf instances, so every
+ * `.meta()` survives; `.strip()` keeps the object's checks, where
+ * `z.object(X.shape)` would drop them.
+ */
+export const UidNameRefInput: z.ZodType<UidNameRefType> = UidNameRefObject.strip();
 
 /**
  * Actor reference — embedded `{uid, name}` for `created_by` / `updated_by` /
