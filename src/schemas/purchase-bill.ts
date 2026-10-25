@@ -52,7 +52,7 @@
  * @module
  */
 import { z } from "zod";
-import { FirestoreId, ThreadId } from "./_uid.ts";
+import { FirestoreId, OutOfServiceId, ThreadId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import {
   ActorRef,
@@ -105,14 +105,46 @@ export const PurchaseDocumentLineSchema: z.ZodType<PurchaseDocumentLine> = z.str
 });
 
 /**
- * A line billing something that is not a product — freight, a fee. Posts to
- * its own account and never touches basis (landed cost is a follow-up).
+ * A line billing something that is not a purchase LINE — freight, a fee, or a
+ * supplier's loss or damage charge on a subrent. Posts to its own account and
+ * never touches basis (landed cost is a follow-up).
+ *
+ * ## Attribution (api-cloudrun#1360, #1364)
+ *
+ * Three optional fields say what the spend is FOR, so a margin report can
+ * attribute it and Xero can track it by product line. All three are permanent
+ * `.optional()`: freight and fees name nothing.
+ *
+ * - `uid_product` — the RENTAL product the spend is attributed to. The writer
+ *   emits the product's Xero `ItemCode` beside the stated `AccountCode`; rental
+ *   items are untracked in Xero, so the code moves no Xero quantity or value. A
+ *   sale product (tracked inventory in Xero) or a rental with no `xero_code` is
+ *   a 400.
+ * - `xero_tracking_option_id` — explicit, else the product's, else none,
+ *   STAMPED at write (the point-in-time ruling invoice lines follow,
+ *   api-cloudrun#537). Not nullable: absent means "none stated".
+ * - `uid_out_of_service` — the record a loss or damage charge is for. It
+ *   defaults `uid_product` to the record's product, and a conflicting product
+ *   is a 400. A `mark_lost` record's id is a `MovementId`, hence
+ *   `OutOfServiceId`.
+ *
+ * ⚠️ **The node stays STRICT, though both push inputs embed it.** Stripping
+ * would let an api that predates these fields silently drop `uid_product`
+ * rather than 400, and the api stores input direct lines as sent — so an
+ * attribution would vanish with nothing failing. No `column` (an opaque id
+ * helps no operator) and no `pii`, following the sibling `uid_*` fields.
  */
 export interface PurchaseDirectLine {
   description: string;
   /** The Xero account the line posts to. */
   account_code: number;
   amount_cents: number;
+  /** The rental product this spend is attributed to — see the type docblock. */
+  uid_product?: string;
+  /** The Xero tracking option the line posts under, stamped at write. */
+  xero_tracking_option_id?: string;
+  /** The out-of-service record a loss or damage charge is for. */
+  uid_out_of_service?: string;
 }
 
 /** Zod schema for PurchaseDirectLine. */
@@ -120,6 +152,12 @@ export const PurchaseDirectLineSchema: z.ZodType<PurchaseDirectLine> = z.strictO
   description: z.string().min(1).max(4000).meta({ column: true, label: "Description" }),
   account_code: z.int().min(0),
   amount_cents: z.int().min(0).meta({ column: true, label: "Amount" }),
+  // Permanent `.optional()`: freight and fees attribute nothing (api-cloudrun#1360).
+  uid_product: FirestoreId.optional(),
+  // Named as `product.ts` / `invoice.ts` name it. Not nullable: absent is "none".
+  xero_tracking_option_id: z.uuid().optional(),
+  // A `mark_lost` record's id is a MovementId, so the union, not FirestoreId.
+  uid_out_of_service: OutOfServiceId.optional(),
 });
 
 function documentLinesIssues(

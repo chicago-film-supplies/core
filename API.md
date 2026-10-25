@@ -9657,14 +9657,43 @@ type PurchaseCreditStatusType = indexedAccess;
 
 ### `PurchaseDirectLine`
 
-A line billing something that is not a product — freight, a fee. Posts to
-its own account and never touches basis (landed cost is a follow-up).
+A line billing something that is not a purchase LINE — freight, a fee, or a
+supplier's loss or damage charge on a subrent. Posts to its own account and
+never touches basis (landed cost is a follow-up).
+
+## Attribution (api-cloudrun#1360, #1364)
+
+Three optional fields say what the spend is FOR, so a margin report can
+attribute it and Xero can track it by product line. All three are permanent
+`.optional()`: freight and fees name nothing.
+
+- `uid_product` — the RENTAL product the spend is attributed to. The writer
+  emits the product's Xero `ItemCode` beside the stated `AccountCode`; rental
+  items are untracked in Xero, so the code moves no Xero quantity or value. A
+  sale product (tracked inventory in Xero) or a rental with no `xero_code` is
+  a 400.
+- `xero_tracking_option_id` — explicit, else the product's, else none,
+  STAMPED at write (the point-in-time ruling invoice lines follow,
+  api-cloudrun#537). Not nullable: absent means "none stated".
+- `uid_out_of_service` — the record a loss or damage charge is for. It
+  defaults `uid_product` to the record's product, and a conflicting product
+  is a 400. A `mark_lost` record's id is a `MovementId`, hence
+  `OutOfServiceId`.
+
+⚠️ **The node stays STRICT, though both push inputs embed it.** Stripping
+would let an api that predates these fields silently drop `uid_product`
+rather than 400, and the api stores input direct lines as sent — so an
+attribution would vanish with nothing failing. No `column` (an opaque id
+helps no operator) and no `pii`, following the sibling `uid_*` fields.
 
 ```ts
 interface PurchaseDirectLine {
   description: string;
   account_code: number;
   amount_cents: number;
+  uid_product?: string;
+  xero_tracking_option_id?: string;
+  uid_out_of_service?: string;
 }
 ```
 
@@ -24831,14 +24860,43 @@ type PurchaseCreditStatusType = indexedAccess;
 
 ### `PurchaseDirectLine`
 
-A line billing something that is not a product — freight, a fee. Posts to
-its own account and never touches basis (landed cost is a follow-up).
+A line billing something that is not a purchase LINE — freight, a fee, or a
+supplier's loss or damage charge on a subrent. Posts to its own account and
+never touches basis (landed cost is a follow-up).
+
+## Attribution (api-cloudrun#1360, #1364)
+
+Three optional fields say what the spend is FOR, so a margin report can
+attribute it and Xero can track it by product line. All three are permanent
+`.optional()`: freight and fees name nothing.
+
+- `uid_product` — the RENTAL product the spend is attributed to. The writer
+  emits the product's Xero `ItemCode` beside the stated `AccountCode`; rental
+  items are untracked in Xero, so the code moves no Xero quantity or value. A
+  sale product (tracked inventory in Xero) or a rental with no `xero_code` is
+  a 400.
+- `xero_tracking_option_id` — explicit, else the product's, else none,
+  STAMPED at write (the point-in-time ruling invoice lines follow,
+  api-cloudrun#537). Not nullable: absent means "none stated".
+- `uid_out_of_service` — the record a loss or damage charge is for. It
+  defaults `uid_product` to the record's product, and a conflicting product
+  is a 400. A `mark_lost` record's id is a `MovementId`, hence
+  `OutOfServiceId`.
+
+⚠️ **The node stays STRICT, though both push inputs embed it.** Stripping
+would let an api that predates these fields silently drop `uid_product`
+rather than 400, and the api stores input direct lines as sent — so an
+attribution would vanish with nothing failing. No `column` (an opaque id
+helps no operator) and no `pii`, following the sibling `uid_*` fields.
 
 ```ts
 interface PurchaseDirectLine {
   description: string;
   account_code: number;
   amount_cents: number;
+  uid_product?: string;
+  xero_tracking_option_id?: string;
+  uid_out_of_service?: string;
 }
 ```
 

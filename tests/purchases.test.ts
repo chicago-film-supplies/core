@@ -363,6 +363,56 @@ Deno.test("PurchaseBillSchema: direct lines count toward a pushed total", () => 
   assertEquals(issuePaths(PurchaseBillSchema, bill({ direct_lines: [freight], totals: t })), []);
 });
 
+Deno.test("PurchaseDirectLine attribution: a legacy three-field line still parses; each field is optional", () => {
+  const t = { total_cents: 142485, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 142485 };
+  const legacy = { description: "Freight", account_code: 5100, amount_cents: 1500 };
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ direct_lines: [legacy], totals: t })), []);
+  const charge = {
+    description: "Loss charge — steamer",
+    account_code: 5100,
+    amount_cents: 1500,
+    uid_product: "testprod100000000000",
+    xero_tracking_option_id: "6f1c2a3b-4d5e-4f60-8a71-b2c3d4e5f607",
+    uid_out_of_service: "testoos1000000000000",
+  };
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ direct_lines: [charge], totals: t })), []);
+});
+
+Deno.test("PurchaseDirectLine attribution: a mark_lost record's MovementId parses as uid_out_of_service", () => {
+  const t = { total_cents: 142485, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 142485 };
+  const movementId = "0199a1f2-3b4c-7d8e-9f01-234567890abc|mark_lost|testordr100000000000:testitem10000000000x:9c2f4a10-6b3d-4e57-8a91-0d5e7c3b2f48";
+  const line = { description: "Loss charge", account_code: 5100, amount_cents: 1500, uid_out_of_service: movementId };
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ direct_lines: [line], totals: t })), []);
+});
+
+Deno.test("PurchaseDirectLine attribution: a null tracking option is refused — absent means none", () => {
+  const t = { total_cents: 142485, amount_paid_cents: 0, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 142485 };
+  const line = { description: "Freight", account_code: 5100, amount_cents: 1500, xero_tracking_option_id: null };
+  assertEquals(issuePaths(PurchaseBillSchema, bill({ direct_lines: [line], totals: t })), ["direct_lines.0.xero_tracking_option_id"]);
+});
+
+Deno.test("PurchaseDirectLine stays STRICT inside the push input — an unknown key is a 400, not dropped", () => {
+  // The fail-closed half of keeping the node strict: an api predating a field
+  // must refuse it rather than store a line with the attribution stripped.
+  const push = (line: Record<string, unknown>) =>
+    CreatePurchaseBillInput.safeParse({
+      mode: "push",
+      date: "2026-10-25T00:00:00.000-05:00",
+      due_date: "2026-11-24T00:00:00.000-06:00",
+      lines: [{ uid_product: "testprod100000000000", quantity: 1, amount_cents: 1000 }],
+      direct_lines: [line],
+      uuid_session: "0199a1f2-3b4c-7d8e-9f01-234567890abc",
+      version: 0,
+    });
+  const charge = { description: "Loss charge", account_code: 5100, amount_cents: 1500, uid_product: "testprod100000000000" };
+  assertEquals(push(charge).success, true, "the otherwise-valid payload parses, so the refusal below is the key alone");
+  const r = push({ ...charge, uid_product_typo: "x" });
+  assertEquals(
+    r.success ? [] : r.error.issues.map((i) => `${i.code}:${i.path.join(".")}`),
+    ["unrecognized_keys:direct_lines.0"],
+  );
+});
+
 Deno.test("PurchaseBillSchema: paid + credited + void + due must equal total", () => {
   const t = { total_cents: 140985, amount_paid_cents: 100, amount_credited_cents: 0, amount_void_cents: 0, amount_due_cents: 140985 };
   assertEquals(issuePaths(PurchaseBillSchema, bill({ totals: t })), ["totals"]);
