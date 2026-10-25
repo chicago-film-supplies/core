@@ -9144,8 +9144,8 @@ interface Product {
   query_by_component_of?: string[];
   query_by_alternates?: string[];
   tracking_category_name?: string;
-  uid_linked_rental?: string | null;
-  uid_linked_replacement?: string | null;
+  uid_linked_rental?: string;
+  uid_linked_replacement?: string;
   uid_tracking_category?: string | null;
   uid_tax_class?: string | null;
   tax_class_name?: string | null;
@@ -23640,8 +23640,8 @@ interface Product {
   query_by_component_of?: string[];
   query_by_alternates?: string[];
   tracking_category_name?: string;
-  uid_linked_rental?: string | null;
-  uid_linked_replacement?: string | null;
+  uid_linked_rental?: string;
+  uid_linked_replacement?: string;
   uid_tracking_category?: string | null;
   uid_tax_class?: string | null;
   tax_class_name?: string | null;
@@ -45197,7 +45197,7 @@ The fields of a product the seed reads — the rental and its replacement twin.
 interface ReplacementSourceProduct {
   uid: string;
   name: string;
-  uid_linked_replacement?: string | null;
+  uid_linked_replacement?: string;
   price?: typeLiteral | null;
   description?: string | null;
 }

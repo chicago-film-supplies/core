@@ -140,7 +140,7 @@ export interface ReplacementSourceOrder {
 export interface ReplacementSourceProduct {
   uid: string;
   name: string;
-  uid_linked_replacement?: string | null;
+  uid_linked_replacement?: string;
   price?: { base_cents?: number | null } | null;
   /** The twin's description opens its line's — never the rental's. */
   description?: string | null;

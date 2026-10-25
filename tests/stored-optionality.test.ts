@@ -127,8 +127,6 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   ["organizations.billing_address.user_coordinates", "pending-census"],
   ["products.price.base_percent", "pending-census"],
   ["products.price.replacement_cents", "pending-census"],
-  ["products.uid_linked_rental", "pending-census"],
-  ["products.uid_linked_replacement", "pending-census"],
   ["products.uid_tracking_category", "pending-census"],
   ["products.webshop.description", "pending-census"],
   ["products.xero_code", "pending-census"],

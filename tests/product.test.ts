@@ -913,3 +913,13 @@ Deno.test("core#78: a component price cannot declare percent_of_total, nor a bas
   const stray = { ...component, price: { ...component.price, base_percent: 3 } };
   assertEquals(ComponentSchema.safeParse(stray).success, false);
 });
+
+// Absent-only (owner, 2026-10-25): a stored null is refused, and the form seed
+// omits both keys — seeding the type-derived `""` would 400 every create.
+Deno.test("ProductSchema uid_linked_* are absent-only and unseeded", () => {
+  for (const key of ["uid_linked_rental", "uid_linked_replacement"] as const) {
+    assertEquals(ProductSchema.safeParse({ ...validProduct, [key]: null }).success, false);
+    assertEquals(ProductSchema.safeParse({ ...validProduct, [key]: "testproduct200000000" }).success, true);
+    assertEquals(key in (getInitialValues(ProductSchema) as Record<string, unknown>), false);
+  }
+});

@@ -347,8 +347,15 @@ export interface Product {
   query_by_component_of?: string[];
   query_by_alternates?: string[];
   tracking_category_name?: string;
-  uid_linked_rental?: string | null;
-  uid_linked_replacement?: string | null;
+  /**
+   * ABSENT-ONLY — never stored `null` (owner, 2026-10-25; an exception to the
+   * present-and-null stored-optionality ruling): no reader tells null from absent,
+   * and `UpdateProductInput` refuses null, so a stored null could not round-trip.
+   * `CreateProductInput` still accepts null and the writer drops it.
+   */
+  uid_linked_rental?: string;
+  /** Absent-only, as {@link uid_linked_rental}. */
+  uid_linked_replacement?: string;
   uid_tracking_category?: string | null;
   /**
    * The `taxes-classes` document this product is taxed as — one class, no union
@@ -708,8 +715,13 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   query_by_component_of: z.array(z.string()).optional(),
   query_by_alternates: z.array(z.string()).optional(),
   tracking_category_name: z.string().optional().meta({ column: true, label: "Tracking Category" }),
-  uid_linked_rental: FirestoreId.nullable().optional(),
-  uid_linked_replacement: FirestoreId.nullable().optional(),
+  // Absent-only (see the `Product` interface): the 8 prod nulls were unset
+  // 2026-10-25 by api-cloudrun's backfill-unset-null-linked-products.
+  // `seed: false`: the type-derived zero is `""`, which `FirestoreId` refuses, so
+  // a form seeded from this schema (manager's create draft) must OMIT the key —
+  // seeding `""` would 400 every product create.
+  uid_linked_rental: FirestoreId.optional().meta({ seed: false }),
+  uid_linked_replacement: FirestoreId.optional().meta({ seed: false }),
   uid_tracking_category: FirestoreId.nullable().optional(),
   uid_tax_class: FirestoreId.nullable().optional(),
   tax_class_name: z.string().nullable().optional().meta({ column: true, label: "Tax Class" }),

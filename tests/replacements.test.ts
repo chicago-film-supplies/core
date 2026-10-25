@@ -34,7 +34,7 @@ const products = new Map<string, ReplacementSourceProduct>([
   ["vest-r", { uid: "vest-r", name: "Replacement: Safety Vest", price: { base_cents: 3000 } }],
   ["cone", { uid: "cone", name: "Traffic Cone", uid_linked_replacement: "cone-r" }],
   ["cone-r", { uid: "cone-r", name: "Replacement: Traffic Cone", price: { base_cents: 4500 } }],
-  ["legacy", { uid: "legacy", name: "Old Stand", uid_linked_replacement: null }],
+  ["legacy", { uid: "legacy", name: "Old Stand" }],
 ]);
 
 function record(uid: string, product: string, line: string, quantity: number, extra: Partial<ReplacementSourceRecord> = {}): ReplacementSourceRecord {

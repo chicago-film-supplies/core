@@ -315,7 +315,7 @@ Deno.test("seedReplacementLines: quotes the replacement value of the copy the bo
   };
   const hash = componentSignatureHash([PAIR, G, MIRROR, CORD]);
   const products = new Map<string, ReplacementSourceProduct>([
-    ["cord", { uid: "cord", name: "25' Extension Cord", uid_linked_replacement: null }],
+    ["cord", { uid: "cord", name: "25' Extension Cord" }],
   ]);
   const seeds = seedReplacementLines(order, [{
     uid: "oosCord",
