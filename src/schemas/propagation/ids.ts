@@ -256,6 +256,7 @@ export type RuleId =
   | "return-purchase:return-to-purchase"
   | "reverse-purchase-return:return-to-purchase"
   | "purchase-card:purchases-to-card"
+  | "update-out-of-service-record:record-to-purchase"
   // out-of-service.ts
   | "create-out-of-service-record:sources-to-record"
   | "create-out-of-service-record:record-to-transactions"

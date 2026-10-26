@@ -5,7 +5,8 @@
  * HISTORY is the journal. Its receipts are movements naming it in `sources[]` —
  * `purchase` on a buy, `subrent_in` on a subrent — and the parent carries
  * co-written buckets (`quantity_received`, `quantity_billed`, and on a subrent
- * `quantity_returned`, moved by its `subrent_out` returns).
+ * `quantity_returned`, moved by its `subrent_out` returns and by the
+ * `return_to_supplier` settles an out-of-service record's PUT writes).
  *
  * ## What a receipt reuses, and what it adds
  *
@@ -168,6 +169,52 @@ const reversePurchaseReturnRules: CollectionRule[] = [
         source: ["sources"],
         target: ["uid"],
         transform: "the reversal's sources[] names the original return and the purchase",
+      },
+    ],
+  },
+];
+
+/**
+ * The settle end to end on a real record PUT. ⚠️ The anchor names the
+ * api-cloudrun integration step the settle writer adds (api-cloudrun#1360,
+ * plan Phase 2 D4); until it lands, api-cloudrun's `enforcedByResolves`
+ * reports it unresolved — a forcing function on that phase.
+ */
+const SETTLE_MOVES_THE_PURCHASE: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/purchases/subrents.test.ts::settle — a damaged rented unit and a lost one go back to the supplier from their records, and the PO closes",
+  clause:
+    "each settle is one `return_to_supplier` naming the record, the purchase and its supplier; the purchase line's quantity_returned and the return card move in the same commit, quantity_rented_in falls and the owned basis does not; lowering the bucket reverses it and restores all three; a settle naming no purchase, a buy, another product's purchase, or more than that purchase still has out is refused. The `quantity_rented_in` bound is not asserted: the purchase bound is reached first through the API",
+  gates: true,
+};
+
+/**
+ * A settle, from the OUT-OF-SERVICE side: the record PUT is its lever, so the
+ * rule is the `update-out-of-service-record` transaction's (declared in
+ * `propagation/out-of-service.ts`), and it lives here beside the other writers
+ * of `quantity_returned` — as `propagation/invoices.ts` holds `update-order:*`.
+ */
+const settleToPurchaseRules: CollectionRule[] = [
+  {
+    id: "update-out-of-service-record:record-to-purchase",
+    source: "out-of-service",
+    target: "purchases",
+    mode: "co-write",
+    invariant:
+      "A rise in a record's `returned_to_supplier` settles that many RENTED units to the subrent purchase the save names (`uid_purchase`, input-only): one `return_to_supplier` naming the record, the purchase (exactly one) and its supplier, written in ONE commit with the purchase line's `quantity_returned` bump and its return card — so `quantity_returned` stays the sum of the returns and settles naming it. Refused on a buy, on a purchase with no line for the record's product, past `quantity_received − quantity_returned`, and past the ledger's `quantity_rented_in`. Lowering the bucket reverses the newest settles, each naming its original and ITS purchase, and lowers that purchase's `quantity_returned` in the same commit. A settle carries no cost and posts nothing to Xero; what the supplier charges for the unit is a line on its bill.",
+    enforced_by: [RETURN_BOUNDED, SETTLE_MOVES_THE_PURCHASE],
+    transaction: "update-out-of-service-record",
+    fields: [
+      {
+        source: ["breakdown", "returned_to_supplier"],
+        target: ["lines", "quantity_returned"],
+        transform: "± the bucket's change, on the line whose uid_product is the record's",
+      },
+      {
+        source: ["uid"],
+        target: ["uid"],
+        transform: "the settle's sources[] names the record AND the purchase; the purchase finds it through query_by_sources",
       },
     ],
   },
@@ -1050,6 +1097,7 @@ export const purchases: PropagationModule = {
     ...reversePurchaseReceiptRules,
     ...returnPurchaseRules,
     ...reversePurchaseReturnRules,
+    ...settleToPurchaseRules,
     ...purchaseCardRules,
     ...createPurchaseBillRules,
     ...settlePurchaseBillRules,

@@ -211,7 +211,7 @@ const updateOutOfServiceRules: CollectionRule[] = [
     target: "transactions",
     mode: "co-write",
     invariant:
-      "Each bucket change is posted in the save that makes it, as the movement that makes it true, read against the record's journal so only the DIFFERENCE is written: into `flagged` a flag {null → reason}; flagged → `away` a send_away; `away` → `returned_to_service` a return_to_service; flagged → `returned_to_service` a clearing flag {reason → null}; into `written_off` a write_off (from the record for away units, from the shelf for flagged ones, clearing their flag); out of `written_off` a reversal. A `reason` edit among damaged/cleaning/maintenance is a flag {old → new} on the FLAGGED units only; when some units are away, written off or returned to service the record SPLITS (see `update-out-of-service-record:record-to-record`). Every movement names the record in sources[].",
+      "Each bucket change is posted in the save that makes it, as the movement that makes it true, read against the record's journal so only the DIFFERENCE is written: into `flagged` a flag {null → reason}; flagged → `away` a send_away; `away` → `returned_to_service` a return_to_service; flagged → `returned_to_service` a clearing flag {reason → null}; into `written_off` a write_off (from the record for away units, from the shelf for flagged ones, clearing their flag); out of `written_off` a reversal; into `returned_to_supplier` a return_to_supplier (a RENTED unit settled to its supplier's account, from the record or the flagged shelf, clearing its flag, naming the subrent purchase — see `update-out-of-service-record:record-to-purchase`); out of `returned_to_supplier` a reversal of it. A `reason` edit among damaged/cleaning/maintenance is a flag {old → new} on the FLAGGED units only; when some units are away, written off or returned to service the record SPLITS (see `update-out-of-service-record:record-to-record`). Every movement names the record in sources[].",
     enforced_by: [OOS_COWRITES_MOVEMENT],
     transaction: "update-out-of-service-record",
     fields: [
@@ -247,6 +247,11 @@ const updateOutOfServiceRules: CollectionRule[] = [
         source: ["breakdown", "written_off"],
         target: ["quantity"],
         transform: "a write_off, or a reversal of one, sized by the journal",
+      },
+      {
+        source: ["breakdown", "returned_to_supplier"],
+        target: ["quantity"],
+        transform: "a return_to_supplier, or a reversal of one, sized by the journal",
       },
       {
         source: ["reason"],
@@ -331,7 +336,7 @@ const updateOutOfServiceRules: CollectionRule[] = [
 const updateOutOfServiceTransaction: TransactionDefinition = {
   id: "update-out-of-service-record",
   description:
-    "Updates an out-of-service record. Every bucket change and in-place reason edit is posted as the movement that makes it true (flag, send_away, return_to_service, write_off, or a reversal), which cascades through the one ledger writer and the stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown — except a reason edit on a booking-raised record, which is `reclassify-out-of-service-record`. A reason edit with units already away, written off or returned splits the record. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Any OOS quantity/date/status change — including a cancel, which drops the record from the array entirely.",
+    "Updates an out-of-service record. Every bucket change and in-place reason edit is posted as the movement that makes it true (flag, send_away, return_to_service, write_off, or a reversal), which cascades through the one ledger writer and the stock update path. No back-propagation to the originating booking — the booking already records the loss in its own breakdown — except a reason edit on a booking-raised record, which is `reclassify-out-of-service-record`. A reason edit with units already away, written off or returned splits the record. A rise in `returned_to_supplier` settles rented units to the subrent purchase the save names, moving its `quantity_returned` and return card in the same commit; lowering it reverses that. The purchase and card steps fire on a settle only. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Any OOS quantity/date/status change — including a cancel, which drops the record from the array entirely.",
   steps: [
     ...STOCK_STEPS,
     "update-out-of-service-record:record-to-transactions",
@@ -339,6 +344,8 @@ const updateOutOfServiceTransaction: TransactionDefinition = {
     "update-out-of-service-record:transactions-to-ledger",
     "units:transactions-to-roster",
     "units:transactions-to-units",
+    "update-out-of-service-record:record-to-purchase",
+    "purchase-card:purchases-to-card",
   ],
 };
 
