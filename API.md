@@ -42029,6 +42029,7 @@ interface OrderLineBuildOptions {
   inheritedAncestry?: string[];
   uidOrder?: string;
   taxClassForType: fnOrConstructor;
+  raisedQuantity?: fnOrConstructor;
 }
 ```
 
@@ -42071,7 +42072,8 @@ by one root-level ratio gives a different (wrong) answer. All 34 are
 `inclusion_type: "default"` and no fractional component is `mandatory`, so the
 result is always a valid integer.
 
-**One drop IS intentional, and the distinction matters.** A `mandatory` or
+**One drop IS intentional, and the distinction matters** — it holds for an
+*unraised* `optional`; `opts.raisedQuantity` is how an operator raises one. A `mandatory` or
 `default` row whose parent is `optional` is NOT emitted: the walk starts at the
 root and only descends through rows that survived the filter, so an unselected
 parent takes its subtree with it. Prod has 3 such rows — a generator's
@@ -42128,7 +42130,7 @@ tree, so the same uid can also appear as a grandchild under another child;
 "the first row with this uid" (the lookup this replaces) can read that row's
 flag for the wrong slot.
 
-### `componentQuantities(rootUid: string, components: readonly C[], quantity: number, _: unknown): ComponentQuantity<C>[]`
+### `componentQuantities(rootUid: string, components: readonly C[], quantity: number, _: unknown, raisedQuantity?: fnOrConstructor): ComponentQuantity<C>[]`
 
 Which `mandatory`/`default` components a product at `quantity` carries, and
 how many of each — the ONE quantity rule, shared by the order-line expander
@@ -42140,7 +42142,9 @@ Depth-first, each parent's direct children `zero_priced` first; quantities
 recurse per level as {@link componentQuantityAt}`(comp.quantity, parentEffective)` (owner,
 2026-10-09: a movement proposal rounds up like an order line, and the
 operator edits it). An `optional` row is not walked, and neither is its
-subtree — see {@link buildOrderComponentLines} for why that drop is right.
+subtree — see {@link buildOrderComponentLines} for why that drop is right —
+unless `raisedQuantity` names a positive number for it, in which case it is
+emitted at exactly that number and its own children walk off it.
 
 ### `componentQuantityAt(ratio: number, parentQty: number): number`
 

@@ -295,6 +295,15 @@ export interface OrderLineBuildOptions {
    * rather than invent a class.
    */
   taxClassForType: (type: DocLineItemTypeType) => string;
+  /**
+   * The quantity an operator typed for an `optional` component, or `undefined`
+   * / `0` when they raised none. A raised optional is emitted at exactly that
+   * number — ABSOLUTE, not scaled by its parent — and its own mandatory/default
+   * children scale off it as usual. Without this option (or when it answers
+   * `undefined`/`0` for every row) the walk is byte-identical to before: an
+   * unraised optional, and its whole subtree, is still dropped.
+   */
+  raisedQuantity?: (component: ProductDocumentComponent) => number | undefined;
 }
 
 /**
@@ -545,7 +554,9 @@ export interface ComponentQuantity<C extends ComponentRowForWalk> {
  * recurse per level as {@link componentQuantityAt}`(comp.quantity, parentEffective)` (owner,
  * 2026-10-09: a movement proposal rounds up like an order line, and the
  * operator edits it). An `optional` row is not walked, and neither is its
- * subtree — see {@link buildOrderComponentLines} for why that drop is right.
+ * subtree — see {@link buildOrderComponentLines} for why that drop is right —
+ * unless `raisedQuantity` names a positive number for it, in which case it is
+ * emitted at exactly that number and its own children walk off it.
  *
  * @throws Error when a reached component row carries no `uid` or no `type`.
  */
@@ -554,8 +565,15 @@ export function componentQuantities<C extends ComponentRowForWalk>(
   components: readonly C[],
   quantity: number,
   rootDocPath: readonly string[] = [rootUid],
+  raisedQuantity?: (component: C) => number | undefined,
 ): ComponentQuantity<C>[] {
-  const included = components.filter((c) => c.inclusion_type === "mandatory" || c.inclusion_type === "default");
+  // A raised optional is the one `optional` row the walk reaches; `> 0` makes
+  // `undefined` and `0` mean "not raised", so they cannot be told apart from
+  // no callback at all.
+  const raised = (c: C): number => (c.inclusion_type === "optional" ? (raisedQuantity?.(c) ?? 0) : 0);
+  const included = components.filter(
+    (c) => c.inclusion_type === "mandatory" || c.inclusion_type === "default" || raised(c) > 0,
+  );
   if (!included.length) return [];
 
   const childrenByParent = new Map<string, C[]>();
@@ -580,7 +598,7 @@ export function componentQuantities<C extends ComponentRowForWalk>(
   const out: ComponentQuantity<C>[] = [];
   const emit = (parentUid: string, parentEffective: number, parentDocPath: string[]): void => {
     for (const comp of childrenByParent.get(parentUid) ?? []) {
-      const qty = componentQuantityAt(comp.quantity ?? 1, parentEffective);
+      const qty = raised(comp) > 0 ? raised(comp) : componentQuantityAt(comp.quantity ?? 1, parentEffective);
       const path = [...parentDocPath, comp.uid!];
       out.push({ component: comp, quantity: qty, path });
       emit(comp.uid!, qty, path);
@@ -607,7 +625,8 @@ export function componentQuantities<C extends ComponentRowForWalk>(
  * `inclusion_type: "default"` and no fractional component is `mandatory`, so the
  * result is always a valid integer.
  *
- * **One drop IS intentional, and the distinction matters.** A `mandatory` or
+ * **One drop IS intentional, and the distinction matters** — it holds for an
+ * *unraised* `optional`; `opts.raisedQuantity` is how an operator raises one. A `mandatory` or
  * `default` row whose parent is `optional` is NOT emitted: the walk starts at the
  * root and only descends through rows that survived the filter, so an unselected
  * parent takes its subtree with it. Prod has 3 such rows — a generator's
@@ -645,6 +664,7 @@ export function buildOrderComponentLines(
     doc.components ?? [],
     opts.quantity,
     [...(opts.inheritedAncestry ?? []), doc.uid],
+    opts.raisedQuantity,
   ).map(({ component: comp, quantity, path }) => {
     // The row is both the slot (its `zero_priced`) and the product (it mirrors
     // the component product's type, stock method and price).

@@ -624,3 +624,87 @@ Deno.test("componentQuantities: the movement fan-out walks the same rule as the 
     assertEquals(lines.map((l) => [l.uid, l.quantity]), componentQuantities("tent", comps, 3).map((w) => [w.component.uid, w.quantity]));
   });
 });
+
+// ── raisedQuantity: an operator raises an OPTIONAL component ───────────────
+//
+// Every expected value below is a literal worked by hand from the fixture, never
+// recomputed by the walk under test.
+
+Deno.test("raisedQuantity: an optional the operator raises expands, with its own children, off the typed number", async (t) => {
+  // A is the root. `tank` is optional at catalog quantity 0; `cap` (×1) and
+  // `hose` (×0.5) are mandatory under it; `jerry` is a nested optional.
+  const doc = product({
+    components: [
+      comp("tank", ["A"], { inclusion_type: "optional", quantity: 0 }),
+      comp("cap", ["A", "tank"], { inclusion_type: "mandatory", quantity: 1 }),
+      comp("hose", ["A", "tank"], { inclusion_type: "mandatory", quantity: 0.5 }),
+      comp("jerry", ["A", "tank"], { inclusion_type: "optional", quantity: 0 }),
+      comp("kept", ["A"], { inclusion_type: "default", quantity: 1 }),
+    ],
+  });
+  const raise = (answers: Record<string, number>) => (c: ProductDocumentComponent) => answers[c.uid!];
+
+  await t.step("a raised direct optional emits at the typed quantity and keeps its inclusion_type and ratio", () => {
+    const lines = buildOrderComponentLines(doc, { ...OPTS, raisedQuantity: raise({ tank: 3 }) });
+    // cap = ceil(1 × 3) = 3, hose = ceil(0.5 × 3) = 2 — scaled off the TYPED 3.
+    assertEquals(lines.map((l) => [l.uid, l.quantity]), [["tank", 3], ["cap", 3], ["hose", 2], ["kept", 1]]);
+    const tank = lines[0];
+    assertEquals(tank.inclusion_type, "optional");
+    assertEquals(tank.quantity_per_parent, 0);
+    assertEquals(tank.path, ["A", "tank"]);
+    assertEquals(lines[1].path, ["A", "tank", "cap"]);
+  });
+
+  await t.step("a nested optional emits only when it is raised itself", () => {
+    const parentOnly = buildOrderComponentLines(doc, { ...OPTS, raisedQuantity: raise({ tank: 3 }) });
+    assertEquals(parentOnly.map((l) => l.uid), ["tank", "cap", "hose", "kept"]);
+
+    const both = buildOrderComponentLines(doc, { ...OPTS, raisedQuantity: raise({ tank: 3, jerry: 2 }) });
+    assertEquals(both.map((l) => [l.uid, l.quantity]), [["tank", 3], ["cap", 3], ["hose", 2], ["jerry", 2], ["kept", 1]]);
+    assertEquals(both[3].path, ["A", "tank", "jerry"]);
+  });
+
+  await t.step("raising a nested optional whose parent is not raised emits nothing — its parent is unreached", () => {
+    const lines = buildOrderComponentLines(doc, { ...OPTS, raisedQuantity: raise({ jerry: 2 }) });
+    assertEquals(lines.map((l) => l.uid), ["kept"]);
+  });
+
+  await t.step("0, undefined and no callback all produce exactly today's output", () => {
+    const none = buildOrderComponentLines(doc, OPTS);
+    assertEquals(none.map((l) => l.uid), ["kept"]);
+    assertEquals(buildOrderComponentLines(doc, { ...OPTS, raisedQuantity: raise({ tank: 0 }) }), none);
+    assertEquals(buildOrderComponentLines(doc, { ...OPTS, raisedQuantity: () => undefined }), none);
+  });
+
+  await t.step("a raised quantity is ABSOLUTE: the parent changing does not scale it, its children still do", () => {
+    const at2 = buildOrderComponentLines(doc, { ...OPTS, quantity: 2, raisedQuantity: raise({ tank: 3 }) });
+    const at4 = buildOrderComponentLines(doc, { ...OPTS, quantity: 4, raisedQuantity: raise({ tank: 3 }) });
+    assertEquals(at2.map((l) => [l.uid, l.quantity]), [["tank", 3], ["cap", 3], ["hose", 2], ["kept", 2]]);
+    assertEquals(at4.map((l) => [l.uid, l.quantity]), [["tank", 3], ["cap", 3], ["hose", 2], ["kept", 4]]);
+  });
+
+  await t.step("the callback is ignored for a mandatory or default row", () => {
+    const lines = buildOrderComponentLines(doc, { ...OPTS, raisedQuantity: raise({ kept: 9 }) });
+    assertEquals(lines.map((l) => [l.uid, l.quantity]), [["kept", 1]]);
+  });
+
+  await t.step("paths carry inheritedAncestry", () => {
+    const lines = buildOrderComponentLines(doc, { ...OPTS, inheritedAncestry: ["X"], raisedQuantity: raise({ tank: 3 }) });
+    assertEquals(lines[0].path, ["X", "A", "tank"]);
+    assertEquals(lines[1].path, ["X", "A", "tank", "cap"]);
+  });
+
+  await t.step("componentQuantities agrees with buildOrderComponentLines under the same callback", () => {
+    const answers = raise({ tank: 3, jerry: 2 });
+    const walked = componentQuantities("A", doc.components!, 1, ["A"], answers);
+    const lines = buildOrderComponentLines(doc, { ...OPTS, raisedQuantity: answers });
+    assertEquals(walked.map((w) => [w.component.uid, w.quantity, w.path.join("/")]), [
+      ["tank", 3, "A/tank"],
+      ["cap", 3, "A/tank/cap"],
+      ["hose", 2, "A/tank/hose"],
+      ["jerry", 2, "A/tank/jerry"],
+      ["kept", 1, "A/kept"],
+    ]);
+    assertEquals(lines.map((l) => [l.uid, l.quantity]), walked.map((w) => [w.component.uid, w.quantity]));
+  });
+});
