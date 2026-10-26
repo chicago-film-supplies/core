@@ -19604,7 +19604,7 @@
           "kind": "function",
           "name": "emptyOOSBreakdown",
           "signature": "emptyOOSBreakdown(): OOSBreakdown",
-          "doc": "A breakdown with every bucket at zero.\n\n⚠️ **It does not state `returned_to_supplier` yet, deliberately.** It is a\nWRITER — the api seeds every new record from it — and a record carrying the\nkey 400s against a strict reader that predates it. It states the key in a\nlater beta, once prod manager reads it (release order step 5).",
+          "doc": "A breakdown with every bucket at zero, `returned_to_supplier` included.\n\nIt is a WRITER — the api seeds every new record from it — so stating the key\nis what moves storage toward the required declaration (release order step 5).\nIt waited for prod manager to read the fifth bucket, which it now does.",
           "paramTags": [],
           "returnsTag": null
         },

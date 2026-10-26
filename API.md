@@ -41839,12 +41839,11 @@ The old `number` parameter is gone: it existed only to tell `draft` from
 
 ### `emptyOOSBreakdown(): OOSBreakdown`
 
-A breakdown with every bucket at zero.
+A breakdown with every bucket at zero, `returned_to_supplier` included.
 
-⚠️ **It does not state `returned_to_supplier` yet, deliberately.** It is a
-WRITER — the api seeds every new record from it — and a record carrying the
-key 400s against a strict reader that predates it. It states the key in a
-later beta, once prod manager reads it (release order step 5).
+It is a WRITER — the api seeds every new record from it — so stating the key
+is what moves storage toward the required declaration (release order step 5).
+It waited for prod manager to read the fifth bucket, which it now does.
 
 ### `oosCancelRefusal(record: Pick<OutOfService, "quantity" | "breakdown" | "canceled_at">): string | null`
 

@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { OOS_BREAKDOWN_KEYS } from "../src/schemas/mod.ts";
 import { deriveOOSStatus, emptyOOSBreakdown, oosCancelRefusal, sumOOSBreakdown } from "../src/utils/out-of-service.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
@@ -34,4 +35,9 @@ Deno.test("oosCancelRefusal: refused while units are flagged or away, and on a c
   assertEquals(oosCancelRefusal(rec({ written_off: 1, returned_to_service: 2 })), null);
   assertEquals(oosCancelRefusal(rec({ flagged: 1, away: 1 }))?.includes("2 unit(s) are still out of service"), true);
   assertEquals(oosCancelRefusal(rec({}, true))?.includes("already canceled"), true);
+});
+
+Deno.test("emptyOOSBreakdown states every bucket, returned_to_supplier included", () => {
+  assertEquals(Object.keys(emptyOOSBreakdown()).sort(), [...OOS_BREAKDOWN_KEYS].sort());
+  assertEquals(Object.values(emptyOOSBreakdown()).every((n) => n === 0), true);
 });
