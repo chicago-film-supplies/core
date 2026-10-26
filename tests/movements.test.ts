@@ -1803,19 +1803,6 @@ Deno.test("subrent: only a subrent type moves quantity_rented_in", () => {
   assertEquals(h.quantity_rented_in, 2);
 });
 
-Deno.test("subrent: the deprecated hire_in / hire_out fold exactly as subrent_in / subrent_out", () => {
-  const alias = (m: FoldMovement): FoldMovement => ({ ...m, type: m.type === "subrent_in" ? "hire_in" : "hire_out" });
-  const viaNew = applyMovementToLedger(applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger, hireOut(4), placements, mockTimestamp);
-  const viaOld = applyMovementToLedger(
-    applyMovementToLedger(steamer(), alias(hireIn(10)), placements, mockTimestamp).ledger,
-    alias(hireOut(4)),
-    placements,
-    mockTimestamp,
-  );
-  assertEquals(viaOld, viaNew);
-  assertEquals([viaNew.ledger.quantity_held, viaNew.ledger.quantity_rented_in], [16, 6]);
-});
-
 Deno.test("settle: a 10-unit hire, 1 flagged and settled off its shelf, 9 returned — back to pre-hire, basis untouched", () => {
   const hired = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger;
   const flag: FoldMovement = {
@@ -1950,7 +1937,7 @@ Deno.test("subrent property: interleaving subrent_in / subrent_out / return_to_s
 
 Deno.test("subrent property companion: a fold averaging over HELD would disagree — the sweep can fail", () => {
   // The same comparison against a hand-held "average over custody" reading of
-  // one step, so the property above is not vacuous: a hire_in of 10 onto the
+  // one step, so the property above is not vacuous: a subrent_in of 10 onto the
   // steamer under a held-denominator fold would report 131.3135, not 262.627.
   const hired = applyMovementToLedger(steamer(), hireIn(10), placements, mockTimestamp).ledger;
   const heldAverage = Number(BigInt(hired.total_cost_basis_cents) * 10000n / BigInt(hired.quantity_held ?? 1)) / 10000;

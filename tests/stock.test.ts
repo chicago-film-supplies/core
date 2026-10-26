@@ -111,7 +111,7 @@ Deno.test("bookingHoldsStock: the shelf-side liveness gate", () => {
 });
 
 Deno.test("oosConsumes: the units still OUT of service, zero once terminal", () => {
-  const none = { written_off: 0, returned_to_service: 0 };
+  const none = { written_off: 0, returned_to_service: 0, returned_to_supplier: 0 };
   // `active` is the one non-terminal status; it covers flagged, away and a
   // record not yet in effect (units in no bucket) alike.
   assertEquals(oosConsumes({ status: "active", quantity: 5, breakdown: none }), 5);
@@ -123,7 +123,7 @@ Deno.test("oosConsumes: the units still OUT of service, zero once terminal", () 
   // returned one is back in service. Counting either would take it out of
   // availability twice. This INVERTS the rule that stood until then.
   assertEquals(
-    oosConsumes({ status: "active", quantity: 5, breakdown: { written_off: 1, returned_to_service: 3 } }),
+    oosConsumes({ status: "active", quantity: 5, breakdown: { written_off: 1, returned_to_service: 3, returned_to_supplier: 0 } }),
     1,
   );
 
@@ -134,7 +134,7 @@ Deno.test("oosConsumes: the units still OUT of service, zero once terminal", () 
     oosConsumes({ status: "active", quantity: 5, breakdown: { written_off: 1, returned_to_service: 1, returned_to_supplier: 2 } }),
     1,
   );
-  assertEquals(oosConsumes({ status: "active", quantity: 5, breakdown: { written_off: 1, returned_to_service: 1 } }), 3);
+  assertEquals(oosConsumes({ status: "active", quantity: 5, breakdown: { written_off: 1, returned_to_service: 1, returned_to_supplier: 0 } }), 3);
 
   // A read that masked the breakdown away must fail, not consume the whole record.
   assertThrows(() => oosConsumes({ status: "active", quantity: 5 } as never));
@@ -235,7 +235,7 @@ Deno.test("unavailableFromBooking: a null bound is preserved, never coerced to a
 });
 
 Deno.test("unavailableFromOOS: the unresolved units until terminal", () => {
-  const none = { written_off: 0, returned_to_service: 0 };
+  const none = { written_off: 0, returned_to_service: 0, returned_to_supplier: 0 };
   assertEquals(
     unavailableFromOOS({ status: "active", quantity: 5, breakdown: none, dates: { start: D1, end: D5 } }),
     { start: D1, end: D5, quantity: 5, kind: "oos" },
@@ -251,7 +251,7 @@ Deno.test("unavailableFromOOS: the unresolved units until terminal", () => {
     unavailableFromOOS({
       status: "active",
       quantity: 5,
-      breakdown: { written_off: 2, returned_to_service: 1 },
+      breakdown: { written_off: 2, returned_to_service: 1, returned_to_supplier: 0 },
       dates: { start: D1, end: D5 },
     })?.quantity,
     2,
@@ -281,7 +281,7 @@ Deno.test("unavailableFromOOS: the unresolved units until terminal", () => {
     unavailableFromOOS({
       status: "active",
       quantity: 2,
-      breakdown: { written_off: 1, returned_to_service: 1 },
+      breakdown: { written_off: 1, returned_to_service: 1, returned_to_supplier: 0 },
       dates: { start: D1, end: D5 },
     }),
     null,

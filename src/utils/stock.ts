@@ -270,7 +270,7 @@ export const TERMINAL_OOS_STATUSES: ReadonlySet<string> = new Set(["complete", "
 export function oosConsumes(o: {
   status: string;
   quantity: number;
-  breakdown: Pick<OOSBreakdown, OOSBreakdownTerminalKeyType>;
+  breakdown: Partial<Pick<OOSBreakdown, OOSBreakdownTerminalKeyType>>;
 }): number {
   if (TERMINAL_OOS_STATUSES.has(o.status)) return 0;
   if (!o.breakdown) {
@@ -379,7 +379,7 @@ export interface StockBookingSource extends StockConsumingBooking {
 export interface StockOOSSource {
   status: OOSStatusType;
   quantity: number;
-  breakdown: Pick<OOSBreakdown, OOSBreakdownTerminalKeyType>;
+  breakdown: Partial<Pick<OOSBreakdown, OOSBreakdownTerminalKeyType>>;
   dates: { start: string | null; end: string | null };
 }
 

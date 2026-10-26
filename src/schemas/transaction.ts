@@ -321,35 +321,24 @@ export const MOVEMENT_TYPES = [
   // `purchase` of 10 rented steamers would have diluted the owned average to
   // half and a weighted-relief return would have destroyed owned basis.
   //
-  // 🔴 **`hire_in` is NOT `purchase`, `find` or `adjustment_increase`.** It
+  // 🔴 **`subrent_in` is NOT `purchase`, `find` or `adjustment_increase`.** It
   // raises `quantity_held` — which counts CUSTODY — and also raises
   // `InventoryLedger.quantity_rented_in` by the same amount, so the units CFS
   // OWNS (`held − rented_in`) and the basis averaged over them do not move.
-  // `hire_out` is its mirror. Both are cost-forbidden, so
+  // `subrent_out` is its mirror. Both are cost-forbidden, so
   // `getTransactionMultiplier` reads their custody direction off `places` and
   // `xeroPostingFor` skips them on `no_cost_contract`: a subrent's money is a
   // job cost on its bill, never an asset cost on a movement.
   //
   // The supplier end is `outside`, for the reason the reclass pair gives: a
   // line nets `(to ? +q) + (from ? −q)`, so a non-null supplier endpoint would
-  // net `hire_in` to zero and `quantity_held` would never rise.
+  // net `subrent_in` to zero and `quantity_held` would never rise.
   //
   // Each names its purchase in `sources[]` and its supplier, like a receipt.
   // Neither is manual (they are raised from the purchase, which co-writes
   // `quantity_received` / `quantity_returned`), neither has an undo type — a
   // mistake is a `reverses` reversal through the purchase's own lever — and
   // neither names units: a subrent product is never serialized.
-  //
-  // ⚠️ **`hire_in` / `hire_out` are DEPRECATED aliases of `subrent_in` /
-  // `subrent_out`** (owner, 2026-10-25: every other surface says subrent —
-  // `kind: "subrent"`, `assertSubrentable`, "Sub-Rent" labels — and "hire" came
-  // from the subrent plan with no recorded rationale). Their contracts are
-  // identical and every reader treats both pairs the same through
-  // {@link SUBRENT_MOVEMENT_TYPES}. Writers emit only the new names; the old
-  // pair is removed in a later beta once a census reads 0 stored in prod, dev
-  // and `test` (`api-cloudrun/.claude/plans/subrent-loss-and-margin.md` D1b).
-  "hire_in",
-  "hire_out",
   "subrent_in",
   "subrent_out",
   // A rented unit that cannot go back: lost at the customer, or damaged
@@ -479,15 +468,12 @@ export const MovementTypeEnum: z.ZodType<MovementTypeType> = z.enum(MOVEMENT_TYP
  * supplier.
  *
  * The ONE list: the schema's purchase-source rule and the ledger fold both read
- * it, so a type added here reaches both. ⚠️ It carries the deprecated
- * `hire_in` / `hire_out` until they are removed (see {@link MOVEMENT_TYPES}).
+ * it, so a type added here reaches both.
  */
 export const SUBRENT_MOVEMENT_TYPES = [
   "subrent_in",
   "subrent_out",
   "return_to_supplier",
-  "hire_in",
-  "hire_out",
 ] as const;
 /** One {@link SUBRENT_MOVEMENT_TYPES} member. */
 export type SubrentMovementTypeType = typeof SUBRENT_MOVEMENT_TYPES[number];
@@ -877,26 +863,6 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
   // would mint permanent numbers). `service: "forbidden"` on the in/out pair
   // because they move clean units only: a flagged or lost rented unit is
   // settled by `return_to_supplier` from its out-of-service record.
-  //
-  // `hire_in` / `hire_out` are the deprecated spellings and stay identical.
-  hire_in: {
-    custody: "forbidden",
-    cost: "forbidden",
-    places: { from: ["outside"], to: ["locations"] },
-    booking: "forbidden",
-    service: "forbidden",
-    units: "forbidden",
-    uncounted: "refused",
-  },
-  hire_out: {
-    custody: "forbidden",
-    cost: "forbidden",
-    places: { from: ["locations"], to: ["outside"] },
-    booking: "forbidden",
-    service: "forbidden",
-    units: "forbidden",
-    uncounted: "refused",
-  },
   subrent_in: {
     custody: "forbidden",
     cost: "forbidden",

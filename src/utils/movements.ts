@@ -143,9 +143,9 @@ export type StandaloneReversalRefusalCode =
   | "reclass_pair"
   /** A booking's movement — undone by lowering the booking's breakdown. */
   | "booking"
-  /** A purchase receipt — `purchase` or a subrent's `subrent_in` (or deprecated `hire_in`) — reversed with the purchase line (`…/receipts/{uid}/reverse`). */
+  /** A purchase receipt — `purchase` or a subrent's `subrent_in` — reversed with the purchase line (`…/receipts/{uid}/reverse`). */
   | "purchase_receipt"
-  /** A subrent's `subrent_out` (or deprecated `hire_out`) — reversed with the purchase line (`…/returns/{uid}/reverse`). */
+  /** A subrent's `subrent_out` — reversed with the purchase line (`…/returns/{uid}/reverse`). */
   | "purchase_return"
   /** A line with an `out-of-service` endpoint — the record's buckets are the other half. */
   | "out_of_service"
@@ -213,7 +213,7 @@ export function standaloneReversalRefusal(
   }
   const purchase = sources.find((s) => s.collection === "purchases");
   if (purchase) {
-    const returned = m.type === "subrent_out" || m.type === "hire_out";
+    const returned = m.type === "subrent_out";
     return { code: returned ? "purchase_return" : "purchase_receipt", uid: purchase.uid };
   }
   const record = (m.lines ?? [])

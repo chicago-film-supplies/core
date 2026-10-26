@@ -20,7 +20,7 @@ const validOOS = {
   reason: "damaged",
   status: "active",
   quantity: 2,
-  breakdown: { flagged: 2, away: 0, written_off: 0, returned_to_service: 0 },
+  breakdown: { flagged: 2, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 0 },
   units: null,
   canceled_at: null,
   organization: null,
@@ -91,7 +91,7 @@ Deno.test("OutOfServiceSchema validates with stores", () => {
   const doc = {
     ...validOOS,
     status: "complete",
-    breakdown: { flagged: 0, away: 0, written_off: 1, returned_to_service: 1 },
+    breakdown: { flagged: 0, away: 0, written_off: 1, returned_to_service: 1, returned_to_supplier: 0 },
     dates: { ...validOOS.dates, end: "2026-03-15T00:00:00.000-05:00", end_fs: fs },
     stores: [{
       uid_store: "teststore10000000000",
@@ -146,7 +146,7 @@ Deno.test("OutOfServiceSchema accepts a record not yet in effect — units in no
   const doc = {
     ...validOOS,
     status: "active",
-    breakdown: { flagged: 0, away: 0, written_off: 0, returned_to_service: 0 },
+    breakdown: { flagged: 0, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 0 },
     dates: { start: null, start_fs: null, end: null, end_fs: null },
   };
   assertEquals(OutOfServiceSchema.safeParse(doc).success, true);
@@ -184,41 +184,54 @@ Deno.test("CreateOutOfServiceInput: allocations must sum to the quantity", () =>
 });
 
 Deno.test("OutOfServiceSchema: the breakdown may not place more units than the record holds", () => {
-  const doc = { ...validOOS, breakdown: { flagged: 2, away: 1, written_off: 0, returned_to_service: 0 } };
+  const doc = { ...validOOS, breakdown: { flagged: 2, away: 1, written_off: 0, returned_to_service: 0, returned_to_supplier: 0 } };
   assertEquals(OutOfServiceSchema.safeParse(doc).success, false);
 });
 
-Deno.test("OutOfServiceSchema: returned_to_supplier is OPTIONAL during its expand — absent parses, stated parses", () => {
-  // Every stored record predates the key (api-cloudrun#1360).
+Deno.test("OutOfServiceSchema: returned_to_supplier is REQUIRED in storage — absent refused, stated parses", () => {
   assertEquals(OutOfServiceSchema.safeParse(validOOS).success, true);
+  const absent = { ...validOOS, breakdown: { flagged: 2, away: 0, written_off: 0, returned_to_service: 0 } };
+  assertEquals(issuePaths(absent), ["breakdown.returned_to_supplier"]);
   const settled = { ...validOOS, breakdown: { flagged: 1, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 1 } };
   assertEquals(OutOfServiceSchema.safeParse(settled).success, true);
   const negative = { ...validOOS, breakdown: { ...validOOS.breakdown, returned_to_supplier: -1 } };
   assertEquals(OutOfServiceSchema.safeParse(negative).success, false);
 });
 
-Deno.test("OutOfServiceSchema: the over-placement guard still fires with returned_to_supplier ABSENT and when it is the overflow", () => {
-  // 🔴 The NaN hazard: `undefined` in a raw sum is NaN, and `NaN > quantity` is
-  // false, so the guard would go silent rather than loud.
-  const absentOver = { ...validOOS, breakdown: { flagged: 2, away: 1, written_off: 0, returned_to_service: 0 } };
-  assertEquals(issuePaths(absentOver), ["breakdown"]);
+Deno.test("OutOfServiceSchema: the over-placement guard fires when returned_to_supplier is the overflow", () => {
   const supplierOver = { ...validOOS, breakdown: { flagged: 2, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 1 } };
   assertEquals(issuePaths(supplierOver), ["breakdown"]);
 });
 
-Deno.test("OutOfServiceSchema: units — an absent returned_to_supplier set reads as [], and a stated one is counted", () => {
-  const units = { away: [], flagged: [1, 2], returned_to_service: [], written_off: [] };
+Deno.test("OutOfServiceSchema: units — returned_to_supplier is a required set, and a stated one is counted", () => {
+  const units = { away: [], flagged: [1, 2], returned_to_service: [], returned_to_supplier: [], written_off: [] };
   assertEquals(OutOfServiceSchema.safeParse({ ...validOOS, units }).success, true);
+  const { returned_to_supplier: _omitted, ...fourSets } = units;
+  assertEquals(OutOfServiceSchema.safeParse({ ...validOOS, units: fourSets }).success, false, "an absent set is refused in storage");
   const settledUnits = { ...units, flagged: [2], returned_to_supplier: [1] };
   const settled = { ...validOOS, breakdown: { flagged: 1, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 1 }, units: settledUnits };
   assertEquals(OutOfServiceSchema.safeParse(settled).success, true);
-  // More named than the bucket holds, with the bucket absent (read as 0).
+  // More named than the bucket holds.
   assertEquals(issuePaths({ ...validOOS, units: { ...units, flagged: [2], returned_to_supplier: [1] } }), ["units.returned_to_supplier"]);
   // A unit in two buckets, one of them the new one.
   assertEquals(
     issuePaths({ ...settled, units: { ...settledUnits, flagged: [1] } }).includes("units.returned_to_supplier"),
     true,
   );
+});
+
+Deno.test("UpdateOutOfServiceInput: a client built before the bucket sends four keys, and that parses — storage is tightened, not the input", () => {
+  const base = { uuid_session: "0199a1f2-3b4c-7d8e-9f01-234567890abc", version: 0 };
+  const four = { flagged: 1, away: 0, written_off: 0, returned_to_service: 0 };
+  assertEquals(UpdateOutOfServiceInput.safeParse({ ...base, breakdown: four }).success, true);
+  const fourSets = { away: [], flagged: [1], returned_to_service: [], written_off: [] };
+  assertEquals(UpdateOutOfServiceInput.safeParse({ ...base, breakdown: four, units: fourSets }).success, true);
+  // The stated 0 and the absent key are the same request.
+  const parsed = UpdateOutOfServiceInput.safeParse({ ...base, breakdown: { ...four, returned_to_supplier: 0 } });
+  assertEquals(parsed.success, true);
+  // Over-placement is still caught with the key absent: undefined in a raw sum is NaN.
+  const over = UpdateOutOfServiceInput.safeParse({ ...base, breakdown: { flagged: 2, away: 1, written_off: 0, returned_to_service: 0 }, units: { away: [], flagged: [1, 2, 3, 4], returned_to_service: [], written_off: [] } });
+  assertEquals(over.success, false);
 });
 
 Deno.test("OutOfServiceSchema: uid_destination mirrors destination", () => {

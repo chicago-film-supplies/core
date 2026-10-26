@@ -207,7 +207,7 @@ Deno.test("BookingAction: units, when named, are exactly `quantity` and canonica
 
 // ── Out-of-service ───────────────────────────────────────────────────
 
-const EMPTY_OOS = { away: [], flagged: [], returned_to_service: [], written_off: [] };
+const EMPTY_OOS = { away: [], flagged: [], returned_to_service: [], returned_to_supplier: [], written_off: [] };
 
 function record(units: unknown, breakdown: Record<string, number>) {
   const base = getTestDoc(OutOfServiceSchema, {}, NOW) as unknown as Record<string, unknown>;

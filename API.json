@@ -2913,7 +2913,7 @@
         {
           "kind": "variable",
           "name": "MOVEMENT_TYPES",
-          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost\" | \"sale_lost_undo\" | \"sale_damaged\" | \"sale_damaged_undo\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"hire_in\" | \"hire_out\" | \"subrent_in\" | \"subrent_out\" | \"return_to_supplier\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\" | \"count_open\" | \"count_close\" | \"enroll\" | \"unenroll\"[];",
+          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost\" | \"sale_lost_undo\" | \"sale_damaged\" | \"sale_damaged_undo\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"subrent_in\" | \"subrent_out\" | \"return_to_supplier\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\" | \"count_open\" | \"count_close\" | \"enroll\" | \"unenroll\"[];",
           "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    🔴 **The movement shape does NOT already exist.** This note claimed it\n    did — *\"`lines: []` + a negative `cost`, the same shape a late\n    landed-cost adjustment uses\"* — and that was wrong in three independent\n    ways, each measured (core#75):\n      1. **No contract permits it.** `places: null` means \"lines must be\n         empty\", and the only entries carrying it are the rebook pair\n         (`prep` did until api-cloudrun#1302), whose `cost` is `forbidden`. Every cost-bearing type has `places` set, and\n         `checkMovementContract` then requires at least one line — so\n         `MovementSchema` rejects `lines: []` beside a cost on **every**\n         {@link MOVEMENT_TYPES} member. `places: null` + `cost: \"required\"`\n         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.\n      2. **The fold would ignore it anyway.** `applyMovementToLedger`\n         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside\n         `delta > 0` / `delta < 0`, where `delta` is\n         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at\n         0; the same cost on one `+10` line moves it to 50000.\n      3. **And it could not reach Xero.** `xeroPostingFor`\n         (`utils/movements.ts`) terminals a cost-bearing movement whose lines\n         net to zero as `no_ownership_direction`, deliberately, because a\n         document like that is malformed today.\n    So a cost-only event needs all three gates opened, in one change: a\n    contract entry pairing `places: null` with `cost: \"required\"`, a\n    `delta === 0` arm in the fold — which owes its own decision about\n    `average_unit_cost`, since the basis moves while the quantity does not —\n    and a posting decision that is not derived from an ownership direction\n    there is none of.\n    The \"late landed-cost adjustment\" cited as precedent is not writable\n    today either, by the same mechanism. (1) and (2) are pinned in\n    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the\n    day someone mints the contract entry is the day a pin goes red rather\n    than the day the ledger silently stops moving.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
         },
         {
@@ -3207,8 +3207,20 @@
         {
           "kind": "interface",
           "name": "OOSBreakdown",
-          "declaration": "interface OOSBreakdown {\n  flagged: number;\n  away: number;\n  written_off: number;\n  returned_to_service: number;\n  returned_to_supplier?: number;\n}",
-          "doc": "Per-bucket quantities. Σ ≤ `quantity` — the shortfall is \"not yet in effect\".\n\n⚠️ **`returned_to_supplier` is OPTIONAL during its expand** (the add-field\norder, `cfs-release-order`; precedent the booking `cleaning`/`maintenance`\nkeys, `schemas/_breakdown.ts`). No stored record carries it yet, and a\nstrict reader that required it would refuse every one. An absent key reads\nas 0 — always through {@link oosBucketQuantity}, never a per-site `?? 0`.\nWriters state it once prod manager reads it, a backfill zero-fills every\nrecord, and a later beta makes it required."
+          "declaration": "interface OOSBreakdown {\n  flagged: number;\n  away: number;\n  written_off: number;\n  returned_to_service: number;\n  returned_to_supplier: number;\n}",
+          "doc": "Per-bucket quantities. Σ ≤ `quantity` — the shortfall is \"not yet in effect\".\n\n`returned_to_supplier` is REQUIRED: every stored record states it (the api's\nwriters state it, a backfill zero-filled the rest — prod, dev and `test`, read\n0 missing on 2026-10-26). The update INPUT still accepts it absent\n({@link OOSBreakdownInputType}): a client built before the bucket sends four\nkeys, and that is no change, not an un-settle."
+        },
+        {
+          "kind": "variable",
+          "name": "OOSBreakdownInput",
+          "declaration": "const OOSBreakdownInput: z.ZodType<OOSBreakdownInputType>;",
+          "doc": "Zod schema for {@link OOSBreakdownInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "OOSBreakdownInputType",
+          "declaration": "interface OOSBreakdownInputType {\n  flagged: number;\n  away: number;\n  written_off: number;\n  returned_to_service: number;\n  returned_to_supplier?: number;\n}",
+          "doc": "The breakdown a client SENDS: {@link OOSBreakdown} with `returned_to_supplier`\noptional. Storage is tightened, not the input (a client built before the\nbucket is not rebuilt in step), so an absent key reads as 0 here, through\n{@link oosBucketQuantity}."
         },
         {
           "kind": "typeAlias",
@@ -3290,6 +3302,18 @@
         },
         {
           "kind": "variable",
+          "name": "OOSUnitsInput",
+          "declaration": "const OOSUnitsInput: z.ZodType<OOSUnitsInputType>;",
+          "doc": "Zod schema for {@link OOSUnitsInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "OOSUnitsInputType",
+          "declaration": "interface OOSUnitsInputType {\n  away: number[];\n  flagged: number[];\n  returned_to_service: number[];\n  written_off: number[];\n  returned_to_supplier?: number[];\n}",
+          "doc": "The unit sets a client SENDS: {@link OOSUnitsType} with `returned_to_supplier` optional."
+        },
+        {
+          "kind": "variable",
           "name": "OOSUnitsSchema",
           "declaration": "const OOSUnitsSchema: z.ZodType<OOSUnitsType>;",
           "doc": "Zod schema for {@link OOSUnitsType}."
@@ -3297,7 +3321,7 @@
         {
           "kind": "interface",
           "name": "OOSUnitsType",
-          "declaration": "interface OOSUnitsType {\n  away: number[];\n  flagged: number[];\n  returned_to_service: number[];\n  written_off: number[];\n  returned_to_supplier?: number[];\n}",
+          "declaration": "interface OOSUnitsType {\n  away: number[];\n  flagged: number[];\n  returned_to_service: number[];\n  written_off: number[];\n  returned_to_supplier: number[];\n}",
           "doc": "Which units sit in each bucket of a record, on a serialized product\n(`api-cloudrun/.claude/plans/serial-tracking.md` D6). Each set is a\ncanonical `UnitSet`, and the sets are pairwise disjoint.\n\n`units[k].length ≤ breakdown[k]`, not `===`: a historic record (24 walkie\nlosses on Replacement lines among them) names no unit at all, and writes off\nwithout vacating anything."
         },
         {
@@ -4588,7 +4612,7 @@
           "kind": "interface",
           "name": "ReturnPurchaseInputType",
           "declaration": "interface ReturnPurchaseInputType {\n  date: string;\n  reference?: string;\n  lines: ReturnPurchaseLineInputType[];\n  uuid_session: string;\n  version: number;\n}",
-          "doc": "Input for returning subrented units to the supplier\n(`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.\n\nEach line becomes ONE `subrent_out` movement naming the purchase in `sources[]`,\nin one transaction with the `quantity_returned` co-write. The movement id is\n`{uuid_session}|hire_out|{uid_product}`, so a retry lands on the same\nmovements. There is no cost: a returned unit was never owned."
+          "doc": "Input for returning subrented units to the supplier\n(`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.\n\nEach line becomes ONE `subrent_out` movement naming the purchase in `sources[]`,\nin one transaction with the `quantity_returned` co-write. The movement id is\n`{uuid_session}|subrent_out|{uid_product}`, so a retry lands on the same\nmovements. There is no cost: a returned unit was never owned."
         },
         {
           "kind": "variable",
@@ -4761,8 +4785,8 @@
         {
           "kind": "variable",
           "name": "SUBRENT_MOVEMENT_TYPES",
-          "declaration": "const SUBRENT_MOVEMENT_TYPES: \"subrent_in\" | \"subrent_out\" | \"return_to_supplier\" | \"hire_in\" | \"hire_out\"[];",
-          "doc": "Every type that moves units into or out of a SUBRENT — custody without\nownership. Each one moves `InventoryLedger.quantity_rented_in` with\n`quantity_held`, names exactly one purchase in `sources[]`, and names its\nsupplier.\n\nThe ONE list: the schema's purchase-source rule and the ledger fold both read\nit, so a type added here reaches both. ⚠️ It carries the deprecated\n`hire_in` / `hire_out` until they are removed (see {@link MOVEMENT_TYPES})."
+          "declaration": "const SUBRENT_MOVEMENT_TYPES: \"subrent_in\" | \"subrent_out\" | \"return_to_supplier\"[];",
+          "doc": "Every type that moves units into or out of a SUBRENT — custody without\nownership. Each one moves `InventoryLedger.quantity_rented_in` with\n`quantity_held`, names exactly one purchase in `sources[]`, and names its\nsupplier.\n\nThe ONE list: the schema's purchase-source rule and the ledger fold both read\nit, so a type added here reaches both."
         },
         {
           "kind": "variable",
@@ -6075,7 +6099,7 @@
         {
           "kind": "interface",
           "name": "UpdateOutOfServiceInputType",
-          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  units?: OOSUnitsType;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uid_purchase?: string;\n  uuid_session: string;\n  version: number;\n}",
+          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdownInputType;\n  units?: OOSUnitsInputType;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uid_purchase?: string;\n  uuid_session: string;\n  version: number;\n}",
           "doc": "Input for updating an out-of-service record.\n\n`breakdown` (when supplied) is the complete next state, Σ ≤ `quantity`. The\nwriter turns each bucket change into the movement that makes it true —\n`flag`, `send_away`, `return_to_service`, `write_off`, or a reversal of one.\n`status` is server-derived; only `\"canceled\"` is honored.\n\n`reason` edits the record IN PLACE, and only among the flag reasons: a\n`lost` ↔ other change is a change of PLACE, not of reason (R3). The writer\nrecords it as a `flag` `{r → r′}`, so the journal keeps the history.\n\n`dates.start` is honored only on a record with no sources (ad-hoc); a\nsource-bound record's start reflects the upstream event that pinned it."
         },
         {
@@ -7104,7 +7128,7 @@
           "kind": "function",
           "name": "oosBucketQuantity",
           "signature": "oosBucketQuantity(b: Partial<OOSBreakdown>, key: OOSBreakdownKeyType): number",
-          "doc": "One bucket of a breakdown, reading an ABSENT key as 0 — the only way any\nreader touches a bucket while `returned_to_supplier` is optional. An absent\nkey read raw is `undefined`, and `undefined` in a sum is `NaN`, which a `>`\ncomparison then reads as false: the guards that refuse over-placement go\nsilent rather than loud.",
+          "doc": "One bucket of a breakdown, reading an ABSENT key as 0 — the way a\nreader touches a bucket of an INPUT, where `returned_to_supplier` may be absent. An absent\nkey read raw is `undefined`, and `undefined` in a sum is `NaN`, which a `>`\ncomparison then reads as false: the guards that refuse over-placement go\nsilent rather than loud.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -10750,8 +10774,20 @@
         {
           "kind": "interface",
           "name": "OOSBreakdown",
-          "declaration": "interface OOSBreakdown {\n  flagged: number;\n  away: number;\n  written_off: number;\n  returned_to_service: number;\n  returned_to_supplier?: number;\n}",
-          "doc": "Per-bucket quantities. Σ ≤ `quantity` — the shortfall is \"not yet in effect\".\n\n⚠️ **`returned_to_supplier` is OPTIONAL during its expand** (the add-field\norder, `cfs-release-order`; precedent the booking `cleaning`/`maintenance`\nkeys, `schemas/_breakdown.ts`). No stored record carries it yet, and a\nstrict reader that required it would refuse every one. An absent key reads\nas 0 — always through {@link oosBucketQuantity}, never a per-site `?? 0`.\nWriters state it once prod manager reads it, a backfill zero-fills every\nrecord, and a later beta makes it required."
+          "declaration": "interface OOSBreakdown {\n  flagged: number;\n  away: number;\n  written_off: number;\n  returned_to_service: number;\n  returned_to_supplier: number;\n}",
+          "doc": "Per-bucket quantities. Σ ≤ `quantity` — the shortfall is \"not yet in effect\".\n\n`returned_to_supplier` is REQUIRED: every stored record states it (the api's\nwriters state it, a backfill zero-filled the rest — prod, dev and `test`, read\n0 missing on 2026-10-26). The update INPUT still accepts it absent\n({@link OOSBreakdownInputType}): a client built before the bucket sends four\nkeys, and that is no change, not an un-settle."
+        },
+        {
+          "kind": "variable",
+          "name": "OOSBreakdownInput",
+          "declaration": "const OOSBreakdownInput: z.ZodType<OOSBreakdownInputType>;",
+          "doc": "Zod schema for {@link OOSBreakdownInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "OOSBreakdownInputType",
+          "declaration": "interface OOSBreakdownInputType {\n  flagged: number;\n  away: number;\n  written_off: number;\n  returned_to_service: number;\n  returned_to_supplier?: number;\n}",
+          "doc": "The breakdown a client SENDS: {@link OOSBreakdown} with `returned_to_supplier`\noptional. Storage is tightened, not the input (a client built before the\nbucket is not rebuilt in step), so an absent key reads as 0 here, through\n{@link oosBucketQuantity}."
         },
         {
           "kind": "typeAlias",
@@ -10815,6 +10851,18 @@
         },
         {
           "kind": "variable",
+          "name": "OOSUnitsInput",
+          "declaration": "const OOSUnitsInput: z.ZodType<OOSUnitsInputType>;",
+          "doc": "Zod schema for {@link OOSUnitsInputType}."
+        },
+        {
+          "kind": "interface",
+          "name": "OOSUnitsInputType",
+          "declaration": "interface OOSUnitsInputType {\n  away: number[];\n  flagged: number[];\n  returned_to_service: number[];\n  written_off: number[];\n  returned_to_supplier?: number[];\n}",
+          "doc": "The unit sets a client SENDS: {@link OOSUnitsType} with `returned_to_supplier` optional."
+        },
+        {
+          "kind": "variable",
           "name": "OOSUnitsSchema",
           "declaration": "const OOSUnitsSchema: z.ZodType<OOSUnitsType>;",
           "doc": "Zod schema for {@link OOSUnitsType}."
@@ -10822,7 +10870,7 @@
         {
           "kind": "interface",
           "name": "OOSUnitsType",
-          "declaration": "interface OOSUnitsType {\n  away: number[];\n  flagged: number[];\n  returned_to_service: number[];\n  written_off: number[];\n  returned_to_supplier?: number[];\n}",
+          "declaration": "interface OOSUnitsType {\n  away: number[];\n  flagged: number[];\n  returned_to_service: number[];\n  written_off: number[];\n  returned_to_supplier: number[];\n}",
           "doc": "Which units sit in each bucket of a record, on a serialized product\n(`api-cloudrun/.claude/plans/serial-tracking.md` D6). Each set is a\ncanonical `UnitSet`, and the sets are pairwise disjoint.\n\n`units[k].length ≤ breakdown[k]`, not `===`: a historic record (24 walkie\nlosses on Replacement lines among them) names no unit at all, and writes off\nwithout vacating anything."
         },
         {
@@ -10876,7 +10924,7 @@
         {
           "kind": "interface",
           "name": "UpdateOutOfServiceInputType",
-          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdown;\n  units?: OOSUnitsType;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uid_purchase?: string;\n  uuid_session: string;\n  version: number;\n}",
+          "declaration": "interface UpdateOutOfServiceInputType {\n  status?: indexedAccess;\n  reason?: OOSFlagReasonType;\n  breakdown?: OOSBreakdownInputType;\n  units?: OOSUnitsInputType;\n  dates?: typeLiteral;\n  destination?: OOSDestinationInputType | null;\n  supplier?: typeLiteral | null;\n  uid_purchase?: string;\n  uuid_session: string;\n  version: number;\n}",
           "doc": "Input for updating an out-of-service record.\n\n`breakdown` (when supplied) is the complete next state, Σ ≤ `quantity`. The\nwriter turns each bucket change into the movement that makes it true —\n`flag`, `send_away`, `return_to_service`, `write_off`, or a reversal of one.\n`status` is server-derived; only `\"canceled\"` is honored.\n\n`reason` edits the record IN PLACE, and only among the flag reasons: a\n`lost` ↔ other change is a change of PLACE, not of reason (R3). The writer\nrecords it as a `flag` `{r → r′}`, so the journal keeps the history.\n\n`dates.start` is honored only on a record with no sources (ad-hoc); a\nsource-bound record's start reflects the upstream event that pinned it."
         },
         {
@@ -10891,7 +10939,7 @@
           "kind": "function",
           "name": "oosBucketQuantity",
           "signature": "oosBucketQuantity(b: Partial<OOSBreakdown>, key: OOSBreakdownKeyType): number",
-          "doc": "One bucket of a breakdown, reading an ABSENT key as 0 — the only way any\nreader touches a bucket while `returned_to_supplier` is optional. An absent\nkey read raw is `undefined`, and `undefined` in a sum is `NaN`, which a `>`\ncomparison then reads as false: the guards that refuse over-placement go\nsilent rather than loud.",
+          "doc": "One bucket of a breakdown, reading an ABSENT key as 0 — the way a\nreader touches a bucket of an INPUT, where `returned_to_supplier` may be absent. An absent\nkey read raw is `undefined`, and `undefined` in a sum is `NaN`, which a `>`\ncomparison then reads as false: the guards that refuse over-placement go\nsilent rather than loud.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11213,7 +11261,7 @@
           "kind": "interface",
           "name": "ReturnPurchaseInputType",
           "declaration": "interface ReturnPurchaseInputType {\n  date: string;\n  reference?: string;\n  lines: ReturnPurchaseLineInputType[];\n  uuid_session: string;\n  version: number;\n}",
-          "doc": "Input for returning subrented units to the supplier\n(`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.\n\nEach line becomes ONE `subrent_out` movement naming the purchase in `sources[]`,\nin one transaction with the `quantity_returned` co-write. The movement id is\n`{uuid_session}|hire_out|{uid_product}`, so a retry lands on the same\nmovements. There is no cost: a returned unit was never owned."
+          "doc": "Input for returning subrented units to the supplier\n(`POST /purchases/{uid}/returns`) — the mirror of {@link ReceivePurchaseInput}.\n\nEach line becomes ONE `subrent_out` movement naming the purchase in `sources[]`,\nin one transaction with the `quantity_returned` co-write. The movement id is\n`{uuid_session}|subrent_out|{uid_product}`, so a retry lands on the same\nmovements. There is no cost: a returned unit was never owned."
         },
         {
           "kind": "variable",
@@ -12092,7 +12140,7 @@
         {
           "kind": "variable",
           "name": "MOVEMENT_TYPES",
-          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost\" | \"sale_lost_undo\" | \"sale_damaged\" | \"sale_damaged_undo\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"hire_in\" | \"hire_out\" | \"subrent_in\" | \"subrent_out\" | \"return_to_supplier\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\" | \"count_open\" | \"count_close\" | \"enroll\" | \"unenroll\"[];",
+          "declaration": "const MOVEMENT_TYPES: \"prep\" | \"check_out\" | \"check_in\" | \"mark_damaged\" | \"mark_lost\" | \"unprep\" | \"check_out_undo\" | \"check_in_undo\" | \"mark_lost_undo\" | \"mark_damaged_undo\" | \"mark_cleaning\" | \"mark_cleaning_undo\" | \"mark_maintenance\" | \"mark_maintenance_undo\" | \"rebook_out\" | \"rebook_in\" | \"sale\" | \"sale_return\" | \"sale_undo\" | \"sale_return_undo\" | \"sale_lost\" | \"sale_lost_undo\" | \"sale_damaged\" | \"sale_damaged_undo\" | \"opening_balance\" | \"purchase\" | \"find\" | \"make\" | \"adjustment_increase\" | \"adjustment_decrease\" | \"trade_in\" | \"write_off\" | \"reclass_out\" | \"reclass_in\" | \"subrent_in\" | \"subrent_out\" | \"return_to_supplier\" | \"transfer\" | \"return_to_service\" | \"flag\" | \"send_away\" | \"count_open\" | \"count_close\" | \"enroll\" | \"unenroll\"[];",
           "doc": "Every kind of movement, as ONE classifier. There is deliberately no second\n`kind` field: `type` is required in a strict object and drives\n{@link getTransactionMultiplier}, so a document can never be half-classified.\n\nGrouped by which axes the type carries — see {@link MOVEMENT_CONTRACTS}, which\nis the machine-readable form of the same grouping.\n\n**Removed in the journal migration**, all with zero stored instances in prod\nAND dev, unreachable from `MANUAL_TRANSACTION_TYPES` and\n{@link getDisplayTransactionTypes}: `acquisition`, `disposal`,\n`partial_disposal`, `depreciation_tax`, `depreciation_gaap`. They were the\nonly unclassified branch, which is why `getTransactionMultiplier` used to\nthrow — a live 500 waiting on a type nothing could produce.\n\nAsset depreciation IS on the roadmap. When it lands:\n  - **`depreciation` wants to be ONE type with a `book` field** on the cost\n    object, not `depreciation_tax` + `depreciation_gaap`. As types they double\n    every future cost-only event; as a field the book is one dimension.\n    🔴 **The movement shape does NOT already exist.** This note claimed it\n    did — *\"`lines: []` + a negative `cost`, the same shape a late\n    landed-cost adjustment uses\"* — and that was wrong in three independent\n    ways, each measured (core#75):\n      1. **No contract permits it.** `places: null` means \"lines must be\n         empty\", and the only entries carrying it are the rebook pair\n         (`prep` did until api-cloudrun#1302), whose `cost` is `forbidden`. Every cost-bearing type has `places` set, and\n         `checkMovementContract` then requires at least one line — so\n         `MovementSchema` rejects `lines: []` beside a cost on **every**\n         {@link MOVEMENT_TYPES} member. `places: null` + `cost: \"required\"`\n         is a pairing {@link MOVEMENT_CONTRACTS} has never carried.\n      2. **The fold would ignore it anyway.** `applyMovementToLedger`\n         (`utils/movements.ts`) touches `total_cost_basis_cents` only inside\n         `delta > 0` / `delta < 0`, where `delta` is\n         `movementHeldDelta(lines)`. `lines: []` + $500 leaves the basis at\n         0; the same cost on one `+10` line moves it to 50000.\n      3. **And it could not reach Xero.** `xeroPostingFor`\n         (`utils/movements.ts`) terminals a cost-bearing movement whose lines\n         net to zero as `no_ownership_direction`, deliberately, because a\n         document like that is malformed today.\n    So a cost-only event needs all three gates opened, in one change: a\n    contract entry pairing `places: null` with `cost: \"required\"`, a\n    `delta === 0` arm in the fold — which owes its own decision about\n    `average_unit_cost`, since the basis moves while the quantity does not —\n    and a posting decision that is not derived from an ownership direction\n    there is none of.\n    The \"late landed-cost adjustment\" cited as precedent is not writable\n    today either, by the same mechanism. (1) and (2) are pinned in\n    `tests/movements.test.ts` and (3) in `tests/xero-posting.test.ts`, so the\n    day someone mints the contract entry is the day a pin goes red rather\n    than the day the ledger silently stops moving.\n  - **`disposal` wants to come back as its own type**, even though `write_off`\n    already covers the mechanics (`out-of-service → null` + `cost`). Finance\n    reporting a \"disposals\" line has to tell a disposal from a damage\n    write-off, and inferring that from \"is there an OOS record in `sources[]`\"\n    is inferring cause from effect — the same reason a refund is a credit-note\n    link and not a `total_cost > 0` test.\n  - `acquisition` and `partial_disposal` do NOT come back: the first is\n    `purchase`, and the second is a `disposal` whose quantity is less than\n    what's held. Quantity already says it.\n\n`transfer_increase` / `transfer_decrease` collapsed into a single\n{@link MOVEMENT_CONTRACTS} `transfer`: they existed only because one row could\nnot say \"out of A, into B\", which `location: {from, to}` now says. The\nmigration rewrites the stored pairs."
         },
         {
@@ -12242,8 +12290,8 @@
         {
           "kind": "variable",
           "name": "SUBRENT_MOVEMENT_TYPES",
-          "declaration": "const SUBRENT_MOVEMENT_TYPES: \"subrent_in\" | \"subrent_out\" | \"return_to_supplier\" | \"hire_in\" | \"hire_out\"[];",
-          "doc": "Every type that moves units into or out of a SUBRENT — custody without\nownership. Each one moves `InventoryLedger.quantity_rented_in` with\n`quantity_held`, names exactly one purchase in `sources[]`, and names its\nsupplier.\n\nThe ONE list: the schema's purchase-source rule and the ledger fold both read\nit, so a type added here reaches both. ⚠️ It carries the deprecated\n`hire_in` / `hire_out` until they are removed (see {@link MOVEMENT_TYPES})."
+          "declaration": "const SUBRENT_MOVEMENT_TYPES: \"subrent_in\" | \"subrent_out\" | \"return_to_supplier\"[];",
+          "doc": "Every type that moves units into or out of a SUBRENT — custody without\nownership. Each one moves `InventoryLedger.quantity_rented_in` with\n`quantity_held`, names exactly one purchase in `sources[]`, and names its\nsupplier.\n\nThe ONE list: the schema's purchase-source rule and the ledger fold both read\nit, so a type added here reaches both."
         },
         {
           "kind": "variable",
@@ -18699,7 +18747,7 @@
         {
           "kind": "interface",
           "name": "StockOOSSource",
-          "declaration": "interface StockOOSSource {\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: Pick<OOSBreakdown, OOSBreakdownTerminalKeyType>;\n  dates: typeLiteral;\n}",
+          "declaration": "interface StockOOSSource {\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: Partial<Pick<OOSBreakdown, OOSBreakdownTerminalKeyType>>;\n  dates: typeLiteral;\n}",
           "doc": "Just enough of an out-of-service record to reduce it to an unavailable interval."
         },
         {

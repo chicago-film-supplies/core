@@ -111,7 +111,7 @@ Deno.test("seed: the description names each unit with the serial it carried at t
     [1042, unitWith(1042, [])],
   ]);
   const lost = record("oosVest", "vest", VEST_LINE, 2, {
-    units: { away: [1042, 1017].sort((a, b) => a - b), flagged: [], returned_to_service: [], written_off: [] },
+    units: { away: [1042, 1017].sort((a, b) => a - b), flagged: [], returned_to_service: [], returned_to_supplier: [], written_off: [] },
   });
   const [seed] = seedReplacementLines(order, [lost], [], products, units);
   assertEquals(seed.units, [1017, 1042]);
@@ -122,13 +122,13 @@ Deno.test("seed: the description names each unit with the serial it carried at t
 Deno.test("seed: with no serial to name, the description is the ranges; with nothing at all, the reason", () => {
   const damaged = record("oosVest", "vest", VEST_LINE, 4, {
     reason: "damaged",
-    units: { away: [], flagged: [1017, 1018], returned_to_service: [1019], written_off: [1030] },
+    units: { away: [], flagged: [1017, 1018], returned_to_service: [1019], returned_to_supplier: [], written_off: [1030] },
   });
   const [ranged] = seedReplacementLines(order, [damaged], [], products, noUnits);
   assertEquals(ranged.description, "Units 1017–1019, 1030");
 
   const [one] = seedReplacementLines(order, [record("oosVest", "vest", VEST_LINE, 1, {
-    units: { away: [1017], flagged: [], returned_to_service: [], written_off: [] },
+    units: { away: [1017], flagged: [], returned_to_service: [], returned_to_supplier: [], written_off: [] },
   })], [], products, noUnits);
   assertEquals(one.description, "Unit 1017");
 
@@ -149,7 +149,7 @@ Deno.test("seed: the description opens with the replacement twin's description, 
     [1017, unitWith(1017, [["902ZAE5968", "2024-01-05T09:00:00.000-06:00", null, "initial"]])],
   ]);
   const [named] = seedReplacementLines(order, [record("oosVest", "vest", VEST_LINE, 2, {
-    units: { away: [1017, 1042], flagged: [], returned_to_service: [], written_off: [] },
+    units: { away: [1017, 1042], flagged: [], returned_to_service: [], returned_to_supplier: [], written_off: [] },
   })], [], described, units);
   assertEquals(named.description, "Otto Two Wire Surveillance Kit - V1-10176\nUnits 1017 (S/N 902ZAE5968), 1042");
 });
@@ -159,7 +159,7 @@ Deno.test("seed: a custom line (no twin) has no product description to carry", (
   assertEquals(seedReplacementLines(order, [stand], [], products, noUnits)[0].description, "Lost");
   const counted = record("oosStand", "legacy", VEST_LINE, 1, {
     query_by_sources: [`orders:${ORDER}`],
-    units: { away: [7], flagged: [], returned_to_service: [], written_off: [] },
+    units: { away: [7], flagged: [], returned_to_service: [], returned_to_supplier: [], written_off: [] },
   });
   assertEquals(seedReplacementLines(order, [counted], [], products, noUnits)[0].description, "Unit 7");
 });

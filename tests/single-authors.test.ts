@@ -229,16 +229,15 @@ Deno.test("row 8: the seven older classes, and a shelf write-off stays reversibl
     standaloneReversalRefusal({ type: "purchase", sources: [{ collection: "purchases", uid: "PO" }] as never }),
     { code: "purchase_receipt", uid: "PO" },
   );
-  // A subrent's receipt is a receipt; its return has its own lever. The
-  // deprecated spellings answer exactly as the new ones.
-  for (const type of ["subrent_in", "hire_in"] as const) {
+  // A subrent's receipt is a receipt; its return has its own lever.
+  for (const type of ["subrent_in"] as const) {
     assertEquals(
       standaloneReversalRefusal({ type, sources: [{ collection: "purchases", uid: "PO" }] as never }),
       { code: "purchase_receipt", uid: "PO" },
       type,
     );
   }
-  for (const type of ["subrent_out", "hire_out"] as const) {
+  for (const type of ["subrent_out"] as const) {
     assertEquals(
       standaloneReversalRefusal({ type, sources: [{ collection: "purchases", uid: "PO" }] as never }),
       { code: "purchase_return", uid: "PO" },

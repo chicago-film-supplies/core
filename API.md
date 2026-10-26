@@ -6568,7 +6568,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "hire_in" | "hire_out" | "subrent_in" | "subrent_out" | "return_to_supplier" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "subrent_in" | "subrent_out" | "return_to_supplier" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
 ```
 
 ### `MOVEMENT_UNDOES`
@@ -7313,16 +7313,39 @@ const OAuthRefreshLogRecordSchema: z.ZodType<OAuthRefreshLogRecord>;
 
 Per-bucket quantities. Σ ≤ `quantity` — the shortfall is "not yet in effect".
 
-⚠️ **`returned_to_supplier` is OPTIONAL during its expand** (the add-field
-order, `cfs-release-order`; precedent the booking `cleaning`/`maintenance`
-keys, `schemas/_breakdown.ts`). No stored record carries it yet, and a
-strict reader that required it would refuse every one. An absent key reads
-as 0 — always through {@link oosBucketQuantity}, never a per-site `?? 0`.
-Writers state it once prod manager reads it, a backfill zero-fills every
-record, and a later beta makes it required.
+`returned_to_supplier` is REQUIRED: every stored record states it (the api's
+writers state it, a backfill zero-filled the rest — prod, dev and `test`, read
+0 missing on 2026-10-26). The update INPUT still accepts it absent
+({@link OOSBreakdownInputType}): a client built before the bucket sends four
+keys, and that is no change, not an un-settle.
 
 ```ts
 interface OOSBreakdown {
+  flagged: number;
+  away: number;
+  written_off: number;
+  returned_to_service: number;
+  returned_to_supplier: number;
+}
+```
+
+### `OOSBreakdownInput`
+
+Zod schema for {@link OOSBreakdownInputType}.
+
+```ts
+const OOSBreakdownInput: z.ZodType<OOSBreakdownInputType>;
+```
+
+### `OOSBreakdownInputType`
+
+The breakdown a client SENDS: {@link OOSBreakdown} with `returned_to_supplier`
+optional. Storage is tightened, not the input (a client built before the
+bucket is not rebuilt in step), so an absent key reads as 0 here, through
+{@link oosBucketQuantity}.
+
+```ts
+interface OOSBreakdownInputType {
   flagged: number;
   away: number;
   written_off: number;
@@ -7472,6 +7495,28 @@ interface OOSStoreLocation {
 }
 ```
 
+### `OOSUnitsInput`
+
+Zod schema for {@link OOSUnitsInputType}.
+
+```ts
+const OOSUnitsInput: z.ZodType<OOSUnitsInputType>;
+```
+
+### `OOSUnitsInputType`
+
+The unit sets a client SENDS: {@link OOSUnitsType} with `returned_to_supplier` optional.
+
+```ts
+interface OOSUnitsInputType {
+  away: number[];
+  flagged: number[];
+  returned_to_service: number[];
+  written_off: number[];
+  returned_to_supplier?: number[];
+}
+```
+
 ### `OOSUnitsSchema`
 
 Zod schema for {@link OOSUnitsType}.
@@ -7496,7 +7541,7 @@ interface OOSUnitsType {
   flagged: number[];
   returned_to_service: number[];
   written_off: number[];
-  returned_to_supplier?: number[];
+  returned_to_supplier: number[];
 }
 ```
 
@@ -10380,7 +10425,7 @@ Input for returning subrented units to the supplier
 
 Each line becomes ONE `subrent_out` movement naming the purchase in `sources[]`,
 in one transaction with the `quantity_returned` co-write. The movement id is
-`{uuid_session}|hire_out|{uid_product}`, so a retry lands on the same
+`{uuid_session}|subrent_out|{uid_product}`, so a retry lands on the same
 movements. There is no cost: a returned unit was never owned.
 
 ```ts
@@ -10753,11 +10798,10 @@ ownership. Each one moves `InventoryLedger.quantity_rented_in` with
 supplier.
 
 The ONE list: the schema's purchase-source rule and the ledger fold both read
-it, so a type added here reaches both. ⚠️ It carries the deprecated
-`hire_in` / `hire_out` until they are removed (see {@link MOVEMENT_TYPES}).
+it, so a type added here reaches both.
 
 ```ts
-const SUBRENT_MOVEMENT_TYPES: "subrent_in" | "subrent_out" | "return_to_supplier" | "hire_in" | "hire_out"[];
+const SUBRENT_MOVEMENT_TYPES: "subrent_in" | "subrent_out" | "return_to_supplier"[];
 ```
 
 ### `SUBSTITUTABLE_ITEM_TYPES`
@@ -13702,8 +13746,8 @@ source-bound record's start reflects the upstream event that pinned it.
 interface UpdateOutOfServiceInputType {
   status?: indexedAccess;
   reason?: OOSFlagReasonType;
-  breakdown?: OOSBreakdown;
-  units?: OOSUnitsType;
+  breakdown?: OOSBreakdownInputType;
+  units?: OOSUnitsInputType;
   dates?: typeLiteral;
   destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
@@ -15617,8 +15661,8 @@ the line's own.
 
 ### `oosBucketQuantity(b: Partial<OOSBreakdown>, key: OOSBreakdownKeyType): number`
 
-One bucket of a breakdown, reading an ABSENT key as 0 — the only way any
-reader touches a bucket while `returned_to_supplier` is optional. An absent
+One bucket of a breakdown, reading an ABSENT key as 0 — the way a
+reader touches a bucket of an INPUT, where `returned_to_supplier` may be absent. An absent
 key read raw is `undefined`, and `undefined` in a sum is `NaN`, which a `>`
 comparison then reads as false: the guards that refuse over-placement go
 silent rather than loud.
@@ -23436,16 +23480,39 @@ interface CreateOutOfServiceInputType {
 
 Per-bucket quantities. Σ ≤ `quantity` — the shortfall is "not yet in effect".
 
-⚠️ **`returned_to_supplier` is OPTIONAL during its expand** (the add-field
-order, `cfs-release-order`; precedent the booking `cleaning`/`maintenance`
-keys, `schemas/_breakdown.ts`). No stored record carries it yet, and a
-strict reader that required it would refuse every one. An absent key reads
-as 0 — always through {@link oosBucketQuantity}, never a per-site `?? 0`.
-Writers state it once prod manager reads it, a backfill zero-fills every
-record, and a later beta makes it required.
+`returned_to_supplier` is REQUIRED: every stored record states it (the api's
+writers state it, a backfill zero-filled the rest — prod, dev and `test`, read
+0 missing on 2026-10-26). The update INPUT still accepts it absent
+({@link OOSBreakdownInputType}): a client built before the bucket sends four
+keys, and that is no change, not an un-settle.
 
 ```ts
 interface OOSBreakdown {
+  flagged: number;
+  away: number;
+  written_off: number;
+  returned_to_service: number;
+  returned_to_supplier: number;
+}
+```
+
+### `OOSBreakdownInput`
+
+Zod schema for {@link OOSBreakdownInputType}.
+
+```ts
+const OOSBreakdownInput: z.ZodType<OOSBreakdownInputType>;
+```
+
+### `OOSBreakdownInputType`
+
+The breakdown a client SENDS: {@link OOSBreakdown} with `returned_to_supplier`
+optional. Storage is tightened, not the input (a client built before the
+bucket is not rebuilt in step), so an absent key reads as 0 here, through
+{@link oosBucketQuantity}.
+
+```ts
+interface OOSBreakdownInputType {
   flagged: number;
   away: number;
   written_off: number;
@@ -23571,6 +23638,28 @@ interface OOSStoreLocation {
 }
 ```
 
+### `OOSUnitsInput`
+
+Zod schema for {@link OOSUnitsInputType}.
+
+```ts
+const OOSUnitsInput: z.ZodType<OOSUnitsInputType>;
+```
+
+### `OOSUnitsInputType`
+
+The unit sets a client SENDS: {@link OOSUnitsType} with `returned_to_supplier` optional.
+
+```ts
+interface OOSUnitsInputType {
+  away: number[];
+  flagged: number[];
+  returned_to_service: number[];
+  written_off: number[];
+  returned_to_supplier?: number[];
+}
+```
+
 ### `OOSUnitsSchema`
 
 Zod schema for {@link OOSUnitsType}.
@@ -23595,7 +23684,7 @@ interface OOSUnitsType {
   flagged: number[];
   returned_to_service: number[];
   written_off: number[];
-  returned_to_supplier?: number[];
+  returned_to_supplier: number[];
 }
 ```
 
@@ -23724,8 +23813,8 @@ source-bound record's start reflects the upstream event that pinned it.
 interface UpdateOutOfServiceInputType {
   status?: indexedAccess;
   reason?: OOSFlagReasonType;
-  breakdown?: OOSBreakdown;
-  units?: OOSUnitsType;
+  breakdown?: OOSBreakdownInputType;
+  units?: OOSUnitsInputType;
   dates?: typeLiteral;
   destination?: OOSDestinationInputType | null;
   supplier?: typeLiteral | null;
@@ -23741,8 +23830,8 @@ Every bucket stated, an absent one as 0 — for a caller that needs the full sha
 
 ### `oosBucketQuantity(b: Partial<OOSBreakdown>, key: OOSBreakdownKeyType): number`
 
-One bucket of a breakdown, reading an ABSENT key as 0 — the only way any
-reader touches a bucket while `returned_to_supplier` is optional. An absent
+One bucket of a breakdown, reading an ABSENT key as 0 — the way a
+reader touches a bucket of an INPUT, where `returned_to_supplier` may be absent. An absent
 key read raw is `undefined`, and `undefined` in a sum is `NaN`, which a `>`
 comparison then reads as false: the guards that refuse over-placement go
 silent rather than loud.
@@ -24536,7 +24625,7 @@ Input for returning subrented units to the supplier
 
 Each line becomes ONE `subrent_out` movement naming the purchase in `sources[]`,
 in one transaction with the `quantity_returned` co-write. The movement id is
-`{uuid_session}|hire_out|{uid_product}`, so a retry lands on the same
+`{uuid_session}|subrent_out|{uid_product}`, so a retry lands on the same
 movements. There is no cost: a returned unit was never owned.
 
 ```ts
@@ -26508,7 +26597,7 @@ not say "out of A, into B", which `location: {from, to}` now says. The
 migration rewrites the stored pairs.
 
 ```ts
-const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "hire_in" | "hire_out" | "subrent_in" | "subrent_out" | "return_to_supplier" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
+const MOVEMENT_TYPES: "prep" | "check_out" | "check_in" | "mark_damaged" | "mark_lost" | "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning" | "mark_cleaning_undo" | "mark_maintenance" | "mark_maintenance_undo" | "rebook_out" | "rebook_in" | "sale" | "sale_return" | "sale_undo" | "sale_return_undo" | "sale_lost" | "sale_lost_undo" | "sale_damaged" | "sale_damaged_undo" | "opening_balance" | "purchase" | "find" | "make" | "adjustment_increase" | "adjustment_decrease" | "trade_in" | "write_off" | "reclass_out" | "reclass_in" | "subrent_in" | "subrent_out" | "return_to_supplier" | "transfer" | "return_to_service" | "flag" | "send_away" | "count_open" | "count_close" | "enroll" | "unenroll"[];
 ```
 
 ### `MOVEMENT_UNDOES`
@@ -26857,11 +26946,10 @@ ownership. Each one moves `InventoryLedger.quantity_rented_in` with
 supplier.
 
 The ONE list: the schema's purchase-source rule and the ledger fold both read
-it, so a type added here reaches both. ⚠️ It carries the deprecated
-`hire_in` / `hire_out` until they are removed (see {@link MOVEMENT_TYPES}).
+it, so a type added here reaches both.
 
 ```ts
-const SUBRENT_MOVEMENT_TYPES: "subrent_in" | "subrent_out" | "return_to_supplier" | "hire_in" | "hire_out"[];
+const SUBRENT_MOVEMENT_TYPES: "subrent_in" | "subrent_out" | "return_to_supplier"[];
 ```
 
 ### `StoreTransferLineInput`
@@ -40127,7 +40215,7 @@ Just enough of an out-of-service record to reduce it to an unavailable interval.
 interface StockOOSSource {
   status: OOSStatusType;
   quantity: number;
-  breakdown: Pick<OOSBreakdown, OOSBreakdownTerminalKeyType>;
+  breakdown: Partial<Pick<OOSBreakdown, OOSBreakdownTerminalKeyType>>;
   dates: typeLiteral;
 }
 ```

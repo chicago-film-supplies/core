@@ -132,21 +132,19 @@ export const OOS_BREAKDOWN_LABELS: Readonly<Record<OOSBreakdownKeyType, string>>
 /**
  * Per-bucket quantities. Σ ≤ `quantity` — the shortfall is "not yet in effect".
  *
- * ⚠️ **`returned_to_supplier` is OPTIONAL during its expand** (the add-field
- * order, `cfs-release-order`; precedent the booking `cleaning`/`maintenance`
- * keys, `schemas/_breakdown.ts`). No stored record carries it yet, and a
- * strict reader that required it would refuse every one. An absent key reads
- * as 0 — always through {@link oosBucketQuantity}, never a per-site `?? 0`.
- * Writers state it once prod manager reads it, a backfill zero-fills every
- * record, and a later beta makes it required.
+ * `returned_to_supplier` is REQUIRED: every stored record states it (the api's
+ * writers state it, a backfill zero-filled the rest — prod, dev and `test`, read
+ * 0 missing on 2026-10-26). The update INPUT still accepts it absent
+ * ({@link OOSBreakdownInputType}): a client built before the bucket sends four
+ * keys, and that is no change, not an un-settle.
  */
 export interface OOSBreakdown {
   flagged: number;
   away: number;
   written_off: number;
   returned_to_service: number;
-  /** Settled to the supplier's account (subrent). Optional until backfilled — see above. */
-  returned_to_supplier?: number;
+  /** Settled to the supplier's account (subrent). */
+  returned_to_supplier: number;
 }
 
 /** Zod schema for OOSBreakdown. */
@@ -155,14 +153,37 @@ export const OOSBreakdownSchema: z.ZodType<OOSBreakdown> = z.strictObject({
   away: z.int().min(0).meta({ column: true, label: "Away" }),
   written_off: z.int().min(0).meta({ column: true, label: "Written Off" }),
   returned_to_service: z.int().min(0).meta({ column: true, label: "Returned To Service" }),
-  // Optional during its expand: 0 stored records carry it (2026-10-25). Made
-  // required once the writers state it and the backfill reads 0 missing.
-  returned_to_supplier: z.int().min(0).meta({ column: true, label: "Returned To Supplier" }).optional(),
+  returned_to_supplier: z.int().min(0).meta({ column: true, label: "Returned To Supplier" }),
 });
 
 /**
- * One bucket of a breakdown, reading an ABSENT key as 0 — the only way any
- * reader touches a bucket while `returned_to_supplier` is optional. An absent
+ * The breakdown a client SENDS: {@link OOSBreakdown} with `returned_to_supplier`
+ * optional. Storage is tightened, not the input (a client built before the
+ * bucket is not rebuilt in step), so an absent key reads as 0 here, through
+ * {@link oosBucketQuantity}.
+ */
+export interface OOSBreakdownInputType {
+  flagged: number;
+  away: number;
+  written_off: number;
+  returned_to_service: number;
+  /** Optional on input: a pre-bucket client sends four keys. */
+  returned_to_supplier?: number;
+}
+
+/** Zod schema for {@link OOSBreakdownInputType}. */
+export const OOSBreakdownInput: z.ZodType<OOSBreakdownInputType> = z.object({
+  flagged: z.int().min(0),
+  away: z.int().min(0),
+  written_off: z.int().min(0),
+  returned_to_service: z.int().min(0),
+  // Optional on INPUT only — see the interface. Storage requires it.
+  returned_to_supplier: z.int().min(0).optional(),
+});
+
+/**
+ * One bucket of a breakdown, reading an ABSENT key as 0 — the way a
+ * reader touches a bucket of an INPUT, where `returned_to_supplier` may be absent. An absent
  * key read raw is `undefined`, and `undefined` in a sum is `NaN`, which a `>`
  * comparison then reads as false: the guards that refuse over-placement go
  * silent rather than loud.
@@ -202,19 +223,12 @@ export interface OOSUnitsType {
   flagged: number[];
   returned_to_service: number[];
   written_off: number[];
-  /** Optional during its expand, as {@link OOSBreakdown.returned_to_supplier}. */
-  returned_to_supplier?: number[];
+  /** Required in storage, as {@link OOSBreakdown.returned_to_supplier}. */
+  returned_to_supplier: number[];
 }
 
-/** Zod schema for {@link OOSUnitsType}. */
-export const OOSUnitsSchema: z.ZodType<OOSUnitsType> = z.strictObject({
-  away: UnitSet,
-  flagged: UnitSet,
-  returned_to_service: UnitSet,
-  written_off: UnitSet,
-  // Optional during its expand — see `OOSBreakdownSchema.returned_to_supplier`.
-  returned_to_supplier: UnitSet.optional(),
-}).superRefine((sets, ctx) => {
+/** Every bucket's set must be disjoint from the others: a unit is in one bucket at a time. */
+function unitsDisjoint(sets: Partial<OOSUnitsType>, ctx: z.RefinementCtx): void {
   const seen = new Map<number, OOSBreakdownKeyType>();
   for (const key of OOS_BREAKDOWN_KEYS) {
     for (const n of oosBucketUnits(sets, key)) {
@@ -229,7 +243,35 @@ export const OOSUnitsSchema: z.ZodType<OOSUnitsType> = z.strictObject({
       seen.set(n, key);
     }
   }
-});
+}
+
+/** Zod schema for {@link OOSUnitsType}. */
+export const OOSUnitsSchema: z.ZodType<OOSUnitsType> = z.strictObject({
+  away: UnitSet,
+  flagged: UnitSet,
+  returned_to_service: UnitSet,
+  written_off: UnitSet,
+  returned_to_supplier: UnitSet,
+}).superRefine(unitsDisjoint);
+
+/** The unit sets a client SENDS: {@link OOSUnitsType} with `returned_to_supplier` optional. */
+export interface OOSUnitsInputType {
+  away: number[];
+  flagged: number[];
+  returned_to_service: number[];
+  written_off: number[];
+  /** Optional on input, as {@link OOSBreakdownInputType.returned_to_supplier}. */
+  returned_to_supplier?: number[];
+}
+
+/** Zod schema for {@link OOSUnitsInputType}. */
+export const OOSUnitsInput: z.ZodType<OOSUnitsInputType> = z.object({
+  away: UnitSet,
+  flagged: UnitSet,
+  returned_to_service: UnitSet,
+  written_off: UnitSet,
+  returned_to_supplier: UnitSet.optional(),
+}).superRefine(unitsDisjoint);
 
 /** One bucket's unit set, reading an ABSENT set as `[]` — {@link oosBucketQuantity}'s twin. */
 export function oosBucketUnits(units: Partial<OOSUnitsType>, key: OOSBreakdownKeyType): number[] {
@@ -237,8 +279,8 @@ export function oosBucketUnits(units: Partial<OOSUnitsType>, key: OOSBreakdownKe
 }
 
 function unitsOverBreakdown(
-  units: OOSUnitsType,
-  breakdown: OOSBreakdown,
+  units: OOSUnitsInputType,
+  breakdown: OOSBreakdownInputType,
   ctx: z.RefinementCtx,
   path: (string | number)[],
 ): void {
@@ -557,13 +599,13 @@ export const CreateOutOfServiceInput: z.ZodType<CreateOutOfServiceInputType> = z
 export interface UpdateOutOfServiceInputType {
   status?: typeof OOS_USER_STATUSES[number];
   reason?: OOSFlagReasonType;
-  breakdown?: OOSBreakdown;
+  breakdown?: OOSBreakdownInputType;
   /**
    * The complete next unit sets, beside the complete next `breakdown` it
    * names units for (and only with it). The writer moves exactly the units
    * whose bucket changed; a set is a fact, so the diff guesses nothing.
    */
-  units?: OOSUnitsType;
+  units?: OOSUnitsInputType;
   dates?: { start?: string | null; end?: string | null };
   destination?: OOSDestinationInputType | null;
   supplier?: { uid: string } | null;
@@ -585,8 +627,8 @@ export interface UpdateOutOfServiceInputType {
 export const UpdateOutOfServiceInput: z.ZodType<UpdateOutOfServiceInputType> = z.object({
   status: z.enum(OOS_USER_STATUSES).optional(),
   reason: z.enum(OOS_FLAG_REASONS).optional(),
-  breakdown: OOSBreakdownSchema.optional(),
-  units: OOSUnitsSchema.optional(),
+  breakdown: OOSBreakdownInput.optional(),
+  units: OOSUnitsInput.optional(),
   dates: z.object({
     start: chicagoInstant().nullable().optional(),
     end: chicagoInstant().nullable().optional(),

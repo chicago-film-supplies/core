@@ -96,8 +96,6 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     write_off: null,
     reclass_out: null,
     reclass_in: null,
-    hire_in: null,
-    hire_out: null,
     subrent_in: null,
     subrent_out: null,
     return_to_supplier: null,
@@ -151,8 +149,6 @@ function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
     write_off: null,
     reclass_out: null,
     reclass_in: null,
-    hire_in: null,
-    hire_out: null,
     subrent_in: null,
     subrent_out: null,
     // The fixture's line leaves the record place: a lost unit, settled.
@@ -1189,8 +1185,6 @@ Deno.test("rule 5: only the twin reclass, the subrent types and the count bounda
   assertEquals(forbidden, [
     "reclass_out",
     "reclass_in",
-    "hire_in",
-    "hire_out",
     "subrent_in",
     "subrent_out",
     "return_to_supplier",
@@ -1410,12 +1404,7 @@ Deno.test("rule 6: an unenroll cannot take units off a booking — a teardown wa
 
 // ── subrent: custody without ownership ───────────────────────────────
 
-const SUBRENT_IN_OUT = ["subrent_in", "subrent_out", "hire_in", "hire_out"] as const;
-
-Deno.test("hire_in / hire_out are deprecated aliases: their contracts equal subrent_in / subrent_out exactly", () => {
-  assertEquals(MOVEMENT_CONTRACTS.hire_in, MOVEMENT_CONTRACTS.subrent_in);
-  assertEquals(MOVEMENT_CONTRACTS.hire_out, MOVEMENT_CONTRACTS.subrent_out);
-});
+const SUBRENT_IN_OUT = ["subrent_in", "subrent_out"] as const;
 
 Deno.test("subrent in/out: cost-forbidden, custody direction off places, no Xero posting", () => {
   for (const type of SUBRENT_IN_OUT) {

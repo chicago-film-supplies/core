@@ -748,7 +748,7 @@ export const ReturnPurchaseLineInput: z.ZodType<ReturnPurchaseLineInputType> = z
  *
  * Each line becomes ONE `subrent_out` movement naming the purchase in `sources[]`,
  * in one transaction with the `quantity_returned` co-write. The movement id is
- * `{uuid_session}|hire_out|{uid_product}`, so a retry lands on the same
+ * `{uuid_session}|subrent_out|{uid_product}`, so a retry lands on the same
  * movements. There is no cost: a returned unit was never owned.
  */
 export interface ReturnPurchaseInputType {

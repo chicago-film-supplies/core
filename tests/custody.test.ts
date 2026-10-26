@@ -869,9 +869,6 @@ Deno.test("custody - PARITY: serviceMovesFor ≡ the api's planBucketMoves over 
         for (let r = 0; r <= q - f - a - w; r++) {
           for (let s = 0; s <= q - f - a - w - r; s++) {
             oos.push({ flagged: f, away: a, written_off: w, returned_to_service: r, returned_to_supplier: s });
-            // A stored record with NO `returned_to_supplier` key must plan
-            // exactly as one stating 0 — the expand-phase shape of every record.
-            if (s === 0) oos.push({ flagged: f, away: a, written_off: w, returned_to_service: r });
           }
         }
       }
@@ -936,10 +933,10 @@ Deno.test("custody - settle: a record whose units are all settled is complete an
 });
 
 Deno.test("custody - record bounds: returned-to-service never falls, lost never flags, closed only un-writes-off", () => {
-  const open = { status: "active" as const, reason: "damaged" as const, quantity: 3, breakdown: { flagged: 1, away: 0, written_off: 0, returned_to_service: 1 } };
+  const open = { status: "active" as const, reason: "damaged" as const, quantity: 3, breakdown: { flagged: 1, away: 0, written_off: 0, returned_to_service: 1, returned_to_supplier: 0 } };
   assertEquals(serviceBucketBounds(open, "returned_to_service"), { min: 1, max: null });
   assertEquals(serviceBucketBounds({ ...open, reason: "lost" }, "flagged"), { min: 0, max: 0 });
-  const closed = { ...open, status: "complete" as const, breakdown: { flagged: 0, away: 0, written_off: 2, returned_to_service: 1 } };
+  const closed = { ...open, status: "complete" as const, breakdown: { flagged: 0, away: 0, written_off: 2, returned_to_service: 1, returned_to_supplier: 0 } };
   assertEquals(serviceBucketBounds(closed, "written_off"), { min: 0, max: 2 });
   assertEquals(serviceBucketBounds(closed, "away"), { min: 0, max: null });
   assertEquals(canEditServiceBreakdown(closed), true);
@@ -951,9 +948,8 @@ Deno.test("custody - record bounds: returned-to-service never falls, lost never 
   const settled = { ...open, status: "complete" as const, breakdown: { flagged: 0, away: 0, written_off: 0, returned_to_service: 1, returned_to_supplier: 2 } };
   assertEquals(serviceBucketBounds(settled, "returned_to_supplier"), { min: 0, max: 2 });
   assertEquals(canEditServiceBreakdown(settled), true);
-  // An absent key reads as 0: a closed record with nothing reversible stays locked.
-  assertEquals(canEditServiceBreakdown({ ...closed, breakdown: { flagged: 0, away: 0, written_off: 0, returned_to_service: 3 } }), false);
-  assertEquals(serviceBucketBounds({ ...open, breakdown: { flagged: 1, away: 0, written_off: 0, returned_to_service: 1 } }, "returned_to_supplier"), { min: 0, max: null });
+  // A closed record with nothing reversible stays locked.
+  assertEquals(canEditServiceBreakdown({ ...closed, breakdown: { flagged: 0, away: 0, written_off: 0, returned_to_service: 3, returned_to_supplier: 0 } }), false);
 });
 
 Deno.test("serviceUnitMovesFor: a settle names its units; undoing one lands away or flagged and must name them too", () => {
@@ -978,8 +974,8 @@ Deno.test("serviceUnitMovesFor: a settle names its units; undoing one lands away
   // A record stored before the key existed plans as if it stated [] / 0.
   assertEquals(
     unitPlan(
-      { flagged: 1, away: 0, written_off: 0, returned_to_service: 0 },
-      { away: [], flagged: [5], returned_to_service: [], written_off: [] },
+      { flagged: 1, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 0 },
+      { away: [], flagged: [5], returned_to_service: [], returned_to_supplier: [], written_off: [] },
       ob({ returned_to_supplier: 1 }),
       ou({ returned_to_supplier: [5] }),
       1,
@@ -1214,7 +1210,7 @@ function lossView(over: {
       number: 7,
       reason,
       quantity,
-      breakdown: { flagged: quantity, away: 0, written_off: over.written_off ?? 0, returned_to_service: 0 },
+      breakdown: { flagged: quantity, away: 0, written_off: over.written_off ?? 0, returned_to_service: 0, returned_to_supplier: 0 },
       status: "active",
       canceled_at: null,
       query_by_sources: ["bookings:b1"],
@@ -1279,7 +1275,7 @@ Deno.test("custody - planReclassification: the flagged units move, the rest spli
     reason: over.reason ?? "damaged" as OOSReasonType,
     status: (over.status ?? "active") as "active",
     quantity: over.quantity ?? 3,
-    breakdown: { flagged: 0, away: 0, written_off: 0, returned_to_service: 0, ...b },
+    breakdown: { flagged: 0, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 0, ...b },
     units: null,
   });
   const rental = { type: "rental" as const, name: "Light", breakdown: bd({ damaged: 3 }) };
@@ -1333,8 +1329,8 @@ Deno.test("custody - lossUndoRefusal: a carried record is undoable on its succes
 
 // ── serviceUnitMovesFor: api-cloudrun tests/unit/oosUnits.test.ts, carried over, plus the editor's checks ──
 
-const ob = (over: Partial<OOSBreakdown>): OOSBreakdown => ({ flagged: 0, away: 0, written_off: 0, returned_to_service: 0, ...over });
-const ou = (over: Partial<OOSUnitsType>): OOSUnitsType => ({ away: [], flagged: [], returned_to_service: [], written_off: [], ...over });
+const ob = (over: Partial<OOSBreakdown>): OOSBreakdown => ({ flagged: 0, away: 0, written_off: 0, returned_to_service: 0, returned_to_supplier: 0, ...over });
+const ou = (over: Partial<OOSUnitsType>): OOSUnitsType => ({ away: [], flagged: [], returned_to_service: [], returned_to_supplier: [], written_off: [], ...over });
 const unitPlan = (prevB: OOSBreakdown, prevU: OOSUnitsType, next: OOSBreakdown, nextU: OOSUnitsType, quantity: number, reason: OOSReasonType, shelf?: number[]) =>
   serviceUnitMovesFor({ quantity, reason, breakdown: prevB, units: prevU }, next, nextU, shelf ? { shelf } : {});
 const refusedWith = (plan: ReturnType<typeof unitPlan>, text: string) => {
@@ -1362,12 +1358,12 @@ Deno.test("serviceUnitMovesFor: each unit's own move, journaled in the table's o
     ok: true,
     moves: [{ from: "unplaced", to: "flagged", quantity: 2, units: [7, 9] }],
   });
-  assertEquals(unitPlan(ob({}), ou({}), ob({ returned_to_service: 2 }), ou({}), 2, "maintenance"), {
+  assertEquals(unitPlan(ob({}), ou({}), ob({ returned_to_service: 2, returned_to_supplier: 0 }), ou({}), 2, "maintenance"), {
     ok: true,
     moves: [{ from: "unplaced", to: "returned_to_service", quantity: 2, units: [] }],
   });
   // A found unit is a written_off → X move, first (D8).
-  assertEquals(unitPlan(ob({ written_off: 2 }), ou({ written_off: [1, 2] }), ob({ away: 1, returned_to_service: 1 }), ou({ away: [1], returned_to_service: [2] }), 2, "lost"), {
+  assertEquals(unitPlan(ob({ written_off: 2 }), ou({ written_off: [1, 2] }), ob({ away: 1, returned_to_service: 1, returned_to_supplier: 0 }), ou({ away: [1], returned_to_service: [2] }), 2, "lost"), {
     ok: true,
     moves: [
       { from: "written_off", to: "away", quantity: 1, units: [1] },
@@ -1377,11 +1373,11 @@ Deno.test("serviceUnitMovesFor: each unit's own move, journaled in the table's o
 });
 
 Deno.test("serviceUnitMovesFor: every api refusal, and the editor's own (G11 (c))", () => {
-  refusedWith(unitPlan(ob({ flagged: 2 }), ou({ flagged: [1, 2] }), ob({ returned_to_service: 2 }), ou({ flagged: [1, 2] }), 2, "damaged"), '"flagged → returned_to_service" must name the 2 unit(s)');
+  refusedWith(unitPlan(ob({ flagged: 2 }), ou({ flagged: [1, 2] }), ob({ returned_to_service: 2, returned_to_supplier: 0 }), ou({ flagged: [1, 2] }), 2, "damaged"), '"flagged → returned_to_service" must name the 2 unit(s)');
   refusedWith(unitPlan(ob({ flagged: 2 }), ou({ flagged: [1, 2] }), ob({ flagged: 2 }), ou({ flagged: [1] }), 2, "damaged"), "cannot leave this record's buckets");
   refusedWith(unitPlan(ob({ written_off: 1 }), ou({}), ob({ away: 1 }), ou({}), 1, "lost"), "written-off units back");
   // Out of returned_to_service: the manager offered it, the api refused it.
-  refusedWith(unitPlan(ob({ returned_to_service: 1 }), ou({ returned_to_service: [1] }), ob({ flagged: 1 }), ou({ flagged: [1] }), 1, "damaged"), "cannot be taken back out");
+  refusedWith(unitPlan(ob({ returned_to_service: 1, returned_to_supplier: 0 }), ou({ returned_to_service: [1] }), ob({ flagged: 1 }), ou({ flagged: [1] }), 1, "damaged"), "cannot be taken back out");
   refusedWith(unitPlan(ob({ away: 1 }), ou({ away: [1] }), ob({ flagged: 1 }), ou({ flagged: [1] }), 1, "lost"), "lost unit");
   refusedWith(unitPlan(ob({ written_off: 1 }), ou({ written_off: [1] }), ob({}), ou({}), 1, "lost"), "cannot leave this record's buckets");
   // The editor's checks, now the api's too.
