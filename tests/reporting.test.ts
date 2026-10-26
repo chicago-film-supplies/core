@@ -6,6 +6,7 @@ import {
   agingBucketOf,
   AgingReportSchema,
   OrgStatementSchema,
+  SubrentMarginReportSchema,
   type AgingBucketType,
 } from "../src/schemas/reporting.ts";
 import { agingOf } from "../src/utils/invoices.ts";
@@ -346,4 +347,73 @@ Deno.test("🔴 a statement line's organization names are PII-classified as mask
   for (const path of ["organization_path.name", "lines.organization_path.name"]) {
     assertEquals(leaves.includes(path), true, `${path} is not pii:"mask" — leaves: ${leaves}`);
   }
+});
+
+// ── The subrent margin report ───────────────────────────────────────
+//
+// 🔴 As above: each refinement clause gets a planted failure.
+
+const PO = "p".repeat(20);
+const ORDER_A = { uid: "o".repeat(20), number: 4101 };
+const ORDER_B = { uid: "q".repeat(20), number: 4102 };
+const COST_LINE = {
+  kind: "product" as const, uid_purchase: PO, purchase_number: 12, uid_product: "r".repeat(20),
+  name: "Arri Skypanel S60", hire_start: "2026-10-01T08:00:00.000-05:00", ordered_cents: 50_000, cost_cents: 50_000,
+};
+const CHARGE_LINE = {
+  ...COST_LINE, kind: "purchase" as const, uid_product: null, name: "Purchase charges", ordered_cents: null, cost_cents: 7_500,
+};
+const MARGIN = {
+  from_date: "2026-10-01T00:00:00.000-05:00",
+  to_date: "2026-11-01T00:00:00.000-05:00",
+  rows: [{ orders: [ORDER_A, ORDER_B], revenue_cents: 120_000, cost_cents: 57_500, margin_cents: 62_500, lines: [COST_LINE, CHARGE_LINE] }],
+  unattributed: { cost_cents: 2_000, lines: [{ ...COST_LINE, uid_purchase: "s".repeat(20), ordered_cents: 2_000, cost_cents: 2_000 }] },
+  totals: { revenue_cents: 120_000, cost_cents: 59_500, margin_cents: 60_500 },
+};
+
+Deno.test("SubrentMarginReportSchema accepts a report that ties", () => {
+  assertEquals(SubrentMarginReportSchema.parse(MARGIN).totals.margin_cents, 60_500);
+});
+
+Deno.test("a margin row may be negative, and an empty report ties at zero", () => {
+  const loss = { ...MARGIN.rows[0], revenue_cents: 10_000, margin_cents: -47_500 };
+  SubrentMarginReportSchema.parse({ ...MARGIN, rows: [loss], totals: { revenue_cents: 10_000, cost_cents: 59_500, margin_cents: -49_500 } });
+  SubrentMarginReportSchema.parse({
+    ...MARGIN, rows: [], unattributed: { cost_cents: 0, lines: [] }, totals: { revenue_cents: 0, cost_cents: 0, margin_cents: 0 },
+  });
+});
+
+Deno.test("🔴 a row whose cost is not the sum of its lines is refused", () => {
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, rows: [{ ...MARGIN.rows[0], cost_cents: 57_501, margin_cents: 62_499 }], totals: { ...MARGIN.totals, cost_cents: 59_501, margin_cents: 60_499 } }));
+});
+
+Deno.test("🔴 a row whose margin is not revenue − cost is refused", () => {
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, rows: [{ ...MARGIN.rows[0], margin_cents: 62_501 }] }));
+});
+
+Deno.test("🔴 an order in two rows is refused — its revenue would count twice", () => {
+  const second = { ...MARGIN.rows[0], orders: [ORDER_B] };
+  assertThrows(() => SubrentMarginReportSchema.parse({
+    ...MARGIN, rows: [MARGIN.rows[0], second],
+    totals: { revenue_cents: 240_000, cost_cents: 117_000, margin_cents: 123_000 },
+  }));
+});
+
+Deno.test("🔴 unattributed cost that is not the sum of its lines is refused", () => {
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, unattributed: { ...MARGIN.unattributed, cost_cents: 2_001 } }));
+});
+
+Deno.test("🔴 totals that leave out the unattributed spend are refused", () => {
+  // The unattributed row exists so the totals never hide spend; a total over
+  // the rows alone is exactly the number it is there to prevent.
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, totals: { revenue_cents: 120_000, cost_cents: 57_500, margin_cents: 62_500 } }));
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, totals: { ...MARGIN.totals, revenue_cents: 120_001, margin_cents: 60_501 } }));
+  assertThrows(() => SubrentMarginReportSchema.parse({ ...MARGIN, totals: { ...MARGIN.totals, margin_cents: 60_501 } }));
+});
+
+Deno.test("🔴 a cost line's kind must agree with its product and ordered amount", () => {
+  const bad = (line: object) => ({ ...MARGIN, rows: [{ ...MARGIN.rows[0], lines: [line, CHARGE_LINE] }] });
+  assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...COST_LINE, uid_product: null })));
+  assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...COST_LINE, ordered_cents: null })));
+  assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...CHARGE_LINE, cost_cents: 50_000, uid_product: "r".repeat(20) })));
 });

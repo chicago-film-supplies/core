@@ -1238,7 +1238,10 @@ export function computeDocumentDiffs(
    * that owns its booking (decision 9).
    *
    * - `fulfilled` is the record's billable units: `quantity −
-   *   returned_to_service`, or 0 once the record is canceled;
+   *   returned_to_service`, or 0 once the record is canceled. ⚠️ Deliberately
+   *   NOT net of `returned_to_supplier` (api-cloudrun#1360, D6): a rented unit
+   *   lost at the customer and settled to the supplier's account is still
+   *   billable to the customer, so a settle must not lower this count;
    * - `invoiced` is what non-void invoices' `replacement` lines bill it
    *   (`billedOutOfService`, the sum the api's over-bill advisory reads);
    * - `ordered` does not apply.

@@ -11516,6 +11516,147 @@ interface StoreTransferLineInputType {
 type StoreUpdated = EventEnvelope<Store> & typeLiteral;
 ```
 
+### `SubrentMarginCostLine`
+
+One cost contribution to a margin row: what CFS paid a supplier for one
+subrent purchase line, or for a charge on that purchase that names no line.
+
+`product` is a purchase line: the bill lines for that product net of the
+credit lines for it, plus every bill direct line attributed to the product
+(a loss or damage charge, api-cloudrun#1360), net of credit direct lines.
+`purchase` is a direct line naming no product on the purchase's lines —
+freight or a fee — which serves every order the purchase was raised for.
+
+```ts
+interface SubrentMarginCostLine {
+  kind: "product" | "purchase";
+  uid_purchase: string;
+  purchase_number: number;
+  uid_product: string | null;
+  name: string;
+  hire_start: string;
+  ordered_cents: number | null;
+  cost_cents: number;
+}
+```
+
+### `SubrentMarginCostLineSchema`
+
+Zod schema for {@link SubrentMarginCostLine}.
+
+```ts
+const SubrentMarginCostLineSchema: z.ZodType<SubrentMarginCostLine>;
+```
+
+### `SubrentMarginReport`
+
+The subrent margin report (api-cloudrun#1364): what the orders that subrented
+equipment billed, against what the subrents cost.
+
+**The window places COST, by hire start.** A purchase line is in the report
+when its `dates.start` lies in `[from_date, to_date)`; the orders it names
+then bring their WHOLE invoiced revenue, because an order's revenue has no
+hire start to place it by. Revenue is the pre-tax `subtotal_discounted_cents`
+of every non-void invoice, net of non-void credit notes against those
+invoices. Cost is supplier bills (lines and attributed direct lines) of the
+SUBRENT purchases, net of non-void supplier credits; a voided bill counts 0.
+
+🔴 **The refinement is the control total**, as on {@link OrgStatement}: a
+report whose rows do not add to its own totals is unrepresentable, and so is
+an order filed in two rows — the one way a group fold can double-count
+revenue.
+
+```ts
+interface SubrentMarginReport {
+  from_date: string;
+  to_date: string;
+  rows: SubrentMarginRow[];
+  unattributed: SubrentMarginUnattributed;
+  totals: SubrentMarginTotals;
+}
+```
+
+### `SubrentMarginReportSchema`
+
+Zod schema for {@link SubrentMarginReport}. See the interface for the refinement.
+
+```ts
+const SubrentMarginReportSchema: z.ZodType<SubrentMarginReport>;
+```
+
+### `SubrentMarginRow`
+
+One margin row: a GROUP of orders that share subrent cost or an invoice.
+
+⭐ **A group is the connected component, never an apportionment.** A purchase
+line naming two orders, or an invoice billing two, merges them into one row;
+nothing is ever split by bookings, days or revenue. Subrented units are
+fungible — they land on a shelf and any booking claims them — so the report
+cannot know which order a hire actually served, and any split would be a
+fabricated number. A row with one order is the common case; whether a row is
+shared is `orders.length > 1`, so no flag is stored beside it.
+
+⚠️ **Cost follows the operator's `uid_orders`, not usage.** A line naming
+no order is in {@link SubrentMarginReport.unattributed}; an under-attributed
+hire is fixed by editing the purchase line, not by this report.
+
+```ts
+interface SubrentMarginRow {
+  orders: MovementSessionOrderRef[];
+  revenue_cents: number;
+  cost_cents: number;
+  margin_cents: number;
+  lines: SubrentMarginCostLine[];
+}
+```
+
+### `SubrentMarginRowSchema`
+
+Zod schema for {@link SubrentMarginRow}.
+
+```ts
+const SubrentMarginRowSchema: z.ZodType<SubrentMarginRow>;
+```
+
+### `SubrentMarginTotals`
+
+The report's control totals.
+
+```ts
+interface SubrentMarginTotals {
+  revenue_cents: number;
+  cost_cents: number;
+  margin_cents: number;
+}
+```
+
+### `SubrentMarginTotalsSchema`
+
+Zod schema for {@link SubrentMarginTotals}.
+
+```ts
+const SubrentMarginTotalsSchema: z.ZodType<SubrentMarginTotals>;
+```
+
+### `SubrentMarginUnattributed`
+
+Subrent spend that names no order — there is no revenue to set it against.
+
+```ts
+interface SubrentMarginUnattributed {
+  cost_cents: number;
+  lines: SubrentMarginCostLine[];
+}
+```
+
+### `SubrentMarginUnattributedSchema`
+
+Zod schema for {@link SubrentMarginUnattributed}.
+
+```ts
+const SubrentMarginUnattributedSchema: z.ZodType<SubrentMarginUnattributed>;
+```
+
 ### `SubrentMovementTypeType`
 
 One {@link SUBRENT_MOVEMENT_TYPES} member.
