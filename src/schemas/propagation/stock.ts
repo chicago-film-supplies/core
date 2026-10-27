@@ -4,7 +4,7 @@
  * `stock/{P}` caches the *inputs* to an availability answer: the ledger's
  * `quantity_held` (and `quantity_rented_in`), the product's live booking
  * intervals, its non-terminal OOS intervals, and — since subrents — the SUPPLY
- * intervals of its live subrent purchases. Every rebuild reads all of them, so
+ * intervals of its live purchases (subrent hires and inbound buys). Every rebuild reads all of them, so
  * the same edges recur, per transaction, and are minted here rather than
  * copy-pasted into the rule files. ⚠️ This said "exactly three" inputs until
  * the supply edge arrived; do not write a count back.
@@ -103,7 +103,7 @@ const SUPPLY_FOLD: EnforcementRef = {
   kind: "audit",
   ref: "api-cloudrun/scripts/audit-stock.ts::supply_stale",
   clause:
-    "`supply[]` is multiset-equal to the fold of the product's live subrent purchases through `supplyFromPurchase`, in BOTH directions (`supply_stale`)",
+    "`supply[]` is multiset-equal to the fold of the product's live purchases — subrent and buy — through `supplyFromPurchase`, in BOTH directions (`supply_stale`)",
   gates: true,
 };
 
@@ -112,7 +112,7 @@ const SUPPLY_MODEL: EnforcementRef = {
   kind: "test",
   ref: "core/tests/stock.test.ts",
   clause:
-    "the `minimum over the window` half — *order 1074 reads 0*, *a hire ending 10-22 leaves the window −10, and the peak −10 at 10-22 + 1ms*, *two staggered hires — the window takes the MINIMUM, not the sum*; and the reducer's liveness (`supplyFromPurchase`)",
+    "the `minimum over the window` half — *order 1074 reads 0*, *a hire ending 10-22 leaves the window −10, and the peak −10 at 10-22 + 1ms*, *two staggered hires — the window takes the MINIMUM, not the sum*; the reducer's liveness (`supplyFromPurchase`); and inbound — *an open-ended entry counts in every window from its start on, and never as NaN*, *a partial receipt leaves held + inbound unchanged*, *the engine counts only the kinds asked for*",
   gates: true,
 };
 
@@ -311,19 +311,26 @@ const rules: CollectionRule[] = [
     target: "stock",
     mode: "fan-out",
     invariant:
-      'stock.supply[] is re-derived from every live (status active) SUBRENT purchase naming the product (`query_by_products`), each line PRE-REDUCED by `supplyFromPurchase` (@cfs/core/utils/stock) to an anonymous {start, end, quantity, kind:"subrent"} interval over its hire window. Supply counts from the moment the purchase exists — receipt is custody only — so a write of a subrent purchase is a supply change and bumps `stock-locks/{P}` like any other input. A SEPARATE array from unavailable[], because the fold takes the MINIMUM of supply over a window where it sums consumption. Anonymous for the reason unavailable[] is: no purchase uid, no supplier.',
+      'stock.supply[] is re-derived from every live (status active) purchase naming the product (`query_by_products`), each line PRE-REDUCED by `supplyFromPurchase` (@cfs/core/utils/stock) to an anonymous interval. A SUBRENT line is {kind:"subrent"} over its hire window, counted from the moment the purchase exists — receipt is custody only. A BUY line with an expected_date is {kind:"inbound"} over [expected_date, +∞) for its unreceived remainder, so a receipt moves units from the entry into quantity_held, and an overdue delivery keeps counting until it is received or short-closed. Every write of a purchase that changes the supply of a line therefore bumps `stock-locks/{P}` like any other input. The public hard gate counts subrent supply only (`supplyKinds`). A SEPARATE array from unavailable[], because the fold takes the MINIMUM of supply over a window where it sums consumption. Anonymous for the reason unavailable[] is: no purchase uid, no supplier.',
     enforced_by: [SUPPLY_FOLD, SUPPLY_MODEL],
     trigger: REBUILD_TRIGGER,
     fields: [
-      { source: ["lines", "dates", "start"], target: ["supply", "start"] },
-      { source: ["lines", "dates", "end"], target: ["supply", "end"] },
+      { source: ["lines", "dates", "start"], target: ["supply", "start"], transform: "a subrent's hire start" },
+      { source: ["lines", "dates", "end"], target: ["supply", "end"], transform: "a subrent's hire end; an inbound entry's end is null (+∞)" },
+      {
+        source: ["lines", "expected_date"],
+        target: ["supply", "start"],
+        transform: "a buy's expected date; a buy line with none contributes nothing",
+      },
       {
         source: ["lines", "quantity"],
         target: ["supply", "quantity"],
-        transform: "quantity − quantity_canceled − quantity_returned; an entry supplying nothing is DROPPED, not stored as a zero",
+        transform:
+          "subrent: quantity − quantity_canceled − quantity_returned; buy: quantity − quantity_canceled − quantity_received (`remainingToReceive`). An entry supplying nothing is DROPPED, not stored as a zero",
       },
       { source: ["lines", "quantity_canceled"], target: ["supply", "quantity"], transform: "subtracted — see quantity" },
-      { source: ["lines", "quantity_returned"], target: ["supply", "quantity"], transform: "subtracted — see quantity" },
+      { source: ["lines", "quantity_returned"], target: ["supply", "quantity"], transform: "subtracted on a subrent — see quantity" },
+      { source: ["lines", "quantity_received"], target: ["supply", "quantity"], transform: "subtracted on a buy — see quantity" },
       {
         source: ["status"],
         target: [],
@@ -332,12 +339,12 @@ const rules: CollectionRule[] = [
       {
         source: ["kind"],
         target: [],
-        transform: "the KIND filter — only a `subrent` supplies; a buy's units arrive as owned stock through its receipts",
+        transform: "the KIND switch — a `subrent` line supplies over its hire window, a `buy` line supplies its unreceived remainder from its expected date",
       },
       {
         source: [],
         target: ["supply", "kind"],
-        transform: '"subrent" — the one fact a reader learns beyond the number, so the operator panel can draw a Sub-rent row',
+        transform: '"subrent" or "inbound", from the purchase kind — the one fact a reader learns beyond the number, so the operator panel can draw a Sub-rent row and an Inbound row',
       },
     ],
   },
@@ -373,7 +380,7 @@ const rules: CollectionRule[] = [
       {
         source: [],
         target: ["supply"],
-        transform: "[] — a brand-new product has no subrent naming it",
+        transform: "[] — a brand-new product has no purchase naming it",
       },
       {
         source: ["quantity_rented_in"],

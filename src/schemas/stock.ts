@@ -100,10 +100,17 @@ export interface StockUnavailableEntry {
 
 /**
  * What added time-bounded SUPPLY. Each kind is drawn as its own row by the
- * operator panel, and api-cloudrun#1228's expected inbound from a buy will be
- * a second member.
+ * operator panel.
+ *
+ * - `subrent` — a live subrent line, over its hire window.
+ * - `inbound` — the unreceived remainder of a live BUY line, from its
+ *   `expected_date` on (api-cloudrun#1228). Open-ended: an overdue delivery
+ *   keeps counting until it is received or short-closed (owner, 2026-10-27),
+ *   and the operator panel marks it overdue. The public hard gate does not
+ *   count it, so a late delivery cannot oversell a web customer — see
+ *   `computeStockAvailability`'s `supplyKinds`.
  */
-export const STOCK_SUPPLY_KINDS = ["subrent"] as const;
+export const STOCK_SUPPLY_KINDS = ["subrent", "inbound"] as const;
 /** Union of {@link STOCK_SUPPLY_KINDS}. */
 export type StockSupplyKindType = typeof STOCK_SUPPLY_KINDS[number];
 /** Zod enum for {@link StockSupplyKindType}. */
@@ -111,9 +118,11 @@ export const StockSupplyKindEnum: z.ZodType<StockSupplyKindType> = z.enum(STOCK_
 
 /**
  * One pre-reduced, anonymous SUPPLY interval: units that will be in CFS's
- * hands over `[start, end]` without CFS owning them — a live subrent's line,
- * counted from the moment the purchase exists (owner, 2026-10-24), not from
- * receipt.
+ * hands over `[start, end]` and are not in `quantity_held` yet, or not as
+ * owned stock. A live subrent's line counts from the moment the purchase exists
+ * (owner, 2026-10-24), not from receipt. A buy line's inbound counts its
+ * unreceived remainder: a receipt moves units out of this entry and into
+ * `quantity_held`, so `held + inbound` does not change.
  *
  * Anonymous for the reason {@link StockUnavailableEntry} is: no purchase uid,
  * no supplier. A SEPARATE array, never a third `STOCK_UNAVAILABLE_KINDS`
@@ -121,16 +130,17 @@ export const StockSupplyKindEnum: z.ZodType<StockSupplyKindType> = z.enum(STOCK_
  * and must take the MINIMUM of supply over it — the two are opposite
  * reductions.
  *
- * `quantity` is what the line still supplies: `quantity − canceled − returned`.
+ * `quantity` is what the line still supplies: `quantity − canceled − returned`
+ * on a subrent, `quantity − canceled − received` on a buy.
  *
- * ⚠️ **Both bounds are non-null, and that is a fact about `subrent` only.**
- * A hire has a due-back date. api-cloudrun#1228's buy inbound is
- * `[expected_date, +∞)`, so adding that kind must widen `end` to nullable for
- * it — this is not "no schema change needed" for that issue.
+ * ⚠️ **`end` is per KIND, and the schema refuses the other pairing.** A
+ * `subrent` has a due-back date, so its `end` is non-null. An `inbound` entry
+ * is `[expected_date, +∞)`, so its `end` is always `null`, read as +∞ like a
+ * sale booking's. The engine adds no `end + 1ms` candidate for a null end.
  */
 export interface StockSupplyEntry {
   start: string;
-  end: string;
+  end: string | null;
   quantity: number;
   kind: StockSupplyKindType;
 }
@@ -168,7 +178,7 @@ export interface Stock {
   unavailable: StockUnavailableEntry[];
   /**
    * Time-bounded supply — see {@link StockSupplyEntry}. `[]` when nothing is
-   * hired in. Required on the same terms as {@link quantity_rented_in}.
+   * hired in or inbound. Required on the same terms as {@link quantity_rented_in}.
    */
   supply: StockSupplyEntry[];
   /**
@@ -280,11 +290,21 @@ const StockUnavailableEntrySchema: z.ZodType<StockUnavailableEntry> = z.strictOb
 
 const StockSupplyEntrySchema: z.ZodType<StockSupplyEntry> = z.strictObject({
   start: chicagoInstant().meta({ column: true, label: "Start" }),
-  end: chicagoInstant().meta({ column: true, label: "End" }),
+  end: chicagoInstant().meta({ column: true, label: "End" }).nullable(),
   // An entry that supplies nothing is never written, as on `unavailable[]`.
   quantity: z.int().min(1).meta({ column: true, label: "Quantity" }),
   kind: StockSupplyKindEnum.meta({ column: true, label: "Kind" }),
-}).refine((e) => Date.parse(e.end) >= Date.parse(e.start), { message: "a supply interval ends at or after it starts", path: ["end"] });
+}).superRefine((e, ctx) => {
+  // The bound is a fact about the kind: a hire has a due-back date, an
+  // inbound delivery counts until it is received or short-closed.
+  if (e.kind === "subrent" && e.end === null) {
+    ctx.addIssue({ code: "custom", path: ["end"], message: "a subrent supply interval has a due-back date" });
+  } else if (e.kind === "inbound" && e.end !== null) {
+    ctx.addIssue({ code: "custom", path: ["end"], message: "an inbound supply interval is open-ended" });
+  } else if (e.end !== null && Date.parse(e.end) < Date.parse(e.start)) {
+    ctx.addIssue({ code: "custom", path: ["end"], message: "a supply interval ends at or after it starts" });
+  }
+});
 
 /** Zod schema for {@link Stock}. */
 export const StockSchema: z.ZodType<Stock> = z.strictObject({

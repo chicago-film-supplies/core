@@ -10833,11 +10833,18 @@ const STATEMENT_FORMATS: "open_item" | "balance_forward"[];
 ### `STOCK_SUPPLY_KINDS`
 
 What added time-bounded SUPPLY. Each kind is drawn as its own row by the
-operator panel, and api-cloudrun#1228's expected inbound from a buy will be
-a second member.
+operator panel.
+
+- `subrent` — a live subrent line, over its hire window.
+- `inbound` — the unreceived remainder of a live BUY line, from its
+  `expected_date` on (api-cloudrun#1228). Open-ended: an overdue delivery
+  keeps counting until it is received or short-closed (owner, 2026-10-27),
+  and the operator panel marks it overdue. The public hard gate does not
+  count it, so a late delivery cannot oversell a web customer — see
+  `computeStockAvailability`'s `supplyKinds`.
 
 ```ts
-const STOCK_SUPPLY_KINDS: "subrent"[];
+const STOCK_SUPPLY_KINDS: "subrent" | "inbound"[];
 ```
 
 ### `STOCK_UNAVAILABLE_KINDS`
@@ -11405,9 +11412,11 @@ const StockSchema: z.ZodType<Stock>;
 ### `StockSupplyEntry`
 
 One pre-reduced, anonymous SUPPLY interval: units that will be in CFS's
-hands over `[start, end]` without CFS owning them — a live subrent's line,
-counted from the moment the purchase exists (owner, 2026-10-24), not from
-receipt.
+hands over `[start, end]` and are not in `quantity_held` yet, or not as
+owned stock. A live subrent's line counts from the moment the purchase exists
+(owner, 2026-10-24), not from receipt. A buy line's inbound counts its
+unreceived remainder: a receipt moves units out of this entry and into
+`quantity_held`, so `held + inbound` does not change.
 
 Anonymous for the reason {@link StockUnavailableEntry} is: no purchase uid,
 no supplier. A SEPARATE array, never a third `STOCK_UNAVAILABLE_KINDS`
@@ -11415,17 +11424,18 @@ member, because the fold SUMS every unavailable entry overlapping a window
 and must take the MINIMUM of supply over it — the two are opposite
 reductions.
 
-`quantity` is what the line still supplies: `quantity − canceled − returned`.
+`quantity` is what the line still supplies: `quantity − canceled − returned`
+on a subrent, `quantity − canceled − received` on a buy.
 
-⚠️ **Both bounds are non-null, and that is a fact about `subrent` only.**
-A hire has a due-back date. api-cloudrun#1228's buy inbound is
-`[expected_date, +∞)`, so adding that kind must widen `end` to nullable for
-it — this is not "no schema change needed" for that issue.
+⚠️ **`end` is per KIND, and the schema refuses the other pairing.** A
+`subrent` has a due-back date, so its `end` is non-null. An `inbound` entry
+is `[expected_date, +∞)`, so its `end` is always `null`, read as +∞ like a
+sale booking's. The engine adds no `end + 1ms` candidate for a null end.
 
 ```ts
 interface StockSupplyEntry {
   start: string;
-  end: string;
+  end: string | null;
   quantity: number;
   kind: StockSupplyKindType;
 }
@@ -25994,11 +26004,18 @@ payable rows too and MUST filter before treating `uid_organization` as set.
 ### `STOCK_SUPPLY_KINDS`
 
 What added time-bounded SUPPLY. Each kind is drawn as its own row by the
-operator panel, and api-cloudrun#1228's expected inbound from a buy will be
-a second member.
+operator panel.
+
+- `subrent` — a live subrent line, over its hire window.
+- `inbound` — the unreceived remainder of a live BUY line, from its
+  `expected_date` on (api-cloudrun#1228). Open-ended: an overdue delivery
+  keeps counting until it is received or short-closed (owner, 2026-10-27),
+  and the operator panel marks it overdue. The public hard gate does not
+  count it, so a late delivery cannot oversell a web customer — see
+  `computeStockAvailability`'s `supplyKinds`.
 
 ```ts
-const STOCK_SUPPLY_KINDS: "subrent"[];
+const STOCK_SUPPLY_KINDS: "subrent" | "inbound"[];
 ```
 
 ### `STOCK_UNAVAILABLE_KINDS`
@@ -26096,9 +26113,11 @@ const StockSchema: z.ZodType<Stock>;
 ### `StockSupplyEntry`
 
 One pre-reduced, anonymous SUPPLY interval: units that will be in CFS's
-hands over `[start, end]` without CFS owning them — a live subrent's line,
-counted from the moment the purchase exists (owner, 2026-10-24), not from
-receipt.
+hands over `[start, end]` and are not in `quantity_held` yet, or not as
+owned stock. A live subrent's line counts from the moment the purchase exists
+(owner, 2026-10-24), not from receipt. A buy line's inbound counts its
+unreceived remainder: a receipt moves units out of this entry and into
+`quantity_held`, so `held + inbound` does not change.
 
 Anonymous for the reason {@link StockUnavailableEntry} is: no purchase uid,
 no supplier. A SEPARATE array, never a third `STOCK_UNAVAILABLE_KINDS`
@@ -26106,17 +26125,18 @@ member, because the fold SUMS every unavailable entry overlapping a window
 and must take the MINIMUM of supply over it — the two are opposite
 reductions.
 
-`quantity` is what the line still supplies: `quantity − canceled − returned`.
+`quantity` is what the line still supplies: `quantity − canceled − returned`
+on a subrent, `quantity − canceled − received` on a buy.
 
-⚠️ **Both bounds are non-null, and that is a fact about `subrent` only.**
-A hire has a due-back date. api-cloudrun#1228's buy inbound is
-`[expected_date, +∞)`, so adding that kind must widen `end` to nullable for
-it — this is not "no schema change needed" for that issue.
+⚠️ **`end` is per KIND, and the schema refuses the other pairing.** A
+`subrent` has a due-back date, so its `end` is non-null. An `inbound` entry
+is `[expected_date, +∞)`, so its `end` is always `null`, read as +∞ like a
+sale booking's. The engine adds no `end + 1ms` candidate for a null end.
 
 ```ts
 interface StockSupplyEntry {
   start: string;
-  end: string;
+  end: string | null;
   quantity: number;
   kind: StockSupplyKindType;
 }
@@ -40352,6 +40372,16 @@ interface StockAvailability {
 }
 ```
 
+### `StockAvailabilityOptions`
+
+Optional knobs for {@link computeStockAvailability}.
+
+```ts
+interface StockAvailabilityOptions {
+  supplyKinds?: readonly StockSupplyKindType[];
+}
+```
+
 ### `StockBookingSource`
 
 Just enough of a booking to reduce it to an unavailable interval. Structural
@@ -40405,6 +40435,11 @@ interface StockOOSSource {
 ### `StockPurchaseSource`
 
 Just enough of a purchase to reduce it to the supply it adds.
+
+`quantity_received` and `expected_date` are REQUIRED, as they are on a stored
+line, because a buy's inbound reads them: a caller that builds its own rows
+and leaves them out must fail to compile rather than count every received
+unit as still inbound.
 
 ```ts
 interface StockPurchaseSource {
@@ -40479,7 +40514,7 @@ demand a check-out will draw (stock campaign P1). The api's staged-units
 sum, the unsourceable-bookings audit and the manager's shelf aggregation
 (`onShelfDemand`) each spelled it by hand.
 
-### `computeStockAvailability(stock: StockEngineInput, window: AvailabilityWindow): StockAvailability`
+### `computeStockAvailability(stock: StockEngineInput, window: AvailabilityWindow, _: unknown): StockAvailability`
 
 Compute availability for one product over one window, from the pre-reduced
 projection.
@@ -40493,7 +40528,7 @@ quantity_available = quantity_owned − quantity_booked(w) − quantity_out_of_s
 once received, and it is also in `supply` from the moment its purchase exists;
 starting from held would count a received rented unit twice. Supply is the
 MINIMUM over the window (see `minSupplyOver`), the opposite reduction to
-consumption's sum.
+consumption's sum. `options.supplyKinds` narrows which supply counts.
 
 Negative results are preserved, never clamped: an oversold product must stay
 visibly oversold, and #424 makes that the intended shortage signal for
@@ -40656,19 +40691,30 @@ on `available` did.
 ### `supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): StockSupplyEntry[]`
 
 Reduce a purchase to the supply intervals it adds for ONE product — one
-entry per live subrent line naming it (a purchase holds one line per
-product, so at most one), and `[]` otherwise.
+entry per live line naming it (a purchase holds one line per product, so at
+most one), and `[]` otherwise. The kind decides the interval:
+
+| purchase | entry | quantity |
+|---|---|---|
+| `subrent` | `[dates.start, dates.end]`, kind `subrent` | `quantity − canceled − returned` |
+| `buy` | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |
 
 Liveness is the reducers' one filter, as for bookings and out-of-service:
-only an `active` SUBRENT supplies anything, and a line supplying nothing is
-dropped rather than stored as a zero. A line supplies
-`quantity − canceled − returned`: what was ordered and not called off, less
-what has already gone back. RECEIPT does not enter — supply counts from the
-moment the purchase exists (owner, 2026-10-24); receipt is custody only.
+only an `active` purchase supplies anything, and a line supplying nothing is
+dropped rather than stored as a zero.
 
-⚠️ A unit that has not gone back by `dates.end` stops counting as supply at
-`end` while it is still in CFS's custody (`quantity_rented_in`). That is the
-conservative direction — late but valid; the return card shows it overdue.
+On a SUBRENT, RECEIPT does not enter — supply counts from the moment the
+purchase exists (owner, 2026-10-24); receipt is custody only. ⚠️ A unit that
+has not gone back by `dates.end` stops counting as supply at `end` while it
+is still in CFS's custody (`quantity_rented_in`). That is the conservative
+direction — late but valid; the return card shows it overdue.
+
+On a BUY, receipt is the whole point: a received unit leaves the inbound
+entry and enters `quantity_held` as owned stock, so a partial receipt leaves
+`held + inbound` unchanged. ⚠️ An OVERDUE delivery stays `[expected_date, +∞)`
+until it is received or short-closed (owner, 2026-10-27) — dropping it would
+need a clock-driven rebuild and hide stock CFS knows is coming. A line with
+no `expected_date` contributes nothing: there is no date to promise from.
 
 ### `unavailableFromBooking(b: StockBookingSource): StockUnavailableEntry | null`
 

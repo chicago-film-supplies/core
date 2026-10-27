@@ -17,23 +17,26 @@
  * transaction. The one edge they add is the bucket: the movement moves its
  * purchase line's `quantity_received` in the same commit.
  *
- * ## What a BUY's create, update and close propagate: nothing to stock
+ * ## What a BUY's create, update and close propagate: inbound supply
  *
- * On a buy, `create-purchase` and `update-purchase` write the purchase alone: it
- * moves no stock and posts nothing to Xero. A close moves the document's own
- * `quantity_canceled`, and propagates only when it leaves a line billed beyond
- * what was received: it then raises a supplier credit for the excess in the same
- * commit (`close-purchase:excess-to-credit`).
+ * On a buy, `create-purchase` and `update-purchase` move no stock and post
+ * nothing to Xero. But a dated buy line is INBOUND supply for its unreceived
+ * remainder (api-cloudrun#1228), so a create, an `expected_date` or quantity
+ * edit, and a close each change supply: they bump `stock-locks/{P}` and rebuild
+ * `stock/{P}` through {@link STOCK_STEPS}. ⚠️ An edit or a close can LOWER
+ * supply, which is the direction that oversells, so the bump is not optional.
+ * A close also moves the document's own `quantity_canceled`, and when it
+ * leaves a line billed beyond what was received it raises a supplier credit for
+ * the excess in the same commit (`close-purchase:excess-to-credit`).
  *
  * ## A SUBRENT's do: supply, and a card
  *
  * A subrent line is SUPPLY over its hire window from the moment the purchase
  * exists, so every write of a subrent — create, update, close, receive, return
- * — is a supply change: it bumps `stock-locks/{P}` and rebuilds `stock/{P}`
- * through {@link STOCK_STEPS} (`stock:purchases-to-stock`). And each subrent has
- * ONE "return to supplier" card the same writers keep current
- * (`purchase-card:purchases-to-card`). Each transaction's `description` says
- * which steps fire on a subrent only.
+ * — is a supply change, through the same {@link STOCK_STEPS}
+ * (`stock:purchases-to-stock`). And each subrent has ONE "return to supplier"
+ * card the same writers keep current (`purchase-card:purchases-to-card`). Each
+ * transaction's `description` says which steps fire on a subrent only.
  *
  * ## Billing
  *
@@ -1003,7 +1006,7 @@ const voidPurchaseCreditFromXeroTransaction: TransactionDefinition = {
 const createPurchaseTransaction: TransactionDefinition = {
   id: "create-purchase",
   description:
-    "Creates a purchase order: a supplier, a store, and one line per product with its quantity and amount, and cowrites its default thread. A purchase moves no stock and posts nothing to Xero; receipts and bills are their own writes. The document id is derived from the client's uuid_session, so a retried create lands on the same purchase. Fires on a SUBRENT only: the hire is supply from this moment, so the create bumps `stock-locks/{P}` and rebuilds `stock/{P}` via STOCK_STEPS, and writes the purchase's return card — with its own default thread, as a card's first write does.",
+    "Creates a purchase order: a supplier, a store, and one line per product with its quantity and amount, and cowrites its default thread. A purchase moves no stock and posts nothing to Xero; receipts and bills are their own writes. The document id is derived from the client's uuid_session, so a retried create lands on the same purchase. Every line is supply from this moment — a subrent over its hire window, a dated buy line as inbound from its expected date — so the create bumps `stock-locks/{P}` and rebuilds `stock/{P}` via STOCK_STEPS. On a SUBRENT only it also writes the purchase's return card, with its own default thread, as a card's first write does.",
   steps: [
     "cowrite-thread:purchases-to-thread",
     "cowrite-thread:thread-to-purchases",
@@ -1017,14 +1020,14 @@ const createPurchaseTransaction: TransactionDefinition = {
 const updatePurchaseTransaction: TransactionDefinition = {
   id: "update-purchase",
   description:
-    "Amends a purchase's date, reference, notes or lines. On a BUY it propagates nothing: a line's quantity may not fall below what is received or billed, and its amount may not change once it has any receipt or bill — a price that moved after goods arrived is a short close plus a new purchase, because every receipt already carries its share of the old price. On a SUBRENT a receipt carries no cost, so the amount and the hire end stay editable after receipt (a paid extension), and the update fires STOCK_STEPS and the return card, since the hire window is supply.",
+    "Amends a purchase's date, reference, notes or lines. On a BUY a line's quantity may not fall below what is received or billed, and its amount may not change once it has any receipt or bill — a price that moved after goods arrived is a short close plus a new purchase, because every receipt already carries its share of the old price; the update fires STOCK_STEPS, since a line's expected_date and unreceived quantity are inbound supply. On a SUBRENT a receipt carries no cost, so the amount and the hire end stay editable after receipt (a paid extension), and the update fires STOCK_STEPS and the return card, since the hire window is supply.",
   steps: [...STOCK_STEPS, "purchase-card:purchases-to-card"],
 };
 
 const closePurchaseTransaction: TransactionDefinition = {
   id: "close-purchase",
   description:
-    "Short-closes (or, with nothing received, cancels) some or all of a purchase's lines: `quantity_canceled = quantity − quantity_received`. When that leaves a line billed beyond what it received, the same commit raises a pushed supplier credit (`short_close`) for the excess and lowers `quantity_billed` to `quantity_received`; after the commit the credit is pushed to Xero and allocated to the purchase's bills, newest first, one `allocate-purchase-credit` per bill. The raised credit gets its default thread in the same commit, as an operator-raised one does. Fires on: a close of an over-billed line. A SUBRENT's close is refused while units are unreturned; when it is allowed it lowers the line's supply, so it fires STOCK_STEPS and the return card on a subrent only. Any other close propagates nothing.",
+    "Short-closes (or, with nothing received, cancels) some or all of a purchase's lines: `quantity_canceled = quantity − quantity_received`. When that leaves a line billed beyond what it received, the same commit raises a pushed supplier credit (`short_close`) for the excess and lowers `quantity_billed` to `quantity_received`; after the commit the credit is pushed to Xero and allocated to the purchase's bills, newest first, one `allocate-purchase-credit` per bill. The raised credit gets its default thread in the same commit, as an operator-raised one does. Fires on: a close of an over-billed line. Every close lowers the closed line's supply, so it fires STOCK_STEPS: on a BUY the short-closed remainder stops being inbound. A SUBRENT's close is refused while units are unreturned; when it is allowed it also fires the return card, on a subrent only.",
   steps: [
     "close-purchase:excess-to-credit",
     "cowrite-thread:purchase-credits-to-thread",

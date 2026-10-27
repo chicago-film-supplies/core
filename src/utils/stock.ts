@@ -96,8 +96,10 @@ import type {
   PurchaseStatusType,
   Stock,
   StockSupplyEntry,
+  StockSupplyKindType,
   StockUnavailableEntry,
 } from "../schemas/mod.ts";
+import { remainingToReceive } from "./purchases.ts";
 import { toChicagoEndOfDay, toChicagoInstant, toChicagoStartOfDay } from "./dates.ts";
 import { sumBreakdownKeys } from "./bookings.ts";
 
@@ -430,7 +432,14 @@ export function unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | n
   return { start: o.dates.start, end: o.dates.end, quantity, kind: "oos" };
 }
 
-/** Just enough of a purchase to reduce it to the supply it adds. */
+/**
+ * Just enough of a purchase to reduce it to the supply it adds.
+ *
+ * `quantity_received` and `expected_date` are REQUIRED, as they are on a stored
+ * line, because a buy's inbound reads them: a caller that builds its own rows
+ * and leaves them out must fail to compile rather than count every received
+ * unit as still inbound.
+ */
 export interface StockPurchaseSource {
   kind?: PurchaseKindType;
   status: PurchaseStatusType;
@@ -438,35 +447,57 @@ export interface StockPurchaseSource {
     uid_product: string;
     quantity: number;
     quantity_canceled: number;
+    quantity_received: number;
     quantity_returned?: number;
+    expected_date: string | null;
     dates?: { start: string; end: string };
   }[];
 }
 
 /**
  * Reduce a purchase to the supply intervals it adds for ONE product — one
- * entry per live subrent line naming it (a purchase holds one line per
- * product, so at most one), and `[]` otherwise.
+ * entry per live line naming it (a purchase holds one line per product, so at
+ * most one), and `[]` otherwise. The kind decides the interval:
+ *
+ * | purchase | entry | quantity |
+ * |---|---|---|
+ * | `subrent` | `[dates.start, dates.end]`, kind `subrent` | `quantity − canceled − returned` |
+ * | `buy` | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |
  *
  * Liveness is the reducers' one filter, as for bookings and out-of-service:
- * only an `active` SUBRENT supplies anything, and a line supplying nothing is
- * dropped rather than stored as a zero. A line supplies
- * `quantity − canceled − returned`: what was ordered and not called off, less
- * what has already gone back. RECEIPT does not enter — supply counts from the
- * moment the purchase exists (owner, 2026-10-24); receipt is custody only.
+ * only an `active` purchase supplies anything, and a line supplying nothing is
+ * dropped rather than stored as a zero.
  *
- * ⚠️ A unit that has not gone back by `dates.end` stops counting as supply at
- * `end` while it is still in CFS's custody (`quantity_rented_in`). That is the
- * conservative direction — late but valid; the return card shows it overdue.
+ * On a SUBRENT, RECEIPT does not enter — supply counts from the moment the
+ * purchase exists (owner, 2026-10-24); receipt is custody only. ⚠️ A unit that
+ * has not gone back by `dates.end` stops counting as supply at `end` while it
+ * is still in CFS's custody (`quantity_rented_in`). That is the conservative
+ * direction — late but valid; the return card shows it overdue.
+ *
+ * On a BUY, receipt is the whole point: a received unit leaves the inbound
+ * entry and enters `quantity_held` as owned stock, so a partial receipt leaves
+ * `held + inbound` unchanged. ⚠️ An OVERDUE delivery stays `[expected_date, +∞)`
+ * until it is received or short-closed (owner, 2026-10-27) — dropping it would
+ * need a clock-driven rebuild and hide stock CFS knows is coming. A line with
+ * no `expected_date` contributes nothing: there is no date to promise from.
  */
 export function supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): StockSupplyEntry[] {
-  if (p.kind !== "subrent" || p.status !== "active") return [];
+  if (p.status !== "active") return [];
   const entries: StockSupplyEntry[] = [];
   for (const line of p.lines) {
-    if (line.uid_product !== uidProduct || !line.dates) continue;
-    const quantity = line.quantity - line.quantity_canceled - (line.quantity_returned ?? 0);
-    if (quantity <= 0) continue;
-    entries.push({ start: line.dates.start, end: line.dates.end, quantity, kind: "subrent" });
+    if (line.uid_product !== uidProduct) continue;
+    if (p.kind === "subrent") {
+      if (!line.dates) continue;
+      const quantity = line.quantity - line.quantity_canceled - (line.quantity_returned ?? 0);
+      if (quantity <= 0) continue;
+      entries.push({ start: line.dates.start, end: line.dates.end, quantity, kind: "subrent" });
+    } else {
+      // A buy — or a purchase written before `kind` existed, which was one.
+      if (line.expected_date === null) continue;
+      const quantity = remainingToReceive(line);
+      if (quantity <= 0) continue;
+      entries.push({ start: line.expected_date, end: null, quantity, kind: "inbound" });
+    }
   }
   return entries;
 }
@@ -478,8 +509,17 @@ function supplyAt(supply: readonly { startMs: number; endMs: number; quantity: n
   return total;
 }
 
+/**
+ * A null `end` is +∞, as on `unavailable[]`. ⚠️ `Date.parse(null)` is `NaN`,
+ * and `NaN` compares false both ways, so passing a null end through would drop
+ * the entry silently from every answer rather than fail.
+ */
 function supplyMs(supply: readonly StockSupplyEntry[]): { startMs: number; endMs: number; quantity: number }[] {
-  return supply.map((e) => ({ startMs: Date.parse(e.start), endMs: Date.parse(e.end), quantity: e.quantity }));
+  return supply.map((e) => ({
+    startMs: Date.parse(e.start),
+    endMs: e.end === null ? Infinity : Date.parse(e.end),
+    quantity: e.quantity,
+  }));
 }
 
 /**
@@ -497,11 +537,13 @@ function supplyMs(supply: readonly StockSupplyEntry[]): { startMs: number; endMs
  *
  * Supply is piecewise constant and only FALLS just after an entry's end, so the
  * minimum over the window is attained at its start or at some `end + 1ms`
- * inside it (closed bounds).
+ * inside it (closed bounds). An open-ended entry never falls, so it adds no
+ * candidate.
  */
 function minSupplyOver(supply: readonly { startMs: number; endMs: number; quantity: number }[], startMs: number, endMs: number): number {
   let min = supplyAt(supply, startMs);
   for (const e of supply) {
+    if (e.endMs === Infinity) continue;
     const t = e.endMs + 1;
     if (t > startMs && t <= endMs) min = Math.min(min, supplyAt(supply, t));
   }
@@ -533,7 +575,7 @@ export interface StockAvailability {
   quantity_owned: number | null;
   quantity_booked: number;
   quantity_out_of_service: number;
-  /** Time-bounded supply (subrents) the window can promise — the minimum over it. `0` with no supply. */
+  /** Supply (subrents, inbound buys) the window can promise — the minimum over it. `0` with no supply. Only the kinds asked for; see {@link StockAvailabilityOptions}. */
   quantity_supplied: number;
   quantity_available: number | null;
 }
@@ -562,6 +604,23 @@ export function availableFrom(held: number | null, consumed: number): number | n
   return held === null ? null : held - consumed;
 }
 
+/** Optional knobs for {@link computeStockAvailability}. */
+export interface StockAvailabilityOptions {
+  /**
+   * Count only these supply kinds; every kind when absent.
+   *
+   * Two callers need it. The public hard gate counts `subrent` alone, so a late
+   * delivery cannot oversell a web customer (owner, 2026-10-27). And the
+   * operator panel draws one row per kind by asking once per kind.
+   *
+   * ⚠️ **There is deliberately no per-kind result field.** Supply is a MINIMUM
+   * over the window, and the minimum of a sum is not the sum of the minimums:
+   * one row per kind does not add up to `quantity_supplied`. Ask the engine
+   * again with `[kind]` instead.
+   */
+  supplyKinds?: readonly StockSupplyKindType[];
+}
+
 /**
  * Compute availability for one product over one window, from the pre-reduced
  * projection.
@@ -575,7 +634,7 @@ export function availableFrom(held: number | null, consumed: number): number | n
  * once received, and it is also in `supply` from the moment its purchase exists;
  * starting from held would count a received rented unit twice. Supply is the
  * MINIMUM over the window (see `minSupplyOver`), the opposite reduction to
- * consumption's sum.
+ * consumption's sum. `options.supplyKinds` narrows which supply counts.
  *
  * Negative results are preserved, never clamped: an oversold product must stay
  * visibly oversold, and #424 makes that the intended shortage signal for
@@ -597,6 +656,7 @@ export function availableFrom(held: number | null, consumed: number): number | n
 export function computeStockAvailability(
   stock: StockEngineInput,
   window: AvailabilityWindow,
+  options: StockAvailabilityOptions = {},
 ): StockAvailability {
   const { startMs, endMs } = windowMs(window);
 
@@ -612,7 +672,8 @@ export function computeStockAvailability(
   }
 
   const quantity_owned = ownedOf(stock);
-  const quantity_supplied = minSupplyOver(supplyMs(stock.supply), startMs, endMs);
+  const supply = options.supplyKinds === undefined ? stock.supply : stock.supply.filter((e) => options.supplyKinds!.includes(e.kind));
+  const quantity_supplied = minSupplyOver(supplyMs(supply), startMs, endMs);
   return {
     quantity_held: stock.quantity_held,
     quantity_owned,
@@ -732,8 +793,10 @@ export function peakStockConsumption(
   if (entries.some((e) => e.startMs === null)) candidates.push({ at: -Infinity, iso: null });
   for (const e of entries) if (e.startMs !== null) candidates.push({ at: e.startMs, iso: e.startIso });
   // Where supply falls away. The ISO is built in Chicago form, since there is no
-  // entry whose own bound it could be.
+  // entry whose own bound it could be. An open-ended (inbound) entry never
+  // falls away, so it adds no candidate; `new Date(Infinity)` would throw.
   for (const e of supply) {
+    if (e.endMs === Infinity) continue;
     const at = e.endMs + 1;
     candidates.push({ at, iso: toChicagoInstant(new Date(at).toISOString()) });
   }

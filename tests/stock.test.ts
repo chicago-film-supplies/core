@@ -807,7 +807,17 @@ Deno.test("supply: with no demand, availability is owned + supply over the hire,
 });
 
 Deno.test("supplyFromPurchase: a live subrent's line, net of canceled and returned; [] for anything else", () => {
-  const line = { uid_product: "P", quantity: 10, quantity_canceled: 0, quantity_returned: 0, dates: { start: H_START, end: H_END } };
+  // `expected_date: null`, so the buy readings below are [] for want of a date,
+  // not for being a buy — the inbound tests below cover a dated buy.
+  const line = {
+    uid_product: "P",
+    quantity: 10,
+    quantity_canceled: 0,
+    quantity_received: 0,
+    quantity_returned: 0,
+    expected_date: null,
+    dates: { start: H_START, end: H_END },
+  };
   const p = { kind: "subrent" as const, status: "active" as const, lines: [line, { ...line, uid_product: "Q" }] };
   assertEquals(supplyFromPurchase(p, "P"), [sup(H_START, H_END, 10)]);
   assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, quantity_canceled: 4, quantity_returned: 3 }] }, "P"), [sup(H_START, H_END, 3)]);
@@ -818,4 +828,100 @@ Deno.test("supplyFromPurchase: a live subrent's line, net of canceled and return
   assertEquals(supplyFromPurchase({ ...p, kind: "buy" }, "P"), []);
   assertEquals(supplyFromPurchase({ status: "active", lines: [line] }, "P"), [], "an absent kind is a buy");
   assertEquals(supplyFromPurchase(p, "R"), []);
+});
+
+// ── Supply: inbound from a buy (api-cloudrun#1228) ───────────────────────────
+//
+// A buy line's unreceived remainder is supply from its expected date, open-ended:
+// an overdue delivery keeps counting until it is received or short-closed.
+
+const EXPECTED = "2026-10-21T00:00:00.000-05:00";
+const inb = (start: string, quantity: number): StockSupplyEntry => ({ start, end: null, quantity, kind: "inbound" });
+
+Deno.test("supplyFromPurchase: a live buy line is open-ended inbound for its unreceived remainder", () => {
+  const line = {
+    uid_product: "P",
+    quantity: 10,
+    quantity_canceled: 0,
+    quantity_received: 0,
+    expected_date: EXPECTED,
+  };
+  const p = { kind: "buy" as const, status: "active" as const, lines: [line, { ...line, uid_product: "Q" }] };
+  assertEquals(supplyFromPurchase(p, "P"), [inb(EXPECTED, 10)]);
+  // A partial receipt moves units out of inbound (and into held).
+  assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, quantity_received: 4 }] }, "P"), [inb(EXPECTED, 6)]);
+  // A short close of the remainder drops the entry; so does a full receipt.
+  assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, quantity_received: 4, quantity_canceled: 6 }] }, "P"), []);
+  assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, quantity_received: 10 }] }, "P"), []);
+  // No expected date, nothing to promise from.
+  assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, expected_date: null }] }, "P"), []);
+  // Liveness.
+  assertEquals(supplyFromPurchase({ ...p, status: "complete" }, "P"), []);
+  assertEquals(supplyFromPurchase({ ...p, status: "canceled" }, "P"), []);
+  // An absent kind is a buy.
+  assertEquals(supplyFromPurchase({ status: "active", lines: [line] }, "P"), [inb(EXPECTED, 10)]);
+  assertEquals(supplyFromPurchase(p, "R"), []);
+});
+
+Deno.test("inbound: an open-ended entry counts in every window from its start on, and never as NaN", () => {
+  const s = stock(10, [], [inb(EXPECTED, 5)]);
+  const before = computeStockAvailability(s, win("2026-10-18", "2026-10-20"));
+  assertEquals([before.quantity_supplied, before.quantity_available], [0, 10]);
+  // A window straddling the start cannot promise it for the whole span.
+  assertEquals(computeStockAvailability(s, win("2026-10-20", "2026-10-22")).quantity_supplied, 0);
+  const after = computeStockAvailability(s, win("2026-10-21", "2026-10-24"));
+  assertEquals([after.quantity_supplied, after.quantity_available], [5, 15]);
+  // Overdue stays counted: years later the entry is still live.
+  const far = computeStockAvailability(s, win("2029-01-01", "2029-12-31"));
+  assertEquals([far.quantity_supplied, far.quantity_available], [5, 15]);
+  // `Date.parse(null)` is NaN, and NaN would drop the entry silently, not throw.
+  for (const a of [before, after, far]) {
+    assertEquals(Number.isNaN(a.quantity_supplied), false);
+    assertEquals(Number.isNaN(a.quantity_available), false);
+  }
+});
+
+Deno.test("inbound: a partial receipt leaves held + inbound unchanged", () => {
+  const line = { uid_product: "P", quantity: 10, quantity_canceled: 0, quantity_received: 0, expected_date: EXPECTED };
+  const p = { kind: "buy" as const, status: "active" as const, lines: [line] };
+  const w = win("2026-10-22", "2026-10-24");
+  const ordered = stock(10, [iv(B_START, B_END, 15)], supplyFromPurchase(p, "P"));
+  const received = stock(14, [iv(B_START, B_END, 15)], supplyFromPurchase({ ...p, lines: [{ ...line, quantity_received: 4 }] }, "P"));
+  assertEquals(computeStockAvailability(ordered, w).quantity_available, 5);
+  assertEquals(computeStockAvailability(received, w).quantity_available, 5);
+});
+
+Deno.test("supplyKinds: the engine counts only the kinds asked for; every kind by default", () => {
+  const s = stock(10, [iv(B_START, B_END, 20)], [sup(H_START, H_END, 10), inb("2026-10-17T00:00:00.000-05:00", 3)]);
+  const w = win("2026-10-19", "2026-10-24");
+  assertEquals(computeStockAvailability(s, w).quantity_supplied, 13);
+  assertEquals(computeStockAvailability(s, w, {}).quantity_supplied, 13);
+  assertEquals(computeStockAvailability(s, w, { supplyKinds: ["subrent"] }).quantity_supplied, 10);
+  assertEquals(computeStockAvailability(s, w, { supplyKinds: ["inbound"] }).quantity_supplied, 3);
+  assertEquals(computeStockAvailability(s, w, { supplyKinds: [] }).quantity_supplied, 0);
+  assertEquals(computeStockAvailability(s, w, { supplyKinds: ["subrent"] }).quantity_available, 0);
+  assertEquals(computeStockAvailability(s, w).quantity_available, 3);
+});
+
+Deno.test("supplyKinds: per-kind minimums do not add up to the total, which is why there is no per-kind field", () => {
+  // Subrent covers 10-19..10-21, inbound arrives 10-22: each kind alone has a
+  // gap in 10-19..10-24, so each row reads 0, while together they never drop below 5.
+  const s = stock(0, [], [sup("2026-10-18T00:00:00.000-05:00", "2026-10-21T23:59:59.999-05:00", 5), inb("2026-10-22T00:00:00.000-05:00", 5)]);
+  const w = win("2026-10-19", "2026-10-24");
+  assertEquals(computeStockAvailability(s, w, { supplyKinds: ["subrent"] }).quantity_supplied, 0);
+  assertEquals(computeStockAvailability(s, w, { supplyKinds: ["inbound"] }).quantity_supplied, 0);
+  assertEquals(computeStockAvailability(s, w).quantity_supplied, 5);
+});
+
+Deno.test("inbound: the peak counts it, and an open-ended entry adds no end + 1ms candidate", () => {
+  // Inbound arriving mid-booking does not cover the booking's start.
+  const late = stock(10, [iv(B_START, B_END, 20)], [inb(EXPECTED, 10)]);
+  const p1 = peakStockConsumption(late);
+  assertEquals([p1.quantity_supplied, p1.quantity_available, p1.since], [0, -10, B_START]);
+  // Inbound before the booking covers it.
+  const early = stock(10, [iv(B_START, B_END, 20)], [inb("2026-10-15T00:00:00.000-05:00", 10)]);
+  const p2 = peakStockConsumption(early);
+  assertEquals([p2.quantity_supplied, p2.quantity_available], [10, 0]);
+  // Inbound alone never makes a peak, and no candidate is built from +∞.
+  assertEquals(peakStockConsumption(stock(10, [], [inb(EXPECTED, 10)])).quantity_available, 10);
 });

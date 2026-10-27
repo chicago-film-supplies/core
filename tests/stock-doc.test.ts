@@ -171,3 +171,15 @@ Deno.test("StockSchema: supply[] and quantity_rented_in are optional (expand/con
   assertEquals(paths({ ...ok, supply: [{ start, end, quantity: 0, kind: "subrent" }] }), ["supply.0.quantity"]);
   assertEquals(paths({ ...ok, supply: [{ start, end: null, quantity: 1, kind: "subrent" }] }), ["supply.0.end"]);
 });
+
+Deno.test("StockSchema: an inbound supply entry is open-ended, and only an inbound one is", () => {
+  const start = "2026-10-21T00:00:00.000-05:00";
+  const paths = (doc: unknown) => {
+    const r = StockSchema.safeParse(doc);
+    return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+  };
+  const ok = { ...validStock, quantity_rented_in: 0, supply: [{ start, end: null, quantity: 5, kind: "inbound" }] };
+  assertEquals(paths(ok), []);
+  assertEquals(paths({ ...ok, supply: [{ start, end: "2026-10-25T17:00:00.000-05:00", quantity: 5, kind: "inbound" }] }), ["supply.0.end"]);
+  assertEquals(paths({ ...ok, supply: [{ start, end: null, quantity: 0, kind: "inbound" }] }), ["supply.0.quantity"]);
+});
