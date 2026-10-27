@@ -12,9 +12,12 @@ import {
   type CreditNoteStatusType,
   INVOICE_ACTION_IDS,
   INVOICE_ACTIONS,
+  INVOICE_FIELD_CLASSES,
+  INVOICE_FIELD_FREEZE,
   INVOICE_STATUS_CONTRACTS,
   type InvoiceActionId,
   type InvoiceDocItemType,
+  type InvoiceFieldClass,
   type InvoiceStatusType,
   SETTLEMENT_CONTRACTS,
   type SettlementTypeType,
@@ -37,6 +40,7 @@ import {
   orderInvoiceActionsFor,
 } from "../src/utils/invoice-actions.ts";
 import type { InvoiceXeroSyncStatus } from "../src/utils/invoice-xero-sync.ts";
+import { invoiceFieldIsFrozen } from "../src/utils/invoices.ts";
 import type { AccountedInvoice } from "../src/utils/quantityAccounting.ts";
 
 const INVOICE_STATUSES = Object.keys(INVOICE_STATUS_CONTRACTS) as InvoiceStatusType[];
@@ -318,6 +322,55 @@ Deno.test("D8 edit_items: always offered; money frozen with the freeze, labels n
   const closed = invoice("paid", { total_cents: 0, closure_count: 1 });
   assertEquals(has(invoiceActionsFor(closed), "edit_organization"), false);
   assertEquals(has(invoiceActionsFor(invoice("issued", { total_cents: 0, closure_count: 0 })), "edit_date"), true);
+});
+
+Deno.test("D4 frozen_classes: literal per fixture — draft, issued, part_paid with a payment, paid, void", () => {
+  const cases: [string, OfferInvoice, InvoiceFieldClass[]][] = [
+    ["draft", invoice("draft"), []],
+    ["issued", invoice("issued"), []],
+    ["part_paid + payment", invoice("part_paid", { amount_paid_cents: 1 }), ["organization", "date", "line_money", "coa_revenue"]],
+    ["paid", invoice("paid"), ["organization", "date", "line_money", "coa_revenue"]],
+    ["void", invoice("void"), ["organization", "date", "line_money", "coa_revenue", "tracking"]],
+  ];
+  for (const [label, inv, want] of cases) {
+    const o = invoiceActionsFor(inv).find((x) => x.action === "edit_items")!;
+    assertEquals(o.frozen_classes, want, label);
+    assertEquals(o.money_frozen, want.includes("line_money"), label);
+    assertEquals(INVOICE_FIELD_CLASSES.filter((c) => invoiceFieldIsFrozen(inv, c)), want, label);
+    assertEquals(has(invoiceActionsFor(inv), "edit_organization"), !want.includes("organization"), label);
+    assertEquals(has(invoiceActionsFor(inv), "edit_date"), !want.includes("date"), label);
+  }
+  // The text class is never frozen — on a void invoice included.
+  assertEquals(invoiceFieldIsFrozen(invoice("void"), "text"), false);
+});
+
+Deno.test("D4 INVOICE_FIELD_FREEZE: every class has a row, and no field sits in two classes", () => {
+  assertEquals(Object.keys(INVOICE_FIELD_FREEZE).sort(), [...INVOICE_FIELD_CLASSES].sort());
+  const seen = new Map<string, string>();
+  for (const cls of INVOICE_FIELD_CLASSES) {
+    for (const m of INVOICE_FIELD_FREEZE[cls].members) {
+      assertEquals(seen.get(m), undefined, `${m} is in ${seen.get(m)} and ${cls}`);
+      seen.set(m, cls);
+    }
+  }
+  // Phase 0's ruling, stated literally: Xero takes a settled tracking edit, not an account change.
+  assertEquals(INVOICE_FIELD_FREEZE.tracking.xero_accepts_on_settled, true);
+  assertEquals(INVOICE_FIELD_FREEZE.coa_revenue.xero_accepts_on_settled, false);
+});
+
+Deno.test("D8 void: refused while Xero holds a settlement; absent or false keeps the offer", () => {
+  const inv = invoice("part_paid", { amount_paid_cents: 1 });
+  assertEquals(has(invoiceActionsFor(inv), "void"), true, "absent ⇒ unchanged");
+  assertEquals(has(invoiceActionsFor(inv, { xero_held_settlements: false }), "void"), true);
+  assertEquals(has(invoiceActionsFor(inv, { xero_held_settlements: true }), "void"), false);
+  assertThrows(
+    () => assertInvoiceAction(inv, { xero_held_settlements: true }, { action: "void" }),
+    InvoiceActionRefusal,
+    "Xero holds",
+  );
+  assertInvoiceAction(inv, {}, { action: "void" });
+  // Still the status gate first: a void invoice is refused for its status, not for Xero.
+  assertThrows(() => assertInvoiceAction(invoice("void"), {}, { action: "void" }), InvoiceActionRefusal, "cannot be voided");
 });
 
 // ── push to Xero (api-cloudrun#1332) ─────────────────────────────────

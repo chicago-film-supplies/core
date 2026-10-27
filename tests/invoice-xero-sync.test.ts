@@ -1,5 +1,5 @@
 import { assertEquals, assertNotEquals } from "@std/assert";
-import type { Invoice, Settlement } from "../src/schemas/mod.ts";
+import { INVOICE_STATUS_CONTRACTS, type Invoice, type InvoiceStatusType, type Settlement } from "../src/schemas/mod.ts";
 import {
   canonicalJson,
   hash48,
@@ -74,6 +74,29 @@ Deno.test("invoiceStatusTracksXeroEdits: the status half, true for paid — whos
   for (const status of ["draft", "void"]) assertEquals(invoiceStatusTracksXeroEdits(status), false, status);
   // The trap it exists for: `null` is not "status only" for paid.
   assertEquals(invoiceXeroSyncStatus(invoice({ status: "paid" }), null), "not_applicable");
+});
+
+Deno.test("D7 tracks_xero_edits: literal per status, and non-null exactly where live_in_xero", () => {
+  const statuses = Object.keys(INVOICE_STATUS_CONTRACTS) as InvoiceStatusType[];
+  assertEquals(
+    Object.fromEntries(statuses.map((s) => [s, INVOICE_STATUS_CONTRACTS[s].tracks_xero_edits])),
+    { draft: null, issued: "always", part_paid: "always", paid: "once_pushed", void: null },
+  );
+  for (const s of statuses) {
+    const c = INVOICE_STATUS_CONTRACTS[s];
+    assertEquals(c.tracks_xero_edits !== null, c.live_in_xero, s);
+    assertEquals(invoiceStatusTracksXeroEdits(s), c.tracks_xero_edits !== null, s);
+  }
+  assertEquals(invoiceStatusTracksXeroEdits("voided"), false, "outside the vocabulary");
+});
+
+Deno.test("D9: a tracking-only line edit moves the projection hash", () => {
+  const tagged = (over: Record<string, unknown>) =>
+    invoice({ items: [{ uid: "o", type: "order", path: ["o"] }, { ...line("tent", 5000), ...over }] });
+  const base = invoiceXeroProjectionHash(tagged({ tracking_category: "Lighting", xero_tracking_option_id: "opt-1" }));
+  assertNotEquals(invoiceXeroProjectionHash(tagged({ tracking_category: "Grip", xero_tracking_option_id: "opt-1" })), base);
+  assertNotEquals(invoiceXeroProjectionHash(tagged({ tracking_category: "Lighting", xero_tracking_option_id: "opt-2" })), base);
+  assertEquals(invoiceXeroProjectionHash(tagged({ tracking_category: "Lighting", xero_tracking_option_id: "opt-1" })), base);
 });
 
 Deno.test("canonicalJson/hash48: key order does not move the hash; content does", () => {

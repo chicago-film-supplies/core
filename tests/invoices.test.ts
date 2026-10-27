@@ -38,6 +38,7 @@ import {
   syncOrderToInvoiceSelective,
   validateInvoiceItemPaths,
   validateInvoiceItemUniqueness,
+  xeroAccrecLineRefs,
 } from "../src/utils/invoices.ts";
 import type {
   InvoiceDocItemType,
@@ -787,6 +788,22 @@ Deno.test("per field: a NEW taxes_base no longer locks a line — G2 is gone", (
     "Renamed",
     "the line must still follow the order — a missing derived key must not freeze it",
   );
+});
+
+Deno.test("D5: an order's account change does not reach an UNEDITED invoice line — the invoice owns it", () => {
+  // prev 4000, invoice 4000 (never touched), next 4100. Under `propagate: true`
+  // the three-way rule took 4100; the invoice now owns the account once
+  // projected, so the line keeps 4000 while its other fields still follow.
+  const prev = orderShapedLine({ coa_revenue: 4000 });
+  const next = orderShapedLine({ coa_revenue: 4100, name: "Renamed" });
+  const stored = buildOrderScopedItems([prev], ORDER_DIV_1)[0];
+  assertEquals((stored as InvoiceItem).coa_revenue, 4000);
+
+  const synced = syncOrderToInvoiceSelective([prev], [next], [stored], ORDER_DIV_1);
+  assertEquals((synced[0] as InvoiceItem).coa_revenue, 4000);
+  assertEquals((synced[0] as InvoiceItem).name, "Renamed", "the rest of the line still follows the order");
+  // A NEW row still takes the order's account at projection.
+  assertEquals((buildOrderScopedItems([next], ORDER_DIV_1)[0] as InvoiceItem).coa_revenue, 4100);
 });
 
 Deno.test("projection: `coa_revenue` inherits but changes NO sync verdict", () => {
@@ -3857,4 +3874,32 @@ Deno.test("syncOrderItems — the hard snap discards an override but KEEPS a los
   const lost = result.find((r) => r.uid === ITEM_2) as InvoiceItem | undefined;
   assert(lost, "a line billing a lost/damaged record has no order counterpart, so the rebuild keeps it");
   assertEquals(lost.uid_out_of_service, "Oos00000000000000001");
+});
+
+// ── D6: the one ACCREC line mapper ───────────────────────────────────
+
+Deno.test("D6 xeroAccrecLineRefs: account, tracking and item code — line first, product fallback", () => {
+  const known = new Set(["opt-line", "opt-product"]);
+  const product = { price: { coa_revenue: 4000 as const }, xero_tracking_option_id: "opt-product", xero_code: "CAM-1" };
+  const cases: [string, Parameters<typeof xeroAccrecLineRefs>[0], typeof product | undefined, ReturnType<typeof xeroAccrecLineRefs>][] = [
+    ["override: the line's account and option win",
+      { uid: "cam", coa_revenue: 4100, xero_tracking_option_id: "opt-line" }, product,
+      { account_code: "4100", tracking_option_id: "opt-line", item_code: "CAM-1" }],
+    ["non-override: the line states the product's own values",
+      { uid: "cam", coa_revenue: 4000, xero_tracking_option_id: "opt-product" }, product,
+      { account_code: "4000", tracking_option_id: "opt-product", item_code: "CAM-1" }],
+    ["a line with neither falls back to the product",
+      { uid: "cam", coa_revenue: null, xero_tracking_option_id: null }, product,
+      { account_code: "4000", tracking_option_id: "opt-product", item_code: "CAM-1" }],
+    ["a line option Xero no longer knows falls back to the product's",
+      { uid: "cam", coa_revenue: 4100, xero_tracking_option_id: "opt-retired" }, product,
+      { account_code: "4100", tracking_option_id: "opt-product", item_code: "CAM-1" }],
+    ["a custom line sends its own option and never reads a product",
+      { uid: "custom-tent-repair", coa_revenue: 4700, xero_tracking_option_id: "opt-line" }, product,
+      { account_code: "4700", tracking_option_id: "opt-line", item_code: null }],
+    ["no product and no line account → 4800, no tracking, no item code",
+      { uid: "cam", coa_revenue: null, xero_tracking_option_id: null }, undefined,
+      { account_code: "4800", tracking_option_id: null, item_code: null }],
+  ];
+  for (const [label, line, p, want] of cases) assertEquals(xeroAccrecLineRefs(line, p, known), want, label);
 });

@@ -5332,13 +5332,49 @@ de-duplicates its menus by these ids, never by a label.
 const INVOICE_ACTION_IDS: "issue" | "void" | "close" | "add_payment" | "reverse_settlement" | "add_credit_note" | "edit_items" | "edit_organization" | "edit_date" | "push_to_xero" | "void_credit_note" | "allocate_credit_note" | "record_refund" | "create_invoice" | "create_remaining_invoice" | "create_replacement_invoice" | "create_service_charge_invoice" | "credit_overbilling"[];
 ```
 
+### `INVOICE_FIELD_CLASSES`
+
+The classes an invoice's editable fields fall into, for the freeze question
+*"may an operator still change this field?"*.
+
+Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
+`.d.ts` emit truncating an inferred tuple.
+
+```ts
+const INVOICE_FIELD_CLASSES: readonly ["organization", "date", "line_money", "coa_revenue", "tracking", "text"];
+```
+
+### `INVOICE_FIELD_FREEZE`
+
+**The one field-class freeze table.** The API's refusals, the manager's
+offers (`edit_items.frozen_classes`, `edit_organization`, `edit_date`) and
+the Xero edit push all read it, through `invoiceFieldIsFrozen`
+(`@cfs/core/utils/invoices`).
+
+This list used to be in four places: `updateInvoice` refusing `organization`
+and `date` by name, the money gate, `invoiceIsFrozen`'s docblock, and the
+manager's own comment — which disagreed with its own section lock.
+
+**The rule follows Xero's** (owner, 2026-10-26): the revenue account is
+locked once settled; tracking stays editable on a settled invoice, because
+Xero accepts a tracking-only edit there, and freezes only on `void`.
+
+⚠️ `text` is `"never"`, and the document-level order → invoice sync must NOT
+route through it: that sync freezes the whole invoice on `invoiceIsFrozen`
+(`api-cloudrun/src/lib/orderInvoiceSync.ts`). Reading the text class there
+would let an order edit rewrite a paid invoice's subject.
+
+```ts
+const INVOICE_FIELD_FREEZE: Readonly<Record<InvoiceFieldClass, InvoiceFieldFreezeContract>>;
+```
+
 ### `INVOICE_STATUS_CONTRACTS`
 
 The per-status contract table.
 
 The `Readonly<Record<InvoiceStatusType, …>>` annotation is what enforces
-totality: a sixth status is a type error **here**, at the declaration, which
-forces an answer to all five questions rather than defaulting four of them.
+totality: a new status is a type error **here**, at the declaration, which
+forces an answer to every column rather than defaulting any of them.
 No separate parity guard — a `T extends keyof typeof TABLE` assertion beside
 this would read `T extends T` and could not fail.
 
@@ -5627,11 +5663,12 @@ Every shared field is now merged per field by construction: it follows the
 order unless the invoice's value differs from the order's PREVIOUS value.
 
 ⚠️ **What a new field DOES need is a classification, and it is a declaration
-rather than a policy**: `.meta({ derived })` if a derivation writes it (it is
-then never compared and recomputed afterwards), or `.meta({ propagate: false })`
-if the key means different things on the two documents. Untagged, it
-propagates — which is the safe default for a payload field and the unsafe one
-for a homonym, so tag the homonym.
+rather than a policy**: `.meta({ propagate: true })` for a payload field,
+`.meta({ derived: true })` if a derivation writes it (it is then never
+compared and recomputed afterwards), or `.meta({ propagate: false })` if the
+key means different things on the two documents. An untagged shared field is
+reported `undeclared` and both shared-field callers THROW (core#116) — it used
+to propagate by default, which silently merged homonyms.
 
 ```ts
 interface InvoiceDocDestinationType {
@@ -5764,6 +5801,26 @@ interface InvoiceDocTotalsType {
   amount_void_cents?: number;
   amount_due_cents: number;
   closure_count?: number;
+}
+```
+
+### `InvoiceFieldClass`
+
+One of {@link INVOICE_FIELD_CLASSES}.
+
+```ts
+type InvoiceFieldClass = indexedAccess;
+```
+
+### `InvoiceFieldFreezeContract`
+
+When a field class freezes, and what Xero does with it once settled.
+
+```ts
+interface InvoiceFieldFreezeContract {
+  frozen_when: "frozen" | "void" | "never";
+  xero_accepts_on_settled: boolean;
+  members: readonly parenthesized[];
 }
 ```
 
@@ -5924,6 +5981,7 @@ interface InvoiceStatusContract {
   live_in_xero: boolean;
   settled: boolean;
   accepts_payment: boolean;
+  tracks_xero_edits: "always" | "once_pushed" | null;
 }
 ```
 
@@ -20552,13 +20610,49 @@ interface CreateInvoiceInputType {
 }
 ```
 
+### `INVOICE_FIELD_CLASSES`
+
+The classes an invoice's editable fields fall into, for the freeze question
+*"may an operator still change this field?"*.
+
+Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
+`.d.ts` emit truncating an inferred tuple.
+
+```ts
+const INVOICE_FIELD_CLASSES: readonly ["organization", "date", "line_money", "coa_revenue", "tracking", "text"];
+```
+
+### `INVOICE_FIELD_FREEZE`
+
+**The one field-class freeze table.** The API's refusals, the manager's
+offers (`edit_items.frozen_classes`, `edit_organization`, `edit_date`) and
+the Xero edit push all read it, through `invoiceFieldIsFrozen`
+(`@cfs/core/utils/invoices`).
+
+This list used to be in four places: `updateInvoice` refusing `organization`
+and `date` by name, the money gate, `invoiceIsFrozen`'s docblock, and the
+manager's own comment — which disagreed with its own section lock.
+
+**The rule follows Xero's** (owner, 2026-10-26): the revenue account is
+locked once settled; tracking stays editable on a settled invoice, because
+Xero accepts a tracking-only edit there, and freezes only on `void`.
+
+⚠️ `text` is `"never"`, and the document-level order → invoice sync must NOT
+route through it: that sync freezes the whole invoice on `invoiceIsFrozen`
+(`api-cloudrun/src/lib/orderInvoiceSync.ts`). Reading the text class there
+would let an order edit rewrite a paid invoice's subject.
+
+```ts
+const INVOICE_FIELD_FREEZE: Readonly<Record<InvoiceFieldClass, InvoiceFieldFreezeContract>>;
+```
+
 ### `INVOICE_STATUS_CONTRACTS`
 
 The per-status contract table.
 
 The `Readonly<Record<InvoiceStatusType, …>>` annotation is what enforces
-totality: a sixth status is a type error **here**, at the declaration, which
-forces an answer to all five questions rather than defaulting four of them.
+totality: a new status is a type error **here**, at the declaration, which
+forces an answer to every column rather than defaulting any of them.
 No separate parity guard — a `T extends keyof typeof TABLE` assertion beside
 this would read `T extends T` and could not fail.
 
@@ -20689,11 +20783,12 @@ Every shared field is now merged per field by construction: it follows the
 order unless the invoice's value differs from the order's PREVIOUS value.
 
 ⚠️ **What a new field DOES need is a classification, and it is a declaration
-rather than a policy**: `.meta({ derived })` if a derivation writes it (it is
-then never compared and recomputed afterwards), or `.meta({ propagate: false })`
-if the key means different things on the two documents. Untagged, it
-propagates — which is the safe default for a payload field and the unsafe one
-for a homonym, so tag the homonym.
+rather than a policy**: `.meta({ propagate: true })` for a payload field,
+`.meta({ derived: true })` if a derivation writes it (it is then never
+compared and recomputed afterwards), or `.meta({ propagate: false })` if the
+key means different things on the two documents. An untagged shared field is
+reported `undeclared` and both shared-field callers THROW (core#116) — it used
+to propagate by default, which silently merged homonyms.
 
 ```ts
 interface InvoiceDocDestinationType {
@@ -20826,6 +20921,26 @@ interface InvoiceDocTotalsType {
   amount_void_cents?: number;
   amount_due_cents: number;
   closure_count?: number;
+}
+```
+
+### `InvoiceFieldClass`
+
+One of {@link INVOICE_FIELD_CLASSES}.
+
+```ts
+type InvoiceFieldClass = indexedAccess;
+```
+
+### `InvoiceFieldFreezeContract`
+
+When a field class freezes, and what Xero does with it once settled.
+
+```ts
+interface InvoiceFieldFreezeContract {
+  frozen_when: "frozen" | "void" | "never";
+  xero_accepts_on_settled: boolean;
+  members: readonly parenthesized[];
 }
 ```
 
@@ -20983,6 +21098,7 @@ interface InvoiceStatusContract {
   live_in_xero: boolean;
   settled: boolean;
   accepts_payment: boolean;
+  tracks_xero_edits: "always" | "once_pushed" | null;
 }
 ```
 
@@ -36209,6 +36325,30 @@ interface UnmatchedInvoiceLine {
 }
 ```
 
+### `XeroAccrecLineRefs`
+
+What one ACCREC Xero line names besides its money and tax.
+
+```ts
+interface XeroAccrecLineRefs {
+  account_code: string;
+  tracking_option_id: string | null;
+  item_code: string | null;
+}
+```
+
+### `XeroLineProduct`
+
+The product fields {@link xeroAccrecLineRefs} reads — a structural slice of `Product`.
+
+```ts
+interface XeroLineProduct {
+  price: typeLiteral;
+  xero_tracking_option_id?: string | null;
+  xero_code?: string | null;
+}
+```
+
 ### `adoptOrderDividerStructure(scopedInvoiceItems: InvoiceDocItemType[], orderItems: LineItem[], orderDividerUid: string): AdoptedDividerStructure`
 
 Re-hang one order-scope of an invoice's items on the ORDER's divider
@@ -36931,6 +37071,15 @@ inside an authored group (a split's new group) still bills its order line.
 - `orderItems` — The order's `items`, dividers included
 - `orderDividerUid` — The order divider's uid
 
+### `invoiceFieldIsFrozen(invoice: typeLiteral, cls: InvoiceFieldClass): boolean`
+
+**May an operator still change fields of this class on this invoice?** — the
+accessor over `INVOICE_FIELD_FREEZE` (`@cfs/core/schemas`), and the only way
+to read it. `true` means frozen.
+
+A `"frozen"` class follows {@link invoiceIsFrozen}, a `"void"` class freezes
+only on a void invoice, and a `"never"` class is always editable.
+
 ### `invoiceHasMoneySettlement(invoice: typeLiteral): boolean`
 
 Does this invoice record money having moved — paid, credited or voided? Money
@@ -36963,10 +37112,12 @@ invoice's ORGANIZATION or its DATE?**
 `invoiceHasSettlement(invoice) || status === "paid" || status === "void"`.
 
 **The rule follows Xero's**: once a payment is applied, the organization, the
-invoice date, the items and the money freeze — item descriptions, `reference`,
-`subject`, `notes` and `due_date` do not. Reversing the payment to zero
-unfreezes it, because {@link invoiceHasSettlement} reads a VALUE and no field
-records that the invoice was once settled.
+invoice date, line money and the revenue account freeze. Text does not, and
+tracking freezes only on `void`. WHICH fields freeze on this predicate is
+`INVOICE_FIELD_FREEZE`'s answer, read per class through
+{@link invoiceFieldIsFrozen}; this function is only the WHEN. Reversing the
+payment to zero unfreezes it, because {@link invoiceHasSettlement} reads a
+VALUE and no field records that the invoice was once settled.
 
 ⚠️ **This is NOT {@link SETTLED_STATUSES}, and the difference is the whole
 reason it exists.** That constant is the STATUS column — `["paid", "void"]` —
@@ -37861,6 +38012,26 @@ Returns `[]` when uniqueness holds.
 NOTE: assumes the self-INCLUDED `path` convention. Product `components`
 exclude self from `path` — use {@link validateComponentUniqueness} for them.
 
+### `xeroAccrecLineRefs(line: Pick<InvoiceDocLineItemType, "uid" | "coa_revenue" | "xero_tracking_option_id">, product: XeroLineProduct | undefined, knownTrackingOptionIds: ReadonlySet<string>): XeroAccrecLineRefs`
+
+**The one rule for which account, tracking option and item code an ACCREC
+Xero line carries** — for the issue body and the edit body alike. They used
+to differ: issue read the account product-first and the tracking from the
+product only, while the edit push read the account line-first. So the hash
+written at issue described a body an edit would not have sent.
+
+- **Account: the line first** — `line.coa_revenue ?? product's ?? 4800`. A
+  line's account is an operator override where it differs from the product.
+- **Tracking: the line's option when Xero still knows it, else the
+  product's** (owner, 2026-10-26). A stored option Xero has since retired
+  falls back rather than sending none. A custom line has no product, so it
+  sends its own.
+- **Item code: the product's `xero_code`**, never `crms_id` (#256).
+
+A `custom-` line is never matched to a product, whatever the caller passes.
+The tax mapping and the money stay in the API (`XeroTaxContext`,
+`xeroLineMoney`).
+
 ## `@cfs/core/utils/invoice-actions`
 
 The invoice action ruleset — ONE answer, for the manager and the API alike, to
@@ -37999,6 +38170,7 @@ interface InvoiceActionOffer {
   uid_settlement?: string;
   lines?: CreditableLine[];
   money_frozen?: boolean;
+  frozen_classes?: readonly InvoiceFieldClass[];
 }
 ```
 
@@ -38023,6 +38195,7 @@ interface InvoiceOfferContext {
   settlements?: readonly OfferSettlement[];
   creditNotes?: readonly CappedNote[];
   xero_sync_status?: InvoiceXeroSyncStatus;
+  xero_held_settlements?: boolean;
 }
 ```
 
@@ -38154,6 +38327,7 @@ Which offer function lists `action` — read off {@link INVOICE_ACTIONS}.
 Every action the UI may offer on this invoice.
 
 - `issue` / `void` — `canOperatorTransition`, the column `updateInvoice` gates on.
+  `void` is also refused while `ctx.xero_held_settlements` is `true` (D8).
 - `close` — a live invoice totalling $0, nothing money-settled, no live
   closure. ⚠️ Offered on a `paid` $0 invoice too: the ones today's derivation
   copied PAID from Xero (#2197) are closed by exactly this action.
@@ -38161,8 +38335,9 @@ Every action the UI may offer on this invoice.
   `max_cents` is the amount due, a hard cap with no overpay override.
 - `reverse_settlement` (D2) — one offer per reversible row.
 - `add_credit_note` (D3) — a status live in Xero, with credit left on a line.
-- `edit_items` (D8) — always; `money_frozen` says whether line money is.
-- `edit_organization` / `edit_date` — while not {@link invoiceIsFrozen}.
+- `edit_items` (D8) — always; `frozen_classes` says which field classes are
+  frozen, and `money_frozen` whether `line_money` is among them.
+- `edit_organization` / `edit_date` — while their field class is not frozen.
 - `push_to_xero` — `issued` / `part_paid` / `paid`, linked to Xero, and the
   caller's `xero_sync_status` is `out_of_sync` or `unknown`. `paid` is CFS's
   status, not Xero's: whether Xero holds the payment is the task's question.
@@ -38231,7 +38406,8 @@ invoice re-enqueues until a push lands. This is the order-quote push's design
   sidecar, or one written before this carried a hash (its `pushed_hash` is the
   old `v<version>` spelling). Not a claim either way.
 - `not_applicable` — no Xero twin to keep in step: a draft or a void. A `paid`
-  invoice with no recorded hash reads this too — see {@link TRACKED_ONCE_PUSHED}.
+  invoice with no recorded hash reads this too — its status's
+  `tracks_xero_edits` is `"once_pushed"`.
 
 ```ts
 type InvoiceXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" | "not_applicable";
@@ -38295,6 +38471,12 @@ key-only change a real Xero POST (api-cloudrun#993). api-cloudrun's
 `api-cloudrun/tests/unit/xeroInvoiceEdit.test.ts` perturbs every leaf of a real line through
 the real assembler, so a field the body starts reading cannot be missing here
 unnoticed.
+
+⚠️ **The two tracking fields are hashed because the body sends the LINE's
+tracking option** (`xeroAccrecLineRefs`, `@cfs/core/utils/invoices`).
+Without them a tracking-only edit never moved the hash and was never
+enqueued. Adding them made every hashed invoice read changed once, so each
+one pushes on its next write.
 
 ### `invoiceXeroProjectionHash(invoice: Partial<Invoice>): string`
 

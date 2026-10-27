@@ -92,6 +92,8 @@ import { interleaveStoredOnlyRows } from "./stored-only-rows.ts";
 import type { COARevenueType, CreditNoteStatusType, DocDestinationType, InvoiceDocDestinationType, InvoiceDocItemPriceType, InvoiceDocItemType, InvoiceDocLineItemType, InvoiceDocTotalsType, InvoiceStatusType, JurisdictionType, OrderDocDestinationItemType, PriceFormulaType, SettlementReasonType, SettlementTargetType, SettlementTypeType, SubstitutedForEntryType, PurchaseCreditStatusType } from "../schemas/mod.ts";
 import {
   getSettlementMultiplier,
+  INVOICE_FIELD_FREEZE,
+  type InvoiceFieldClass,
   InvoiceSchema,
   isDividerItemType,
   isLineItemType,
@@ -301,10 +303,12 @@ export function invoiceHasSettlement(invoice: { totals: InvoiceSettledTotals }):
  * `invoiceHasSettlement(invoice) || status === "paid" || status === "void"`.
  *
  * **The rule follows Xero's**: once a payment is applied, the organization, the
- * invoice date, the items and the money freeze — item descriptions, `reference`,
- * `subject`, `notes` and `due_date` do not. Reversing the payment to zero
- * unfreezes it, because {@link invoiceHasSettlement} reads a VALUE and no field
- * records that the invoice was once settled.
+ * invoice date, line money and the revenue account freeze. Text does not, and
+ * tracking freezes only on `void`. WHICH fields freeze on this predicate is
+ * `INVOICE_FIELD_FREEZE`'s answer, read per class through
+ * {@link invoiceFieldIsFrozen}; this function is only the WHEN. Reversing the
+ * payment to zero unfreezes it, because {@link invoiceHasSettlement} reads a
+ * VALUE and no field records that the invoice was once settled.
  *
  * ⚠️ **This is NOT {@link SETTLED_STATUSES}, and the difference is the whole
  * reason it exists.** That constant is the STATUS column — `["paid", "void"]` —
@@ -322,6 +326,28 @@ export function invoiceIsFrozen(
   invoice: { status: InvoiceStatusType; totals: InvoiceSettledTotals },
 ): boolean {
   return invoiceHasSettlement(invoice) || invoice.status === "paid" || invoice.status === "void";
+}
+
+/**
+ * **May an operator still change fields of this class on this invoice?** — the
+ * accessor over `INVOICE_FIELD_FREEZE` (`@cfs/core/schemas`), and the only way
+ * to read it. `true` means frozen.
+ *
+ * A `"frozen"` class follows {@link invoiceIsFrozen}, a `"void"` class freezes
+ * only on a void invoice, and a `"never"` class is always editable.
+ */
+export function invoiceFieldIsFrozen(
+  invoice: { status: InvoiceStatusType; totals: InvoiceSettledTotals },
+  cls: InvoiceFieldClass,
+): boolean {
+  switch (INVOICE_FIELD_FREEZE[cls].frozen_when) {
+    case "frozen":
+      return invoiceIsFrozen(invoice);
+    case "void":
+      return invoice.status === "void";
+    case "never":
+      return false;
+  }
 }
 
 /**
@@ -768,6 +794,63 @@ export function getXeroUnitAmountFromCents(subtotalCents: number, quantity: numb
   ));
 }
 
+/** The product fields {@link xeroAccrecLineRefs} reads — a structural slice of `Product`. */
+export interface XeroLineProduct {
+  price: { coa_revenue?: COARevenueType | null };
+  xero_tracking_option_id?: string | null;
+  xero_code?: string | null;
+}
+
+/** What one ACCREC Xero line names besides its money and tax. */
+export interface XeroAccrecLineRefs {
+  /** Xero `AccountCode`. */
+  account_code: string;
+  /**
+   * The tracking option to send, or `null` for none. Not yet checked against
+   * Xero when it came from the product or is a custom line's own: the API's
+   * `resolveXeroTracking` drops (and logs) an option Xero does not know.
+   */
+  tracking_option_id: string | null;
+  /** Xero `ItemCode`: the product's own Xero code, or `null` to omit it. */
+  item_code: string | null;
+}
+
+/**
+ * **The one rule for which account, tracking option and item code an ACCREC
+ * Xero line carries** — for the issue body and the edit body alike. They used
+ * to differ: issue read the account product-first and the tracking from the
+ * product only, while the edit push read the account line-first. So the hash
+ * written at issue described a body an edit would not have sent.
+ *
+ * - **Account: the line first** — `line.coa_revenue ?? product's ?? 4800`. A
+ *   line's account is an operator override where it differs from the product.
+ * - **Tracking: the line's option when Xero still knows it, else the
+ *   product's** (owner, 2026-10-26). A stored option Xero has since retired
+ *   falls back rather than sending none. A custom line has no product, so it
+ *   sends its own.
+ * - **Item code: the product's `xero_code`**, never `crms_id` (#256).
+ *
+ * A `custom-` line is never matched to a product, whatever the caller passes.
+ * The tax mapping and the money stay in the API (`XeroTaxContext`,
+ * `xeroLineMoney`).
+ */
+export function xeroAccrecLineRefs(
+  line: Pick<InvoiceDocLineItemType, "uid" | "coa_revenue" | "xero_tracking_option_id">,
+  product: XeroLineProduct | undefined,
+  knownTrackingOptionIds: ReadonlySet<string>,
+): XeroAccrecLineRefs {
+  const p = line.uid.startsWith("custom-") ? undefined : product;
+  const lineOption = line.xero_tracking_option_id ?? null;
+  const productOption = p?.xero_tracking_option_id ?? null;
+  return {
+    account_code: String(line.coa_revenue ?? p?.price.coa_revenue ?? 4800),
+    tracking_option_id: lineOption !== null && knownTrackingOptionIds.has(lineOption)
+      ? lineOption
+      : productOption ?? lineOption,
+    item_code: p?.xero_code ?? null,
+  };
+}
+
 // ── Selective sync helpers ──────────────────────────────────────
 
 /**
@@ -786,7 +869,7 @@ export function getXeroUnitAmountFromCents(subtotalCents: number, quantity: numb
  * see it.
  *
  * ⭐ **`substituted_for` is a member, and it is the only one that is not
- * merely an override.** The other six are values an invoice may hold instead of
+ * merely an override.** The other seven are values an invoice may hold instead of
  * its order's; this one is the record that the invoice deliberately bills a
  * DIFFERENT product. Being in the list buys the same two things either way —
  * {@link invoiceItemDifferences} filters it out of both key sets, so a

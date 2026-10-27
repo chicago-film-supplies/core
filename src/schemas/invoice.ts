@@ -111,14 +111,31 @@ export interface InvoiceStatusContract {
    * from it and absorbs the overpayment silently.
    */
   accepts_payment: boolean;
+  /**
+   * Does the Xero twin track CFS edits — and on what condition?
+   *
+   * - `"always"` — every edit is pushed (`issued`, `part_paid`).
+   * - `"once_pushed"` — only once a push has recorded a projection hash. **CFS
+   *   `paid` is not Xero paid** (owner, 2026-10-22): an operator records a
+   *   settlement ahead of Xero's bank feed, so Xero may still accept an edit,
+   *   and the edit task's Xero-held-settlements check is the gate. Without a
+   *   recorded hash the sync status would read `unknown` and enqueue on every
+   *   write — 979 of 1,026 prod paid invoices (2026-10-22) have none.
+   * - `null` — there is no live twin to track (`draft`, `void`).
+   *
+   * `null` rather than a third string, per this package's convention for a
+   * column with no answer. Non-null exactly where {@link live_in_xero} is true;
+   * a test holds the two together, because they used to be hand-kept copies.
+   */
+  tracks_xero_edits: "always" | "once_pushed" | null;
 }
 
 /**
  * The per-status contract table.
  *
  * The `Readonly<Record<InvoiceStatusType, …>>` annotation is what enforces
- * totality: a sixth status is a type error **here**, at the declaration, which
- * forces an answer to all five questions rather than defaulting four of them.
+ * totality: a new status is a type error **here**, at the declaration, which
+ * forces an answer to every column rather than defaulting any of them.
  * No separate parity guard — a `T extends keyof typeof TABLE` assertion beside
  * this would read `T extends T` and could not fail.
  *
@@ -140,6 +157,7 @@ export const INVOICE_STATUS_CONTRACTS: Readonly<
     live_in_xero: false,
     settled: false,
     accepts_payment: false,
+    tracks_xero_edits: null,
   },
   issued: {
     operator_moves: ["void"],
@@ -147,6 +165,7 @@ export const INVOICE_STATUS_CONTRACTS: Readonly<
     live_in_xero: true,
     settled: false,
     accepts_payment: true,
+    tracks_xero_edits: "always",
   },
   part_paid: {
     operator_moves: ["void"],
@@ -154,6 +173,7 @@ export const INVOICE_STATUS_CONTRACTS: Readonly<
     live_in_xero: true,
     settled: false,
     accepts_payment: true,
+    tracks_xero_edits: "always",
   },
   paid: {
     operator_moves: ["void"],
@@ -161,6 +181,7 @@ export const INVOICE_STATUS_CONTRACTS: Readonly<
     live_in_xero: true,
     settled: true,
     accepts_payment: false,
+    tracks_xero_edits: "once_pushed",
   },
   void: {
     operator_moves: [],
@@ -168,6 +189,7 @@ export const INVOICE_STATUS_CONTRACTS: Readonly<
     live_in_xero: false,
     settled: true,
     accepts_payment: false,
+    tracks_xero_edits: null,
   },
 };
 
@@ -225,6 +247,113 @@ export const ACCEPTS_PAYMENT_STATUSES: readonly InvoiceStatusType[] =
   statusesWhere(
     "accepts_payment",
   );
+
+// ── Field-class freeze table ────────────────────────────────────
+
+/**
+ * The classes an invoice's editable fields fall into, for the freeze question
+ * *"may an operator still change this field?"*.
+ *
+ * Explicit tuple type rather than `as const` alone: core#43 is JSR's npm
+ * `.d.ts` emit truncating an inferred tuple.
+ */
+export const INVOICE_FIELD_CLASSES: readonly [
+  "organization",
+  "date",
+  "line_money",
+  "coa_revenue",
+  "tracking",
+  "text",
+] = ["organization", "date", "line_money", "coa_revenue", "tracking", "text"];
+
+/** One of {@link INVOICE_FIELD_CLASSES}. */
+export type InvoiceFieldClass = typeof INVOICE_FIELD_CLASSES[number];
+
+/** When a field class freezes, and what Xero does with it once settled. */
+export interface InvoiceFieldFreezeContract {
+  /**
+   * - `"frozen"` — while `invoiceIsFrozen` (`@cfs/core/utils/invoices`): a live
+   *   settlement or closure, or a `paid` / `void` status.
+   * - `"void"` — only on a `void` invoice.
+   * - `"never"` — always editable.
+   */
+  frozen_when: "frozen" | "void" | "never";
+  /**
+   * Does Xero accept a change to this class on an invoice it holds a payment or
+   * credit allocation against? Read by the Xero edit push, which on a settled
+   * invoice may push only when every changed class says `true`.
+   *
+   * `true` only where an edit Xero has ALREADY ACCEPTED shows it (2026-10-26,
+   * from prod history): tracking-only edits on paid invoices, including one
+   * with a payment and a credit allocation (#1689). They were accepted only in
+   * the shape that GETs the invoice and round-trips Xero's own lines by
+   * `LineItemID`, changing nothing but `Tracking`. `false` is "not shown",
+   * which is not the same as "refused" — it keeps the push at its manual seam.
+   */
+  xero_accepts_on_settled: boolean;
+  /**
+   * The document and line keys in the class. Typed against the stored shapes,
+   * so a misspelled member is a compile error rather than a field that never
+   * freezes. Descriptive for `line_money`: the API decides that class with
+   * `lineMoneyAgrees`, over the REBUILT lines, not by comparing these keys.
+   */
+  members: readonly (keyof Invoice | keyof InvoiceDocLineItemType)[];
+}
+
+/**
+ * **The one field-class freeze table.** The API's refusals, the manager's
+ * offers (`edit_items.frozen_classes`, `edit_organization`, `edit_date`) and
+ * the Xero edit push all read it, through `invoiceFieldIsFrozen`
+ * (`@cfs/core/utils/invoices`).
+ *
+ * This list used to be in four places: `updateInvoice` refusing `organization`
+ * and `date` by name, the money gate, `invoiceIsFrozen`'s docblock, and the
+ * manager's own comment — which disagreed with its own section lock.
+ *
+ * **The rule follows Xero's** (owner, 2026-10-26): the revenue account is
+ * locked once settled; tracking stays editable on a settled invoice, because
+ * Xero accepts a tracking-only edit there, and freezes only on `void`.
+ *
+ * ⚠️ `text` is `"never"`, and the document-level order → invoice sync must NOT
+ * route through it: that sync freezes the whole invoice on `invoiceIsFrozen`
+ * (`api-cloudrun/src/lib/orderInvoiceSync.ts`). Reading the text class there
+ * would let an order edit rewrite a paid invoice's subject.
+ */
+export const INVOICE_FIELD_FREEZE: Readonly<
+  Record<InvoiceFieldClass, InvoiceFieldFreezeContract>
+> = {
+  organization: {
+    frozen_when: "frozen",
+    xero_accepts_on_settled: false,
+    members: ["organization"],
+  },
+  date: {
+    frozen_when: "frozen",
+    xero_accepts_on_settled: false,
+    members: ["date"],
+  },
+  line_money: {
+    frozen_when: "frozen",
+    xero_accepts_on_settled: false,
+    members: ["quantity", "price", "uid_tax_class", "uid_tax_class_override"],
+  },
+  coa_revenue: {
+    frozen_when: "frozen",
+    xero_accepts_on_settled: false,
+    members: ["coa_revenue"],
+  },
+  tracking: {
+    frozen_when: "void",
+    xero_accepts_on_settled: true,
+    members: ["tracking_category", "xero_tracking_option_id"],
+  },
+  text: {
+    frozen_when: "never",
+    // Not shown either way: the accepted settled edits changed only Tracking.
+    xero_accepts_on_settled: false,
+    members: ["reference", "subject", "notes", "due_date", "name", "description"],
+  },
+};
 
 // Invoice item types are a superset of order item types — they add the "order"
 // divider. That superset had a name here (`InvoiceItemTypeType`, an alias of
@@ -809,11 +938,12 @@ const InvoiceDocTotals: z.ZodType<InvoiceDocTotalsType> = z.strictObject({
  * order unless the invoice's value differs from the order's PREVIOUS value.
  *
  * ⚠️ **What a new field DOES need is a classification, and it is a declaration
- * rather than a policy**: `.meta({ derived })` if a derivation writes it (it is
- * then never compared and recomputed afterwards), or `.meta({ propagate: false })`
- * if the key means different things on the two documents. Untagged, it
- * propagates — which is the safe default for a payload field and the unsafe one
- * for a homonym, so tag the homonym.
+ * rather than a policy**: `.meta({ propagate: true })` for a payload field,
+ * `.meta({ derived: true })` if a derivation writes it (it is then never
+ * compared and recomputed afterwards), or `.meta({ propagate: false })` if the
+ * key means different things on the two documents. An untagged shared field is
+ * reported `undeclared` and both shared-field callers THROW (core#116) — it used
+ * to propagate by default, which silently merged homonyms.
  */
 export interface InvoiceDocDestinationType extends DocDestinationType {
   uid_order: string;

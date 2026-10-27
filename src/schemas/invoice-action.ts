@@ -77,7 +77,7 @@ export const INVOICE_ACTIONS: Readonly<Record<InvoiceActionId, InvoiceActionDefi
   add_payment: { subject: "invoice", description: "Record a payment, up to the amount due." },
   reverse_settlement: { subject: "invoice", description: "Reverse one settlement row." },
   add_credit_note: { subject: "invoice", description: "Credit billed lines, net of prior notes." },
-  edit_items: { subject: "invoice", description: "Edit lines; money is frozen once settled." },
+  edit_items: { subject: "invoice", description: "Edit lines; each field class freezes per INVOICE_FIELD_FREEZE." },
   edit_organization: { subject: "invoice", description: "Re-address the invoice." },
   edit_date: { subject: "invoice", description: "Change the invoice date." },
   push_to_xero: { subject: "invoice", description: "Re-push an out-of-sync issued invoice to Xero." },

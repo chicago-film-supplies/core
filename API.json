@@ -2360,9 +2360,21 @@
         },
         {
           "kind": "variable",
+          "name": "INVOICE_FIELD_CLASSES",
+          "declaration": "const INVOICE_FIELD_CLASSES: readonly [\"organization\", \"date\", \"line_money\", \"coa_revenue\", \"tracking\", \"text\"];",
+          "doc": "The classes an invoice's editable fields fall into, for the freeze question\n*\"may an operator still change this field?\"*.\n\nExplicit tuple type rather than `as const` alone: core#43 is JSR's npm\n`.d.ts` emit truncating an inferred tuple."
+        },
+        {
+          "kind": "variable",
+          "name": "INVOICE_FIELD_FREEZE",
+          "declaration": "const INVOICE_FIELD_FREEZE: Readonly<Record<InvoiceFieldClass, InvoiceFieldFreezeContract>>;",
+          "doc": "**The one field-class freeze table.** The API's refusals, the manager's\noffers (`edit_items.frozen_classes`, `edit_organization`, `edit_date`) and\nthe Xero edit push all read it, through `invoiceFieldIsFrozen`\n(`@cfs/core/utils/invoices`).\n\nThis list used to be in four places: `updateInvoice` refusing `organization`\nand `date` by name, the money gate, `invoiceIsFrozen`'s docblock, and the\nmanager's own comment — which disagreed with its own section lock.\n\n**The rule follows Xero's** (owner, 2026-10-26): the revenue account is\nlocked once settled; tracking stays editable on a settled invoice, because\nXero accepts a tracking-only edit there, and freezes only on `void`.\n\n⚠️ `text` is `\"never\"`, and the document-level order → invoice sync must NOT\nroute through it: that sync freezes the whole invoice on `invoiceIsFrozen`\n(`api-cloudrun/src/lib/orderInvoiceSync.ts`). Reading the text class there\nwould let an order edit rewrite a paid invoice's subject."
+        },
+        {
+          "kind": "variable",
           "name": "INVOICE_STATUS_CONTRACTS",
           "declaration": "const INVOICE_STATUS_CONTRACTS: Readonly<Record<InvoiceStatusType, InvoiceStatusContract>>;",
-          "doc": "The per-status contract table.\n\nThe `Readonly<Record<InvoiceStatusType, …>>` annotation is what enforces\ntotality: a sixth status is a type error **here**, at the declaration, which\nforces an answer to all five questions rather than defaulting four of them.\nNo separate parity guard — a `T extends keyof typeof TABLE` assertion beside\nthis would read `T extends T` and could not fail.\n\nDeliberately **not** carrying an `amounts` column. Two status↔amounts rules\nwere proposed and both were killed by paging all 962 prod invoices:\n`paid ⟹ amount_due <= 0` fails on 20 of 813, and `issued ⟹ amount_paid == 0`\nfails on **75 of 98** — a bucket whose money matches Xero to the cent and\nwhose `status` is what is stale. The arithmetic identity that did survive\n(`amount_paid + amount_credited + amount_due == total`, exempting `void`)\nships separately as a `superRefine`, because it is the one rule that does not\nmention status."
+          "doc": "The per-status contract table.\n\nThe `Readonly<Record<InvoiceStatusType, …>>` annotation is what enforces\ntotality: a new status is a type error **here**, at the declaration, which\nforces an answer to every column rather than defaulting any of them.\nNo separate parity guard — a `T extends keyof typeof TABLE` assertion beside\nthis would read `T extends T` and could not fail.\n\nDeliberately **not** carrying an `amounts` column. Two status↔amounts rules\nwere proposed and both were killed by paging all 962 prod invoices:\n`paid ⟹ amount_due <= 0` fails on 20 of 813, and `issued ⟹ amount_paid == 0`\nfails on **75 of 98** — a bucket whose money matches Xero to the cent and\nwhose `status` is what is stale. The arithmetic identity that did survive\n(`amount_paid + amount_credited + amount_due == total`, exempting `void`)\nships separately as a `superRefine`, because it is the one rule that does not\nmention status."
         },
         {
           "kind": "variable",
@@ -2476,7 +2488,7 @@
           "kind": "interface",
           "name": "InvoiceDocDestinationType",
           "declaration": "interface InvoiceDocDestinationType {\n  uid_order: string;\n}",
-          "doc": "Destination pair on an invoice — mirrors the order's `DocDestinationType`\nwith a `uid_order` scope field so multi-order invoices can carry pairs\nfrom several orders and have them selectively synced per source order.\nCarries `dates` (rendered on the invoice) snapshotted from the source order.\n\n⭐ **A new field on this pair is now ONE edit, and it is not in this file.**\nIt used to be four, of which the compiler caught one. The `extends` below hands\nover the TYPE; `InvoiceDocDestination` restated the same six keys by hand and\ninherited nothing, so a field added to the order's pair type-checked here and\nwas then REFUSED at write. That is not hypothetical — it is how both flags kept\na `.default(false)` the order grain had already removed (core#101, 16 absent\nflags across 8 prod invoices). The schema now spreads `DestinationPairCore`, so\ndeclaring a field there lands it on both grains.\n\nThe other enumerators have all become walks and need no edit either:\n`toInvoiceDestinationPair` projects with `Object.entries` (its docblock says the\nspread is deliberate — do not tidy it into a field list), the merge reads the\nfield set off the two schemas (`orderInvoiceSharedFields`), and api-cloudrun's\nCRMS invoice webhook map is deleted.\n\n⭐ **A new field no longer needs an override RULING, and that is the point of\nthe campaign this paragraph used to describe.** It said a new field had to be\nplaced either in `INVOICE_OVERRIDABLE_PAIR_FIELDS` — payload the invoice owned\nand a separate carry reconciled — or left order-authored to freeze the whole\npair when it differed. Both that list and the whole-pair freeze are deleted.\nEvery shared field is now merged per field by construction: it follows the\norder unless the invoice's value differs from the order's PREVIOUS value.\n\n⚠️ **What a new field DOES need is a classification, and it is a declaration\nrather than a policy**: `.meta({ derived })` if a derivation writes it (it is\nthen never compared and recomputed afterwards), or `.meta({ propagate: false })`\nif the key means different things on the two documents. Untagged, it\npropagates — which is the safe default for a payload field and the unsafe one\nfor a homonym, so tag the homonym."
+          "doc": "Destination pair on an invoice — mirrors the order's `DocDestinationType`\nwith a `uid_order` scope field so multi-order invoices can carry pairs\nfrom several orders and have them selectively synced per source order.\nCarries `dates` (rendered on the invoice) snapshotted from the source order.\n\n⭐ **A new field on this pair is now ONE edit, and it is not in this file.**\nIt used to be four, of which the compiler caught one. The `extends` below hands\nover the TYPE; `InvoiceDocDestination` restated the same six keys by hand and\ninherited nothing, so a field added to the order's pair type-checked here and\nwas then REFUSED at write. That is not hypothetical — it is how both flags kept\na `.default(false)` the order grain had already removed (core#101, 16 absent\nflags across 8 prod invoices). The schema now spreads `DestinationPairCore`, so\ndeclaring a field there lands it on both grains.\n\nThe other enumerators have all become walks and need no edit either:\n`toInvoiceDestinationPair` projects with `Object.entries` (its docblock says the\nspread is deliberate — do not tidy it into a field list), the merge reads the\nfield set off the two schemas (`orderInvoiceSharedFields`), and api-cloudrun's\nCRMS invoice webhook map is deleted.\n\n⭐ **A new field no longer needs an override RULING, and that is the point of\nthe campaign this paragraph used to describe.** It said a new field had to be\nplaced either in `INVOICE_OVERRIDABLE_PAIR_FIELDS` — payload the invoice owned\nand a separate carry reconciled — or left order-authored to freeze the whole\npair when it differed. Both that list and the whole-pair freeze are deleted.\nEvery shared field is now merged per field by construction: it follows the\norder unless the invoice's value differs from the order's PREVIOUS value.\n\n⚠️ **What a new field DOES need is a classification, and it is a declaration\nrather than a policy**: `.meta({ propagate: true })` for a payload field,\n`.meta({ derived: true })` if a derivation writes it (it is then never\ncompared and recomputed afterwards), or `.meta({ propagate: false })` if the\nkey means different things on the two documents. An untagged shared field is\nreported `undeclared` and both shared-field callers THROW (core#116) — it used\nto propagate by default, which silently merged homonyms."
         },
         {
           "kind": "variable",
@@ -2525,6 +2537,18 @@
           "name": "InvoiceDocTotalsType",
           "declaration": "interface InvoiceDocTotalsType {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_void_cents?: number;\n  amount_due_cents: number;\n  closure_count?: number;\n}",
           "doc": "Invoice-level totals with settlement tracking.\n\n`amount_paid`, `amount_credited` and `amount_due` are a **co-written\nprojection** of the `settlements` journal — produced only by\n`recomputeSettlementTotals`, written in the same transaction as the settlement\nthat changed them, and rebuildable from the log by\n`api-cloudrun/scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization\nto apologise for; they are the target architecture, and the same shape\n`stock/{P}` already has against the movement journal.\n\n`total` is NOT part of that projection — it derives from `items[]`. So the\nrebuild is deliberately **partial**: it repairs the settlement-fed fields\nwithout re-pricing anything."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InvoiceFieldClass",
+          "declaration": "type InvoiceFieldClass = indexedAccess;",
+          "doc": "One of {@link INVOICE_FIELD_CLASSES}."
+        },
+        {
+          "kind": "interface",
+          "name": "InvoiceFieldFreezeContract",
+          "declaration": "interface InvoiceFieldFreezeContract {\n  frozen_when: \"frozen\" | \"void\" | \"never\";\n  xero_accepts_on_settled: boolean;\n  members: readonly parenthesized[];\n}",
+          "doc": "When a field class freezes, and what Xero does with it once settled."
         },
         {
           "kind": "typeAlias",
@@ -2601,7 +2625,7 @@
         {
           "kind": "interface",
           "name": "InvoiceStatusContract",
-          "declaration": "interface InvoiceStatusContract {\n  operator_moves: readonly InvoiceStatusType[];\n  reached_xero: boolean;\n  live_in_xero: boolean;\n  settled: boolean;\n  accepts_payment: boolean;\n}",
+          "declaration": "interface InvoiceStatusContract {\n  operator_moves: readonly InvoiceStatusType[];\n  reached_xero: boolean;\n  live_in_xero: boolean;\n  settled: boolean;\n  accepts_payment: boolean;\n  tracks_xero_edits: \"always\" | \"once_pushed\" | null;\n}",
           "doc": "What one invoice status admits, on every axis anything in CFS asks about.\n\nFive hand-written status sets used to live in four repos, and three of them\nwere textually identical while a fourth looked identical and was not. As\ncolumns they stop looking like duplicates of each other and start being\nseparate answers to separate questions — which is what makes collapsing them\nsafe where a naive merge was not."
         },
         {
@@ -9470,9 +9494,21 @@
         },
         {
           "kind": "variable",
+          "name": "INVOICE_FIELD_CLASSES",
+          "declaration": "const INVOICE_FIELD_CLASSES: readonly [\"organization\", \"date\", \"line_money\", \"coa_revenue\", \"tracking\", \"text\"];",
+          "doc": "The classes an invoice's editable fields fall into, for the freeze question\n*\"may an operator still change this field?\"*.\n\nExplicit tuple type rather than `as const` alone: core#43 is JSR's npm\n`.d.ts` emit truncating an inferred tuple."
+        },
+        {
+          "kind": "variable",
+          "name": "INVOICE_FIELD_FREEZE",
+          "declaration": "const INVOICE_FIELD_FREEZE: Readonly<Record<InvoiceFieldClass, InvoiceFieldFreezeContract>>;",
+          "doc": "**The one field-class freeze table.** The API's refusals, the manager's\noffers (`edit_items.frozen_classes`, `edit_organization`, `edit_date`) and\nthe Xero edit push all read it, through `invoiceFieldIsFrozen`\n(`@cfs/core/utils/invoices`).\n\nThis list used to be in four places: `updateInvoice` refusing `organization`\nand `date` by name, the money gate, `invoiceIsFrozen`'s docblock, and the\nmanager's own comment — which disagreed with its own section lock.\n\n**The rule follows Xero's** (owner, 2026-10-26): the revenue account is\nlocked once settled; tracking stays editable on a settled invoice, because\nXero accepts a tracking-only edit there, and freezes only on `void`.\n\n⚠️ `text` is `\"never\"`, and the document-level order → invoice sync must NOT\nroute through it: that sync freezes the whole invoice on `invoiceIsFrozen`\n(`api-cloudrun/src/lib/orderInvoiceSync.ts`). Reading the text class there\nwould let an order edit rewrite a paid invoice's subject."
+        },
+        {
+          "kind": "variable",
           "name": "INVOICE_STATUS_CONTRACTS",
           "declaration": "const INVOICE_STATUS_CONTRACTS: Readonly<Record<InvoiceStatusType, InvoiceStatusContract>>;",
-          "doc": "The per-status contract table.\n\nThe `Readonly<Record<InvoiceStatusType, …>>` annotation is what enforces\ntotality: a sixth status is a type error **here**, at the declaration, which\nforces an answer to all five questions rather than defaulting four of them.\nNo separate parity guard — a `T extends keyof typeof TABLE` assertion beside\nthis would read `T extends T` and could not fail.\n\nDeliberately **not** carrying an `amounts` column. Two status↔amounts rules\nwere proposed and both were killed by paging all 962 prod invoices:\n`paid ⟹ amount_due <= 0` fails on 20 of 813, and `issued ⟹ amount_paid == 0`\nfails on **75 of 98** — a bucket whose money matches Xero to the cent and\nwhose `status` is what is stale. The arithmetic identity that did survive\n(`amount_paid + amount_credited + amount_due == total`, exempting `void`)\nships separately as a `superRefine`, because it is the one rule that does not\nmention status."
+          "doc": "The per-status contract table.\n\nThe `Readonly<Record<InvoiceStatusType, …>>` annotation is what enforces\ntotality: a new status is a type error **here**, at the declaration, which\nforces an answer to every column rather than defaulting any of them.\nNo separate parity guard — a `T extends keyof typeof TABLE` assertion beside\nthis would read `T extends T` and could not fail.\n\nDeliberately **not** carrying an `amounts` column. Two status↔amounts rules\nwere proposed and both were killed by paging all 962 prod invoices:\n`paid ⟹ amount_due <= 0` fails on 20 of 813, and `issued ⟹ amount_paid == 0`\nfails on **75 of 98** — a bucket whose money matches Xero to the cent and\nwhose `status` is what is stale. The arithmetic identity that did survive\n(`amount_paid + amount_credited + amount_due == total`, exempting `void`)\nships separately as a `superRefine`, because it is the one rule that does not\nmention status."
         },
         {
           "kind": "interface",
@@ -9502,7 +9538,7 @@
           "kind": "interface",
           "name": "InvoiceDocDestinationType",
           "declaration": "interface InvoiceDocDestinationType {\n  uid_order: string;\n}",
-          "doc": "Destination pair on an invoice — mirrors the order's `DocDestinationType`\nwith a `uid_order` scope field so multi-order invoices can carry pairs\nfrom several orders and have them selectively synced per source order.\nCarries `dates` (rendered on the invoice) snapshotted from the source order.\n\n⭐ **A new field on this pair is now ONE edit, and it is not in this file.**\nIt used to be four, of which the compiler caught one. The `extends` below hands\nover the TYPE; `InvoiceDocDestination` restated the same six keys by hand and\ninherited nothing, so a field added to the order's pair type-checked here and\nwas then REFUSED at write. That is not hypothetical — it is how both flags kept\na `.default(false)` the order grain had already removed (core#101, 16 absent\nflags across 8 prod invoices). The schema now spreads `DestinationPairCore`, so\ndeclaring a field there lands it on both grains.\n\nThe other enumerators have all become walks and need no edit either:\n`toInvoiceDestinationPair` projects with `Object.entries` (its docblock says the\nspread is deliberate — do not tidy it into a field list), the merge reads the\nfield set off the two schemas (`orderInvoiceSharedFields`), and api-cloudrun's\nCRMS invoice webhook map is deleted.\n\n⭐ **A new field no longer needs an override RULING, and that is the point of\nthe campaign this paragraph used to describe.** It said a new field had to be\nplaced either in `INVOICE_OVERRIDABLE_PAIR_FIELDS` — payload the invoice owned\nand a separate carry reconciled — or left order-authored to freeze the whole\npair when it differed. Both that list and the whole-pair freeze are deleted.\nEvery shared field is now merged per field by construction: it follows the\norder unless the invoice's value differs from the order's PREVIOUS value.\n\n⚠️ **What a new field DOES need is a classification, and it is a declaration\nrather than a policy**: `.meta({ derived })` if a derivation writes it (it is\nthen never compared and recomputed afterwards), or `.meta({ propagate: false })`\nif the key means different things on the two documents. Untagged, it\npropagates — which is the safe default for a payload field and the unsafe one\nfor a homonym, so tag the homonym."
+          "doc": "Destination pair on an invoice — mirrors the order's `DocDestinationType`\nwith a `uid_order` scope field so multi-order invoices can carry pairs\nfrom several orders and have them selectively synced per source order.\nCarries `dates` (rendered on the invoice) snapshotted from the source order.\n\n⭐ **A new field on this pair is now ONE edit, and it is not in this file.**\nIt used to be four, of which the compiler caught one. The `extends` below hands\nover the TYPE; `InvoiceDocDestination` restated the same six keys by hand and\ninherited nothing, so a field added to the order's pair type-checked here and\nwas then REFUSED at write. That is not hypothetical — it is how both flags kept\na `.default(false)` the order grain had already removed (core#101, 16 absent\nflags across 8 prod invoices). The schema now spreads `DestinationPairCore`, so\ndeclaring a field there lands it on both grains.\n\nThe other enumerators have all become walks and need no edit either:\n`toInvoiceDestinationPair` projects with `Object.entries` (its docblock says the\nspread is deliberate — do not tidy it into a field list), the merge reads the\nfield set off the two schemas (`orderInvoiceSharedFields`), and api-cloudrun's\nCRMS invoice webhook map is deleted.\n\n⭐ **A new field no longer needs an override RULING, and that is the point of\nthe campaign this paragraph used to describe.** It said a new field had to be\nplaced either in `INVOICE_OVERRIDABLE_PAIR_FIELDS` — payload the invoice owned\nand a separate carry reconciled — or left order-authored to freeze the whole\npair when it differed. Both that list and the whole-pair freeze are deleted.\nEvery shared field is now merged per field by construction: it follows the\norder unless the invoice's value differs from the order's PREVIOUS value.\n\n⚠️ **What a new field DOES need is a classification, and it is a declaration\nrather than a policy**: `.meta({ propagate: true })` for a payload field,\n`.meta({ derived: true })` if a derivation writes it (it is then never\ncompared and recomputed afterwards), or `.meta({ propagate: false })` if the\nkey means different things on the two documents. An untagged shared field is\nreported `undeclared` and both shared-field callers THROW (core#116) — it used\nto propagate by default, which silently merged homonyms."
         },
         {
           "kind": "variable",
@@ -9551,6 +9587,18 @@
           "name": "InvoiceDocTotalsType",
           "declaration": "interface InvoiceDocTotalsType {\n  subtotal_cents: number;\n  subtotal_discounted_cents: number;\n  discount_amount_cents: number;\n  taxes: PriceModifierType[];\n  transaction_fees: PriceModifierType[];\n  total_cents: number;\n  amount_paid_cents: number;\n  amount_credited_cents?: number;\n  amount_void_cents?: number;\n  amount_due_cents: number;\n  closure_count?: number;\n}",
           "doc": "Invoice-level totals with settlement tracking.\n\n`amount_paid`, `amount_credited` and `amount_due` are a **co-written\nprojection** of the `settlements` journal — produced only by\n`recomputeSettlementTotals`, written in the same transaction as the settlement\nthat changed them, and rebuildable from the log by\n`api-cloudrun/scripts/repair-invoice-settlement-totals.ts`. They are not a denormalization\nto apologise for; they are the target architecture, and the same shape\n`stock/{P}` already has against the movement journal.\n\n`total` is NOT part of that projection — it derives from `items[]`. So the\nrebuild is deliberately **partial**: it repairs the settlement-fed fields\nwithout re-pricing anything."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "InvoiceFieldClass",
+          "declaration": "type InvoiceFieldClass = indexedAccess;",
+          "doc": "One of {@link INVOICE_FIELD_CLASSES}."
+        },
+        {
+          "kind": "interface",
+          "name": "InvoiceFieldFreezeContract",
+          "declaration": "interface InvoiceFieldFreezeContract {\n  frozen_when: \"frozen\" | \"void\" | \"never\";\n  xero_accepts_on_settled: boolean;\n  members: readonly parenthesized[];\n}",
+          "doc": "When a field class freezes, and what Xero does with it once settled."
         },
         {
           "kind": "variable",
@@ -9621,7 +9669,7 @@
         {
           "kind": "interface",
           "name": "InvoiceStatusContract",
-          "declaration": "interface InvoiceStatusContract {\n  operator_moves: readonly InvoiceStatusType[];\n  reached_xero: boolean;\n  live_in_xero: boolean;\n  settled: boolean;\n  accepts_payment: boolean;\n}",
+          "declaration": "interface InvoiceStatusContract {\n  operator_moves: readonly InvoiceStatusType[];\n  reached_xero: boolean;\n  live_in_xero: boolean;\n  settled: boolean;\n  accepts_payment: boolean;\n  tracks_xero_edits: \"always\" | \"once_pushed\" | null;\n}",
           "doc": "What one invoice status admits, on every axis anything in CFS asks about.\n\nFive hand-written status sets used to live in four repos, and three of them\nwere textually identical while a fourth looked identical and was not. As\ncolumns they stop looking like duplicates of each other and start being\nseparate answers to separate questions — which is what makes collapsing them\nsafe where a naive merge was not."
         },
         {
@@ -16643,6 +16691,18 @@
           "doc": "An invoice line with no counterpart on the order it is scoped to."
         },
         {
+          "kind": "interface",
+          "name": "XeroAccrecLineRefs",
+          "declaration": "interface XeroAccrecLineRefs {\n  account_code: string;\n  tracking_option_id: string | null;\n  item_code: string | null;\n}",
+          "doc": "What one ACCREC Xero line names besides its money and tax."
+        },
+        {
+          "kind": "interface",
+          "name": "XeroLineProduct",
+          "declaration": "interface XeroLineProduct {\n  price: typeLiteral;\n  xero_tracking_option_id?: string | null;\n  xero_code?: string | null;\n}",
+          "doc": "The product fields {@link xeroAccrecLineRefs} reads — a structural slice of `Product`."
+        },
+        {
           "kind": "function",
           "name": "adoptOrderDividerStructure",
           "signature": "adoptOrderDividerStructure(scopedInvoiceItems: InvoiceDocItemType[], orderItems: LineItem[], orderDividerUid: string): AdoptedDividerStructure",
@@ -17038,6 +17098,14 @@
         },
         {
           "kind": "function",
+          "name": "invoiceFieldIsFrozen",
+          "signature": "invoiceFieldIsFrozen(invoice: typeLiteral, cls: InvoiceFieldClass): boolean",
+          "doc": "**May an operator still change fields of this class on this invoice?** — the\naccessor over `INVOICE_FIELD_FREEZE` (`@cfs/core/schemas`), and the only way\nto read it. `true` means frozen.\n\nA `\"frozen\"` class follows {@link invoiceIsFrozen}, a `\"void\"` class freezes\nonly on a void invoice, and a `\"never\"` class is always editable.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "invoiceHasMoneySettlement",
           "signature": "invoiceHasMoneySettlement(invoice: typeLiteral): boolean",
           "doc": "Does this invoice record money having moved — paid, credited or voided? Money\nonly: a closure is NOT money. See {@link invoiceHasSettlement}, which counts it.",
@@ -17056,7 +17124,7 @@
           "kind": "function",
           "name": "invoiceIsFrozen",
           "signature": "invoiceIsFrozen(invoice: typeLiteral): boolean",
-          "doc": "🔴 **The authoritative freeze predicate: may an operator still change this\ninvoice's ORGANIZATION or its DATE?**\n\n`invoiceHasSettlement(invoice) || status === \"paid\" || status === \"void\"`.\n\n**The rule follows Xero's**: once a payment is applied, the organization, the\ninvoice date, the items and the money freeze — item descriptions, `reference`,\n`subject`, `notes` and `due_date` do not. Reversing the payment to zero\nunfreezes it, because {@link invoiceHasSettlement} reads a VALUE and no field\nrecords that the invoice was once settled.\n\n⚠️ **This is NOT {@link SETTLED_STATUSES}, and the difference is the whole\nreason it exists.** That constant is the STATUS column — `[\"paid\", \"void\"]` —\nand it is strictly weaker: it misses a `part_paid` invoice carrying a partial\npayment, which has real money against it and must not be re-addressed. A gate\nwritten on the status alone is wrong in both directions at once — stricter\nthan the server on a `paid` invoice, whose text fields are still editable, and\nweaker on a `part_paid` one.\n\n⚠️ **It answers the FIELD-CLASS question, not the money question.** The money\ngate (`lineMoneyAgrees`) asks *did the amount move?*; this asks *is this field\nthe operator's to change at all?* Both exist, and neither subsumes the other.",
+          "doc": "🔴 **The authoritative freeze predicate: may an operator still change this\ninvoice's ORGANIZATION or its DATE?**\n\n`invoiceHasSettlement(invoice) || status === \"paid\" || status === \"void\"`.\n\n**The rule follows Xero's**: once a payment is applied, the organization, the\ninvoice date, line money and the revenue account freeze. Text does not, and\ntracking freezes only on `void`. WHICH fields freeze on this predicate is\n`INVOICE_FIELD_FREEZE`'s answer, read per class through\n{@link invoiceFieldIsFrozen}; this function is only the WHEN. Reversing the\npayment to zero unfreezes it, because {@link invoiceHasSettlement} reads a\nVALUE and no field records that the invoice was once settled.\n\n⚠️ **This is NOT {@link SETTLED_STATUSES}, and the difference is the whole\nreason it exists.** That constant is the STATUS column — `[\"paid\", \"void\"]` —\nand it is strictly weaker: it misses a `part_paid` invoice carrying a partial\npayment, which has real money against it and must not be re-addressed. A gate\nwritten on the status alone is wrong in both directions at once — stricter\nthan the server on a `paid` invoice, whose text fields are still editable, and\nweaker on a `part_paid` one.\n\n⚠️ **It answers the FIELD-CLASS question, not the money question.** The money\ngate (`lineMoneyAgrees`) asks *did the amount move?*; this asks *is this field\nthe operator's to change at all?* Both exist, and neither subsumes the other.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -17540,6 +17608,14 @@
           "doc": "Assert that within each items array, no two entries share the same `uid`\nAND the same immediate parent PATH (`path.slice(0, -1)`; `[]` for a\ntop-level row).\n\nThis is the uniqueness invariant orders/invoices rely on so that path-based\nline identity is unambiguous. Violations indicate a duplicate that should\nbe merged — manager's `mergeStagedIntoOrder` (`manager/src/stores/orders.ts`)\nand the migration script consolidate. The same kit on two legs, or split\ninto a group within one leg, is legal: its components sit under different\nparent paths.\n\nReturns `[]` when uniqueness holds.\n\nNOTE: assumes the self-INCLUDED `path` convention. Product `components`\nexclude self from `path` — use {@link validateComponentUniqueness} for them.",
           "paramTags": [],
           "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "xeroAccrecLineRefs",
+          "signature": "xeroAccrecLineRefs(line: Pick<InvoiceDocLineItemType, \"uid\" | \"coa_revenue\" | \"xero_tracking_option_id\">, product: XeroLineProduct | undefined, knownTrackingOptionIds: ReadonlySet<string>): XeroAccrecLineRefs",
+          "doc": "**The one rule for which account, tracking option and item code an ACCREC\nXero line carries** — for the issue body and the edit body alike. They used\nto differ: issue read the account product-first and the tracking from the\nproduct only, while the edit push read the account line-first. So the hash\nwritten at issue described a body an edit would not have sent.\n\n- **Account: the line first** — `line.coa_revenue ?? product's ?? 4800`. A\n  line's account is an operator override where it differs from the product.\n- **Tracking: the line's option when Xero still knows it, else the\n  product's** (owner, 2026-10-26). A stored option Xero has since retired\n  falls back rather than sending none. A custom line has no product, so it\n  sends its own.\n- **Item code: the product's `xero_code`**, never `crms_id` (#256).\n\nA `custom-` line is never matched to a product, whatever the caller passes.\nThe tax mapping and the money stay in the API (`XeroTaxContext`,\n`xeroLineMoney`).",
+          "paramTags": [],
+          "returnsTag": null
         }
       ]
     },
@@ -17580,7 +17656,7 @@
         {
           "kind": "interface",
           "name": "InvoiceActionOffer",
-          "declaration": "interface InvoiceActionOffer {\n  key: string;\n  action: InvoiceActionId;\n  max_cents?: number;\n  uid_settlement?: string;\n  lines?: CreditableLine[];\n  money_frozen?: boolean;\n}",
+          "declaration": "interface InvoiceActionOffer {\n  key: string;\n  action: InvoiceActionId;\n  max_cents?: number;\n  uid_settlement?: string;\n  lines?: CreditableLine[];\n  money_frozen?: boolean;\n  frozen_classes?: readonly InvoiceFieldClass[];\n}",
           "doc": "One action the UI may offer. `key` is what a menu de-duplicates on: the action\nid, or `reverse_settlement:<uid>` for a per-row reversal."
         },
         {
@@ -17598,7 +17674,7 @@
         {
           "kind": "interface",
           "name": "InvoiceOfferContext",
-          "declaration": "interface InvoiceOfferContext {\n  settlements?: readonly OfferSettlement[];\n  creditNotes?: readonly CappedNote[];\n  xero_sync_status?: InvoiceXeroSyncStatus;\n}",
+          "declaration": "interface InvoiceOfferContext {\n  settlements?: readonly OfferSettlement[];\n  creditNotes?: readonly CappedNote[];\n  xero_sync_status?: InvoiceXeroSyncStatus;\n  xero_held_settlements?: boolean;\n}",
           "doc": "What {@link invoiceActionsFor} needs that the invoice alone does not carry."
         },
         {
@@ -17703,7 +17779,7 @@
           "kind": "function",
           "name": "invoiceActionsFor",
           "signature": "invoiceActionsFor(invoice: OfferInvoice, _: unknown): InvoiceActionOffer[]",
-          "doc": "Every action the UI may offer on this invoice.\n\n- `issue` / `void` — `canOperatorTransition`, the column `updateInvoice` gates on.\n- `close` — a live invoice totalling $0, nothing money-settled, no live\n  closure. ⚠️ Offered on a `paid` $0 invoice too: the ones today's derivation\n  copied PAID from Xero (#2197) are closed by exactly this action.\n- `add_payment` (D1) — the status `accepts_payment` and something is due;\n  `max_cents` is the amount due, a hard cap with no overpay override.\n- `reverse_settlement` (D2) — one offer per reversible row.\n- `add_credit_note` (D3) — a status live in Xero, with credit left on a line.\n- `edit_items` (D8) — always; `money_frozen` says whether line money is.\n- `edit_organization` / `edit_date` — while not {@link invoiceIsFrozen}.\n- `push_to_xero` — `issued` / `part_paid` / `paid`, linked to Xero, and the\n  caller's `xero_sync_status` is `out_of_sync` or `unknown`. `paid` is CFS's\n  status, not Xero's: whether Xero holds the payment is the task's question.",
+          "doc": "Every action the UI may offer on this invoice.\n\n- `issue` / `void` — `canOperatorTransition`, the column `updateInvoice` gates on.\n  `void` is also refused while `ctx.xero_held_settlements` is `true` (D8).\n- `close` — a live invoice totalling $0, nothing money-settled, no live\n  closure. ⚠️ Offered on a `paid` $0 invoice too: the ones today's derivation\n  copied PAID from Xero (#2197) are closed by exactly this action.\n- `add_payment` (D1) — the status `accepts_payment` and something is due;\n  `max_cents` is the amount due, a hard cap with no overpay override.\n- `reverse_settlement` (D2) — one offer per reversible row.\n- `add_credit_note` (D3) — a status live in Xero, with credit left on a line.\n- `edit_items` (D8) — always; `frozen_classes` says which field classes are\n  frozen, and `money_frozen` whether `line_money` is among them.\n- `edit_organization` / `edit_date` — while their field class is not frozen.\n- `push_to_xero` — `issued` / `part_paid` / `paid`, linked to Xero, and the\n  caller's `xero_sync_status` is `out_of_sync` or `unknown`. `paid` is CFS's\n  status, not Xero's: whether Xero holds the payment is the task's question.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -17725,7 +17801,7 @@
           "kind": "typeAlias",
           "name": "InvoiceXeroSyncStatus",
           "declaration": "type InvoiceXeroSyncStatus = \"in_sync\" | \"out_of_sync\" | \"unknown\" | \"not_applicable\";",
-          "doc": "- `in_sync` — the invoice's Xero-carried fields are what was last pushed.\n- `out_of_sync` — they have changed since, and no push has landed; OR the invoice\n  is issued and has no `xero_id` at all, because the issue POST never landed\n  (a non-throttle refusal is logged and the status flip is not rolled back). For\n  the moment between the status commit and the POST this reads out of sync too,\n  which is true.\n- `unknown` — linked and live, but no push has recorded a projection hash: no\n  sidecar, or one written before this carried a hash (its `pushed_hash` is the\n  old `v<version>` spelling). Not a claim either way.\n- `not_applicable` — no Xero twin to keep in step: a draft or a void. A `paid`\n  invoice with no recorded hash reads this too — see {@link TRACKED_ONCE_PUSHED}."
+          "doc": "- `in_sync` — the invoice's Xero-carried fields are what was last pushed.\n- `out_of_sync` — they have changed since, and no push has landed; OR the invoice\n  is issued and has no `xero_id` at all, because the issue POST never landed\n  (a non-throttle refusal is logged and the status flip is not rolled back). For\n  the moment between the status commit and the POST this reads out of sync too,\n  which is true.\n- `unknown` — linked and live, but no push has recorded a projection hash: no\n  sidecar, or one written before this carried a hash (its `pushed_hash` is the\n  old `v<version>` spelling). Not a claim either way.\n- `not_applicable` — no Xero twin to keep in step: a draft or a void. A `paid`\n  invoice with no recorded hash reads this too — its status's\n  `tracks_xero_edits` is `\"once_pushed\"`."
         },
         {
           "kind": "function",
@@ -17763,7 +17839,7 @@
           "kind": "function",
           "name": "invoiceXeroProjection",
           "signature": "invoiceXeroProjection(invoice: Partial<Invoice>): unknown",
-          "doc": "The part of an invoice that the Xero update body is built from.\n\n⚠️ **Money totals and `status` are deliberately absent.** A settlement writer\nadvances `version` and moves `status` / `amount_*_cents` without touching a\nline, and Xero learns of a payment from its own ledger, not from a push.\n\n⚠️ **Lines are projected to what the body reads, never compared whole.**\napi-cloudrun's `assembleXeroInvoiceUpdateBody` reads, per billable line: `uid`,\n`name`, `quantity`, `coa_revenue`, `price.subtotal_cents`, `price.discount`,\nand each tax's `uid` and `amount_cents`. Comparing `items` whole made every\nkey-only change a real Xero POST (api-cloudrun#993). api-cloudrun's\n`api-cloudrun/tests/unit/xeroInvoiceEdit.test.ts` perturbs every leaf of a real line through\nthe real assembler, so a field the body starts reading cannot be missing here\nunnoticed.",
+          "doc": "The part of an invoice that the Xero update body is built from.\n\n⚠️ **Money totals and `status` are deliberately absent.** A settlement writer\nadvances `version` and moves `status` / `amount_*_cents` without touching a\nline, and Xero learns of a payment from its own ledger, not from a push.\n\n⚠️ **Lines are projected to what the body reads, never compared whole.**\napi-cloudrun's `assembleXeroInvoiceUpdateBody` reads, per billable line: `uid`,\n`name`, `quantity`, `coa_revenue`, `price.subtotal_cents`, `price.discount`,\nand each tax's `uid` and `amount_cents`. Comparing `items` whole made every\nkey-only change a real Xero POST (api-cloudrun#993). api-cloudrun's\n`api-cloudrun/tests/unit/xeroInvoiceEdit.test.ts` perturbs every leaf of a real line through\nthe real assembler, so a field the body starts reading cannot be missing here\nunnoticed.\n\n⚠️ **The two tracking fields are hashed because the body sends the LINE's\ntracking option** (`xeroAccrecLineRefs`, `@cfs/core/utils/invoices`).\nWithout them a tracking-only edit never moved the hash and was never\nenqueued. Adding them made every hashed invoice read changed once, so each\none pushes on its next write.",
           "paramTags": [],
           "returnsTag": null
         },

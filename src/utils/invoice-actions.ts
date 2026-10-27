@@ -70,10 +70,12 @@ import {
   type CreditNoteStatusContract,
   canOperatorTransition,
   INVOICE_ACTIONS,
+  INVOICE_FIELD_CLASSES,
   INVOICE_STATUS_CONTRACTS,
   type InvoiceActionId,
   type InvoiceActionSubject,
   type InvoiceDocItemType,
+  type InvoiceFieldClass,
   type InvoiceStatusContract,
   type InvoiceStatusType,
   isInvoiceLineItem,
@@ -81,7 +83,7 @@ import {
   type Settlement,
   SETTLEMENT_CONTRACTS,
 } from "../schemas/mod.ts";
-import { invoiceHasMoneySettlement, invoiceIsFrozen, type InvoiceSettledTotals, liveSettlements } from "./invoices.ts";
+import { invoiceFieldIsFrozen, invoiceHasMoneySettlement, type InvoiceSettledTotals, liveSettlements } from "./invoices.ts";
 import { invoiceStatusTracksXeroEdits, type InvoiceXeroSyncStatus } from "./invoice-xero-sync.ts";
 import {
   type AccountedCreditNote,
@@ -141,10 +143,18 @@ export interface InvoiceActionOffer {
   /** `add_credit_note`: every line with credit left. Never empty. */
   lines?: CreditableLine[];
   /**
-   * `edit_items`: whether line MONEY is frozen (D8). Names, descriptions,
-   * `tracking_category` and `coa_revenue` stay editable either way.
+   * `edit_items`: whether line MONEY is frozen (D8) — `frozen_classes` includes
+   * `"line_money"`. Kept for the callers that ask only that.
    */
   money_frozen?: boolean;
+  /**
+   * `edit_items`: every field class that is frozen on this invoice, in
+   * `INVOICE_FIELD_CLASSES` order (`INVOICE_FIELD_FREEZE`, `@cfs/core/schemas`).
+   * A class not listed is editable. Read it per class rather than as one
+   * "settled" boolean: on a paid invoice the revenue account is locked while
+   * tracking and text are not.
+   */
+  frozen_classes?: readonly InvoiceFieldClass[];
 }
 
 // ── invoice ──────────────────────────────────────────────────────────
@@ -196,6 +206,15 @@ export interface InvoiceOfferContext {
    * caller, which is different from the `unknown` status (no hash recorded yet).
    */
   xero_sync_status?: InvoiceXeroSyncStatus;
+  /**
+   * Does Xero hold a payment or credit allocation against this invoice?
+   * `invoiceSettlementsHeldByXero(rows).length > 0`, from
+   * `@cfs/core/utils/invoice-xero-sync`. Xero refuses to void an invoice that
+   * carries one, so `void` is not offered while it is `true`.
+   * **Absent ⇒ not known**, and `void` is offered exactly as before; the server
+   * computes it at void time and refuses there.
+   */
+  xero_held_settlements?: boolean;
 }
 
 /** A status outside the vocabulary has no contract, and every gate reads false. */
@@ -329,6 +348,7 @@ function reversalRefusal(row: OfferSettlement, rows: readonly OfferSettlement[])
  * Every action the UI may offer on this invoice.
  *
  * - `issue` / `void` — `canOperatorTransition`, the column `updateInvoice` gates on.
+ *   `void` is also refused while `ctx.xero_held_settlements` is `true` (D8).
  * - `close` — a live invoice totalling $0, nothing money-settled, no live
  *   closure. ⚠️ Offered on a `paid` $0 invoice too: the ones today's derivation
  *   copied PAID from Xero (#2197) are closed by exactly this action.
@@ -336,8 +356,9 @@ function reversalRefusal(row: OfferSettlement, rows: readonly OfferSettlement[])
  *   `max_cents` is the amount due, a hard cap with no overpay override.
  * - `reverse_settlement` (D2) — one offer per reversible row.
  * - `add_credit_note` (D3) — a status live in Xero, with credit left on a line.
- * - `edit_items` (D8) — always; `money_frozen` says whether line money is.
- * - `edit_organization` / `edit_date` — while not {@link invoiceIsFrozen}.
+ * - `edit_items` (D8) — always; `frozen_classes` says which field classes are
+ *   frozen, and `money_frozen` whether `line_money` is among them.
+ * - `edit_organization` / `edit_date` — while their field class is not frozen.
  * - `push_to_xero` — `issued` / `part_paid` / `paid`, linked to Xero, and the
  *   caller's `xero_sync_status` is `out_of_sync` or `unknown`. `paid` is CFS's
  *   status, not Xero's: whether Xero holds the payment is the task's question.
@@ -350,7 +371,7 @@ export function invoiceActionsFor(invoice: OfferInvoice, ctx: InvoiceOfferContex
     offers.push({ key: action, action, ...extra });
 
   if (canOperatorTransition(invoice.status, "issued")) offer("issue");
-  if (canOperatorTransition(invoice.status, "void")) offer("void");
+  if (invoiceVoidRefusal(invoice, ctx) === null) offer("void");
   if (closeRefusal(invoice, contract) === null) offer("close");
 
   const due = invoice.totals.amount_due_cents;
@@ -366,11 +387,10 @@ export function invoiceActionsFor(invoice: OfferInvoice, ctx: InvoiceOfferContex
     if (lines.length > 0) offer("add_credit_note", { lines });
   }
 
-  offer("edit_items", { money_frozen: invoiceIsFrozen(invoice) });
-  if (!invoiceIsFrozen(invoice)) {
-    offer("edit_organization");
-    offer("edit_date");
-  }
+  const frozen = INVOICE_FIELD_CLASSES.filter((cls) => invoiceFieldIsFrozen(invoice, cls));
+  offer("edit_items", { money_frozen: frozen.includes("line_money"), frozen_classes: frozen });
+  if (!frozen.includes("organization")) offer("edit_organization");
+  if (!frozen.includes("date")) offer("edit_date");
   if (pushRefusal(invoice, ctx) === null) offer("push_to_xero");
   return offers;
 }
@@ -383,6 +403,17 @@ function pushRefusal(invoice: OfferInvoice, ctx: InvoiceOfferContext): string | 
   const status = ctx.xero_sync_status;
   if (status === undefined) return "the invoice's Xero sync status is unknown to the caller";
   if (status !== "out_of_sync" && status !== "unknown") return `the invoice is ${status} with Xero; there is nothing to push`;
+  return null;
+}
+
+// Xero refuses to void an invoice it holds a payment or credit allocation
+// against. Without this gate the CFS void committed first and the Xero void
+// then failed with only a log line, leaving the two systems disagreeing.
+function invoiceVoidRefusal(invoice: OfferInvoice, ctx: InvoiceOfferContext): string | null {
+  if (!canOperatorTransition(invoice.status, "void")) return `a ${invoice.status} invoice cannot be voided`;
+  if (ctx.xero_held_settlements === true) {
+    return "Xero holds a payment or credit against this invoice; remove it in Xero before voiding";
+  }
   return null;
 }
 
@@ -446,11 +477,16 @@ export function assertInvoiceAction(
       return;
     }
     case "edit_items": {
-      if (request.money_moved && invoiceIsFrozen(invoice)) refuse("Cannot reprice a settled invoice");
+      if (request.money_moved && invoiceFieldIsFrozen(invoice, "line_money")) refuse("Cannot reprice a settled invoice");
       return;
     }
     case "close": {
       const why = closeRefusal(invoice, contract!);
+      if (why !== null) refuse(why);
+      return;
+    }
+    case "void": {
+      const why = invoiceVoidRefusal(invoice, ctx);
       if (why !== null) refuse(why);
       return;
     }

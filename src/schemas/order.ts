@@ -2371,7 +2371,11 @@ const OrderDocLineItemInner = z.strictObject({
   // defaulted: `validateBeforeWrite` persists the RAW doc, so a `.default()`
   // never materializes, and every line written before beta.120 is genuinely
   // absent rather than null.
-  coa_revenue: COARevenueEnum.nullable().optional().meta({ propagate: true }),
+  // `propagate: false` — OWNED BY THE INVOICE once projected (manager#309). A
+  // new invoice row still takes the order's account through
+  // `projectOrderItemToInvoiceItem`; after that an order edit does not reach it. It used to propagate here while `INVOICE_ONLY_ITEM_FIELDS` carried
+  // the old value back on a resync, so the two owners disagreed invisibly.
+  coa_revenue: COARevenueEnum.nullable().optional().meta({ propagate: false }),
   // The class snapshot + the operator's class override — one declaration
   // shared with the invoice line (`_items.ts`).
   ...LineTaxCore,

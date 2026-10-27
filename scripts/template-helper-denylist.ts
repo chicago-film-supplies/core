@@ -365,6 +365,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // ── Xero integration ──
     "flattenForXero", // Xero line projection — write-path only
     "getXeroUnitAmountFromCents", // bakes duration into a per-unit price for Xero
+    "xeroAccrecLineRefs", // which account / tracking / item code a Xero line carries — write-path only
     // ── Payment / totals internals ──
     // `recomputePaymentTotals` sat here for months after the function was
     // deleted — a dead string nothing could see, because this file names its
@@ -385,6 +386,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "invoiceHasSettlement",
     "invoiceHasMoneySettlement",
     "invoiceIsFrozen",
+    "invoiceFieldIsFrozen", // its per-class form over INVOICE_FIELD_FREEZE — same reason
     // Settlement liveness, for MATCHING rows (the reap, the edit push's held
     // settlements). A rendered invoice reads its stored totals.
     "liveSettlements",

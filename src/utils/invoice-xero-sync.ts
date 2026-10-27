@@ -34,8 +34,8 @@
  *
  * @module
  */
-import type { Invoice, Settlement, XeroSyncState } from "../schemas/mod.ts";
-import { isInvoiceLineItem, SETTLEMENT_CONTRACTS } from "../schemas/mod.ts";
+import type { Invoice, InvoiceStatusContract, Settlement, XeroSyncState } from "../schemas/mod.ts";
+import { INVOICE_STATUS_CONTRACTS, isInvoiceLineItem, SETTLEMENT_CONTRACTS } from "../schemas/mod.ts";
 import { canonicalJson, hash48 } from "./contentHash.ts";
 import { liveSettlements } from "./invoices.ts";
 
@@ -54,6 +54,12 @@ import { liveSettlements } from "./invoices.ts";
  * `api-cloudrun/tests/unit/xeroInvoiceEdit.test.ts` perturbs every leaf of a real line through
  * the real assembler, so a field the body starts reading cannot be missing here
  * unnoticed.
+ *
+ * ⚠️ **The two tracking fields are hashed because the body sends the LINE's
+ * tracking option** (`xeroAccrecLineRefs`, `@cfs/core/utils/invoices`).
+ * Without them a tracking-only edit never moved the hash and was never
+ * enqueued. Adding them made every hashed invoice read changed once, so each
+ * one pushes on its next write.
  */
 export function invoiceXeroProjection(invoice: Partial<Invoice>): unknown {
   return {
@@ -62,6 +68,8 @@ export function invoiceXeroProjection(invoice: Partial<Invoice>): unknown {
       name: line.name ?? null,
       quantity: line.quantity ?? null,
       coa_revenue: line.coa_revenue ?? null,
+      tracking_category: line.tracking_category ?? null,
+      xero_tracking_option_id: line.xero_tracking_option_id ?? null,
       subtotal_cents: line.price?.subtotal_cents ?? null,
       discount: line.price?.discount ?? null,
       taxes: (line.price?.taxes ?? []).map((tax) => ({ uid: tax.uid, amount_cents: tax.amount_cents ?? 0 })),
@@ -95,7 +103,8 @@ export function invoiceXeroProjectionHash(invoice: Partial<Invoice>): string {
  *   sidecar, or one written before this carried a hash (its `pushed_hash` is the
  *   old `v<version>` spelling). Not a claim either way.
  * - `not_applicable` — no Xero twin to keep in step: a draft or a void. A `paid`
- *   invoice with no recorded hash reads this too — see {@link TRACKED_ONCE_PUSHED}.
+ *   invoice with no recorded hash reads this too — its status's
+ *   `tracks_xero_edits` is `"once_pushed"`.
  */
 export type InvoiceXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" | "not_applicable";
 
@@ -106,24 +115,20 @@ export type InvoiceXeroSyncStatus = "in_sync" | "out_of_sync" | "unknown" | "not
  */
 const LEGACY_VERSION_WATERMARK = /^v\d+$/;
 
-/** Statuses whose Xero twin is live and should track CFS edits. */
-const TRACKED_STATUSES: ReadonlySet<string> = new Set(["issued", "part_paid"]);
-
 /**
- * **CFS `paid` is not Xero paid** (owner, 2026-10-22). An operator records a
- * settlement in CFS ahead of Xero's bank feed — to issue a paid invoice at once —
- * and Xero's payment matches that row a day later. Until it does, Xero holds no
- * payment and accepts an edit, so CFS's status must not stop the push: the edit
- * task's Xero-held-settlements check ({@link invoiceSettlementsHeldByXero}) is the
- * gate. Prod #2399 and #2413 lost their card-fee lines to the old `paid` exemption.
+ * The status's `tracks_xero_edits` column (`INVOICE_STATUS_CONTRACTS`), or `null`
+ * for a status outside the vocabulary. These used to be two hand-written sets,
+ * `issued`/`part_paid` and `paid`, repeating `LIVE_IN_XERO_STATUSES` by hand.
  *
- * ⚠️ **Tracked only once a push has recorded a hash.** Without one, `unknown`
- * would enqueue on every write — and of 1,026 prod paid invoices (2026-10-22),
- * 979 have no hash and a Xero-held payment, so each write would cost a task that
- * ends at the `invoice_edit_has_settlements` seam reporting an edit nobody made.
- * A paid invoice with no hash reads `not_applicable`, as before.
+ * Why `paid` is `"once_pushed"` — CFS `paid` is not Xero paid, and prod #2399 and
+ * #2413 lost their card-fee lines to the old `paid` exemption — is on the column.
+ * The edit task's Xero-held-settlements check ({@link invoiceSettlementsHeldByXero})
+ * is the real gate for a paid invoice.
  */
-const TRACKED_ONCE_PUSHED: ReadonlySet<string> = new Set(["paid"]);
+function tracksXeroEdits(status: string): InvoiceStatusContract["tracks_xero_edits"] {
+  return (INVOICE_STATUS_CONTRACTS as Record<string, InvoiceStatusContract | undefined>)[status]
+    ?.tracks_xero_edits ?? null;
+}
 
 /**
  * **May an invoice in this status track CFS edits in Xero?** The status half of
@@ -133,7 +138,7 @@ const TRACKED_ONCE_PUSHED: ReadonlySet<string> = new Set(["paid"]);
  * with the real watermark, never with `null` standing in for "status only".
  */
 export function invoiceStatusTracksXeroEdits(status: string): boolean {
-  return TRACKED_STATUSES.has(status) || TRACKED_ONCE_PUSHED.has(status);
+  return tracksXeroEdits(status) !== null;
 }
 
 /** See {@link InvoiceXeroSyncStatus}. `state` is the watermark, or `null` when absent. */
@@ -143,9 +148,9 @@ export function invoiceXeroSyncStatus(
 ): InvoiceXeroSyncStatus {
   const pushed = state?.pushed_hash ?? null;
   const hashless = pushed === null || LEGACY_VERSION_WATERMARK.test(pushed);
-  if (TRACKED_ONCE_PUSHED.has(invoice.status)) {
-    if (!invoice.xero_id || hashless) return "not_applicable";
-  } else if (!TRACKED_STATUSES.has(invoice.status)) return "not_applicable";
+  const tracks = tracksXeroEdits(invoice.status);
+  if (tracks === null) return "not_applicable";
+  if (tracks === "once_pushed" && (!invoice.xero_id || hashless)) return "not_applicable";
   if (!invoice.xero_id) return "out_of_sync";
   if (hashless) return "unknown";
   return pushed === invoiceXeroProjectionHash(invoice) ? "in_sync" : "out_of_sync";
