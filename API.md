@@ -9879,6 +9879,80 @@ Allowed purchase kinds. See {@link PURCHASE_KINDS}.
 type PurchaseKindType = indexedAccess;
 ```
 
+### `PurchaseLandedCost`
+
+One landed cost on a BUY line: freight, duty or a fee the operator attributes
+to the units still to arrive (api-cloudrun#1227). It is cost basis, so it
+reaches the ledger only through the receipts that price it.
+
+⚠️ **It lives on the PURCHASE LINE, not on the bill.** 276 of 299 historic
+bills are linked card-purchase bills with `direct_lines: []`, and the receipt
+transaction reads the purchase, never its bills. The Xero side is unchanged:
+the freight still posts through a bill's direct line to its own account.
+`uid_purchase_bill` is traceability only. A `PurchaseDirectLine` carries no
+id of its own, so the pointer names the bill.
+
+**What it spreads over is fixed at entry.** `quantity` is the line's
+outstanding count when the entry was made, and `received_at_entry` is
+`quantity_received` at that moment. The k-th receipt prices the units received
+since the entry, `clamp(received − received_at_entry, 0, quantity)`, with
+`cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when
+every outstanding unit arrives (`purchaseLineReceiptTargetCents`,
+`@cfs/core/utils/purchases`).
+
+**Append-only, the way the line amount is.** An entry no receipt has priced
+(`quantity_received ≤ received_at_entry`) is editable and removable. One that
+a receipt has priced any part of is frozen. A short close still proceeds:
+the unpriced remainder is DERIVED (`strandedLandedCents`), never stored. The
+post-receipt re-base waits on depreciation (api-cloudrun#1388).
+
+```ts
+interface PurchaseLandedCost {
+  uid: string;
+  description: string;
+  amount_cents: number;
+  quantity: number;
+  received_at_entry: number;
+  uid_purchase_bill: string | null;
+}
+```
+
+### `PurchaseLandedCostInput`
+
+Zod schema for PurchaseLandedCostInputType.
+
+```ts
+const PurchaseLandedCostInput: z.ZodType<PurchaseLandedCostInputType>;
+```
+
+### `PurchaseLandedCostInputType`
+
+One landed cost as the operator states it on a buy line. `quantity` and
+`received_at_entry` are the server's, stamped from the stored line.
+
+`uid` names a stored entry to keep or edit; absent mints a new one. Splitting
+one amount across several lines is `allocateLandedCostCents`
+(`@cfs/core/utils/purchases`), run by the client so the preview it shows is the
+split it sends. Any per-line split is legal; the allocator is the default,
+not a rule.
+
+```ts
+interface PurchaseLandedCostInputType {
+  uid?: string;
+  description: string;
+  amount_cents: number;
+  uid_purchase_bill?: string | null;
+}
+```
+
+### `PurchaseLandedCostSchema`
+
+Zod schema for PurchaseLandedCost.
+
+```ts
+const PurchaseLandedCostSchema: z.ZodType<PurchaseLandedCost>;
+```
+
 ### `PurchaseLine`
 
 One product ordered on a purchase.
@@ -9896,6 +9970,7 @@ interface PurchaseLine {
   dates?: PurchaseLineDates;
   quantity_returned?: number;
   uid_orders?: string[];
+  landed_costs?: PurchaseLandedCost[];
 }
 ```
 
@@ -9943,6 +10018,7 @@ interface PurchaseLineInputType {
   expected_date?: string | null;
   dates?: PurchaseLineDates;
   uid_orders?: string[];
+  landed_costs?: PurchaseLandedCostInputType[];
 }
 ```
 
@@ -24587,6 +24663,80 @@ Allowed purchase kinds. See {@link PURCHASE_KINDS}.
 type PurchaseKindType = indexedAccess;
 ```
 
+### `PurchaseLandedCost`
+
+One landed cost on a BUY line: freight, duty or a fee the operator attributes
+to the units still to arrive (api-cloudrun#1227). It is cost basis, so it
+reaches the ledger only through the receipts that price it.
+
+⚠️ **It lives on the PURCHASE LINE, not on the bill.** 276 of 299 historic
+bills are linked card-purchase bills with `direct_lines: []`, and the receipt
+transaction reads the purchase, never its bills. The Xero side is unchanged:
+the freight still posts through a bill's direct line to its own account.
+`uid_purchase_bill` is traceability only. A `PurchaseDirectLine` carries no
+id of its own, so the pointer names the bill.
+
+**What it spreads over is fixed at entry.** `quantity` is the line's
+outstanding count when the entry was made, and `received_at_entry` is
+`quantity_received` at that moment. The k-th receipt prices the units received
+since the entry, `clamp(received − received_at_entry, 0, quantity)`, with
+`cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when
+every outstanding unit arrives (`purchaseLineReceiptTargetCents`,
+`@cfs/core/utils/purchases`).
+
+**Append-only, the way the line amount is.** An entry no receipt has priced
+(`quantity_received ≤ received_at_entry`) is editable and removable. One that
+a receipt has priced any part of is frozen. A short close still proceeds:
+the unpriced remainder is DERIVED (`strandedLandedCents`), never stored. The
+post-receipt re-base waits on depreciation (api-cloudrun#1388).
+
+```ts
+interface PurchaseLandedCost {
+  uid: string;
+  description: string;
+  amount_cents: number;
+  quantity: number;
+  received_at_entry: number;
+  uid_purchase_bill: string | null;
+}
+```
+
+### `PurchaseLandedCostInput`
+
+Zod schema for PurchaseLandedCostInputType.
+
+```ts
+const PurchaseLandedCostInput: z.ZodType<PurchaseLandedCostInputType>;
+```
+
+### `PurchaseLandedCostInputType`
+
+One landed cost as the operator states it on a buy line. `quantity` and
+`received_at_entry` are the server's, stamped from the stored line.
+
+`uid` names a stored entry to keep or edit; absent mints a new one. Splitting
+one amount across several lines is `allocateLandedCostCents`
+(`@cfs/core/utils/purchases`), run by the client so the preview it shows is the
+split it sends. Any per-line split is legal; the allocator is the default,
+not a rule.
+
+```ts
+interface PurchaseLandedCostInputType {
+  uid?: string;
+  description: string;
+  amount_cents: number;
+  uid_purchase_bill?: string | null;
+}
+```
+
+### `PurchaseLandedCostSchema`
+
+Zod schema for PurchaseLandedCost.
+
+```ts
+const PurchaseLandedCostSchema: z.ZodType<PurchaseLandedCost>;
+```
+
 ### `PurchaseLine`
 
 One product ordered on a purchase.
@@ -24604,6 +24754,7 @@ interface PurchaseLine {
   dates?: PurchaseLineDates;
   quantity_returned?: number;
   uid_orders?: string[];
+  landed_costs?: PurchaseLandedCost[];
 }
 ```
 
@@ -24651,6 +24802,7 @@ interface PurchaseLineInputType {
   expected_date?: string | null;
   dates?: PurchaseLineDates;
   uid_orders?: string[];
+  landed_costs?: PurchaseLandedCostInputType[];
 }
 ```
 
@@ -30423,7 +30575,7 @@ type CloudTaskEventMsg = indexedAccess;
 Msg literals this archetype absorbs.
 
 ```ts
-const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "checkout_shelf_shortfall" | "custody_delta_unmatched" | "substitution_custody_kept" | "invoice_action_unoffered" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_sync_organization_kept" | "destination_pair_unjoined"[];
+const DOMAIN_EVENT_MSGS: "afterOrderWrite_order_not_found" | "store_destination_no_default" | "after_order_write_no_changes" | "after_product_write_no_changes" | "after_product_write_not_found" | "after_product_write_skip_create" | "update_order_no_changes" | "order_invoice_count_high" | "invoice_created" | "invoice_updated" | "organization_check_failed" | "organization_no_xero_id" | "organization_xero_id_shared" | "organization_merged" | "item_path_invariant_failed" | "order_invoice_mirror_repaired" | "cascade_converged" | "location_cascade_skip" | "location_reversal_skip" | "location_quantity_negative" | "stock_recalc_item_added" | "stock_recalc_item_modified" | "stock_recalc_item_removed" | "stock_recalc_items" | "stock_recalc_status_changed" | "stock_oversold" | "oos_overbilled" | "checkout_shelf_shortfall" | "custody_delta_unmatched" | "substitution_custody_kept" | "invoice_action_unoffered" | "fulfillment_custom_item_qty_override" | "fulfillment_sync_items_skipped_no_bookings" | "fulfillment_sync_frozen_rows" | "recurrence_horizon_failed" | "tax_priced_on_unreviewed_rate" | "invoice_sync_organization_kept" | "destination_pair_unjoined" | "purchase_landed_cost_stranded"[];
 ```
 
 ### `DmarcAggregateLogRecord`
@@ -30499,6 +30651,8 @@ interface DomainEventLogRecord {
   action_subject?: "invoice" | "credit_note" | "order";
   action_subject_uid?: string;
   refusal?: string;
+  uid_purchase?: string;
+  stranded_cents?: number;
 }
 ```
 
@@ -41342,6 +41496,31 @@ flagged as broken.
 const PAYMENT_MATCH_TOLERANCE_CENTS: 1;
 ```
 
+### `apportionCents(total: bigint, weights: readonly bigint[]): bigint[]`
+
+Split `total` cents in proportion to `weights`, by LARGEST REMAINDER, so the
+shares **sum to exactly `total`**.
+
+Each share starts at `floor(total × w ÷ Σw)`. The cents that leaves over (at
+most one per share) go one each to the shares with the largest remainders
+`total × w mod Σw`, ties to the earliest index, which is `distributeCents`'s
+front-loading. So every share is the floor or the ceiling of its exact quota,
+and no share got the floor while a share with a smaller remainder got the
+ceiling.
+
+⚠️ **Not one rounding per share.** Rounding each quota on its own
+(`roundDivHalfUp(total × w, Σw)`) is the obvious form and it does not
+conserve: three equal weights over 100 give 33 + 33 + 33. Neither does
+`distributeCents` fit, which splits evenly, nor `apportionBreakdown`
+(`utils/bookings.ts`), which apportions units.
+
+A weight of 0 always gets 0.
+
+**Parameters**
+
+- `total` — Cents to split, non-negative.
+- `weights` — One non-negative weight per share, at least one positive.
+
 ### `distributeCents(total: bigint, parts: number): bigint[]`
 
 Split `total` cents into `parts` whole-cent shares that **sum to exactly
@@ -45055,6 +45234,15 @@ The result of {@link expandPurchaseLines}.
 type PurchaseExpansionResult = typeLiteral | typeLiteral;
 ```
 
+### `allocateLandedCostCents(amountCents: number, lines: readonly Pick<PurchaseLine, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">[]): number[]`
+
+Spread one landed amount over several buy lines, in proportion to each
+line's value still to arrive ({@link landedCostWeightCents}), with
+{@link apportionCents}. Σ is exactly `amountCents`.
+
+The client runs it so the preview it shows is the split it sends; a line with
+weight 0 gets 0, and the caller drops it rather than send a 0-cent entry.
+
 ### `cumulativeShareCents(amountCents: number, quantity: number, before: number, after: number): number`
 
 The cents a line's units `(before, after]` cost — the k-th receipt or the
@@ -45161,6 +45349,33 @@ second price already follows — and that merge is a refusal.
 Returns rather than throws: a refusal is an operator-facing 400, and core
 throws plain `Error`, which a consumer's middleware reads as a 500.
 
+### `isLandedCostFrozen(entry: Pick<PurchaseLandedCost, "received_at_entry">, line: Pick<PurchaseLine, "quantity_received">): boolean`
+
+Is a landed cost frozen? A receipt has priced part of it once `received > received_at_entry`.
+
+### `landedCostWeightCents(line: Pick<PurchaseLine, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">): number`
+
+A line's weight when one landed amount is spread over several lines: the
+value still to arrive, `cumulativeShareCents(amount, quantity, received,
+quantity − canceled)`. Units already received carry none of it, because the
+entry only ever prices units received after it.
+
+### `landedPricedCents(entry: Pick<PurchaseLandedCost, "amount_cents" | "quantity" | "received_at_entry">, quantityReceived: number): number`
+
+The cents a landed cost has put onto the ledger at a cumulative received
+count — `cumulativeShareCents` over the entry's own units, so the receipts
+telescope to `amount_cents` exactly once every one of them has arrived.
+
+### `landedUnitsPriced(entry: Pick<PurchaseLandedCost, "quantity" | "received_at_entry">, quantityReceived: number): number`
+
+How many of a landed cost's units a line's receipts have priced, at a
+cumulative received count: the units received since the entry was made,
+`clamp(received − received_at_entry, 0, quantity)`.
+
+The clamp at 0 is what makes a REVERSAL that crosses the entry exact: units
+received before the entry never carried it, so taking them back returns none
+of it.
+
 ### `purchaseCreditRemainingFromJournal(totalCents: number, settlements: readonly typeLiteral[]): number`
 
 A supplier credit's unconsumed credit, folded from the journal
@@ -45178,6 +45393,23 @@ the AR twin skips. Negative results are preserved, never clamped.
 
 - `totalCents` — The credit's `total_cents`
 - `settlements` — Every settlement naming the credit, reversals included
+
+### `purchaseLineReceiptTargetCents(line: Pick<PurchaseLine, "amount_cents" | "quantity" | "landed_costs">, quantityReceived: number): number`
+
+The CUMULATIVE cost a buy line's receipts should have journalled once
+`quantityReceived` units are in: the goods' share plus every landed cost's
+share, each rounded on its own cumulative count.
+
+A receipt's cost is this target minus what the journal already holds for the
+product. That difference is the whole design, and it is why a partial
+`(before, after]` landed share is WRONG here: the journal subtraction already
+removes the landed cents earlier receipts carried, so a partial would leave
+only the last receipt's share (a $100 entry over two halves journals $50).
+Only a cumulative target survives the subtraction, and it keeps a reversal
+exact as well, since the target at a count does not depend on the path.
+
+Absent `landed_costs` reads as `[]`, which reduces this to the goods' share,
+the pre-#1227 formula.
 
 ### `recomputePurchaseBillTotals(totalCents: number, settlements: readonly typeLiteral[]): typeLiteral`
 
@@ -45211,6 +45443,16 @@ Units of a line still to be received: `quantity − canceled − received`.
 Units of a SUBRENT line still to go back to the supplier: `received − returned`.
 Bounded by what came in, not by what was ordered — an unreceived unit owes no
 return. `0` on a buy line, which carries no `quantity_returned`.
+
+### `strandedLandedCents(line: Pick<PurchaseLine, "quantity" | "quantity_received" | "quantity_canceled" | "landed_costs">): number`
+
+Landed cents a line can no longer price, because no unit is left to arrive:
+Σ over its entries of `amount_cents − landedPricedCents(entry, received)`,
+and `0` while any unit is still to come (a receipt may yet price it).
+
+Nonzero only after a short close cut units an entry was spread over. It is
+DERIVED, never stored (ruling 6): the cost basis it belongs to waits on the
+post-receipt re-base, which is designed with depreciation (api-cloudrun#1388).
 
 ## `@cfs/core/utils/organizations`
 

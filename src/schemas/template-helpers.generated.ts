@@ -186,6 +186,7 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "normalizeLocationName", expr: "it.locations.normalizeLocationName(name)", desc: "Canonical uniqueness key for a location name, scoped within its store.", returns: "string" },
   ],
   "money": [
+    { name: "apportionCents", expr: "it.money.apportionCents(total, weights)", desc: "Split `total` cents in proportion to `weights`, by LARGEST REMAINDER, so the shares **sum to exactly `total`**.", returns: "bigint[]" },
     { name: "distributeCents", expr: "it.money.distributeCents(total, parts)", desc: "Split `total` cents into `parts` whole-cent shares that **sum to exactly `total`**.", returns: "bigint[]" },
     { name: "formatCents", expr: "it.money.formatCents(cents, arg2)", desc: "Format integer cents for display **without ever creating a float**.", returns: "string" },
     { name: "formatDiscriminatedRate", expr: "it.money.formatDiscriminatedRate(r)", desc: "Render a discriminated `{ type, rate }` — `Discount`, `PriceModifier`, `Tax`, `TaxRef` — in the unit its `type` names: `percent` → `10.25%`, `flat` → `$0.055` (dollars per unit, 4dp ceiling, 2dp floor). One switch, so a site cannot pick the wrong arm and a new {@link RateType} member is a compile error here rather than a silent `$` (core#130 row 4).", returns: "string" },
@@ -285,7 +286,13 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
     { name: "removeComponentEntries", expr: "it.products.removeComponentEntries(components, path)", desc: "Remove a component and all its descendants from a flat components array. An entry is removed if its `path` starts with the given path prefix — this covers the component itself and every entry nested beneath it.", returns: "T[]" },
   ],
   "purchases": [
-
+    { name: "allocateLandedCostCents", expr: "it.purchases.allocateLandedCostCents(amountCents, lines)", desc: "Spread one landed amount over several buy lines, in proportion to each line's value still to arrive ({@link landedCostWeightCents}), with {@link apportionCents}. Σ is exactly `amountCents`.", returns: "number[]" },
+    { name: "isLandedCostFrozen", expr: "it.purchases.isLandedCostFrozen(entry, line)", desc: "Is a landed cost frozen? A receipt has priced part of it once `received > received_at_entry`.", returns: "boolean" },
+    { name: "landedCostWeightCents", expr: "it.purchases.landedCostWeightCents(line)", desc: "A line's weight when one landed amount is spread over several lines: the value still to arrive, `cumulativeShareCents(amount, quantity, received, quantity − canceled)`. Units already received carry none of it, because the entry only ever prices units received after it.", returns: "number" },
+    { name: "landedPricedCents", expr: "it.purchases.landedPricedCents(entry, quantityReceived)", desc: "The cents a landed cost has put onto the ledger at a cumulative received count — `cumulativeShareCents` over the entry's own units, so the receipts telescope to `amount_cents` exactly once every one of them has arrived.", returns: "number" },
+    { name: "landedUnitsPriced", expr: "it.purchases.landedUnitsPriced(entry, quantityReceived)", desc: "How many of a landed cost's units a line's receipts have priced, at a cumulative received count: the units received since the entry was made, `clamp(received − received_at_entry, 0, quantity)`.", returns: "number" },
+    { name: "purchaseLineReceiptTargetCents", expr: "it.purchases.purchaseLineReceiptTargetCents(line, quantityReceived)", desc: "The CUMULATIVE cost a buy line's receipts should have journalled once `quantityReceived` units are in: the goods' share plus every landed cost's share, each rounded on its own cumulative count.", returns: "number" },
+    { name: "strandedLandedCents", expr: "it.purchases.strandedLandedCents(line)", desc: "Landed cents a line can no longer price, because no unit is left to arrive: Σ over its entries of `amount_cents − landedPricedCents(entry, received)`, and `0` while any unit is still to come (a receipt may yet price it).", returns: "number" },
   ],
   "quantityAccounting": [
     { name: "buildOverbillingCredits", expr: "it.quantityAccounting.buildOverbillingCredits(order, invoices, arg3)", desc: "**Build the credit notes that give back what an order's invoices over-billed it** (api-cloudrun#1028). The ONE author of the offer: the server rebuilds it inside the create transaction and the manager renders it as a preview, so the two cannot answer differently.", returns: "OverbillingCredits" },

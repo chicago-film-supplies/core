@@ -331,6 +331,51 @@ export function distributeCents(total: bigint, parts: number): bigint[] {
 }
 
 /**
+ * Split `total` cents in proportion to `weights`, by LARGEST REMAINDER, so the
+ * shares **sum to exactly `total`**.
+ *
+ * Each share starts at `floor(total × w ÷ Σw)`. The cents that leaves over (at
+ * most one per share) go one each to the shares with the largest remainders
+ * `total × w mod Σw`, ties to the earliest index, which is `distributeCents`'s
+ * front-loading. So every share is the floor or the ceiling of its exact quota,
+ * and no share got the floor while a share with a smaller remainder got the
+ * ceiling.
+ *
+ * ⚠️ **Not one rounding per share.** Rounding each quota on its own
+ * (`roundDivHalfUp(total × w, Σw)`) is the obvious form and it does not
+ * conserve: three equal weights over 100 give 33 + 33 + 33. Neither does
+ * `distributeCents` fit, which splits evenly, nor `apportionBreakdown`
+ * (`utils/bookings.ts`), which apportions units.
+ *
+ * A weight of 0 always gets 0.
+ *
+ * @param total - Cents to split, non-negative.
+ * @param weights - One non-negative weight per share, at least one positive.
+ * @throws when `total` or any weight is negative, or every weight is 0 — there
+ *   is no proportional split of a total over nothing.
+ */
+export function apportionCents(total: bigint, weights: readonly bigint[]): bigint[] {
+  if (total < 0n) throw new RangeError(`apportionCents needs a non-negative total, got ${total}`);
+  if (weights.some((w) => w < 0n)) throw new RangeError(`apportionCents needs non-negative weights, got ${weights.join(", ")}`);
+  const sum = weights.reduce((a, w) => a + w, 0n);
+  if (sum === 0n) {
+    throw new RangeError(`apportionCents needs a positive weight — no split of ${total} over ${weights.length} zero weights conserves it`);
+  }
+  const shares = weights.map((w) => (total * w) / sum);
+  let left = total - shares.reduce((a, s) => a + s, 0n);
+  const byRemainder = weights
+    .map((w, i) => ({ i, rem: (total * w) % sum }))
+    .filter((r) => r.rem > 0n)
+    .sort((a, b) => (a.rem === b.rem ? a.i - b.i : a.rem > b.rem ? -1 : 1));
+  for (const { i } of byRemainder) {
+    if (left === 0n) break;
+    shares[i] += 1n;
+    left -= 1n;
+  }
+  return shares;
+}
+
+/**
  * How far a CFS settlement may sit from the Xero payment it matches, in cents.
  *
  * A domain rule, not a fudge factor: Xero rounds its own line arithmetic, so a

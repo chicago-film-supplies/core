@@ -11,7 +11,9 @@ import {
   CreatePurchaseBillInput,
   CreatePurchaseInput,
   derivePurchaseStatus,
+  type PurchaseLandedCost,
   type PurchaseLine,
+  PurchaseLineInput,
   PurchaseBillSchema,
   PurchaseCreditSchema,
   PurchaseSchema,
@@ -20,8 +22,14 @@ import {
   UpdatePurchaseInput,
 } from "../src/schemas/mod.ts";
 import {
+  allocateLandedCostCents,
   cumulativeShareCents,
   expandPurchaseLines,
+  isLandedCostFrozen,
+  landedCostWeightCents,
+  landedUnitsPriced,
+  purchaseLineReceiptTargetCents,
+  strandedLandedCents,
   type PurchaseExpansionComponent,
   type PurchaseExpansionProduct,
   deriveQueryByOrders,
@@ -30,6 +38,7 @@ import {
   remainingToReceive,
   remainingToReturn,
 } from "../src/utils/purchases.ts";
+import { apportionCents } from "../src/utils/money.ts";
 import { mockTimestamp } from "./helpers/timestamp.ts";
 
 // ── the cumulative share ─────────────────────────────────────────────
@@ -801,4 +810,288 @@ Deno.test("expandPurchaseLines: two subrent lines on one product merge only with
   ], CATALOG);
   assert(!other.ok);
   assertEquals(other.refusal.reason, "different_hire_windows");
+});
+
+// ── landed cost (api-cloudrun#1227) ──────────────────────────────────
+
+/**
+ * The largest-remainder oracle, by PROPERTY rather than by construction: Σ is
+ * the total, each share is within one cent of its exact quota `T·w/W`, and no
+ * share rounded down has a larger fractional remainder than a share rounded
+ * up. All checked by cross-multiplication, so it never computes a share itself.
+ */
+function largestRemainderViolation(total: bigint, weights: bigint[], shares: bigint[]): string | null {
+  const W = weights.reduce((a, w) => a + w, 0n);
+  if (shares.reduce((a, s) => a + s, 0n) !== total) return `Σ ${shares.join("+")} ≠ ${total}`;
+  let maxDownFrac = -1n;
+  let minUpFrac = W + 1n;
+  for (let i = 0; i < weights.length; i++) {
+    const exact = total * weights[i]; // the quota, scaled by W
+    const scaled = shares[i] * W;
+    if (scaled - exact >= W || exact - scaled >= W) return `share ${i} = ${shares[i]} is a cent or more from ${exact}/${W}`;
+    if (weights[i] === 0n && shares[i] !== 0n) return `zero weight ${i} got ${shares[i]}`;
+    if (scaled < exact) maxDownFrac = exact - scaled > maxDownFrac ? exact - scaled : maxDownFrac;
+    if (scaled > exact) {
+      const frac = exact - (scaled - W); // its remainder before the +1
+      minUpFrac = frac < minUpFrac ? frac : minUpFrac;
+    }
+  }
+  if (maxDownFrac > minUpFrac) return `a share rounded down holds remainder ${maxDownFrac} > an up-rounded ${minUpFrac}`;
+  return null;
+}
+
+function randomWeights(rand: () => number): bigint[] {
+  const n = 1 + Math.floor(rand() * 12);
+  const ws: bigint[] = Array.from({ length: n }, () => (rand() < 0.15 ? 0n : BigInt(Math.floor(rand() * 5_000_000))));
+  if (!ws.some((w) => w > 0n)) ws[0] = 1n;
+  return ws;
+}
+
+Deno.test("apportionCents: over 200k random splits, Σ is exact and the split is largest-remainder", () => {
+  const rand = mulberry32(1227);
+  let failure: string | null = null;
+  let withRemainder = 0;
+  let withZeroWeight = 0;
+  for (let draw = 0; draw < DRAWS && failure === null; draw++) {
+    const total = BigInt(Math.floor(rand() * 2_000_000));
+    const weights = randomWeights(rand);
+    const shares = apportionCents(total, weights);
+    const v = largestRemainderViolation(total, weights, shares);
+    if (v !== null) failure = `draw ${draw}: ${v}`;
+    const W = weights.reduce((a, w) => a + w, 0n);
+    if (weights.some((w, i) => shares[i] * W > total * w)) withRemainder++;
+    if (weights.some((w) => w === 0n)) withZeroWeight++;
+  }
+  assertEquals(failure, null);
+  // The domain, asserted apart from correctness: an evenly-dividing corpus
+  // exercises none of the remainder handout.
+  assert(withRemainder > DRAWS / 2, `only ${withRemainder} draws handed out a remainder cent`);
+  assert(withZeroWeight > DRAWS / 10, `only ${withZeroWeight} draws carried a zero weight`);
+});
+
+Deno.test("apportionCents companion: rounding each share on its own does NOT conserve — the sweep above can fail", () => {
+  const rand = mulberry32(1227);
+  let drifted = 0;
+  for (let draw = 0; draw < 20_000; draw++) {
+    const total = BigInt(Math.floor(rand() * 2_000_000));
+    const weights = randomWeights(rand);
+    const W = weights.reduce((a, w) => a + w, 0n);
+    const perShare = weights.map((w) => halfUpByRemainder(total * w, W));
+    if (largestRemainderViolation(total, weights, perShare) !== null) drifted++;
+  }
+  assert(drifted > 1_000, `per-share rounding failed the oracle on only ${drifted} of 20,000 splits`);
+  assertEquals(apportionCents(100n, [1n, 1n, 1n]), [34n, 33n, 33n]);
+  assertEquals([1n, 1n, 1n].map((w) => halfUpByRemainder(100n * w, 3n)), [33n, 33n, 33n]);
+});
+
+Deno.test("apportionCents: refuses a split over nothing, or a negative", () => {
+  assertThrows(() => apportionCents(100n, [0n, 0n]), RangeError);
+  assertThrows(() => apportionCents(100n, []), RangeError);
+  assertThrows(() => apportionCents(-1n, [1n]), RangeError);
+  assertThrows(() => apportionCents(100n, [1n, -1n]), RangeError);
+  assertEquals(apportionCents(0n, [3n, 1n]), [0n, 0n]);
+  assertEquals(apportionCents(10_000n, [3n, 0n, 1n]), [7_500n, 0n, 2_500n]);
+});
+
+const entry = (over: Partial<PurchaseLandedCost> = {}): PurchaseLandedCost => ({
+  uid: "8c1e2a4f-0000-4000-8000-000000000001",
+  description: "Freight",
+  amount_cents: 10_000,
+  quantity: 3,
+  received_at_entry: 0,
+  uid_purchase_bill: null,
+  ...over,
+});
+
+/**
+ * Receive along `path` (signed steps: a negative is a reversal) the way the api
+ * prices it — the cumulative target minus the journal — and return the journal.
+ */
+function journalAlong(l: PurchaseLine, path: number[]): number[] {
+  const journal: number[] = [];
+  let received = 0;
+  for (const step of path) {
+    received += step;
+    const sum = journal.reduce((a, c) => a + c, 0);
+    journal.push(purchaseLineReceiptTargetCents(l, received) - sum);
+  }
+  return journal;
+}
+
+Deno.test("landed cost: $100 over two lines, two partial receipts each — Σ receipts is goods + $100 exactly", () => {
+  const a = line({ uid_product: "testprod1000000000aa", quantity: 4, amount_cents: 40_000 });
+  const b = line({ uid_product: "testprod1000000000bb", quantity: 3, amount_cents: 20_000 });
+  const split = allocateLandedCostCents(10_000, [a, b]);
+  assertEquals(split, [6_667, 3_333]);
+  const withA = { ...a, landed_costs: [entry({ amount_cents: split[0], quantity: 4 })] };
+  const withB = { ...b, landed_costs: [entry({ amount_cents: split[1], quantity: 3 })] };
+  const ja = journalAlong(withA, [1, 3]);
+  const jb = journalAlong(withB, [2, 1]);
+  assertEquals(ja.reduce((s, c) => s + c, 0) + jb.reduce((s, c) => s + c, 0), 40_000 + 20_000 + 10_000);
+  // Every receipt carries its share, not just the last — the `(before, after]`
+  // partial on top of the journal subtraction would have priced receipt 1 at
+  // its goods alone.
+  assertEquals(ja, [10_000 + 1_667, 30_000 + 5_000]);
+});
+
+Deno.test("landed cost: an entry made mid-receipt prices only the units received after it", () => {
+  // 2 of 5 already in when $30 freight is entered over the other 3.
+  const l = line({ quantity: 5, amount_cents: 5_000, landed_costs: [entry({ amount_cents: 3_000, quantity: 3, received_at_entry: 2 })] });
+  assertEquals(purchaseLineReceiptTargetCents(l, 2), 2_000);
+  assertEquals(purchaseLineReceiptTargetCents(l, 3), 3_000 + 1_000);
+  assertEquals(purchaseLineReceiptTargetCents(l, 5), 5_000 + 3_000);
+  // Reversing back past the entry clamps at 0 — those units never carried it.
+  assertEquals(landedUnitsPriced(l.landed_costs![0], 1), 0);
+  assertEquals(purchaseLineReceiptTargetCents(l, 1), 1_000);
+});
+
+Deno.test("landed cost: over 50k random lines, entries and receipt paths WITH reversals, the journal always equals the target and a full receipt lands every cent", () => {
+  const rand = mulberry32(12270);
+  let failure: string | null = null;
+  let reversals = 0;
+  let crossingReversals = 0;
+  for (let draw = 0; draw < 50_000 && failure === null; draw++) {
+    const quantity = 1 + Math.floor(rand() * 60);
+    const received0 = Math.floor(rand() * quantity);
+    const entries = Array.from({ length: Math.floor(rand() * 3) }, (_, k) =>
+      entry({
+        uid: `8c1e2a4f-0000-4000-8000-00000000000${k}`,
+        amount_cents: 1 + Math.floor(rand() * 500_000),
+        quantity: quantity - received0,
+        received_at_entry: received0,
+      }));
+    const l = line({ quantity, amount_cents: Math.floor(rand() * 5_000_000), landed_costs: entries });
+    // Walk 0 → quantity with occasional reversals, never below 0.
+    const path: number[] = [];
+    let at = 0;
+    while (at < quantity) {
+      if (at > 0 && rand() < 0.2) {
+        const back = -(1 + Math.floor(rand() * at));
+        if (at > received0 && at + back < received0) crossingReversals++;
+        path.push(back);
+        at += back;
+        reversals++;
+      } else {
+        const step = 1 + Math.floor(rand() * (quantity - at));
+        path.push(step);
+        at += step;
+      }
+    }
+    const journal = journalAlong(l, path);
+    const sum = journal.reduce((a, c) => a + c, 0);
+    const want = l.amount_cents + entries.reduce((a, e) => a + e.amount_cents, 0);
+    if (sum !== want) failure = `draw ${draw}: Σ journal ${sum} ≠ ${want}`;
+  }
+  assertEquals(failure, null);
+  assert(reversals > 10_000, `only ${reversals} reversals drawn`);
+  assert(crossingReversals > 1_000, `only ${crossingReversals} reversals crossed an entry`);
+});
+
+Deno.test("landed cost companion: a (before, after] landed partial on top of the journal subtraction loses all but the last share", () => {
+  // The spec's first form. If the sweep above could not tell it apart, it
+  // would be guarding nothing.
+  const l = line({ quantity: 2, amount_cents: 0, landed_costs: [entry({ amount_cents: 10_000, quantity: 2 })] });
+  const wrongTarget = (before: number, after: number) =>
+    cumulativeShareCents(l.amount_cents, l.quantity, 0, after) +
+    cumulativeShareCents(10_000, 2, before, after);
+  const journal: number[] = [];
+  let before = 0;
+  for (const after of [1, 2]) {
+    journal.push(wrongTarget(before, after) - journal.reduce((a, c) => a + c, 0));
+    before = after;
+  }
+  assertEquals(journal.reduce((a, c) => a + c, 0), 5_000, "the wrong form journals $50 of $100");
+  assertEquals(journalAlong(l, [1, 1]).reduce((a, c) => a + c, 0), 10_000);
+});
+
+Deno.test("strandedLandedCents: 0 while units are to come; the unpriced share once a short close cuts them", () => {
+  const e = entry({ amount_cents: 10_000, quantity: 4 });
+  assertEquals(strandedLandedCents(line({ quantity: 4, quantity_received: 1, landed_costs: [e] })), 0);
+  // Closed after 1 of 4: three quarters never arrives.
+  assertEquals(strandedLandedCents(line({ quantity: 4, quantity_received: 1, quantity_canceled: 3, landed_costs: [e] })), 7_500);
+  // Received in full: nothing stranded.
+  assertEquals(strandedLandedCents(line({ quantity: 4, quantity_received: 4, landed_costs: [e] })), 0);
+  // No entries, or absent: nothing.
+  assertEquals(strandedLandedCents(line({ quantity: 4, quantity_canceled: 4 })), 0);
+});
+
+Deno.test("isLandedCostFrozen: frozen once a receipt after the entry has priced it", () => {
+  const e = entry({ received_at_entry: 2 });
+  assertEquals(isLandedCostFrozen(e, { quantity_received: 2 }), false);
+  assertEquals(isLandedCostFrozen(e, { quantity_received: 3 }), true);
+  // A reversal back to the entry point thaws it: nothing priced it any more.
+  assertEquals(isLandedCostFrozen(e, { quantity_received: 1 }), false);
+});
+
+Deno.test("allocateLandedCostCents: weights are the value still to arrive, and a split over nothing is refused", () => {
+  const half = line({ quantity: 4, amount_cents: 40_000, quantity_received: 2 });
+  assertEquals(landedCostWeightCents(half), 20_000);
+  const done = line({ quantity: 2, amount_cents: 10_000, quantity_received: 2 });
+  assertEquals(allocateLandedCostCents(5_000, [half, done]), [5_000, 0]);
+  assertThrows(() => allocateLandedCostCents(5_000, [done]), RangeError);
+});
+
+Deno.test("PurchaseSchema: landed costs parse on a buy line, absent still parses (the expand step)", () => {
+  assertEquals(issuePaths(PurchaseSchema, purchase({ lines: [line({ landed_costs: [entry()] })] })), []);
+  assertEquals(issuePaths(PurchaseSchema, purchase({ lines: [line({ landed_costs: [] })] })), []);
+  assertEquals(issuePaths(PurchaseSchema, purchase()), []);
+});
+
+Deno.test("PurchaseSchema: a landed cost is refused on a subrent line", () => {
+  assertEquals(issuePaths(PurchaseSchema, subrent({ lines: [hireLine({ landed_costs: [] })] })), ["lines.0.landed_costs"]);
+});
+
+Deno.test("PurchaseSchema: a landed cost's own refines, one field at a time", () => {
+  const at = (e: PurchaseLandedCost) => issuePaths(PurchaseSchema, purchase({ lines: [line({ landed_costs: [e] })] }));
+  assertEquals(at(entry({ amount_cents: 0 })), ["lines.0.landed_costs.0.amount_cents"]);
+  assertEquals(at(entry({ quantity: 0 })), ["lines.0.landed_costs.0.quantity"]);
+  assertEquals(at(entry({ quantity: 2, received_at_entry: 2 })), ["lines.0.landed_costs.0.quantity"]);
+  assertEquals(at(entry({ uid: "not-a-uuid" })), ["lines.0.landed_costs.0.uid"]);
+  assertEquals(
+    issuePaths(PurchaseSchema, purchase({ lines: [line({ landed_costs: [entry(), entry({ quantity: 1 })] })] })),
+    ["lines.0.landed_costs.1.uid"],
+  );
+});
+
+Deno.test("landed cost inputs: a subrent create refuses them; a line input refuses a uid named twice", () => {
+  const create = CreatePurchaseInput.safeParse({
+    kind: "subrent",
+    supplier: { uid: "testsupp100000000000" },
+    store: { uid: "teststore10000000000" },
+    date: "2026-10-01T00:00:00.000-05:00",
+    lines: [{ uid_product: "testprod100000000000", quantity: 1, amount_cents: 100, dates: HIRE, landed_costs: [] }],
+    uuid_session: "8c1e2a4f-0000-4000-8000-0000000000ff",
+  });
+  assert(!create.success);
+  assert(create.error.issues.some((i) => i.path.join(".") === "lines.0.landed_costs"), JSON.stringify(create.error.issues));
+  const twice = PurchaseLineInput.safeParse({
+    uid_product: "testprod100000000000",
+    quantity: 1,
+    amount_cents: 100,
+    landed_costs: [
+      { uid: entry().uid, description: "Freight", amount_cents: 1 },
+      { uid: entry().uid, description: "Duty", amount_cents: 1 },
+    ],
+  });
+  assert(!twice.success);
+  assertEquals(twice.error.issues.map((i) => i.path.join(".")), ["landed_costs.1.uid"]);
+});
+
+Deno.test("expandPurchaseLines: landed costs ride a pack onto its component, and concatenate on a merge", () => {
+  const freight = { description: "Freight", amount_cents: 500 };
+  const duty = { description: "Duty", amount_cents: 200 };
+  assertEquals(
+    expandPurchaseLines([
+      { uid_product: "410", quantity: 10, amount_cents: 100, landed_costs: [freight] },
+      { uid_product: "118", quantity: 1, amount_cents: 900, landed_costs: [duty] },
+    ], CATALOG),
+    { ok: true, lines: [{ uid_product: "410", quantity: 50, amount_cents: 1_000, landed_costs: [freight, duty] }] },
+  );
+  // Absent on both stays absent: "keep what is stored" must survive a merge.
+  const merged = expandPurchaseLines([
+    { uid_product: "410", quantity: 10, amount_cents: 100 },
+    { uid_product: "118", quantity: 1, amount_cents: 900 },
+  ], CATALOG);
+  assert(merged.ok);
+  assertEquals("landed_costs" in merged.lines[0], false);
 });

@@ -295,6 +295,13 @@ export const DOMAIN_EVENT_MSGS = [
   //
   // `{ collection, doc_uid, operation, orphan_pairs, orphan_dividers }`.
   "destination_pair_unjoined",
+  // A short close cut units a buy line's landed cost was spread over, so part
+  // of it can never reach the cost basis through a receipt (api-cloudrun#1227,
+  // ruling 6). The close proceeds and the remainder is DERIVED
+  // (`strandedLandedCents`, `@cfs/core/utils/purchases`), never stored; this
+  // record is how it gets noticed until depreciation re-bases it
+  // (api-cloudrun#1388). `warn`. `{ uid_purchase, uid_product, stranded_cents }`.
+  "purchase_landed_cost_stranded",
 ] as const;
 
 /** Discriminated msg union for Domain-archetype log records. */
@@ -370,6 +377,10 @@ export interface DomainEventLogRecord {
   action_subject_uid?: string;
   /** `invoice_action_unoffered` — the refusal message the ruleset would have thrown. */
   refusal?: string;
+  /** `purchase_landed_cost_stranded` — the purchase whose line was closed. */
+  uid_purchase?: string;
+  /** `purchase_landed_cost_stranded` — the landed cents no receipt can now price. */
+  stranded_cents?: number;
   [key: string]: unknown;
 }
 
@@ -396,4 +407,6 @@ export const DomainEventLogRecordSchema: z.ZodType<DomainEventLogRecord> = z.obj
   action_subject: z.enum(["invoice", "credit_note", "order"]).optional(),
   action_subject_uid: z.string().optional(),
   refusal: z.string().optional(),
+  uid_purchase: z.string().optional(),
+  stranded_cents: z.int().optional(),
 }).passthrough().meta({ title: "DomainEventLogRecord" });

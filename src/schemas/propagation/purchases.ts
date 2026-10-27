@@ -80,7 +80,7 @@ const receivePurchaseRules: CollectionRule[] = [
     target: "purchases",
     mode: "co-write",
     invariant:
-      "Every receipt is ONE movement naming its purchase in sources[] (exactly one `purchases` source — the movement refine) — a `purchase` on a buy, a cost-forbidden `subrent_in` on a subrent — written in ONE commit with the purchase line's `quantity_received` bump, so the bucket is the sum of the receipts naming it by construction. Receiving is refused past `quantity − quantity_canceled − quantity_received`. A buy receipt's cost is its CUMULATIVE share of the line (`cumulativeShareCents`), never a client input, so the receipts of a fully received line sum to its `amount_cents` exactly; a subrent receipt carries no cost at all, because a rented unit is never owned. A receipt posts nothing to Xero: the bill is its own document.",
+      "Every receipt is ONE movement naming its purchase in sources[] (exactly one `purchases` source — the movement refine) — a `purchase` on a buy, a cost-forbidden `subrent_in` on a subrent — written in ONE commit with the purchase line's `quantity_received` bump, so the bucket is the sum of the receipts naming it by construction. Receiving is refused past `quantity − quantity_canceled − quantity_received`. A buy receipt's cost is the line's CUMULATIVE target at the new received count — the goods' share plus every landed cost's share (`purchaseLineReceiptTargetCents`) — minus the cost the journal already holds for the product, never a client input, so the receipts of a fully received line sum to its `amount_cents` plus its landed costs exactly; a subrent receipt carries no cost at all, because a rented unit is never owned. A receipt posts nothing to Xero: the bill is its own document.",
     enforced_by: [RECEIPT_MOVES_THE_BUCKET],
     transaction: "receive-purchase",
     fields: [
@@ -98,7 +98,13 @@ const receivePurchaseRules: CollectionRule[] = [
         source: ["cost", "amount_cents"],
         target: ["lines", "amount_cents"],
         transform:
-          "a buy only: cumulativeShareCents(line.amount_cents, line.quantity, received_before, received_before + quantity) — read from the line, never written to it. A subrent_in has no cost object.",
+          "a buy only: the goods' half of purchaseLineReceiptTargetCents(line, received_before + quantity) − Σ the journal's cost for the product — read from the line, never written to it. A subrent_in has no cost object.",
+      },
+      {
+        source: ["cost", "amount_cents"],
+        target: ["lines", "landed_costs", "amount_cents"],
+        transform:
+          "a buy only: each landed cost adds cumulativeShareCents(entry.amount_cents, entry.quantity, 0, clamp(received_after − entry.received_at_entry, 0, entry.quantity)) to the same cumulative target — read, never written (api-cloudrun#1227)",
       },
     ],
   },

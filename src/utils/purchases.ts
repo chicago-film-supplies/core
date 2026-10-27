@@ -11,11 +11,12 @@ import {
   deriveQueryByOrders,
   deriveQueryByProducts,
   type ProductTypeType,
+  type PurchaseLandedCost,
   type PurchaseLine,
   type PurchaseLineInputType,
   type StockMethodType,
 } from "../schemas/mod.ts";
-import { roundDivHalfUp } from "./money.ts";
+import { apportionCents, roundDivHalfUp } from "./money.ts";
 import { componentQuantities, type ComponentRowForWalk } from "./order-lines.ts";
 import { productCountsStock } from "./products.ts";
 import { derivePurchaseCreditStatus, purchaseCreditRemainingFromJournal, recomputePurchaseBillTotals } from "./invoices.ts";
@@ -77,6 +78,120 @@ export function cumulativeShareCents(
   const qty = BigInt(quantity);
   const at = (k: number) => roundDivHalfUp(amount * BigInt(k), qty);
   return Number(at(after) - at(before));
+}
+
+// ── Landed cost (api-cloudrun#1227) ──────────────────────────────
+
+/**
+ * How many of a landed cost's units a line's receipts have priced, at a
+ * cumulative received count: the units received since the entry was made,
+ * `clamp(received − received_at_entry, 0, quantity)`.
+ *
+ * The clamp at 0 is what makes a REVERSAL that crosses the entry exact: units
+ * received before the entry never carried it, so taking them back returns none
+ * of it.
+ */
+export function landedUnitsPriced(
+  entry: Pick<PurchaseLandedCost, "quantity" | "received_at_entry">,
+  quantityReceived: number,
+): number {
+  return Math.min(Math.max(quantityReceived - entry.received_at_entry, 0), entry.quantity);
+}
+
+/**
+ * The cents a landed cost has put onto the ledger at a cumulative received
+ * count — `cumulativeShareCents` over the entry's own units, so the receipts
+ * telescope to `amount_cents` exactly once every one of them has arrived.
+ */
+export function landedPricedCents(
+  entry: Pick<PurchaseLandedCost, "amount_cents" | "quantity" | "received_at_entry">,
+  quantityReceived: number,
+): number {
+  return cumulativeShareCents(entry.amount_cents, entry.quantity, 0, landedUnitsPriced(entry, quantityReceived));
+}
+
+/**
+ * The CUMULATIVE cost a buy line's receipts should have journalled once
+ * `quantityReceived` units are in: the goods' share plus every landed cost's
+ * share, each rounded on its own cumulative count.
+ *
+ * A receipt's cost is this target minus what the journal already holds for the
+ * product. That difference is the whole design, and it is why a partial
+ * `(before, after]` landed share is WRONG here: the journal subtraction already
+ * removes the landed cents earlier receipts carried, so a partial would leave
+ * only the last receipt's share (a $100 entry over two halves journals $50).
+ * Only a cumulative target survives the subtraction, and it keeps a reversal
+ * exact as well, since the target at a count does not depend on the path.
+ *
+ * Absent `landed_costs` reads as `[]`, which reduces this to the goods' share,
+ * the pre-#1227 formula.
+ */
+export function purchaseLineReceiptTargetCents(
+  line: Pick<PurchaseLine, "amount_cents" | "quantity" | "landed_costs">,
+  quantityReceived: number,
+): number {
+  return (line.landed_costs ?? []).reduce(
+    (sum, entry) => sum + landedPricedCents(entry, quantityReceived),
+    cumulativeShareCents(line.amount_cents, line.quantity, 0, quantityReceived),
+  );
+}
+
+/** Is a landed cost frozen? A receipt has priced part of it once `received > received_at_entry`. */
+export function isLandedCostFrozen(
+  entry: Pick<PurchaseLandedCost, "received_at_entry">,
+  line: Pick<PurchaseLine, "quantity_received">,
+): boolean {
+  return line.quantity_received > entry.received_at_entry;
+}
+
+/**
+ * Landed cents a line can no longer price, because no unit is left to arrive:
+ * Σ over its entries of `amount_cents − landedPricedCents(entry, received)`,
+ * and `0` while any unit is still to come (a receipt may yet price it).
+ *
+ * Nonzero only after a short close cut units an entry was spread over. It is
+ * DERIVED, never stored (ruling 6): the cost basis it belongs to waits on the
+ * post-receipt re-base, which is designed with depreciation (api-cloudrun#1388).
+ */
+export function strandedLandedCents(
+  line: Pick<PurchaseLine, "quantity" | "quantity_received" | "quantity_canceled" | "landed_costs">,
+): number {
+  if (remainingToReceive(line) > 0) return 0;
+  return (line.landed_costs ?? []).reduce(
+    (sum, entry) => sum + entry.amount_cents - landedPricedCents(entry, line.quantity_received),
+    0,
+  );
+}
+
+/**
+ * A line's weight when one landed amount is spread over several lines: the
+ * value still to arrive, `cumulativeShareCents(amount, quantity, received,
+ * quantity − canceled)`. Units already received carry none of it, because the
+ * entry only ever prices units received after it.
+ */
+export function landedCostWeightCents(
+  line: Pick<PurchaseLine, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">,
+): number {
+  return cumulativeShareCents(line.amount_cents, line.quantity, line.quantity_received, line.quantity - line.quantity_canceled);
+}
+
+/**
+ * Spread one landed amount over several buy lines, in proportion to each
+ * line's value still to arrive ({@link landedCostWeightCents}), with
+ * {@link apportionCents}. Σ is exactly `amountCents`.
+ *
+ * The client runs it so the preview it shows is the split it sends; a line with
+ * weight 0 gets 0, and the caller drops it rather than send a 0-cent entry.
+ *
+ * @throws when every line's weight is 0. There is nothing to be proportional
+ *   to, and splitting evenly would put cost on lines with nothing left to
+ *   arrive.
+ */
+export function allocateLandedCostCents(
+  amountCents: number,
+  lines: readonly Pick<PurchaseLine, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">[],
+): number[] {
+  return apportionCents(BigInt(amountCents), lines.map((l) => BigInt(landedCostWeightCents(l)))).map(Number);
 }
 
 /** Units of a line still to be received: `quantity − canceled − received`. */
@@ -204,6 +319,7 @@ export function expandPurchaseLines(
       ...(line.expected_date !== undefined ? { expected_date: line.expected_date } : {}),
       ...(line.dates !== undefined ? { dates: { ...line.dates } } : {}),
       ...(line.uid_orders !== undefined ? { uid_orders: [...line.uid_orders] } : {}),
+      ...(line.landed_costs !== undefined ? { landed_costs: line.landed_costs.map((e) => ({ ...e })) } : {}),
     });
   }
   return mergeByProduct(expanded, products);
@@ -241,6 +357,7 @@ function mergeByProduct(
         ...line,
         ...(line.dates !== undefined ? { dates: { ...line.dates } } : {}),
         ...(line.uid_orders !== undefined ? { uid_orders: [...line.uid_orders] } : {}),
+        ...(line.landed_costs !== undefined ? { landed_costs: line.landed_costs.map((e) => ({ ...e })) } : {}),
       });
       continue;
     }
@@ -258,6 +375,11 @@ function mergeByProduct(
     }
     if (prev.uid_orders !== undefined || line.uid_orders !== undefined) {
       prev.uid_orders = [...new Set([...(prev.uid_orders ?? []), ...(line.uid_orders ?? [])])];
+    }
+    // Each merged line's landed costs keep their own amounts; absent on both
+    // stays absent, so a merge cannot turn "keep what is stored" into "erase".
+    if (prev.landed_costs !== undefined || line.landed_costs !== undefined) {
+      prev.landed_costs = [...(prev.landed_costs ?? []), ...(line.landed_costs ?? []).map((e) => ({ ...e }))];
     }
     prev.quantity += line.quantity;
     prev.amount_cents += line.amount_cents;

@@ -154,6 +154,56 @@ export const PurchaseLineDatesSchema: z.ZodType<PurchaseLineDates> = z.strictObj
   end: chicagoInstant().meta({ column: true, label: "Hire End" }),
 });
 
+/**
+ * One landed cost on a BUY line: freight, duty or a fee the operator attributes
+ * to the units still to arrive (api-cloudrun#1227). It is cost basis, so it
+ * reaches the ledger only through the receipts that price it.
+ *
+ * ⚠️ **It lives on the PURCHASE LINE, not on the bill.** 276 of 299 historic
+ * bills are linked card-purchase bills with `direct_lines: []`, and the receipt
+ * transaction reads the purchase, never its bills. The Xero side is unchanged:
+ * the freight still posts through a bill's direct line to its own account.
+ * `uid_purchase_bill` is traceability only. A `PurchaseDirectLine` carries no
+ * id of its own, so the pointer names the bill.
+ *
+ * **What it spreads over is fixed at entry.** `quantity` is the line's
+ * outstanding count when the entry was made, and `received_at_entry` is
+ * `quantity_received` at that moment. The k-th receipt prices the units received
+ * since the entry, `clamp(received − received_at_entry, 0, quantity)`, with
+ * `cumulativeShareCents`, so the shares telescope to `amount_cents` exactly when
+ * every outstanding unit arrives (`purchaseLineReceiptTargetCents`,
+ * `@cfs/core/utils/purchases`).
+ *
+ * **Append-only, the way the line amount is.** An entry no receipt has priced
+ * (`quantity_received ≤ received_at_entry`) is editable and removable. One that
+ * a receipt has priced any part of is frozen. A short close still proceeds:
+ * the unpriced remainder is DERIVED (`strandedLandedCents`), never stored. The
+ * post-receipt re-base waits on depreciation (api-cloudrun#1388).
+ */
+export interface PurchaseLandedCost {
+  /** Array-member id, minted by the writer (`crypto.randomUUID()`). */
+  uid: string;
+  description: string;
+  /** What this entry adds to the line's units, integer cents. */
+  amount_cents: number;
+  /** The line's outstanding count (`quantity − canceled − received`) when the entry was made. */
+  quantity: number;
+  /** The line's `quantity_received` when the entry was made. */
+  received_at_entry: number;
+  /** The bill this cost was charged on, or `null`. Traceability only; nothing reads it to price. */
+  uid_purchase_bill: string | null;
+}
+
+/** Zod schema for PurchaseLandedCost. */
+export const PurchaseLandedCostSchema: z.ZodType<PurchaseLandedCost> = z.strictObject({
+  uid: z.uuid(),
+  description: z.string().min(1).max(200).meta({ column: true, label: "Description" }),
+  amount_cents: z.int().min(1).meta({ column: true, label: "Amount" }),
+  quantity: z.int().min(1).meta({ column: true, label: "Spread Over" }),
+  received_at_entry: z.int().min(0),
+  uid_purchase_bill: FirestoreId.nullable(),
+});
+
 /** One product ordered on a purchase. */
 export interface PurchaseLine {
   uid_product: string;
@@ -202,6 +252,18 @@ export interface PurchaseLine {
    * Present-iff-subrent, as `dates`.
    */
   uid_orders?: string[];
+  /**
+   * BUY ONLY — freight, duty and fees spread onto the units still to arrive
+   * ({@link PurchaseLandedCost}). Refused on a subrent line, which never owns
+   * units.
+   *
+   * ⚠️ **Optional for the EXPAND step only** (api-cloudrun#1227). The contract
+   * is present-iff-buy, as `dates` is present-iff-subrent: the api stamps `[]`
+   * on every buy line it writes, the 305 stored purchases (both projects,
+   * 2026-10-27) are backfilled, and then the document refine requires it. Until
+   * then absent reads as `[]`.
+   */
+  landed_costs?: PurchaseLandedCost[];
 }
 
 /** Zod schema for PurchaseLine. */
@@ -217,6 +279,7 @@ export const PurchaseLineSchema: z.ZodType<PurchaseLine> = z.strictObject({
   dates: PurchaseLineDatesSchema.optional(),
   quantity_returned: z.int().min(0).meta({ column: true, label: "Returned" }).optional(),
   uid_orders: z.array(FirestoreId).optional(),
+  landed_costs: z.array(PurchaseLandedCostSchema).meta({ label: "Landed Cost" }).optional(),
 }).superRefine((line, ctx) => {
   // Two invariants, not one Σ: receiving and billing are independent axes, so
   // `received + billed` means nothing. Each axis is bounded by what is still
@@ -247,6 +310,25 @@ export const PurchaseLineSchema: z.ZodType<PurchaseLine> = z.strictObject({
   if (line.dates && Date.parse(line.dates.end) < Date.parse(line.dates.start)) {
     ctx.addIssue({ code: "custom", path: ["dates", "end"], message: "a hire ends at or after it starts" });
   }
+  const entryUids = new Set<string>();
+  line.landed_costs?.forEach((entry, k) => {
+    if (entryUids.has(entry.uid)) {
+      ctx.addIssue({ code: "custom", path: ["landed_costs", k, "uid"], message: "a landed cost uid appears once per line" });
+    }
+    entryUids.add(entry.uid);
+    // The units it spreads over had not arrived when it was entered, so they
+    // fit inside what was ordered then. A later quantity cut must keep it so:
+    // the writer re-bases an entry no receipt has priced, and refuses the cut
+    // under a frozen one (a short close is the channel for "fewer will come").
+    if (entry.received_at_entry + entry.quantity > line.quantity) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["landed_costs", k, "quantity"],
+        message: `a landed cost spreads over ${entry.quantity} units after ${entry.received_at_entry} received, ` +
+          `more than the ${line.quantity} ordered`,
+      });
+    }
+  });
 });
 
 /**
@@ -379,6 +461,14 @@ function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
         ctx.addIssue({ code: "custom", path: ["lines", i, key], message: `${key} is a subrent line's; a buy line never carries it` });
       }
     }
+    // A subrent never owns its units, so there is no cost basis to land on.
+    if (subrent && line.landed_costs !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lines", i, "landed_costs"],
+        message: "landed_costs is a buy line's; a subrent never owns the units it would land on",
+      });
+    }
   });
 
   if (!sameMembers(p.query_by_products, deriveQueryByProducts(p.lines))) {
@@ -464,6 +554,31 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
 
 // ── Inputs ───────────────────────────────────────────────────────
 
+/**
+ * One landed cost as the operator states it on a buy line. `quantity` and
+ * `received_at_entry` are the server's, stamped from the stored line.
+ *
+ * `uid` names a stored entry to keep or edit; absent mints a new one. Splitting
+ * one amount across several lines is `allocateLandedCostCents`
+ * (`@cfs/core/utils/purchases`), run by the client so the preview it shows is the
+ * split it sends. Any per-line split is legal; the allocator is the default,
+ * not a rule.
+ */
+export interface PurchaseLandedCostInputType {
+  uid?: string;
+  description: string;
+  amount_cents: number;
+  uid_purchase_bill?: string | null;
+}
+
+/** Zod schema for PurchaseLandedCostInputType. */
+export const PurchaseLandedCostInput: z.ZodType<PurchaseLandedCostInputType> = z.object({
+  uid: z.uuid().optional(),
+  description: z.string().min(1).max(200),
+  amount_cents: z.int().min(1),
+  uid_purchase_bill: FirestoreId.nullable().optional(),
+});
+
 /** One line as an operator orders it — the buckets are the server's. */
 export interface PurchaseLineInputType {
   uid_product: string;
@@ -474,6 +589,14 @@ export interface PurchaseLineInputType {
   dates?: PurchaseLineDates;
   /** Subrent only — the orders the line was raised for. Absent is `[]`: the writer states it. */
   uid_orders?: string[];
+  /**
+   * Buy only — the line's WHOLE landed-cost set. Absent keeps what is stored,
+   * so a client that never names landed costs cannot erase them: this is a
+   * replacement, and a default here would delete what the client did not
+   * restate. Present: a stored entry missing from it is removed, which the
+   * writer refuses once a receipt has priced it.
+   */
+  landed_costs?: PurchaseLandedCostInputType[];
 }
 
 /** Zod schema for PurchaseLineInputType. */
@@ -484,7 +607,16 @@ export const PurchaseLineInput: z.ZodType<PurchaseLineInputType> = z.object({
   expected_date: chicagoStartOfDay().nullable().optional(),
   dates: z.object({ start: chicagoInstant(), end: chicagoInstant() }).optional(),
   uid_orders: z.array(FirestoreId).optional(),
+  landed_costs: z.array(PurchaseLandedCostInput).optional(),
 }).superRefine((l, ctx) => {
+  const named = new Set<string>();
+  l.landed_costs?.forEach((entry, k) => {
+    if (entry.uid === undefined) return;
+    if (named.has(entry.uid)) {
+      ctx.addIssue({ code: "custom", path: ["landed_costs", k, "uid"], message: "a landed cost uid appears once per line" });
+    }
+    named.add(entry.uid);
+  });
   if (l.dates && Date.parse(l.dates.end) < Date.parse(l.dates.start)) {
     ctx.addIssue({ code: "custom", path: ["dates", "end"], message: "a hire ends at or after it starts" });
   }
@@ -507,6 +639,13 @@ function kindLines(kind: PurchaseKindType | undefined, lines: readonly PurchaseL
           ctx.addIssue({ code: "custom", path: ["lines", i, key], message: `${key} is a subrent line's; a buy line never carries it` });
         }
       }
+    }
+    if (subrent && line.landed_costs !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lines", i, "landed_costs"],
+        message: "landed_costs is a buy line's; a subrent never owns the units it would land on",
+      });
     }
   });
 }
