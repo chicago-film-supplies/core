@@ -257,11 +257,10 @@ export interface PurchaseLine {
    * ({@link PurchaseLandedCost}). Refused on a subrent line, which never owns
    * units.
    *
-   * ⚠️ **Optional for the EXPAND step only** (api-cloudrun#1227). The contract
-   * is present-iff-buy, as `dates` is present-iff-subrent: the api stamps `[]`
-   * on every buy line it writes, the 305 stored purchases (both projects,
-   * 2026-10-27) are backfilled, and then the document refine requires it. Until
-   * then absent reads as `[]`.
+   * Present-iff-buy, as `dates` is present-iff-subrent, so the key stays
+   * optional on the type and the document refine (`checkPurchase`) holds the
+   * contract. The api stamps `[]` on every buy line it writes, and every stored
+   * buy line was backfilled on 2026-10-27 (api-cloudrun#1227).
    */
   landed_costs?: PurchaseLandedCost[];
 }
@@ -461,13 +460,17 @@ function checkPurchase(p: Purchase, ctx: z.RefinementCtx): void {
         ctx.addIssue({ code: "custom", path: ["lines", i, key], message: `${key} is a subrent line's; a buy line never carries it` });
       }
     }
-    // A subrent never owns its units, so there is no cost basis to land on.
+    // Present-iff-buy, the mirror of the subrent members: a subrent never owns
+    // its units, so there is no cost basis to land on, and every buy line states
+    // its landed costs (`[]` at least) since the 2026-10-27 backfill.
     if (subrent && line.landed_costs !== undefined) {
       ctx.addIssue({
         code: "custom",
         path: ["lines", i, "landed_costs"],
         message: "landed_costs is a buy line's; a subrent never owns the units it would land on",
       });
+    } else if (!subrent && line.landed_costs === undefined) {
+      ctx.addIssue({ code: "custom", path: ["lines", i, "landed_costs"], message: "a buy line states landed_costs" });
     }
   });
 
@@ -558,7 +561,10 @@ export const PurchaseSchema: z.ZodType<Purchase> = z.strictObject({
  * One landed cost as the operator states it on a buy line. `quantity` and
  * `received_at_entry` are the server's, stamped from the stored line.
  *
- * `uid` names a stored entry to keep or edit; absent mints a new one. Splitting
+ * `uid` names a stored entry to keep or edit. A uid the line does not hold
+ * is a NEW entry stored under it (the manager mints one as it adds the entry, so
+ * a re-send before the Firestore echo is the same entry), and absent mints one
+ * server-side. Splitting
  * one amount across several lines is `allocateLandedCostCents`
  * (`@cfs/core/utils/purchases`), run by the client so the preview it shows is the
  * split it sends. Any per-line split is legal; the allocator is the default,

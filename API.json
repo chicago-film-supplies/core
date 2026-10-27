@@ -4324,7 +4324,7 @@
           "kind": "interface",
           "name": "PurchaseLandedCostInputType",
           "declaration": "interface PurchaseLandedCostInputType {\n  uid?: string;\n  description: string;\n  amount_cents: number;\n  uid_purchase_bill?: string | null;\n}",
-          "doc": "One landed cost as the operator states it on a buy line. `quantity` and\n`received_at_entry` are the server's, stamped from the stored line.\n\n`uid` names a stored entry to keep or edit; absent mints a new one. Splitting\none amount across several lines is `allocateLandedCostCents`\n(`@cfs/core/utils/purchases`), run by the client so the preview it shows is the\nsplit it sends. Any per-line split is legal; the allocator is the default,\nnot a rule."
+          "doc": "One landed cost as the operator states it on a buy line. `quantity` and\n`received_at_entry` are the server's, stamped from the stored line.\n\n`uid` names a stored entry to keep or edit. A uid the line does not hold\nis a NEW entry stored under it (the manager mints one as it adds the entry, so\na re-send before the Firestore echo is the same entry), and absent mints one\nserver-side. Splitting\none amount across several lines is `allocateLandedCostCents`\n(`@cfs/core/utils/purchases`), run by the client so the preview it shows is the\nsplit it sends. Any per-line split is legal; the allocator is the default,\nnot a rule."
         },
         {
           "kind": "variable",
@@ -11261,7 +11261,7 @@
           "kind": "interface",
           "name": "PurchaseLandedCostInputType",
           "declaration": "interface PurchaseLandedCostInputType {\n  uid?: string;\n  description: string;\n  amount_cents: number;\n  uid_purchase_bill?: string | null;\n}",
-          "doc": "One landed cost as the operator states it on a buy line. `quantity` and\n`received_at_entry` are the server's, stamped from the stored line.\n\n`uid` names a stored entry to keep or edit; absent mints a new one. Splitting\none amount across several lines is `allocateLandedCostCents`\n(`@cfs/core/utils/purchases`), run by the client so the preview it shows is the\nsplit it sends. Any per-line split is legal; the allocator is the default,\nnot a rule."
+          "doc": "One landed cost as the operator states it on a buy line. `quantity` and\n`received_at_entry` are the server's, stamped from the stored line.\n\n`uid` names a stored entry to keep or edit. A uid the line does not hold\nis a NEW entry stored under it (the manager mints one as it adds the entry, so\na re-send before the Firestore echo is the same entry), and absent mints one\nserver-side. Splitting\none amount across several lines is `allocateLandedCostCents`\n(`@cfs/core/utils/purchases`), run by the client so the preview it shows is the\nsplit it sends. Any per-line split is legal; the allocator is the default,\nnot a rule."
         },
         {
           "kind": "variable",

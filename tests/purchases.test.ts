@@ -165,6 +165,7 @@ const line = (over: Partial<PurchaseLine> = {}): PurchaseLine => ({
   quantity_received: 0,
   quantity_billed: 0,
   quantity_canceled: 0,
+  landed_costs: [],
   ...over,
 });
 
@@ -664,8 +665,12 @@ const HIRE = { start: "2026-10-18T09:00:00.000-05:00", end: "2026-10-25T17:00:00
 const ORDER_1074 = "testorder1074000000a";
 
 /** A subrent line of 10 steamers, received and returned per `over`. */
-const hireLine = (over: Partial<PurchaseLine> = {}): PurchaseLine =>
-  line({ quantity: 10, amount_cents: 50_000, dates: HIRE, quantity_returned: 0, uid_orders: [ORDER_1074], ...over });
+// A subrent line never carries `landed_costs`, so the buy fixture's `[]` comes off.
+const hireLine = (over: Partial<PurchaseLine> = {}): PurchaseLine => {
+  const l = line({ quantity: 10, amount_cents: 50_000, dates: HIRE, quantity_returned: 0, uid_orders: [ORDER_1074] });
+  delete l.landed_costs;
+  return { ...l, ...over };
+};
 
 function subrent(over: Record<string, unknown> = {}) {
   const lines = (over.lines as PurchaseLine[] | undefined) ?? [hireLine()];
@@ -1031,10 +1036,12 @@ Deno.test("allocateLandedCostCents: weights are the value still to arrive, and a
   assertThrows(() => allocateLandedCostCents(5_000, [done]), RangeError);
 });
 
-Deno.test("PurchaseSchema: landed costs parse on a buy line, absent still parses (the expand step)", () => {
+Deno.test("PurchaseSchema: landed costs are present-iff-buy — a buy line states them, `[]` at least", () => {
   assertEquals(issuePaths(PurchaseSchema, purchase({ lines: [line({ landed_costs: [entry()] })] })), []);
   assertEquals(issuePaths(PurchaseSchema, purchase({ lines: [line({ landed_costs: [] })] })), []);
-  assertEquals(issuePaths(PurchaseSchema, purchase()), []);
+  const absent = line();
+  delete absent.landed_costs;
+  assertEquals(issuePaths(PurchaseSchema, purchase({ lines: [absent] })), ["lines.0.landed_costs"]);
 });
 
 Deno.test("PurchaseSchema: a landed cost is refused on a subrent line", () => {

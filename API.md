@@ -9930,7 +9930,10 @@ const PurchaseLandedCostInput: z.ZodType<PurchaseLandedCostInputType>;
 One landed cost as the operator states it on a buy line. `quantity` and
 `received_at_entry` are the server's, stamped from the stored line.
 
-`uid` names a stored entry to keep or edit; absent mints a new one. Splitting
+`uid` names a stored entry to keep or edit. A uid the line does not hold
+is a NEW entry stored under it (the manager mints one as it adds the entry, so
+a re-send before the Firestore echo is the same entry), and absent mints one
+server-side. Splitting
 one amount across several lines is `allocateLandedCostCents`
 (`@cfs/core/utils/purchases`), run by the client so the preview it shows is the
 split it sends. Any per-line split is legal; the allocator is the default,
@@ -24714,7 +24717,10 @@ const PurchaseLandedCostInput: z.ZodType<PurchaseLandedCostInputType>;
 One landed cost as the operator states it on a buy line. `quantity` and
 `received_at_entry` are the server's, stamped from the stored line.
 
-`uid` names a stored entry to keep or edit; absent mints a new one. Splitting
+`uid` names a stored entry to keep or edit. A uid the line does not hold
+is a NEW entry stored under it (the manager mints one as it adds the entry, so
+a re-send before the Firestore echo is the same entry), and absent mints one
+server-side. Splitting
 one amount across several lines is `allocateLandedCostCents`
 (`@cfs/core/utils/purchases`), run by the client so the preview it shows is the
 split it sends. Any per-line split is legal; the allocator is the default,

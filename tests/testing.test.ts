@@ -117,8 +117,24 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
   // is a cross-field equality; while the mirror was optional the walker simply
   // left it absent. `query_by_orders` stays `[]`, which a buy line (no
   // `uid_orders`) derives.
+  //
+  // The line itself joined it when `landed_costs` became present-iff-buy
+  // (api-cloudrun#1227): an optional key the walker leaves absent, required by
+  // the kind arm of the document refine. Arrays are replaced wholesale, so the
+  // whole minimal line is stated rather than just the key. Still one entry.
   purchase: {
     query_by_products: ["AAAAAAAAAAAAAAAAAAAA"],
+    lines: [{
+      uid_product: "AAAAAAAAAAAAAAAAAAAA",
+      name: "A",
+      quantity: 1,
+      amount_cents: 0,
+      expected_date: null,
+      quantity_received: 0,
+      quantity_billed: 0,
+      quantity_canceled: 0,
+      landed_costs: [],
+    }],
   },
 };
 
