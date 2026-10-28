@@ -125,6 +125,20 @@ const createOutOfServiceRules: CollectionRule[] = [
     ],
   },
   {
+    id: "create-out-of-service-record:products-to-record",
+    source: "products",
+    target: "out-of-service",
+    mode: "embed",
+    invariant:
+      "A new record copies its product's catalog name as of the write, read by the writer and never taken from the client. An ad-hoc create uses the product it already reads; a booking mark reads the products of the transitions that open a record; a split sibling and a partial-undo remainder inherit the name from the record they come from, which was active and therefore current. `uid_product` mirrors `product.uid`.",
+    transaction: "create-out-of-service-record",
+    fields: [
+      { source: ["uid"], target: ["product", "uid"] },
+      { source: ["uid"], target: ["uid_product"] },
+      { source: ["name"], target: ["product", "name"] },
+    ],
+  },
+  {
     id: "create-out-of-service-record:record-to-transactions",
     source: "out-of-service",
     target: "transactions",
@@ -195,6 +209,7 @@ const createOutOfServiceTransaction: TransactionDefinition = {
     "Creates an out-of-service record from the movement that puts its units out of service (a flag on the shelf, or a send_away to the record for a loss), rebuilds the affected product's `stock/{P}` projection, and cowrites a default thread for the record. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: Creating an OOS record.",
   steps: [
     "create-out-of-service-record:sources-to-record",
+    "create-out-of-service-record:products-to-record",
     "create-out-of-service-record:record-to-transactions",
     "create-out-of-service-record:transactions-to-ledger",
     ...STOCK_STEPS,

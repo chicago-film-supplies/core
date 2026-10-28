@@ -329,10 +329,35 @@ export interface OOSDates {
   end_fs: FirestoreTimestampType | null;
 }
 
+/**
+ * A product named by `{uid, name}`. The `name` links to the PRODUCT's page,
+ * not the row's: `TableCell` resolves `linkTo` through the uid of the object
+ * the value sits in, which is why the name is nested here and not at the root.
+ */
+export interface ProductRefType {
+  uid: string;
+  name: string;
+}
+
+/** Zod schema for {@link ProductRefType}. Labelless — the key holding it names the column. */
+export const ProductRef: z.ZodType<ProductRefType> = z.strictObject({
+  uid: FirestoreId,
+  name: z.string().min(1).meta({ pii: "none", column: true, linkTo: "productDetail" }),
+});
+
 /** An out-of-service record tracking inventory removed from active service. */
 export interface OutOfService {
   uid: string;
   uid_product: string;
+  /**
+   * The product, with its name. `uid_product` is its flat query mirror. The
+   * name is live while the record is `active` (a rename cascades to it) and
+   * frozen once the record is terminal.
+   *
+   * Optional only until the backfill: a strictObject add goes deploy, backfill,
+   * then tighten (§ *Making a field REQUIRED*).
+   */
+  product?: ProductRefType;
   number: number;
   reason: OOSReasonType;
   status: OOSStatusType;
@@ -424,6 +449,8 @@ const OOSDatesSchema: z.ZodType<OOSDates> = z.strictObject({
 export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   uid: OutOfServiceId,
   uid_product: FirestoreId,
+  // Optional until the backfill — see the interface field's own note.
+  product: ProductRef.meta({ label: "Product" }).optional(),
   number: z.int().meta({ column: true, label: "#", linkTo: "outOfServiceDetail", serverSortVia: "number" }),
   reason: OOSReasonEnum.meta({ column: true, label: "Reason" }),
   status: OOSStatusEnum.meta({ column: true, label: "Status" }),
@@ -474,11 +501,18 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
       message: "uid_destination must mirror destination.uid",
     });
   }
+  if (doc.product !== undefined && doc.product.uid !== doc.uid_product) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["uid_product"],
+      message: "uid_product must mirror product.uid",
+    });
+  }
 }).meta({
   title: "Out of Service Record",
   collection: "out-of-service",
   displayDefaults: {
-    columns: ["number", "reason", "organization.path", "quantity", "dates.start", "dates.end"],
+    columns: ["number", "product.name", "reason", "organization.path", "quantity", "dates.start", "dates.end"],
     filters: {},
     sort: { column: "number", direction: "desc" },
     groupBy: [

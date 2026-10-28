@@ -259,6 +259,7 @@ export type RuleId =
   | "update-out-of-service-record:record-to-purchase"
   // out-of-service.ts
   | "create-out-of-service-record:sources-to-record"
+  | "create-out-of-service-record:products-to-record"
   | "create-out-of-service-record:record-to-transactions"
   | "create-out-of-service-record:transactions-to-ledger"
   | "update-out-of-service-record:record-to-transactions"
@@ -292,6 +293,7 @@ export type RuleId =
   | "update-product:name-to-locations"
   | "update-product:name-to-tags"
   | "update-product:name-to-tracking-categories"
+  | "update-product:name-to-out-of-service"
   | "update-product:to-webshop"
   | "update-product:tags-to-tags"
   | "update-product:tracking-category-change"

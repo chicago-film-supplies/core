@@ -243,6 +243,14 @@ Deno.test("OutOfServiceSchema: uid_destination mirrors destination", () => {
   assertEquals(OutOfServiceSchema.safeParse({ ...validOOS, destination, uid_destination: null }).success, false);
 });
 
+Deno.test("OutOfServiceSchema: uid_product mirrors product.uid; product is optional until the backfill", () => {
+  const product = { uid: "testprod100000000000", name: "C-Stand" };
+  assertEquals(OutOfServiceSchema.safeParse({ ...validOOS, product }).success, true);
+  assertEquals(issuePaths({ ...validOOS, product: { ...product, uid: "testprod200000000000" } }), ["uid_product"]);
+  assertEquals(issuePaths({ ...validOOS, product: { ...product, name: "" } }), ["product.name"]);
+  assertEquals(OutOfServiceSchema.safeParse(validOOS).success, true);
+});
+
 Deno.test("OutOfServiceSchema refuses the retired card-status buckets", () => {
   const doc = {
     ...validOOS,

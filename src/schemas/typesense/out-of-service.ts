@@ -15,6 +15,10 @@ export const outOfService: TypesenseCollectionConfig = {
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
       { name: "uid_product", type: "string", facet: false },
+      // Optional while the stored key is: records lack it until the backfill.
+      { name: "product", type: "object", optional: true },
+      { name: "product.uid", type: "string", facet: false, optional: true },
+      { name: "product.name", type: "string", sort: true, stem: true, facet: false, optional: true },
       { name: "number", type: "int64", sort: true, index: true, facet: false },
       { name: "number_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "reason", type: "string", facet: true },
@@ -52,7 +56,7 @@ export const outOfService: TypesenseCollectionConfig = {
   displayDefaults: {
     // Both ends of the window: this table is read against a date range, and a
     // start with no end cannot say whether a record is still open.
-    columns: ["number", "reason", "status", "organization.name", "quantity", "dates.start_fs", "dates.end_fs"],
+    columns: ["number", "product.name", "reason", "status", "organization.name", "quantity", "dates.start_fs", "dates.end_fs"],
     filters: { status: [] },
   },
 };

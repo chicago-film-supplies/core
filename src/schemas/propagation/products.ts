@@ -616,6 +616,25 @@ const updateProductRules: CollectionRule[] = [
     ],
   },
   {
+    id: "update-product:name-to-out-of-service",
+    source: "products",
+    target: "out-of-service",
+    mode: "co-write",
+    invariant:
+      "An ACTIVE out-of-service record shows its product's current name. A terminal record (complete or canceled) keeps the name it had when it closed, so the cascade selects active records only and re-checks the status at the write, because the scan runs outside the transaction and a record may close in between.",
+    transaction: "update-product",
+    enforced_by: [{
+      kind: "audit",
+      ref: "api-cloudrun/scripts/audit-denorm-freshness.ts",
+      clause:
+        "row `out-of-service←products` — the NAME clause, active records only; terminal records are counted and never fail",
+      gates: true,
+    }],
+    fields: [
+      { source: ["name"], target: ["product", "name"] },
+    ],
+  },
+  {
     id: "update-product:to-webshop",
     source: "products",
     target: "webshop-products",
@@ -936,6 +955,7 @@ const updateProductTransaction: TransactionDefinition = {
     "update-product:name-to-locations",
     "update-product:name-to-tags",
     "update-product:name-to-tracking-categories",
+    "update-product:name-to-out-of-service",
     "update-product:to-webshop",
     "update-product:tags-to-tags",
     "update-product:tracking-category-change",

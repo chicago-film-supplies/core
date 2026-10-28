@@ -1067,6 +1067,8 @@ export {
 export {
   OutOfServiceSchema,
   type OutOfService,
+  ProductRef,
+  type ProductRefType,
   OOS_STATUSES,
   OOS_USER_STATUSES,
   OOSStatusEnum,
