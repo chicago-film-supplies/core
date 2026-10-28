@@ -8494,7 +8494,7 @@ An out-of-service record tracking inventory removed from active service.
 interface OutOfService {
   uid: string;
   uid_product: string;
-  product?: ProductRefType;
+  product: ProductRefType;
   number: number;
   reason: OOSReasonType;
   status: OOSStatusType;
@@ -23976,7 +23976,7 @@ An out-of-service record tracking inventory removed from active service.
 interface OutOfService {
   uid: string;
   uid_product: string;
-  product?: ProductRefType;
+  product: ProductRefType;
   number: number;
   reason: OOSReasonType;
   status: OOSStatusType;
@@ -28434,7 +28434,7 @@ interface OutOfServiceDocument {
   id: string;
   uid: string;
   uid_product: string;
-  product?: typeLiteral;
+  product: typeLiteral;
   number: number;
   number_str?: string;
   reason: string;

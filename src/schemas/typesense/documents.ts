@@ -525,7 +525,7 @@ export interface OutOfServiceDocument {
   id: string;
   uid: string;
   uid_product: string;
-  product?: {
+  product: {
     uid: string;
     name: string;
   };

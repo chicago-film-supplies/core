@@ -353,11 +353,8 @@ export interface OutOfService {
    * The product, with its name. `uid_product` is its flat query mirror. The
    * name is live while the record is `active` (a rename cascades to it) and
    * frozen once the record is terminal.
-   *
-   * Optional only until the backfill: a strictObject add goes deploy, backfill,
-   * then tighten (§ *Making a field REQUIRED*).
    */
-  product?: ProductRefType;
+  product: ProductRefType;
   number: number;
   reason: OOSReasonType;
   status: OOSStatusType;
@@ -450,7 +447,7 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
   uid: OutOfServiceId,
   uid_product: FirestoreId,
   // Optional until the backfill — see the interface field's own note.
-  product: ProductRef.meta({ label: "Product" }).optional(),
+  product: ProductRef.meta({ label: "Product" }),
   number: z.int().meta({ column: true, label: "#", linkTo: "outOfServiceDetail", serverSortVia: "number" }),
   reason: OOSReasonEnum.meta({ column: true, label: "Reason" }),
   status: OOSStatusEnum.meta({ column: true, label: "Status" }),
@@ -501,7 +498,7 @@ export const OutOfServiceSchema: z.ZodType<OutOfService> = z.strictObject({
       message: "uid_destination must mirror destination.uid",
     });
   }
-  if (doc.product !== undefined && doc.product.uid !== doc.uid_product) {
+  if (doc.product.uid !== doc.uid_product) {
     ctx.addIssue({
       code: "custom",
       path: ["uid_product"],

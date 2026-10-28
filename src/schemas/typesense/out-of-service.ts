@@ -16,9 +16,9 @@ export const outOfService: TypesenseCollectionConfig = {
       { name: "uid", type: "string", sort: true, facet: false },
       { name: "uid_product", type: "string", facet: false },
       // Optional while the stored key is: records lack it until the backfill.
-      { name: "product", type: "object", optional: true },
-      { name: "product.uid", type: "string", facet: false, optional: true },
-      { name: "product.name", type: "string", sort: true, stem: true, facet: false, optional: true },
+      { name: "product", type: "object" },
+      { name: "product.uid", type: "string", facet: false },
+      { name: "product.name", type: "string", sort: true, stem: true, facet: false },
       { name: "number", type: "int64", sort: true, index: true, facet: false },
       { name: "number_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "reason", type: "string", facet: true },

@@ -16,6 +16,7 @@ function issuePaths(doc: unknown): string[] {
 const validOOS = {
   uid: "testoos1000000000000",
   uid_product: "testprod100000000000",
+  product: { uid: "testprod100000000000", name: "C-Stand" },
   number: 1,
   reason: "damaged",
   status: "active",
@@ -243,12 +244,12 @@ Deno.test("OutOfServiceSchema: uid_destination mirrors destination", () => {
   assertEquals(OutOfServiceSchema.safeParse({ ...validOOS, destination, uid_destination: null }).success, false);
 });
 
-Deno.test("OutOfServiceSchema: uid_product mirrors product.uid; product is optional until the backfill", () => {
-  const product = { uid: "testprod100000000000", name: "C-Stand" };
-  assertEquals(OutOfServiceSchema.safeParse({ ...validOOS, product }).success, true);
+Deno.test("OutOfServiceSchema: product is REQUIRED, and uid_product mirrors product.uid", () => {
+  const { product, ...withoutProduct } = validOOS;
+  assertEquals(OutOfServiceSchema.safeParse(validOOS).success, true);
+  assertEquals(issuePaths(withoutProduct), ["product"]);
   assertEquals(issuePaths({ ...validOOS, product: { ...product, uid: "testprod200000000000" } }), ["uid_product"]);
   assertEquals(issuePaths({ ...validOOS, product: { ...product, name: "" } }), ["product.name"]);
-  assertEquals(OutOfServiceSchema.safeParse(validOOS).success, true);
 });
 
 Deno.test("OutOfServiceSchema refuses the retired card-status buckets", () => {

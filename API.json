@@ -3729,7 +3729,7 @@
         {
           "kind": "interface",
           "name": "OutOfService",
-          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  product?: ProductRefType;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  units: OOSUnitsType | null;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  destination: BookingDestinationRef | null;\n  uid_destination: string | null;\n  supplier: UidNameRefType | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  product: ProductRefType;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  units: OOSUnitsType | null;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  destination: BookingDestinationRef | null;\n  uid_destination: string | null;\n  supplier: UidNameRefType | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An out-of-service record tracking inventory removed from active service."
         },
         {
@@ -10990,7 +10990,7 @@
         {
           "kind": "interface",
           "name": "OutOfService",
-          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  product?: ProductRefType;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  units: OOSUnitsType | null;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  destination: BookingDestinationRef | null;\n  uid_destination: string | null;\n  supplier: UidNameRefType | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface OutOfService {\n  uid: string;\n  uid_product: string;\n  product: ProductRefType;\n  number: number;\n  reason: OOSReasonType;\n  status: OOSStatusType;\n  quantity: number;\n  breakdown: OOSBreakdown;\n  units: OOSUnitsType | null;\n  canceled_at: FirestoreTimestampType | null;\n  organization: typeLiteral | null;\n  dates: OOSDates;\n  destination: BookingDestinationRef | null;\n  uid_destination: string | null;\n  supplier: UidNameRefType | null;\n  sources: DocSourceType[];\n  query_by_sources: string[];\n  crms_id?: number | null;\n  crms_stock_level_id?: number | null;\n  stores: OOSStore[];\n  query_by_uid_store: string[];\n  query_by_uid_location: string[];\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "An out-of-service record tracking inventory removed from active service."
         },
         {
@@ -12900,7 +12900,7 @@
         {
           "kind": "interface",
           "name": "OutOfServiceDocument",
-          "declaration": "interface OutOfServiceDocument {\n  id: string;\n  uid: string;\n  uid_product: string;\n  product?: typeLiteral;\n  number: number;\n  number_str?: string;\n  reason: string;\n  status: string;\n  quantity: number;\n  breakdown: typeLiteral;\n  uid_destination?: string;\n  supplier?: typeLiteral;\n  organization?: typeLiteral;\n  dates: typeLiteral;\n  stores?: Array<typeLiteral>;\n  canceled_at?: number;\n  created_at?: number;\n  updated_at: number;\n}",
+          "declaration": "interface OutOfServiceDocument {\n  id: string;\n  uid: string;\n  uid_product: string;\n  product: typeLiteral;\n  number: number;\n  number_str?: string;\n  reason: string;\n  status: string;\n  quantity: number;\n  breakdown: typeLiteral;\n  uid_destination?: string;\n  supplier?: typeLiteral;\n  organization?: typeLiteral;\n  dates: typeLiteral;\n  stores?: Array<typeLiteral>;\n  canceled_at?: number;\n  created_at?: number;\n  updated_at: number;\n}",
           "doc": "Typesense document type for out-of-service records."
         },
         {
