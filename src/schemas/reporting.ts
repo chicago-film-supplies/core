@@ -45,6 +45,8 @@ import {
   type OrgPathNodeType,
   SettlementTypeEnum,
   type SettlementTypeType,
+  UidNameRef,
+  type UidNameRefType,
 } from "./common.ts";
 import { type MovementSessionOrderRef, MovementSessionOrderRefSchema } from "./movement-session.ts";
 
@@ -803,3 +805,252 @@ export const SubrentMarginReportSchema: z.ZodType<SubrentMarginReport> = z.stric
     ctx.addIssue({ code: "custom", path: ["totals", "margin_cents"], message: "totals.margin_cents must equal revenue_cents − cost_cents" });
   }
 }).meta({ title: "SubrentMarginReport" }) as z.ZodType<SubrentMarginReport>;
+
+// ── Unit activity (api-cloudrun#1395) ───────────────────────────────
+
+/**
+ * Which instants a billed period was cut from: the provider's confirmed ones,
+ * CFS's own, or `mixed` when the spans touching it disagree
+ * (`@cfs/core/utils/cogs` `spanInstants`).
+ */
+export const UNIT_ACTIVITY_INSTANT_SOURCES = ["provider", "cfs", "mixed"] as const;
+/** Zod enum for {@link UNIT_ACTIVITY_INSTANT_SOURCES}. */
+export const UnitActivityInstantSourceEnum: z.ZodEnum<{ provider: "provider"; cfs: "cfs"; mixed: "mixed" }> = z.enum(
+  UNIT_ACTIVITY_INSTANT_SOURCES,
+);
+/** One of {@link UNIT_ACTIVITY_INSTANT_SOURCES}. */
+export type UnitActivityInstantSourceType = z.infer<typeof UnitActivityInstantSourceEnum>;
+
+/**
+ * An order a unit's activity names. `number` is `null` when the order no
+ * longer exists: the span or booking still names it, and dropping it would
+ * turn the period into an idle one.
+ */
+export interface UnitActivityOrderRef {
+  uid: string;
+  number: number | null;
+}
+
+/** Zod schema for {@link UnitActivityOrderRef}. */
+export const UnitActivityOrderRefSchema: z.ZodType<UnitActivityOrderRef> = z.strictObject({
+  uid: FirestoreId,
+  number: z.int().nullable(),
+});
+
+/**
+ * One billed period of one unit's line under one `cogs` activation entry:
+ * `@cfs/core/utils/cogs` `billablePeriods`, which bills the WHOLE period for
+ * any active day (owner, 2026-10-27, Q11).
+ */
+export interface UnitActivityPeriod {
+  /** The product's `cogs` activation entry the spans accrue. */
+  uid_cogs: string;
+  /** The entry's label, so a reader need not hold the product. */
+  label: string;
+  /** The period's first instant. */
+  start: string;
+  /** The next period's first instant: `[start, end)`. */
+  end: string;
+  /**
+   * The period starts inside the report's month. A `per_week` period can
+   * straddle two months and appears in both reports; it COUNTS toward the
+   * totals of the month it starts in only, so twelve monthly reports sum to
+   * the year without double-counting a week.
+   */
+  starts_in_month: boolean;
+  /**
+   * The orders whose spans touched the period, ascending by number. EMPTY is
+   * an IDLE period: the line was on for no job, and its cost is CFS's
+   * overhead (owner, 2026-10-27, Q2). Several orders are listed, never split.
+   */
+  orders: UnitActivityOrderRef[];
+  /**
+   * Chicago days of the period, up to `as_of`, on which some span was on.
+   * Context only — the bill does not depend on it.
+   */
+  active_days: number;
+  instants: UnitActivityInstantSourceType;
+  /** The entry's `rate_cents`: one period bills one rate. */
+  expected_cents: number;
+}
+
+/** Zod schema for {@link UnitActivityPeriod}. */
+export const UnitActivityPeriodSchema: z.ZodType<UnitActivityPeriod> = z.strictObject({
+  uid_cogs: z.uuid(),
+  label: z.string(),
+  start: z.string(),
+  end: z.string(),
+  starts_in_month: z.boolean(),
+  orders: z.array(UnitActivityOrderRefSchema),
+  active_days: z.int().min(0),
+  instants: UnitActivityInstantSourceEnum,
+  expected_cents: z.int().min(0),
+});
+
+/**
+ * One spell the unit spent OUT on a booking, overlapping the month — the
+ * journal's roster fold (`@cfs/core/utils/journal` `unitOutSpells`), unclipped.
+ */
+export interface UnitActivityOutSpell {
+  uid_booking: string;
+  /** The booking's order, or `null` when the booking id names none. */
+  order: UnitActivityOrderRef | null;
+  start: string;
+  /** `null` while the unit is still out. */
+  end: string | null;
+}
+
+/** Zod schema for {@link UnitActivityOutSpell}. */
+export const UnitActivityOutSpellSchema: z.ZodType<UnitActivityOutSpell> = z.strictObject({
+  uid_booking: z.string(),
+  order: UnitActivityOrderRefSchema.nullable(),
+  start: z.string(),
+  end: z.string().nullable(),
+});
+
+/** One unit's activity in the month. */
+export interface UnitActivityUnit {
+  uid_unit: string;
+  number: number;
+  uid_product: string;
+  product_name: string;
+  /** The serial of the physical unit under the number at `as_of` (`serialAt`). */
+  serial_number: string | null;
+  /**
+   * Whose unit it was: the supplier of the history entry in force at its
+   * first billed period in the month, or `null` for CFS.
+   */
+  supplier: UidNameRefType | null;
+  /** Ascending by start. */
+  periods: UnitActivityPeriod[];
+  /** Spells out on a booking overlapping the month. */
+  out: UnitActivityOutSpell[];
+  /** Chicago days of the month, up to `as_of`, on which the unit was out on some booking. */
+  days_out: number;
+  /** `Σ periods[].expected_cents` over periods that start in the month. */
+  expected_cents: number;
+  /** The same sum over IDLE periods only — CFS's overhead. */
+  idle_expected_cents: number;
+}
+
+/** Zod schema for {@link UnitActivityUnit}. */
+export const UnitActivityUnitSchema: z.ZodType<UnitActivityUnit> = z.strictObject({
+  uid_unit: z.string(),
+  number: z.int(),
+  uid_product: FirestoreId,
+  product_name: z.string(),
+  serial_number: z.string().nullable(),
+  supplier: UidNameRef.nullable(),
+  periods: z.array(UnitActivityPeriodSchema),
+  out: z.array(UnitActivityOutSpellSchema),
+  days_out: z.int().min(0),
+  expected_cents: z.int().min(0),
+  idle_expected_cents: z.int().min(0),
+});
+
+/**
+ * A movement the journal's roster fold refused while placing a product's
+ * units. Every spell after one on the same unit is approximate, so the report
+ * carries them beside the spells rather than hiding them.
+ */
+export interface UnitActivityFinding {
+  uid_product: string;
+  uid_movement: string;
+  unit: number | null;
+  message: string;
+}
+
+/** Zod schema for {@link UnitActivityFinding}. */
+export const UnitActivityFindingSchema: z.ZodType<UnitActivityFinding> = z.strictObject({
+  uid_product: FirestoreId,
+  uid_movement: z.string(),
+  unit: z.int().nullable(),
+  message: z.string(),
+});
+
+/** The report's control totals, over periods that START in the month. */
+export interface UnitActivityTotals {
+  periods: number;
+  idle_periods: number;
+  /** `Σ units[].expected_cents`. */
+  expected_cents: number;
+  /** `Σ units[].idle_expected_cents`. */
+  idle_expected_cents: number;
+}
+
+/** Zod schema for {@link UnitActivityTotals}. */
+export const UnitActivityTotalsSchema: z.ZodType<UnitActivityTotals> = z.strictObject({
+  periods: z.int().min(0),
+  idle_periods: z.int().min(0),
+  expected_cents: z.int().min(0),
+  idle_expected_cents: z.int().min(0),
+});
+
+/**
+ * The unit activity report (api-cloudrun#1395;
+ * `api-cloudrun/.claude/plans/serialized-subrent.md` § 8): for ONE provider
+ * and ONE Chicago calendar month, every unit whose line that provider bills,
+ * cut into billed periods, with the orders each period served and the days the
+ * unit was physically out.
+ *
+ * It covers owned and rented units alike — activation is a fact about the
+ * device's service, not its owner. It reports EXPECTED cost only; what the
+ * provider actually billed arrives with the linked usage bills
+ * (api-cloudrun#1396).
+ *
+ * 🔴 **The refinement is the control total**: every unit's sums tie to its
+ * periods, and the totals tie to the units.
+ */
+export interface UnitActivityReport {
+  /** `YYYY-MM`, Chicago. */
+  month: string;
+  /** The month's first instant. */
+  from_date: string;
+  /** The next month's first instant: the month is `[from_date, to_date)`. */
+  to_date: string;
+  /**
+   * `min(to_date, now)`. A still-open span runs to here, so the current
+   * month's report bills what has happened, never a projection.
+   */
+  as_of: string;
+  provider: UidNameRefType;
+  /** Ascending by product name, then number. */
+  units: UnitActivityUnit[];
+  findings: UnitActivityFinding[];
+  totals: UnitActivityTotals;
+}
+
+/** Zod schema for {@link UnitActivityReport}. See the interface for the refinement. */
+export const UnitActivityReportSchema: z.ZodType<UnitActivityReport> = z.strictObject({
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  from_date: z.string(),
+  to_date: z.string(),
+  as_of: z.string(),
+  provider: UidNameRef,
+  units: z.array(UnitActivityUnitSchema),
+  findings: z.array(UnitActivityFindingSchema),
+  totals: UnitActivityTotalsSchema,
+}).superRefine((doc, ctx) => {
+  const totals = { periods: 0, idle_periods: 0, expected_cents: 0, idle_expected_cents: 0 };
+  doc.units.forEach((unit, i) => {
+    const counted = unit.periods.filter((p) => p.starts_in_month);
+    const idle = counted.filter((p) => p.orders.length === 0);
+    const expected = counted.reduce((s, p) => s + p.expected_cents, 0);
+    const idleExpected = idle.reduce((s, p) => s + p.expected_cents, 0);
+    if (unit.expected_cents !== expected) {
+      ctx.addIssue({ code: "custom", path: ["units", i, "expected_cents"], message: `expected_cents (${unit.expected_cents}) must equal its periods that start in the month (${expected})` });
+    }
+    if (unit.idle_expected_cents !== idleExpected) {
+      ctx.addIssue({ code: "custom", path: ["units", i, "idle_expected_cents"], message: `idle_expected_cents (${unit.idle_expected_cents}) must equal its idle periods that start in the month (${idleExpected})` });
+    }
+    totals.periods += counted.length;
+    totals.idle_periods += idle.length;
+    totals.expected_cents += unit.expected_cents;
+    totals.idle_expected_cents += unit.idle_expected_cents;
+  });
+  for (const key of ["periods", "idle_periods", "expected_cents", "idle_expected_cents"] as const) {
+    if (doc.totals[key] !== totals[key]) {
+      ctx.addIssue({ code: "custom", path: ["totals", key], message: `totals.${key} (${doc.totals[key]}) must equal the sum over units (${totals[key]})` });
+    }
+  }
+}).meta({ title: "UnitActivityReport" }) as z.ZodType<UnitActivityReport>;

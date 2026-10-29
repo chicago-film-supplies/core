@@ -7,6 +7,7 @@ import {
   AgingReportSchema,
   OrgStatementSchema,
   SubrentMarginReportSchema,
+  UnitActivityReportSchema,
   type AgingBucketType,
 } from "../src/schemas/reporting.ts";
 import { agingOf } from "../src/utils/invoices.ts";
@@ -416,4 +417,59 @@ Deno.test("🔴 a cost line's kind must agree with its product and ordered amoun
   assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...COST_LINE, uid_product: null })));
   assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...COST_LINE, ordered_cents: null })));
   assertThrows(() => SubrentMarginReportSchema.parse(bad({ ...CHARGE_LINE, cost_cents: 50_000, uid_product: "r".repeat(20) })));
+});
+
+// ── Unit activity (api-cloudrun#1395) ───────────────────────────────
+
+const VISION = { uid: "v".repeat(20), name: "Vision Communications" };
+const WEEK = (start: string, end: string, starts_in_month: boolean, orders: { uid: string; number: number | null }[]) => ({
+  uid_cogs: "00000000-0000-4000-8000-000000000001", label: "Vision weekly", start, end, starts_in_month, orders,
+  active_days: 3, instants: "cfs" as const, expected_cents: 4_500,
+});
+const STRADDLE = WEEK("2026-09-29T00:00:00.000-05:00", "2026-10-06T00:00:00.000-05:00", false, []);
+const JOB = WEEK("2026-10-06T00:00:00.000-05:00", "2026-10-13T00:00:00.000-05:00", true, [{ uid: "o".repeat(20), number: 1201 }]);
+const IDLE = WEEK("2026-10-13T00:00:00.000-05:00", "2026-10-20T00:00:00.000-05:00", true, []);
+const UNIT = {
+  uid_unit: "unit-3001", number: 3001, uid_product: "p".repeat(20), product_name: "Hotspot (Unlimited)",
+  serial_number: "V010", supplier: VISION, periods: [STRADDLE, JOB, IDLE], out: [], days_out: 0,
+  expected_cents: 9_000, idle_expected_cents: 4_500,
+};
+const ACTIVITY = {
+  month: "2026-10", from_date: "2026-10-01T00:00:00.000-05:00", to_date: "2026-11-01T00:00:00.000-05:00",
+  as_of: "2026-11-01T00:00:00.000-05:00", provider: VISION, units: [UNIT], findings: [],
+  totals: { periods: 2, idle_periods: 1, expected_cents: 9_000, idle_expected_cents: 4_500 },
+};
+
+Deno.test("UnitActivityReportSchema accepts a report that ties, and an empty one", () => {
+  assertEquals(UnitActivityReportSchema.parse(ACTIVITY).totals.expected_cents, 9_000);
+  UnitActivityReportSchema.parse({ ...ACTIVITY, units: [], totals: { periods: 0, idle_periods: 0, expected_cents: 0, idle_expected_cents: 0 } });
+});
+
+Deno.test("🔴 a period that starts in the previous month is shown but not counted", () => {
+  // Counting the straddling week here as well as in September would bill it twice across the year.
+  const counted = { ...UNIT, expected_cents: 13_500, idle_expected_cents: 9_000 };
+  assertThrows(() => UnitActivityReportSchema.parse({
+    ...ACTIVITY, units: [counted], totals: { periods: 3, idle_periods: 2, expected_cents: 13_500, idle_expected_cents: 9_000 },
+  }));
+});
+
+Deno.test("🔴 a unit whose sums do not tie to its periods is refused", () => {
+  assertThrows(() => UnitActivityReportSchema.parse({ ...ACTIVITY, units: [{ ...UNIT, idle_expected_cents: 0 }], totals: { ...ACTIVITY.totals, idle_expected_cents: 0 } }));
+  assertThrows(() => UnitActivityReportSchema.parse({ ...ACTIVITY, units: [{ ...UNIT, expected_cents: 4_500 }], totals: { ...ACTIVITY.totals, expected_cents: 4_500 } }));
+});
+
+Deno.test("🔴 totals that do not tie to the units are refused", () => {
+  for (const key of ["periods", "idle_periods", "expected_cents", "idle_expected_cents"] as const) {
+    assertThrows(() => UnitActivityReportSchema.parse({ ...ACTIVITY, totals: { ...ACTIVITY.totals, [key]: ACTIVITY.totals[key] + 1 } }), Error, key);
+  }
+});
+
+Deno.test("a period with several orders lists them and is not idle", () => {
+  const shared = { ...JOB, orders: [{ uid: "o".repeat(20), number: 1201 }, { uid: "q".repeat(20), number: null }] };
+  UnitActivityReportSchema.parse({ ...ACTIVITY, units: [{ ...UNIT, periods: [STRADDLE, shared, IDLE] }] });
+});
+
+Deno.test("the month is YYYY-MM", () => {
+  assertThrows(() => UnitActivityReportSchema.parse({ ...ACTIVITY, month: "2026-13" }));
+  assertThrows(() => UnitActivityReportSchema.parse({ ...ACTIVITY, month: "2026-10-01" }));
 });

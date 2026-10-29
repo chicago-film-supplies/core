@@ -13359,6 +13359,16 @@ for the two that carry cost — the exact relief.
 const UNDO_MOVEMENT_TYPES: "unprep" | "check_out_undo" | "check_in_undo" | "mark_lost_undo" | "mark_damaged_undo" | "mark_cleaning_undo" | "mark_maintenance_undo" | "sale_undo" | "sale_return_undo" | "sale_lost_undo" | "sale_damaged_undo"[];
 ```
 
+### `UNIT_ACTIVITY_INSTANT_SOURCES`
+
+Which instants a billed period was cut from: the provider's confirmed ones,
+CFS's own, or `mixed` when the spans touching it disagree
+(`@cfs/core/utils/cogs` `spanInstants`).
+
+```ts
+const UNIT_ACTIVITY_INSTANT_SOURCES: "provider" | "cfs" | "mixed"[];
+```
+
 ### `UNIT_ROSTER_STATES`
 
 The states a rostered unit can be in. See {@link UnitRosterEntryType}.
@@ -13542,6 +13552,202 @@ interface UnitActivationType {
   notes: string;
   changed_by: ActorRefType;
 }
+```
+
+### `UnitActivityFinding`
+
+A movement the journal's roster fold refused while placing a product's
+units. Every spell after one on the same unit is approximate, so the report
+carries them beside the spells rather than hiding them.
+
+```ts
+interface UnitActivityFinding {
+  uid_product: string;
+  uid_movement: string;
+  unit: number | null;
+  message: string;
+}
+```
+
+### `UnitActivityFindingSchema`
+
+Zod schema for {@link UnitActivityFinding}.
+
+```ts
+const UnitActivityFindingSchema: z.ZodType<UnitActivityFinding>;
+```
+
+### `UnitActivityInstantSourceEnum`
+
+Zod enum for {@link UNIT_ACTIVITY_INSTANT_SOURCES}.
+
+```ts
+const UnitActivityInstantSourceEnum: z.ZodEnum<typeLiteral>;
+```
+
+### `UnitActivityInstantSourceType`
+
+One of {@link UNIT_ACTIVITY_INSTANT_SOURCES}.
+
+```ts
+type UnitActivityInstantSourceType = z.infer<UnitActivityInstantSourceEnum>;
+```
+
+### `UnitActivityOrderRef`
+
+An order a unit's activity names. `number` is `null` when the order no
+longer exists: the span or booking still names it, and dropping it would
+turn the period into an idle one.
+
+```ts
+interface UnitActivityOrderRef {
+  uid: string;
+  number: number | null;
+}
+```
+
+### `UnitActivityOrderRefSchema`
+
+Zod schema for {@link UnitActivityOrderRef}.
+
+```ts
+const UnitActivityOrderRefSchema: z.ZodType<UnitActivityOrderRef>;
+```
+
+### `UnitActivityOutSpell`
+
+One spell the unit spent OUT on a booking, overlapping the month — the
+journal's roster fold (`@cfs/core/utils/journal` `unitOutSpells`), unclipped.
+
+```ts
+interface UnitActivityOutSpell {
+  uid_booking: string;
+  order: UnitActivityOrderRef | null;
+  start: string;
+  end: string | null;
+}
+```
+
+### `UnitActivityOutSpellSchema`
+
+Zod schema for {@link UnitActivityOutSpell}.
+
+```ts
+const UnitActivityOutSpellSchema: z.ZodType<UnitActivityOutSpell>;
+```
+
+### `UnitActivityPeriod`
+
+One billed period of one unit's line under one `cogs` activation entry:
+`@cfs/core/utils/cogs` `billablePeriods`, which bills the WHOLE period for
+any active day (owner, 2026-10-27, Q11).
+
+```ts
+interface UnitActivityPeriod {
+  uid_cogs: string;
+  label: string;
+  start: string;
+  end: string;
+  starts_in_month: boolean;
+  orders: UnitActivityOrderRef[];
+  active_days: number;
+  instants: UnitActivityInstantSourceType;
+  expected_cents: number;
+}
+```
+
+### `UnitActivityPeriodSchema`
+
+Zod schema for {@link UnitActivityPeriod}.
+
+```ts
+const UnitActivityPeriodSchema: z.ZodType<UnitActivityPeriod>;
+```
+
+### `UnitActivityReport`
+
+The unit activity report (api-cloudrun#1395;
+`api-cloudrun/.claude/plans/serialized-subrent.md` § 8): for ONE provider
+and ONE Chicago calendar month, every unit whose line that provider bills,
+cut into billed periods, with the orders each period served and the days the
+unit was physically out.
+
+It covers owned and rented units alike — activation is a fact about the
+device's service, not its owner. It reports EXPECTED cost only; what the
+provider actually billed arrives with the linked usage bills
+(api-cloudrun#1396).
+
+🔴 **The refinement is the control total**: every unit's sums tie to its
+periods, and the totals tie to the units.
+
+```ts
+interface UnitActivityReport {
+  month: string;
+  from_date: string;
+  to_date: string;
+  as_of: string;
+  provider: UidNameRefType;
+  units: UnitActivityUnit[];
+  findings: UnitActivityFinding[];
+  totals: UnitActivityTotals;
+}
+```
+
+### `UnitActivityReportSchema`
+
+Zod schema for {@link UnitActivityReport}. See the interface for the refinement.
+
+```ts
+const UnitActivityReportSchema: z.ZodType<UnitActivityReport>;
+```
+
+### `UnitActivityTotals`
+
+The report's control totals, over periods that START in the month.
+
+```ts
+interface UnitActivityTotals {
+  periods: number;
+  idle_periods: number;
+  expected_cents: number;
+  idle_expected_cents: number;
+}
+```
+
+### `UnitActivityTotalsSchema`
+
+Zod schema for {@link UnitActivityTotals}.
+
+```ts
+const UnitActivityTotalsSchema: z.ZodType<UnitActivityTotals>;
+```
+
+### `UnitActivityUnit`
+
+One unit's activity in the month.
+
+```ts
+interface UnitActivityUnit {
+  uid_unit: string;
+  number: number;
+  uid_product: string;
+  product_name: string;
+  serial_number: string | null;
+  supplier: UidNameRefType | null;
+  periods: UnitActivityPeriod[];
+  out: UnitActivityOutSpell[];
+  days_out: number;
+  expected_cents: number;
+  idle_expected_cents: number;
+}
+```
+
+### `UnitActivityUnitSchema`
+
+Zod schema for {@link UnitActivityUnit}.
+
+```ts
+const UnitActivityUnitSchema: z.ZodType<UnitActivityUnit>;
 ```
 
 ### `UnitId`

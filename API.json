@@ -5900,6 +5900,12 @@
         },
         {
           "kind": "variable",
+          "name": "UNIT_ACTIVITY_INSTANT_SOURCES",
+          "declaration": "const UNIT_ACTIVITY_INSTANT_SOURCES: \"provider\" | \"cfs\" | \"mixed\"[];",
+          "doc": "Which instants a billed period was cut from: the provider's confirmed ones,\nCFS's own, or `mixed` when the spans touching it disagree\n(`@cfs/core/utils/cogs` `spanInstants`)."
+        },
+        {
+          "kind": "variable",
           "name": "UNIT_ROSTER_STATES",
           "declaration": "const UNIT_ROSTER_STATES: \"shelf\" | \"prepped\" | \"out\" | \"away\" | \"unattributed_out\"[];",
           "doc": "The states a rostered unit can be in. See {@link UnitRosterEntryType}."
@@ -5987,6 +5993,102 @@
           "name": "UnitActivationType",
           "declaration": "interface UnitActivationType {\n  uid: string;\n  start: string;\n  end: string | null;\n  uid_order: string | null;\n  uid_cogs: string;\n  provider_confirmed: UnitActivationConfirmedType | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
           "doc": "One span during which a unit's service line was switched ON — a hotspot's or\nrouter's data line, billed by its provider through the product's `cogs`\nactivation entry that `uid_cogs` names.\n\nRECORDED, never derived from custody: a device can sit on the shelf switched\non (an idle, still-billed span) or go out switched off. Present on every\nunit, owned or rented, because CFS's own devices carry provider lines too.\nThe biller is the named cost entry's `provider`, not a field here, since one\nproduct can hold units billed by different providers."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitActivityFinding",
+          "declaration": "interface UnitActivityFinding {\n  uid_product: string;\n  uid_movement: string;\n  unit: number | null;\n  message: string;\n}",
+          "doc": "A movement the journal's roster fold refused while placing a product's\nunits. Every spell after one on the same unit is approximate, so the report\ncarries them beside the spells rather than hiding them."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitActivityFindingSchema",
+          "declaration": "const UnitActivityFindingSchema: z.ZodType<UnitActivityFinding>;",
+          "doc": "Zod schema for {@link UnitActivityFinding}."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitActivityInstantSourceEnum",
+          "declaration": "const UnitActivityInstantSourceEnum: z.ZodEnum<typeLiteral>;",
+          "doc": "Zod enum for {@link UNIT_ACTIVITY_INSTANT_SOURCES}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitActivityInstantSourceType",
+          "declaration": "type UnitActivityInstantSourceType = z.infer<UnitActivityInstantSourceEnum>;",
+          "doc": "One of {@link UNIT_ACTIVITY_INSTANT_SOURCES}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitActivityOrderRef",
+          "declaration": "interface UnitActivityOrderRef {\n  uid: string;\n  number: number | null;\n}",
+          "doc": "An order a unit's activity names. `number` is `null` when the order no\nlonger exists: the span or booking still names it, and dropping it would\nturn the period into an idle one."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitActivityOrderRefSchema",
+          "declaration": "const UnitActivityOrderRefSchema: z.ZodType<UnitActivityOrderRef>;",
+          "doc": "Zod schema for {@link UnitActivityOrderRef}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitActivityOutSpell",
+          "declaration": "interface UnitActivityOutSpell {\n  uid_booking: string;\n  order: UnitActivityOrderRef | null;\n  start: string;\n  end: string | null;\n}",
+          "doc": "One spell the unit spent OUT on a booking, overlapping the month — the\njournal's roster fold (`@cfs/core/utils/journal` `unitOutSpells`), unclipped."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitActivityOutSpellSchema",
+          "declaration": "const UnitActivityOutSpellSchema: z.ZodType<UnitActivityOutSpell>;",
+          "doc": "Zod schema for {@link UnitActivityOutSpell}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitActivityPeriod",
+          "declaration": "interface UnitActivityPeriod {\n  uid_cogs: string;\n  label: string;\n  start: string;\n  end: string;\n  starts_in_month: boolean;\n  orders: UnitActivityOrderRef[];\n  active_days: number;\n  instants: UnitActivityInstantSourceType;\n  expected_cents: number;\n}",
+          "doc": "One billed period of one unit's line under one `cogs` activation entry:\n`@cfs/core/utils/cogs` `billablePeriods`, which bills the WHOLE period for\nany active day (owner, 2026-10-27, Q11)."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitActivityPeriodSchema",
+          "declaration": "const UnitActivityPeriodSchema: z.ZodType<UnitActivityPeriod>;",
+          "doc": "Zod schema for {@link UnitActivityPeriod}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitActivityReport",
+          "declaration": "interface UnitActivityReport {\n  month: string;\n  from_date: string;\n  to_date: string;\n  as_of: string;\n  provider: UidNameRefType;\n  units: UnitActivityUnit[];\n  findings: UnitActivityFinding[];\n  totals: UnitActivityTotals;\n}",
+          "doc": "The unit activity report (api-cloudrun#1395;\n`api-cloudrun/.claude/plans/serialized-subrent.md` § 8): for ONE provider\nand ONE Chicago calendar month, every unit whose line that provider bills,\ncut into billed periods, with the orders each period served and the days the\nunit was physically out.\n\nIt covers owned and rented units alike — activation is a fact about the\ndevice's service, not its owner. It reports EXPECTED cost only; what the\nprovider actually billed arrives with the linked usage bills\n(api-cloudrun#1396).\n\n🔴 **The refinement is the control total**: every unit's sums tie to its\nperiods, and the totals tie to the units."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitActivityReportSchema",
+          "declaration": "const UnitActivityReportSchema: z.ZodType<UnitActivityReport>;",
+          "doc": "Zod schema for {@link UnitActivityReport}. See the interface for the refinement."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitActivityTotals",
+          "declaration": "interface UnitActivityTotals {\n  periods: number;\n  idle_periods: number;\n  expected_cents: number;\n  idle_expected_cents: number;\n}",
+          "doc": "The report's control totals, over periods that START in the month."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitActivityTotalsSchema",
+          "declaration": "const UnitActivityTotalsSchema: z.ZodType<UnitActivityTotals>;",
+          "doc": "Zod schema for {@link UnitActivityTotals}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitActivityUnit",
+          "declaration": "interface UnitActivityUnit {\n  uid_unit: string;\n  number: number;\n  uid_product: string;\n  product_name: string;\n  serial_number: string | null;\n  supplier: UidNameRefType | null;\n  periods: UnitActivityPeriod[];\n  out: UnitActivityOutSpell[];\n  days_out: number;\n  expected_cents: number;\n  idle_expected_cents: number;\n}",
+          "doc": "One unit's activity in the month."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitActivityUnitSchema",
+          "declaration": "const UnitActivityUnitSchema: z.ZodType<UnitActivityUnit>;",
+          "doc": "Zod schema for {@link UnitActivityUnit}."
         },
         {
           "kind": "variable",
