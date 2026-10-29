@@ -276,9 +276,14 @@ export interface CreditNoteDocLineItem {
    * new notes derive it, history stores what actually happened.
    */
   coa_posting: number;
-  tracking_category: string | null;
+  /**
+   * The `tracking-categories` document the credited thing reports under — copied
+   * from the invoice line it credits (`InvoiceDocLineItemType.uid_tracking_category`).
+   * Replaced the stored name and Xero option id. The credit-note Xero body sends
+   * no tracking today; the line carries the uid so it can.
+   */
+  uid_tracking_category: string | null;
   xero_id: string | null;
-  xero_tracking_option_id: string | null;
   /** The invoice line this credits, when the credit was raised from one. */
   uid_invoice_item: string | null;
   /**
@@ -357,9 +362,8 @@ const CreditNoteDocLineItemInner = z.strictObject({
   price: CreditNoteDocItemPriceSchema,
   coa_revenue: COARevenueEnum.nullable(),
   coa_posting: COACode,
-  tracking_category: z.string().nullable(),
+  uid_tracking_category: FirestoreId.nullable(),
   xero_id: z.uuid().nullable(),
-  xero_tracking_option_id: z.uuid().nullable(),
   uid_invoice_item: ItemUid.nullable(),
   // `seed: false`: `[]` fails `.min(1)`, so the form seed must omit the key (core#125).
   path_invoice_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),

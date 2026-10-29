@@ -25,7 +25,7 @@ export {
 // The priced grains' shared tax levers (api-cloudrun#993). `LineItemCore` itself
 // stays internal to the grains; these are exported because the order → invoice
 // projection in `utils/invoices.ts` copies them by key.
-export { LINE_TAX_FIELDS, LineTaxCore } from "./_items.ts";
+export { LINE_POSTING_FIELDS, LINE_TAX_FIELDS, LinePostingCore, LineTaxCore } from "./_items.ts";
 
 export {
   ContactSchema,

@@ -152,9 +152,8 @@ export interface InvoiceItem extends LineItem {
   description?: string;
   price?: PriceObject | InvoiceDocItemPriceType;
   coa_revenue?: COARevenueType | null;
-  tracking_category?: string | null;
+  uid_tracking_category?: string | null;
   xero_id?: string | null;
-  xero_tracking_option_id?: string | null;
   crms_id?: number | string | null;
   // Present on the stored schema (`schemas/invoice.ts`) but absent from this
   // shadow until 2026-08-10, which is why it was missing from every one of the
@@ -801,6 +800,14 @@ export interface XeroLineProduct {
   xero_code?: string | null;
 }
 
+/**
+ * A tracking category's Xero option id, by `tracking-categories` uid — the
+ * lookup {@link xeroAccrecLineRefs} resolves a line's `uid_tracking_category`
+ * through. The API builds it from its category cache; a uid with no entry, or a
+ * `null` option, resolves to nothing.
+ */
+export type XeroOptionByCategoryUid = ReadonlyMap<string, string | null>;
+
 /** What one ACCREC Xero line names besides its money and tax. */
 export interface XeroAccrecLineRefs {
   /** Xero `AccountCode`. */
@@ -824,10 +831,12 @@ export interface XeroAccrecLineRefs {
  *
  * - **Account: the line first** — `line.coa_revenue ?? product's ?? 4800`. A
  *   line's account is an operator override where it differs from the product.
- * - **Tracking: the line's option when Xero still knows it, else the
- *   product's** (owner, 2026-10-26). A stored option Xero has since retired
- *   falls back rather than sending none. A custom line has no product, so it
- *   sends its own.
+ * - **Tracking: the line's category's option when Xero still knows it, else
+ *   the product's** (owner, 2026-10-26). The option is looked up from the
+ *   line's `uid_tracking_category` through `optionByCategoryUid` at build time —
+ *   the line stores no option id. An option Xero has since retired falls back
+ *   rather than sending none. A custom line has no product, so it sends its own
+ *   category's.
  * - **Item code: the product's `xero_code`**, never `crms_id` (#256).
  *
  * A `custom-` line is never matched to a product, whatever the caller passes.
@@ -835,12 +844,15 @@ export interface XeroAccrecLineRefs {
  * `xeroLineMoney`).
  */
 export function xeroAccrecLineRefs(
-  line: Pick<InvoiceDocLineItemType, "uid" | "coa_revenue" | "xero_tracking_option_id">,
+  line: Pick<InvoiceDocLineItemType, "uid" | "coa_revenue" | "uid_tracking_category">,
   product: XeroLineProduct | undefined,
+  optionByCategoryUid: XeroOptionByCategoryUid,
   knownTrackingOptionIds: ReadonlySet<string>,
 ): XeroAccrecLineRefs {
   const p = line.uid.startsWith("custom-") ? undefined : product;
-  const lineOption = line.xero_tracking_option_id ?? null;
+  const lineOption = line.uid_tracking_category == null
+    ? null
+    : optionByCategoryUid.get(line.uid_tracking_category) ?? null;
   const productOption = p?.xero_tracking_option_id ?? null;
   return {
     account_code: String(line.coa_revenue ?? p?.price.coa_revenue ?? 4800),
@@ -864,12 +876,12 @@ export function xeroAccrecLineRefs(
  * before values and reported the ENTIRE CRMS-authored corpus `out_of_sync`,
  * with nothing thrown.
  *
- * ⚠️ Eight literals, no spread. core#43 is the standing case where JSR's npm
+ * ⚠️ Five literals, no spread. core#43 is the standing case where JSR's npm
  * `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate could
  * see it.
  *
  * ⭐ **`substituted_for` is a member, and it is the only one that is not
- * merely an override.** The other seven are values an invoice may hold instead of
+ * merely an override.** The other four are values an invoice may hold instead of
  * its order's; this one is the record that the invoice deliberately bills a
  * DIFFERENT product. Being in the list buys the same two things either way —
  * {@link invoiceItemDifferences} filters it out of both key sets, so a
@@ -879,10 +891,13 @@ export function xeroAccrecLineRefs(
  * {@link syncOrderToInvoiceSelective}'s anchor handling.
  */
 const INVOICE_ONLY_ITEM_FIELDS = [
-  "coa_revenue",
-  "tracking_category",
+  // ⚠️ `coa_revenue` and the tracking category LEFT this list in the
+  // line-tracking-uid campaign (8 → 5): they are `LinePostingCore`, shared and
+  // `propagate: true`, so an invoice line follows its order line on both until
+  // an operator overrides one — one owner, one rule. This reverses
+  // invoice-line-overrides D5, under which the invoice owned them after
+  // projection and a resync carried them back.
   "xero_id",
-  "xero_tracking_option_id",
   "crms_id",
   "crms_opportunity_id",
   "substituted_for",
@@ -892,7 +907,7 @@ const INVOICE_ONLY_ITEM_FIELDS = [
   "uid_out_of_service",
   // 🔴 Type-checked against the STORED shape, not derived from it. Derivation is
   // wrong here and the distinction is the whole point: this is an OVERRIDE
-  // POLICY, not a structural difference — `coa_revenue` is on the order line too
+  // POLICY, not a structural difference — `crms_id` is on the order line too
   // and `substituted_for` is on the fulfillment line, so "fields the
   // invoice has and the order does not" computes a different list.
   //
@@ -1071,8 +1086,9 @@ export function buildInvoiceDestinationDivider(
  * paired line report a key-set difference at once. This file already records
  * that happening three times (`base_percent`, `crms_id`,
  * `price.discount_percent` — 8,015 of 8,978 paired lines), which is why
- * `coa_revenue`, the tax-class levers and `price.taxes_base` below are all spread
- * CONDITIONALLY.
+ * the tax-class override and `price.taxes_base` below are spread
+ * CONDITIONALLY. The posting fields (`LinePostingCore`) are not: both are
+ * required on both grains, so they are stated `?? null` like `zero_priced`.
  *
  * 🔴 **So this key is the one that must NOT be conditional, and the population
  * is why.** A conditional spread on presence is vacuous — the condition is true
@@ -1169,19 +1185,10 @@ export function projectOrderItemToInvoiceItem(item: LineItem, orderDividerUid: s
     // the order line's, never the value — the stamp is a snapshot, so the
     // statedness hazard the docblock names cannot arise.
     ...(item.quantity_per_parent !== undefined ? { quantity_per_parent: item.quantity_per_parent } : {}),
-    // ⚠️ `coa_revenue` is an INVOICE_ONLY field, and projecting it is not a
-    // contradiction — it is what makes the override an override. The invoice's
-    // own value still wins (`carryForwardOverrides` re-applies it after the
-    // replace); this only supplies the order's when the invoice has none,
-    // instead of leaving `undefined` for the invoice pricer to read as
-    // "taxable" while the stored per-line taxes say otherwise.
-    //
-    // Comparator-safe by construction: `invoiceItemsMatch` filters
-    // INVOICE_ONLY_ITEM_FIELDS out of both key sets, so adding this key changes
-    // no sync verdict. That is NOT true of `price.taxes_base` above, which is
-    // nested inside `price` and therefore compared — hence the two different
-    // treatments of two fields added in the same pass.
-    ...(item.coa_revenue !== undefined ? { coa_revenue: item.coa_revenue } : {}),
+    // The account + tracking category (`LinePostingCore`) — shared fields that
+    // propagate, so the projection carries the order line's and the three-way
+    // merge decides whether an invoice override keeps its own.
+    ...pickLinePostingFields(item),
     // The tax levers (`LineTaxCore`: `uid_tax_class`, `uid_tax_class_override`) mirror onto the invoice, because the invoice is
     // what gets billed and it prices its OWN line through the same resolver.
     // The class is required on both grains; the override is copied only when
@@ -1210,6 +1217,22 @@ export function pickLineTaxFields(
   return {
     uid_tax_class: item.uid_tax_class,
     ...(item.uid_tax_class_override !== undefined ? { uid_tax_class_override: item.uid_tax_class_override } : {}),
+  };
+}
+
+/**
+ * The `LINE_POSTING_FIELDS` a line carries, for a projection onto another
+ * grain. Both are required + nullable on every stored priced line, so each is
+ * stated UNCONDITIONALLY (`?? null`): the comparator compares KEY SETS, and a
+ * key whose presence depended on its value would read as a difference. `null`
+ * is a real answer on both (a custom line; a product with no category).
+ */
+export function pickLinePostingFields(
+  item: { coa_revenue?: COARevenueType | null; uid_tracking_category?: string | null },
+): { coa_revenue: COARevenueType | null; uid_tracking_category: string | null } {
+  return {
+    coa_revenue: item.coa_revenue ?? null,
+    uid_tracking_category: item.uid_tracking_category ?? null,
   };
 }
 
@@ -3004,7 +3027,7 @@ export function isInInvoiceAuthoredSubtree(
  * 🔴 **Never by uid alone** (core#129). A uid repeats within one scope — the
  * same component standalone and inside a kit, or one sub-kit inside two kits —
  * and a uid-keyed map let the LAST occurrence win, stamping one row's
- * `xero_id`, `substituted_for`, `coa_revenue` and `tracking_category` onto every
+ * `xero_id` and `substituted_for` (then also its account and tracking) onto every
  * row sharing its uid: duplicate Xero LineItemIDs and a doubled substitution
  * offset.
  *
@@ -3116,8 +3139,9 @@ export function syncOrderItems(
  * Pure: returns a fresh items array; the input is not mutated. Scoped to one
  * **order divider** — a multi-order invoice loops its linked orders. The
  * {@link INVOICE_ONLY_ITEM_FIELDS} are always carried forward — named by the
- * list rather than re-spelled, because the copy that stood here listed four of
- * them and the list has six.
+ * list rather than re-spelled, because a copy that stood here once listed four
+ * of them when the list had six. The posting fields are NOT in it: a resync
+ * resets a line's account and tracking category to the order's (D6).
  *
  * - `targetPaths` omitted → **whole**: every order-scoped line is rebuilt from
  *   the order — a hard snap-to-order, so price overrides are discarded and lines

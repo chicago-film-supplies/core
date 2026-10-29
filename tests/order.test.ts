@@ -33,6 +33,8 @@ const docLine = (over: Record<string, unknown> = {}) => ({
   stock_method: "none",
   zero_priced: null,
   uid_tax_class: "TaxC1assDefau1tAAAAA",
+  coa_revenue: 4000,
+  uid_tracking_category: null,
   price: priceBase,
   path: [],
   ...over,
@@ -622,6 +624,8 @@ Deno.test("OrderSchema validates a complete document", () => {
         path: ["11111111-1111-4111-8111-111111111111", "550e8400-e29b-41d4-a716-446655440001"],
         quantity: 2,
         uid_tax_class: "TaxC1assDefau1tAAAAA",
+        coa_revenue: 4000,
+        uid_tracking_category: null,
         price: {
           ...priceBase,
           base_cents: 10000,
@@ -1154,6 +1158,8 @@ const feeLine = {
   stock_method: "none",
   zero_priced: null,
   uid_tax_class: "TaxC1assDefau1tAAAAA",
+  coa_revenue: 4000,
+  uid_tracking_category: null,
   // A `percent_of_total` fee carries its rate in `base_percent` (a 4dp
   // percentage), never in `base_cents` — D1's split, enforced by
   // `checkPriceBaseUnit`. 3% here, not $3.00.
@@ -1403,6 +1409,26 @@ Deno.test("OrderDocItem: a stored line that omits zero_priced is refused — the
   );
 });
 
+Deno.test("OrderDocItem: a stored line must STATE both posting keys (`LinePostingCore`), `null` allowed", () => {
+  assertEquals(OrderDocItem.safeParse({ ...docLine(), coa_revenue: null, uid_tracking_category: null }).success, true, "control: nulls parse");
+  for (const key of ["coa_revenue", "uid_tracking_category"] as const) {
+    const withoutKey = { ...docLine() } as Record<string, unknown>;
+    delete withoutKey[key];
+    const result = OrderDocItem.safeParse(withoutKey);
+    assertEquals(result.success, false, `${key} absent must be refused`);
+    assertEquals(result.error?.issues.some((i) => i.path.at(-1) === key), true, `the refusal must name ${key}`);
+  }
+});
+
+Deno.test("OrderItem input: both posting keys are optional and nullable (missing = keep, null = reset)", () => {
+  const base = { uid: "testitem100000000000", type: "rental", path: [] };
+  for (const over of [{}, { coa_revenue: null, uid_tracking_category: null }, { coa_revenue: 4100, uid_tracking_category: "TrackCat000000000001" }]) {
+    const r = OrderItem.safeParse({ ...base, ...over });
+    assertEquals(r.success, true, JSON.stringify(over));
+    assertEquals(r.success && Object.keys(over).every((k) => k in r.data), true, "a stated key reaches the handler, not stripped");
+  }
+});
+
 // ── Exchange pairs — an exchange is a destination pair ────────────────
 
 const PARENT_PAIR = "11111111-1111-4111-8111-111111111111";
@@ -1483,6 +1509,8 @@ function orderLine(uid: string, path: string[], extra: Record<string, unknown> =
     path,
     quantity: 1,
     uid_tax_class: "TaxC1assDefau1tAAAAA",
+    coa_revenue: 4000,
+    uid_tracking_category: null,
     price: {
       ...priceBase,
       base_cents: 10000,

@@ -397,7 +397,7 @@ Deno.test("buildOrderScopedItems preserves group shape via OrderDocGroupItem", (
 
 // ── carryForwardOverrides ───────────────────────────────────────
 
-Deno.test("carryForwardOverrides preserves coa_revenue and xero_id from existing items", () => {
+Deno.test("carryForwardOverrides preserves xero_id, and the account resets to the rebuilt line's (D6)", () => {
   const rebuilt: InvoiceDocItemType[] = [
     { ...lineItemBase, uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light Updated", quantity: 3, path: [] },
     { ...lineItemBase, uid: "item-new", type: "sale", uid_tax_class: TAX_CLASS, name: "New Item", quantity: 1, path: [] },
@@ -409,38 +409,45 @@ Deno.test("carryForwardOverrides preserves coa_revenue and xero_id from existing
   const result = carryForwardOverrides(rebuilt, existing);
   assertEquals(result[0].name, "Light Updated"); // rebuilt field
   assertEquals(asLine(result[0]).quantity, 3); // rebuilt field
-  assertEquals(asLine(result[0]).coa_revenue, 4100); // carried forward
+  // `coa_revenue` is a shared field (`LinePostingCore`), no longer invoice-only:
+  // a resync resets it to the order's, which the rebuilt line already states.
+  assertEquals(asLine(result[0]).coa_revenue, null);
   assertEquals(asLine(result[0]).xero_id, "00000000-0000-4000-8000-000000000001"); // carried forward
   assertEquals(asLine(result[1]).coa_revenue, null); // new item, no override
-  // `null`, not `undefined`: a real invoice line carries the schema default, and
-  // the old `undefined` was an artifact of a fixture built without one.
 });
 
-// ── INVOICE_ONLY_ITEM_FIELDS: one list, six fields ──────────────
+// ── INVOICE_ONLY_ITEM_FIELDS: one list ───────────────────────────
 //
 // `pickInvoiceOnlyFields` is module-private, so it is asserted through
 // `carryForwardOverrides` — its only production consumer and the surface that
 // used to hand-inline the same four conditional spreads.
 
-/** Every invoice-only field, populated, on one existing line. */
+/** The value-shaped invoice-only fields, populated, on one existing line. */
 const ALL_SIX_OVERRIDES = {
-  coa_revenue: 4100,
-  tracking_category: "Camera",
   xero_id: "00000000-0000-4000-8000-0000000000a1",
-  xero_tracking_option_id: "00000000-0000-4000-8000-0000000000a2",
   crms_id: 8812,
   crms_opportunity_id: 5501,
 } as const;
 
-Deno.test("carryForwardOverrides carries ALL SIX invoice-only fields, not just the original four", () => {
+/**
+ * The posting fields — invoice-only until the line-tracking-uid campaign, now
+ * `LinePostingCore` (shared, propagated). A resync must NOT carry them: it
+ * resets them to the order's (D6).
+ */
+const POSTING_OVERRIDES = { coa_revenue: 4100, uid_tracking_category: "TrackCat000000000001" } as const;
+
+Deno.test("carryForwardOverrides carries every invoice-only field, and NOT the posting fields", () => {
   const rebuilt = [
     { ...lineItemBase, uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light Updated", quantity: 3, path: [] },
   ] as InvoiceDocItemType[];
   const existing: InvoiceItem[] = [
-    { uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light", path: [], ...ALL_SIX_OVERRIDES },
+    { uid: "item-1", type: "rental", uid_tax_class: TAX_CLASS, name: "Light", path: [], ...ALL_SIX_OVERRIDES, ...POSTING_OVERRIDES },
   ];
 
   const out = carryForwardOverrides(rebuilt, existing)[0] as unknown as Record<string, unknown>;
+  for (const key of Object.keys(POSTING_OVERRIDES)) {
+    assertEquals(out[key], null, `posting field "${key}" must reset to the rebuilt line's, not be carried`);
+  }
 
   // The rebuilt body still wins…
   assertEquals(out.name, "Light Updated");
@@ -542,7 +549,9 @@ Deno.test("syncOrderItems replaces scoped items and carries forward overrides", 
   assertEquals(result[2].path, [ORDER_DIV_1, DEST_1, ITEM_1]);
   assertEquals(result[2].name, "Spot Light v2");
   assertEquals(asLine(result[2]).quantity, 5);
-  assertEquals((result[2] as InvoiceItem).coa_revenue, 4100); // carried forward
+  // A hard resync resets the account to the order line's (D6) — the order line
+  // states none here, so the projection's `null` stands.
+  assertEquals((result[2] as InvoiceItem).coa_revenue, null);
 
   assertEquals(result[3].path, [ORDER_DIV_1, DEST_1, ITEM_NEW]);
   assertEquals(result[3].name, "Setup Fee");
@@ -790,49 +799,46 @@ Deno.test("per field: a NEW taxes_base no longer locks a line — G2 is gone", (
   );
 });
 
-Deno.test("D5: an order's account change does not reach an UNEDITED invoice line — the invoice owns it", () => {
-  // prev 4000, invoice 4000 (never touched), next 4100. Under `propagate: true`
-  // the three-way rule took 4100; the invoice now owns the account once
-  // projected, so the line keeps 4000 while its other fields still follow.
-  const prev = orderShapedLine({ coa_revenue: 4000 });
-  const next = orderShapedLine({ coa_revenue: 4100, name: "Renamed" });
+Deno.test("D3: an order's posting change reaches an UNEDITED invoice line, and an override survives it", () => {
+  // `LinePostingCore` is `propagate: true` (line-tracking-uid D3, reversing the
+  // old D5 under which the invoice owned the account once projected). So the
+  // ordinary three-way rule decides both fields: prev 4000 / Cat A, invoice
+  // untouched, next 4100 / Cat B → the invoice takes 4100 / Cat B.
+  const CAT_A = "TrackCatAAAAAAAAAAAA";
+  const CAT_B = "TrackCatBBBBBBBBBBBB";
+  const prev = orderShapedLine({ coa_revenue: 4000, uid_tracking_category: CAT_A });
+  const next = orderShapedLine({ coa_revenue: 4100, uid_tracking_category: CAT_B, name: "Renamed" });
   const stored = buildOrderScopedItems([prev], ORDER_DIV_1)[0];
-  assertEquals((stored as InvoiceItem).coa_revenue, 4000);
+  assertEquals([(stored as InvoiceItem).coa_revenue, (stored as InvoiceItem).uid_tracking_category], [4000, CAT_A]);
 
   const synced = syncOrderToInvoiceSelective([prev], [next], [stored], ORDER_DIV_1);
-  assertEquals((synced[0] as InvoiceItem).coa_revenue, 4000);
-  assertEquals((synced[0] as InvoiceItem).name, "Renamed", "the rest of the line still follows the order");
-  // A NEW row still takes the order's account at projection.
-  assertEquals((buildOrderScopedItems([next], ORDER_DIV_1)[0] as InvoiceItem).coa_revenue, 4100);
+  assertEquals([(synced[0] as InvoiceItem).coa_revenue, (synced[0] as InvoiceItem).uid_tracking_category], [4100, CAT_B]);
+  assertEquals((synced[0] as InvoiceItem).name, "Renamed", "the rest of the line follows too");
+
+  // An operator override on the invoice is kept, per field: the account was
+  // changed there, the category was not.
+  const overridden = { ...stored, coa_revenue: 4700 } as InvoiceDocItemType;
+  const kept = syncOrderToInvoiceSelective([prev], [next], [overridden], ORDER_DIV_1);
+  assertEquals((kept[0] as InvoiceItem).coa_revenue, 4700, "the invoice's own account survives the order edit");
+  assertEquals((kept[0] as InvoiceItem).uid_tracking_category, CAT_B, "the un-overridden category still follows");
 });
 
-Deno.test("projection: `coa_revenue` inherits but changes NO sync verdict", () => {
-  // The other half of the asymmetry. `coa_revenue` is projected too — an order
-  // line that carries one should hand it to the invoice rather than leaving
-  // `undefined` for the invoice pricer to read as "taxable" while the
-  // stored per-line taxes say otherwise. But it is in INVOICE_ONLY_ITEM_FIELDS,
-  // so `invoiceItemsMatch` filters it out of both key sets and adding it to the
-  // projection cannot flip a verdict — unlike `price.taxes_base`, which is
-  // nested inside `price` and therefore compared.
-  const orderLine = orderShapedLine({ coa_revenue: 4000 });
-  const storedInvoiceLine = buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0];
+Deno.test("projection: the posting fields are stated on every projected line, `null` included", () => {
+  // Both keys are required + nullable on the stored invoice line, and the line
+  // comparator compares KEY SETS — so the projection states them whether or not
+  // the order line holds a value (`pickLinePostingFields`).
+  const bare = buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0] as InvoiceItem;
+  assertEquals([bare.coa_revenue, bare.uid_tracking_category], [null, null]);
+  assert("coa_revenue" in bare && "uid_tracking_category" in bare);
 
-  // It still reaches the projected item, and the invoice's own value still wins.
+  const orderLine = orderShapedLine({ coa_revenue: 4000 });
   const projected = buildOrderScopedItems([orderLine], ORDER_DIV_1)[0];
   assertEquals((projected as InvoiceItem).coa_revenue, 4000);
 
-  const overridden = { ...storedInvoiceLine, coa_revenue: 4100 } as InvoiceDocItemType;
-  const synced = syncOrderToInvoiceSelective(
-    [orderShapedLine()],
-    [orderLine],
-    [overridden],
-    ORDER_DIV_1,
-  );
-  assertEquals(
-    (synced[0] as InvoiceItem).coa_revenue,
-    4100,
-    "carryForwardOverrides re-applies the invoice's own COA over the projected one",
-  );
+  // An invoice-side account the previous order never had is an override, and stays.
+  const overridden = { ...buildOrderScopedItems([orderShapedLine()], ORDER_DIV_1)[0], coa_revenue: 4100 } as InvoiceDocItemType;
+  const synced = syncOrderToInvoiceSelective([orderShapedLine()], [orderLine], [overridden], ORDER_DIV_1);
+  assertEquals((synced[0] as InvoiceItem).coa_revenue, 4100, "the three-way merge keeps the invoice's own account");
 });
 
 // ── Substitution on an invoice (manager#399) ────────────────────
@@ -1935,10 +1941,22 @@ Deno.test("computeInvoiceSyncStatus: only the changed line is out_of_sync", () =
 
 Deno.test("computeInvoiceSyncStatus: invoice-only overrides do not count as drift", () => {
   const inv = baselineInvoice().map((it) =>
-    it.uid === ITEM_1 ? ({ ...it, coa_revenue: 4100, xero_id: "00000000-0000-4000-8000-000000000abc" } as InvoiceItem) : it
+    it.uid === ITEM_1 ? ({ ...it, xero_id: "00000000-0000-4000-8000-000000000abc" } as InvoiceItem) : it
   );
   const status = computeInvoiceSyncStatus(inv, RESYNC_ORDER_ITEMS, ORDER_DIV_1, NO_EXPLANATIONS);
-  assertEquals(status.get(KEY_A), "in_sync"); // coa_revenue / xero_id excluded from comparison
+  assertEquals(status.get(KEY_A), "in_sync"); // xero_id excluded from comparison
+});
+
+Deno.test("computeInvoiceSyncStatus: a posting override IS a difference — the fields are shared now", () => {
+  // `coa_revenue` / `uid_tracking_category` left INVOICE_ONLY_ITEM_FIELDS
+  // (line-tracking-uid D3): an invoice line holding its own account differs from
+  // its order line, and the diff surface shows it for the operator to keep.
+  for (const over of [{ coa_revenue: 4100 }, { uid_tracking_category: "TrackCat000000000001" }]) {
+    const inv = baselineInvoice().map((it) => it.uid === ITEM_1 ? ({ ...it, ...over } as InvoiceItem) : it);
+    const status = computeInvoiceSyncStatus(inv, RESYNC_ORDER_ITEMS, ORDER_DIV_1, NO_EXPLANATIONS);
+    assertEquals(status.get(KEY_A), "out_of_sync", JSON.stringify(over));
+    assertEquals(status.get(KEY_B), "in_sync");
+  }
 });
 
 Deno.test("computeInvoiceSyncStatus: a CRMS-authored line is in_sync — the corpus-wide false positive", () => {
@@ -2214,14 +2232,17 @@ Deno.test("resyncInvoiceLines per-line: re-projects only the targeted line, sibl
   assertEquals((asLine(a).price as { subtotal_cents: number }).subtotal_cents, 90000);
 });
 
-Deno.test("resyncInvoiceLines per-line: carries forward invoice-only override fields", () => {
+Deno.test("resyncInvoiceLines per-line: carries forward invoice-only fields, resets the posting fields (D6)", () => {
   const inv = baselineInvoice().map((it) =>
-    it.uid === ITEM_1 ? ({ ...it, coa_revenue: 4100, xero_id: "00000000-0000-4000-8000-000000000abc" } as InvoiceDocItemType) : it
+    it.uid === ITEM_1
+      ? ({ ...it, coa_revenue: 4100, uid_tracking_category: "TrackCat000000000001", xero_id: "00000000-0000-4000-8000-000000000abc" } as InvoiceDocItemType)
+      : it
   );
   const result = resyncInvoiceLines(inv, changedOrderItems(), ORDER_DIV_1, [[ORDER_DIV_1, DEST_1, ITEM_1]]);
   const a = asLine(result.find((i) => i.uid === ITEM_1)!);
   assertEquals(a.quantity, 9); // body snapped to the order
-  assertEquals(a.coa_revenue, 4100); // override preserved
+  // The account and category reset to the order line's — which states neither.
+  assertEquals([a.coa_revenue, a.uid_tracking_category], [null, null]);
   assertEquals(a.xero_id, "00000000-0000-4000-8000-000000000abc");
 });
 
@@ -2625,9 +2646,11 @@ function mutations(): Array<[string, (it: InvoiceItem) => InvoiceItem]> {
       return next as unknown as InvoiceItem;
     }],
     ["a top-level key added", (it) => ({ ...it, unexpected_key: 1 } as unknown as InvoiceItem)],
+    // No `coa_revenue` here: it left the invoice-only list (line-tracking-uid
+    // D3), so it is compared now and this pre-refactor oracle, which excluded
+    // it, no longer describes it — see the "posting override" test below.
     ["invoice-only fields set", (it) => ({
       ...it,
-      coa_revenue: 4100,
       xero_id: "00000000-0000-4000-8000-000000000abc",
       crms_id: 55,
     } as unknown as InvoiceItem)],
@@ -2674,11 +2697,19 @@ Deno.test("invoiceItemDifferences: an invoice-only override is never a differenc
   const expected = projectedLineA();
   const overridden = {
     ...expected,
-    coa_revenue: 4100,
     xero_id: "00000000-0000-4000-8000-000000000abc",
     crms_id: 55,
   } as unknown as InvoiceItem;
   assertEquals(invoiceItemDifferences(expected, overridden), []);
+});
+
+Deno.test("invoiceItemDifferences: a posting override IS named — the fields are shared now", () => {
+  const expected = projectedLineA();
+  assertEquals(invoiceItemDifferences(expected, { ...expected, coa_revenue: 4100 } as InvoiceItem), ["coa_revenue"]);
+  assertEquals(
+    invoiceItemDifferences(expected, { ...expected, uid_tracking_category: "TrackCat000000000001" } as InvoiceItem),
+    ["uid_tracking_category"],
+  );
 });
 
 Deno.test("invoiceItemDifferences: every compared price key is reachable, none collapse into `price`", () => {
@@ -3025,7 +3056,10 @@ Deno.test("#481 coa: the invoice untaxes a line the order does not — explained
   const current = { ...taxedLine(TAX_CHI_V2, 15, 0), coa_revenue: 6000 } as unknown as InvoiceItem;
   (current as unknown as { price: Record<string, unknown> }).price.taxes = [];
   const exp = expected as unknown as InvoiceItem;
-  assertEquals(residue(exp, current, LIVE), []);
+  // The TAX difference is explained by the account. The account itself is not:
+  // `coa_revenue` is a shared field now (line-tracking-uid D3), so an invoice
+  // holding its own is an override the operator is shown, not a hidden key.
+  assertEquals(residue(exp, current, LIVE), ["coa_revenue"]);
 });
 
 Deno.test("🔴 #481 total_cents is covered ONLY when it moved by exactly the tax delta", () => {
@@ -3880,26 +3914,39 @@ Deno.test("syncOrderItems — the hard snap discards an override but KEEPS a los
 
 Deno.test("D6 xeroAccrecLineRefs: account, tracking and item code — line first, product fallback", () => {
   const known = new Set(["opt-line", "opt-product"]);
+  // The line names a category by uid; its option is looked up when the body is built.
+  const options = new Map<string, string | null>([
+    ["cat-line", "opt-line"],
+    ["cat-product", "opt-product"],
+    ["cat-retired", "opt-retired"],
+    ["cat-no-option", null],
+  ]);
   const product = { price: { coa_revenue: 4000 as const }, xero_tracking_option_id: "opt-product", xero_code: "CAM-1" };
   const cases: [string, Parameters<typeof xeroAccrecLineRefs>[0], typeof product | undefined, ReturnType<typeof xeroAccrecLineRefs>][] = [
-    ["override: the line's account and option win",
-      { uid: "cam", coa_revenue: 4100, xero_tracking_option_id: "opt-line" }, product,
+    ["override: the line's account and category's option win",
+      { uid: "cam", coa_revenue: 4100, uid_tracking_category: "cat-line" }, product,
       { account_code: "4100", tracking_option_id: "opt-line", item_code: "CAM-1" }],
     ["non-override: the line states the product's own values",
-      { uid: "cam", coa_revenue: 4000, xero_tracking_option_id: "opt-product" }, product,
+      { uid: "cam", coa_revenue: 4000, uid_tracking_category: "cat-product" }, product,
       { account_code: "4000", tracking_option_id: "opt-product", item_code: "CAM-1" }],
     ["a line with neither falls back to the product",
-      { uid: "cam", coa_revenue: null, xero_tracking_option_id: null }, product,
+      { uid: "cam", coa_revenue: null, uid_tracking_category: null }, product,
       { account_code: "4000", tracking_option_id: "opt-product", item_code: "CAM-1" }],
     ["a line option Xero no longer knows falls back to the product's",
-      { uid: "cam", coa_revenue: 4100, xero_tracking_option_id: "opt-retired" }, product,
+      { uid: "cam", coa_revenue: 4100, uid_tracking_category: "cat-retired" }, product,
       { account_code: "4100", tracking_option_id: "opt-product", item_code: "CAM-1" }],
-    ["a custom line sends its own option and never reads a product",
-      { uid: "custom-tent-repair", coa_revenue: 4700, xero_tracking_option_id: "opt-line" }, product,
+    ["a category the lookup does not know falls back to the product's",
+      { uid: "cam", coa_revenue: 4100, uid_tracking_category: "cat-unknown" }, product,
+      { account_code: "4100", tracking_option_id: "opt-product", item_code: "CAM-1" }],
+    ["a category whose option is null falls back to the product's",
+      { uid: "cam", coa_revenue: 4100, uid_tracking_category: "cat-no-option" }, product,
+      { account_code: "4100", tracking_option_id: "opt-product", item_code: "CAM-1" }],
+    ["a custom line sends its own category's option and never reads a product",
+      { uid: "custom-tent-repair", coa_revenue: 4700, uid_tracking_category: "cat-line" }, product,
       { account_code: "4700", tracking_option_id: "opt-line", item_code: null }],
     ["no product and no line account → 4800, no tracking, no item code",
-      { uid: "cam", coa_revenue: null, xero_tracking_option_id: null }, undefined,
+      { uid: "cam", coa_revenue: null, uid_tracking_category: null }, undefined,
       { account_code: "4800", tracking_option_id: null, item_code: null }],
   ];
-  for (const [label, line, p, want] of cases) assertEquals(xeroAccrecLineRefs(line, p, known), want, label);
+  for (const [label, line, p, want] of cases) assertEquals(xeroAccrecLineRefs(line, p, options, known), want, label);
 });

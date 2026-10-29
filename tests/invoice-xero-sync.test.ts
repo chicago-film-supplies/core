@@ -93,10 +93,12 @@ Deno.test("D7 tracks_xero_edits: literal per status, and non-null exactly where 
 Deno.test("D9: a tracking-only line edit moves the projection hash", () => {
   const tagged = (over: Record<string, unknown>) =>
     invoice({ items: [{ uid: "o", type: "order", path: ["o"] }, { ...line("tent", 5000), ...over }] });
-  const base = invoiceXeroProjectionHash(tagged({ tracking_category: "Lighting", xero_tracking_option_id: "opt-1" }));
-  assertNotEquals(invoiceXeroProjectionHash(tagged({ tracking_category: "Grip", xero_tracking_option_id: "opt-1" })), base);
-  assertNotEquals(invoiceXeroProjectionHash(tagged({ tracking_category: "Lighting", xero_tracking_option_id: "opt-2" })), base);
-  assertEquals(invoiceXeroProjectionHash(tagged({ tracking_category: "Lighting", xero_tracking_option_id: "opt-1" })), base);
+  const base = invoiceXeroProjectionHash(tagged({ uid_tracking_category: "cat-lighting" }));
+  assertNotEquals(invoiceXeroProjectionHash(tagged({ uid_tracking_category: "cat-grip" })), base);
+  assertNotEquals(invoiceXeroProjectionHash(tagged({ uid_tracking_category: null })), base);
+  assertEquals(invoiceXeroProjectionHash(tagged({ uid_tracking_category: "cat-lighting" })), base);
+  // The retired keys are not hashed: a stale copy on a line moves nothing.
+  assertEquals(invoiceXeroProjectionHash(tagged({ uid_tracking_category: "cat-lighting", xero_tracking_option_id: "opt-2" })), base);
 });
 
 Deno.test("canonicalJson/hash48: key order does not move the hash; content does", () => {

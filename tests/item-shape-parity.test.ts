@@ -34,8 +34,8 @@
  * else would pass an import-based check and fail this one.
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import { LINE_TAX_FIELDS, LineItemCore, LineTaxCore } from "../src/schemas/_items.ts";
-import { pickLineTaxFields } from "../src/utils/invoices.ts";
+import { LINE_POSTING_FIELDS, LINE_TAX_FIELDS, LineItemCore, LinePostingCore, LineTaxCore } from "../src/schemas/_items.ts";
+import { pickLinePostingFields, pickLineTaxFields } from "../src/utils/invoices.ts";
 import { InvoiceDocItem, schemas } from "../src/schemas/mod.ts";
 
 const GRAINS = ["orders", "invoices", "fulfillments"] as const;
@@ -157,6 +157,8 @@ Deno.test("checkZeroPricedAmount now runs when an INVOICE DOCUMENT parses", () =
     path: ["abcdefghij0123456789"],
     zero_priced: null,
     uid_tax_class: "TaxC1assDefau1tAAAAA",
+    coa_revenue: 4000,
+    uid_tracking_category: null,
     price: {
       base_cents: 1000,
       formula: "five_day_week",
@@ -279,5 +281,42 @@ Deno.test("pickLineTaxFields: the class is required, the override keeps its key 
   assertEquals(
     pickLineTaxFields({ uid: "line1", uid_tax_class: "classuid00000000000a", uid_tax_class_override: null }),
     { uid_tax_class: "classuid00000000000a", uid_tax_class_override: null },
+  );
+});
+
+// ── The PRICED grains' shared posting (line-tracking-uid D3) ─────────────
+
+Deno.test("LinePostingCore is the SAME INSTANCE on the order and invoice line, and absent from the fulfillment line", () => {
+  const drifted: string[] = [];
+  for (const grain of ["orders", "invoices"] as const) {
+    const shape = lineArmShape(grain);
+    for (const [key, canonical] of Object.entries(LinePostingCore)) {
+      if (shape[key] !== canonical) drifted.push(`${grain}.items[].${key}`);
+    }
+  }
+  assertEquals(drifted, [], "a priced grain re-declared or omitted a LinePostingCore field:\n" + drifted.join("\n"));
+  const fulfillment = lineArmShape("fulfillments");
+  assertEquals(Object.keys(LinePostingCore).filter((k) => k in fulfillment), [], "a fulfillment line carries no price and posts nothing");
+});
+
+Deno.test("LINE_POSTING_FIELDS names exactly LinePostingCore's keys, and is not vacuous", () => {
+  assertEquals([...LINE_POSTING_FIELDS].sort(), Object.keys(LinePostingCore).sort());
+  assert(LINE_POSTING_FIELDS.length === 2);
+});
+
+Deno.test("LinePostingCore sits directly before LineTaxCore on both priced grains", () => {
+  const RUN = [...Object.keys(LinePostingCore), ...Object.keys(LineTaxCore)];
+  for (const grain of ["orders", "invoices"] as const) {
+    const keys = Object.keys(lineArmShape(grain));
+    const at = keys.indexOf(RUN[0]);
+    assertEquals(keys.slice(at, at + RUN.length), RUN, `${grain}: posting then tax levers, contiguous`);
+  }
+});
+
+Deno.test("pickLinePostingFields: both keys are always stated, `null` included", () => {
+  assertEquals(pickLinePostingFields({}), { coa_revenue: null, uid_tracking_category: null });
+  assertEquals(
+    pickLinePostingFields({ coa_revenue: 4000, uid_tracking_category: "TrackCat000000000001" }),
+    { coa_revenue: 4000, uid_tracking_category: "TrackCat000000000001" },
   );
 });

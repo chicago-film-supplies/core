@@ -94,6 +94,7 @@
  */
 import { z } from "zod";
 import { FirestoreId, ItemUid } from "./_uid.ts";
+import { COARevenueEnum, type COARevenueType } from "./common.ts";
 
 /**
  * The six fields an order line, an invoice line and a fulfillment line all
@@ -262,7 +263,7 @@ export const LineItemCore: {
  * ⭐ **Shared rather than copied, for the reason `LineItemCore` is**: the invoice
  * prices its OWN line through the same resolver, so an order line and the
  * invoice line projected from it must carry the same levers under the same
- * declaration. Spread by both grains directly after `coa_revenue`, which is
+ * declaration. Spread by both grains directly after {@link LinePostingCore}, which is
  * where both already declared these keys, so no column moves.
  * `tests/item-shape-parity.test.ts` asserts instance identity on both.
  *
@@ -285,4 +286,50 @@ export const LineTaxCore: {
 export const LINE_TAX_FIELDS: readonly ["uid_tax_class", "uid_tax_class_override"] = [
   "uid_tax_class",
   "uid_tax_class_override",
+];
+
+/**
+ * **Where the line's income POSTS, declared once for the two PRICED grains** — an
+ * order line and an invoice line (api-cloudrun `.claude/plans/line-tracking-uid.md`).
+ * Not a fulfillment line: it carries no price, so it posts nothing.
+ *
+ * - `coa_revenue` — Xero's `AccountCode`, closed by {@link COARevenueEnum}.
+ * - `uid_tracking_category` — the `tracking-categories` document the line reports
+ *   under, the field products already carry. A bare uid with no stored name
+ *   (owner): core's merge, diff and freeze compare values whole, so a name copied
+ *   at a different time would read as an operator override. The Xero option id is
+ *   looked up from the category doc when a body is built, and templates read the
+ *   name from an injected map.
+ *
+ * ⭐ **Both `propagate: true`, and that is a REVERSAL** (one owner, one rule).
+ * The order line's `coa_revenue` used to be `propagate: false` with the invoice
+ * owning it after projection (manager#309), and the invoice's tracking was a
+ * name plus an option id in `INVOICE_ONLY_ITEM_FIELDS`. Now an invoice line
+ * follows its order line on both until an operator changes one there — the
+ * three-way merge's ordinary override, with no marker.
+ *
+ * **Required and nullable** on every stored priced line, because the line
+ * comparator compares KEY SETS first — an absent key read as different has
+ * caused three past incidents. `null` is a real answer on both: a custom line
+ * has no product to post as (Xero still gets 4800 via `xeroAccrecLineRefs`),
+ * and a product may have no category. The 2026-10-28 migration
+ * (`api-cloudrun/scripts/migrate-line-tracking-to-uid.ts`) states both keys on
+ * every stored order and invoice line.
+ *
+ * Spread by both grains where `coa_revenue` already sat, directly before
+ * {@link LineTaxCore}; `tests/item-shape-parity.test.ts` asserts instance
+ * identity on both.
+ */
+export const LinePostingCore: {
+  coa_revenue: z.ZodNullable<z.ZodType<COARevenueType>>;
+  uid_tracking_category: z.ZodNullable<z.ZodType<string>>;
+} = {
+  coa_revenue: COARevenueEnum.nullable().meta({ propagate: true }),
+  uid_tracking_category: FirestoreId.nullable().meta({ propagate: true }),
+};
+
+/** The {@link LinePostingCore} keys, for code that copies the posting between grains. */
+export const LINE_POSTING_FIELDS: readonly ["coa_revenue", "uid_tracking_category"] = [
+  "coa_revenue",
+  "uid_tracking_category",
 ];

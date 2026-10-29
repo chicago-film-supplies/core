@@ -5,7 +5,7 @@ import { z } from "zod";
 import { FirestoreId, isProductShapedUid, ItemUid, ThreadId } from "./_uid.ts";
 import { chicagoInstant, toChicagoYmd as toChicagoYmdForSchema } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
-import { LineItemCore, LineTaxCore } from "./_items.ts";
+import { LineItemCore, LinePostingCore, LineTaxCore } from "./_items.ts";
 import { UnitSet } from "./unit.ts";
 import { type BookingBreakdown, breakdownObjectSchema } from "./_breakdown.ts";
 import type { BookingStatusType } from "./booking.ts";
@@ -1821,6 +1821,15 @@ export interface OrderItemLineType {
   quantity_per_parent?: number | null;
   order_number?: number;
   uid_order?: string;
+  /**
+   * @see `OrderDocLineItemType.coa_revenue` — operator-authored, so it is accepted
+   * here. A missing key keeps the stored value, `null` resets it to the product's
+   * (both to `null` on a custom line), and a value sets it — api-cloudrun's
+   * `lineDenorms` is the one author of that rule.
+   */
+  coa_revenue?: COARevenueType | null;
+  /** @see `OrderDocLineItemType.uid_tracking_category` — set/keep/clear exactly as `coa_revenue`. */
+  uid_tracking_category?: string | null;
   /** @see `OrderDocLineItemType.uid_tax_class_override` — operator-authored, so it is accepted here. */
   uid_tax_class_override?: string | null;
   /**
@@ -1854,6 +1863,8 @@ const OrderItemLineInner = z.object({
   quantity_per_parent: z.number().min(0).nullable().optional(),
   order_number: z.int().optional(),
   uid_order: FirestoreId.optional(),
+  coa_revenue: COARevenueEnum.nullable().optional(),
+  uid_tracking_category: FirestoreId.nullable().optional(),
   uid_tax_class_override: FirestoreId.nullable().optional(),
   exchanged_for: ExchangedForList.optional(),
 }).superRefine(checkItemPriceFormula);
@@ -2268,8 +2279,9 @@ export interface OrderDocLineItemType {
    * `@cfs/core/utils/orders`, now retired); everything below is the history of
    * that gate, kept because it is what the field was added for.
    *
-   * **Absent on every line written before `10.0.0-beta.120`** — which is
-   * api-cloudrun#421 tail 3, and the reason this field exists. `isTaxableCoa`
+   * **It was absent on every line written before `10.0.0-beta.120`** (the
+   * 2026-10-28 migration filled them) — which is api-cloudrun#421 tail 3, and the
+   * reason this field exists. `isTaxableCoa`
    * treats an absent COA as *taxable* (unknown means unknown, and the engine may
    * only remove tax from a line it can positively identify), so while an order
    * line carried no COA the gate was **inert for the entire order corpus**: CFS
@@ -2280,15 +2292,28 @@ export interface OrderDocLineItemType {
    * would not carry. Order #563 and its invoice #1978 disagreed by exactly the
    * $67.50 that invoice's own repair had already stripped.
    *
-   * **Server-resolved, never client-supplied** — deliberately absent from the
-   * INPUT schema (`OrderItemLineInner`). api-cloudrun#409's landing fix was
-   * precisely that `coa_revenue` must be resolved from the product rather than
-   * trusted from the payload; the manager ships `items` back whole, so a
-   * client-sent value would round-trip a stale COA into the taxability decision.
-   * The input schema is non-strict, so an incoming value is stripped and the
-   * server re-derives it.
+   * **Operator-settable since the line-tracking-uid campaign, reversing
+   * api-cloudrun#409.** #409 kept this off the INPUT because a client-sent value
+   * round-tripped a stale COA into the taxability decision; that reason died with
+   * `isTaxableCoa` (api-cloudrun#596), and the field is now purely an
+   * `AccountCode`. The input accepts it, and api-cloudrun's `lineDenorms` decides
+   * it: a missing key keeps the stored value, `null` resets it to the product's,
+   * a value sets it. A line built from a product starts at the product's.
+   *
+   * **Required + nullable, and SHARED with the invoice line** — see
+   * `LinePostingCore` (`schemas/_items.ts`), which declares it once for both
+   * priced grains and makes it propagate order → invoice. Every stored order line
+   * states it since the 2026-10-28 migration; `null` on a custom line.
    */
-  coa_revenue?: COARevenueType | null;
+  coa_revenue: COARevenueType | null;
+  /**
+   * The `tracking-categories` document this line reports under — **a bare uid,
+   * with no stored name** (see `LinePostingCore`). Starts at the product's
+   * `uid_tracking_category`; `null` on a custom line, on a kit component (whose
+   * catalog row carries no category until the server stamps the product's), and
+   * on a product with none. Settable on the input exactly as `coa_revenue` is.
+   */
+  uid_tracking_category: string | null;
   /**
    * The `taxes-classes` document this line is taxed as — **snapshotted from the
    * product at build**, the way `type` is, and carried forward on items
@@ -2366,16 +2391,11 @@ const OrderDocLineItemInner = z.strictObject({
   inclusion_type: z.enum(INCLUSION_TYPES_NULLABLE).nullable().optional().meta({ column: true, label: "Inclusion" }),
   // `propagate: false` — the CRMS line id is a different record on each document.
   crms_id: z.int().nullable().optional().meta({ propagate: false }),
-  // Denormalized from the product at write time — see the interface docblock for
-  // why this is on the DOC line and not the input one. `.optional()` rather than
-  // defaulted: `validateBeforeWrite` persists the RAW doc, so a `.default()`
-  // never materializes, and every line written before beta.120 is genuinely
-  // absent rather than null.
-  // `propagate: false` — OWNED BY THE INVOICE once projected (manager#309). A
-  // new invoice row still takes the order's account through
-  // `projectOrderItemToInvoiceItem`; after that an order edit does not reach it. It used to propagate here while `INVOICE_ONLY_ITEM_FIELDS` carried
-  // the old value back on a resync, so the two owners disagreed invisibly.
-  coa_revenue: COARevenueEnum.nullable().optional().meta({ propagate: false }),
+  // The account + the tracking category — one declaration shared with the
+  // invoice line (`_items.ts`), both `propagate: true`. That reverses
+  // manager#309's `propagate: false`: the invoice follows its order line on both
+  // until an operator overrides one there, by the ordinary three-way merge.
+  ...LinePostingCore,
   // The class snapshot + the operator's class override — one declaration
   // shared with the invoice line (`_items.ts`).
   ...LineTaxCore,

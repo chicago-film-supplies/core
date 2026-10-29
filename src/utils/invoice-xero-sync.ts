@@ -55,11 +55,17 @@ import { liveSettlements } from "./invoices.ts";
  * the real assembler, so a field the body starts reading cannot be missing here
  * unnoticed.
  *
- * ⚠️ **The two tracking fields are hashed because the body sends the LINE's
- * tracking option** (`xeroAccrecLineRefs`, `@cfs/core/utils/invoices`).
- * Without them a tracking-only edit never moved the hash and was never
- * enqueued. Adding them made every hashed invoice read changed once, so each
- * one pushes on its next write.
+ * ⚠️ **The line's `uid_tracking_category` is hashed because the body sends the
+ * LINE's category's tracking option** (`xeroAccrecLineRefs`,
+ * `@cfs/core/utils/invoices`). Without it a tracking-only edit never moved the
+ * hash and was never enqueued. It replaced the two stored fields (the name and
+ * the option id) in the line-tracking-uid campaign, which made every hashed
+ * invoice read changed once — the migration's window deletes the tasks that
+ * mints, so each one pushes on its next REAL write.
+ *
+ * ⚠️ The option id itself is not hashed: it is looked up from the category doc
+ * at build time, so a category re-pointed to another Xero option does not move
+ * any invoice's hash.
  */
 export function invoiceXeroProjection(invoice: Partial<Invoice>): unknown {
   return {
@@ -68,8 +74,7 @@ export function invoiceXeroProjection(invoice: Partial<Invoice>): unknown {
       name: line.name ?? null,
       quantity: line.quantity ?? null,
       coa_revenue: line.coa_revenue ?? null,
-      tracking_category: line.tracking_category ?? null,
-      xero_tracking_option_id: line.xero_tracking_option_id ?? null,
+      uid_tracking_category: line.uid_tracking_category ?? null,
       subtotal_cents: line.price?.subtotal_cents ?? null,
       discount: line.price?.discount ?? null,
       taxes: (line.price?.taxes ?? []).map((tax) => ({ uid: tax.uid, amount_cents: tax.amount_cents ?? 0 })),

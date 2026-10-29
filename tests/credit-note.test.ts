@@ -60,9 +60,8 @@ function makeCreditNote(overrides: Record<string, unknown> = {}) {
       },
       coa_revenue: 4000,
       coa_posting: 4000,
-      tracking_category: null,
+      uid_tracking_category: null,
       xero_id: null,
-      xero_tracking_option_id: null,
       uid_invoice_item: null,
       // Required, and false on every line this feature did not write — see
       // `schemas/credit-note.ts`. Stated explicitly rather than omitted, which is

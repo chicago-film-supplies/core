@@ -6,7 +6,7 @@ import { FirestoreId, ItemUid, OutOfServiceId, ThreadId } from "./_uid.ts";
 import { chicagoStartOfDay } from "./_datetime.ts";
 import { DestinationDividerArm, GroupDividerArm } from "./_dividers.ts";
 import { extendChecked } from "./_extend.ts";
-import { LineItemCore, LineTaxCore } from "./_items.ts";
+import { LineItemCore, LinePostingCore, LineTaxCore } from "./_items.ts";
 import { uploadcareRef } from "./uploadcare/ref.ts";
 import {
   type RenderParamsContext,
@@ -345,7 +345,7 @@ export const INVOICE_FIELD_FREEZE: Readonly<
   tracking: {
     frozen_when: "void",
     xero_accepts_on_settled: true,
-    members: ["tracking_category", "xero_tracking_option_id"],
+    members: ["uid_tracking_category"],
   },
   text: {
     frozen_when: "never",
@@ -493,7 +493,19 @@ export interface InvoiceDocLineItemType {
   zero_priced: boolean | null;
   /** @see `LineItemCore.quantity_per_parent` (`schemas/_items.ts`) — the per-parent ratio, stamped at expansion. */
   quantity_per_parent?: number | null;
-  coa_revenue?: COARevenueType | null;
+  /**
+   * @see `OrderDocLineItemType.coa_revenue`. Shared with the order line
+   * (`LinePostingCore`), so it follows the order line until an operator
+   * overrides it here. Required + nullable since the 2026-10-28 migration.
+   */
+  coa_revenue: COARevenueType | null;
+  /**
+   * @see `OrderDocLineItemType.uid_tracking_category`. Replaced the stored
+   * category NAME (`tracking_category`) and the Xero option id
+   * (`xero_tracking_option_id`): the option is looked up from the category doc
+   * when a Xero body is built, and the name is read live.
+   */
+  uid_tracking_category: string | null;
   /**
    * @see `OrderDocLineItemType.uid_tax_class`. Mirrored onto the invoice so an
    * order→invoice projection round-trips it, and so `invoiceItemsMatch` can
@@ -503,9 +515,7 @@ export interface InvoiceDocLineItemType {
   uid_tax_class: string;
   /** @see `OrderDocLineItemType.uid_tax_class_override`. */
   uid_tax_class_override?: string | null;
-  tracking_category?: string | null;
   xero_id?: string | null;
-  xero_tracking_option_id?: string | null;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
   crms_opportunity_id?: number | null;
   /** @deprecated Legacy CRMS field — not set on new invoices. */
@@ -645,13 +655,12 @@ const InvoiceDocLineItemInner = z.strictObject({
   type: z.enum(DOC_LINE_ITEM_TYPES).meta({ column: true, label: "Type" }),
   ...LineItemCore,
   price: InvoiceDocItemPrice,
-  coa_revenue: COARevenueEnum.nullable().optional(),
-  // Shared with the order line (`_items.ts`), so the projected line carries the
-  // same tax levers under the same declaration.
+  // The account + the tracking category, and the tax levers — both shared with
+  // the order line (`_items.ts`), so the projected line carries them under the
+  // same declarations.
+  ...LinePostingCore,
   ...LineTaxCore,
-  tracking_category: z.string().nullable().optional(),
   xero_id: z.uuid().nullable().optional(),
-  xero_tracking_option_id: z.uuid().nullable().optional(),
   crms_opportunity_id: z.int().nullable().optional(),
   crms_id: z.union([z.int(), z.string()]).nullable().optional(),
   // Plain `.optional()`, matching `FulfillmentLineItem.substituted_for`
@@ -1415,10 +1424,12 @@ export interface InvoiceItemInputLineType {
   quantity?: number;
   price?: InvoiceItemInputPriceType;
   path: string[];
+  /** @see `OrderItemLineType.coa_revenue` — the same set/keep/clear rule. */
   coa_revenue?: COARevenueType | null;
+  /** @see `OrderItemLineType.uid_tracking_category` — the same set/keep/clear rule. */
+  uid_tracking_category?: string | null;
   /** @see `OrderDocLineItemType.uid_tax_class_override` — operator-authored, so it is accepted here. */
   uid_tax_class_override?: string | null;
-  tracking_category?: string | null;
   /**
    * @see `InvoiceDocLineItemType.substituted_for`. Operator-authored, so it
    * needs an input channel: this schema is a plain `z.object` and STRIPS
@@ -1498,8 +1509,8 @@ const InvoiceItemInputLineInner = z.object({
   price: InvoiceItemInputPrice.optional(),
   path: z.array(ItemUid),
   coa_revenue: COARevenueEnum.nullable().optional(),
+  uid_tracking_category: FirestoreId.nullable().optional(),
   uid_tax_class_override: FirestoreId.nullable().optional(),
-  tracking_category: z.string().nullable().optional(),
   substituted_for: SubstitutedForList.optional(),
   zero_priced: z.boolean().nullable().optional(),
   quantity_per_parent: z.number().min(0).nullable().optional(),

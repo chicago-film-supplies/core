@@ -3539,9 +3539,8 @@ interface CreditNoteDocLineItem {
   price: CreditNoteDocItemPrice;
   coa_revenue: COARevenueType | null;
   coa_posting: number;
-  tracking_category: string | null;
+  uid_tracking_category: string | null;
   xero_id: string | null;
-  xero_tracking_option_id: string | null;
   uid_invoice_item: string | null;
   path_invoice_item?: string[];
   reverses_billing: boolean;
@@ -5736,12 +5735,11 @@ interface InvoiceDocLineItemType {
   path: string[];
   zero_priced: boolean | null;
   quantity_per_parent?: number | null;
-  coa_revenue?: COARevenueType | null;
+  coa_revenue: COARevenueType | null;
+  uid_tracking_category: string | null;
   uid_tax_class: string;
   uid_tax_class_override?: string | null;
-  tracking_category?: string | null;
   xero_id?: string | null;
-  xero_tracking_option_id?: string | null;
   crms_opportunity_id?: number | null;
   crms_id?: number | string | null;
   substituted_for?: SubstitutedForEntryType[];
@@ -5905,8 +5903,8 @@ interface InvoiceItemInputLineType {
   price?: InvoiceItemInputPriceType;
   path: string[];
   coa_revenue?: COARevenueType | null;
+  uid_tracking_category?: string | null;
   uid_tax_class_override?: string | null;
-  tracking_category?: string | null;
   substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
@@ -6135,6 +6133,14 @@ Allowed values for tax jurisdiction.
 type JurisdictionType = indexedAccess;
 ```
 
+### `LINE_POSTING_FIELDS`
+
+The {@link LinePostingCore} keys, for code that copies the posting between grains.
+
+```ts
+const LINE_POSTING_FIELDS: readonly ["coa_revenue", "uid_tracking_category"];
+```
+
 ### `LINE_TAX_FIELDS`
 
 The {@link LineTaxCore} keys, for code that copies the levers between grains.
@@ -6208,6 +6214,43 @@ interface LeafPath {
 }
 ```
 
+### `LinePostingCore`
+
+**Where the line's income POSTS, declared once for the two PRICED grains** — an
+order line and an invoice line (api-cloudrun `.claude/plans/line-tracking-uid.md`).
+Not a fulfillment line: it carries no price, so it posts nothing.
+
+- `coa_revenue` — Xero's `AccountCode`, closed by {@link COARevenueEnum}.
+- `uid_tracking_category` — the `tracking-categories` document the line reports
+  under, the field products already carry. A bare uid with no stored name
+  (owner): core's merge, diff and freeze compare values whole, so a name copied
+  at a different time would read as an operator override. The Xero option id is
+  looked up from the category doc when a body is built, and templates read the
+  name from an injected map.
+
+⭐ **Both `propagate: true`, and that is a REVERSAL** (one owner, one rule).
+The order line's `coa_revenue` used to be `propagate: false` with the invoice
+owning it after projection (manager#309), and the invoice's tracking was a
+name plus an option id in `INVOICE_ONLY_ITEM_FIELDS`. Now an invoice line
+follows its order line on both until an operator changes one there — the
+three-way merge's ordinary override, with no marker.
+
+**Required and nullable** on every stored priced line, because the line
+comparator compares KEY SETS first — an absent key read as different has
+caused three past incidents. `null` is a real answer on both: a custom line
+has no product to post as (Xero still gets 4800 via `xeroAccrecLineRefs`),
+and a product may have no category. The 2026-10-28 migration
+(`api-cloudrun/scripts/migrate-line-tracking-to-uid.ts`) states both keys on
+every stored order and invoice line.
+
+Spread by both grains where `coa_revenue` already sat, directly before
+{@link LineTaxCore}; `tests/item-shape-parity.test.ts` asserts instance
+identity on both.
+
+```ts
+const LinePostingCore: typeLiteral;
+```
+
 ### `LineTaxCore`
 
 **The line's tax levers, declared once for the two PRICED grains** — an order
@@ -6221,7 +6264,7 @@ carries no price, so it has nothing to tax.
 ⭐ **Shared rather than copied, for the reason `LineItemCore` is**: the invoice
 prices its OWN line through the same resolver, so an order line and the
 invoice line projected from it must carry the same levers under the same
-declaration. Spread by both grains directly after `coa_revenue`, which is
+declaration. Spread by both grains directly after {@link LinePostingCore}, which is
 where both already declared these keys, so no column moves.
 `tests/item-shape-parity.test.ts` asserts instance identity on both.
 
@@ -8080,7 +8123,8 @@ interface OrderDocLineItemType {
   zero_priced: boolean | null;
   quantity_per_parent?: number | null;
   crms_id?: number | null;
-  coa_revenue?: COARevenueType | null;
+  coa_revenue: COARevenueType | null;
+  uid_tracking_category: string | null;
   uid_tax_class: string;
   uid_tax_class_override?: string | null;
   exchanged_for?: ExchangedForEntryType[];
@@ -8238,6 +8282,8 @@ interface OrderItemLineType {
   quantity_per_parent?: number | null;
   order_number?: number;
   uid_order?: string;
+  coa_revenue?: COARevenueType | null;
+  uid_tracking_category?: string | null;
   uid_tax_class_override?: string | null;
   exchanged_for?: ExchangedForEntryType[];
 }
@@ -20967,12 +21013,11 @@ interface InvoiceDocLineItemType {
   path: string[];
   zero_priced: boolean | null;
   quantity_per_parent?: number | null;
-  coa_revenue?: COARevenueType | null;
+  coa_revenue: COARevenueType | null;
+  uid_tracking_category: string | null;
   uid_tax_class: string;
   uid_tax_class_override?: string | null;
-  tracking_category?: string | null;
   xero_id?: string | null;
-  xero_tracking_option_id?: string | null;
   crms_opportunity_id?: number | null;
   crms_id?: number | string | null;
   substituted_for?: SubstitutedForEntryType[];
@@ -21130,8 +21175,8 @@ interface InvoiceItemInputLineType {
   price?: InvoiceItemInputPriceType;
   path: string[];
   coa_revenue?: COARevenueType | null;
+  uid_tracking_category?: string | null;
   uid_tax_class_override?: string | null;
-  tracking_category?: string | null;
   substituted_for?: SubstitutedForEntryType[];
   zero_priced?: boolean | null;
   quantity_per_parent?: number | null;
@@ -22568,7 +22613,8 @@ interface OrderDocLineItemType {
   zero_priced: boolean | null;
   quantity_per_parent?: number | null;
   crms_id?: number | null;
-  coa_revenue?: COARevenueType | null;
+  coa_revenue: COARevenueType | null;
+  uid_tracking_category: string | null;
   uid_tax_class: string;
   uid_tax_class_override?: string | null;
   exchanged_for?: ExchangedForEntryType[];
@@ -22702,6 +22748,8 @@ interface OrderItemLineType {
   quantity_per_parent?: number | null;
   order_number?: number;
   uid_order?: string;
+  coa_revenue?: COARevenueType | null;
+  uid_tracking_category?: string | null;
   uid_tax_class_override?: string | null;
   exchanged_for?: ExchangedForEntryType[];
 }
@@ -25912,9 +25960,8 @@ interface CreditNoteDocLineItem {
   price: CreditNoteDocItemPrice;
   coa_revenue: COARevenueType | null;
   coa_posting: number;
-  tracking_category: string | null;
+  uid_tracking_category: string | null;
   xero_id: string | null;
-  xero_tracking_option_id: string | null;
   uid_invoice_item: string | null;
   path_invoice_item?: string[];
   reverses_billing: boolean;
@@ -31693,6 +31740,7 @@ interface XeroEventLogRecord {
   uid_order?: string;
   order_uid?: string;
   uid_product?: string;
+  uid_tracking_category?: string | null;
   product_uid?: string;
   xero_quote_id?: string | null;
   order_number?: number;
@@ -36153,9 +36201,8 @@ interface InvoiceItem {
   description?: string;
   price?: PriceObject | InvoiceDocItemPriceType;
   coa_revenue?: COARevenueType | null;
-  tracking_category?: string | null;
+  uid_tracking_category?: string | null;
   xero_id?: string | null;
-  xero_tracking_option_id?: string | null;
   crms_id?: number | string | null;
   crms_opportunity_id?: number | null;
   substituted_for?: SubstitutedForEntryType[];
@@ -36288,6 +36335,7 @@ interface LineItem {
   order_number?: number;
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
+  uid_tracking_category?: string | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }
@@ -36574,6 +36622,17 @@ interface XeroLineProduct {
 }
 ```
 
+### `XeroOptionByCategoryUid`
+
+A tracking category's Xero option id, by `tracking-categories` uid — the
+lookup {@link xeroAccrecLineRefs} resolves a line's `uid_tracking_category`
+through. The API builds it from its category cache; a uid with no entry, or a
+`null` option, resolves to nothing.
+
+```ts
+type XeroOptionByCategoryUid = ReadonlyMap<string, string | null>;
+```
+
 ### `adoptOrderDividerStructure(scopedInvoiceItems: InvoiceDocItemType[], orderItems: LineItem[], orderDividerUid: string): AdoptedDividerStructure`
 
 Re-hang one order-scope of an invoice's items on the ORDER's divider
@@ -36756,7 +36815,7 @@ to change.
 🔴 **Never by uid alone** (core#129). A uid repeats within one scope — the
 same component standalone and inside a kit, or one sub-kit inside two kits —
 and a uid-keyed map let the LAST occurrence win, stamping one row's
-`xero_id`, `substituted_for`, `coa_revenue` and `tracking_category` onto every
+`xero_id` and `substituted_for` (then also its account and tracking) onto every
 row sharing its uid: duplicate Xero LineItemIDs and a doubled substitution
 offset.
 
@@ -37603,6 +37662,14 @@ the pointer (owner, 2026-10-03).
 - `scopedInvoiceItems` — Items of one order scope (the order divider may be included)
 - `orderDividerUid` — The order divider's uid
 
+### `pickLinePostingFields(item: typeLiteral): typeLiteral`
+
+The `LINE_POSTING_FIELDS` a line carries, for a projection onto another
+grain. Both are required + nullable on every stored priced line, so each is
+stated UNCONDITIONALLY (`?? null`): the comparator compares KEY SETS, and a
+key whose presence depended on its value would read as a difference. `null`
+is a real answer on both (a custom line; a product with no category).
+
 ### `pickLineTaxFields(item: typeLiteral): typeLiteral`
 
 The `LINE_TAX_FIELDS` a line carries, for a projection onto another
@@ -37634,8 +37701,9 @@ exception, and emitting here ahead of the backfill would have made EVERY
 paired line report a key-set difference at once. This file already records
 that happening three times (`base_percent`, `crms_id`,
 `price.discount_percent` — 8,015 of 8,978 paired lines), which is why
-`coa_revenue`, the tax-class levers and `price.taxes_base` below are all spread
-CONDITIONALLY.
+the tax-class override and `price.taxes_base` below are spread
+CONDITIONALLY. The posting fields (`LinePostingCore`) are not: both are
+required on both grains, so they are stated `?? null` like `zero_priced`.
 
 🔴 **So this key is the one that must NOT be conditional, and the population
 is why.** A conditional spread on presence is vacuous — the condition is true
@@ -37813,8 +37881,9 @@ that was overridden on the invoice and should now track the order again.
 Pure: returns a fresh items array; the input is not mutated. Scoped to one
 **order divider** — a multi-order invoice loops its linked orders. The
 {@link INVOICE_ONLY_ITEM_FIELDS} are always carried forward — named by the
-list rather than re-spelled, because the copy that stood here listed four of
-them and the list has six.
+list rather than re-spelled, because a copy that stood here once listed four
+of them when the list had six. The posting fields are NOT in it: a resync
+resets a line's account and tracking category to the order's (D6).
 
 - `targetPaths` omitted → **whole**: every order-scoped line is rebuilt from
   the order — a hard snap-to-order, so price overrides are discarded and lines
@@ -38237,7 +38306,7 @@ Returns `[]` when uniqueness holds.
 NOTE: assumes the self-INCLUDED `path` convention. Product `components`
 exclude self from `path` — use {@link validateComponentUniqueness} for them.
 
-### `xeroAccrecLineRefs(line: Pick<InvoiceDocLineItemType, "uid" | "coa_revenue" | "xero_tracking_option_id">, product: XeroLineProduct | undefined, knownTrackingOptionIds: ReadonlySet<string>): XeroAccrecLineRefs`
+### `xeroAccrecLineRefs(line: Pick<InvoiceDocLineItemType, "uid" | "coa_revenue" | "uid_tracking_category">, product: XeroLineProduct | undefined, optionByCategoryUid: XeroOptionByCategoryUid, knownTrackingOptionIds: ReadonlySet<string>): XeroAccrecLineRefs`
 
 **The one rule for which account, tracking option and item code an ACCREC
 Xero line carries** — for the issue body and the edit body alike. They used
@@ -38247,10 +38316,12 @@ written at issue described a body an edit would not have sent.
 
 - **Account: the line first** — `line.coa_revenue ?? product's ?? 4800`. A
   line's account is an operator override where it differs from the product.
-- **Tracking: the line's option when Xero still knows it, else the
-  product's** (owner, 2026-10-26). A stored option Xero has since retired
-  falls back rather than sending none. A custom line has no product, so it
-  sends its own.
+- **Tracking: the line's category's option when Xero still knows it, else
+  the product's** (owner, 2026-10-26). The option is looked up from the
+  line's `uid_tracking_category` through `optionByCategoryUid` at build time —
+  the line stores no option id. An option Xero has since retired falls back
+  rather than sending none. A custom line has no product, so it sends its own
+  category's.
 - **Item code: the product's `xero_code`**, never `crms_id` (#256).
 
 A `custom-` line is never matched to a product, whatever the caller passes.
@@ -38697,11 +38768,17 @@ key-only change a real Xero POST (api-cloudrun#993). api-cloudrun's
 the real assembler, so a field the body starts reading cannot be missing here
 unnoticed.
 
-⚠️ **The two tracking fields are hashed because the body sends the LINE's
-tracking option** (`xeroAccrecLineRefs`, `@cfs/core/utils/invoices`).
-Without them a tracking-only edit never moved the hash and was never
-enqueued. Adding them made every hashed invoice read changed once, so each
-one pushes on its next write.
+⚠️ **The line's `uid_tracking_category` is hashed because the body sends the
+LINE's category's tracking option** (`xeroAccrecLineRefs`,
+`@cfs/core/utils/invoices`). Without it a tracking-only edit never moved the
+hash and was never enqueued. It replaced the two stored fields (the name and
+the option id) in the line-tracking-uid campaign, which made every hashed
+invoice read changed once — the migration's window deletes the tasks that
+mints, so each one pushes on its next REAL write.
+
+⚠️ The option id itself is not hashed: it is looked up from the category doc
+at build time, so a category re-pointed to another Xero option does not move
+any invoice's hash.
 
 ### `invoiceXeroProjectionHash(invoice: Partial<Invoice>): string`
 
@@ -38957,6 +39034,7 @@ interface LineItem {
   order_number?: number;
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
+  uid_tracking_category?: string | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }
@@ -42550,6 +42628,7 @@ interface LineCatalogFacts {
   type: DocLineItemTypeType;
   stock_method: StockMethodType;
   zero_priced: boolean | null;
+  coa_revenue: COARevenueType | null;
   price: typeLiteral;
 }
 ```
@@ -43223,6 +43302,7 @@ interface LineItem {
   order_number?: number;
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
+  uid_tracking_category?: string | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }
@@ -47104,6 +47184,7 @@ interface LineItem {
   order_number?: number;
   uid_order?: string | null;
   coa_revenue?: COARevenueType | null;
+  uid_tracking_category?: string | null;
   uid_tax_class?: string | null;
   uid_tax_class_override?: string | null;
 }

@@ -42,6 +42,7 @@
  * @module
  */
 import type {
+  COARevenueType,
   ComponentTypeType,
   DocLineItemTypeType,
   InvoiceDocLineItemType,
@@ -93,6 +94,8 @@ export interface CatalogLineSource {
   readonly type?: string;
   readonly stock_method?: string;
   readonly price?: {
+    /** The revenue account — a bare `number` on a Typesense hit, `COARevenueEnum`-written by the product writer. */
+    readonly coa_revenue?: number | null;
     readonly base_cents?: number;
     readonly base_percent?: number | null;
     readonly replacement_cents?: number | null;
@@ -118,6 +121,8 @@ export interface LineCatalogFacts {
   type: DocLineItemTypeType;
   stock_method: StockMethodType;
   zero_priced: boolean | null;
+  /** The catalog's revenue account, or `null` when it states none (`LinePostingCore`). */
+  coa_revenue: COARevenueType | null;
   price: {
     base_cents: number;
     base_percent: number | null;
@@ -202,6 +207,9 @@ export function deriveLineCatalogFacts(
     type: product.type as DocLineItemTypeType,
     stock_method: product.stock_method as StockMethodType,
     zero_priced: zeroPriced,
+    // A Typesense hit projects the enum as a bare number; the product writer
+    // writes it from `COARevenueEnum`, so the field-level narrowing is sound.
+    coa_revenue: (product.price?.coa_revenue as COARevenueType | null | undefined) ?? null,
     price: {
       base_cents: zeroPriced === true || isPercent ? 0 : (product.price?.base_cents ?? 0),
       base_percent: isPercent ? (product.price?.base_percent ?? null) : null,
@@ -341,6 +349,10 @@ export function buildOrderLineFromProduct(
     // what the server will stamp; a hit indexed before the field takes its
     // type's default, which is the server's fallback too.
     uid_tax_class: doc.uid_tax_class || opts.taxClassForType(type),
+    // Where the line posts — the product's, so the optimistic row matches the
+    // server stamp (`LinePostingCore`).
+    coa_revenue: facts.coa_revenue,
+    uid_tracking_category: doc.uid_tracking_category ?? null,
     price: {
       base_cents: facts.price.base_cents,
       base_percent: facts.price.base_percent,
@@ -406,6 +418,9 @@ export function buildCustomOrderLine(opts: CustomLineBuildOptions): OrderDocLine
     zero_priced: null,
     quantity_per_parent: null,
     uid_tax_class: opts.uid_tax_class,
+    // No product to post as: Xero still gets 4800 via `xeroAccrecLineRefs`.
+    coa_revenue: null,
+    uid_tracking_category: null,
     price: {
       base_cents: opts.base_cents ?? 0,
       replacement_cents: isRental ? 0 : null,
@@ -447,6 +462,8 @@ export function buildCustomInvoiceLine(
     path: [],
     zero_priced: null,
     uid_tax_class: opts.uid_tax_class,
+    coa_revenue: null,
+    uid_tracking_category: null,
     price: {
       base_cents: opts.base_cents ?? 0,
       chargeable_days: isRental ? opts.chargeDays : null,
@@ -689,6 +706,13 @@ export function buildOrderComponentLines(
       // `quantity` until someone edits it (core#131).
       quantity_per_parent: quantityPerParentForSlot(comp),
       uid_tax_class: comp.uid_tax_class || opts.taxClassForType(type),
+      // The row mirrors its component product's account, but NOT its tracking
+      // category — `ProductComponent` carries none — so the optimistic line
+      // states `null` and the server stamps the product's. The row differs from
+      // the echo on this one key until the save returns; that is accepted
+      // rather than minting a component mirror with its own cascade.
+      coa_revenue: facts.coa_revenue,
+      uid_tracking_category: null,
       price: {
         // No `base_percent` key: a component line never wrote one, and a
         // writer's key set is a claim about its stored lines.

@@ -110,7 +110,8 @@ Deno.test("classifySharedFields: order → invoice, every shared key and its kin
     "derived items[].price.taxes_base",
     "derived items[].price.total_cents",
     "homonym items[].crms_id",
-    "homonym items[].coa_revenue",
+    "propagated items[].coa_revenue",
+    "propagated items[].uid_tracking_category",
     "propagated items[].uid_tax_class",
     "propagated items[].uid_tax_class_override",
     "propagated tax_exempt",
@@ -558,7 +559,7 @@ Deno.test("mergeSharedFields: an unedited line takes every propagating field fro
     const prev = invoiceLine(r);
     const next = structuredClone(prev);
     for (const path of mergeableLeaves(LINE_FIELDS, prev)) if (r() < 0.5) set(next, path, vary(get(prev, path), r));
-    const down: InvoiceDocLineItemType = { ...structuredClone(prev), xero_id: "kept", tracking_category: "kept" };
+    const down: InvoiceDocLineItemType = { ...structuredClone(prev), xero_id: "kept", crms_id: 78 };
 
     const { merged, overridden } = mergeSharedFields(LINE_FIELDS, prev, next, down);
     assertEquals(overridden, []);
@@ -567,7 +568,7 @@ Deno.test("mergeSharedFields: an unedited line takes every propagating field fro
       assertEquals(get(merged, f.path), want, f.path);
     }
     // Downstream-only keys are never touched.
-    assertEquals([merged.xero_id, merged.tracking_category], ["kept", "kept"]);
+    assertEquals([merged.xero_id, merged.crms_id], ["kept", 78]);
   }
 });
 

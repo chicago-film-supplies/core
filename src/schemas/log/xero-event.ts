@@ -249,7 +249,8 @@ export const XERO_EVENT_MSGS = [
   // half-created tax rate costs nothing — it is inert clutter in a dropdown
   // until something stores its `TaxType`, not a duplicated money record.
   "xero_tax_rate_create_failed",
-  // A line was about to be pushed carrying an `xero_tracking_option_id` that
+  // A line was about to be pushed carrying a tracking option id (resolved from
+  // its `uid_tracking_category`, else its product's) that
   // matches no known Xero tracking option, so CFS omitted the `Tracking`
   // element rather than sending it. This log is the ONLY signal that the line
   // landed unclassified: Xero **silently drops** a `Tracking` element whose
@@ -260,7 +261,7 @@ export const XERO_EVENT_MSGS = [
   //
   // Deliberately a warn, not a throw. Money resolves or fails; reporting
   // metadata degrades and says so. Carries `xero_tracking_option_id` +
-  // `uid_product` + `item_name`, and whichever of `invoice_uid`/`uid_order`
+  // `uid_tracking_category` + `uid_product` + `item_name`, and whichever of `invoice_uid`/`uid_order`
   // identifies the document being pushed.
   "xero_tracking_option_unresolved",
   "xero_tracking_option_update_failed",
@@ -340,6 +341,12 @@ export interface XeroEventLogRecord {
    * the tracking-option family).
    */
   uid_product?: string;
+  /**
+   * The `tracking-categories` uid a pushed line names (`LinePostingCore`), when
+   * its option did not resolve — so the category, not just the dead option id,
+   * is in the log.
+   */
+  uid_tracking_category?: string | null;
   /**
    * @deprecated Use {@link uid_product}. Never declared on this arm before,
    * though most `product_uid` emitters are Xero msgs; declared now only so the
@@ -427,6 +434,7 @@ export const XeroEventLogRecordSchema: z.ZodType<XeroEventLogRecord> = z.object(
   /** @deprecated Use `uid_order`. */
   order_uid: z.string().optional(),
   uid_product: z.string().optional(),
+  uid_tracking_category: z.string().nullable().optional(),
   /** @deprecated Use `uid_product`. */
   product_uid: z.string().optional(),
   xero_quote_id: z.string().nullable().optional(),

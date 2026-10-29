@@ -245,13 +245,13 @@ Deno.test("carryForwardOverrides: two rows sharing a uid each keep their OWN xer
   ] as InvoiceDocItemType[];
   const existing = [
     line(CORD, at([CORD])),
-    line(PLUG, at([CORD, PLUG]), { xero_id: XERO_A, coa_revenue: 4100 }),
+    line(PLUG, at([CORD, PLUG]), { xero_id: XERO_A, crms_id: 4100 }),
     line(MIRROR, at([MIRROR])),
     line(CORD, at([MIRROR, CORD])),
-    line(PLUG, at([MIRROR, CORD, PLUG]), { xero_id: XERO_B, coa_revenue: 4200 }),
+    line(PLUG, at([MIRROR, CORD, PLUG]), { xero_id: XERO_B, crms_id: 4200 }),
   ] as InvoiceItem[];
   const out = carryForwardOverrides(rebuilt, existing) as Row[];
-  const plugs = out.filter((i) => i.uid === PLUG).map((i) => [i.path, i.xero_id, i.coa_revenue]);
+  const plugs = out.filter((i) => i.uid === PLUG).map((i) => [i.path, i.xero_id, i.crms_id]);
   assertEquals(plugs, [
     [at([CORD, PLUG]), XERO_A, 4100],
     [at([MIRROR, CORD, PLUG]), XERO_B, 4200],

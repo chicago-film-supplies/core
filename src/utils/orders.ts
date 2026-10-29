@@ -134,8 +134,8 @@ export interface LineItem {
   uid_order?: string | null;
   /**
    * Revenue chart-of-accounts code — **where the line's income POSTS in Xero**.
-   * Stored on an invoice line; absent on an order line, where it lives on the
-   * product — see {@link PricingItem.coa_revenue}.
+   * Stored on order and invoice lines alike (`LinePostingCore`); optional here
+   * because this shadow also types lines still being built.
    *
    * ⚠️ It does **not** decide taxability, and until 2026-08-20 it did. Owner:
    * *"an item's tax is item type × jurisdiction, it has nothing to do with
@@ -156,6 +156,8 @@ export interface LineItem {
    * of `number`, so a `LineItem` still satisfies `PricingItem`.
    */
   coa_revenue?: COARevenueType | null;
+  /** The line's tracking category (`LinePostingCore`) — a `tracking-categories` uid. */
+  uid_tracking_category?: string | null;
   /** The product's tax-class snapshot (`LineTaxCore`) — see `deriveLineTaxClass`. */
   uid_tax_class?: string | null;
   /** The operator's per-line tax-class override (`LineTaxCore`); wins over the snapshot. */
@@ -236,8 +238,8 @@ export interface PricingItem {
    * **not** an input to what it is taxed (owner ruling, 2026-08-20; see
    * {@link isTaxableCoa}, the retired gate).
    *
-   * Optional because the two item shapes differ: an **invoice** line stores it,
-   * an **order** line does not (it lives on the product). Nothing in the
+   * Optional because an order-INPUT item may omit it (the server keeps or
+   * resolves it); a stored order or invoice line always states it. Nothing in the
    * pricing pipeline reads it any more, so an unresolved one no longer changes
    * a price; the Xero push still needs it for `AccountCode`.
    */
