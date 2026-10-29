@@ -706,13 +706,12 @@ export function buildOrderComponentLines(
       // `quantity` until someone edits it (core#131).
       quantity_per_parent: quantityPerParentForSlot(comp),
       uid_tax_class: comp.uid_tax_class || opts.taxClassForType(type),
-      // The row mirrors its component product's account, but NOT its tracking
-      // category — `ProductComponent` carries none — so the optimistic line
-      // states `null` and the server stamps the product's. The row differs from
-      // the echo on this one key until the save returns; that is accepted
-      // rather than minting a component mirror with its own cascade.
+      // The row mirrors its component product's account and tracking category
+      // (`update-product:tracking-category-to-components`), so the optimistic
+      // line matches the server stamp. An entry stamped before the mirror
+      // existed states none and reads `null` until the save returns.
       coa_revenue: facts.coa_revenue,
-      uid_tracking_category: null,
+      uid_tracking_category: comp.uid_tracking_category ?? null,
       price: {
         // No `base_percent` key: a component line never wrote one, and a
         // writer's key set is a claim about its stored lines.

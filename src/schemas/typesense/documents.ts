@@ -677,6 +677,8 @@ export interface ProductDocumentComponent {
   zero_priced?: boolean;
   /** @see `ProductComponent.uid_tax_class`. */
   uid_tax_class?: string;
+  /** @see `ProductComponent.uid_tracking_category`. */
+  uid_tracking_category?: string;
   price?: {
     base_cents?: number;
     replacement_cents?: number;

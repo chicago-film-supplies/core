@@ -77,6 +77,16 @@ export interface ProductComponent {
    * class — absent is that one state.
    */
   uid_tax_class?: string;
+  /**
+   * The component PRODUCT's `uid_tracking_category`, mirrored exactly as
+   * {@link uid_tax_class} is — so a component line built from this entry on the
+   * client starts with the category the server would stamp
+   * (`update-product:tracking-category-to-components`). DERIVED by the writer,
+   * never authored by the parent. Optional: absent when the component product
+   * has no category. It only SEEDS the line — the line's own
+   * `uid_tracking_category` stays operator-settable.
+   */
+  uid_tracking_category?: string;
   price: {
     base_cents: number;
     /**
@@ -445,6 +455,8 @@ const ComponentObject = z.strictObject({
   // `.optional()`, not `.nullable()`: the writer omits the key when the component
   // product has no class, so absent is the one "unknown" state.
   uid_tax_class: FirestoreId.optional(),
+  // Same shape and same reason as `uid_tax_class` one line up.
+  uid_tracking_category: FirestoreId.optional(),
   price: z.strictObject({
     base_cents: z.int().meta({ label: "Base Price" }),
     // 🔴 **Declared here because a component price is a COPY of a product

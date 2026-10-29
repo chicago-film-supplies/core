@@ -741,6 +741,20 @@ const updateProductRules: CollectionRule[] = [
     ],
   },
   {
+    id: "update-product:tracking-category-to-components",
+    source: "products",
+    target: "products",
+    mode: "fan-out",
+    invariant:
+      "A `components` / `component_of` entry mirrors its component product's `uid_tracking_category`, so a kit component line built from the entry on the client starts with the category the server stamps (line-tracking-uid, owner 2026-10-28). Unconditional, as `update-product:tax-class-to-components` is: a parent cannot author its component's category, so there is no override to preserve. It seeds LINES and never rewrites one — an order or invoice line's own `uid_tracking_category` is operator-settable and no rule moves it when a product is re-categorized.",
+    trigger:
+      "a product write that moves `uid_tracking_category` — post-commit fan-out over the TARGETS' reverse indexes (query_by_components / query_by_component_of); a parent write stamps its own entries from the component products",
+    fields: [
+      { source: ["uid_tracking_category"], target: ["components", "uid_tracking_category"] },
+      { source: ["uid_tracking_category"], target: ["component_of", "uid_tracking_category"] },
+    ],
+  },
+  {
     id: "update-product:stock-method-change",
     source: "products",
     target: "inventory-ledgers",

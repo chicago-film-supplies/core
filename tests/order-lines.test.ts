@@ -708,3 +708,27 @@ Deno.test("raisedQuantity: an optional the operator raises expands, with its own
     assertEquals(lines.map((l) => [l.uid, l.quantity]), walked.map((w) => [w.component.uid, w.quantity]));
   });
 });
+
+// ── Posting fields (`LinePostingCore`) ─────────────────────────────────
+
+Deno.test("posting: each line starts at its OWN catalog source's account and category", () => {
+  const CAT_KIT = "TrackCatKitAAAAAAAAA";
+  const CAT_B = "TrackCatBBBBBBBBBBBB";
+  const doc = product({
+    uid_tracking_category: CAT_KIT,
+    price: { base_cents: 10000, replacement_cents: 50000, formula: "five_day_week", coa_revenue: 4000 },
+    components: [
+      comp("B", ["A"], { uid_tracking_category: CAT_B, price: { base_cents: 1000, formula: "five_day_week", coa_revenue: 4100 } }),
+      // An entry stamped before the mirror existed carries no category.
+      comp("C", ["A"]),
+    ],
+  });
+  const top = buildOrderLineFromProduct(doc, OPTS);
+  assertEquals([top.coa_revenue, top.uid_tracking_category], [4000, CAT_KIT]);
+  const [b, c] = buildOrderComponentLines(doc, OPTS);
+  // A component takes ITS product's posting (the mirror), never the kit's.
+  assertEquals([b.coa_revenue, b.uid_tracking_category], [4100, CAT_B]);
+  assertEquals([c.coa_revenue, c.uid_tracking_category], [null, null]);
+  const custom = buildCustomOrderLine({ type: "sale", chargeDays: null, taxes: [], uid_tax_class: DEFAULT_CLASS });
+  assertEquals([custom.coa_revenue, custom.uid_tracking_category], [null, null]);
+});
