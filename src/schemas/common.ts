@@ -997,6 +997,25 @@ export const COARevenueEnum: z.ZodType<COARevenueType> = z.union([
   z.literal(4800),
 ]);
 
+/**
+ * The Direct Costs accounts a product's cost rule (`Product.cogs[].coa_cost`)
+ * may post to — a POLICY subset, like the revenue codes above, because a schema
+ * can check a code against a list but not against the chart-of-accounts
+ * document's `type`. 5000–5700 as synced on 2026-10-28, plus `5150` "Cost of
+ * Goods Sold: Data Service" (created in Xero 2026-10-28 for carrier lines on
+ * owned devices; api-cloudrun `.claude/plans/serialized-subrent.md` § 7a).
+ *
+ * ⚠️ So a new cost account needs a core release.
+ */
+export const COA_COST_CODES = [5000, 5001, 5100, 5150, 5200, 5300, 5400, 5500, 5600, 5700] as const;
+/** One allowed Direct Costs code. See {@link COA_COST_CODES}. */
+export type COACostType = typeof COA_COST_CODES[number];
+/** Zod schema for COACostType. */
+export const COACostEnum: z.ZodType<COACostType> = z.union([
+  z.literal(5000), z.literal(5001), z.literal(5100), z.literal(5150), z.literal(5200),
+  z.literal(5300), z.literal(5400), z.literal(5500), z.literal(5600), z.literal(5700),
+]);
+
 const DOC_ITEM_TYPES = ["rental", "destination", "group", "replacement", "sale", "service", "surcharge", "transaction_fee"] as const;
 /** All item types accepted in order/invoice input schemas (includes structural dividers). */
 export type DocItemTypeType = typeof DOC_ITEM_TYPES[number];

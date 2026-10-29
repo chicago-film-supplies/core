@@ -106,6 +106,108 @@ Deno.test("Unit: a vacant number carries no serial and no open entry", () => {
   assertEquals(issues(UnitSchema.safeParse({ ...closed, serial_number: null, status: "vacant" })), []);
 });
 
+// ── Spells and activations (serialized-subrent § 1, § 7) ─────────────
+
+const SUPPLIER = { uid: "VisionComms000000000", name: "Vision Communications" };
+const COGS_UID = "5f1d1b62-2c1a-4e8b-9d0e-7a6b5c4d3e2f";
+
+function span(start: string, end: string | null, over: Record<string, unknown> = {}) {
+  return {
+    uid: crypto.randomUUID(),
+    start,
+    end,
+    uid_order: null,
+    uid_cogs: COGS_UID,
+    provider_confirmed: null,
+    notes: "",
+    changed_by: ACTOR,
+    ...over,
+  };
+}
+
+Deno.test("Unit: a serial-less open spell is legal — a tent, or a radio whose serial is not typed in yet", () => {
+  const u = activeUnit();
+  u.serial_history[0].serial_number = null as unknown as string;
+  assertEquals(issues(UnitSchema.safeParse({ ...u, serial_number: null })), []);
+  // …and the unit's serial still mirrors the open entry's.
+  assertRefused(UnitSchema.safeParse({ ...u, serial_number: "SN-A" }), "must be null when");
+});
+
+Deno.test("Unit: an entry's supplier is optional (readers beta), null, or a {uid, name}", () => {
+  const u = activeUnit();
+  assertEquals(issues(UnitSchema.safeParse(u)), [], "absent — a stored entry from before the field");
+  const owned = { ...u, serial_history: [{ ...u.serial_history[0], supplier: null }] };
+  assertEquals(issues(UnitSchema.safeParse(owned)), []);
+  const rented = {
+    ...u,
+    serial_history: [{ ...u.serial_history[0], reason: "subrented", supplier: SUPPLIER }],
+  };
+  assertEquals(issues(UnitSchema.safeParse(rented)), []);
+  assert(!UnitSchema.safeParse({ ...u, serial_history: [{ ...u.serial_history[0], supplier: { uid: "x" } }] }).success);
+});
+
+Deno.test("UpdateUnitInput: an operator never sends `subrented` — only a subrent_in opens one", () => {
+  assert(UpdateUnitInput.safeParse({ version: 0, serial: { serial_number: "SN", reason: "initial", notes: "" } }).success);
+  assert(!UpdateUnitInput.safeParse({ version: 0, serial: { serial_number: "SN", reason: "subrented", notes: "" } }).success);
+});
+
+Deno.test("Unit: activations are optional (readers beta) and an empty list parses", () => {
+  assertEquals(issues(UnitSchema.safeParse({ ...activeUnit(), activations: [] })), []);
+  const spans = [
+    span("2026-10-01T09:00:00.000-05:00", "2026-10-05T09:00:00.000-05:00"),
+    span("2026-10-05T09:00:00.000-05:00", null, { uid_order: fid("order1") }),
+  ];
+  assertEquals(issues(UnitSchema.safeParse({ ...activeUnit(), activations: spans })), [], "back-to-back is not an overlap");
+});
+
+Deno.test("Unit: activations ascend by start", () => {
+  const spans = [
+    span("2026-10-05T09:00:00.000-05:00", "2026-10-06T09:00:00.000-05:00"),
+    span("2026-10-01T09:00:00.000-05:00", "2026-10-02T09:00:00.000-05:00"),
+  ];
+  assertRefused(UnitSchema.safeParse({ ...activeUnit(), activations: spans }), "ascend by start");
+});
+
+Deno.test("Unit: activations never overlap, and only the last may be open", () => {
+  const overlap = [
+    span("2026-10-01T09:00:00.000-05:00", "2026-10-06T09:00:00.000-05:00"),
+    span("2026-10-05T09:00:00.000-05:00", null),
+  ];
+  assertRefused(UnitSchema.safeParse({ ...activeUnit(), activations: overlap }), "must not overlap");
+  const twoOpen = [span("2026-10-01T09:00:00.000-05:00", null), span("2026-10-05T09:00:00.000-05:00", null)];
+  assertRefused(UnitSchema.safeParse({ ...activeUnit(), activations: twoOpen }), "must not overlap");
+});
+
+Deno.test("Unit: a number that is not active has no line switched on", () => {
+  const closed = activeUnit();
+  closed.serial_history[0].end = "2026-10-04T09:00:00.000-05:00";
+  const vacant = { ...closed, serial_number: null, status: "vacant" };
+  assertEquals(
+    issues(UnitSchema.safeParse({ ...vacant, activations: [span("2026-10-01T09:00:00.000-05:00", "2026-10-03T09:00:00.000-05:00")] })),
+    [],
+  );
+  assertRefused(
+    UnitSchema.safeParse({ ...vacant, activations: [span("2026-10-01T09:00:00.000-05:00", null)] }),
+    "end its open activation first",
+  );
+});
+
+Deno.test("UnitActivation: ends at or after it starts, and so does its provider confirmation", () => {
+  assertRefused(
+    UnitSchema.safeParse({ ...activeUnit(), activations: [span("2026-10-05T09:00:00.000-05:00", "2026-10-01T09:00:00.000-05:00")] }),
+    "an activation ends at or after it starts",
+  );
+  const badConfirm = span("2026-10-01T09:00:00.000-05:00", null, {
+    provider_confirmed: { start: "2026-10-05T00:00:00.000-05:00", end: "2026-10-02T00:00:00.000-05:00" },
+  });
+  assertRefused(UnitSchema.safeParse({ ...activeUnit(), activations: [badConfirm] }), "confirmed activation ends");
+  const ok = span("2026-10-01T09:00:00.000-05:00", null, {
+    provider_confirmed: { start: "2026-10-01T10:00:00.000-05:00", end: null },
+  });
+  assertEquals(issues(UnitSchema.safeParse({ ...activeUnit(), activations: [ok] })), []);
+  assert(!UnitSchema.safeParse({ ...activeUnit(), activations: [span("2026-10-01T09:00:00.000-05:00", null, { uid_cogs: "not-a-uuid" })] }).success);
+});
+
 Deno.test("Unit: the id is unit-{number} with no zero and no leading zero", () => {
   assert(!UnitSchema.safeParse({ ...activeUnit(), uid: "unit-0" }).success);
   assert(!UnitSchema.safeParse({ ...activeUnit(), uid: "unit-01001" }).success);

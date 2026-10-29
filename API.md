@@ -1318,6 +1318,22 @@ can actually be refreshed, not by a literal list that goes stale silently.
 type COACodeType = number;
 ```
 
+### `COACostEnum`
+
+Zod schema for COACostType.
+
+```ts
+const COACostEnum: z.ZodType<COACostType>;
+```
+
+### `COACostType`
+
+One allowed Direct Costs code. See {@link COA_COST_CODES}.
+
+```ts
+type COACostType = indexedAccess;
+```
+
 ### `COARevenueEnum`
 
 Zod schema for COARevenueType.
@@ -1372,6 +1388,59 @@ Xero's Bad Debt account. The one posting account a `reason` determines.
 
 ```ts
 const COA_BAD_DEBT: 6900;
+```
+
+### `COA_COST_CODES`
+
+The Direct Costs accounts a product's cost rule (`Product.cogs[].coa_cost`)
+may post to — a POLICY subset, like the revenue codes above, because a schema
+can check a code against a list but not against the chart-of-accounts
+document's `type`. 5000–5700 as synced on 2026-10-28, plus `5150` "Cost of
+Goods Sold: Data Service" (created in Xero 2026-10-28 for carrier lines on
+owned devices; api-cloudrun `.claude/plans/serialized-subrent.md` § 7a).
+
+⚠️ So a new cost account needs a core release.
+
+```ts
+const COA_COST_CODES: 5000 | 5001 | 5100 | 5150 | 5200 | 5300 | 5400 | 5500 | 5600 | 5700[];
+```
+
+### `COGS_ACTIVATION_FORMULAS`
+
+How an activation entry's periods are cut. ANY active day bills the whole
+period (owner, 2026-10-27, Q11).
+
+- `per_week` — 7-day cycles anchored on the unit's FIRST activation day under
+  the entry, so a re-activation inside a week already billed continues it.
+- `per_calendar_month` — Chicago calendar months.
+
+A separate vocabulary from `PRICE_FORMULAS`, so a customer price picker never
+offers a cost formula (the core#78 lesson). The one function that applies
+them is `billablePeriods` (`@cfs/core/utils/cogs`).
+
+```ts
+const COGS_ACTIVATION_FORMULAS: "per_week" | "per_calendar_month"[];
+```
+
+### `COGS_OWNERSHIPS`
+
+Whose units an activation entry prices: CFS's own (`cfs`, e.g. Verizon lines
+on owned devices) or a supplier's (`supplier`, e.g. Vision's hotspots). The
+manager defaults a span's entry by the unit's `unitOwnership`.
+
+```ts
+const COGS_OWNERSHIPS: "cfs" | "supplier"[];
+```
+
+### `COGS_TRIGGERS`
+
+What triggers a cost-of-revenue rule. `sale` — a sale's inventory relief;
+`activation` — a unit's service line being switched on (a hotspot's data
+line), billed by its provider per period. Later: `booking`, `depreciation`
+(api-cloudrun#1388).
+
+```ts
+const COGS_TRIGGERS: "sale" | "activation"[];
 ```
 
 ### `COMPONENT_PRICE_KEYS`
@@ -2166,6 +2235,113 @@ interface ClosePurchaseInputType {
   uuid_session: string;
   version: number;
 }
+```
+
+### `CogsActivationEntryType`
+
+A provider-billed service line, accrued per billed period by the unit
+activations whose `uid_cogs` names this entry. Only activation entries carry
+a `uid`, because only spans reference an entry.
+
+```ts
+interface CogsActivationEntryType {
+  trigger: "activation";
+  uid: string;
+  label: string;
+  coa_cost: COACostType;
+  formula: CogsActivationFormulaType;
+  provider: UidNameRefType;
+  ownership: CogsOwnershipType;
+  rate_cents: number;
+}
+```
+
+### `CogsActivationFormulaEnum`
+
+Zod schema for {@link CogsActivationFormulaType}.
+
+```ts
+const CogsActivationFormulaEnum: z.ZodType<CogsActivationFormulaType>;
+```
+
+### `CogsActivationFormulaType`
+
+One activation billing formula. See {@link COGS_ACTIVATION_FORMULAS}.
+
+```ts
+type CogsActivationFormulaType = indexedAccess;
+```
+
+### `CogsEntry`
+
+Zod schema for {@link CogsEntryType}. A discriminated union on `trigger`, the house shape for a stored array member.
+
+```ts
+const CogsEntry: z.ZodType<CogsEntryType>;
+```
+
+### `CogsEntryInput`
+
+{@link CogsEntry} for an INPUT: unknown keys are stripped, not refused.
+
+```ts
+const CogsEntryInput: z.ZodType<CogsEntryType>;
+```
+
+### `CogsEntryType`
+
+One rule that prices a product's cost of revenue: its Direct Costs account,
+what triggers it, and how its amount is reached
+(`api-cloudrun/.claude/plans/serialized-subrent.md` § 7a). Shrink, write-offs
+and every other movement-driven cost are EVENTS and stay on movements.
+
+```ts
+type CogsEntryType = CogsSaleEntryType | CogsActivationEntryType;
+```
+
+### `CogsOwnershipEnum`
+
+Zod schema for {@link CogsOwnershipType}.
+
+```ts
+const CogsOwnershipEnum: z.ZodType<CogsOwnershipType>;
+```
+
+### `CogsOwnershipType`
+
+One ownership. See {@link COGS_OWNERSHIPS}.
+
+```ts
+type CogsOwnershipType = indexedAccess;
+```
+
+### `CogsSaleEntryType`
+
+A sale's inventory relief, at the ledger's average cost.
+
+```ts
+interface CogsSaleEntryType {
+  trigger: "sale";
+  formula: "average_cost";
+  label: string;
+  coa_cost: COACostType;
+}
+```
+
+### `CogsTriggerEnum`
+
+Zod schema for {@link CogsTriggerType}.
+
+```ts
+const CogsTriggerEnum: z.ZodType<CogsTriggerType>;
+```
+
+### `CogsTriggerType`
+
+One cost trigger. See {@link COGS_TRIGGERS}.
+
+```ts
+type CogsTriggerType = indexedAccess;
 ```
 
 ### `CollectDisplayColumnsResult`
@@ -3054,6 +3230,7 @@ interface CreateProductInputType {
   uid_tax_class?: string | null;
   uid_linked_rental?: string | null;
   uid_linked_replacement?: string | null;
+  cogs?: CogsEntryType[];
   webshop: typeLiteral;
   transaction?: never;
   purchase?: never;
@@ -9334,6 +9511,8 @@ interface Product {
   tracking_category_name?: string;
   uid_linked_rental?: string;
   uid_linked_replacement?: string;
+  cogs?: CogsEntryType[];
+  uid_superseded_by?: string;
   uid_tracking_category?: string | null;
   uid_tax_class?: string | null;
   tax_class_name?: string | null;
@@ -10661,6 +10840,7 @@ interface ReturnPurchaseLineInputType {
   uid_product: string;
   quantity: number;
   allocations?: MovementAllocationInputType[];
+  units?: MovementUnitInputType[];
 }
 ```
 
@@ -10897,15 +11077,23 @@ const SEEDED_ROLE_NAMES: "admin" | "authenticated" | "customer" | "template-edit
 
 ### `SERIAL_CHANGE_REASONS`
 
-Why a serial was set on a number.
+Why a history entry (a spell) opened on a number.
 
-- `initial` — the first serial recorded for the number (a create, a
-  conversion, or a later bulk paste).
+- `initial` — the first spell of a CFS-owned unit on the number (a create, a
+  conversion, an ownership movement, or a later bulk paste).
 - `replaced` — a different physical unit took over the number.
 - `corrected` — the previous entry was mis-typed; the unit did not change.
+- `subrented` — a `subrent_in` brought a supplier's unit in on the number:
+  every entry a subrent opens takes it, whether the number was fresh, vacant,
+  or is the same device coming back. Like `replaced` it starts a new PHYSICAL
+  unit (`serialAt`). It says why the spell opened, never whose the unit is —
+  that is the entry's `supplier`, which a `corrected` entry on a vendor unit
+  carries forward.
+
+Adding a member widens a stored enum, so readers ship before any writer.
 
 ```ts
-const SERIAL_CHANGE_REASONS: "initial" | "replaced" | "corrected"[];
+const SERIAL_CHANGE_REASONS: "initial" | "replaced" | "corrected" | "subrented"[];
 ```
 
 ### `SETTLED_STATUSES`
@@ -13148,22 +13336,28 @@ const UNIT_ROSTER_STATES: "shelf" | "prepped" | "out" | "away" | "unattributed_o
 
 ### `UNIT_SERIAL_IN_TYPES`
 
-The manual types that bring a unit IN to CFS ownership, so may carry the
-serial it arrives with. Every other type names units by number only: a serial
-changes on an existing number through `PUT /units/{uid}`, never by moving it.
+The types that bring a unit IN to CFS's custody, so may carry the serial it
+arrives with: the manual ownership in-types, plus `subrent_in`, whose
+supplier's device arrives with its own serial (raised from the purchase, not
+typed by hand, but read through the same {@link MovementUnitInput}). Every
+other type names units by number only: a serial changes on an existing number
+through `PUT /units/{uid}`, never by moving it.
 
 ```ts
-const UNIT_SERIAL_IN_TYPES: "purchase" | "find" | "make" | "opening_balance" | "adjustment_increase"[];
+const UNIT_SERIAL_IN_TYPES: "purchase" | "find" | "make" | "opening_balance" | "adjustment_increase" | "subrent_in"[];
 ```
 
 ### `UNIT_STATUSES`
 
 Whether a number is in use.
 
-- `active` — owned, and on the product's roster.
-- `vacant` — not owned right now (sold, written off, never activated). The
-  number can take a replacement unit with a new serial. EVERY departure
-  leaves a number vacant (owner, 2026-10-03); nothing retires one implicitly.
+- `active` — in CFS's CUSTODY, and on the product's roster. Not "owned": a
+  unit subrented from a supplier is active too. WHOSE it is is its open
+  history entry's `supplier` (`unitOwnership`, `@cfs/core/utils/units`).
+- `vacant` — not in CFS's custody right now (sold, written off, returned to
+  its supplier, never activated). The number can take a replacement unit with
+  a new serial. EVERY departure leaves a number vacant (owner, 2026-10-03);
+  nothing retires one implicitly.
 - `retired` — never to be reused. Only an operator retires a number, and only
   from `vacant`.
 
@@ -13173,9 +13367,10 @@ const UNIT_STATUSES: "active" | "vacant" | "retired"[];
 
 ### `UNIT_USER_SERIAL_REASONS`
 
-The reasons `PUT /units/{uid}` may send. Today every reason; kept as its own
-list, the `OOS_USER_STATUSES` pattern, so narrowing what an operator may send
-does not narrow what storage may hold.
+The reasons `PUT /units/{uid}` may send. Every reason but `subrented`, which
+only a `subrent_in` opens. Kept as its own list, the `OOS_USER_STATUSES`
+pattern, so narrowing what an operator may send does not narrow what storage
+may hold.
 
 ```ts
 const UNIT_USER_SERIAL_REASONS: "initial" | "replaced" | "corrected"[];
@@ -13261,6 +13456,58 @@ from B's `rebook_in` movements, never from the client.
 ```ts
 interface UndoRentalExtensionInputType {
   version: number;
+}
+```
+
+### `UnitActivation`
+
+Zod schema for {@link UnitActivationType}.
+
+```ts
+const UnitActivation: z.ZodType<UnitActivationType>;
+```
+
+### `UnitActivationConfirmed`
+
+Zod schema for {@link UnitActivationConfirmedType}.
+
+```ts
+const UnitActivationConfirmed: z.ZodType<UnitActivationConfirmedType>;
+```
+
+### `UnitActivationConfirmedType`
+
+The confirmed on/off instants of an activation, as the provider's portal or bill states them.
+
+```ts
+interface UnitActivationConfirmedType {
+  start: string;
+  end: string | null;
+}
+```
+
+### `UnitActivationType`
+
+One span during which a unit's service line was switched ON — a hotspot's or
+router's data line, billed by its provider through the product's `cogs`
+activation entry that `uid_cogs` names.
+
+RECORDED, never derived from custody: a device can sit on the shelf switched
+on (an idle, still-billed span) or go out switched off. Present on every
+unit, owned or rented, because CFS's own devices carry provider lines too.
+The biller is the named cost entry's `provider`, not a field here, since one
+product can hold units billed by different providers.
+
+```ts
+interface UnitActivationType {
+  uid: string;
+  start: string;
+  end: string | null;
+  uid_order: string | null;
+  uid_cogs: string;
+  provider_confirmed: UnitActivationConfirmedType | null;
+  notes: string;
+  changed_by: ActorRefType;
 }
 ```
 
@@ -13397,20 +13644,27 @@ const UnitSerialHistoryEntry: z.ZodType<UnitSerialHistoryEntryType>;
 
 ### `UnitSerialHistoryEntryType`
 
-One serial a number has carried, and over which span.
+One SPELL of one physical unit under a number: from when it took the number
+until it left or was re-recorded. Its serial is optional — a tent has a
+number and no serial, and a radio's serial may be typed in later — so an
+entry is a spell, not "a serial". The field keeps the name `serial_history`
+because renaming a stored array on a strict object is a four-step purge for a
+cosmetic gain.
 
 The acquisition reference lives HERE, per entry, rather than once per unit: a
 replacement re-points the number at a new physical unit, and a single
 unit-level field would lose the original acquisition. The unit's CURRENT
-acquisition is the open entry's `uid_movement`.
+acquisition is the open entry's `uid_movement`. Ownership lives here for the
+same reason: a number can be CFS-owned, then vacant, then a supplier's.
 
 ```ts
 interface UnitSerialHistoryEntryType {
-  serial_number: string;
+  serial_number: string | null;
   start: string;
   end: string | null;
   reason: SerialChangeReasonType;
   uid_movement: string | null;
+  supplier?: UidNameRefType | null;
   notes: string;
   changed_by: ActorRefType;
 }
@@ -13457,6 +13711,7 @@ interface UnitType {
   serial_number: string | null;
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
+  activations?: UnitActivationType[];
   uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
@@ -14008,6 +14263,8 @@ interface UpdateProductInputType {
   uid_tax_class?: string | null;
   uid_linked_rental?: string;
   uid_linked_replacement?: string;
+  cogs?: CogsEntryType[] | null;
+  uid_superseded_by?: string | null;
   webshop?: typeLiteral;
   version: number;
 }
@@ -16647,6 +16904,22 @@ the units physically are: a `locations` doc (on a shelf), a `bookings` doc
 const CFS_SOURCE_COLLECTIONS: "bookings" | "cards" | "contacts" | "credit-notes" | "fulfillments" | "invoices" | "locations" | "orders" | "organizations" | "out-of-service" | "products" | "purchase-bills" | "purchase-credits" | "purchases" | "roles" | "settlements" | "suppliers" | "template-components" | "templates" | "templates-versions" | "transactions"[];
 ```
 
+### `COACostEnum`
+
+Zod schema for COACostType.
+
+```ts
+const COACostEnum: z.ZodType<COACostType>;
+```
+
+### `COACostType`
+
+One allowed Direct Costs code. See {@link COA_COST_CODES}.
+
+```ts
+type COACostType = indexedAccess;
+```
+
 ### `COARevenueEnum`
 
 Zod schema for COARevenueType.
@@ -16661,6 +16934,21 @@ Allowed values for chart-of-accounts revenue code.
 
 ```ts
 type COARevenueType = indexedAccess;
+```
+
+### `COA_COST_CODES`
+
+The Direct Costs accounts a product's cost rule (`Product.cogs[].coa_cost`)
+may post to — a POLICY subset, like the revenue codes above, because a schema
+can check a code against a list but not against the chart-of-accounts
+document's `type`. 5000–5700 as synced on 2026-10-28, plus `5150` "Cost of
+Goods Sold: Data Service" (created in Xero 2026-10-28 for carrier lines on
+owned devices; api-cloudrun `.claude/plans/serialized-subrent.md` § 7a).
+
+⚠️ So a new cost account needs a core release.
+
+```ts
+const COA_COST_CODES: 5000 | 5001 | 5100 | 5150 | 5200 | 5300 | 5400 | 5500 | 5600 | 5700[];
 ```
 
 ### `COMPONENT_TYPES`
@@ -24223,6 +24511,44 @@ interface AuthoredProductComponent {
 }
 ```
 
+### `COGS_ACTIVATION_FORMULAS`
+
+How an activation entry's periods are cut. ANY active day bills the whole
+period (owner, 2026-10-27, Q11).
+
+- `per_week` — 7-day cycles anchored on the unit's FIRST activation day under
+  the entry, so a re-activation inside a week already billed continues it.
+- `per_calendar_month` — Chicago calendar months.
+
+A separate vocabulary from `PRICE_FORMULAS`, so a customer price picker never
+offers a cost formula (the core#78 lesson). The one function that applies
+them is `billablePeriods` (`@cfs/core/utils/cogs`).
+
+```ts
+const COGS_ACTIVATION_FORMULAS: "per_week" | "per_calendar_month"[];
+```
+
+### `COGS_OWNERSHIPS`
+
+Whose units an activation entry prices: CFS's own (`cfs`, e.g. Verizon lines
+on owned devices) or a supplier's (`supplier`, e.g. Vision's hotspots). The
+manager defaults a span's entry by the unit's `unitOwnership`.
+
+```ts
+const COGS_OWNERSHIPS: "cfs" | "supplier"[];
+```
+
+### `COGS_TRIGGERS`
+
+What triggers a cost-of-revenue rule. `sale` — a sale's inventory relief;
+`activation` — a unit's service line being switched on (a hotspot's data
+line), billed by its provider per period. Later: `booking`, `depreciation`
+(api-cloudrun#1388).
+
+```ts
+const COGS_TRIGGERS: "sale" | "activation"[];
+```
+
 ### `COMPONENT_PRICE_KEYS`
 
 The price keys a parent may deliberately author on its own `components` entry,
@@ -24242,6 +24568,113 @@ Decimal places a catalog component `quantity` (a per-parent ratio) may carry.
 
 ```ts
 const COMPONENT_QUANTITY_DECIMALS: 4;
+```
+
+### `CogsActivationEntryType`
+
+A provider-billed service line, accrued per billed period by the unit
+activations whose `uid_cogs` names this entry. Only activation entries carry
+a `uid`, because only spans reference an entry.
+
+```ts
+interface CogsActivationEntryType {
+  trigger: "activation";
+  uid: string;
+  label: string;
+  coa_cost: COACostType;
+  formula: CogsActivationFormulaType;
+  provider: UidNameRefType;
+  ownership: CogsOwnershipType;
+  rate_cents: number;
+}
+```
+
+### `CogsActivationFormulaEnum`
+
+Zod schema for {@link CogsActivationFormulaType}.
+
+```ts
+const CogsActivationFormulaEnum: z.ZodType<CogsActivationFormulaType>;
+```
+
+### `CogsActivationFormulaType`
+
+One activation billing formula. See {@link COGS_ACTIVATION_FORMULAS}.
+
+```ts
+type CogsActivationFormulaType = indexedAccess;
+```
+
+### `CogsEntry`
+
+Zod schema for {@link CogsEntryType}. A discriminated union on `trigger`, the house shape for a stored array member.
+
+```ts
+const CogsEntry: z.ZodType<CogsEntryType>;
+```
+
+### `CogsEntryInput`
+
+{@link CogsEntry} for an INPUT: unknown keys are stripped, not refused.
+
+```ts
+const CogsEntryInput: z.ZodType<CogsEntryType>;
+```
+
+### `CogsEntryType`
+
+One rule that prices a product's cost of revenue: its Direct Costs account,
+what triggers it, and how its amount is reached
+(`api-cloudrun/.claude/plans/serialized-subrent.md` § 7a). Shrink, write-offs
+and every other movement-driven cost are EVENTS and stay on movements.
+
+```ts
+type CogsEntryType = CogsSaleEntryType | CogsActivationEntryType;
+```
+
+### `CogsOwnershipEnum`
+
+Zod schema for {@link CogsOwnershipType}.
+
+```ts
+const CogsOwnershipEnum: z.ZodType<CogsOwnershipType>;
+```
+
+### `CogsOwnershipType`
+
+One ownership. See {@link COGS_OWNERSHIPS}.
+
+```ts
+type CogsOwnershipType = indexedAccess;
+```
+
+### `CogsSaleEntryType`
+
+A sale's inventory relief, at the ledger's average cost.
+
+```ts
+interface CogsSaleEntryType {
+  trigger: "sale";
+  formula: "average_cost";
+  label: string;
+  coa_cost: COACostType;
+}
+```
+
+### `CogsTriggerEnum`
+
+Zod schema for {@link CogsTriggerType}.
+
+```ts
+const CogsTriggerEnum: z.ZodType<CogsTriggerType>;
+```
+
+### `CogsTriggerType`
+
+One cost trigger. See {@link COGS_TRIGGERS}.
+
+```ts
+type CogsTriggerType = indexedAccess;
 ```
 
 ### `ComponentPriceKeyEnum`
@@ -24310,6 +24743,7 @@ interface CreateProductInputType {
   uid_tax_class?: string | null;
   uid_linked_rental?: string | null;
   uid_linked_replacement?: string | null;
+  cogs?: CogsEntryType[];
   webshop: typeLiteral;
   transaction?: never;
   purchase?: never;
@@ -24352,6 +24786,8 @@ interface Product {
   tracking_category_name?: string;
   uid_linked_rental?: string;
   uid_linked_replacement?: string;
+  cogs?: CogsEntryType[];
+  uid_superseded_by?: string;
   uid_tracking_category?: string | null;
   uid_tax_class?: string | null;
   tax_class_name?: string | null;
@@ -24526,6 +24962,8 @@ interface UpdateProductInputType {
   uid_tax_class?: string | null;
   uid_linked_rental?: string;
   uid_linked_replacement?: string;
+  cogs?: CogsEntryType[] | null;
+  uid_superseded_by?: string | null;
   webshop?: typeLiteral;
   version: number;
 }
@@ -25033,6 +25471,7 @@ interface ReturnPurchaseLineInputType {
   uid_product: string;
   quantity: number;
   allocations?: MovementAllocationInputType[];
+  units?: MovementUnitInputType[];
 }
 ```
 
@@ -27404,12 +27843,15 @@ const UNDO_MOVEMENT_TYPES: "unprep" | "check_out_undo" | "check_in_undo" | "mark
 
 ### `UNIT_SERIAL_IN_TYPES`
 
-The manual types that bring a unit IN to CFS ownership, so may carry the
-serial it arrives with. Every other type names units by number only: a serial
-changes on an existing number through `PUT /units/{uid}`, never by moving it.
+The types that bring a unit IN to CFS's custody, so may carry the serial it
+arrives with: the manual ownership in-types, plus `subrent_in`, whose
+supplier's device arrives with its own serial (raised from the purchase, not
+typed by hand, but read through the same {@link MovementUnitInput}). Every
+other type names units by number only: a serial changes on an existing number
+through `PUT /units/{uid}`, never by moving it.
 
 ```ts
-const UNIT_SERIAL_IN_TYPES: "purchase" | "find" | "make" | "opening_balance" | "adjustment_increase"[];
+const UNIT_SERIAL_IN_TYPES: "purchase" | "find" | "make" | "opening_balance" | "adjustment_increase" | "subrent_in"[];
 ```
 
 ### `UndoMovementTypeType`
@@ -27593,15 +28035,23 @@ const MAX_UNITS_PER_ROSTER: 5000;
 
 ### `SERIAL_CHANGE_REASONS`
 
-Why a serial was set on a number.
+Why a history entry (a spell) opened on a number.
 
-- `initial` — the first serial recorded for the number (a create, a
-  conversion, or a later bulk paste).
+- `initial` — the first spell of a CFS-owned unit on the number (a create, a
+  conversion, an ownership movement, or a later bulk paste).
 - `replaced` — a different physical unit took over the number.
 - `corrected` — the previous entry was mis-typed; the unit did not change.
+- `subrented` — a `subrent_in` brought a supplier's unit in on the number:
+  every entry a subrent opens takes it, whether the number was fresh, vacant,
+  or is the same device coming back. Like `replaced` it starts a new PHYSICAL
+  unit (`serialAt`). It says why the spell opened, never whose the unit is —
+  that is the entry's `supplier`, which a `corrected` entry on a vendor unit
+  carries forward.
+
+Adding a member widens a stored enum, so readers ship before any writer.
 
 ```ts
-const SERIAL_CHANGE_REASONS: "initial" | "replaced" | "corrected"[];
+const SERIAL_CHANGE_REASONS: "initial" | "replaced" | "corrected" | "subrented"[];
 ```
 
 ### `SerialChangeReasonEnum`
@@ -27633,10 +28083,13 @@ const SerialNumber: z.ZodType<string>;
 
 Whether a number is in use.
 
-- `active` — owned, and on the product's roster.
-- `vacant` — not owned right now (sold, written off, never activated). The
-  number can take a replacement unit with a new serial. EVERY departure
-  leaves a number vacant (owner, 2026-10-03); nothing retires one implicitly.
+- `active` — in CFS's CUSTODY, and on the product's roster. Not "owned": a
+  unit subrented from a supplier is active too. WHOSE it is is its open
+  history entry's `supplier` (`unitOwnership`, `@cfs/core/utils/units`).
+- `vacant` — not in CFS's custody right now (sold, written off, returned to
+  its supplier, never activated). The number can take a replacement unit with
+  a new serial. EVERY departure leaves a number vacant (owner, 2026-10-03);
+  nothing retires one implicitly.
 - `retired` — never to be reused. Only an operator retires a number, and only
   from `vacant`.
 
@@ -27646,9 +28099,10 @@ const UNIT_STATUSES: "active" | "vacant" | "retired"[];
 
 ### `UNIT_USER_SERIAL_REASONS`
 
-The reasons `PUT /units/{uid}` may send. Today every reason; kept as its own
-list, the `OOS_USER_STATUSES` pattern, so narrowing what an operator may send
-does not narrow what storage may hold.
+The reasons `PUT /units/{uid}` may send. Every reason but `subrented`, which
+only a `subrent_in` opens. Kept as its own list, the `OOS_USER_STATUSES`
+pattern, so narrowing what an operator may send does not narrow what storage
+may hold.
 
 ```ts
 const UNIT_USER_SERIAL_REASONS: "initial" | "replaced" | "corrected"[];
@@ -27662,6 +28116,58 @@ movements, never set by hand.
 
 ```ts
 const UNIT_USER_STATUSES: "retired"[];
+```
+
+### `UnitActivation`
+
+Zod schema for {@link UnitActivationType}.
+
+```ts
+const UnitActivation: z.ZodType<UnitActivationType>;
+```
+
+### `UnitActivationConfirmed`
+
+Zod schema for {@link UnitActivationConfirmedType}.
+
+```ts
+const UnitActivationConfirmed: z.ZodType<UnitActivationConfirmedType>;
+```
+
+### `UnitActivationConfirmedType`
+
+The confirmed on/off instants of an activation, as the provider's portal or bill states them.
+
+```ts
+interface UnitActivationConfirmedType {
+  start: string;
+  end: string | null;
+}
+```
+
+### `UnitActivationType`
+
+One span during which a unit's service line was switched ON — a hotspot's or
+router's data line, billed by its provider through the product's `cogs`
+activation entry that `uid_cogs` names.
+
+RECORDED, never derived from custody: a device can sit on the shelf switched
+on (an idle, still-billed span) or go out switched off. Present on every
+unit, owned or rented, because CFS's own devices carry provider lines too.
+The biller is the named cost entry's `provider`, not a field here, since one
+product can hold units billed by different providers.
+
+```ts
+interface UnitActivationType {
+  uid: string;
+  start: string;
+  end: string | null;
+  uid_order: string | null;
+  uid_cogs: string;
+  provider_confirmed: UnitActivationConfirmedType | null;
+  notes: string;
+  changed_by: ActorRefType;
+}
 ```
 
 ### `UnitNumber`
@@ -27703,20 +28209,27 @@ const UnitSerialHistoryEntry: z.ZodType<UnitSerialHistoryEntryType>;
 
 ### `UnitSerialHistoryEntryType`
 
-One serial a number has carried, and over which span.
+One SPELL of one physical unit under a number: from when it took the number
+until it left or was re-recorded. Its serial is optional — a tent has a
+number and no serial, and a radio's serial may be typed in later — so an
+entry is a spell, not "a serial". The field keeps the name `serial_history`
+because renaming a stored array on a strict object is a four-step purge for a
+cosmetic gain.
 
 The acquisition reference lives HERE, per entry, rather than once per unit: a
 replacement re-points the number at a new physical unit, and a single
 unit-level field would lose the original acquisition. The unit's CURRENT
-acquisition is the open entry's `uid_movement`.
+acquisition is the open entry's `uid_movement`. Ownership lives here for the
+same reason: a number can be CFS-owned, then vacant, then a supplier's.
 
 ```ts
 interface UnitSerialHistoryEntryType {
-  serial_number: string;
+  serial_number: string | null;
   start: string;
   end: string | null;
   reason: SerialChangeReasonType;
   uid_movement: string | null;
+  supplier?: UidNameRefType | null;
   notes: string;
   changed_by: ActorRefType;
 }
@@ -27763,6 +28276,7 @@ interface UnitType {
   serial_number: string | null;
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
+  activations?: UnitActivationType[];
   uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
@@ -39925,12 +40439,14 @@ interface JournalOrdered {
 
 ### `JournalProjection`
 
-One thing a journal fold accumulates.
+One thing a journal fold accumulates. `M` is the movement shape it reads:
+{@link JournalMovement} by default, wider for a projection that needs more of
+the movement (as {@link unitOutSpells} does).
 
 ```ts
 interface JournalProjection {
   init(): S;
-  step(state: S, movement: JournalMovement): void;
+  step(state: S, movement: M): void;
 }
 ```
 
@@ -39998,6 +40514,50 @@ How a booking's events compare with its stored breakdown.
 type ReplayVerdict = "ok" | "no_events" | "substitution_seeded" | "partial_history" | "sale_untracked_loss" | "service_surcharge" | "diverged";
 ```
 
+### `UnitJournalMovement`
+
+A movement as {@link unitOutSpells} reads it: the journal fields plus the roster fold's.
+
+```ts
+type UnitJournalMovement = JournalMovement & RosterMovement;
+```
+
+### `UnitOutFinding`
+
+A movement the roster fold refused, and why.
+
+```ts
+interface UnitOutFinding {
+  uid_movement: string;
+  message: string;
+  unit: number | null;
+}
+```
+
+### `UnitOutSpell`
+
+One spell a unit spent OUT on one booking.
+
+```ts
+interface UnitOutSpell {
+  uid_booking: string;
+  start: string;
+  end: string | null;
+}
+```
+
+### `UnitOutSpells`
+
+{@link unitOutSpells}' state.
+
+```ts
+interface UnitOutSpells {
+  spells: Map<number, UnitOutSpell[]>;
+  roster: RosterUnits;
+  findings: UnitOutFinding[];
+}
+```
+
 ### `UnitSetsByKey`
 
 Each booking's named units per history key, as the journal leaves them.
@@ -40036,7 +40596,7 @@ Net custody per GRAIN — `(order, product, leg)`, every component signature
 pooled. A grain carry or a re-key moves custody between the bookings of one
 grain, so a booking can diverge while its grain conserves.
 
-### `foldJournal(movements: readonly JournalMovement[], projections: P): ProjectionStates<P>`
+### `foldJournal(movements: readonly M[], projections: P): ProjectionStates<P>`
 
 Fold `movements` once, in {@link journalOrder}, through every projection,
 and return each projection's state. The input is not mutated or assumed
@@ -40092,6 +40652,31 @@ Every earlier-era movement precedes every later one.
 ⚠️ Inside the earlier era this approximates the rebuild rather than
 reproducing it: the rebuild broke a same-instant tie by an internal rank and
 a carried movement kept its old `number`, neither of which is stored.
+
+### `unitOutSpells(): JournalProjection<UnitOutSpells, UnitJournalMovement>`
+
+When each unit was physically OUT on a booking — the unit activity report's
+"days out" (`api-cloudrun/.claude/plans/serialized-subrent.md` § 8).
+
+🔴 **It runs the ROSTER FOLD, not a line rule of its own.** A rule reading
+lines `to: bookings/B` would miscount three cases `foldRosterUnits` already
+handles: a lineless `rebook_out`/`rebook_in` pair moves an out unit between
+bookings with no line at all; an `enroll`'s in-place line `to: bookings/B`
+seeds a unit `unattributed_out`, which is out on no RECORDED booking and so
+opens no spell here; and a lineless customer-side step changes nothing. A
+spell opens when a movement leaves a unit `out` on B and it was not before,
+and closes when one leaves it anywhere else.
+
+⚠️ **Feed it every movement of the product, not one unit's.** The fold checks
+every unit a movement names against where the roster has it, so a movement
+naming units 3001 and 3002, folded without 3002's earlier history, is a
+finding. A movement names one product's units only, so the union of
+`query_by_unit_number` over all of a product's units is complete.
+
+Folded in {@link journalOrder} by {@link foldJournal} — a business-date
+question. The live roster was applied in record order, so a backdated
+movement can be a finding here while the stored roster is fine; that is what
+`findings` is for.
 
 ### `unitsByBooking(): JournalProjection<Map<string, UnitSetsByKey>>`
 
@@ -46016,6 +46601,174 @@ provably-wrong item paths as clean, corpus-wide.
 Returns every violation rather than throwing on the first, so an audit reports
 a whole document at once. An empty array means the node is well-formed.
 
+## `@cfs/core/utils/cogs`
+
+The cost model, applied: a product's effective cost rules, and how an
+activation entry cuts a unit's service-line spans into billed periods.
+
+```ts
+import { billablePeriods, effectiveCogs, remainingUsageToBill } from "@cfs/core/utils/cogs";
+```
+
+One home for both halves of `api-cloudrun/.claude/plans/serialized-subrent.md`
+§ 7a, so the unit activity report, the usage-bill pre-fill and the manager's
+"already billed through" hint all read the same periods. Pure and
+platform-free.
+
+## Periods, and why any active day bills the whole one
+
+A provider bills a line per PERIOD, not per day: a Vision week costs the same
+whether the hotspot was on for one day of it or seven (owner, 2026-10-27,
+Q11). So a period is billable iff any activation span under the entry
+overlaps it, and the expected cost is `periods × rate_cents` — an integer
+times an integer, closed money with no rounding decision (`cfs-money`).
+
+⚠️ Switching a line off mid-period therefore saves nothing for that period,
+which is what the manager's "already billed through" hint exists to say.
+
+### `BillablePeriod`
+
+One billed period.
+
+```ts
+interface BillablePeriod {
+  start: string;
+  end: string;
+  activation_uids: string[];
+}
+```
+
+### `BillablePeriods`
+
+{@link billablePeriods}' answer.
+
+```ts
+interface BillablePeriods {
+  periods: BillablePeriod[];
+  expectedCents: number;
+}
+```
+
+### `BillableSpan`
+
+The span fields {@link billablePeriods} reads.
+
+```ts
+type BillableSpan = Pick<UnitActivationType, "uid" | "start" | "end" | "uid_cogs" | "provider_confirmed">;
+```
+
+### `CogsRange`
+
+A half-open instant range `[start, end)`; a `null` start is the beginning of time.
+
+```ts
+interface CogsRange {
+  start: string | null;
+  end: string;
+}
+```
+
+### `DEFAULT_SALE_COA_COST`
+
+The account a `sale` product relieves inventory to when it states no `sale`
+entry: `5000` "Cost of Goods Sold: Retail Inventory".
+
+⚠️ **A code constant, deliberately not catalog-derived** (as tax classes'
+`is_default_for` is). It replaces the literal `"5000"` the Xero item body
+sent, one for one, so every existing product's item body is byte-identical
+and nothing re-pushes.
+
+```ts
+const DEFAULT_SALE_COA_COST: 5000;
+```
+
+### `SpanInstantSource`
+
+Which instants a span's period cut used.
+
+```ts
+type SpanInstantSource = "provider" | "cfs";
+```
+
+### `SpanInstants`
+
+A span's resolved on/off instants.
+
+```ts
+interface SpanInstants {
+  start: string;
+  end: string | null;
+  source: SpanInstantSource;
+}
+```
+
+### `UsageBilledItem`
+
+The fields of a usage-billed purchase item {@link remainingUsageToBill} reads —
+structural, so both a carrier's `usage` item and an activation-billed
+`subrent` item take it (`api-cloudrun/.claude/plans/purchase-documents-invoice-shape.md`).
+
+```ts
+interface UsageBilledItem {
+  uid_cogs: string;
+  quantity_billed: number;
+}
+```
+
+### `billablePeriods(spans: readonly BillableSpan[], entry: Pick<CogsActivationEntryType, "uid" | "formula" | "rate_cents">, range: CogsRange): BillablePeriods`
+
+The periods of ONE unit's spans under ONE activation entry that are billable
+and overlap `range`, and their expected cost.
+
+- Only spans whose `uid_cogs` is `entry.uid` count; pass the unit's WHOLE
+  activation list, since a `per_week` cycle is anchored on the unit's FIRST
+  activation day under the entry (owner, 2026-10-28, Q11b), which can lie
+  before `range`.
+- `per_week`: 7 Chicago calendar days from that anchor's start of day, so a
+  re-activation inside a week already billed continues it at no extra cost.
+  Calendar days, never `7 × 86,400,000 ms` (`addChicagoDays`'s DST note).
+- `per_calendar_month`: Chicago calendar months.
+- A period is billable iff some span `[start, end)` overlaps it; a still-open
+  span runs on to `range.end`. A zero-length span bills nothing.
+
+Spans' instants come from {@link spanInstants}.
+
+### `cogsActivationEntry(product: Pick<Product, "cogs">, uid_cogs: string): CogsActivationEntryType | undefined`
+
+The activation entry `uid_cogs` names on a product, or `undefined`.
+
+### `effectiveCogs(product: Pick<Product, "type" | "cogs">): CogsEntryType[]`
+
+A product's cost rules as every reader must see them: the stored `cogs`,
+plus the TYPE default — a `sale` product with no stored `sale` entry gets
+`{ trigger: "sale", formula: "average_cost", coa_cost: 5000 }`.
+
+The default is derived rather than stored because stamping it would be a
+write to every sale product, and each product write fans out to a Xero item
+sync and a Typesense reindex (`Product.cogs`'s docblock).
+
+### `remainingUsageToBill(item: UsageBilledItem, unitSpans: ReadonlyArray<readonly BillableSpan[]>, entry: Pick<CogsActivationEntryType, "uid" | "formula" | "rate_cents">, range: CogsRange): number`
+
+How many billable periods of `item`'s cost entry remain unbilled through
+`range.end`: `Σ billablePeriods(each unit's spans)` − `quantity_billed`.
+
+A SEPARATE function from `remainingToBill`, which six callers share over
+stored buckets; a usage item's billable quantity is derived from spans the
+caller has read (each unit's whole activation list, from the product's
+roster, point-read inside the bill transaction). It is the guard that a
+unit-period cannot be billed twice.
+
+⚠️ May be NEGATIVE: an over-billed item, which the caller reports rather
+than clamps.
+
+### `spanInstants(span: Pick<UnitActivationType, "start" | "end" | "provider_confirmed">): SpanInstants`
+
+The instants a span is billed over: the provider's confirmed ones where set,
+otherwise CFS's own (§ 8 — the operator reconciles against the provider's
+invoice, so the provider's word wins once it exists). A confirmed on-instant
+with no confirmed off-instant keeps CFS's off-instant, and says `cfs`, since
+the pair is then only half confirmed.
+
 ## `@cfs/core/utils/products`
 
 Shared product utility functions for CFS applications.
@@ -46045,6 +46798,14 @@ A `stock_method` that carries a count.
 
 ```ts
 type CountedStockMethod = Exclude<StockMethodType, "none">;
+```
+
+### `SupersessionNode`
+
+The fields the supersession helpers read.
+
+```ts
+type SupersessionNode = Pick<Product, "uid" | "type" | "uid_superseded_by">;
 ```
 
 ### `buildComponentEntries(parentUid: string, sourceComponents: T[], baseDepth: number, maxDepth?: number): T[]`
@@ -46122,6 +46883,21 @@ API's ledger lifecycle does. Only `rental` and `sale` are physical: `service`,
 `surcharge` and `transaction_fee` are billing lines, and `replacement` is the
 billing stand-in for a lost rental unit, not a second copy of it.
 
+### `productLineage(uid: string, lookup: fnOrConstructor): string[]`
+
+A product's line of succession, itself first: `[A, B, C]` when A is
+superseded by B and B by C. Reports fold every member's revenue under the
+LAST one (`api-cloudrun/.claude/plans/serialized-subrent.md` § 12), while
+the orders, invoices and pick sheets that name A keep showing A.
+
+Stops at a link `lookup` cannot resolve — an unread or deleted successor —
+and returns the chain so far: a report must still render.
+{@link validateSupersession} is what refuses such a link at write time.
+
+### `productSurvivor(uid: string, lookup: fnOrConstructor): string`
+
+The product a report folds `uid` under: the last of its {@link productLineage}.
+
 ### `removeComponentEntries(components: T[], path: string[]): T[]`
 
 Remove a component and all its descendants from a flat components array.
@@ -46142,6 +46918,22 @@ direct-children block (keyed by `path.at(-1)`, a path of length ≤ 1 being the
 root's), entries with `zero_priced === true` precede the rest. Position
 across parent blocks is preserved — only same-parent siblings swap.
 Mutates `components` in place and returns it; idempotent.
+
+### `validateSupersession(product: SupersessionNode, lookup: fnOrConstructor): string[]`
+
+The CROSS-DOCUMENT supersession invariants, for a product about to be
+written with `uid_superseded_by` set. The org merge's split
+(`validateMergeLinks`): the schema refine forbids only self-reference, and
+what reads another document lives here, called by the writer.
+
+1. the successor exists;
+2. it has the same `type` — a rental's revenue must not fold into a sale's;
+3. the chain from it resolves to a survivor without returning to `product`.
+   Unlike an org merge, a chain may be longer than one hop (A → B → C reports
+   under C).
+
+Returns every violation; empty means the link is consistent. A product with
+no `uid_superseded_by` is trivially consistent.
 
 ## `@cfs/core/utils/replacements`
 
@@ -48573,6 +49365,15 @@ Everything here is pure and platform-free. The manager's picker and the
 api's validation read the same parser; the api's ledger writer and the
 `audit-unit-replay` script run the same {@link foldRosterUnits}.
 
+### `DEVICE_BOUNDARY_REASONS`
+
+The reasons whose entry starts a new PHYSICAL unit on a number, so {@link serialAt}
+never reads a serial across one.
+
+```ts
+const DEVICE_BOUNDARY_REASONS: ReadonlySet<SerialChangeReasonType>;
+```
+
 ### `FormatUnitRangesOptions`
 
 Options for {@link formatUnitRanges}.
@@ -48620,6 +49421,14 @@ A roster's `units` map: unit number (as a key) → where it is.
 
 ```ts
 type RosterUnits = Record<string, UnitRosterEntryType>;
+```
+
+### `UnitOwnership`
+
+Whose a unit is: CFS's, or the supplier it was subrented from.
+
+```ts
+type UnitOwnership = "cfs" | "supplier";
 ```
 
 ### `UnitRange`
@@ -48740,10 +49549,12 @@ The serial of the physical unit that held a number at `instant` — or, with
 ever recorded for that unit.
 
 🔴 **Not "the history entry open at `instant`".** A number changes PHYSICAL
-unit only at a `replaced` entry; `initial` and `corrected` entries restate the
-serial of the unit already there. So this finds the span of history between
-the `replaced` entries either side of `instant` and returns that span's
-LATEST serial. The open-entry reading is wrong both ways that matter: the
+unit only at a `replaced` or `subrented` entry ({@link DEVICE_BOUNDARY_REASONS});
+`initial` and `corrected` entries restate the serial of the unit already
+there. So this finds the span of history between the boundary entries either
+side of `instant` and returns that span's LATEST serial. A `subrented` entry
+is a boundary because a supplier's device is never the CFS-era unit before
+it, even under the same number. The open-entry reading is wrong both ways that matter: the
 walkie's serials were pasted (`initial`) on 2026-10-07, after most of its
 losses, so no entry is open at the loss; and a `corrected` entry after the
 loss fixes a typo in the same radio's serial.
@@ -48775,6 +49586,23 @@ The fewest inclusive runs covering `numbers`, ascending.
 Unflagged shelf units, ascending — optionally on one location. The manager
 filtered the roster this way in three places (`recordActions`,
 `OOSBreakdownEditor`, `unitPicks`).
+
+### `unitOwnership(unit: Pick<UnitType, "serial_history">): UnitOwnership`
+
+`"supplier"` when {@link unitSupplier} names one, else `"cfs"`.
+
+### `unitSupplier(unit: Pick<UnitType, "serial_history">): UidNameRefType | null`
+
+The supplier a unit is subrented from: its OPEN history entry's `supplier`,
+or `null` for a CFS-owned unit and for a number with no open entry (vacant,
+retired, or an active unit the spell backfill has not reached yet — which
+only a CFS conversion produced). An entry stored before `supplier` existed
+reads as `null`.
+
+The one predicate the api's refusing writers, the manager's pickers and the
+unit audit all read (`api-cloudrun/.claude/plans/serialized-subrent.md` § 2).
+Never decide ownership from the entry's `reason`: a `corrected` entry on a
+vendor unit keeps its supplier.
 
 ## `@cfs/core/utils/templates`
 

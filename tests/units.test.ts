@@ -29,6 +29,8 @@ import {
   serialAt,
   suggestUnits,
   toUnitRanges,
+  unitOwnership,
+  unitSupplier,
 } from "../src/utils/units.ts";
 import { bookingId, fid, legUid } from "./helpers/ids.ts";
 
@@ -487,7 +489,13 @@ Deno.test("foldRosterUnits does not mutate its input", () => {
 
 // ── serialAt ─────────────────────────────────────────────────────────
 
-type HistoryEntry = { serial_number: string; start: string; end: string | null; reason: "initial" | "replaced" | "corrected" };
+type HistoryEntry = {
+  serial_number: string | null;
+  start: string;
+  end: string | null;
+  reason: "initial" | "replaced" | "corrected" | "subrented";
+  supplier?: { uid: string; name: string } | null;
+};
 function history(...entries: HistoryEntry[]) {
   return {
     serial_history: entries.map((e) => ({ ...e, uid_movement: null, notes: "", changed_by: { uid: "u1", name: "Op" } })),
@@ -525,6 +533,51 @@ Deno.test("serialAt: a written-off radio's closed entry still answers; no histor
   );
   assertEquals(serialAt(unit, LOSS), "902ZAE5968");
   assertEquals(serialAt(history(), LOSS), null);
+});
+
+Deno.test("serialAt: a `subrented` entry is a device boundary — a vendor's device never answers for the CFS-era unit", () => {
+  // A CFS-owned hotspot A held the number, went vacant, and Vision's device B
+  // was later subrented in on the same number.
+  const unit = history(
+    { serial_number: "IMEI-A", start: "2026-01-05T09:00:00.000-06:00", end: "2026-05-01T09:00:00.000-05:00", reason: "initial" },
+    {
+      serial_number: "IMEI-B",
+      start: "2026-06-01T09:00:00.000-05:00",
+      end: null,
+      reason: "subrented",
+      supplier: { uid: "VisionComms000000000", name: "Vision" },
+    },
+  );
+  assertEquals(serialAt(unit, "2026-03-01T09:00:00.000-06:00"), "IMEI-A");
+  assertEquals(serialAt(unit, "2026-07-01T09:00:00.000-05:00"), "IMEI-B");
+  // Without the boundary, the vendor's later serial would have answered for A's spell.
+  const asInitial = history(
+    { serial_number: "IMEI-A", start: "2026-01-05T09:00:00.000-06:00", end: "2026-05-01T09:00:00.000-05:00", reason: "initial" },
+    { serial_number: "IMEI-B", start: "2026-06-01T09:00:00.000-05:00", end: null, reason: "initial" },
+  );
+  assertEquals(serialAt(asInitial, "2026-03-01T09:00:00.000-06:00"), "IMEI-B", "the control: no boundary, wrong device");
+});
+
+// ── ownership ────────────────────────────────────────────────────────
+
+Deno.test("unitOwnership / unitSupplier: the OPEN entry's supplier decides, never the reason", () => {
+  const vision = { uid: "VisionComms000000000", name: "Vision" };
+  const rented = history({ serial_number: null, start: "2026-06-01T09:00:00.000-05:00", end: null, reason: "subrented", supplier: vision });
+  assertEquals(unitSupplier(rented), vision);
+  assertEquals(unitOwnership(rented), "supplier");
+  // A correction on a vendor unit keeps its supplier while its reason is `corrected`.
+  const corrected = history(
+    { serial_number: "IMEI-X", start: "2026-06-01T09:00:00.000-05:00", end: "2026-06-02T09:00:00.000-05:00", reason: "subrented", supplier: vision },
+    { serial_number: "IMEI-Y", start: "2026-06-02T09:00:00.000-05:00", end: null, reason: "corrected", supplier: vision },
+  );
+  assertEquals(unitOwnership(corrected), "supplier");
+  // Owned: explicit null, and an entry stored before the field existed.
+  assertEquals(unitOwnership(history({ serial_number: "SN", start: "2026-01-01T09:00:00.000-06:00", end: null, reason: "initial", supplier: null })), "cfs");
+  assertEquals(unitOwnership(history({ serial_number: "SN", start: "2026-01-01T09:00:00.000-06:00", end: null, reason: "initial" })), "cfs");
+  // A vacant ex-vendor number: its CLOSED entry's supplier does not make it the vendor's.
+  const vacant = history({ serial_number: "IMEI-X", start: "2026-06-01T09:00:00.000-05:00", end: "2026-07-01T09:00:00.000-05:00", reason: "subrented", supplier: vision });
+  assertEquals(unitSupplier(vacant), null);
+  assertEquals(unitOwnership(vacant), "cfs");
 });
 
 Deno.test("serialAt: a number first minted for a replacement after the instant held no radio then", () => {

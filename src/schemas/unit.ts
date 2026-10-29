@@ -40,6 +40,8 @@ import {
   type ActorRefType,
   FirestoreTimestamp,
   type FirestoreTimestampType,
+  UidNameRef,
+  type UidNameRefType,
 } from "./common.ts";
 
 // ── Scalars ──────────────────────────────────────────────────────────
@@ -101,10 +103,13 @@ export const MAX_UNITS_PER_CREATE = 400;
 /**
  * Whether a number is in use.
  *
- * - `active` — owned, and on the product's roster.
- * - `vacant` — not owned right now (sold, written off, never activated). The
- *   number can take a replacement unit with a new serial. EVERY departure
- *   leaves a number vacant (owner, 2026-10-03); nothing retires one implicitly.
+ * - `active` — in CFS's CUSTODY, and on the product's roster. Not "owned": a
+ *   unit subrented from a supplier is active too. WHOSE it is is its open
+ *   history entry's `supplier` (`unitOwnership`, `@cfs/core/utils/units`).
+ * - `vacant` — not in CFS's custody right now (sold, written off, returned to
+ *   its supplier, never activated). The number can take a replacement unit with
+ *   a new serial. EVERY departure leaves a number vacant (owner, 2026-10-03);
+ *   nothing retires one implicitly.
  * - `retired` — never to be reused. Only an operator retires a number, and only
  *   from `vacant`.
  */
@@ -115,23 +120,32 @@ export type UnitStatusType = typeof UNIT_STATUSES[number];
 export const UnitStatusEnum: z.ZodType<UnitStatusType> = z.enum(UNIT_STATUSES);
 
 /**
- * Why a serial was set on a number.
+ * Why a history entry (a spell) opened on a number.
  *
- * - `initial` — the first serial recorded for the number (a create, a
- *   conversion, or a later bulk paste).
+ * - `initial` — the first spell of a CFS-owned unit on the number (a create, a
+ *   conversion, an ownership movement, or a later bulk paste).
  * - `replaced` — a different physical unit took over the number.
  * - `corrected` — the previous entry was mis-typed; the unit did not change.
+ * - `subrented` — a `subrent_in` brought a supplier's unit in on the number:
+ *   every entry a subrent opens takes it, whether the number was fresh, vacant,
+ *   or is the same device coming back. Like `replaced` it starts a new PHYSICAL
+ *   unit (`serialAt`). It says why the spell opened, never whose the unit is —
+ *   that is the entry's `supplier`, which a `corrected` entry on a vendor unit
+ *   carries forward.
+ *
+ * Adding a member widens a stored enum, so readers ship before any writer.
  */
-export const SERIAL_CHANGE_REASONS = ["initial", "replaced", "corrected"] as const;
+export const SERIAL_CHANGE_REASONS = ["initial", "replaced", "corrected", "subrented"] as const;
 /** One serial-change reason. See {@link SERIAL_CHANGE_REASONS}. */
 export type SerialChangeReasonType = typeof SERIAL_CHANGE_REASONS[number];
 /** Zod schema for {@link SerialChangeReasonType}. */
 export const SerialChangeReasonEnum: z.ZodType<SerialChangeReasonType> = z.enum(SERIAL_CHANGE_REASONS);
 
 /**
- * The reasons `PUT /units/{uid}` may send. Today every reason; kept as its own
- * list, the `OOS_USER_STATUSES` pattern, so narrowing what an operator may send
- * does not narrow what storage may hold.
+ * The reasons `PUT /units/{uid}` may send. Every reason but `subrented`, which
+ * only a `subrent_in` opens. Kept as its own list, the `OOS_USER_STATUSES`
+ * pattern, so narrowing what an operator may send does not narrow what storage
+ * may hold.
  */
 export const UNIT_USER_SERIAL_REASONS = ["initial", "replaced", "corrected"] as const;
 /** One reason an operator may send. */
@@ -159,15 +173,22 @@ void _unitVocabSubsets;
 // ── The document ─────────────────────────────────────────────────────
 
 /**
- * One serial a number has carried, and over which span.
+ * One SPELL of one physical unit under a number: from when it took the number
+ * until it left or was re-recorded. Its serial is optional — a tent has a
+ * number and no serial, and a radio's serial may be typed in later — so an
+ * entry is a spell, not "a serial". The field keeps the name `serial_history`
+ * because renaming a stored array on a strict object is a four-step purge for a
+ * cosmetic gain.
  *
  * The acquisition reference lives HERE, per entry, rather than once per unit: a
  * replacement re-points the number at a new physical unit, and a single
  * unit-level field would lose the original acquisition. The unit's CURRENT
- * acquisition is the open entry's `uid_movement`.
+ * acquisition is the open entry's `uid_movement`. Ownership lives here for the
+ * same reason: a number can be CFS-owned, then vacant, then a supplier's.
  */
 export interface UnitSerialHistoryEntryType {
-  serial_number: string;
+  /** The manufacturer serial this spell carried, or `null` when none was recorded. */
+  serial_number: string | null;
   /** When this serial took the number. A Chicago instant; array members carry no `_fs` twin. */
   start: string;
   /** When it stopped carrying it; `null` is the current mapping. At most one entry is open. */
@@ -179,6 +200,53 @@ export interface UnitSerialHistoryEntryType {
    * `corrected` entry that no movement made.
    */
   uid_movement: string | null;
+  /**
+   * WHOSE the unit is during this spell: the supplier it was subrented from, or
+   * `null` for a CFS-owned unit. Non-null exactly when a `subrent_in` opened the
+   * spell; a `corrected` copy carries it forward. Spelled as `Purchase.supplier`.
+   * A unit is vendor-owned iff its OPEN entry's `supplier !== null`.
+   *
+   * ⚠️ Optional only until the backfill stamps `null` onto every stored entry
+   * (api-cloudrun `.claude/plans/serialized-subrent.md` § 1, step 3); the
+   * contract beta then makes it required. Absent reads as `null`.
+   */
+  supplier?: UidNameRefType | null;
+  notes: string;
+  changed_by: ActorRefType;
+}
+
+/** The confirmed on/off instants of an activation, as the provider's portal or bill states them. */
+export interface UnitActivationConfirmedType {
+  /** A Chicago instant. */
+  start: string;
+  /** A Chicago instant; `null` until the off-instant is confirmed. */
+  end: string | null;
+}
+
+/**
+ * One span during which a unit's service line was switched ON — a hotspot's or
+ * router's data line, billed by its provider through the product's `cogs`
+ * activation entry that `uid_cogs` names.
+ *
+ * RECORDED, never derived from custody: a device can sit on the shelf switched
+ * on (an idle, still-billed span) or go out switched off. Present on every
+ * unit, owned or rented, because CFS's own devices carry provider lines too.
+ * The biller is the named cost entry's `provider`, not a field here, since one
+ * product can hold units billed by different providers.
+ */
+export interface UnitActivationType {
+  /** An array-member uid (`crypto.randomUUID()`). */
+  uid: string;
+  /** When CFS asked the provider to switch the line on. A Chicago instant. */
+  start: string;
+  /** When it was switched off; `null` while still on. A Chicago instant. */
+  end: string | null;
+  /** The order it was switched on for, or `null` for an idle or test activation. */
+  uid_order: string | null;
+  /** The product's `cogs` activation entry this span accrues (`CogsEntryType.uid`). */
+  uid_cogs: string;
+  /** What the provider confirms, or `null` until the on-instant is confirmed. */
+  provider_confirmed: UnitActivationConfirmedType | null;
   notes: string;
   changed_by: ActorRefType;
 }
@@ -197,6 +265,15 @@ export interface UnitType {
   serial_number: string | null;
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
+  /**
+   * The unit's service-line activations, ascending by `start`, never
+   * overlapping, at most one open, and none open unless `active`.
+   *
+   * ⚠️ Optional only until the backfill stamps `[]` onto every stored unit
+   * (`.claude/plans/serialized-subrent.md` § 1, step 3); the contract beta
+   * makes it required. Absent reads as `[]`.
+   */
+  activations?: UnitActivationType[];
   /**
    * The `POST /products/{uid}/units` request that minted this number — its
    * `uuid_session`, the create's idempotency key. A retried count-mode create
@@ -217,14 +294,42 @@ export interface UnitType {
 
 /** Zod schema for {@link UnitSerialHistoryEntryType}. */
 export const UnitSerialHistoryEntry: z.ZodType<UnitSerialHistoryEntryType> = z.strictObject({
-  serial_number: SerialNumber.meta({ column: true, label: "Serial" }),
+  serial_number: SerialNumber.nullable().meta({ column: true, label: "Serial" }),
   start: chicagoInstant().meta({ column: true, label: "From" }),
   end: chicagoInstant().nullable().meta({ column: true, label: "Until" }),
   reason: SerialChangeReasonEnum.meta({ column: true, label: "Reason" }),
   uid_movement: MovementId.nullable(),
+  supplier: UidNameRef.nullable().optional().meta({ label: "Supplier" }),
   // `mask` — free text an operator writes about a unit, which can name a person.
   notes: z.string().max(500).meta({ pii: "mask" }),
   changed_by: ActorRef.meta({ label: "Changed By" }),
+});
+
+/** Zod schema for {@link UnitActivationConfirmedType}. */
+export const UnitActivationConfirmed: z.ZodType<UnitActivationConfirmedType> = z.strictObject({
+  start: chicagoInstant().meta({ column: true, label: "Provider On" }),
+  end: chicagoInstant().nullable().meta({ column: true, label: "Provider Off" }),
+}).superRefine((c, ctx) => {
+  if (c.end !== null && Date.parse(c.end) < Date.parse(c.start)) {
+    ctx.addIssue({ code: "custom", path: ["end"], message: "a confirmed activation ends at or after it starts" });
+  }
+});
+
+/** Zod schema for {@link UnitActivationType}. */
+export const UnitActivation: z.ZodType<UnitActivationType> = z.strictObject({
+  uid: z.uuid(),
+  start: chicagoInstant().meta({ column: true, label: "Active From" }),
+  end: chicagoInstant().nullable().meta({ column: true, label: "Active Until" }),
+  uid_order: FirestoreId.nullable(),
+  uid_cogs: z.uuid(),
+  provider_confirmed: UnitActivationConfirmed.nullable().meta({ label: "Confirmed" }),
+  // `mask` — free text an operator writes about a unit, which can name a person.
+  notes: z.string().max(500).meta({ pii: "mask" }),
+  changed_by: ActorRef.meta({ label: "Changed By" }),
+}).superRefine((a, ctx) => {
+  if (a.end !== null && Date.parse(a.end) < Date.parse(a.start)) {
+    ctx.addIssue({ code: "custom", path: ["end"], message: "an activation ends at or after it starts" });
+  }
 });
 
 /**
@@ -234,7 +339,16 @@ export const UnitSerialHistoryEntry: z.ZodType<UnitSerialHistoryEntryType> = z.s
  * 2. `serial_number` is the open entry's serial, or `null` when none is open;
  * 3. a number that is not `active` carries no serial and no open entry — a
  *    vacant number's last serial is CLOSED, which is what lets a replacement
- *    open a new one.
+ *    open a new one;
+ * 4. its activations ascend by `start` and never overlap, at most one is
+ *    open, and a number that is not `active` has none open — switching a line
+ *    off is a call to the provider, so a departure refuses an activated unit
+ *    rather than closing its span for it.
+ *
+ * ⚠️ Rule 3 still allows an ACTIVE unit with no open entry. The universal
+ * spell rule — active ⟺ exactly one open entry — turns on in the contract beta,
+ * once the backfill has opened one for every active unit that has none
+ * (`.claude/plans/serialized-subrent.md` § 1, step 4).
  */
 function checkUnit(doc: UnitType, ctx: z.RefinementCtx): void {
   const open = doc.serial_history.filter((e) => e.end === null);
@@ -263,6 +377,34 @@ function checkUnit(doc: UnitType, ctx: z.RefinementCtx): void {
       message: `a ${doc.status} number carries no serial; close its open history entry first`,
     });
   }
+  checkActivations(doc, ctx);
+}
+
+function checkActivations(doc: UnitType, ctx: z.RefinementCtx): void {
+  const spans = doc.activations ?? [];
+  for (let i = 1; i < spans.length; i++) {
+    const prev = spans[i - 1];
+    if (Date.parse(spans[i].start) < Date.parse(prev.start)) {
+      ctx.addIssue({ code: "custom", path: ["activations", i], message: "activations must ascend by start" });
+      return;
+    }
+    if (prev.end === null || Date.parse(prev.end) > Date.parse(spans[i].start)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["activations", i],
+        message: "activations must not overlap: a span starts only after the previous one has ended",
+      });
+      return;
+    }
+  }
+  const open = spans.filter((a) => a.end === null).length;
+  if (open > 0 && doc.status !== "active") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["activations"],
+      message: `a ${doc.status} number has no line switched on; end its open activation first`,
+    });
+  }
 }
 
 /** Zod schema for {@link UnitType}. */
@@ -273,6 +415,7 @@ export const UnitSchema: z.ZodType<UnitType> = z.strictObject({
   serial_number: SerialNumber.nullable().meta({ column: true, label: "Serial" }),
   serial_history: z.array(UnitSerialHistoryEntry).meta({ label: "Serial History" }),
   status: UnitStatusEnum.meta({ column: true, label: "Status" }),
+  activations: z.array(UnitActivation).optional().meta({ label: "Activations" }),
   uuid_session: z.uuid().nullable(),
   // Plain, not `.default(0)`: every writer states it, and a stored default is
   // inert (`tests/stored-defaults.test.ts`).

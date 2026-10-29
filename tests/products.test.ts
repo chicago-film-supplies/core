@@ -1,5 +1,14 @@
-import { assertEquals } from "@std/assert";
-import { buildComponentEntries, productCountsStock, productHasLedger, removeComponentEntries } from "../src/utils/products.ts";
+import { assertEquals, assertThrows } from "@std/assert";
+import {
+  buildComponentEntries,
+  productCountsStock,
+  productHasLedger,
+  productLineage,
+  productSurvivor,
+  removeComponentEntries,
+  type SupersessionNode,
+  validateSupersession,
+} from "../src/utils/products.ts";
 import { ComponentSchema, getInitialValues } from "../src/schemas/mod.ts";
 import type { ProductComponent } from "../src/schemas/mod.ts";
 
@@ -133,4 +142,51 @@ Deno.test("productHasLedger / productCountsStock: rental and sale only, and none
   assertEquals(productCountsStock("sale", "serialized"), true);
   assertEquals(productCountsStock("rental", "none"), false);
   assertEquals(productCountsStock("service", "bulk"), false);
+});
+
+// ── supersession (serialized-subrent § 12) ───────────────────────────
+
+function catalog(...nodes: SupersessionNode[]) {
+  const byUid = new Map(nodes.map((n) => [n.uid, n]));
+  return (uid: string) => byUid.get(uid);
+}
+const TWIN: SupersessionNode = { uid: "VCtwin", type: "rental", uid_superseded_by: "Owned" };
+const OWNED: SupersessionNode = { uid: "Owned", type: "rental" };
+
+Deno.test("productLineage: the chain, itself first; the survivor is the last", () => {
+  const lookup = catalog(
+    { uid: "A", type: "rental", uid_superseded_by: "B" },
+    { uid: "B", type: "rental", uid_superseded_by: "C" },
+    { uid: "C", type: "rental" },
+  );
+  assertEquals(productLineage("A", lookup), ["A", "B", "C"]);
+  assertEquals(productSurvivor("A", lookup), "C");
+  assertEquals(productSurvivor("C", lookup), "C");
+  // An unreadable successor stops the chain rather than failing the report.
+  assertEquals(productLineage("X", catalog({ uid: "X", type: "rental", uid_superseded_by: "gone" })), ["X", "gone"]);
+});
+
+Deno.test("productLineage: a cycle throws rather than folding revenue under an arbitrary member", () => {
+  const lookup = catalog(
+    { uid: "A", type: "rental", uid_superseded_by: "B" },
+    { uid: "B", type: "rental", uid_superseded_by: "A" },
+  );
+  assertThrows(() => productLineage("A", lookup), Error, "cycles: A → B → A");
+});
+
+Deno.test("validateSupersession: exists, same type, and the chain does not return to the product", () => {
+  assertEquals(validateSupersession(OWNED, catalog(OWNED)), [], "a live product is trivially consistent");
+  assertEquals(validateSupersession(TWIN, catalog(TWIN, OWNED)), []);
+  assertEquals(validateSupersession(TWIN, catalog(TWIN)), ["product VCtwin is superseded by Owned, which does not exist"]);
+  assertEquals(
+    validateSupersession(TWIN, catalog(TWIN, { ...OWNED, type: "sale" })),
+    ["product VCtwin (rental) cannot be superseded by Owned (sale): the types differ"],
+  );
+  // The writer validates the document it is ABOUT to write, so a stored
+  // back-pointer from the successor makes a cycle through the new link.
+  const cyc = validateSupersession(TWIN, catalog({ ...TWIN, uid_superseded_by: undefined }, { ...OWNED, uid_superseded_by: "VCtwin" }));
+  assertEquals(cyc, ["product supersession cycles: VCtwin → Owned → VCtwin"]);
+  assertEquals(validateSupersession({ ...OWNED, uid_superseded_by: "Owned" }, catalog(OWNED)), [
+    "product Owned cannot be superseded by itself",
+  ]);
 });

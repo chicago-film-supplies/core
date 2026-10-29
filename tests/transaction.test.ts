@@ -1175,22 +1175,18 @@ function issuePaths(doc: unknown): string[] {
   return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
 }
 
-Deno.test("rule 5: only the twin reclass, the subrent types and the count boundaries forbid units", () => {
+Deno.test("rule 5: only the twin reclass and the count boundaries forbid units", () => {
   // A reclass moves units between two products' rosters; a count boundary is
   // not where a serialized product's units are placed (its roster's `enroll`
-  // is), so naming one there would place it twice. A subrent's units are never
-  // numbered: a serialized product cannot be subrented, because its roster
-  // would mint permanent numbers for units CFS gives back.
+  // is), so naming one there would place it twice. The subrent types ALLOW
+  // units since serialized subrent (api-cloudrun serialized-subrent § 5): a
+  // numbered vendor unit's ownership is its open history entry's `supplier`,
+  // and its number goes vacant when it goes back.
   const forbidden = MOVEMENT_TYPES.filter((t) => MOVEMENT_CONTRACTS[t].units === "forbidden");
-  assertEquals(forbidden, [
-    "reclass_out",
-    "reclass_in",
-    "subrent_in",
-    "subrent_out",
-    "return_to_supplier",
-    "count_open",
-    "count_close",
-  ]);
+  assertEquals(forbidden, ["reclass_out", "reclass_in", "count_open", "count_close"]);
+  for (const t of ["subrent_in", "subrent_out", "return_to_supplier"] as const) {
+    assertEquals(MOVEMENT_CONTRACTS[t].units, "allowed", t);
+  }
 });
 
 Deno.test("rule 5: every type accepts empty unit keys (the scaffold) and refuses absent ones", () => {
@@ -1430,6 +1426,27 @@ Deno.test("every subrent type names exactly ONE purchase and a supplier — stri
     assertEquals(issuePaths(movement(type, { supplier: null })), ["supplier"], `${type} null supplier`);
     const { supplier: _absent, ...noKey } = movement(type);
     assertEquals(issuePaths(noKey), ["supplier"], `${type} absent supplier`);
+  }
+});
+
+Deno.test("subrent in/out name their units on a serialized product (serialized-subrent § 5)", () => {
+  // The movement's line places from the fixture, with the units attached.
+  for (const type of SUBRENT_IN_OUT) {
+    const base = movement(type, { quantity: 2 });
+    const lines = (base.lines as { location: unknown }[]).map((l) => ({ quantity: 2, location: l.location, units: [3004, 3007] }));
+    const named = { ...base, lines, units: [unit(3004, "IMEI-1"), unit(3007)], query_by_unit_number: [3004, 3007] };
+    assertEquals(issuePaths(named), [], type);
+  }
+});
+
+Deno.test("rule 5: a type that forbids units says ITS reason, not the reclass wording for all", () => {
+  for (const type of MOVEMENT_TYPES.filter((t) => MOVEMENT_CONTRACTS[t].units === "forbidden")) {
+    const named = movement(type, { units: [unit(3)], query_by_unit_number: [3] });
+    const r = MovementSchema.safeParse(named);
+    assert(!r.success, type);
+    const msg = r.error.issues.find((i) => i.path.join(".") === "units")?.message ?? "";
+    assert(msg.startsWith(`a "${type}" never names units: `), `${type}: ${msg}`);
+    assert(!msg.includes("its contract forbids them"), `${type} has no stated reason`);
   }
 });
 

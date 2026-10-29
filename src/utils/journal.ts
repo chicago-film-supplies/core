@@ -53,6 +53,7 @@ import {
 import type { FirestoreTimestampType, FirestoreTimestampValue } from "../schemas/common.ts";
 import { breakdownQuantity } from "./bookings.ts";
 import { parseBookingId } from "./booking-id.ts";
+import { foldRosterUnits, RosterFoldError, type RosterMovement, type RosterUnits } from "./units.ts";
 
 // ── The one order ────────────────────────────────────────────────────
 
@@ -168,15 +169,20 @@ export interface JournalMovement extends JournalOrdered {
   units: ReadonlyArray<{ number: number }>;
 }
 
-/** One thing a journal fold accumulates. */
-export interface JournalProjection<S> {
+/**
+ * One thing a journal fold accumulates. `M` is the movement shape it reads:
+ * {@link JournalMovement} by default, wider for a projection that needs more of
+ * the movement (as {@link unitOutSpells} does).
+ */
+export interface JournalProjection<S, M extends JournalMovement = JournalMovement> {
   init(): S;
-  step(state: S, movement: JournalMovement): void;
+  step(state: S, movement: M): void;
 }
 
 /** The states a list of projections produce, in the same order. */
-export type ProjectionStates<P extends readonly JournalProjection<unknown>[]> = {
-  [K in keyof P]: P[K] extends JournalProjection<infer S> ? S : never;
+export type ProjectionStates<P extends readonly JournalProjection<unknown, never>[]> = {
+  // deno-lint-ignore no-explicit-any
+  [K in keyof P]: P[K] extends JournalProjection<infer S, any> ? S : never;
 };
 
 /**
@@ -184,8 +190,11 @@ export type ProjectionStates<P extends readonly JournalProjection<unknown>[]> = 
  * and return each projection's state. The input is not mutated or assumed
  * sorted.
  */
-export function foldJournal<P extends readonly JournalProjection<unknown>[]>(
-  movements: readonly JournalMovement[],
+export function foldJournal<
+  M extends JournalMovement,
+  P extends readonly JournalProjection<unknown, M>[],
+>(
+  movements: readonly M[],
   projections: P,
 ): ProjectionStates<P> {
   const ordered = [...movements].sort(journalOrder);
@@ -287,6 +296,97 @@ export function unitsByBooking(): JournalProjection<Map<string, UnitSetsByKey>> 
         if (m.custody.to !== null && HISTORY.has(m.custody.to)) (sets[m.custody.to] ??= new Set()).add(n);
       }
       state.set(m.uid_booking, sets);
+    },
+  };
+}
+
+// ── Unit time out ────────────────────────────────────────────────────
+
+/** A movement as {@link unitOutSpells} reads it: the journal fields plus the roster fold's. */
+export type UnitJournalMovement = JournalMovement & RosterMovement;
+
+/** One spell a unit spent OUT on one booking. */
+export interface UnitOutSpell {
+  uid_booking: string;
+  /** The `date` of the movement that put it out there. */
+  start: string;
+  /** The `date` of the movement that took it off that booking; `null` while it is still out. */
+  end: string | null;
+}
+
+/** A movement the roster fold refused, and why. */
+export interface UnitOutFinding {
+  uid_movement: string;
+  message: string;
+  unit: number | null;
+}
+
+/** {@link unitOutSpells}' state. */
+export interface UnitOutSpells {
+  /** Per unit number, its spells out, in journal order. */
+  spells: Map<number, UnitOutSpell[]>;
+  /** The roster as the fold leaves it. */
+  roster: RosterUnits;
+  /**
+   * Movements the fold refused. Each is skipped — the roster is left as it was
+   * — so every spell after a finding on the same unit is approximate, and a
+   * caller reporting spells must report these beside them.
+   */
+  findings: UnitOutFinding[];
+}
+
+/**
+ * When each unit was physically OUT on a booking — the unit activity report's
+ * "days out" (`api-cloudrun/.claude/plans/serialized-subrent.md` § 8).
+ *
+ * 🔴 **It runs the ROSTER FOLD, not a line rule of its own.** A rule reading
+ * lines `to: bookings/B` would miscount three cases `foldRosterUnits` already
+ * handles: a lineless `rebook_out`/`rebook_in` pair moves an out unit between
+ * bookings with no line at all; an `enroll`'s in-place line `to: bookings/B`
+ * seeds a unit `unattributed_out`, which is out on no RECORDED booking and so
+ * opens no spell here; and a lineless customer-side step changes nothing. A
+ * spell opens when a movement leaves a unit `out` on B and it was not before,
+ * and closes when one leaves it anywhere else.
+ *
+ * ⚠️ **Feed it every movement of the product, not one unit's.** The fold checks
+ * every unit a movement names against where the roster has it, so a movement
+ * naming units 3001 and 3002, folded without 3002's earlier history, is a
+ * finding. A movement names one product's units only, so the union of
+ * `query_by_unit_number` over all of a product's units is complete.
+ *
+ * Folded in {@link journalOrder} by {@link foldJournal} — a business-date
+ * question. The live roster was applied in record order, so a backdated
+ * movement can be a finding here while the stored roster is fine; that is what
+ * `findings` is for.
+ */
+export function unitOutSpells(): JournalProjection<UnitOutSpells, UnitJournalMovement> {
+  return {
+    init: () => ({ spells: new Map(), roster: {}, findings: [] }),
+    step(state, m) {
+      if (m.units.length === 0) return;
+      let next: RosterUnits;
+      try {
+        next = foldRosterUnits(state.roster, m);
+      } catch (e) {
+        if (!(e instanceof RosterFoldError)) throw e;
+        state.findings.push({ uid_movement: m.uid, message: e.message, unit: e.unit });
+        return;
+      }
+      for (const { number: n } of m.units) {
+        const before = state.roster[String(n)];
+        const after = next[String(n)];
+        const was = before?.state === "out" ? before.uid_booking : null;
+        const now = after?.state === "out" ? after.uid_booking : null;
+        if (was === now) continue;
+        const spells = state.spells.get(n) ?? [];
+        if (was !== null) {
+          const open = spells.findLast((s) => s.uid_booking === was && s.end === null);
+          if (open !== undefined) open.end = m.date;
+        }
+        if (now !== null) spells.push({ uid_booking: now, start: m.date, end: null });
+        state.spells.set(n, spells);
+      }
+      state.roster = next;
     },
   };
 }

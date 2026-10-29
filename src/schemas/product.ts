@@ -8,6 +8,8 @@ import { uploadcareRef } from "./uploadcare/ref.ts";
 import {
   ActorRef,
   type ActorRefType,
+  COACostEnum,
+  type COACostType,
   COARevenueEnum,
   type COARevenueType,
   ComponentTypeEnum,
@@ -31,6 +33,135 @@ import {
   type UidNameRefType,
   checkZeroPricedAmount,
 } from "./common.ts";
+
+// ── The cost model ───────────────────────────────────────────────────
+
+/**
+ * What triggers a cost-of-revenue rule. `sale` — a sale's inventory relief;
+ * `activation` — a unit's service line being switched on (a hotspot's data
+ * line), billed by its provider per period. Later: `booking`, `depreciation`
+ * (api-cloudrun#1388).
+ */
+export const COGS_TRIGGERS = ["sale", "activation"] as const;
+/** One cost trigger. See {@link COGS_TRIGGERS}. */
+export type CogsTriggerType = typeof COGS_TRIGGERS[number];
+/** Zod schema for {@link CogsTriggerType}. */
+export const CogsTriggerEnum: z.ZodType<CogsTriggerType> = z.enum(COGS_TRIGGERS);
+
+/**
+ * How an activation entry's periods are cut. ANY active day bills the whole
+ * period (owner, 2026-10-27, Q11).
+ *
+ * - `per_week` — 7-day cycles anchored on the unit's FIRST activation day under
+ *   the entry, so a re-activation inside a week already billed continues it.
+ * - `per_calendar_month` — Chicago calendar months.
+ *
+ * A separate vocabulary from `PRICE_FORMULAS`, so a customer price picker never
+ * offers a cost formula (the core#78 lesson). The one function that applies
+ * them is `billablePeriods` (`@cfs/core/utils/cogs`).
+ */
+export const COGS_ACTIVATION_FORMULAS = ["per_week", "per_calendar_month"] as const;
+/** One activation billing formula. See {@link COGS_ACTIVATION_FORMULAS}. */
+export type CogsActivationFormulaType = typeof COGS_ACTIVATION_FORMULAS[number];
+/** Zod schema for {@link CogsActivationFormulaType}. */
+export const CogsActivationFormulaEnum: z.ZodType<CogsActivationFormulaType> = z.enum(COGS_ACTIVATION_FORMULAS);
+
+/**
+ * Whose units an activation entry prices: CFS's own (`cfs`, e.g. Verizon lines
+ * on owned devices) or a supplier's (`supplier`, e.g. Vision's hotspots). The
+ * manager defaults a span's entry by the unit's `unitOwnership`.
+ */
+export const COGS_OWNERSHIPS = ["cfs", "supplier"] as const;
+/** One ownership. See {@link COGS_OWNERSHIPS}. */
+export type CogsOwnershipType = typeof COGS_OWNERSHIPS[number];
+/** Zod schema for {@link CogsOwnershipType}. */
+export const CogsOwnershipEnum: z.ZodType<CogsOwnershipType> = z.enum(COGS_OWNERSHIPS);
+
+/** A sale's inventory relief, at the ledger's average cost. */
+export interface CogsSaleEntryType {
+  trigger: "sale";
+  formula: "average_cost";
+  label: string;
+  coa_cost: COACostType;
+}
+
+/**
+ * A provider-billed service line, accrued per billed period by the unit
+ * activations whose `uid_cogs` names this entry. Only activation entries carry
+ * a `uid`, because only spans reference an entry.
+ */
+export interface CogsActivationEntryType {
+  trigger: "activation";
+  /** `z.uuid()`; `UnitActivationType.uid_cogs` names it. */
+  uid: string;
+  label: string;
+  coa_cost: COACostType;
+  formula: CogsActivationFormulaType;
+  /** Who bills the line — not always the unit's owner. A `{uid, name}` supplier snapshot. */
+  provider: UidNameRefType;
+  ownership: CogsOwnershipType;
+  /**
+   * Cost per billed period, in cents. ONE current rate, no dated windows (owner,
+   * 2026-10-27): a past period's EXPECTED cost is recomputed at today's rate.
+   */
+  rate_cents: number;
+}
+
+/**
+ * One rule that prices a product's cost of revenue: its Direct Costs account,
+ * what triggers it, and how its amount is reached
+ * (`api-cloudrun/.claude/plans/serialized-subrent.md` § 7a). Shrink, write-offs
+ * and every other movement-driven cost are EVENTS and stay on movements.
+ */
+export type CogsEntryType = CogsSaleEntryType | CogsActivationEntryType;
+
+// `label` is operator-typed but names a cost rule, never a person: `none`.
+const cogsSaleShape = {
+  trigger: z.literal("sale"),
+  formula: z.literal("average_cost").meta({ column: true, label: "Formula" }),
+  label: z.string().min(1).max(100).meta({ pii: "none", column: true, label: "Label" }),
+  coa_cost: COACostEnum.meta({ column: true, label: "Account" }),
+};
+const cogsActivationShape = {
+  trigger: z.literal("activation"),
+  uid: z.uuid(),
+  label: z.string().min(1).max(100).meta({ pii: "none", column: true, label: "Label" }),
+  coa_cost: COACostEnum.meta({ column: true, label: "Account" }),
+  formula: CogsActivationFormulaEnum.meta({ column: true, label: "Formula" }),
+  provider: UidNameRef.meta({ label: "Provider" }),
+  ownership: CogsOwnershipEnum.meta({ column: true, label: "Ownership" }),
+  rate_cents: z.int().min(0).meta({ column: true, label: "Rate" }),
+};
+
+/** Zod schema for {@link CogsEntryType}. A discriminated union on `trigger`, the house shape for a stored array member. */
+export const CogsEntry: z.ZodType<CogsEntryType> = z.discriminatedUnion("trigger", [
+  z.strictObject(cogsSaleShape),
+  z.strictObject(cogsActivationShape),
+]);
+
+/** {@link CogsEntry} for an INPUT: unknown keys are stripped, not refused. */
+export const CogsEntryInput: z.ZodType<CogsEntryType> = z.discriminatedUnion("trigger", [
+  z.object(cogsSaleShape),
+  z.object({ ...cogsActivationShape, provider: UidNameRefInput }),
+]);
+
+/**
+ * A `cogs` array's own consistency: at most one `sale` entry (a sale relieves
+ * inventory once), and activation entry uids unique (spans name them).
+ */
+function checkCogs(entries: CogsEntryType[], ctx: z.RefinementCtx): void {
+  if (entries.filter((e) => e.trigger === "sale").length > 1) {
+    ctx.addIssue({ code: "custom", path: [], message: "a product carries at most one sale cost entry" });
+  }
+  const seen = new Set<string>();
+  entries.forEach((e, i) => {
+    if (e.trigger !== "activation") return;
+    if (seen.has(e.uid)) {
+      ctx.addIssue({ code: "custom", path: [i, "uid"], message: `cost entry uid ${e.uid} is named twice` });
+    }
+    seen.add(e.uid);
+  });
+}
 
 /** An alternate product reference. */
 export interface ProductAlternate {
@@ -366,6 +497,30 @@ export interface Product {
   uid_linked_rental?: string;
   /** Absent-only, as {@link uid_linked_rental}. */
   uid_linked_replacement?: string;
+  /**
+   * The rules that price this product's cost of revenue (§ 7a of
+   * `api-cloudrun/.claude/plans/serialized-subrent.md`). Read it through
+   * `effectiveCogs` (`@cfs/core/utils/cogs`), which adds the type default — a
+   * `sale` product with no `sale` entry relieves inventory to 5000.
+   *
+   * ⚠️ **PRESENT ONLY WHEN IT SAYS SOMETHING, and that is deliberate.** Stamping
+   * the default onto every sale product would be a write to each, and every
+   * product write fans out to a Xero item sync and a Typesense reindex. So the
+   * default is derived, there is no backfill, and it must never gain a
+   * `.default([])`. Absent-only: an update's `null` deletes the key rather than
+   * storing `null`, which would be a second spelling of "unset".
+   */
+  cogs?: CogsEntryType[];
+  /**
+   * The product this one was folded into (a VC twin → its owned counterpart,
+   * § 12 of the serialized-subrent plan). A TOMBSTONE, the org merge's
+   * `merged_to` precedent: setting it deactivates the product, reports fold its
+   * revenue into the successor through `productLineage`, and no billed document
+   * is rewritten. Absent-only, as {@link cogs}, for the same no-fan-out reason;
+   * "same type" and "chains resolve" read other documents, so they are
+   * `validateSupersession`'s (`@cfs/core/utils/products`), not this schema's.
+   */
+  uid_superseded_by?: string;
   uid_tracking_category?: string | null;
   /**
    * The `taxes-classes` document this product is taxed as — one class, no union
@@ -753,6 +908,9 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
   // seeding `""` would 400 every product create.
   uid_linked_rental: FirestoreId.optional().meta({ seed: false }),
   uid_linked_replacement: FirestoreId.optional().meta({ seed: false }),
+  // Absent-only — see the interface. `seed: false`: a create form must not seed `[]`.
+  cogs: z.array(CogsEntry).superRefine(checkCogs).optional().meta({ seed: false, label: "Cost Rules" }),
+  uid_superseded_by: FirestoreId.optional().meta({ seed: false }),
   uid_tracking_category: FirestoreId.nullable().optional(),
   uid_tax_class: FirestoreId.nullable().optional(),
   tax_class_name: z.string().nullable().optional().meta({ column: true, label: "Tax Class" }),
@@ -807,6 +965,9 @@ export const ProductSchema: z.ZodType<Product> = z.strictObject({
     path: ["price", "replacement_cents"],
   },
 ).refine(isUncountedIfReplacement, REPLACEMENT_STOCK_METHOD_ISSUE).refine(
+  (p) => p.uid_superseded_by !== p.uid,
+  { message: "a product cannot be superseded by itself", path: ["uid_superseded_by"] },
+).refine(
   (p) => {
     // Skip only when BOTH are absent — that is the ~531 pre-images product
     // docs, which must keep validating unchanged. One side present without the
@@ -893,6 +1054,8 @@ export interface CreateProductInputType {
   uid_tax_class?: string | null;
   uid_linked_rental?: string | null;
   uid_linked_replacement?: string | null;
+  /** The product's cost rules; absent states none (the type default applies). See {@link Product.cogs}. */
+  cogs?: CogsEntryType[];
   webshop: {
     available: boolean;
     description?: string | null;
@@ -984,6 +1147,7 @@ export const CreateProductInput: z.ZodType<CreateProductInputType> = z.object({
   uid_tax_class: FirestoreId.nullable().optional(),
   uid_linked_rental: FirestoreId.nullable().optional(),
   uid_linked_replacement: FirestoreId.nullable().optional(),
+  cogs: z.array(CogsEntryInput).superRefine(checkCogs).optional(),
   webshop: z.object({
     available: z.boolean(),
     description: z.string().nullable().optional(),
@@ -1047,6 +1211,18 @@ export interface UpdateProductInputType {
   uid_tax_class?: string | null;
   uid_linked_rental?: string;
   uid_linked_replacement?: string;
+  /**
+   * The WHOLE cost-rule array (a replacement, never merged). `null` clears it —
+   * the writer DELETES the key, since storage is absent-only — and absent
+   * leaves it alone.
+   */
+  cogs?: CogsEntryType[] | null;
+  /**
+   * Fold this product into another. `null` clears the tombstone (the writer
+   * deletes the key); absent leaves it alone. The writer deactivates the
+   * product and runs `validateSupersession`.
+   */
+  uid_superseded_by?: string | null;
   webshop?: {
     available: boolean;
     description?: string | null;
@@ -1094,9 +1270,14 @@ export const UpdateProductInput: z.ZodType<UpdateProductInputType> = z.object({
   uid_tax_class: FirestoreId.nullable().optional(),
   uid_linked_rental: FirestoreId.optional(),
   uid_linked_replacement: FirestoreId.optional(),
+  cogs: z.array(CogsEntryInput).superRefine(checkCogs).nullable().optional(),
+  uid_superseded_by: FirestoreId.nullable().optional(),
   webshop: z.object({
     available: z.boolean(),
     description: z.string().nullable().optional(),
   }).optional(),
   version: z.int().min(0),
+}).refine((p) => p.uid_superseded_by !== p.uid, {
+  message: "a product cannot be superseded by itself",
+  path: ["uid_superseded_by"],
 });

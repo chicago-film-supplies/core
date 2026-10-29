@@ -237,6 +237,11 @@ const NULLABLE_OPTIONAL: ReadonlyMap<string, Reason> = new Map([
   // Fulfillment actors (api-cloudrun#1112, 2026-09-26). Writers stamp both from
   // the API release carrying this beta; the backfill fills the ~1,046 per env
   // that predate it, and then both tighten to required-nullable.
+  // The unit spell owner (api-cloudrun serialized-subrent § 1, 2026-10-28). The
+  // readers beta adds it optional; the api stamps `null` on every entry it
+  // writes, the one-shot backfill stamps the rest, and the contract beta makes
+  // it required-nullable.
+  ["units.serial_history[].supplier", "mid-expand"],
   // ── pending-removal — loosened so writers can stop before storage is purged.
   // ── refused — a written refusal sits beside the declaration, with its corpus
   //    count. See `src/schemas/supplier.ts`.

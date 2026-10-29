@@ -22,6 +22,8 @@ import {
   type Movement,
   OOS_FLAG_REASONS,
   type OOSFlagReasonType,
+  type SerialChangeReasonType,
+  type UidNameRefType,
   type UnitRosterEntryType,
   type UnitType,
 } from "../schemas/mod.ts";
@@ -79,15 +81,26 @@ export function formatUnitRanges(numbers: Iterable<number>, opts: FormatUnitRang
 // ── Serials ──────────────────────────────────────────────────────────
 
 /**
+ * The reasons whose entry starts a new PHYSICAL unit on a number, so {@link serialAt}
+ * never reads a serial across one.
+ */
+export const DEVICE_BOUNDARY_REASONS: ReadonlySet<SerialChangeReasonType> = new Set<SerialChangeReasonType>([
+  "replaced",
+  "subrented",
+]);
+
+/**
  * The serial of the physical unit that held a number at `instant` — or, with
  * `instant` `null`, of the one that holds it now. `null` when no serial was
  * ever recorded for that unit.
  *
  * 🔴 **Not "the history entry open at `instant`".** A number changes PHYSICAL
- * unit only at a `replaced` entry; `initial` and `corrected` entries restate the
- * serial of the unit already there. So this finds the span of history between
- * the `replaced` entries either side of `instant` and returns that span's
- * LATEST serial. The open-entry reading is wrong both ways that matter: the
+ * unit only at a `replaced` or `subrented` entry ({@link DEVICE_BOUNDARY_REASONS});
+ * `initial` and `corrected` entries restate the serial of the unit already
+ * there. So this finds the span of history between the boundary entries either
+ * side of `instant` and returns that span's LATEST serial. A `subrented` entry
+ * is a boundary because a supplier's device is never the CFS-era unit before
+ * it, even under the same number. The open-entry reading is wrong both ways that matter: the
  * walkie's serials were pasted (`initial`) on 2026-10-07, after most of its
  * losses, so no entry is open at the loss; and a `corrected` entry after the
  * loss fixes a typo in the same radio's serial.
@@ -104,7 +117,7 @@ export function serialAt(
   let from = 0;
   let to = history.length;
   for (let i = 0; i < history.length; i++) {
-    if (history[i].reason !== "replaced") continue;
+    if (!DEVICE_BOUNDARY_REASONS.has(history[i].reason)) continue;
     if (Date.parse(history[i].start) <= at) from = i;
     else {
       to = i;
@@ -112,6 +125,32 @@ export function serialAt(
     }
   }
   return history.slice(from, to).at(-1)?.serial_number ?? null;
+}
+
+// ── Ownership ────────────────────────────────────────────────────────
+
+/** Whose a unit is: CFS's, or the supplier it was subrented from. */
+export type UnitOwnership = "cfs" | "supplier";
+
+/**
+ * The supplier a unit is subrented from: its OPEN history entry's `supplier`,
+ * or `null` for a CFS-owned unit and for a number with no open entry (vacant,
+ * retired, or an active unit the spell backfill has not reached yet — which
+ * only a CFS conversion produced). An entry stored before `supplier` existed
+ * reads as `null`.
+ *
+ * The one predicate the api's refusing writers, the manager's pickers and the
+ * unit audit all read (`api-cloudrun/.claude/plans/serialized-subrent.md` § 2).
+ * Never decide ownership from the entry's `reason`: a `corrected` entry on a
+ * vendor unit keeps its supplier.
+ */
+export function unitSupplier(unit: Pick<UnitType, "serial_history">): UidNameRefType | null {
+  return unit.serial_history.find((e) => e.end === null)?.supplier ?? null;
+}
+
+/** `"supplier"` when {@link unitSupplier} names one, else `"cfs"`. */
+export function unitOwnership(unit: Pick<UnitType, "serial_history">): UnitOwnership {
+  return unitSupplier(unit) === null ? "cfs" : "supplier";
 }
 
 // ── Parsing ──────────────────────────────────────────────────────────

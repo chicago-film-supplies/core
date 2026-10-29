@@ -337,8 +337,10 @@ export const MOVEMENT_TYPES = [
   // Each names its purchase in `sources[]` and its supplier, like a receipt.
   // Neither is manual (they are raised from the purchase, which co-writes
   // `quantity_received` / `quantity_returned`), neither has an undo type — a
-  // mistake is a `reverses` reversal through the purchase's own lever — and
-  // neither names units: a subrent product is never serialized.
+  // mistake is a `reverses` reversal through the purchase's own lever. On a
+  // serialized product they name their units, and a numbered subrent unit's
+  // OWNERSHIP is its open history entry's `supplier`, not the movement type
+  // (api-cloudrun `.claude/plans/serialized-subrent.md` § 1).
   "subrent_in",
   "subrent_out",
   // A rented unit that cannot go back: lost at the customer, or damaged
@@ -859,8 +861,9 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
   // `custody: "forbidden"` is about the BOOKING ladder, not the place: the
   // units enter and leave CFS's custody at a shelf, and a booking then claims
   // them like any other unit. `cost: "forbidden"` is the whole point. `units:
-  // "forbidden"` because a serialized product cannot be subrented (its roster
-  // would mint permanent numbers). `service: "forbidden"` on the in/out pair
+  // "allowed"`: a serialized product can be subrented, and the opened history
+  // entry's `supplier` says whose each numbered unit is; a returned vendor
+  // unit's number goes vacant like any departure (D8). `service: "forbidden"` on the in/out pair
   // because they move clean units only: a flagged or lost rented unit is
   // settled by `return_to_supplier` from its out-of-service record.
   subrent_in: {
@@ -869,7 +872,7 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
     places: { from: ["outside"], to: ["locations"] },
     booking: "forbidden",
     service: "forbidden",
-    units: "forbidden",
+    units: "allowed",
     uncounted: "refused",
   },
   subrent_out: {
@@ -878,7 +881,7 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
     places: { from: ["locations"], to: ["outside"] },
     booking: "forbidden",
     service: "forbidden",
-    units: "forbidden",
+    units: "allowed",
     uncounted: "refused",
   },
   // `write_off`'s places — a flagged unit off its shelf, or a lost or away unit
@@ -897,7 +900,7 @@ const FORWARD_CONTRACTS: Readonly<Record<ForwardMovementTypeType, BaseMovementCo
     places: { from: ["out-of-service", "locations"], to: ["outside"] },
     booking: "forbidden",
     service: "required",
-    units: "forbidden",
+    units: "allowed",
     uncounted: "refused",
   },
   // No custody: the booking keeps `damaged: N` forever — a terminal key and part
@@ -1803,6 +1806,17 @@ function checkRosterBoundary(m: Movement, ctx: z.RefinementCtx): void {
 }
 
 /**
+ * Why each type whose contract forbids units forbids them — the refusal text
+ * names the type's own reason rather than one type's wording for all.
+ */
+const UNITS_FORBIDDEN_REASON: Partial<Record<MovementTypeType, string>> = {
+  reclass_out: "it moves units between two products' rosters, which the twin reclass does by count",
+  reclass_in: "it moves units between two products' rosters, which the twin reclass does by count",
+  count_open: "a serialized product's units are placed by its roster's enroll, not by a count boundary",
+  count_close: "a serialized product's units are placed by its roster's enroll, not by a count boundary",
+};
+
+/**
  * Rule 5 of {@link checkMovementContract}: which units moved.
  *
  * - The mirror `query_by_unit_number` is `units[].number` in order.
@@ -1835,7 +1849,7 @@ function checkMovementUnits(
     ctx.addIssue({
       code: "custom",
       path: ["units"],
-      message: `"${m.type}" moves units between products' rosters and must not name units`,
+      message: `a "${m.type}" never names units: ${UNITS_FORBIDDEN_REASON[m.type] ?? "its contract forbids them"}`,
     });
   }
 
@@ -2323,11 +2337,21 @@ export function allocationUnitsIssue(
 }
 
 /**
- * The manual types that bring a unit IN to CFS ownership, so may carry the
- * serial it arrives with. Every other type names units by number only: a serial
- * changes on an existing number through `PUT /units/{uid}`, never by moving it.
+ * The types that bring a unit IN to CFS's custody, so may carry the serial it
+ * arrives with: the manual ownership in-types, plus `subrent_in`, whose
+ * supplier's device arrives with its own serial (raised from the purchase, not
+ * typed by hand, but read through the same {@link MovementUnitInput}). Every
+ * other type names units by number only: a serial changes on an existing number
+ * through `PUT /units/{uid}`, never by moving it.
  */
-export const UNIT_SERIAL_IN_TYPES = ["purchase", "find", "make", "opening_balance", "adjustment_increase"] as const;
+export const UNIT_SERIAL_IN_TYPES = [
+  "purchase",
+  "find",
+  "make",
+  "opening_balance",
+  "adjustment_increase",
+  "subrent_in",
+] as const;
 
 /**
  * One unit a manual movement names. `serial_number` only on an in-type

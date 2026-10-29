@@ -1046,7 +1046,7 @@ const closePurchaseTransaction: TransactionDefinition = {
 const receivePurchaseTransaction: TransactionDefinition = {
   id: "receive-purchase",
   description:
-    "Receives goods against a purchase: one movement per product naming the purchase in sources[] — a `purchase` costing its cumulative share of the line on a buy, a cost-forbidden `subrent_in` landing at the arrivals inbox on a subrent (which raises `quantity_rented_in` with `quantity_held`) — folded onto the ledger and the shelves through the one ledger writer, with the purchase's `quantity_received` moved in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: every receipt, since a receipt always moves quantity_held. The unit roster steps fire on a BUY only (a subrent product is never serialized); the return card on a SUBRENT only.",
+    "Receives goods against a purchase: one movement per product naming the purchase in sources[] — a `purchase` costing its cumulative share of the line on a buy, a cost-forbidden `subrent_in` landing at the arrivals inbox on a subrent (which raises `quantity_rented_in` with `quantity_held`) — folded onto the ledger and the shelves through the one ledger writer, with the purchase's `quantity_received` moved in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: every receipt, since a receipt always moves quantity_held. The unit roster steps fire whenever the receipt names units — a buy or a subrent of a seeded serialized product, where a `subrent_in`'s opened history entry carries the purchase's `supplier`; the return card on a SUBRENT only.",
   steps: [
     "receive-purchase:receipt-to-purchase",
     "create-transaction:transaction-to-ledger",
@@ -1061,7 +1061,7 @@ const receivePurchaseTransaction: TransactionDefinition = {
 const reversePurchaseReceiptTransaction: TransactionDefinition = {
   id: "reverse-purchase-receipt",
   description:
-    "Reverses one receipt through its purchase: the reversal is the receipt's lines and cost negated, applied through the one ledger writer, and the purchase's `quantity_received` falls in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: every receipt reversal. The roster steps fire on a buy only; the return card on a subrent only.",
+    "Reverses one receipt through its purchase: the reversal is the receipt's lines and cost negated, applied through the one ledger writer, and the purchase's `quantity_received` falls in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: every receipt reversal. The roster steps fire whenever the receipt named units, a subrent's included; the return card on a subrent only.",
   steps: [
     "reverse-purchase-receipt:receipt-to-purchase",
     "reverse-transaction:transaction-to-ledger",

@@ -578,6 +578,18 @@
         },
         {
           "kind": "variable",
+          "name": "COACostEnum",
+          "declaration": "const COACostEnum: z.ZodType<COACostType>;",
+          "doc": "Zod schema for COACostType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "COACostType",
+          "declaration": "type COACostType = indexedAccess;",
+          "doc": "One allowed Direct Costs code. See {@link COA_COST_CODES}."
+        },
+        {
+          "kind": "variable",
           "name": "COARevenueEnum",
           "declaration": "const COARevenueEnum: z.ZodType<COARevenueType>;",
           "doc": "Zod schema for COARevenueType."
@@ -617,6 +629,30 @@
           "name": "COA_BAD_DEBT",
           "declaration": "const COA_BAD_DEBT: 6900;",
           "doc": "Xero's Bad Debt account. The one posting account a `reason` determines."
+        },
+        {
+          "kind": "variable",
+          "name": "COA_COST_CODES",
+          "declaration": "const COA_COST_CODES: 5000 | 5001 | 5100 | 5150 | 5200 | 5300 | 5400 | 5500 | 5600 | 5700[];",
+          "doc": "The Direct Costs accounts a product's cost rule (`Product.cogs[].coa_cost`)\nmay post to — a POLICY subset, like the revenue codes above, because a schema\ncan check a code against a list but not against the chart-of-accounts\ndocument's `type`. 5000–5700 as synced on 2026-10-28, plus `5150` \"Cost of\nGoods Sold: Data Service\" (created in Xero 2026-10-28 for carrier lines on\nowned devices; api-cloudrun `.claude/plans/serialized-subrent.md` § 7a).\n\n⚠️ So a new cost account needs a core release."
+        },
+        {
+          "kind": "variable",
+          "name": "COGS_ACTIVATION_FORMULAS",
+          "declaration": "const COGS_ACTIVATION_FORMULAS: \"per_week\" | \"per_calendar_month\"[];",
+          "doc": "How an activation entry's periods are cut. ANY active day bills the whole\nperiod (owner, 2026-10-27, Q11).\n\n- `per_week` — 7-day cycles anchored on the unit's FIRST activation day under\n  the entry, so a re-activation inside a week already billed continues it.\n- `per_calendar_month` — Chicago calendar months.\n\nA separate vocabulary from `PRICE_FORMULAS`, so a customer price picker never\noffers a cost formula (the core#78 lesson). The one function that applies\nthem is `billablePeriods` (`@cfs/core/utils/cogs`)."
+        },
+        {
+          "kind": "variable",
+          "name": "COGS_OWNERSHIPS",
+          "declaration": "const COGS_OWNERSHIPS: \"cfs\" | \"supplier\"[];",
+          "doc": "Whose units an activation entry prices: CFS's own (`cfs`, e.g. Verizon lines\non owned devices) or a supplier's (`supplier`, e.g. Vision's hotspots). The\nmanager defaults a span's entry by the unit's `unitOwnership`."
+        },
+        {
+          "kind": "variable",
+          "name": "COGS_TRIGGERS",
+          "declaration": "const COGS_TRIGGERS: \"sale\" | \"activation\"[];",
+          "doc": "What triggers a cost-of-revenue rule. `sale` — a sale's inventory relief;\n`activation` — a unit's service line being switched on (a hotspot's data\nline), billed by its provider per period. Later: `booking`, `depreciation`\n(api-cloudrun#1388)."
         },
         {
           "kind": "variable",
@@ -965,6 +1001,72 @@
           "name": "ClosePurchaseInputType",
           "declaration": "interface ClosePurchaseInputType {\n  uid_products?: string[];\n  uuid_session: string;\n  version: number;\n}",
           "doc": "Input for a short close or a cancel.\n\nSets each named line's `quantity_canceled` to `quantity − quantity_received`.\n`uid_products` absent closes every line; a cancel is a close of a purchase\nwith nothing received. When the close leaves a line billed beyond what was\nreceived, the writer raises a `purchase-credits` document for the excess."
+        },
+        {
+          "kind": "interface",
+          "name": "CogsActivationEntryType",
+          "declaration": "interface CogsActivationEntryType {\n  trigger: \"activation\";\n  uid: string;\n  label: string;\n  coa_cost: COACostType;\n  formula: CogsActivationFormulaType;\n  provider: UidNameRefType;\n  ownership: CogsOwnershipType;\n  rate_cents: number;\n}",
+          "doc": "A provider-billed service line, accrued per billed period by the unit\nactivations whose `uid_cogs` names this entry. Only activation entries carry\na `uid`, because only spans reference an entry."
+        },
+        {
+          "kind": "variable",
+          "name": "CogsActivationFormulaEnum",
+          "declaration": "const CogsActivationFormulaEnum: z.ZodType<CogsActivationFormulaType>;",
+          "doc": "Zod schema for {@link CogsActivationFormulaType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CogsActivationFormulaType",
+          "declaration": "type CogsActivationFormulaType = indexedAccess;",
+          "doc": "One activation billing formula. See {@link COGS_ACTIVATION_FORMULAS}."
+        },
+        {
+          "kind": "variable",
+          "name": "CogsEntry",
+          "declaration": "const CogsEntry: z.ZodType<CogsEntryType>;",
+          "doc": "Zod schema for {@link CogsEntryType}. A discriminated union on `trigger`, the house shape for a stored array member."
+        },
+        {
+          "kind": "variable",
+          "name": "CogsEntryInput",
+          "declaration": "const CogsEntryInput: z.ZodType<CogsEntryType>;",
+          "doc": "{@link CogsEntry} for an INPUT: unknown keys are stripped, not refused."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CogsEntryType",
+          "declaration": "type CogsEntryType = CogsSaleEntryType | CogsActivationEntryType;",
+          "doc": "One rule that prices a product's cost of revenue: its Direct Costs account,\nwhat triggers it, and how its amount is reached\n(`api-cloudrun/.claude/plans/serialized-subrent.md` § 7a). Shrink, write-offs\nand every other movement-driven cost are EVENTS and stay on movements."
+        },
+        {
+          "kind": "variable",
+          "name": "CogsOwnershipEnum",
+          "declaration": "const CogsOwnershipEnum: z.ZodType<CogsOwnershipType>;",
+          "doc": "Zod schema for {@link CogsOwnershipType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CogsOwnershipType",
+          "declaration": "type CogsOwnershipType = indexedAccess;",
+          "doc": "One ownership. See {@link COGS_OWNERSHIPS}."
+        },
+        {
+          "kind": "interface",
+          "name": "CogsSaleEntryType",
+          "declaration": "interface CogsSaleEntryType {\n  trigger: \"sale\";\n  formula: \"average_cost\";\n  label: string;\n  coa_cost: COACostType;\n}",
+          "doc": "A sale's inventory relief, at the ledger's average cost."
+        },
+        {
+          "kind": "variable",
+          "name": "CogsTriggerEnum",
+          "declaration": "const CogsTriggerEnum: z.ZodType<CogsTriggerType>;",
+          "doc": "Zod schema for {@link CogsTriggerType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CogsTriggerType",
+          "declaration": "type CogsTriggerType = indexedAccess;",
+          "doc": "One cost trigger. See {@link COGS_TRIGGERS}."
         },
         {
           "kind": "interface",
@@ -1347,7 +1449,7 @@
         {
           "kind": "interface",
           "name": "CreateProductInputType",
-          "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  webshop: typeLiteral;\n  transaction?: never;\n  purchase?: never;\n}",
+          "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  cogs?: CogsEntryType[];\n  webshop: typeLiteral;\n  transaction?: never;\n  purchase?: never;\n}",
           "doc": "Input type for creating a product."
         },
         {
@@ -4071,7 +4173,7 @@
         {
           "kind": "interface",
           "name": "Product",
-          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: AuthoredProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  tax_class_name?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: AuthoredProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  cogs?: CogsEntryType[];\n  uid_superseded_by?: string;\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  tax_class_name?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A product document in the products Firestore collection."
         },
         {
@@ -4695,7 +4797,7 @@
         {
           "kind": "interface",
           "name": "ReturnPurchaseLineInputType",
-          "declaration": "interface ReturnPurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n}",
+          "declaration": "interface ReturnPurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n}",
           "doc": "One product given back to the supplier on a subrent."
         },
         {
@@ -4809,8 +4911,8 @@
         {
           "kind": "variable",
           "name": "SERIAL_CHANGE_REASONS",
-          "declaration": "const SERIAL_CHANGE_REASONS: \"initial\" | \"replaced\" | \"corrected\"[];",
-          "doc": "Why a serial was set on a number.\n\n- `initial` — the first serial recorded for the number (a create, a\n  conversion, or a later bulk paste).\n- `replaced` — a different physical unit took over the number.\n- `corrected` — the previous entry was mis-typed; the unit did not change."
+          "declaration": "const SERIAL_CHANGE_REASONS: \"initial\" | \"replaced\" | \"corrected\" | \"subrented\"[];",
+          "doc": "Why a history entry (a spell) opened on a number.\n\n- `initial` — the first spell of a CFS-owned unit on the number (a create, a\n  conversion, an ownership movement, or a later bulk paste).\n- `replaced` — a different physical unit took over the number.\n- `corrected` — the previous entry was mis-typed; the unit did not change.\n- `subrented` — a `subrent_in` brought a supplier's unit in on the number:\n  every entry a subrent opens takes it, whether the number was fresh, vacant,\n  or is the same device coming back. Like `replaced` it starts a new PHYSICAL\n  unit (`serialAt`). It says why the spell opened, never whose the unit is —\n  that is the entry's `supplier`, which a `corrected` entry on a vendor unit\n  carries forward.\n\nAdding a member widens a stored enum, so readers ship before any writer."
         },
         {
           "kind": "variable",
@@ -5793,20 +5895,20 @@
         {
           "kind": "variable",
           "name": "UNIT_SERIAL_IN_TYPES",
-          "declaration": "const UNIT_SERIAL_IN_TYPES: \"purchase\" | \"find\" | \"make\" | \"opening_balance\" | \"adjustment_increase\"[];",
-          "doc": "The manual types that bring a unit IN to CFS ownership, so may carry the\nserial it arrives with. Every other type names units by number only: a serial\nchanges on an existing number through `PUT /units/{uid}`, never by moving it."
+          "declaration": "const UNIT_SERIAL_IN_TYPES: \"purchase\" | \"find\" | \"make\" | \"opening_balance\" | \"adjustment_increase\" | \"subrent_in\"[];",
+          "doc": "The types that bring a unit IN to CFS's custody, so may carry the serial it\narrives with: the manual ownership in-types, plus `subrent_in`, whose\nsupplier's device arrives with its own serial (raised from the purchase, not\ntyped by hand, but read through the same {@link MovementUnitInput}). Every\nother type names units by number only: a serial changes on an existing number\nthrough `PUT /units/{uid}`, never by moving it."
         },
         {
           "kind": "variable",
           "name": "UNIT_STATUSES",
           "declaration": "const UNIT_STATUSES: \"active\" | \"vacant\" | \"retired\"[];",
-          "doc": "Whether a number is in use.\n\n- `active` — owned, and on the product's roster.\n- `vacant` — not owned right now (sold, written off, never activated). The\n  number can take a replacement unit with a new serial. EVERY departure\n  leaves a number vacant (owner, 2026-10-03); nothing retires one implicitly.\n- `retired` — never to be reused. Only an operator retires a number, and only\n  from `vacant`."
+          "doc": "Whether a number is in use.\n\n- `active` — in CFS's CUSTODY, and on the product's roster. Not \"owned\": a\n  unit subrented from a supplier is active too. WHOSE it is is its open\n  history entry's `supplier` (`unitOwnership`, `@cfs/core/utils/units`).\n- `vacant` — not in CFS's custody right now (sold, written off, returned to\n  its supplier, never activated). The number can take a replacement unit with\n  a new serial. EVERY departure leaves a number vacant (owner, 2026-10-03);\n  nothing retires one implicitly.\n- `retired` — never to be reused. Only an operator retires a number, and only\n  from `vacant`."
         },
         {
           "kind": "variable",
           "name": "UNIT_USER_SERIAL_REASONS",
           "declaration": "const UNIT_USER_SERIAL_REASONS: \"initial\" | \"replaced\" | \"corrected\"[];",
-          "doc": "The reasons `PUT /units/{uid}` may send. Today every reason; kept as its own\nlist, the `OOS_USER_STATUSES` pattern, so narrowing what an operator may send\ndoes not narrow what storage may hold."
+          "doc": "The reasons `PUT /units/{uid}` may send. Every reason but `subrented`, which\nonly a `subrent_in` opens. Kept as its own list, the `OOS_USER_STATUSES`\npattern, so narrowing what an operator may send does not narrow what storage\nmay hold."
         },
         {
           "kind": "variable",
@@ -5849,6 +5951,30 @@
           "name": "UndoRentalExtensionInputType",
           "declaration": "interface UndoRentalExtensionInputType {\n  version: number;\n}",
           "doc": "Body of `POST /orders/{uid}/extensions/{uid_pair}/undo` — undo a rental\nextension while leg B is still exactly what it made. The server derives leg A\nfrom B's `rebook_in` movements, never from the client."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitActivation",
+          "declaration": "const UnitActivation: z.ZodType<UnitActivationType>;",
+          "doc": "Zod schema for {@link UnitActivationType}."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitActivationConfirmed",
+          "declaration": "const UnitActivationConfirmed: z.ZodType<UnitActivationConfirmedType>;",
+          "doc": "Zod schema for {@link UnitActivationConfirmedType}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitActivationConfirmedType",
+          "declaration": "interface UnitActivationConfirmedType {\n  start: string;\n  end: string | null;\n}",
+          "doc": "The confirmed on/off instants of an activation, as the provider's portal or bill states them."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitActivationType",
+          "declaration": "interface UnitActivationType {\n  uid: string;\n  start: string;\n  end: string | null;\n  uid_order: string | null;\n  uid_cogs: string;\n  provider_confirmed: UnitActivationConfirmedType | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
+          "doc": "One span during which a unit's service line was switched ON — a hotspot's or\nrouter's data line, billed by its provider through the product's `cogs`\nactivation entry that `uid_cogs` names.\n\nRECORDED, never derived from custody: a device can sit on the shelf switched\non (an idle, still-billed span) or go out switched off. Present on every\nunit, owned or rented, because CFS's own devices carry provider lines too.\nThe biller is the named cost entry's `provider`, not a field here, since one\nproduct can hold units billed by different providers."
         },
         {
           "kind": "variable",
@@ -5919,8 +6045,8 @@
         {
           "kind": "interface",
           "name": "UnitSerialHistoryEntryType",
-          "declaration": "interface UnitSerialHistoryEntryType {\n  serial_number: string;\n  start: string;\n  end: string | null;\n  reason: SerialChangeReasonType;\n  uid_movement: string | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
-          "doc": "One serial a number has carried, and over which span.\n\nThe acquisition reference lives HERE, per entry, rather than once per unit: a\nreplacement re-points the number at a new physical unit, and a single\nunit-level field would lose the original acquisition. The unit's CURRENT\nacquisition is the open entry's `uid_movement`."
+          "declaration": "interface UnitSerialHistoryEntryType {\n  serial_number: string | null;\n  start: string;\n  end: string | null;\n  reason: SerialChangeReasonType;\n  uid_movement: string | null;\n  supplier?: UidNameRefType | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
+          "doc": "One SPELL of one physical unit under a number: from when it took the number\nuntil it left or was re-recorded. Its serial is optional — a tent has a\nnumber and no serial, and a radio's serial may be typed in later — so an\nentry is a spell, not \"a serial\". The field keeps the name `serial_history`\nbecause renaming a stored array on a strict object is a four-step purge for a\ncosmetic gain.\n\nThe acquisition reference lives HERE, per entry, rather than once per unit: a\nreplacement re-points the number at a new physical unit, and a single\nunit-level field would lose the original acquisition. The unit's CURRENT\nacquisition is the open entry's `uid_movement`. Ownership lives here for the\nsame reason: a number can be CFS-owned, then vacant, then a supplier's."
         },
         {
           "kind": "variable",
@@ -5943,7 +6069,7 @@
         {
           "kind": "interface",
           "name": "UnitType",
-          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  activations?: UnitActivationType[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A unit number, its current serial and its history."
         },
         {
@@ -6183,7 +6309,7 @@
         {
           "kind": "interface",
           "name": "UpdateProductInputType",
-          "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  webshop?: typeLiteral;\n  version: number;\n}",
+          "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  cogs?: CogsEntryType[] | null;\n  uid_superseded_by?: string | null;\n  webshop?: typeLiteral;\n  version: number;\n}",
           "doc": "Input type for updating a product."
         },
         {
@@ -7594,6 +7720,18 @@
         },
         {
           "kind": "variable",
+          "name": "COACostEnum",
+          "declaration": "const COACostEnum: z.ZodType<COACostType>;",
+          "doc": "Zod schema for COACostType."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "COACostType",
+          "declaration": "type COACostType = indexedAccess;",
+          "doc": "One allowed Direct Costs code. See {@link COA_COST_CODES}."
+        },
+        {
+          "kind": "variable",
           "name": "COARevenueEnum",
           "declaration": "const COARevenueEnum: z.ZodType<COARevenueType>;",
           "doc": "Zod schema for COARevenueType."
@@ -7603,6 +7741,12 @@
           "name": "COARevenueType",
           "declaration": "type COARevenueType = indexedAccess;",
           "doc": "Allowed values for chart-of-accounts revenue code."
+        },
+        {
+          "kind": "variable",
+          "name": "COA_COST_CODES",
+          "declaration": "const COA_COST_CODES: 5000 | 5001 | 5100 | 5150 | 5200 | 5300 | 5400 | 5500 | 5600 | 5700[];",
+          "doc": "The Direct Costs accounts a product's cost rule (`Product.cogs[].coa_cost`)\nmay post to — a POLICY subset, like the revenue codes above, because a schema\ncan check a code against a list but not against the chart-of-accounts\ndocument's `type`. 5000–5700 as synced on 2026-10-28, plus `5150` \"Cost of\nGoods Sold: Data Service\" (created in Xero 2026-10-28 for carrier lines on\nowned devices; api-cloudrun `.claude/plans/serialized-subrent.md` § 7a).\n\n⚠️ So a new cost account needs a core release."
         },
         {
           "kind": "variable",
@@ -11105,6 +11249,24 @@
         },
         {
           "kind": "variable",
+          "name": "COGS_ACTIVATION_FORMULAS",
+          "declaration": "const COGS_ACTIVATION_FORMULAS: \"per_week\" | \"per_calendar_month\"[];",
+          "doc": "How an activation entry's periods are cut. ANY active day bills the whole\nperiod (owner, 2026-10-27, Q11).\n\n- `per_week` — 7-day cycles anchored on the unit's FIRST activation day under\n  the entry, so a re-activation inside a week already billed continues it.\n- `per_calendar_month` — Chicago calendar months.\n\nA separate vocabulary from `PRICE_FORMULAS`, so a customer price picker never\noffers a cost formula (the core#78 lesson). The one function that applies\nthem is `billablePeriods` (`@cfs/core/utils/cogs`)."
+        },
+        {
+          "kind": "variable",
+          "name": "COGS_OWNERSHIPS",
+          "declaration": "const COGS_OWNERSHIPS: \"cfs\" | \"supplier\"[];",
+          "doc": "Whose units an activation entry prices: CFS's own (`cfs`, e.g. Verizon lines\non owned devices) or a supplier's (`supplier`, e.g. Vision's hotspots). The\nmanager defaults a span's entry by the unit's `unitOwnership`."
+        },
+        {
+          "kind": "variable",
+          "name": "COGS_TRIGGERS",
+          "declaration": "const COGS_TRIGGERS: \"sale\" | \"activation\"[];",
+          "doc": "What triggers a cost-of-revenue rule. `sale` — a sale's inventory relief;\n`activation` — a unit's service line being switched on (a hotspot's data\nline), billed by its provider per period. Later: `booking`, `depreciation`\n(api-cloudrun#1388)."
+        },
+        {
+          "kind": "variable",
           "name": "COMPONENT_PRICE_KEYS",
           "declaration": "const COMPONENT_PRICE_KEYS: \"base_cents\" | \"base_percent\" | \"replacement_cents\" | \"coa_revenue\" | \"formula\" | \"discountable\"[];",
           "doc": "The price keys a parent may deliberately author on its own `components` entry,\noverriding the component product's catalog price.\n\n⚠️ **Plain literals, no spread** — core#43 is the standing case where JSR's\nnpm `.d.ts` emit TRUNCATED a spread inside an `as const`, and no core gate\ncould see it."
@@ -11114,6 +11276,72 @@
           "name": "COMPONENT_QUANTITY_DECIMALS",
           "declaration": "const COMPONENT_QUANTITY_DECIMALS: 4;",
           "doc": "Decimal places a catalog component `quantity` (a per-parent ratio) may carry."
+        },
+        {
+          "kind": "interface",
+          "name": "CogsActivationEntryType",
+          "declaration": "interface CogsActivationEntryType {\n  trigger: \"activation\";\n  uid: string;\n  label: string;\n  coa_cost: COACostType;\n  formula: CogsActivationFormulaType;\n  provider: UidNameRefType;\n  ownership: CogsOwnershipType;\n  rate_cents: number;\n}",
+          "doc": "A provider-billed service line, accrued per billed period by the unit\nactivations whose `uid_cogs` names this entry. Only activation entries carry\na `uid`, because only spans reference an entry."
+        },
+        {
+          "kind": "variable",
+          "name": "CogsActivationFormulaEnum",
+          "declaration": "const CogsActivationFormulaEnum: z.ZodType<CogsActivationFormulaType>;",
+          "doc": "Zod schema for {@link CogsActivationFormulaType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CogsActivationFormulaType",
+          "declaration": "type CogsActivationFormulaType = indexedAccess;",
+          "doc": "One activation billing formula. See {@link COGS_ACTIVATION_FORMULAS}."
+        },
+        {
+          "kind": "variable",
+          "name": "CogsEntry",
+          "declaration": "const CogsEntry: z.ZodType<CogsEntryType>;",
+          "doc": "Zod schema for {@link CogsEntryType}. A discriminated union on `trigger`, the house shape for a stored array member."
+        },
+        {
+          "kind": "variable",
+          "name": "CogsEntryInput",
+          "declaration": "const CogsEntryInput: z.ZodType<CogsEntryType>;",
+          "doc": "{@link CogsEntry} for an INPUT: unknown keys are stripped, not refused."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CogsEntryType",
+          "declaration": "type CogsEntryType = CogsSaleEntryType | CogsActivationEntryType;",
+          "doc": "One rule that prices a product's cost of revenue: its Direct Costs account,\nwhat triggers it, and how its amount is reached\n(`api-cloudrun/.claude/plans/serialized-subrent.md` § 7a). Shrink, write-offs\nand every other movement-driven cost are EVENTS and stay on movements."
+        },
+        {
+          "kind": "variable",
+          "name": "CogsOwnershipEnum",
+          "declaration": "const CogsOwnershipEnum: z.ZodType<CogsOwnershipType>;",
+          "doc": "Zod schema for {@link CogsOwnershipType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CogsOwnershipType",
+          "declaration": "type CogsOwnershipType = indexedAccess;",
+          "doc": "One ownership. See {@link COGS_OWNERSHIPS}."
+        },
+        {
+          "kind": "interface",
+          "name": "CogsSaleEntryType",
+          "declaration": "interface CogsSaleEntryType {\n  trigger: \"sale\";\n  formula: \"average_cost\";\n  label: string;\n  coa_cost: COACostType;\n}",
+          "doc": "A sale's inventory relief, at the ledger's average cost."
+        },
+        {
+          "kind": "variable",
+          "name": "CogsTriggerEnum",
+          "declaration": "const CogsTriggerEnum: z.ZodType<CogsTriggerType>;",
+          "doc": "Zod schema for {@link CogsTriggerType}."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "CogsTriggerType",
+          "declaration": "type CogsTriggerType = indexedAccess;",
+          "doc": "One cost trigger. See {@link COGS_TRIGGERS}."
         },
         {
           "kind": "variable",
@@ -11142,13 +11370,13 @@
         {
           "kind": "interface",
           "name": "CreateProductInputType",
-          "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  webshop: typeLiteral;\n  transaction?: never;\n  purchase?: never;\n}",
+          "declaration": "interface CreateProductInputType {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  uid_linked_rental?: string | null;\n  uid_linked_replacement?: string | null;\n  cogs?: CogsEntryType[];\n  webshop: typeLiteral;\n  transaction?: never;\n  purchase?: never;\n}",
           "doc": "Input type for creating a product."
         },
         {
           "kind": "interface",
           "name": "Product",
-          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: AuthoredProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  tax_class_name?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface Product {\n  uid: string;\n  name: string;\n  active: boolean;\n  type: ProductTypeType;\n  stock_method: StockMethodType;\n  component_only: boolean;\n  crms_id: number | null;\n  crms_rate_id?: number | null;\n  crms_stock_level_ids?: Record<string, number>;\n  crms_linked_rental_id?: number | null;\n  crms_linked_replacement_id?: number | null;\n  crms_linked_replacement_rate_id?: number | null;\n  description: string;\n  eligible_delivery: boolean;\n  eligible_in_store_pickup: boolean;\n  eligible_shipping_ground: boolean;\n  eligible_shipping_air: boolean;\n  price: ProductPrice;\n  shipping?: ProductShipping;\n  alternates: ProductAlternate[];\n  components: AuthoredProductComponent[];\n  component_of: ProductComponent[];\n  tags: UidNameRefType[];\n  query_by_tags?: string[];\n  query_by_components?: string[];\n  query_by_component_of?: string[];\n  query_by_alternates?: string[];\n  tracking_category_name?: string;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  cogs?: CogsEntryType[];\n  uid_superseded_by?: string;\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  tax_class_name?: string | null;\n  webshop: ProductWebshop;\n  images?: ProductImage[];\n  query_by_images?: string[];\n  xero_id: string | null;\n  xero_code?: string | null;\n  xero_tracking_option_id: string | null;\n  uid_thread?: string;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A product document in the products Firestore collection."
         },
         {
@@ -11202,7 +11430,7 @@
         {
           "kind": "interface",
           "name": "UpdateProductInputType",
-          "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  webshop?: typeLiteral;\n  version: number;\n}",
+          "declaration": "interface UpdateProductInputType {\n  uid: string;\n  name?: string;\n  active?: boolean;\n  type?: ProductTypeType;\n  stock_method?: StockMethodType;\n  component_only?: boolean;\n  description?: string;\n  eligible_delivery?: boolean;\n  eligible_in_store_pickup?: boolean;\n  eligible_shipping_ground?: boolean;\n  eligible_shipping_air?: boolean;\n  price?: typeLiteral;\n  shipping?: typeLiteral;\n  alternates?: UidNameRefType[];\n  components?: ProductComponent[];\n  component_of?: ProductComponent[];\n  tags?: UidNameRefType[];\n  uid_tracking_category?: string | null;\n  uid_tax_class?: string | null;\n  uid_linked_rental?: string;\n  uid_linked_replacement?: string;\n  cogs?: CogsEntryType[] | null;\n  uid_superseded_by?: string | null;\n  webshop?: typeLiteral;\n  version: number;\n}",
           "doc": "Input type for updating a product."
         },
         {
@@ -11404,7 +11632,7 @@
         {
           "kind": "interface",
           "name": "ReturnPurchaseLineInputType",
-          "declaration": "interface ReturnPurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n}",
+          "declaration": "interface ReturnPurchaseLineInputType {\n  uid_product: string;\n  quantity: number;\n  allocations?: MovementAllocationInputType[];\n  units?: MovementUnitInputType[];\n}",
           "doc": "One product given back to the supplier on a subrent."
         },
         {
@@ -12452,8 +12680,8 @@
         {
           "kind": "variable",
           "name": "UNIT_SERIAL_IN_TYPES",
-          "declaration": "const UNIT_SERIAL_IN_TYPES: \"purchase\" | \"find\" | \"make\" | \"opening_balance\" | \"adjustment_increase\"[];",
-          "doc": "The manual types that bring a unit IN to CFS ownership, so may carry the\nserial it arrives with. Every other type names units by number only: a serial\nchanges on an existing number through `PUT /units/{uid}`, never by moving it."
+          "declaration": "const UNIT_SERIAL_IN_TYPES: \"purchase\" | \"find\" | \"make\" | \"opening_balance\" | \"adjustment_increase\" | \"subrent_in\"[];",
+          "doc": "The types that bring a unit IN to CFS's custody, so may carry the serial it\narrives with: the manual ownership in-types, plus `subrent_in`, whose\nsupplier's device arrives with its own serial (raised from the purchase, not\ntyped by hand, but read through the same {@link MovementUnitInput}). Every\nother type names units by number only: a serial changes on an existing number\nthrough `PUT /units/{uid}`, never by moving it."
         },
         {
           "kind": "typeAlias",
@@ -12546,8 +12774,8 @@
         {
           "kind": "variable",
           "name": "SERIAL_CHANGE_REASONS",
-          "declaration": "const SERIAL_CHANGE_REASONS: \"initial\" | \"replaced\" | \"corrected\"[];",
-          "doc": "Why a serial was set on a number.\n\n- `initial` — the first serial recorded for the number (a create, a\n  conversion, or a later bulk paste).\n- `replaced` — a different physical unit took over the number.\n- `corrected` — the previous entry was mis-typed; the unit did not change."
+          "declaration": "const SERIAL_CHANGE_REASONS: \"initial\" | \"replaced\" | \"corrected\" | \"subrented\"[];",
+          "doc": "Why a history entry (a spell) opened on a number.\n\n- `initial` — the first spell of a CFS-owned unit on the number (a create, a\n  conversion, an ownership movement, or a later bulk paste).\n- `replaced` — a different physical unit took over the number.\n- `corrected` — the previous entry was mis-typed; the unit did not change.\n- `subrented` — a `subrent_in` brought a supplier's unit in on the number:\n  every entry a subrent opens takes it, whether the number was fresh, vacant,\n  or is the same device coming back. Like `replaced` it starts a new PHYSICAL\n  unit (`serialAt`). It says why the spell opened, never whose the unit is —\n  that is the entry's `supplier`, which a `corrected` entry on a vendor unit\n  carries forward.\n\nAdding a member widens a stored enum, so readers ship before any writer."
         },
         {
           "kind": "variable",
@@ -12571,19 +12799,43 @@
           "kind": "variable",
           "name": "UNIT_STATUSES",
           "declaration": "const UNIT_STATUSES: \"active\" | \"vacant\" | \"retired\"[];",
-          "doc": "Whether a number is in use.\n\n- `active` — owned, and on the product's roster.\n- `vacant` — not owned right now (sold, written off, never activated). The\n  number can take a replacement unit with a new serial. EVERY departure\n  leaves a number vacant (owner, 2026-10-03); nothing retires one implicitly.\n- `retired` — never to be reused. Only an operator retires a number, and only\n  from `vacant`."
+          "doc": "Whether a number is in use.\n\n- `active` — in CFS's CUSTODY, and on the product's roster. Not \"owned\": a\n  unit subrented from a supplier is active too. WHOSE it is is its open\n  history entry's `supplier` (`unitOwnership`, `@cfs/core/utils/units`).\n- `vacant` — not in CFS's custody right now (sold, written off, returned to\n  its supplier, never activated). The number can take a replacement unit with\n  a new serial. EVERY departure leaves a number vacant (owner, 2026-10-03);\n  nothing retires one implicitly.\n- `retired` — never to be reused. Only an operator retires a number, and only\n  from `vacant`."
         },
         {
           "kind": "variable",
           "name": "UNIT_USER_SERIAL_REASONS",
           "declaration": "const UNIT_USER_SERIAL_REASONS: \"initial\" | \"replaced\" | \"corrected\"[];",
-          "doc": "The reasons `PUT /units/{uid}` may send. Today every reason; kept as its own\nlist, the `OOS_USER_STATUSES` pattern, so narrowing what an operator may send\ndoes not narrow what storage may hold."
+          "doc": "The reasons `PUT /units/{uid}` may send. Every reason but `subrented`, which\nonly a `subrent_in` opens. Kept as its own list, the `OOS_USER_STATUSES`\npattern, so narrowing what an operator may send does not narrow what storage\nmay hold."
         },
         {
           "kind": "variable",
           "name": "UNIT_USER_STATUSES",
           "declaration": "const UNIT_USER_STATUSES: \"retired\"[];",
           "doc": "The statuses `PUT /units/{uid}` may ask for: only `retired`, and the server\nhonours it only from `vacant`. `active` and `vacant` are reached by ownership\nmovements, never set by hand."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitActivation",
+          "declaration": "const UnitActivation: z.ZodType<UnitActivationType>;",
+          "doc": "Zod schema for {@link UnitActivationType}."
+        },
+        {
+          "kind": "variable",
+          "name": "UnitActivationConfirmed",
+          "declaration": "const UnitActivationConfirmed: z.ZodType<UnitActivationConfirmedType>;",
+          "doc": "Zod schema for {@link UnitActivationConfirmedType}."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitActivationConfirmedType",
+          "declaration": "interface UnitActivationConfirmedType {\n  start: string;\n  end: string | null;\n}",
+          "doc": "The confirmed on/off instants of an activation, as the provider's portal or bill states them."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitActivationType",
+          "declaration": "interface UnitActivationType {\n  uid: string;\n  start: string;\n  end: string | null;\n  uid_order: string | null;\n  uid_cogs: string;\n  provider_confirmed: UnitActivationConfirmedType | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
+          "doc": "One span during which a unit's service line was switched ON — a hotspot's or\nrouter's data line, billed by its provider through the product's `cogs`\nactivation entry that `uid_cogs` names.\n\nRECORDED, never derived from custody: a device can sit on the shelf switched\non (an idle, still-billed span) or go out switched off. Present on every\nunit, owned or rented, because CFS's own devices carry provider lines too.\nThe biller is the named cost entry's `provider`, not a field here, since one\nproduct can hold units billed by different providers."
         },
         {
           "kind": "variable",
@@ -12612,8 +12864,8 @@
         {
           "kind": "interface",
           "name": "UnitSerialHistoryEntryType",
-          "declaration": "interface UnitSerialHistoryEntryType {\n  serial_number: string;\n  start: string;\n  end: string | null;\n  reason: SerialChangeReasonType;\n  uid_movement: string | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
-          "doc": "One serial a number has carried, and over which span.\n\nThe acquisition reference lives HERE, per entry, rather than once per unit: a\nreplacement re-points the number at a new physical unit, and a single\nunit-level field would lose the original acquisition. The unit's CURRENT\nacquisition is the open entry's `uid_movement`."
+          "declaration": "interface UnitSerialHistoryEntryType {\n  serial_number: string | null;\n  start: string;\n  end: string | null;\n  reason: SerialChangeReasonType;\n  uid_movement: string | null;\n  supplier?: UidNameRefType | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
+          "doc": "One SPELL of one physical unit under a number: from when it took the number\nuntil it left or was re-recorded. Its serial is optional — a tent has a\nnumber and no serial, and a radio's serial may be typed in later — so an\nentry is a spell, not \"a serial\". The field keeps the name `serial_history`\nbecause renaming a stored array on a strict object is a four-step purge for a\ncosmetic gain.\n\nThe acquisition reference lives HERE, per entry, rather than once per unit: a\nreplacement re-points the number at a new physical unit, and a single\nunit-level field would lose the original acquisition. The unit's CURRENT\nacquisition is the open entry's `uid_movement`. Ownership lives here for the\nsame reason: a number can be CFS-owned, then vacant, then a supplier's."
         },
         {
           "kind": "variable",
@@ -12636,7 +12888,7 @@
         {
           "kind": "interface",
           "name": "UnitType",
-          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  activations?: UnitActivationType[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A unit number, its current serial and its history."
         },
         {
@@ -18499,8 +18751,8 @@
         {
           "kind": "interface",
           "name": "JournalProjection",
-          "declaration": "interface JournalProjection {\n  init(): S;\n  step(state: S, movement: JournalMovement): void;\n}",
-          "doc": "One thing a journal fold accumulates."
+          "declaration": "interface JournalProjection {\n  init(): S;\n  step(state: S, movement: M): void;\n}",
+          "doc": "One thing a journal fold accumulates. `M` is the movement shape it reads:\n{@link JournalMovement} by default, wider for a projection that needs more of\nthe movement (as {@link unitOutSpells} does)."
         },
         {
           "kind": "typeAlias",
@@ -18540,6 +18792,30 @@
         },
         {
           "kind": "typeAlias",
+          "name": "UnitJournalMovement",
+          "declaration": "type UnitJournalMovement = JournalMovement & RosterMovement;",
+          "doc": "A movement as {@link unitOutSpells} reads it: the journal fields plus the roster fold's."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitOutFinding",
+          "declaration": "interface UnitOutFinding {\n  uid_movement: string;\n  message: string;\n  unit: number | null;\n}",
+          "doc": "A movement the roster fold refused, and why."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitOutSpell",
+          "declaration": "interface UnitOutSpell {\n  uid_booking: string;\n  start: string;\n  end: string | null;\n}",
+          "doc": "One spell a unit spent OUT on one booking."
+        },
+        {
+          "kind": "interface",
+          "name": "UnitOutSpells",
+          "declaration": "interface UnitOutSpells {\n  spells: Map<number, UnitOutSpell[]>;\n  roster: RosterUnits;\n  findings: UnitOutFinding[];\n}",
+          "doc": "{@link unitOutSpells}' state."
+        },
+        {
+          "kind": "typeAlias",
           "name": "UnitSetsByKey",
           "declaration": "type UnitSetsByKey = Partial<Record<BookingBreakdownKeyType, Set<number>>>;",
           "doc": "Each booking's named units per history key, as the journal leaves them."
@@ -18576,7 +18852,7 @@
         {
           "kind": "function",
           "name": "foldJournal",
-          "signature": "foldJournal(movements: readonly JournalMovement[], projections: P): ProjectionStates<P>",
+          "signature": "foldJournal(movements: readonly M[], projections: P): ProjectionStates<P>",
           "doc": "Fold `movements` once, in {@link journalOrder}, through every projection,\nand return each projection's state. The input is not mutated or assumed\nsorted.",
           "paramTags": [],
           "returnsTag": null
@@ -18618,6 +18894,14 @@
           "name": "replayOrder",
           "signature": "replayOrder(a: ReplayOrdered, b: ReplayOrdered): number",
           "doc": "The order the writers actually applied the journal in, which is what a replay\nmust use to reproduce a stored ledger or roster.\n\nTwo eras, split at {@link REBUILD_AT_MS}:\n\n- **At or before it**, {@link journalOrder}: the rebuild folded the whole\n  journal by business date. Record order is wrong here — the rebuild CARRIED\n  older movements with their original `created_at`, so they would replay\n  ahead of the supply that preceded them on the shelf and relieve $0\n  (`costOfUnits` returns 0 when held is 0 or less).\n- **After it**, {@link recordOrder}: the live writer applied on arrival.\n  Business order is wrong here — a backdated purchase would move basis for\n  every movement between its date and its recording.\n\nEvery earlier-era movement precedes every later one.\n\n⚠️ Inside the earlier era this approximates the rebuild rather than\nreproducing it: the rebuild broke a same-instant tie by an internal rank and\na carried movement kept its old `number`, neither of which is stored.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "unitOutSpells",
+          "signature": "unitOutSpells(): JournalProjection<UnitOutSpells, UnitJournalMovement>",
+          "doc": "When each unit was physically OUT on a booking — the unit activity report's\n\"days out\" (`api-cloudrun/.claude/plans/serialized-subrent.md` § 8).\n\n🔴 **It runs the ROSTER FOLD, not a line rule of its own.** A rule reading\nlines `to: bookings/B` would miscount three cases `foldRosterUnits` already\nhandles: a lineless `rebook_out`/`rebook_in` pair moves an out unit between\nbookings with no line at all; an `enroll`'s in-place line `to: bookings/B`\nseeds a unit `unattributed_out`, which is out on no RECORDED booking and so\nopens no spell here; and a lineless customer-side step changes nothing. A\nspell opens when a movement leaves a unit `out` on B and it was not before,\nand closes when one leaves it anywhere else.\n\n⚠️ **Feed it every movement of the product, not one unit's.** The fold checks\nevery unit a movement names against where the roster has it, so a movement\nnaming units 3001 and 3002, folded without 3002's earlier history, is a\nfinding. A movement names one product's units only, so the union of\n`query_by_unit_number` over all of a product's units is complete.\n\nFolded in {@link journalOrder} by {@link foldJournal} — a business-date\nquestion. The live roster was applied in record order, so a backdated\nmovement can be a finding here while the stored roster is fine; that is what\n`findings` is for.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -21590,6 +21874,100 @@
       ]
     },
     {
+      "entrypoint": "@cfs/core/utils/cogs",
+      "moduleDoc": "The cost model, applied: a product's effective cost rules, and how an\nactivation entry cuts a unit's service-line spans into billed periods.\n\n```ts\nimport { billablePeriods, effectiveCogs, remainingUsageToBill } from \"@cfs/core/utils/cogs\";\n```\n\nOne home for both halves of `api-cloudrun/.claude/plans/serialized-subrent.md`\n§ 7a, so the unit activity report, the usage-bill pre-fill and the manager's\n\"already billed through\" hint all read the same periods. Pure and\nplatform-free.\n\n## Periods, and why any active day bills the whole one\n\nA provider bills a line per PERIOD, not per day: a Vision week costs the same\nwhether the hotspot was on for one day of it or seven (owner, 2026-10-27,\nQ11). So a period is billable iff any activation span under the entry\noverlaps it, and the expected cost is `periods × rate_cents` — an integer\ntimes an integer, closed money with no rounding decision (`cfs-money`).\n\n⚠️ Switching a line off mid-period therefore saves nothing for that period,\nwhich is what the manager's \"already billed through\" hint exists to say.",
+      "symbols": [
+        {
+          "kind": "interface",
+          "name": "BillablePeriod",
+          "declaration": "interface BillablePeriod {\n  start: string;\n  end: string;\n  activation_uids: string[];\n}",
+          "doc": "One billed period."
+        },
+        {
+          "kind": "interface",
+          "name": "BillablePeriods",
+          "declaration": "interface BillablePeriods {\n  periods: BillablePeriod[];\n  expectedCents: number;\n}",
+          "doc": "{@link billablePeriods}' answer."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "BillableSpan",
+          "declaration": "type BillableSpan = Pick<UnitActivationType, \"uid\" | \"start\" | \"end\" | \"uid_cogs\" | \"provider_confirmed\">;",
+          "doc": "The span fields {@link billablePeriods} reads."
+        },
+        {
+          "kind": "interface",
+          "name": "CogsRange",
+          "declaration": "interface CogsRange {\n  start: string | null;\n  end: string;\n}",
+          "doc": "A half-open instant range `[start, end)`; a `null` start is the beginning of time."
+        },
+        {
+          "kind": "variable",
+          "name": "DEFAULT_SALE_COA_COST",
+          "declaration": "const DEFAULT_SALE_COA_COST: 5000;",
+          "doc": "The account a `sale` product relieves inventory to when it states no `sale`\nentry: `5000` \"Cost of Goods Sold: Retail Inventory\".\n\n⚠️ **A code constant, deliberately not catalog-derived** (as tax classes'\n`is_default_for` is). It replaces the literal `\"5000\"` the Xero item body\nsent, one for one, so every existing product's item body is byte-identical\nand nothing re-pushes."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SpanInstantSource",
+          "declaration": "type SpanInstantSource = \"provider\" | \"cfs\";",
+          "doc": "Which instants a span's period cut used."
+        },
+        {
+          "kind": "interface",
+          "name": "SpanInstants",
+          "declaration": "interface SpanInstants {\n  start: string;\n  end: string | null;\n  source: SpanInstantSource;\n}",
+          "doc": "A span's resolved on/off instants."
+        },
+        {
+          "kind": "interface",
+          "name": "UsageBilledItem",
+          "declaration": "interface UsageBilledItem {\n  uid_cogs: string;\n  quantity_billed: number;\n}",
+          "doc": "The fields of a usage-billed purchase item {@link remainingUsageToBill} reads —\nstructural, so both a carrier's `usage` item and an activation-billed\n`subrent` item take it (`api-cloudrun/.claude/plans/purchase-documents-invoice-shape.md`)."
+        },
+        {
+          "kind": "function",
+          "name": "billablePeriods",
+          "signature": "billablePeriods(spans: readonly BillableSpan[], entry: Pick<CogsActivationEntryType, \"uid\" | \"formula\" | \"rate_cents\">, range: CogsRange): BillablePeriods",
+          "doc": "The periods of ONE unit's spans under ONE activation entry that are billable\nand overlap `range`, and their expected cost.\n\n- Only spans whose `uid_cogs` is `entry.uid` count; pass the unit's WHOLE\n  activation list, since a `per_week` cycle is anchored on the unit's FIRST\n  activation day under the entry (owner, 2026-10-28, Q11b), which can lie\n  before `range`.\n- `per_week`: 7 Chicago calendar days from that anchor's start of day, so a\n  re-activation inside a week already billed continues it at no extra cost.\n  Calendar days, never `7 × 86,400,000 ms` (`addChicagoDays`'s DST note).\n- `per_calendar_month`: Chicago calendar months.\n- A period is billable iff some span `[start, end)` overlaps it; a still-open\n  span runs on to `range.end`. A zero-length span bills nothing.\n\nSpans' instants come from {@link spanInstants}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "cogsActivationEntry",
+          "signature": "cogsActivationEntry(product: Pick<Product, \"cogs\">, uid_cogs: string): CogsActivationEntryType | undefined",
+          "doc": "The activation entry `uid_cogs` names on a product, or `undefined`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "effectiveCogs",
+          "signature": "effectiveCogs(product: Pick<Product, \"type\" | \"cogs\">): CogsEntryType[]",
+          "doc": "A product's cost rules as every reader must see them: the stored `cogs`,\nplus the TYPE default — a `sale` product with no stored `sale` entry gets\n`{ trigger: \"sale\", formula: \"average_cost\", coa_cost: 5000 }`.\n\nThe default is derived rather than stored because stamping it would be a\nwrite to every sale product, and each product write fans out to a Xero item\nsync and a Typesense reindex (`Product.cogs`'s docblock).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "remainingUsageToBill",
+          "signature": "remainingUsageToBill(item: UsageBilledItem, unitSpans: ReadonlyArray<readonly BillableSpan[]>, entry: Pick<CogsActivationEntryType, \"uid\" | \"formula\" | \"rate_cents\">, range: CogsRange): number",
+          "doc": "How many billable periods of `item`'s cost entry remain unbilled through\n`range.end`: `Σ billablePeriods(each unit's spans)` − `quantity_billed`.\n\nA SEPARATE function from `remainingToBill`, which six callers share over\nstored buckets; a usage item's billable quantity is derived from spans the\ncaller has read (each unit's whole activation list, from the product's\nroster, point-read inside the bill transaction). It is the guard that a\nunit-period cannot be billed twice.\n\n⚠️ May be NEGATIVE: an over-billed item, which the caller reports rather\nthan clamps.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "spanInstants",
+          "signature": "spanInstants(span: Pick<UnitActivationType, \"start\" | \"end\" | \"provider_confirmed\">): SpanInstants",
+          "doc": "The instants a span is billed over: the provider's confirmed ones where set,\notherwise CFS's own (§ 8 — the operator reconciles against the provider's\ninvoice, so the provider's word wins once it exists). A confirmed on-instant\nwith no confirmed off-instant keeps CFS's off-instant, and says `cfs`, since\nthe pair is then only half confirmed.",
+          "paramTags": [],
+          "returnsTag": null
+        }
+      ]
+    },
+    {
       "entrypoint": "@cfs/core/utils/products",
       "moduleDoc": "Shared product utility functions for CFS applications.\n\n```ts\nimport { buildComponentEntries } from \"@cfs/core/utils/products\";\n\n// When adding component B to product A, copy B's nested components\n// into A's components array with adjusted paths:\nconst nested = buildComponentEntries(\"A\", productB.components, 1);\n```",
       "symbols": [
@@ -21604,6 +21982,12 @@
           "name": "CountedStockMethod",
           "declaration": "type CountedStockMethod = Exclude<StockMethodType, \"none\">;",
           "doc": "A `stock_method` that carries a count."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "SupersessionNode",
+          "declaration": "type SupersessionNode = Pick<Product, \"uid\" | \"type\" | \"uid_superseded_by\">;",
+          "doc": "The fields the supersession helpers read."
         },
         {
           "kind": "function",
@@ -21664,6 +22048,22 @@
         },
         {
           "kind": "function",
+          "name": "productLineage",
+          "signature": "productLineage(uid: string, lookup: fnOrConstructor): string[]",
+          "doc": "A product's line of succession, itself first: `[A, B, C]` when A is\nsuperseded by B and B by C. Reports fold every member's revenue under the\nLAST one (`api-cloudrun/.claude/plans/serialized-subrent.md` § 12), while\nthe orders, invoices and pick sheets that name A keep showing A.\n\nStops at a link `lookup` cannot resolve — an unread or deleted successor —\nand returns the chain so far: a report must still render.\n{@link validateSupersession} is what refuses such a link at write time.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "productSurvivor",
+          "signature": "productSurvivor(uid: string, lookup: fnOrConstructor): string",
+          "doc": "The product a report folds `uid` under: the last of its {@link productLineage}.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
           "name": "removeComponentEntries",
           "signature": "removeComponentEntries(components: T[], path: string[]): T[]",
           "doc": "Remove a component and all its descendants from a flat components array.\nAn entry is removed if its `path` starts with the given path prefix —\nthis covers the component itself and every entry nested beneath it.",
@@ -21684,6 +22084,14 @@
           "name": "sortComponentsZeroPricedFirst",
           "signature": "sortComponentsZeroPricedFirst(components: T[]): T[]",
           "doc": "Stable-sort a `product.components` array so that within each parent's\ndirect-children block (keyed by `path.at(-1)`, a path of length ≤ 1 being the\nroot's), entries with `zero_priced === true` precede the rest. Position\nacross parent blocks is preserved — only same-parent siblings swap.\nMutates `components` in place and returns it; idempotent.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "validateSupersession",
+          "signature": "validateSupersession(product: SupersessionNode, lookup: fnOrConstructor): string[]",
+          "doc": "The CROSS-DOCUMENT supersession invariants, for a product about to be\nwritten with `uid_superseded_by` set. The org merge's split\n(`validateMergeLinks`): the schema refine forbids only self-reference, and\nwhat reads another document lives here, called by the writer.\n\n1. the successor exists;\n2. it has the same `type` — a rental's revenue must not fold into a sale's;\n3. the chain from it resolves to a survivor without returning to `product`.\n   Unlike an org merge, a chain may be longer than one hop (A → B → C reports\n   under C).\n\nReturns every violation; empty means the link is consistent. A product with\nno `uid_superseded_by` is trivially consistent.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -22666,6 +23074,12 @@
       "moduleDoc": "Serialized units, applied: the range text operators type, the canonical\nset every wire carries, the picker's suggestion, and the ONE fold that turns\nmovements into a product's roster.\n\n```ts\nimport { formatUnitRanges, parseUnitRanges, suggestUnits } from \"@cfs/core/utils/units\";\n```\n\nEverything here is pure and platform-free. The manager's picker and the\napi's validation read the same parser; the api's ledger writer and the\n`audit-unit-replay` script run the same {@link foldRosterUnits}.",
       "symbols": [
         {
+          "kind": "variable",
+          "name": "DEVICE_BOUNDARY_REASONS",
+          "declaration": "const DEVICE_BOUNDARY_REASONS: ReadonlySet<SerialChangeReasonType>;",
+          "doc": "The reasons whose entry starts a new PHYSICAL unit on a number, so {@link serialAt}\nnever reads a serial across one."
+        },
+        {
           "kind": "interface",
           "name": "FormatUnitRangesOptions",
           "declaration": "interface FormatUnitRangesOptions {\n  separator?: string;\n  dash?: string;\n}",
@@ -22700,6 +23114,12 @@
           "name": "RosterUnits",
           "declaration": "type RosterUnits = Record<string, UnitRosterEntryType>;",
           "doc": "A roster's `units` map: unit number (as a key) → where it is."
+        },
+        {
+          "kind": "typeAlias",
+          "name": "UnitOwnership",
+          "declaration": "type UnitOwnership = \"cfs\" | \"supplier\";",
+          "doc": "Whose a unit is: CFS's, or the supplier it was subrented from."
         },
         {
           "kind": "interface",
@@ -22763,7 +23183,7 @@
           "kind": "function",
           "name": "serialAt",
           "signature": "serialAt(unit: Pick<UnitType, \"serial_history\">, instant: string | null): string | null",
-          "doc": "The serial of the physical unit that held a number at `instant` — or, with\n`instant` `null`, of the one that holds it now. `null` when no serial was\never recorded for that unit.\n\n🔴 **Not \"the history entry open at `instant`\".** A number changes PHYSICAL\nunit only at a `replaced` entry; `initial` and `corrected` entries restate the\nserial of the unit already there. So this finds the span of history between\nthe `replaced` entries either side of `instant` and returns that span's\nLATEST serial. The open-entry reading is wrong both ways that matter: the\nwalkie's serials were pasted (`initial`) on 2026-10-07, after most of its\nlosses, so no entry is open at the loss; and a `corrected` entry after the\nloss fixes a typo in the same radio's serial.\n\nA closed span still answers — a write-off closes the open entry, and the\nwritten-off radio's serial is what an invoice for it names.",
+          "doc": "The serial of the physical unit that held a number at `instant` — or, with\n`instant` `null`, of the one that holds it now. `null` when no serial was\never recorded for that unit.\n\n🔴 **Not \"the history entry open at `instant`\".** A number changes PHYSICAL\nunit only at a `replaced` or `subrented` entry ({@link DEVICE_BOUNDARY_REASONS});\n`initial` and `corrected` entries restate the serial of the unit already\nthere. So this finds the span of history between the boundary entries either\nside of `instant` and returns that span's LATEST serial. A `subrented` entry\nis a boundary because a supplier's device is never the CFS-era unit before\nit, even under the same number. The open-entry reading is wrong both ways that matter: the\nwalkie's serials were pasted (`initial`) on 2026-10-07, after most of its\nlosses, so no entry is open at the loss; and a `corrected` entry after the\nloss fixes a typo in the same radio's serial.\n\nA closed span still answers — a write-off closes the open entry, and the\nwritten-off radio's serial is what an invoice for it names.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -22788,6 +23208,22 @@
           "name": "unflaggedShelfUnits",
           "signature": "unflaggedShelfUnits(roster: RosterUnits, uid_location?: string): number[]",
           "doc": "Unflagged shelf units, ascending — optionally on one location. The manager\nfiltered the roster this way in three places (`recordActions`,\n`OOSBreakdownEditor`, `unitPicks`).",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "unitOwnership",
+          "signature": "unitOwnership(unit: Pick<UnitType, \"serial_history\">): UnitOwnership",
+          "doc": "`\"supplier\"` when {@link unitSupplier} names one, else `\"cfs\"`.",
+          "paramTags": [],
+          "returnsTag": null
+        },
+        {
+          "kind": "function",
+          "name": "unitSupplier",
+          "signature": "unitSupplier(unit: Pick<UnitType, \"serial_history\">): UidNameRefType | null",
+          "doc": "The supplier a unit is subrented from: its OPEN history entry's `supplier`,\nor `null` for a CFS-owned unit and for a number with no open entry (vacant,\nretired, or an active unit the spell backfill has not reached yet — which\nonly a CFS conversion produced). An entry stored before `supplier` existed\nreads as `null`.\n\nThe one predicate the api's refusing writers, the manager's pickers and the\nunit audit all read (`api-cloudrun/.claude/plans/serialized-subrent.md` § 2).\nNever decide ownership from the entry's `reason`: a `corrected` entry on a\nvendor unit keeps its supplier.",
           "paramTags": [],
           "returnsTag": null
         }

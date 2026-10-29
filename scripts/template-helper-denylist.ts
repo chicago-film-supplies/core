@@ -472,6 +472,13 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     // (`template-context.ts` has no `product` — templates render orders,
     // invoices and quotes).
     "deriveProductImageUuids",
+    // Supersession (serialized-subrent § 12): a report folds revenue under a
+    // product's survivor, and the writer validates the link. Both take a
+    // product lookup no render context holds — and a document keeps showing the
+    // product it was written with, never its successor.
+    "productLineage",
+    "productSurvivor",
+    "validateSupersession",
   ],
   // 🔴 **Denylisted WHOLE, and for a different reason from everything else in
   // this file.** Every other entry hides a helper that is real domain code
@@ -583,6 +590,7 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "recordOrder",
     "replayCustody",
     "replayOrder",
+    "unitOutSpells",
     "unitsByBooking",
   ],
   // `utils/contentHash.ts` fingerprints a document — the API's content-addressed
@@ -892,11 +900,27 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
   // its audit run. `serialAt` reads a unit's whole serial history to name what
   // a replacement line bills (`seedReplacementLines`); a template holds no unit
   // document, and a printed unit's CURRENT serial is its `serial_number`.
+  // `unitSupplier` / `unitOwnership` read a unit's open history entry, for the
+  // api's refusing writers and the manager's pickers; a template holds no unit
+  // document either.
   units: [
     "foldRosterUnits",
     "normalizeUnitSet",
     "parseUnitRanges",
     "serialAt",
     "suggestUnits",
+    "unitOwnership",
+    "unitSupplier",
+  ],
+  // `utils/cogs.ts` prices CFS's COST of revenue — a product's cost rules and a
+  // unit's billed service periods — for the unit activity report and the usage
+  // bill pre-fill (serialized-subrent § 7a). A customer document never shows
+  // cost, and no render context holds a product or a unit.
+  cogs: [
+    "billablePeriods",
+    "cogsActivationEntry",
+    "effectiveCogs",
+    "remainingUsageToBill",
+    "spanInstants",
   ],
 };

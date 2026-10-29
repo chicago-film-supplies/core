@@ -59,7 +59,7 @@ const sharedRules: CollectionRule[] = [
     target: "units",
     mode: "co-write",
     invariant:
-      "An OWNERSHIP movement on a seeded serialized product moves its units' status in the same commit (owner, 2026-10-03). An in-type (purchase, find, make, adjustment_increase, sale_return) activates a vacant number or mints a fresh one; a replacement keeps the number and opens a `replaced` history entry. An out-type (sale, trade_in, adjustment_decrease, write_off) leaves every named number `vacant` and closes its open serial entry — never `retired`, which only an operator sets. A reversal reverses the unit effect, refused when the number has since been reused. Custody movements never touch `units`.",
+      "An OWNERSHIP or SUBRENT movement on a seeded serialized product moves its units' status in the same commit (owner, 2026-10-03). An in-type (purchase, find, make, adjustment_increase, sale_return, subrent_in) activates a vacant number or mints a fresh one and opens a history entry, serial or none; a replacement keeps the number and opens a `replaced` entry. The opened entry's `supplier` is null for a CFS-owned unit and the purchase's supplier on a `subrent_in`, whose entry takes reason `subrented`. An out-type (sale, trade_in, adjustment_decrease, write_off, subrent_out, return_to_supplier) leaves every named number `vacant` and closes its open entry — never `retired`, which only an operator sets. A subrent out-type names only units subrented from that purchase's supplier, and an ownership out-type only CFS-owned ones (serialized-subrent § 2). A reversal reverses the unit effect, refused when the number has since been reused. Custody movements never touch `units`.",
     fields: [
       {
         source: ["units"],
@@ -70,7 +70,7 @@ const sharedRules: CollectionRule[] = [
         source: ["units", "serial_number"],
         target: ["serial_history"],
         transform:
-          "in: opens an entry naming this movement in `uid_movement`; out: closes the open entry (`end` = the movement's date)",
+          "in: opens an entry naming this movement in `uid_movement`, with `supplier` (null unless a `subrent_in`); out: closes the open entry (`end` = the movement's date)",
       },
       {
         source: ["units", "serial_number"],

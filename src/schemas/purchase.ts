@@ -867,10 +867,17 @@ export interface ReturnPurchaseLineInputType {
   quantity: number;
   /**
    * Which locations the units leave FROM. Absent means the writer picks the
-   * shelves, as a check-out does. Never names units: a subrent product is
-   * never serialized (refused at create).
+   * shelves, as a check-out does.
    */
   allocations?: MovementAllocationInputType[];
+  /**
+   * Which units go back, on a serialized product: exactly `quantity`,
+   * ascending by number, by NUMBER only (a serial is captured on the way in,
+   * never on the way out). The writer requires them on a seeded roster and
+   * refuses any unit not subrented from this purchase's supplier
+   * (api-cloudrun `.claude/plans/serialized-subrent.md` § 2).
+   */
+  units?: MovementUnitInputType[];
 }
 
 /** Zod schema for ReturnPurchaseLineInputType. */
@@ -878,13 +885,33 @@ export const ReturnPurchaseLineInput: z.ZodType<ReturnPurchaseLineInputType> = z
   uid_product: FirestoreId,
   quantity: z.int().min(1),
   allocations: z.array(MovementAllocationInput).min(1).optional(),
+  units: z.array(MovementUnitInput).optional(),
 }).superRefine((l, ctx) => {
   if (l.allocations && l.quantity !== l.allocations.reduce((sum, a) => sum + a.quantity, 0)) {
     ctx.addIssue({ code: "custom", path: ["quantity"], message: "quantity must equal the sum of per-location allocation quantities" });
   }
-  if (l.allocations?.some((a) => a.units !== undefined)) {
-    ctx.addIssue({ code: "custom", path: ["allocations"], message: "a subrent return never names units" });
+  if (l.units !== undefined) {
+    if (l.units.length !== l.quantity) {
+      ctx.addIssue({ code: "custom", path: ["units"], message: "a return that names units names exactly `quantity` of them" });
+    }
+    for (let i = 1; i < l.units.length; i++) {
+      if (l.units[i].number <= l.units[i - 1].number) {
+        ctx.addIssue({ code: "custom", path: ["units", i], message: "units must be ascending by number, each named once" });
+        break;
+      }
+    }
+    l.units.forEach((u, i) => {
+      if (u.serial_number !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["units", i, "serial_number"],
+          message: "a return names units by number only; a serial arrives with a unit coming in",
+        });
+      }
+    });
   }
+  const issue = allocationUnitsIssue(l.units?.map((u) => u.number), l.allocations);
+  if (issue !== null) ctx.addIssue({ code: "custom", path: ["allocations"], message: issue });
 });
 
 /**

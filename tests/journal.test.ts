@@ -24,6 +24,8 @@ import {
   type JournalMovement,
   orphanedCustody,
   replayCustody,
+  type UnitJournalMovement,
+  unitOutSpells,
   unitsByBooking,
 } from "../src/utils/journal.ts";
 import { type BookingBreakdown, type BookingBreakdownKeyType, CUSTODY_HISTORY_KEYS } from "../src/schemas/mod.ts";
@@ -453,4 +455,118 @@ Deno.test("recordOrder: created_at, then number; a write sentinel is refused", (
   assertEquals([rm(2, "x", at), rm(1, "x", at)].sort(recordOrder).map((m) => m.number), [1, 2]);
   const sentinel = { number: 3, date: "x", created_at: { isEqual: () => false } };
   assertThrows(() => recordOrder(sentinel, rm(1, "x", at)), Error, "not a stored Timestamp");
+});
+
+// ── unitOutSpells ────────────────────────────────────────────────────
+
+const SHELF_L = "Lshelf00000000000000";
+const BK_A = "bookingA";
+const BK_B = "bookingB";
+
+let um = 0;
+/** A movement naming units, `um` minutes after 09:00 on 2026-10-01 (Chicago). */
+function unitMove(
+  type: UnitJournalMovement["type"],
+  units: number[],
+  over: Partial<UnitJournalMovement> = {},
+): UnitJournalMovement {
+  um += 1;
+  return {
+    uid: `m${um}`,
+    type,
+    number: um,
+    date: new Date(Date.parse("2026-10-01T09:00:00.000-05:00") + um * 60_000).toISOString(),
+    uid_booking: null,
+    custody: null,
+    service: null,
+    quantity: units.length,
+    lines: [],
+    units: units.map((n) => ({ uid_unit: `unit-${n}`, number: n, serial_number: null })),
+    sources: [],
+    ...over,
+  };
+}
+const line = (units: number[], from: string | null, to: string | null) => ({
+  quantity: units.length,
+  units,
+  location: {
+    from: from === null ? null : from.startsWith("booking")
+      ? { collection: "bookings" as const, uid: from }
+      : { collection: "locations" as const, uid: from },
+    to: to === null ? null : to.startsWith("booking")
+      ? { collection: "bookings" as const, uid: to }
+      : { collection: "locations" as const, uid: to },
+  },
+});
+
+Deno.test("unitOutSpells: a check-out opens a spell, a rebook pair moves it, a check-in closes it", () => {
+  const enroll = unitMove("enroll", [3001, 3002], { lines: [line([3001, 3002], SHELF_L, SHELF_L)] });
+  const out = unitMove("check_out", [3001], {
+    uid_booking: BK_A,
+    custody: { from: "reserved", to: "out" },
+    lines: [line([3001], SHELF_L, BK_A)],
+  });
+  const rebookOut = unitMove("rebook_out", [3001], {
+    uid_booking: BK_A,
+    custody: { from: "out", to: null },
+    sources: [{ collection: "bookings", uid: BK_B }],
+  });
+  const rebookIn = unitMove("rebook_in", [3001], {
+    uid_booking: BK_B,
+    custody: { from: null, to: "out" },
+    sources: [{ collection: "bookings", uid: BK_A }],
+  });
+  const back = unitMove("check_in", [3001], {
+    uid_booking: BK_B,
+    custody: { from: "out", to: "returned" },
+    lines: [line([3001], BK_B, SHELF_L)],
+  });
+  // Folded out of order on purpose: foldJournal sorts by journalOrder.
+  const [state] = foldJournal([back, rebookIn, out, enroll, rebookOut], [unitOutSpells()] as const);
+  assertEquals(state.findings, []);
+  assertEquals(state.spells.get(3001), [
+    { uid_booking: BK_A, start: out.date, end: rebookIn.date },
+    { uid_booking: BK_B, start: rebookIn.date, end: back.date },
+  ]);
+  assertEquals(state.spells.get(3002), undefined, "a unit that never left has no spell");
+});
+
+Deno.test("unitOutSpells: an enroll onto a booking is unattributed_out — no spell — until a rebook writes the booking down", () => {
+  const enroll = unitMove("enroll", [3010], { lines: [line([3010], BK_A, BK_A)] });
+  const [seeded] = foldJournal([enroll], [unitOutSpells()] as const);
+  assertEquals(seeded.roster["3010"], { state: "unattributed_out" });
+  assertEquals(seeded.spells.get(3010), undefined);
+
+  const rebookIn = unitMove("rebook_in", [3010], {
+    uid_booking: BK_B,
+    custody: { from: null, to: "out" },
+    sources: [{ collection: "bookings", uid: BK_A }],
+  });
+  const [after] = foldJournal([enroll, rebookIn], [unitOutSpells()] as const);
+  assertEquals(after.spells.get(3010), [{ uid_booking: BK_B, start: rebookIn.date, end: null }]);
+});
+
+Deno.test("unitOutSpells: a movement the roster fold refuses is a FINDING, skipped, not a throw", () => {
+  // 3020 was never enrolled, so checking it out is refused.
+  const out = unitMove("check_out", [3020], {
+    uid_booking: BK_A,
+    custody: { from: "reserved", to: "out" },
+    lines: [line([3020], SHELF_L, BK_A)],
+  });
+  const [state] = foldJournal([out], [unitOutSpells()] as const);
+  assertEquals(state.findings.map((f) => [f.uid_movement, f.unit]), [[out.uid, 3020]]);
+  assertEquals(state.spells.size, 0);
+  assertEquals(state.roster, {});
+});
+
+Deno.test("unitOutSpells: shares one fold with the existing projections", () => {
+  const enroll = unitMove("enroll", [3030], { lines: [line([3030], SHELF_L, SHELF_L)] });
+  const out = unitMove("check_out", [3030], {
+    uid_booking: BK_A,
+    custody: { from: "reserved", to: "out" },
+    lines: [line([3030], SHELF_L, BK_A)],
+  });
+  const [spells, byBooking] = foldJournal([enroll, out], [unitOutSpells(), unitsByBooking()] as const);
+  assertEquals(spells.spells.get(3030)?.length, 1);
+  assertEquals([...(byBooking.get(BK_A)?.out ?? [])], [3030]);
 });

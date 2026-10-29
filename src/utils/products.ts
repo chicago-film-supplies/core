@@ -15,6 +15,7 @@
 import {
   type AuthoredProductComponent,
   type ComponentPriceKeyType,
+  type Product,
   type ProductComponent,
   type ProductTypeType,
   roundComponentQuantity,
@@ -197,4 +198,86 @@ export function sortComponentsZeroPricedFirst<T extends ProductComponent>(compon
   }
   for (let i = 0; i < components.length; i++) components[i] = sortedAt[i];
   return components;
+}
+
+// ── Supersession ─────────────────────────────────────────────────────
+
+/** The fields the supersession helpers read. */
+export type SupersessionNode = Pick<Product, "uid" | "type" | "uid_superseded_by">;
+
+/**
+ * A product's line of succession, itself first: `[A, B, C]` when A is
+ * superseded by B and B by C. Reports fold every member's revenue under the
+ * LAST one (`api-cloudrun/.claude/plans/serialized-subrent.md` § 12), while
+ * the orders, invoices and pick sheets that name A keep showing A.
+ *
+ * Stops at a link `lookup` cannot resolve — an unread or deleted successor —
+ * and returns the chain so far: a report must still render.
+ * {@link validateSupersession} is what refuses such a link at write time.
+ *
+ * @throws on a cycle, which no writer that ran {@link validateSupersession}
+ *   can produce; folding around one would put revenue under an arbitrary
+ *   member.
+ */
+export function productLineage(
+  uid: string,
+  lookup: (uid: string) => Pick<SupersessionNode, "uid" | "uid_superseded_by"> | undefined,
+): string[] {
+  const chain = [uid];
+  const seen = new Set(chain);
+  let next = lookup(uid)?.uid_superseded_by;
+  while (next !== undefined) {
+    if (seen.has(next)) throw new Error(`product supersession cycles: ${[...chain, next].join(" → ")}`);
+    chain.push(next);
+    seen.add(next);
+    next = lookup(next)?.uid_superseded_by;
+  }
+  return chain;
+}
+
+/** The product a report folds `uid` under: the last of its {@link productLineage}. */
+export function productSurvivor(
+  uid: string,
+  lookup: (uid: string) => Pick<SupersessionNode, "uid" | "uid_superseded_by"> | undefined,
+): string {
+  return productLineage(uid, lookup).at(-1)!;
+}
+
+/**
+ * The CROSS-DOCUMENT supersession invariants, for a product about to be
+ * written with `uid_superseded_by` set. The org merge's split
+ * (`validateMergeLinks`): the schema refine forbids only self-reference, and
+ * what reads another document lives here, called by the writer.
+ *
+ * 1. the successor exists;
+ * 2. it has the same `type` — a rental's revenue must not fold into a sale's;
+ * 3. the chain from it resolves to a survivor without returning to `product`.
+ *    Unlike an org merge, a chain may be longer than one hop (A → B → C reports
+ *    under C).
+ *
+ * Returns every violation; empty means the link is consistent. A product with
+ * no `uid_superseded_by` is trivially consistent.
+ */
+export function validateSupersession(
+  product: SupersessionNode,
+  lookup: (uid: string) => SupersessionNode | undefined,
+): string[] {
+  const target = product.uid_superseded_by;
+  if (target === undefined) return [];
+  if (target === product.uid) return [`product ${product.uid} cannot be superseded by itself`];
+  const successor = lookup(target);
+  if (successor === undefined) return [`product ${product.uid} is superseded by ${target}, which does not exist`];
+  const violations: string[] = [];
+  if (successor.type !== product.type) {
+    violations.push(
+      `product ${product.uid} (${product.type}) cannot be superseded by ${target} (${successor.type}): the types differ`,
+    );
+  }
+  const resolve = (uid: string) => uid === product.uid ? product : lookup(uid);
+  try {
+    productLineage(product.uid, resolve);
+  } catch (e) {
+    violations.push((e as Error).message);
+  }
+  return violations;
 }

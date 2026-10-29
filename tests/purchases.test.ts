@@ -778,7 +778,7 @@ Deno.test("CreatePurchaseInput: a subrent names a hire on every line, a buy name
   assertEquals(issuePaths(UpdatePurchaseInput, { version: 0, lines: [{ ...l, dates: HIRE }] }), []);
 });
 
-Deno.test("ReturnPurchaseInput: allocations sum to the quantity and never name units", () => {
+Deno.test("ReturnPurchaseInput: allocations sum to the quantity; units only with the line's own units", () => {
   const ret = (lineOver: Record<string, unknown>) => ({
     date: "2026-10-25T10:00:00.000-05:00",
     lines: [{ uid_product: "testprod100000000000", quantity: 10, ...lineOver }],
@@ -792,6 +792,31 @@ Deno.test("ReturnPurchaseInput: allocations sum to the quantity and never name u
   assertEquals(
     issuePaths(ReturnPurchaseInput, ret({ quantity: 1, allocations: [{ uid_location: "testloc1000000000000", quantity: 1, units: [4] }] })),
     ["lines.0.allocations"],
+    "an allocation naming units the line does not name",
+  );
+});
+
+Deno.test("ReturnPurchaseInput: a serialized subrent return names its units by number (serialized-subrent § 5)", () => {
+  const ret = (lineOver: Record<string, unknown>) => ({
+    date: "2026-10-25T10:00:00.000-05:00",
+    lines: [{ uid_product: "testprod100000000000", quantity: 2, ...lineOver }],
+    uuid_session: "0199a1f2-3b4c-7d8e-9f01-234567890abc",
+    version: 3,
+  });
+  const units = [{ number: 3004 }, { number: 3007 }];
+  assertEquals(issuePaths(ReturnPurchaseInput, ret({ units })), []);
+  assertEquals(
+    issuePaths(ReturnPurchaseInput, ret({
+      units,
+      allocations: [{ uid_location: "testloc1000000000000", quantity: 2, units: [3004, 3007] }],
+    })),
+    [],
+  );
+  assertEquals(issuePaths(ReturnPurchaseInput, ret({ units: [{ number: 3004 }] })), ["lines.0.units"]);
+  assertEquals(issuePaths(ReturnPurchaseInput, ret({ units: [{ number: 3007 }, { number: 3004 }] })), ["lines.0.units.1"]);
+  assertEquals(
+    issuePaths(ReturnPurchaseInput, ret({ units: [{ number: 3004, serial_number: "IMEI" }, { number: 3007 }] })),
+    ["lines.0.units.0.serial_number"],
   );
 });
 

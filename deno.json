@@ -99,6 +99,7 @@
     "./utils/price-document": "./src/utils/price-document.ts",
     "./utils/purchases": "./src/utils/purchases.ts",
     "./utils/organizations": "./src/utils/organizations.ts",
+    "./utils/cogs": "./src/utils/cogs.ts",
     "./utils/products": "./src/utils/products.ts",
     "./utils/replacements": "./src/utils/replacements.ts",
     "./utils/reporting": "./src/utils/reporting.ts",

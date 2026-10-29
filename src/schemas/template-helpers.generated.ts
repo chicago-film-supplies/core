@@ -59,6 +59,9 @@ export const templateHelpers: Record<string, TemplateHelperEntry[]> = {
   "citations": [
 
   ],
+  "cogs": [
+
+  ],
   "contact-name": [
     { name: "deriveName", expr: "it.contact-name.deriveName(parts)", desc: "Canonical join rule for deriving a single display string from name parts. Joins `[first_name, middle_name, last_name]` with single spaces (missing parts are dropped, never produce empty padding) and appends ` (pronunciation)` when set. This is the single source of truth — every `name` field on a stored document and `ActorRef.name` is computed by passing through here.", returns: "string" },
   ],
