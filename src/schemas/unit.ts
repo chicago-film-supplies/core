@@ -207,7 +207,7 @@ export interface UnitSerialHistoryEntryType {
    * A unit is vendor-owned iff its OPEN entry's `supplier !== null`.
    *
    * ⚠️ Optional only until the backfill stamps `null` onto every stored entry
-   * (api-cloudrun `.claude/plans/serialized-subrent.md` § 1, step 3); the
+   * (`api-cloudrun/.claude/plans/serialized-subrent.md` § 1, step 3); the
    * contract beta then makes it required. Absent reads as `null`.
    */
   supplier?: UidNameRefType | null;
@@ -270,7 +270,7 @@ export interface UnitType {
    * overlapping, at most one open, and none open unless `active`.
    *
    * ⚠️ Optional only until the backfill stamps `[]` onto every stored unit
-   * (`.claude/plans/serialized-subrent.md` § 1, step 3); the contract beta
+   * (`api-cloudrun/.claude/plans/serialized-subrent.md` § 1, step 3); the contract beta
    * makes it required. Absent reads as `[]`.
    */
   activations?: UnitActivationType[];
@@ -348,7 +348,7 @@ export const UnitActivation: z.ZodType<UnitActivationType> = z.strictObject({
  * ⚠️ Rule 3 still allows an ACTIVE unit with no open entry. The universal
  * spell rule — active ⟺ exactly one open entry — turns on in the contract beta,
  * once the backfill has opened one for every active unit that has none
- * (`.claude/plans/serialized-subrent.md` § 1, step 4).
+ * (`api-cloudrun/.claude/plans/serialized-subrent.md` § 1, step 4).
  */
 function checkUnit(doc: UnitType, ctx: z.RefinementCtx): void {
   const open = doc.serial_history.filter((e) => e.end === null);

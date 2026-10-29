@@ -340,7 +340,7 @@ export const MOVEMENT_TYPES = [
   // mistake is a `reverses` reversal through the purchase's own lever. On a
   // serialized product they name their units, and a numbered subrent unit's
   // OWNERSHIP is its open history entry's `supplier`, not the movement type
-  // (api-cloudrun `.claude/plans/serialized-subrent.md` § 1).
+  // (`api-cloudrun/.claude/plans/serialized-subrent.md` § 1).
   "subrent_in",
   "subrent_out",
   // A rented unit that cannot go back: lost at the customer, or damaged

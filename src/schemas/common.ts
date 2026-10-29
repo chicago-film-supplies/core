@@ -1003,7 +1003,7 @@ export const COARevenueEnum: z.ZodType<COARevenueType> = z.union([
  * can check a code against a list but not against the chart-of-accounts
  * document's `type`. 5000–5700 as synced on 2026-10-28, plus `5150` "Cost of
  * Goods Sold: Data Service" (created in Xero 2026-10-28 for carrier lines on
- * owned devices; api-cloudrun `.claude/plans/serialized-subrent.md` § 7a).
+ * owned devices; `api-cloudrun/.claude/plans/serialized-subrent.md` § 7a).
  *
  * ⚠️ So a new cost account needs a core release.
  */

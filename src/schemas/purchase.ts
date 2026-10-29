@@ -875,7 +875,7 @@ export interface ReturnPurchaseLineInputType {
    * ascending by number, by NUMBER only (a serial is captured on the way in,
    * never on the way out). The writer requires them on a seeded roster and
    * refuses any unit not subrented from this purchase's supplier
-   * (api-cloudrun `.claude/plans/serialized-subrent.md` § 2).
+   * (`api-cloudrun/.claude/plans/serialized-subrent.md` § 2).
    */
   units?: MovementUnitInputType[];
 }

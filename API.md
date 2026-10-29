@@ -1397,7 +1397,7 @@ may post to — a POLICY subset, like the revenue codes above, because a schema
 can check a code against a list but not against the chart-of-accounts
 document's `type`. 5000–5700 as synced on 2026-10-28, plus `5150` "Cost of
 Goods Sold: Data Service" (created in Xero 2026-10-28 for carrier lines on
-owned devices; api-cloudrun `.claude/plans/serialized-subrent.md` § 7a).
+owned devices; `api-cloudrun/.claude/plans/serialized-subrent.md` § 7a).
 
 ⚠️ So a new cost account needs a core release.
 
@@ -6394,7 +6394,7 @@ interface LeafPath {
 ### `LinePostingCore`
 
 **Where the line's income POSTS, declared once for the two PRICED grains** — an
-order line and an invoice line (api-cloudrun `.claude/plans/line-tracking-uid.md`).
+order line and an invoice line (`api-cloudrun/.claude/plans/line-tracking-uid.md`).
 Not a fulfillment line: it carries no price, so it posts nothing.
 
 - `coa_revenue` — Xero's `AccountCode`, closed by {@link COARevenueEnum}.
@@ -16947,7 +16947,7 @@ may post to — a POLICY subset, like the revenue codes above, because a schema
 can check a code against a list but not against the chart-of-accounts
 document's `type`. 5000–5700 as synced on 2026-10-28, plus `5150` "Cost of
 Goods Sold: Data Service" (created in Xero 2026-10-28 for carrier lines on
-owned devices; api-cloudrun `.claude/plans/serialized-subrent.md` § 7a).
+owned devices; `api-cloudrun/.claude/plans/serialized-subrent.md` § 7a).
 
 ⚠️ So a new cost account needs a core release.
 
