@@ -313,7 +313,7 @@ export const LINE_TAX_FIELDS: readonly ["uid_tax_class", "uid_tax_class_override
  * caused three past incidents. `null` is a real answer on both: a custom line
  * has no product to post as (Xero still gets 4800 via `xeroAccrecLineRefs`),
  * and a product may have no category. The 2026-10-28 migration
- * (`api-cloudrun/scripts/migrate-line-tracking-to-uid.ts`) states both keys on
+ * (an api-cloudrun one-shot, since deleted) states both keys on
  * every stored order and invoice line.
  *
  * Spread by both grains where `coa_revenue` already sat, directly before
