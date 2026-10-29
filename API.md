@@ -6394,7 +6394,7 @@ interface LeafPath {
 ### `LinePostingCore`
 
 **Where the line's income POSTS, declared once for the two PRICED grains** — an
-order line and an invoice line (`api-cloudrun/.claude/plans/line-tracking-uid.md`).
+order line and an invoice line (api-cloudrun's line-tracking-uid plan, landed 2026-10-29 and since deleted).
 Not a fulfillment line: it carries no price, so it posts nothing.
 
 - `coa_revenue` — Xero's `AccountCode`, closed by {@link COARevenueEnum}.
