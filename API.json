@@ -6045,7 +6045,7 @@
         {
           "kind": "interface",
           "name": "UnitSerialHistoryEntryType",
-          "declaration": "interface UnitSerialHistoryEntryType {\n  serial_number: string | null;\n  start: string;\n  end: string | null;\n  reason: SerialChangeReasonType;\n  uid_movement: string | null;\n  supplier?: UidNameRefType | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
+          "declaration": "interface UnitSerialHistoryEntryType {\n  serial_number: string | null;\n  start: string;\n  end: string | null;\n  reason: SerialChangeReasonType;\n  uid_movement: string | null;\n  supplier: UidNameRefType | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
           "doc": "One SPELL of one physical unit under a number: from when it took the number\nuntil it left or was re-recorded. Its serial is optional — a tent has a\nnumber and no serial, and a radio's serial may be typed in later — so an\nentry is a spell, not \"a serial\". The field keeps the name `serial_history`\nbecause renaming a stored array on a strict object is a four-step purge for a\ncosmetic gain.\n\nThe acquisition reference lives HERE, per entry, rather than once per unit: a\nreplacement re-points the number at a new physical unit, and a single\nunit-level field would lose the original acquisition. The unit's CURRENT\nacquisition is the open entry's `uid_movement`. Ownership lives here for the\nsame reason: a number can be CFS-owned, then vacant, then a supplier's."
         },
         {
@@ -6069,7 +6069,7 @@
         {
           "kind": "interface",
           "name": "UnitType",
-          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  activations?: UnitActivationType[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  activations: UnitActivationType[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A unit number, its current serial and its history."
         },
         {
@@ -12864,7 +12864,7 @@
         {
           "kind": "interface",
           "name": "UnitSerialHistoryEntryType",
-          "declaration": "interface UnitSerialHistoryEntryType {\n  serial_number: string | null;\n  start: string;\n  end: string | null;\n  reason: SerialChangeReasonType;\n  uid_movement: string | null;\n  supplier?: UidNameRefType | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
+          "declaration": "interface UnitSerialHistoryEntryType {\n  serial_number: string | null;\n  start: string;\n  end: string | null;\n  reason: SerialChangeReasonType;\n  uid_movement: string | null;\n  supplier: UidNameRefType | null;\n  notes: string;\n  changed_by: ActorRefType;\n}",
           "doc": "One SPELL of one physical unit under a number: from when it took the number\nuntil it left or was re-recorded. Its serial is optional — a tent has a\nnumber and no serial, and a radio's serial may be typed in later — so an\nentry is a spell, not \"a serial\". The field keeps the name `serial_history`\nbecause renaming a stored array on a strict object is a four-step purge for a\ncosmetic gain.\n\nThe acquisition reference lives HERE, per entry, rather than once per unit: a\nreplacement re-points the number at a new physical unit, and a single\nunit-level field would lose the original acquisition. The unit's CURRENT\nacquisition is the open entry's `uid_movement`. Ownership lives here for the\nsame reason: a number can be CFS-owned, then vacant, then a supplier's."
         },
         {
@@ -12888,7 +12888,7 @@
         {
           "kind": "interface",
           "name": "UnitType",
-          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  activations?: UnitActivationType[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
+          "declaration": "interface UnitType {\n  uid: string;\n  uid_product: string;\n  number: number;\n  serial_number: string | null;\n  serial_history: UnitSerialHistoryEntryType[];\n  status: UnitStatusType;\n  activations: UnitActivationType[];\n  uuid_session: string | null;\n  version: number;\n  created_by: ActorRefType;\n  updated_by: ActorRefType;\n  created_at: FirestoreTimestampType;\n  updated_at: FirestoreTimestampType;\n}",
           "doc": "A unit number, its current serial and its history."
         },
         {
@@ -23223,7 +23223,7 @@
           "kind": "function",
           "name": "unitSupplier",
           "signature": "unitSupplier(unit: Pick<UnitType, \"serial_history\">): UidNameRefType | null",
-          "doc": "The supplier a unit is subrented from: its OPEN history entry's `supplier`,\nor `null` for a CFS-owned unit and for a number with no open entry (vacant,\nretired, or an active unit the spell backfill has not reached yet — which\nonly a CFS conversion produced). An entry stored before `supplier` existed\nreads as `null`.\n\nThe one predicate the api's refusing writers, the manager's pickers and the\nunit audit all read (`api-cloudrun/.claude/plans/serialized-subrent.md` § 2).\nNever decide ownership from the entry's `reason`: a `corrected` entry on a\nvendor unit keeps its supplier.",
+          "doc": "The supplier a unit is subrented from: its OPEN history entry's `supplier`,\nor `null` for a CFS-owned unit and for a number with no open entry (vacant or\nretired — an active number always has exactly one, `checkUnit` rule 3).\n\nThe one predicate the api's refusing writers, the manager's pickers and the\nunit audit all read (`api-cloudrun/.claude/plans/serialized-subrent.md` § 2).\nNever decide ownership from the entry's `reason`: a `corrected` entry on a\nvendor unit keeps its supplier.",
           "paramTags": [],
           "returnsTag": null
         }

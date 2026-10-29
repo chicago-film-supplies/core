@@ -13668,7 +13668,7 @@ interface UnitSerialHistoryEntryType {
   end: string | null;
   reason: SerialChangeReasonType;
   uid_movement: string | null;
-  supplier?: UidNameRefType | null;
+  supplier: UidNameRefType | null;
   notes: string;
   changed_by: ActorRefType;
 }
@@ -13715,7 +13715,7 @@ interface UnitType {
   serial_number: string | null;
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
-  activations?: UnitActivationType[];
+  activations: UnitActivationType[];
   uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
@@ -28233,7 +28233,7 @@ interface UnitSerialHistoryEntryType {
   end: string | null;
   reason: SerialChangeReasonType;
   uid_movement: string | null;
-  supplier?: UidNameRefType | null;
+  supplier: UidNameRefType | null;
   notes: string;
   changed_by: ActorRefType;
 }
@@ -28280,7 +28280,7 @@ interface UnitType {
   serial_number: string | null;
   serial_history: UnitSerialHistoryEntryType[];
   status: UnitStatusType;
-  activations?: UnitActivationType[];
+  activations: UnitActivationType[];
   uuid_session: string | null;
   version: number;
   created_by: ActorRefType;
@@ -49602,10 +49602,8 @@ filtered the roster this way in three places (`recordActions`,
 ### `unitSupplier(unit: Pick<UnitType, "serial_history">): UidNameRefType | null`
 
 The supplier a unit is subrented from: its OPEN history entry's `supplier`,
-or `null` for a CFS-owned unit and for a number with no open entry (vacant,
-retired, or an active unit the spell backfill has not reached yet — which
-only a CFS conversion produced). An entry stored before `supplier` existed
-reads as `null`.
+or `null` for a CFS-owned unit and for a number with no open entry (vacant or
+retired — an active number always has exactly one, `checkUnit` rule 3).
 
 The one predicate the api's refusing writers, the manager's pickers and the
 unit audit all read (`api-cloudrun/.claude/plans/serialized-subrent.md` § 2).

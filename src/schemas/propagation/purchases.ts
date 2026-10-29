@@ -1076,12 +1076,14 @@ const reversePurchaseReceiptTransaction: TransactionDefinition = {
 const returnPurchaseTransaction: TransactionDefinition = {
   id: "return-purchase",
   description:
-    "Returns a subrent's units to the supplier (`POST /purchases/{uid}/returns`): one cost-forbidden `subrent_out` per product, from the shelves, naming the purchase in sources[] and folded through the one ledger writer — which lowers `quantity_held` and `quantity_rented_in` together and leaves owned basis untouched — with the purchase's `quantity_returned` moved in the same commit. Refused on a buy. Posts nothing to Xero. Rebuilds `stock/{P}` via STOCK_STEPS and moves the return card — fires on: every return.",
+    "Returns a subrent's units to the supplier (`POST /purchases/{uid}/returns`): one cost-forbidden `subrent_out` per product, from the shelves, naming the purchase in sources[] and folded through the one ledger writer — which lowers `quantity_held` and `quantity_rented_in` together and leaves owned basis untouched — with the purchase's `quantity_returned` moved in the same commit. Refused on a buy. Posts nothing to Xero. Rebuilds `stock/{P}` via STOCK_STEPS and moves the return card — fires on: every return. The unit roster steps fire whenever the return names units, each of which must be vendor-owned by this purchase's supplier.",
   steps: [
     "return-purchase:return-to-purchase",
     "create-transaction:transaction-to-ledger",
     "create-transaction:transaction-to-locations",
     ...STOCK_STEPS,
+    "units:transactions-to-roster",
+    "units:transactions-to-units",
     "purchase-card:purchases-to-card",
   ],
 };
@@ -1089,12 +1091,14 @@ const returnPurchaseTransaction: TransactionDefinition = {
 const reversePurchaseReturnTransaction: TransactionDefinition = {
   id: "reverse-purchase-return",
   description:
-    "Reverses one return through its purchase: the `subrent_out`'s lines negated through the one ledger writer, and the purchase's `quantity_returned` falls in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via STOCK_STEPS and moves the return card — fires on: every return reversal.",
+    "Reverses one return through its purchase: the `subrent_out`'s lines negated through the one ledger writer, and the purchase's `quantity_returned` falls in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via STOCK_STEPS and moves the return card — fires on: every return reversal. The unit roster steps fire whenever the return named units.",
   steps: [
     "reverse-purchase-return:return-to-purchase",
     "reverse-transaction:transaction-to-ledger",
     "reverse-transaction:transaction-to-locations",
     ...STOCK_STEPS,
+    "units:transactions-to-roster",
+    "units:transactions-to-units",
     "purchase-card:purchases-to-card",
   ],
 };

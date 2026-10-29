@@ -22,6 +22,7 @@ import {
   QuoteSchema,
   schemas,
   TemplateVersionSchema,
+  UnitSchema,
 } from "../src/schemas/mod.ts";
 import {
   getFullTestDoc,
@@ -364,7 +365,7 @@ Deno.test("overrides — objects merge key-wise, arrays and scalars replace, und
   assertThrows(() => getTestDoc(S, { gone: undefined }), Error, "gone");
 });
 
-Deno.test("enum-arm search — re-chooses exactly four arms across the corpus, by name", () => {
+Deno.test("enum-arm search — re-chooses exactly five arms across the corpus, by name", () => {
   // `product` parses only as a SALE: a rental obliges `price.replacement_cents`
   // through a superRefine. Documented, because it is surprising.
   const product = getTestDoc(ProductSchema, undefined, NOW);
@@ -406,11 +407,19 @@ Deno.test("enum-arm search — re-chooses exactly four arms across the corpus, b
   const ledger = getTestDoc(InventoryLedgerSchema, undefined, NOW);
   assertEquals([ledger.stock_method, ledger.quantity_held], ["none", null]);
 
+  // `unit` parses only as a non-`active` number: an active one has exactly one
+  // open history entry (`checkUnit` rule 3), and the required-only seed's
+  // `serial_history` is `[]`. So a bare `getTestDoc(UnitSchema)` is VACANT — a
+  // caller that wants an active unit supplies its open entry.
+  const unit = getTestDoc(UnitSchema, undefined, NOW);
+  assertEquals([unit.status, unit.serial_history], ["vacant", []]);
+
   assertEquals(rechosen.sort(), [
     "booking.type",
     "inventory-ledger.stock_method",
     "product.type",
     "templates-versions.status",
+    "unit.status",
   ]);
 });
 

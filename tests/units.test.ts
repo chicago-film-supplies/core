@@ -498,7 +498,7 @@ type HistoryEntry = {
 };
 function history(...entries: HistoryEntry[]) {
   return {
-    serial_history: entries.map((e) => ({ ...e, uid_movement: null, notes: "", changed_by: { uid: "u1", name: "Op" } })),
+    serial_history: entries.map((e) => ({ supplier: null, ...e, uid_movement: null, notes: "", changed_by: { uid: "u1", name: "Op" } })),
   };
 }
 const LOSS = "2025-04-17T12:00:00.000-05:00";

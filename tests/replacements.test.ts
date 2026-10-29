@@ -57,7 +57,7 @@ function unitWith(number: number, entries: Array<[string, string, string | null,
   return {
     number,
     serial_history: entries.map(([serial_number, start, end, reason]) => ({
-      serial_number, start, end, reason, uid_movement: null, notes: "", changed_by: { uid: "u1", name: "Op" },
+      serial_number, start, end, reason, supplier: null, uid_movement: null, notes: "", changed_by: { uid: "u1", name: "Op" },
     })),
   };
 }

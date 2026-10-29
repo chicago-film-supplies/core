@@ -205,12 +205,8 @@ export interface UnitSerialHistoryEntryType {
    * `null` for a CFS-owned unit. Non-null exactly when a `subrent_in` opened the
    * spell; a `corrected` copy carries it forward. Spelled as `Purchase.supplier`.
    * A unit is vendor-owned iff its OPEN entry's `supplier !== null`.
-   *
-   * ⚠️ Optional only until the backfill stamps `null` onto every stored entry
-   * (`api-cloudrun/.claude/plans/serialized-subrent.md` § 1, step 3); the
-   * contract beta then makes it required. Absent reads as `null`.
    */
-  supplier?: UidNameRefType | null;
+  supplier: UidNameRefType | null;
   notes: string;
   changed_by: ActorRefType;
 }
@@ -268,12 +264,8 @@ export interface UnitType {
   /**
    * The unit's service-line activations, ascending by `start`, never
    * overlapping, at most one open, and none open unless `active`.
-   *
-   * ⚠️ Optional only until the backfill stamps `[]` onto every stored unit
-   * (`api-cloudrun/.claude/plans/serialized-subrent.md` § 1, step 3); the contract beta
-   * makes it required. Absent reads as `[]`.
    */
-  activations?: UnitActivationType[];
+  activations: UnitActivationType[];
   /**
    * The `POST /products/{uid}/units` request that minted this number — its
    * `uuid_session`, the create's idempotency key. A retried count-mode create
@@ -299,7 +291,7 @@ export const UnitSerialHistoryEntry: z.ZodType<UnitSerialHistoryEntryType> = z.s
   end: chicagoInstant().nullable().meta({ column: true, label: "Until" }),
   reason: SerialChangeReasonEnum.meta({ column: true, label: "Reason" }),
   uid_movement: MovementId.nullable(),
-  supplier: UidNameRef.nullable().optional().meta({ label: "Supplier" }),
+  supplier: UidNameRef.nullable().meta({ label: "Supplier" }),
   // `mask` — free text an operator writes about a unit, which can name a person.
   notes: z.string().max(500).meta({ pii: "mask" }),
   changed_by: ActorRef.meta({ label: "Changed By" }),
@@ -337,18 +329,15 @@ export const UnitActivation: z.ZodType<UnitActivationType> = z.strictObject({
  *
  * 1. at most one history entry is open;
  * 2. `serial_number` is the open entry's serial, or `null` when none is open;
- * 3. a number that is not `active` carries no serial and no open entry — a
- *    vacant number's last serial is CLOSED, which is what lets a replacement
- *    open a new one;
+ * 3. an `active` number has exactly one open entry and any other number has
+ *    none — an entry is one spell of one physical unit under the number, its
+ *    serial optional, so a serial-less active unit still carries one. A vacant
+ *    number's last spell is CLOSED, which is what lets a replacement open a
+ *    new one;
  * 4. its activations ascend by `start` and never overlap, at most one is
  *    open, and a number that is not `active` has none open — switching a line
  *    off is a call to the provider, so a departure refuses an activated unit
  *    rather than closing its span for it.
- *
- * ⚠️ Rule 3 still allows an ACTIVE unit with no open entry. The universal
- * spell rule — active ⟺ exactly one open entry — turns on in the contract beta,
- * once the backfill has opened one for every active unit that has none
- * (`api-cloudrun/.claude/plans/serialized-subrent.md` § 1, step 4).
  */
 function checkUnit(doc: UnitType, ctx: z.RefinementCtx): void {
   const open = doc.serial_history.filter((e) => e.end === null);
@@ -370,6 +359,13 @@ function checkUnit(doc: UnitType, ctx: z.RefinementCtx): void {
         : `serial_number must equal the open history entry's serial (${current})`,
     });
   }
+  if (doc.status === "active" && open.length === 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["serial_history"],
+      message: "an active number has exactly one open history entry; none is open",
+    });
+  }
   if (doc.status !== "active" && (open.length > 0 || doc.serial_number !== null)) {
     ctx.addIssue({
       code: "custom",
@@ -381,7 +377,7 @@ function checkUnit(doc: UnitType, ctx: z.RefinementCtx): void {
 }
 
 function checkActivations(doc: UnitType, ctx: z.RefinementCtx): void {
-  const spans = doc.activations ?? [];
+  const spans = doc.activations;
   for (let i = 1; i < spans.length; i++) {
     const prev = spans[i - 1];
     if (Date.parse(spans[i].start) < Date.parse(prev.start)) {
@@ -415,7 +411,7 @@ export const UnitSchema: z.ZodType<UnitType> = z.strictObject({
   serial_number: SerialNumber.nullable().meta({ column: true, label: "Serial" }),
   serial_history: z.array(UnitSerialHistoryEntry).meta({ label: "Serial History" }),
   status: UnitStatusEnum.meta({ column: true, label: "Status" }),
-  activations: z.array(UnitActivation).optional().meta({ label: "Activations" }),
+  activations: z.array(UnitActivation).meta({ label: "Activations" }),
   uuid_session: z.uuid().nullable(),
   // Plain, not `.default(0)`: every writer states it, and a stored default is
   // inert (`tests/stored-defaults.test.ts`).

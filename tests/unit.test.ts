@@ -71,10 +71,12 @@ function activeUnit() {
       end: null as string | null,
       reason: "initial",
       uid_movement: null,
+      supplier: null as { uid: string; name: string } | null,
       notes: "",
       changed_by: ACTOR,
     }],
     status: "active",
+    activations: [] as unknown[],
     uuid_session: null,
     version: 0,
     created_by: ACTOR,
@@ -84,7 +86,7 @@ function activeUnit() {
   };
 }
 
-Deno.test("Unit: a minimal active unit parses, and getTestDoc builds one with no override", () => {
+Deno.test("Unit: a minimal active unit parses, and getTestDoc builds a (vacant) one with no override", () => {
   assertEquals(issues(UnitSchema.safeParse(activeUnit())), []);
   assert(UnitSchema.safeParse(getTestDoc(UnitSchema, {}, NOW)).success);
 });
@@ -97,6 +99,13 @@ Deno.test("Unit: at most one serial history entry is open", () => {
 
 Deno.test("Unit: serial_number is the open entry's serial", () => {
   assertRefused(UnitSchema.safeParse({ ...activeUnit(), serial_number: "SN-Z" }), "open history entry's serial");
+});
+
+Deno.test("Unit: an active number has exactly one open entry — serial or not", () => {
+  const closed = activeUnit();
+  closed.serial_history[0].end = "2026-10-04T09:00:00.000-05:00";
+  assertRefused(UnitSchema.safeParse({ ...closed, serial_number: null }), "an active number has exactly one open history entry");
+  assertRefused(UnitSchema.safeParse({ ...activeUnit(), serial_number: null, serial_history: [] }), "an active number has exactly one open history entry");
 });
 
 Deno.test("Unit: a vacant number carries no serial and no open entry", () => {
@@ -133,11 +142,11 @@ Deno.test("Unit: a serial-less open spell is legal — a tent, or a radio whose 
   assertRefused(UnitSchema.safeParse({ ...u, serial_number: "SN-A" }), "must be null when");
 });
 
-Deno.test("Unit: an entry's supplier is optional (readers beta), null, or a {uid, name}", () => {
+Deno.test("Unit: an entry's supplier is required — null, or a {uid, name}", () => {
   const u = activeUnit();
-  assertEquals(issues(UnitSchema.safeParse(u)), [], "absent — a stored entry from before the field");
-  const owned = { ...u, serial_history: [{ ...u.serial_history[0], supplier: null }] };
-  assertEquals(issues(UnitSchema.safeParse(owned)), []);
+  assertEquals(issues(UnitSchema.safeParse(u)), [], "null — a CFS-owned spell");
+  const { supplier: _, ...bare } = u.serial_history[0];
+  assertRefused(UnitSchema.safeParse({ ...u, serial_history: [bare] }), "serial_history.0.supplier");
   const rented = {
     ...u,
     serial_history: [{ ...u.serial_history[0], reason: "subrented", supplier: SUPPLIER }],
@@ -151,8 +160,10 @@ Deno.test("UpdateUnitInput: an operator never sends `subrented` — only a subre
   assert(!UpdateUnitInput.safeParse({ version: 0, serial: { serial_number: "SN", reason: "subrented", notes: "" } }).success);
 });
 
-Deno.test("Unit: activations are optional (readers beta) and an empty list parses", () => {
+Deno.test("Unit: activations are required, and an empty list parses", () => {
   assertEquals(issues(UnitSchema.safeParse({ ...activeUnit(), activations: [] })), []);
+  const { activations: _, ...bare } = activeUnit();
+  assertRefused(UnitSchema.safeParse(bare), "activations");
   const spans = [
     span("2026-10-01T09:00:00.000-05:00", "2026-10-05T09:00:00.000-05:00"),
     span("2026-10-05T09:00:00.000-05:00", null, { uid_order: fid("order1") }),

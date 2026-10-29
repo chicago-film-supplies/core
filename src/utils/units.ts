@@ -134,10 +134,8 @@ export type UnitOwnership = "cfs" | "supplier";
 
 /**
  * The supplier a unit is subrented from: its OPEN history entry's `supplier`,
- * or `null` for a CFS-owned unit and for a number with no open entry (vacant,
- * retired, or an active unit the spell backfill has not reached yet — which
- * only a CFS conversion produced). An entry stored before `supplier` existed
- * reads as `null`.
+ * or `null` for a CFS-owned unit and for a number with no open entry (vacant or
+ * retired — an active number always has exactly one, `checkUnit` rule 3).
  *
  * The one predicate the api's refusing writers, the manager's pickers and the
  * unit audit all read (`api-cloudrun/.claude/plans/serialized-subrent.md` § 2).
@@ -145,7 +143,7 @@ export type UnitOwnership = "cfs" | "supplier";
  * vendor unit keeps its supplier.
  */
 export function unitSupplier(unit: Pick<UnitType, "serial_history">): UidNameRefType | null {
-  return unit.serial_history.find((e) => e.end === null)?.supplier ?? null;
+  return unit.serial_history.find((e) => e.end === null)?.supplier ?? null; // `??` covers no open entry, not an absent key
 }
 
 /** `"supplier"` when {@link unitSupplier} names one, else `"cfs"`. */
