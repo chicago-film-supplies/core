@@ -231,6 +231,10 @@ export const PERMISSIONS = [
   "units.create",
   "units.read",
   "units.update",
+  // Switching a unit's service line on or off, and recording what its provider
+  // confirms (serialized-subrent § 7). Separate from `units.update` because it
+  // is a billing fact, not unit admin: whoever calls the provider records it.
+  "units.activate",
 
   "users.read",
   "users.update",

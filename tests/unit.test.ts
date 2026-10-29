@@ -21,6 +21,8 @@ import {
   UnitSchema,
   UnitSet,
   UpdateOutOfServiceInput,
+  OpenUnitActivationInput,
+  UpdateUnitActivationInput,
   UpdateUnitInput,
 } from "../src/schemas/mod.ts";
 import { getTestDoc, type TestDocOptionsWithNow } from "../src/schemas/testing.ts";
@@ -427,4 +429,38 @@ Deno.test("MovementAllocationInput / StoreTransferLineInput: units are exactly `
   const line = { from: L1, to: L2, quantity: 2, oos: null };
   assert(StoreTransferLineInput.safeParse({ ...line, units: [1001, 1002] }).success);
   assertRefused(StoreTransferLineInput.safeParse({ ...line, units: [1001] }), "exactly `quantity`");
+});
+
+Deno.test("OpenUnitActivationInput: strips unknown keys, canonicalizes start, refuses a reversed confirmation", () => {
+  const ok = OpenUnitActivationInput.safeParse({
+    version: 0,
+    start: "2026-10-29T15:00:00.000Z",
+    uid_order: null,
+    uid_cogs: UUID,
+    notes: "",
+    end: "2026-10-30T15:00:00.000Z",
+  });
+  assert(ok.success);
+  assertEquals(ok.data.start, "2026-10-29T10:00:00.000-05:00");
+  assert(!("end" in ok.data), "an open takes no end: the key is stripped, not stored");
+  assert(!OpenUnitActivationInput.safeParse({ version: 0, start: "2026-10-29", uid_order: null, uid_cogs: UUID, notes: "" })
+    .success, "a bare date is not an instant");
+  assertRefused(
+    OpenUnitActivationInput.safeParse({
+      version: 0,
+      start: "2026-10-29T15:00:00.000Z",
+      uid_order: null,
+      uid_cogs: UUID,
+      notes: "",
+      provider_confirmed: { start: "2026-10-29T15:00:00.000Z", end: "2026-10-28T15:00:00.000Z" },
+    }),
+    "ends at or after it starts",
+  );
+});
+
+Deno.test("UpdateUnitActivationInput: needs a field beyond version; end may be null to re-open", () => {
+  assertRefused(UpdateUnitActivationInput.safeParse({ version: 1 }), "at least one activation field");
+  assert(UpdateUnitActivationInput.safeParse({ version: 1, end: null }).success);
+  assert(UpdateUnitActivationInput.safeParse({ version: 1, end: "2026-10-30T15:00:00.000Z" }).success);
+  assert(UpdateUnitActivationInput.safeParse({ version: 1, provider_confirmed: null }).success);
 });

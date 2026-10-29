@@ -503,3 +503,75 @@ export const UpdateUnitInput: z.ZodType<UpdateUnitInputType> = z.object({
 }).refine((u) => u.serial !== undefined || u.status !== undefined, {
   message: "send a serial change, a status change, or both",
 });
+
+/**
+ * The provider's confirmed instants as an INPUT: the stripping twin of
+ * {@link UnitActivationConfirmed}, with the same `start ≤ end` refine.
+ */
+const UnitActivationConfirmedInput: z.ZodType<UnitActivationConfirmedType> = z.object({
+  start: chicagoInstant(),
+  end: chicagoInstant().nullable(),
+}).superRefine((c, ctx) => {
+  if (c.end !== null && Date.parse(c.end) < Date.parse(c.start)) {
+    ctx.addIssue({ code: "custom", path: ["end"], message: "a confirmed activation ends at or after it starts" });
+  }
+});
+
+/**
+ * Body of `POST /units/{uid}/activations`: switch a unit's service line ON.
+ *
+ * Opens a span with no `end` — the server refuses a unit that is not `active`
+ * or that already has an open span, and a `uid_cogs` that names no activation
+ * entry on the unit's product. `start` is when CFS asked the provider to switch
+ * the line on, which may be earlier than the request (the call came first). A
+ * stripping `z.object`, not the stored strict node (`tests/input-strictness.test.ts`).
+ */
+export interface OpenUnitActivationInputType {
+  version: number;
+  start: string;
+  uid_order: string | null;
+  uid_cogs: string;
+  /** Absent means unconfirmed (`null`). */
+  provider_confirmed?: UnitActivationConfirmedType | null;
+  notes: string;
+}
+
+/** Zod schema for {@link OpenUnitActivationInputType}. */
+export const OpenUnitActivationInput: z.ZodType<OpenUnitActivationInputType> = z.object({
+  version: z.int().min(0),
+  start: chicagoInstant(),
+  uid_order: FirestoreId.nullable(),
+  uid_cogs: z.uuid(),
+  provider_confirmed: UnitActivationConfirmedInput.nullable().optional(),
+  // `mask` — free text an operator writes about a unit, which can name a person.
+  notes: z.string().max(500).meta({ pii: "mask" }),
+});
+
+/**
+ * Body of `PUT /units/{uid}/activations/{activation_uid}`: close a span
+ * (`end`), record what the provider confirms (`provider_confirmed`), or correct
+ * any of its fields. An absent key keeps the stored value; `end: null`
+ * re-opens the LAST span of an `active` unit (a switch-off recorded in error).
+ */
+export interface UpdateUnitActivationInputType {
+  version: number;
+  start?: string;
+  end?: string | null;
+  uid_order?: string | null;
+  uid_cogs?: string;
+  provider_confirmed?: UnitActivationConfirmedType | null;
+  notes?: string;
+}
+
+/** Zod schema for {@link UpdateUnitActivationInputType}. */
+export const UpdateUnitActivationInput: z.ZodType<UpdateUnitActivationInputType> = z.object({
+  version: z.int().min(0),
+  start: chicagoInstant().optional(),
+  end: chicagoInstant().nullable().optional(),
+  uid_order: FirestoreId.nullable().optional(),
+  uid_cogs: z.uuid().optional(),
+  provider_confirmed: UnitActivationConfirmedInput.nullable().optional(),
+  notes: z.string().max(500).meta({ pii: "mask" }).optional(),
+}).refine((u) => Object.keys(u).some((k) => k !== "version"), {
+  message: "send at least one activation field to change",
+});

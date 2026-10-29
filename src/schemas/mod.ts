@@ -1268,6 +1268,10 @@ export {
   type UnitUserStatusType,
   UpdateUnitInput,
   type UpdateUnitInputType,
+  OpenUnitActivationInput,
+  type OpenUnitActivationInputType,
+  UpdateUnitActivationInput,
+  type UpdateUnitActivationInputType,
 } from "./unit.ts";
 export {
   UNIT_ROSTER_STATES,

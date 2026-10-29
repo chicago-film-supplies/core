@@ -8009,6 +8009,35 @@ interface OosChargeProducts {
 }
 ```
 
+### `OpenUnitActivationInput`
+
+Zod schema for {@link OpenUnitActivationInputType}.
+
+```ts
+const OpenUnitActivationInput: z.ZodType<OpenUnitActivationInputType>;
+```
+
+### `OpenUnitActivationInputType`
+
+Body of `POST /units/{uid}/activations`: switch a unit's service line ON.
+
+Opens a span with no `end` — the server refuses a unit that is not `active`
+or that already has an open span, and a `uid_cogs` that names no activation
+entry on the unit's product. `start` is when CFS asked the provider to switch
+the line on, which may be earlier than the request (the call came first). A
+stripping `z.object`, not the stored strict node (`tests/input-strictness.test.ts`).
+
+```ts
+interface OpenUnitActivationInputType {
+  version: number;
+  start: string;
+  uid_order: string | null;
+  uid_cogs: string;
+  provider_confirmed?: UnitActivationConfirmedType | null;
+  notes: string;
+}
+```
+
 ### `Order`
 
 Full order document schema (Firestore document shape).
@@ -8814,7 +8843,7 @@ type OutOfServiceUpdated = EventEnvelope<OutOfService> & typeLiteral;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "purchases.create" | "purchases.read" | "purchases.search" | "purchases.update" | "purchases.receive" | "purchases.bill" | "stockSummaries.read" | "typesenseSync.read" | "units.create" | "units.read" | "units.update" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "purchases.create" | "purchases.read" | "purchases.search" | "purchases.update" | "purchases.receive" | "purchases.bill" | "stockSummaries.read" | "typesenseSync.read" | "units.create" | "units.read" | "units.update" | "units.activate" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `PICK_SHEET_GATES`
@@ -13160,7 +13189,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "close-purchase" | "receive-purchase" | "reverse-purchase-receipt" | "return-purchase" | "reverse-purchase-return" | "create-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill-from-xero" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "close-purchase" | "receive-purchase" | "reverse-purchase-receipt" | "return-purchase" | "reverse-purchase-return" | "create-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill-from-xero" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "open-unit-activation" | "update-unit-activation" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `TransactionLogRecord`
@@ -14566,6 +14595,33 @@ mutable table. Only `reference` still edits in place.
 interface UpdateTransactionInputType {
   reference: string;
   version: number;
+}
+```
+
+### `UpdateUnitActivationInput`
+
+Zod schema for {@link UpdateUnitActivationInputType}.
+
+```ts
+const UpdateUnitActivationInput: z.ZodType<UpdateUnitActivationInputType>;
+```
+
+### `UpdateUnitActivationInputType`
+
+Body of `PUT /units/{uid}/activations/{activation_uid}`: close a span
+(`end`), record what the provider confirms (`provider_confirmed`), or correct
+any of its fields. An absent key keeps the stored value; `end: null`
+re-opens the LAST span of an `active` unit (a switch-off recorded in error).
+
+```ts
+interface UpdateUnitActivationInputType {
+  version: number;
+  start?: string;
+  end?: string | null;
+  uid_order?: string | null;
+  uid_cogs?: string;
+  provider_confirmed?: UnitActivationConfirmedType | null;
+  notes?: string;
 }
 ```
 
@@ -16601,7 +16657,7 @@ Every `TransactionDefinition.id` in the catalog.
 now, not by the shape of the call that consumes them.
 
 ```ts
-type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "close-purchase" | "receive-purchase" | "reverse-purchase-receipt" | "return-purchase" | "reverse-purchase-return" | "create-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill-from-xero" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
+type TransactionId = "create-order" | "update-order" | "update-booking" | "bulk-checkout-order" | "bulk-return-order" | "bulk-fulfillment-bookings" | "cross-order-bookings" | "finalize-order" | "extend-rental" | "undo-extend-rental" | "create-out-of-service-record" | "update-out-of-service-record" | "reclassify-out-of-service-record" | "create-transaction" | "reverse-transaction" | "reclass-stock" | "reverse-stock-reclass" | "create-purchase" | "update-purchase" | "close-purchase" | "receive-purchase" | "reverse-purchase-receipt" | "return-purchase" | "reverse-purchase-return" | "create-purchase-bill" | "settle-purchase-bill" | "void-purchase-bill-from-xero" | "create-purchase-credit" | "allocate-purchase-credit" | "reverse-purchase-credit-allocation" | "settle-purchase-credit" | "void-purchase-credit" | "void-purchase-credit-from-xero" | "create-store-transfer" | "create-units" | "update-unit" | "open-unit-activation" | "update-unit-activation" | "create-product" | "update-product" | "create-department-type" | "update-department-type" | "create-supplier" | "update-supplier" | "reparent-destination" | "create-organization" | "update-organization" | "reparent-organization" | "organization-activity-stamp" | "merge-organization" | "create-contact" | "update-contact" | "create-user" | "update-user" | "delete-user" | "create-invoice" | "update-invoice" | "create-settlement" | "reverse-settlement" | "close-invoice" | "sync-xero-settlement" | "void-invoice" | "void-invoice-from-xero" | "void-invoice-from-cancel" | "create-credit-note" | "allocate-credit-note" | "void-credit-note" | "record-credit-note-refund" | "sync-xero-credit-note-refunds" | "reverse-credit-note-refund" | "update-fulfillment-items" | "update-fulfillment-destinations" | "create-fulfillment-exchange" | "reset-fulfillment" | "reconcile-fulfillment-cards" | "reconcile-order-from-invoices" | "create-tax-code" | "update-tax-code" | "create-tax-rate" | "update-tax-rate" | "create-tax-class" | "update-tax-class" | "create-holiday-definition" | "update-holiday-definition" | "delete-holiday-definition" | "create-location" | "update-location" | "set-location-product-default" | "create-role" | "create-comment" | "delete-comment" | "create-card" | "delete-card" | "create-template" | "manage-draft" | "publish-template" | "create-recurrence" | "materialize-horizon" | "update-recurrence" | "delete-recurrence" | "update-card-scope-following" | "update-card-scope-all" | "delete-card-scope-this" | "delete-card-scope-following" | "delete-card-scope-all";
 ```
 
 ### `aggregates`
@@ -28037,6 +28093,35 @@ entry, so 5,000 is roughly 600 KB against Firestore's 1 MiB).
 const MAX_UNITS_PER_ROSTER: 5000;
 ```
 
+### `OpenUnitActivationInput`
+
+Zod schema for {@link OpenUnitActivationInputType}.
+
+```ts
+const OpenUnitActivationInput: z.ZodType<OpenUnitActivationInputType>;
+```
+
+### `OpenUnitActivationInputType`
+
+Body of `POST /units/{uid}/activations`: switch a unit's service line ON.
+
+Opens a span with no `end` — the server refuses a unit that is not `active`
+or that already has an open span, and a `uid_cogs` that names no activation
+entry on the unit's product. `start` is when CFS asked the provider to switch
+the line on, which may be earlier than the request (the call came first). A
+stripping `z.object`, not the stored strict node (`tests/input-strictness.test.ts`).
+
+```ts
+interface OpenUnitActivationInputType {
+  version: number;
+  start: string;
+  uid_order: string | null;
+  uid_cogs: string;
+  provider_confirmed?: UnitActivationConfirmedType | null;
+  notes: string;
+}
+```
+
 ### `SERIAL_CHANGE_REASONS`
 
 Why a history entry (a spell) opened on a number.
@@ -28320,6 +28405,33 @@ One status an operator may ask for.
 
 ```ts
 type UnitUserStatusType = indexedAccess;
+```
+
+### `UpdateUnitActivationInput`
+
+Zod schema for {@link UpdateUnitActivationInputType}.
+
+```ts
+const UpdateUnitActivationInput: z.ZodType<UpdateUnitActivationInputType>;
+```
+
+### `UpdateUnitActivationInputType`
+
+Body of `PUT /units/{uid}/activations/{activation_uid}`: close a span
+(`end`), record what the provider confirms (`provider_confirmed`), or correct
+any of its fields. An absent key keeps the stored value; `end: null`
+re-opens the LAST span of an `active` unit (a switch-off recorded in error).
+
+```ts
+interface UpdateUnitActivationInputType {
+  version: number;
+  start?: string;
+  end?: string | null;
+  uid_order?: string | null;
+  uid_cogs?: string;
+  provider_confirmed?: UnitActivationConfirmedType | null;
+  notes?: string;
+}
 ```
 
 ### `UpdateUnitInput`
@@ -32823,7 +32935,7 @@ const RoleSummarySchema: z.ZodType<RoleSummary>;
 The full catalog of permissions. Adding a new route? Add its permission here first.
 
 ```ts
-const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "purchases.create" | "purchases.read" | "purchases.search" | "purchases.update" | "purchases.receive" | "purchases.bill" | "stockSummaries.read" | "typesenseSync.read" | "units.create" | "units.read" | "units.update" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
+const PERMISSIONS: "orders.create" | "orders.read" | "orders.update" | "orders.delete" | "orders.search" | "orders.checkout" | "orders.return" | "products.create" | "products.read" | "products.update" | "products.delete" | "products.search" | "webshopProducts.read" | "webshopProducts.search" | "contacts.create" | "contacts.read" | "contacts.update" | "contacts.delete" | "contacts.search" | "organizations.create" | "organizations.read" | "organizations.update" | "organizations.delete" | "organizations.search" | "transactions.create" | "transactions.read" | "transactions.update" | "transactions.delete" | "invoices.create" | "invoices.read" | "invoices.update" | "invoices.delete" | "invoices.search" | "settlements.create" | "settlements.read" | "settlements.reverse" | "creditNotes.create" | "creditNotes.read" | "creditNotes.update" | "creditNotes.void" | "creditNotes.search" | "quotes.create" | "quotes.read" | "quotes.update" | "quotes.delete" | "statements.create" | "statements.read" | "statements.update" | "statements.delete" | "locations.create" | "locations.read" | "locations.update" | "locations.delete" | "locations.search" | "locationTypes.create" | "locationTypes.read" | "locationTypes.update" | "locationTypes.delete" | "departmentTypes.create" | "departmentTypes.read" | "departmentTypes.update" | "departmentTypes.delete" | "stores.create" | "stores.read" | "stores.update" | "stores.delete" | "stores.search" | "taxCodes.create" | "taxCodes.read" | "taxCodes.update" | "taxRates.create" | "taxRates.read" | "taxRates.update" | "taxClasses.create" | "taxClasses.read" | "taxClasses.update" | "suppliers.create" | "suppliers.read" | "suppliers.update" | "suppliers.delete" | "suppliers.search" | "tags.create" | "tags.read" | "tags.update" | "tags.delete" | "tags.search" | "trackingCategories.create" | "trackingCategories.read" | "trackingCategories.update" | "trackingCategories.delete" | "trackingCategories.search" | "holidays.create" | "holidays.read" | "holidays.update" | "holidays.delete" | "billingSettings.update" | "templates.create" | "templates.read" | "templates.search" | "templates.propose" | "templates.release" | "templates.merge" | "templates.rollback" | "templates.blessGolden" | "templates.archive" | "lists.create" | "lists.read" | "lists.update" | "lists.delete" | "cards.create" | "cards.read" | "cards.update" | "cards.delete" | "cards.search" | "recurrences.create" | "recurrences.read" | "recurrences.update" | "recurrences.delete" | "bookings.read" | "bookings.search" | "bookings.update" | "chartOfAccounts.read" | "chartOfAccounts.search" | "dateHelpers.read" | "destinations.read" | "destinations.search" | "destinations.update" | "ledgers.read" | "fulfillment.read" | "fulfillment.search" | "fulfillment.update" | "fulfillment.reset" | "outOfService.create" | "outOfService.read" | "outOfService.update" | "outOfService.delete" | "outOfService.search" | "purchases.create" | "purchases.read" | "purchases.search" | "purchases.update" | "purchases.receive" | "purchases.bill" | "stockSummaries.read" | "typesenseSync.read" | "units.create" | "units.read" | "units.update" | "units.activate" | "users.read" | "users.update" | "users.delete" | "users.invite" | "users.search" | "users.assignRoles" | "roles.read" | "roles.edit" | "threads.create" | "threads.read" | "threads.update" | "threads.search" | "comments.create" | "comments.read" | "comments.update" | "comments.delete" | "comments.moderate" | "comments.search" | "comments.react" | "uploads.sign" | "activities.read" | "reports.read" | "reports.readFinancial" | "admin.reindex" | "admin.validate" | "admin.sync" | "admin.previewRole"[];
 ```
 
 ### `Permission`

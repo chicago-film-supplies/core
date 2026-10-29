@@ -91,6 +91,8 @@ export type TransactionId =
   // units.ts
   | "create-units"
   | "update-unit"
+  | "open-unit-activation"
+  | "update-unit-activation"
   // products.ts
   | "create-product"
   | "update-product"

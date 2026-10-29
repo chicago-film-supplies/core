@@ -215,9 +215,23 @@ const updateUnitTransaction: TransactionDefinition = {
   steps: [],
 };
 
+const openUnitActivationTransaction: TransactionDefinition = {
+  id: "open-unit-activation",
+  description:
+    "POST /units/{uid}/activations — records a unit's service line being switched ON, under `units.activate`, as an open span on the unit's own `activations`. Cascades NOWHERE: a span is a billing fact read by the activity report and the usage bills, never denormalized, and it is not custody, so no roster, booking or ledger moves.",
+  steps: [],
+};
+
+const updateUnitActivationTransaction: TransactionDefinition = {
+  id: "update-unit-activation",
+  description:
+    "PUT /units/{uid}/activations/{activation_uid} — closes a span, records the provider's confirmed instants, or corrects a span's fields, under `units.activate`. Cascades NOWHERE, for `open-unit-activation`'s reason.",
+  steps: [],
+};
+
 // ── Module ──────────────────────────────────────────────────────────
 /** Everything `propagation/units.ts` contributes to the propagation catalog. */
 export const units: PropagationModule = {
   rules: [...sharedRules, createUnitsRule],
-  transactions: [createUnitsTransaction, updateUnitTransaction],
+  transactions: [createUnitsTransaction, updateUnitTransaction, openUnitActivationTransaction, updateUnitActivationTransaction],
 };
