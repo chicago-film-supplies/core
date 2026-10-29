@@ -5452,7 +5452,7 @@
           "kind": "variable",
           "name": "TEMPLATE_SCALAR_GLOBALS",
           "declaration": "const TEMPLATE_SCALAR_GLOBALS: readonly string[];",
-          "doc": "Per-render scalars injected as `it.*` globals for every template. `it.doc` is\nalways the **source** document — a template never reads its target, it\nproduces it."
+          "doc": "Per-render scalars injected as `it.*` globals for every template. `it.doc` is\nalways the **source** document — a template never reads its target, it\nproduces it.\n\n`trackingCategories` is a `tracking-categories` uid → `{ name }` map: a line\nnames its category by `uid_tracking_category` and stores no name, so a\ntemplate that prints one looks it up here (line-tracking-uid D8)."
         },
         {
           "kind": "variable",
@@ -13881,7 +13881,7 @@
           "kind": "variable",
           "name": "TEMPLATE_SCALAR_GLOBALS",
           "declaration": "const TEMPLATE_SCALAR_GLOBALS: readonly string[];",
-          "doc": "Per-render scalars injected as `it.*` globals for every template. `it.doc` is\nalways the **source** document — a template never reads its target, it\nproduces it."
+          "doc": "Per-render scalars injected as `it.*` globals for every template. `it.doc` is\nalways the **source** document — a template never reads its target, it\nproduces it.\n\n`trackingCategories` is a `tracking-categories` uid → `{ name }` map: a line\nnames its category by `uid_tracking_category` and stores no name, so a\ntemplate that prints one looks it up here (line-tracking-uid D8)."
         },
         {
           "kind": "typeAlias",

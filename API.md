@@ -12351,6 +12351,10 @@ Per-render scalars injected as `it.*` globals for every template. `it.doc` is
 always the **source** document — a template never reads its target, it
 produces it.
 
+`trackingCategories` is a `tracking-categories` uid → `{ name }` map: a line
+names its category by `uid_tracking_category` and stores no name, so a
+template that prints one looks it up here (line-tracking-uid D8).
+
 ```ts
 const TEMPLATE_SCALAR_GLOBALS: readonly string[];
 ```
@@ -30764,6 +30768,10 @@ const TEMPLATE_LIB_GLOBALS: readonly string[];
 Per-render scalars injected as `it.*` globals for every template. `it.doc` is
 always the **source** document — a template never reads its target, it
 produces it.
+
+`trackingCategories` is a `tracking-categories` uid → `{ name }` map: a line
+names its category by `uid_tracking_category` and stores no name, so a
+template that prints one looks it up here (line-tracking-uid D8).
 
 ```ts
 const TEMPLATE_SCALAR_GLOBALS: readonly string[];
