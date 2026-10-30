@@ -44,7 +44,21 @@ const SUPPLIER = "testsupp100000000000";
 const base = getInitialValues(MovementSchema) as Record<string, unknown>;
 
 /** A schema-valid movement of `type`, with every axis filled per its contract. */
+/** The purchase item a fixture naming a purchase moves (api-cloudrun#1407). */
+const PURCHASE_ITEM = "0199a1f2-3b4c-7d8e-9f01-2345678900ab";
+
+/**
+ * A well-formed movement. One naming a purchase also names the item it moves
+ * (`path_purchase_item`) unless `over` states that key — a test of the presence
+ * rule states it, every other fixture gets the item for free.
+ */
 function movement(type: MovementTypeType, over: Record<string, unknown> = {}) {
+  const doc = movementBase(type, over);
+  const namesPurchase = (doc.sources as { collection: string }[]).some((s) => s.collection === "purchases");
+  return namesPurchase && !("path_purchase_item" in over) ? { ...doc, path_purchase_item: [PURCHASE_ITEM] } : doc;
+}
+
+function movementBase(type: MovementTypeType, over: Record<string, unknown> = {}) {
   const contract = MOVEMENT_CONTRACTS[type];
   const booking = contract.booking === "forbidden" ? null : BOOKING;
   const custodyNeeded = contract.custody === "required" ||
@@ -264,13 +278,24 @@ Deno.test("a purchase naming TWO purchases is refused — its bucket would be am
   assertEquals(issuePaths(two), ["sources"]);
 });
 
+Deno.test("a movement naming a purchase names the item it moves — and only then (api-cloudrun#1407)", () => {
+  // One product may sit on two items, so the item is what a reader attributes
+  // by. Both directions, on a receipt and a subrent type.
+  for (const type of ["purchase", "subrent_in"] as const) {
+    const missing = movement(type, { sources: [atPurchase], path_purchase_item: undefined });
+    assertEquals(issuePaths({ ...missing, path_purchase_item: undefined }), ["path_purchase_item"], type);
+  }
+  assertEquals(issuePaths(movement("purchase", { path_purchase_item: [PURCHASE_ITEM] })), ["path_purchase_item"]);
+  assertEquals(MovementSchema.safeParse(movement("purchase", { sources: [atPurchase] })).success, true);
+});
+
 Deno.test("only a purchase or a subrent type may name a purchase: every other type is refused", () => {
   // Swept over every type rather than one example, so a new type defaults to
   // being checked. Each fixture is otherwise valid, so the ONE issue is this rule.
   for (const type of MOVEMENT_TYPES) {
     if (type === "purchase" || (SUBRENT_MOVEMENT_TYPES as readonly string[]).includes(type)) continue;
     const base = movement(type);
-    const doc = { ...base, sources: [...(base.sources as unknown[]), atPurchase] };
+    const doc = { ...base, sources: [...(base.sources as unknown[]), atPurchase], path_purchase_item: [PURCHASE_ITEM] };
     assertEquals(issuePaths(doc), ["sources"], type);
   }
 });

@@ -50,7 +50,7 @@
  * @module
  */
 import { z } from "zod";
-import { BookingId, FirestoreId, MovementId, OutOfServiceId, UnitId } from "./_uid.ts";
+import { BookingId, FirestoreId, ItemUid, MovementId, OutOfServiceId, UnitId } from "./_uid.ts";
 import { SerialNumber, UnitNumber, UnitSet } from "./unit.ts";
 import { chicagoInstant } from "./_datetime.ts";
 import {
@@ -1546,6 +1546,27 @@ export interface Movement {
    * frozen `null` on a row nothing ever rewrites.
    */
   supplier?: UidNameRefType | null;
+  /**
+   * The purchase ITEM this movement moves, by its `path` — present exactly when
+   * `sources[]` names a purchase (api-cloudrun#1407): a receipt, a subrent's
+   * `subrent_in` / `subrent_out`, an out-of-service `return_to_supplier`
+   * settle, and the reversal of each.
+   *
+   * It exists because one product may now sit on two items of one purchase (a
+   * buy plus a re-order, two hire windows), so `(purchase, uid_product)` no
+   * longer names a line. Every journal reader that attributes a movement to an
+   * item — the receipt's cost, a reversal's bucket, a return's bucket — keys on
+   * this, never on `uid_product`. The spelling is the bill item's
+   * `path_purchase_item`, the same pointer from another document.
+   *
+   * **Optional, never required-nullable**: it is meaningless on the ~22k
+   * movements that name no purchase, and a required-nullable key would reject
+   * every one of them on its next write. The refine below makes absence exact:
+   * absent ⟺ no purchase in `sources[]`. The movements that name a purchase
+   * were backfilled in the api-cloudrun#1407 window, exact because every
+   * purchase then held one item per product.
+   */
+  path_purchase_item?: string[];
 
   // ── standard ──────────────────────────────────────────────────────
   version: number;
@@ -2128,6 +2149,10 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   // `display-columns.test.ts` T9 fails on "every declared column composes a
   // non-empty label".
   supplier: UidNameRef.nullable().optional().meta({ label: "Supplier" }),
+  // Present ⟺ `sources[]` names a purchase — the refine below. See the interface.
+  // `seed: false`: `[]` fails `.min(1)`, so a form seed omits the key — the bill
+  // item's `path_purchase_item` precedent.
+  path_purchase_item: z.array(ItemUid).min(1).optional().meta({ seed: false }),
   version: z.int().min(0).default(0),
   created_by: ActorRef.meta({ column: true, label: "Created By" }),
   updated_by: ActorRef.meta({ column: true, label: "Updated By" }),
@@ -2187,8 +2212,8 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
   // A receipt names the purchase it receives against (api-cloudrun#1210), and
   // the purchase finds its receipts — and their reversals, which carry the same
   // `sources[]` — only through `query_by_sources`, the out-of-service shape.
-  // ONE purchase: its line is `(purchase, uid_product)`, so a second would make
-  // the bucket the receipt moves ambiguous. Only the types that cross the
+  // ONE purchase: its item is `(purchase, path_purchase_item)`, so a second would
+  // make the bucket the receipt moves ambiguous. Only the types that cross the
   // boundary WITH the supplier may name one — a `purchase` receipt, and every
   // {@link SUBRENT_MOVEMENT_TYPES} member. Every other type moves stock that is
   // already in CFS's custody, or leaves it for somebody who is not a supplier.
@@ -2212,6 +2237,23 @@ export const MovementSchema: z.ZodType<Movement> = z.strictObject({
       code: "custom",
       path: ["sources"],
       message: `a ${doc.type} names exactly ONE purchase in sources[] — the subrent it is part of`,
+    });
+  }
+  // The item the movement moves (api-cloudrun#1407): present exactly when a
+  // purchase is named, because `(purchase, uid_product)` no longer names a line
+  // once one product may sit on two items.
+  if (purchases === 1 && doc.path_purchase_item === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["path_purchase_item"],
+      message: "a movement naming a purchase names the purchase item it moves (path_purchase_item)",
+    });
+  }
+  if (purchases === 0 && doc.path_purchase_item !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["path_purchase_item"],
+      message: "path_purchase_item names an item of the purchase in sources[], and this movement names none",
     });
   }
   if (doc.type !== "purchase" && !subrent && purchases > 0) {

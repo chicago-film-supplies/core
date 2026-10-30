@@ -7152,6 +7152,7 @@ interface Movement {
   query_by_unit_number: number[];
   xero_id?: string | null;
   supplier?: UidNameRefType | null;
+  path_purchase_item?: string[];
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
@@ -28533,6 +28534,7 @@ interface Movement {
   query_by_unit_number: number[];
   xero_id?: string | null;
   supplier?: UidNameRefType | null;
+  path_purchase_item?: string[];
   version: number;
   created_by: ActorRefType;
   updated_by: ActorRefType;
