@@ -32,7 +32,7 @@ jobs:
       # publish's behaviour a property of the day it ran. Renovate bumps it.
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.9.7
+          deno-version: v2.9.8
 
       - name: Install dependencies
         run: deno install
