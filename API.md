@@ -12033,10 +12033,12 @@ reductions.
 `quantity` is what the line still supplies: `quantity − canceled − returned`
 on a subrent, `quantity − canceled − received` on a buy.
 
-⚠️ **`end` is per KIND, and the schema refuses the other pairing.** A
-`subrent` has a due-back date, so its `end` is non-null. An `inbound` entry
-is `[expected_date, +∞)`, so its `end` is always `null`, read as +∞ like a
-sale booking's. The engine adds no `end + 1ms` candidate for a null end.
+⚠️ **`end` is per KIND.** An `inbound` entry is `[expected_date, +∞)`, so its
+`end` is always `null` and the schema refuses a bound. A `subrent` entry
+carries its hire's due-back date — or `null` on a STANDING subrent (a hire
+with no end, `PurchaseItemDates.end: null`, api-cloudrun#1392 folded into
+api-cloudrun#1407 D8), read as +∞ like a sale booking's. The engine adds no
+`end + 1ms` candidate for a null end.
 
 ```ts
 interface StockSupplyEntry {
@@ -27889,10 +27891,12 @@ reductions.
 `quantity` is what the line still supplies: `quantity − canceled − returned`
 on a subrent, `quantity − canceled − received` on a buy.
 
-⚠️ **`end` is per KIND, and the schema refuses the other pairing.** A
-`subrent` has a due-back date, so its `end` is non-null. An `inbound` entry
-is `[expected_date, +∞)`, so its `end` is always `null`, read as +∞ like a
-sale booking's. The engine adds no `end + 1ms` candidate for a null end.
+⚠️ **`end` is per KIND.** An `inbound` entry is `[expected_date, +∞)`, so its
+`end` is always `null` and the schema refuses a bound. A `subrent` entry
+carries its hire's due-back date — or `null` on a STANDING subrent (a hire
+with no end, `PurchaseItemDates.end: null`, api-cloudrun#1392 folded into
+api-cloudrun#1407 D8), read as +∞ like a sale booking's. The engine adds no
+`end + 1ms` candidate for a null end.
 
 ```ts
 interface StockSupplyEntry {

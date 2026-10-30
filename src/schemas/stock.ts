@@ -133,10 +133,12 @@ export const StockSupplyKindEnum: z.ZodType<StockSupplyKindType> = z.enum(STOCK_
  * `quantity` is what the line still supplies: `quantity − canceled − returned`
  * on a subrent, `quantity − canceled − received` on a buy.
  *
- * ⚠️ **`end` is per KIND, and the schema refuses the other pairing.** A
- * `subrent` has a due-back date, so its `end` is non-null. An `inbound` entry
- * is `[expected_date, +∞)`, so its `end` is always `null`, read as +∞ like a
- * sale booking's. The engine adds no `end + 1ms` candidate for a null end.
+ * ⚠️ **`end` is per KIND.** An `inbound` entry is `[expected_date, +∞)`, so its
+ * `end` is always `null` and the schema refuses a bound. A `subrent` entry
+ * carries its hire's due-back date — or `null` on a STANDING subrent (a hire
+ * with no end, `PurchaseItemDates.end: null`, api-cloudrun#1392 folded into
+ * api-cloudrun#1407 D8), read as +∞ like a sale booking's. The engine adds no
+ * `end + 1ms` candidate for a null end.
  */
 export interface StockSupplyEntry {
   start: string;
@@ -295,11 +297,10 @@ const StockSupplyEntrySchema: z.ZodType<StockSupplyEntry> = z.strictObject({
   quantity: z.int().min(1).meta({ column: true, label: "Quantity" }),
   kind: StockSupplyKindEnum.meta({ column: true, label: "Kind" }),
 }).superRefine((e, ctx) => {
-  // The bound is a fact about the kind: a hire has a due-back date, an
-  // inbound delivery counts until it is received or short-closed.
-  if (e.kind === "subrent" && e.end === null) {
-    ctx.addIssue({ code: "custom", path: ["end"], message: "a subrent supply interval has a due-back date" });
-  } else if (e.kind === "inbound" && e.end !== null) {
+  // An inbound delivery counts until it is received or short-closed, so it has
+  // no bound. A hire's bound is its due-back date, or none on a standing
+  // subrent (D8) — so a subrent may be either.
+  if (e.kind === "inbound" && e.end !== null) {
     ctx.addIssue({ code: "custom", path: ["end"], message: "an inbound supply interval is open-ended" });
   } else if (e.end !== null && Date.parse(e.end) < Date.parse(e.start)) {
     ctx.addIssue({ code: "custom", path: ["end"], message: "a supply interval ends at or after it starts" });

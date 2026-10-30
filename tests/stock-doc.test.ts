@@ -169,10 +169,11 @@ Deno.test("StockSchema: supply[] and quantity_rented_in are optional (expand/con
   };
   assertEquals(paths({ ...ok, supply: [{ start: end, end: start, quantity: 10, kind: "subrent" }] }), ["supply.0.end"]);
   assertEquals(paths({ ...ok, supply: [{ start, end, quantity: 0, kind: "subrent" }] }), ["supply.0.quantity"]);
-  assertEquals(paths({ ...ok, supply: [{ start, end: null, quantity: 1, kind: "subrent" }] }), ["supply.0.end"]);
+  // A STANDING subrent (hire end null, api-cloudrun#1407 D8) is +∞, as an inbound entry is.
+  assertEquals(paths({ ...ok, supply: [{ start, end: null, quantity: 1, kind: "subrent" }] }), []);
 });
 
-Deno.test("StockSchema: an inbound supply entry is open-ended, and only an inbound one is", () => {
+Deno.test("StockSchema: an inbound supply entry is always open-ended; a subrent one may be either", () => {
   const start = "2026-10-21T00:00:00.000-05:00";
   const paths = (doc: unknown) => {
     const r = StockSchema.safeParse(doc);
