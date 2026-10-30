@@ -1036,7 +1036,7 @@
           "kind": "interface",
           "name": "ClosePurchaseInputType",
           "declaration": "interface ClosePurchaseInputType {\n  uid_items?: string[];\n  uuid_session: string;\n  version: number;\n}",
-          "doc": "Input for a short close or a cancel.\n\nSets each named buy or subrent item's `quantity_canceled` to\n`quantity − quantity_received`. `uid_items` absent closes every such item; a\ncancel is a close of a purchase with nothing received. When the close leaves\nan item billed beyond what was received, the writer raises a\n`purchase-credits` document for the excess."
+          "doc": "Input for a short close or a cancel.\n\nSets each named buy or subrent item's `quantity_canceled` to\n`quantity − quantity_received`, and each named UNBILLED direct item's to 1 (a\nbilled one has nothing left to cancel). `uid_items` absent closes every such\nitem; a\ncancel is a close of a purchase with nothing received. When the close leaves\nan item billed beyond what was received, the writer raises a\n`purchase-credits` document for the excess."
         },
         {
           "kind": "interface",
@@ -1905,8 +1905,8 @@
         {
           "kind": "interface",
           "name": "DirectItem",
-          "declaration": "interface DirectItem {\n  type: \"direct\";\n  description: string;\n  amount_cents: number;\n  quantity_billed: number;\n  uid_product?: string;\n  uid_out_of_service?: string;\n}",
-          "doc": "A DIRECT item — something ordered that is not a product: freight, a fee, a\nservice. Posts to any account and never touches basis (a landed cost on a buy\nitem is how freight reaches basis). `name` equals `description`, so every arm\nanswers \"what is this row\" from one key.\n\nA direct item bills ONCE, so `quantity_billed` is 0 or 1.\n\nAttribution, as on a bill's direct item (api-cloudrun#1360, #1364):\n`uid_product` is the RENTAL product the spend is for, `uid_out_of_service` the\nrecord a loss or damage charge is for. Both permanently optional — freight\nattributes nothing."
+          "declaration": "interface DirectItem {\n  type: \"direct\";\n  description: string;\n  amount_cents: number;\n  quantity_billed: number;\n  quantity_canceled: number;\n  uid_product?: string;\n  uid_out_of_service?: string;\n}",
+          "doc": "A DIRECT item — something ordered that is not a product: freight, a fee, a\nservice. Posts to any account and never touches basis (a landed cost on a buy\nitem is how freight reaches basis). `name` equals `description`, so every arm\nanswers \"what is this row\" from one key.\n\nA direct item is ONE thing, billed once or canceled: `quantity_billed` and\n`quantity_canceled` are each 0 or 1, and never both 1 (owner, 2026-10-30). A\nclose cancels an unbilled direct item exactly as it cancels a buy's\nunreceived units, so a purchase holding unbilled freight can still be closed\nor canceled.\n\nAttribution, as on a bill's direct item (api-cloudrun#1360, #1364):\n`uid_product` is the RENTAL product the spend is for, `uid_out_of_service` the\nrecord a loss or damage charge is for. Both permanently optional — freight\nattributes nothing."
         },
         {
           "kind": "interface",
@@ -7690,7 +7690,7 @@
           "kind": "function",
           "name": "purchaseItemCanceled",
           "signature": "purchaseItemCanceled(item: PurchaseItem): boolean",
-          "doc": "Was this item canceled in full — nothing will come and nothing is billed?\nA usage or direct item has no cancel bucket, so it is never canceled; a\npurchase holding one is canceled only once that item has gone (an update).",
+          "doc": "Was this item canceled in full — nothing will come and nothing is billed?\nA direct item is canceled when its one unit is. A usage item has no cancel\nbucket, so it is never canceled; a purchase holding one is canceled only once\nthat item has gone (an update).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -7714,7 +7714,7 @@
           "kind": "function",
           "name": "purchaseItemResolved",
           "signature": "purchaseItemResolved(item: PurchaseItem): boolean",
-          "doc": "Has this item nothing left to happen?\n\n- **buy** — every unit received or canceled, and billed for exactly what was\n  not canceled.\n- **subrent** — the same, plus every unit received has gone back: a hire with\n  units still in CFS's custody is not finished. An ACTIVATION-billed subrent\n  has no billing axis to close (it bills periods as they accrue), so custody\n  alone resolves it.\n- **usage** — never: a carrier line accrues for as long as it exists.\n- **direct** — billed.\n\nPayment is the bill's business and holds nothing open.",
+          "doc": "Has this item nothing left to happen?\n\n- **buy** — every unit received or canceled, and billed for exactly what was\n  not canceled.\n- **subrent** — the same, plus every unit received has gone back: a hire with\n  units still in CFS's custody is not finished. An ACTIVATION-billed subrent\n  has no billing axis to close (it bills periods as they accrue), so custody\n  alone resolves it.\n- **usage** — never: a carrier line accrues for as long as it exists.\n- **direct** — billed or canceled.\n\nPayment is the bill's business and holds nothing open.",
           "paramTags": [],
           "returnsTag": null
         },
@@ -11841,7 +11841,7 @@
           "kind": "interface",
           "name": "ClosePurchaseInputType",
           "declaration": "interface ClosePurchaseInputType {\n  uid_items?: string[];\n  uuid_session: string;\n  version: number;\n}",
-          "doc": "Input for a short close or a cancel.\n\nSets each named buy or subrent item's `quantity_canceled` to\n`quantity − quantity_received`. `uid_items` absent closes every such item; a\ncancel is a close of a purchase with nothing received. When the close leaves\nan item billed beyond what was received, the writer raises a\n`purchase-credits` document for the excess."
+          "doc": "Input for a short close or a cancel.\n\nSets each named buy or subrent item's `quantity_canceled` to\n`quantity − quantity_received`, and each named UNBILLED direct item's to 1 (a\nbilled one has nothing left to cancel). `uid_items` absent closes every such\nitem; a\ncancel is a close of a purchase with nothing received. When the close leaves\nan item billed beyond what was received, the writer raises a\n`purchase-credits` document for the excess."
         },
         {
           "kind": "variable",
@@ -11858,8 +11858,8 @@
         {
           "kind": "interface",
           "name": "DirectItem",
-          "declaration": "interface DirectItem {\n  type: \"direct\";\n  description: string;\n  amount_cents: number;\n  quantity_billed: number;\n  uid_product?: string;\n  uid_out_of_service?: string;\n}",
-          "doc": "A DIRECT item — something ordered that is not a product: freight, a fee, a\nservice. Posts to any account and never touches basis (a landed cost on a buy\nitem is how freight reaches basis). `name` equals `description`, so every arm\nanswers \"what is this row\" from one key.\n\nA direct item bills ONCE, so `quantity_billed` is 0 or 1.\n\nAttribution, as on a bill's direct item (api-cloudrun#1360, #1364):\n`uid_product` is the RENTAL product the spend is for, `uid_out_of_service` the\nrecord a loss or damage charge is for. Both permanently optional — freight\nattributes nothing."
+          "declaration": "interface DirectItem {\n  type: \"direct\";\n  description: string;\n  amount_cents: number;\n  quantity_billed: number;\n  quantity_canceled: number;\n  uid_product?: string;\n  uid_out_of_service?: string;\n}",
+          "doc": "A DIRECT item — something ordered that is not a product: freight, a fee, a\nservice. Posts to any account and never touches basis (a landed cost on a buy\nitem is how freight reaches basis). `name` equals `description`, so every arm\nanswers \"what is this row\" from one key.\n\nA direct item is ONE thing, billed once or canceled: `quantity_billed` and\n`quantity_canceled` are each 0 or 1, and never both 1 (owner, 2026-10-30). A\nclose cancels an unbilled direct item exactly as it cancels a buy's\nunreceived units, so a purchase holding unbilled freight can still be closed\nor canceled.\n\nAttribution, as on a bill's direct item (api-cloudrun#1360, #1364):\n`uid_product` is the RENTAL product the spend is for, `uid_out_of_service` the\nrecord a loss or damage charge is for. Both permanently optional — freight\nattributes nothing."
         },
         {
           "kind": "interface",
@@ -12179,7 +12179,7 @@
           "kind": "function",
           "name": "purchaseItemCanceled",
           "signature": "purchaseItemCanceled(item: PurchaseItem): boolean",
-          "doc": "Was this item canceled in full — nothing will come and nothing is billed?\nA usage or direct item has no cancel bucket, so it is never canceled; a\npurchase holding one is canceled only once that item has gone (an update).",
+          "doc": "Was this item canceled in full — nothing will come and nothing is billed?\nA direct item is canceled when its one unit is. A usage item has no cancel\nbucket, so it is never canceled; a purchase holding one is canceled only once\nthat item has gone (an update).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -12203,7 +12203,7 @@
           "kind": "function",
           "name": "purchaseItemResolved",
           "signature": "purchaseItemResolved(item: PurchaseItem): boolean",
-          "doc": "Has this item nothing left to happen?\n\n- **buy** — every unit received or canceled, and billed for exactly what was\n  not canceled.\n- **subrent** — the same, plus every unit received has gone back: a hire with\n  units still in CFS's custody is not finished. An ACTIVATION-billed subrent\n  has no billing axis to close (it bills periods as they accrue), so custody\n  alone resolves it.\n- **usage** — never: a carrier line accrues for as long as it exists.\n- **direct** — billed.\n\nPayment is the bill's business and holds nothing open.",
+          "doc": "Has this item nothing left to happen?\n\n- **buy** — every unit received or canceled, and billed for exactly what was\n  not canceled.\n- **subrent** — the same, plus every unit received has gone back: a hire with\n  units still in CFS's custody is not finished. An ACTIVATION-billed subrent\n  has no billing axis to close (it bills periods as they accrue), so custody\n  alone resolves it.\n- **usage** — never: a carrier line accrues for as long as it exists.\n- **direct** — billed or canceled.\n\nPayment is the bill's business and holds nothing open.",
           "paramTags": [],
           "returnsTag": null
         }
@@ -22218,7 +22218,7 @@
           "kind": "function",
           "name": "purchaseItemCanceled",
           "signature": "purchaseItemCanceled(item: PurchaseItem): boolean",
-          "doc": "Was this item canceled in full — nothing will come and nothing is billed?\nA usage or direct item has no cancel bucket, so it is never canceled; a\npurchase holding one is canceled only once that item has gone (an update).",
+          "doc": "Was this item canceled in full — nothing will come and nothing is billed?\nA direct item is canceled when its one unit is. A usage item has no cancel\nbucket, so it is never canceled; a purchase holding one is canceled only once\nthat item has gone (an update).",
           "paramTags": [],
           "returnsTag": null
         },
@@ -22242,7 +22242,7 @@
           "kind": "function",
           "name": "purchaseItemResolved",
           "signature": "purchaseItemResolved(item: PurchaseItem): boolean",
-          "doc": "Has this item nothing left to happen?\n\n- **buy** — every unit received or canceled, and billed for exactly what was\n  not canceled.\n- **subrent** — the same, plus every unit received has gone back: a hire with\n  units still in CFS's custody is not finished. An ACTIVATION-billed subrent\n  has no billing axis to close (it bills periods as they accrue), so custody\n  alone resolves it.\n- **usage** — never: a carrier line accrues for as long as it exists.\n- **direct** — billed.\n\nPayment is the bill's business and holds nothing open.",
+          "doc": "Has this item nothing left to happen?\n\n- **buy** — every unit received or canceled, and billed for exactly what was\n  not canceled.\n- **subrent** — the same, plus every unit received has gone back: a hire with\n  units still in CFS's custody is not finished. An ACTIVATION-billed subrent\n  has no billing axis to close (it bills periods as they accrue), so custody\n  alone resolves it.\n- **usage** — never: a carrier line accrues for as long as it exists.\n- **direct** — billed or canceled.\n\nPayment is the bill's business and holds nothing open.",
           "paramTags": [],
           "returnsTag": null
         },

@@ -2299,7 +2299,9 @@ const ClosePurchaseInput: z.ZodType<ClosePurchaseInputType>;
 Input for a short close or a cancel.
 
 Sets each named buy or subrent item's `quantity_canceled` to
-`quantity − quantity_received`. `uid_items` absent closes every such item; a
+`quantity − quantity_received`, and each named UNBILLED direct item's to 1 (a
+billed one has nothing left to cancel). `uid_items` absent closes every such
+item; a
 cancel is a close of a purchase with nothing received. When the close leaves
 an item billed beyond what was received, the writer raises a
 `purchase-credits` document for the excess.
@@ -4247,7 +4249,11 @@ service. Posts to any account and never touches basis (a landed cost on a buy
 item is how freight reaches basis). `name` equals `description`, so every arm
 answers "what is this row" from one key.
 
-A direct item bills ONCE, so `quantity_billed` is 0 or 1.
+A direct item is ONE thing, billed once or canceled: `quantity_billed` and
+`quantity_canceled` are each 0 or 1, and never both 1 (owner, 2026-10-30). A
+close cancels an unbilled direct item exactly as it cancels a buy's
+unreceived units, so a purchase holding unbilled freight can still be closed
+or canceled.
 
 Attribution, as on a bill's direct item (api-cloudrun#1360, #1364):
 `uid_product` is the RENTAL product the spend is for, `uid_out_of_service` the
@@ -4260,6 +4266,7 @@ interface DirectItem {
   description: string;
   amount_cents: number;
   quantity_billed: number;
+  quantity_canceled: number;
   uid_product?: string;
   uid_out_of_service?: string;
 }
@@ -16846,8 +16853,9 @@ field. Derivation supplies the default; the stamped value is the fact.
 ### `purchaseItemCanceled(item: PurchaseItem): boolean`
 
 Was this item canceled in full — nothing will come and nothing is billed?
-A usage or direct item has no cancel bucket, so it is never canceled; a
-purchase holding one is canceled only once that item has gone (an update).
+A direct item is canceled when its one unit is. A usage item has no cancel
+bucket, so it is never canceled; a purchase holding one is canceled only once
+that item has gone (an update).
 
 ### `purchaseItemCommittedCents(item: PurchaseItem): number`
 
@@ -16870,7 +16878,7 @@ Has this item nothing left to happen?
   has no billing axis to close (it bills periods as they accrue), so custody
   alone resolves it.
 - **usage** — never: a carrier line accrues for as long as it exists.
-- **direct** — billed.
+- **direct** — billed or canceled.
 
 Payment is the bill's business and holds nothing open.
 
@@ -25823,7 +25831,9 @@ const ClosePurchaseInput: z.ZodType<ClosePurchaseInputType>;
 Input for a short close or a cancel.
 
 Sets each named buy or subrent item's `quantity_canceled` to
-`quantity − quantity_received`. `uid_items` absent closes every such item; a
+`quantity − quantity_received`, and each named UNBILLED direct item's to 1 (a
+billed one has nothing left to cancel). `uid_items` absent closes every such
+item; a
 cancel is a close of a purchase with nothing received. When the close leaves
 an item billed beyond what was received, the writer raises a
 `purchase-credits` document for the excess.
@@ -25871,7 +25881,11 @@ service. Posts to any account and never touches basis (a landed cost on a buy
 item is how freight reaches basis). `name` equals `description`, so every arm
 answers "what is this row" from one key.
 
-A direct item bills ONCE, so `quantity_billed` is 0 or 1.
+A direct item is ONE thing, billed once or canceled: `quantity_billed` and
+`quantity_canceled` are each 0 or 1, and never both 1 (owner, 2026-10-30). A
+close cancels an unbilled direct item exactly as it cancels a buy's
+unreceived units, so a purchase holding unbilled freight can still be closed
+or canceled.
 
 Attribution, as on a bill's direct item (api-cloudrun#1360, #1364):
 `uid_product` is the RENTAL product the spend is for, `uid_out_of_service` the
@@ -25884,6 +25898,7 @@ interface DirectItem {
   description: string;
   amount_cents: number;
   quantity_billed: number;
+  quantity_canceled: number;
   uid_product?: string;
   uid_out_of_service?: string;
 }
@@ -26510,8 +26525,9 @@ out. The one author of the mirror, called by every writer.
 ### `purchaseItemCanceled(item: PurchaseItem): boolean`
 
 Was this item canceled in full — nothing will come and nothing is billed?
-A usage or direct item has no cancel bucket, so it is never canceled; a
-purchase holding one is canceled only once that item has gone (an update).
+A direct item is canceled when its one unit is. A usage item has no cancel
+bucket, so it is never canceled; a purchase holding one is canceled only once
+that item has gone (an update).
 
 ### `purchaseItemCommittedCents(item: PurchaseItem): number`
 
@@ -26534,7 +26550,7 @@ Has this item nothing left to happen?
   has no billing axis to close (it bills periods as they accrue), so custody
   alone resolves it.
 - **usage** — never: a carrier line accrues for as long as it exists.
-- **direct** — billed.
+- **direct** — billed or canceled.
 
 Payment is the bill's business and holds nothing open.
 
@@ -47265,8 +47281,9 @@ the AR twin skips. Negative results are preserved, never clamped.
 ### `purchaseItemCanceled(item: PurchaseItem): boolean`
 
 Was this item canceled in full — nothing will come and nothing is billed?
-A usage or direct item has no cancel bucket, so it is never canceled; a
-purchase holding one is canceled only once that item has gone (an update).
+A direct item is canceled when its one unit is. A usage item has no cancel
+bucket, so it is never canceled; a purchase holding one is canceled only once
+that item has gone (an update).
 
 ### `purchaseItemCommittedCents(item: PurchaseItem): number`
 
@@ -47289,7 +47306,7 @@ Has this item nothing left to happen?
   has no billing axis to close (it bills periods as they accrue), so custody
   alone resolves it.
 - **usage** — never: a carrier line accrues for as long as it exists.
-- **direct** — billed.
+- **direct** — billed or canceled.
 
 Payment is the bill's business and holds nothing open.
 

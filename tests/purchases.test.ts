@@ -256,6 +256,7 @@ const direct = (over: Partial<DirectItem> = {}): DirectItem => {
     coa_posting: 5300,
     uid_tracking_category: null,
     quantity_billed: 0,
+    quantity_canceled: 0,
     ...over,
   };
 };
@@ -486,8 +487,32 @@ Deno.test("the nested billing union is reached by the column walker (the new pat
   assertEquals(columns.get("items.type"), "Item Type");
 });
 
-Deno.test("PurchaseSchema: a direct item bills once", () => {
-  assertEquals(issuePaths(PurchaseSchema, withItems([direct({ quantity_billed: 2 })])), ["items.0.quantity_billed"]);
+Deno.test("PurchaseSchema: a direct item is billed once or canceled, never both", () => {
+  // 2 breaks the bucket's own bound AND the billed-or-canceled sum: both issues are real.
+  assertEquals(issuePaths(PurchaseSchema, withItems([direct({ quantity_billed: 2 })])), [
+    "items.0.quantity_billed",
+    "items.0.quantity_canceled",
+  ]);
+  assertEquals(issuePaths(PurchaseSchema, withItems([direct({ quantity_canceled: 1 })])), []);
+  assertEquals(issuePaths(PurchaseSchema, withItems([direct({ quantity_billed: 1, quantity_canceled: 1 })])), [
+    "items.0.quantity_canceled",
+  ]);
+  const noBucket = { ...direct() } as Record<string, unknown>;
+  delete noBucket.quantity_canceled;
+  assertEquals(issuePaths(PurchaseSchema, withItems([direct()], { items: [noBucket] })), ["items.0.quantity_canceled"]);
+});
+
+Deno.test("derivePurchaseStatus — a canceled direct item no longer holds a purchase open (owner, 2026-10-30)", () => {
+  // Unbilled freight beside a canceled buy: before the bucket this could only read active.
+  assertEquals(derivePurchaseStatus({ items: [line({ quantity_canceled: 3 }), direct()] }), "active");
+  assertEquals(derivePurchaseStatus({ items: [line({ quantity_canceled: 3 }), direct({ quantity_canceled: 1 })] }), "canceled");
+  // Goods done, freight canceled unbilled: complete.
+  assertEquals(
+    derivePurchaseStatus({ items: [line({ quantity_received: 3, quantity_billed: 3 }), direct({ quantity_canceled: 1 })] }),
+    "complete",
+  );
+  // A BILLED direct item is not canceled, so a purchase holding one is not canceled either.
+  assertEquals(derivePurchaseStatus({ items: [line({ quantity_canceled: 3 }), direct({ quantity_billed: 1 })] }), "complete");
 });
 
 Deno.test("PurchaseSchema: all three mirrors are required, and each must be exact", () => {
