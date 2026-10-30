@@ -22563,7 +22563,7 @@
           "kind": "interface",
           "name": "UsageBilledItem",
           "declaration": "interface UsageBilledItem {\n  uid_cogs: string;\n  quantity_billed: number;\n}",
-          "doc": "The fields of a usage-billed purchase item {@link remainingUsageToBill} reads —\nstructural, so both a carrier's `usage` item and an activation-billed\n`subrent` item take it (`api-cloudrun/.claude/plans/purchase-documents-invoice-shape.md`)."
+          "doc": "The fields of a usage-billed purchase item {@link remainingUsageToBill} reads —\nstructural, so both a carrier's `usage` item and an activation-billed\n`subrent` item take it (the purchase-items plan, chicago-film-supplies/api-cloudrun#1407,\nlanded 2026-10-30)."
         },
         {
           "kind": "function",

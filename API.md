@@ -47917,7 +47917,8 @@ interface SpanInstants {
 
 The fields of a usage-billed purchase item {@link remainingUsageToBill} reads —
 structural, so both a carrier's `usage` item and an activation-billed
-`subrent` item take it (`api-cloudrun/.claude/plans/purchase-documents-invoice-shape.md`).
+`subrent` item take it (the purchase-items plan, chicago-film-supplies/api-cloudrun#1407,
+landed 2026-10-30).
 
 ```ts
 interface UsageBilledItem {
