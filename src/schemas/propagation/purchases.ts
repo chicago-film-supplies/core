@@ -522,7 +522,7 @@ const voidPurchaseBillFromXeroRules: CollectionRule[] = [
 const CREDIT_UNBILLS_THE_BUCKET: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::push — a credit un-bills its lines at their cumulative share",
+    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::push — a credit un-bills its items at their cumulative share",
   clause:
     "each credit line lowers its purchase line's quantity_billed by its quantity in the same commit; a pushed credit line is priced at the share of the range it un-bills, so a bill and the credit of all its units sum to zero; un-billing past quantity_billed is refused",
   gates: true,
@@ -587,7 +587,7 @@ const createPurchaseCreditRules: CollectionRule[] = [
 const CLOSE_RAISES_CREDIT: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::short close — a line billed beyond what it received raises a short_close credit, allocated to the bill",
+    "api-cloudrun/tests/integration/purchases/purchaseCredits.test.ts::short close — an item billed beyond what it received raises a short_close credit, allocated to the bill",
   clause:
     "closing a line billed beyond what it received writes one pushed purchase-credit (reason short_close, keyed on the purchase and the close session) for the excess units at the share of the range they un-bill, and sets quantity_billed to quantity_received in the same commit; the credit is then allocated newest bill first; a retried close writes nothing new",
   gates: true,
@@ -767,7 +767,7 @@ const SUPPLIER_REFUND_FOLDED: EnforcementRef = {
 const CREDIT_VOIDED_FROM_XERO: EnforcementRef = {
   kind: "test",
   ref:
-    "api-cloudrun/tests/integration/purchases/purchaseCreditSettlements.test.ts::void from Xero — a voided credit reaps its draws, refolds its bills and re-bills its purchase lines",
+    "api-cloudrun/tests/integration/purchases/purchaseCreditSettlements.test.ts::void from Xero — a voided credit reaps its draws, refolds its bills and re-bills its purchase items",
   clause:
     "a tracked supplier credit Xero reports VOIDED or DELETED becomes void; every live row drawing on it is reversed (source_retracted), each bill those rows credited is refolded in the same commit, and each credit line raises its purchase line's quantity_billed back by its quantity; a redelivery writes nothing",
   gates: true,
