@@ -1030,8 +1030,8 @@ const createPurchaseTransaction: TransactionDefinition = {
 const updatePurchaseTransaction: TransactionDefinition = {
   id: "update-purchase",
   description:
-    "Amends a purchase's date, reference, notes or items, matched by item uid. On a BUY item the quantity may not fall below what is received or billed, and its amount may not change once it has any receipt or bill — a price that moved after goods arrived is a short close plus a new purchase, because every receipt already carries its share of the old price; the update fires STOCK_STEPS, since a buy item's expected_date and unreceived quantity are inbound supply. On a SUBRENT item a receipt carries no cost, so the amount and the hire end stay editable after receipt (a paid extension), and the update fires STOCK_STEPS and the return card, since the hire window is supply.",
-  steps: [...STOCK_STEPS, "purchase-card:purchases-to-card"],
+    "Amends a purchase's date, reference, notes or items, matched by item uid. On a BUY item the quantity may not fall below what is received or billed, and its amount may not change once it has any receipt or bill — a price that moved after goods arrived is a short close plus a new purchase, because every receipt already carries its share of the old price; the update fires STOCK_STEPS, since a buy item's expected_date and unreceived quantity are inbound supply. On a SUBRENT item a receipt carries no cost, so the amount and the hire end stay editable after receipt (a paid extension), and the update fires STOCK_STEPS and the return card, since the hire window is supply. An amend that adds a purchase's FIRST subrent item writes its return card in the same commit, with the card's own default thread, as a create does.",
+  steps: [...STOCK_STEPS, "purchase-card:purchases-to-card", "cowrite-thread:cards-to-thread", "cowrite-thread:thread-to-cards"],
 };
 
 const closePurchaseTransaction: TransactionDefinition = {
