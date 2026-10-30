@@ -10272,8 +10272,9 @@ interface PurchaseDocumentDirectItem {
 
 A document-only direct item as an operator states it on a PUSHED bill or
 credit. The writer mints its `uid`/`path` and sets `name` = `description`.
-`uid_tracking_category` absent takes the attributed product's category, else
-none; `null` states none.
+`uid_tracking_category` follows the order/invoice line rule: absent or `null`
+takes the attributed product's category (none when it names no product); a
+uid sets it and must name a live category.
 
 ⚠️ **The node stays STRICT, though both push inputs embed it.** Stripping
 would let an api that predates a field silently drop it rather than 400, and
@@ -26968,8 +26969,9 @@ interface PurchaseDocumentDirectItem {
 
 A document-only direct item as an operator states it on a PUSHED bill or
 credit. The writer mints its `uid`/`path` and sets `name` = `description`.
-`uid_tracking_category` absent takes the attributed product's category, else
-none; `null` states none.
+`uid_tracking_category` follows the order/invoice line rule: absent or `null`
+takes the attributed product's category (none when it names no product); a
+uid sets it and must name a live category.
 
 ⚠️ **The node stays STRICT, though both push inputs embed it.** Stripping
 would let an api that predates a field silently drop it rather than 400, and

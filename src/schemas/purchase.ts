@@ -902,12 +902,13 @@ export const PurchaseLandedCostInput: z.ZodType<PurchaseLandedCostInputType> = z
  * absent (or a uid the purchase does not hold) is a NEW item, minted by the
  * writer, so an update matches rows by identity rather than by product.
  *
- * `coa_posting` and `uid_tracking_category` follow the line-tracking-uid rule
- * (`api-cloudrun/src/lib/lineDenorms.ts`): absent KEEPS what is stored, or takes
- * the default on a new item; a value SETS it; and `uid_tracking_category: null`
- * CLEARS it. The defaults are the writer's (D4): a buy's is
- * `xeroPostingFor("purchase", …)`'s asset account, a subrent's 5100, a usage
- * item's its cost entry's `coa_cost`, and tracking is the product's category.
+ * `uid_tracking_category` takes the SAME rule as an order or invoice line's
+ * (`resolveLinePosting`, `api-cloudrun/src/lib/lineDenorms.ts`): absent KEEPS
+ * what is stored (a new item takes the product's category); `null` returns it to
+ * the product's category — never "untracked"; a uid SETS it and must name a
+ * live category. `coa_posting` is absent-KEEPS, value-SETS, with the writer's
+ * default on a new item (D4): a buy's is `xeroPostingFor("purchase", …)`'s asset
+ * account, a subrent's 5100, a usage item's its cost entry's `coa_cost`.
  */
 interface PurchaseItemInputBase {
   uid?: string;
