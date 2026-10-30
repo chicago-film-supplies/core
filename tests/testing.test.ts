@@ -114,27 +114,47 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
     uid_destination_delivery: "AAAAAAAAAAAAAAAAAAAA",
   },
   // ⚠️ **Seventh entry, added when the purchase mirrors became required** (the
-  // subrent plan's beta B). `query_by_products === lines.map(l => l.uid_product)`
-  // is a cross-field equality; while the mirror was optional the walker simply
-  // left it absent. `query_by_orders` stays `[]`, which a buy line (no
-  // `uid_orders`) derives.
-  //
-  // The line itself joined it when `landed_costs` became present-iff-buy
-  // (api-cloudrun#1227): an optional key the walker leaves absent, required by
-  // the kind arm of the document refine. Arrays are replaced wholesale, so the
-  // whole minimal line is stated rather than just the key. Still one entry.
+  // subrent plan's beta B). `query_by_products` and `query_by_item_types` are
+  // cross-field equalities over the items; `query_by_orders` stays `[]`, which a
+  // buy item derives. Since api-cloudrun#1407 the ITEM also carries one — its
+  // `path` is `[uid]` — and arrays are replaced wholesale, so the whole minimal
+  // buy item is stated. Still one entry.
   purchase: {
     query_by_products: ["AAAAAAAAAAAAAAAAAAAA"],
-    lines: [{
-      uid_product: "AAAAAAAAAAAAAAAAAAAA",
+    query_by_item_types: ["buy"],
+    items: [{
+      type: "buy",
+      uid: "AAAAAAAAAAAAAAAAAAAA",
+      path: ["AAAAAAAAAAAAAAAAAAAA"],
       name: "A",
+      uid_product: "AAAAAAAAAAAAAAAAAAAA",
       quantity: 1,
       amount_cents: 0,
+      coa_posting: 1999,
+      uid_tracking_category: null,
       expected_date: null,
       quantity_received: 0,
       quantity_billed: 0,
       quantity_canceled: 0,
       landed_costs: [],
+    }],
+  },
+  // ⚠️ **Eighth entry, added when a bill's lines became items** (api-cloudrun#1407):
+  // an item's `path` is `[uid]`, the same cross-field class — the walker
+  // generates a uid and a path independently. A credit needs none: its `items`
+  // may be empty, which is what the walker builds.
+  "purchase-bill": {
+    items: [{
+      type: "buy",
+      uid: "AAAAAAAAAAAAAAAAAAAA",
+      path: ["AAAAAAAAAAAAAAAAAAAA"],
+      name: "A",
+      uid_product: "AAAAAAAAAAAAAAAAAAAA",
+      quantity: 1,
+      amount_cents: 0,
+      coa_posting: 1999,
+      uid_tracking_category: null,
+      path_purchase_item: ["AAAAAAAAAAAAAAAAAAAA"],
     }],
   },
 };
@@ -193,8 +213,9 @@ Deno.test("corpus gate — every registry schema has a minimal fixture that pars
   // it; if this grows for a reason OTHER than a new cross-field refinement, the
   // walker has stopped keeping up with the schemas.
   // 6 since core#103's booking delivery mirror, 7 since the purchase mirrors
-  // became required — each a new cross-field refinement.
-  assertEquals(Object.keys(OVERRIDES).length, 7, "a schema now needs hand-written fixture knowledge");
+  // became required, 8 since a bill item's `path` is `[uid]` (api-cloudrun#1407)
+  // — each a new cross-field refinement.
+  assertEquals(Object.keys(OVERRIDES).length, 8, "a schema now needs hand-written fixture knowledge");
 });
 
 Deno.test("corpus gate companion — an unsatisfiable invariant still throws, naming its path", () => {

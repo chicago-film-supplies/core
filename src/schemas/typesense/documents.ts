@@ -1150,12 +1150,11 @@ export interface PurchaseDocument {
   number: number;
   number_str?: string;
   status: string;
-  /** `buy` | `subrent`; absent on a pre-subrent purchase until the backfill. */
-  kind?: string;
   supplier: { uid?: string; name: string };
   store: { uid?: string; name: string };
   reference?: string;
-  lines?: Array<{ uid_product?: string; name?: string; quantity_returned?: number }>;
+  /** Every item arm; `type` is the buy/subrent/usage/direct facet that replaced the document `kind` (api-cloudrun#1407). */
+  items?: Array<{ type?: string; uid_product?: string; name?: string; quantity_returned?: number }>;
   total_cents?: number;
   total_cents_str?: string;
   created_by?: TypesenseActorRef;
@@ -1165,7 +1164,7 @@ export interface PurchaseDocument {
   updated_at?: number;
 }
 
-/** A purchase bill as indexed in Typesense. No `store`, no `status`, no line `name`. */
+/** A purchase bill as indexed in Typesense. No `store`, no `status`. */
 export interface PurchaseBillDocument {
   id: string;
   uid: string;
@@ -1177,7 +1176,7 @@ export interface PurchaseBillDocument {
   xero_document: string;
   xero_id?: string;
   reference?: string;
-  lines?: Array<{ uid_product?: string }>;
+  items?: Array<{ type?: string; uid_product?: string; name?: string }>;
   totals?: {
     total_cents?: number;
     total_cents_str?: string;
@@ -1198,7 +1197,7 @@ export interface PurchaseBillDocument {
   updated_at?: number;
 }
 
-/** A supplier credit as indexed in Typesense. `lines` may be empty on the stored document. */
+/** A supplier credit as indexed in Typesense. `items` may be empty on the stored document. */
 export interface PurchaseCreditDocument {
   id: string;
   uid: string;
@@ -1211,7 +1210,7 @@ export interface PurchaseCreditDocument {
   status: string;
   xero_id?: string;
   reference?: string;
-  lines?: Array<{ uid_product?: string }>;
+  items?: Array<{ type?: string; uid_product?: string; name?: string }>;
   total_cents?: number;
   total_cents_str?: string;
   remaining_credit_cents?: number;

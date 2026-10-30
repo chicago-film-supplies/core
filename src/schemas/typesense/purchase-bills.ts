@@ -4,10 +4,12 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * Typesense collection config for purchase bills (api-cloudrun#1220) — the
  * supplier's ACCPAY bill against one purchase.
  *
- * ⚠️ **Not the purchase skeleton.** A bill has no `store` and no `status`, and
- * its `lines` are `PurchaseDocumentLine` — `uid_product`, `quantity`,
- * `amount_cents`, no `name` — so declaring either here would fail field
- * resolution. `direct_lines` (freight and the like) are not declared.
+ * ⚠️ **Not the purchase skeleton.** A bill has no `store` and no `status`.
+ *
+ * v2 (api-cloudrun#1407): `lines` + `direct_lines` → one `items` array, product
+ * projections and direct items together, each carrying `type` and `name` — so
+ * `items.type` is a facet and `items.name` is searchable. Every `items.*` field
+ * is `optional: true`: a direct item may name no product.
  *
  * `uid_purchase` is indexed but not faceted: a purchase's own bills are a
  * Firestore `where`, not a search, and this field exists so a search can
@@ -19,12 +21,12 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  */
 export const purchaseBills: TypesenseCollectionConfig = {
   alias: "purchase-bills",
-  version: 1,
+  version: 2,
   firestoreCollection: "purchase-bills",
-  collectionName: "purchase-bills_v1",
+  collectionName: "purchase-bills_v2",
   enabled: true,
   schema: {
-    name: "purchase-bills_v1",
+    name: "purchase-bills_v2",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -38,8 +40,10 @@ export const purchaseBills: TypesenseCollectionConfig = {
       { name: "xero_document", type: "string", facet: true },
       { name: "xero_id", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
-      { name: "lines", type: "object[]", optional: true },
-      { name: "lines.uid_product", type: "string[]", facet: false, optional: true },
+      { name: "items", type: "object[]", optional: true },
+      { name: "items.type", type: "string[]", facet: true, optional: true },
+      { name: "items.uid_product", type: "string[]", facet: false, optional: true },
+      { name: "items.name", type: "string[]", stem: true, optional: true },
       { name: "totals", type: "object", optional: true },
       { name: "totals.total_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "totals.total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },

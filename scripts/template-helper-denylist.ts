@@ -387,6 +387,8 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "invoiceHasMoneySettlement",
     "invoiceIsFrozen",
     "invoiceFieldIsFrozen", // its per-class form over INVOICE_FIELD_FREEZE — same reason
+    "purchaseBillIsFrozen", // the bill's twin (api-cloudrun#1407 D10) — same reason
+    "purchaseBillFieldIsFrozen", // and its per-class form over PURCHASE_BILL_FIELD_FREEZE
     // Settlement liveness, for MATCHING rows (the reap, the edit push's held
     // settlements). A rendered invoice reads its stored totals.
     "liveSettlements",
@@ -697,17 +699,23 @@ export const TEMPLATE_HELPER_DENYLIST: Record<string, string[]> = {
     "emptyOOSBreakdown",
     "sumOOSBreakdown",
   ],
-  // Write-path rules (api-cloudrun#1210): the price of a receipt or bill line,
-  // the per-line headroom, the status rule, and the pack expansion that runs
-  // before a line is stored (api-cloudrun#1081), plus the subrent return
-  // headroom and the two mirror authors a writer stamps. A template renders a
-  // purchase that has already been written.
+  // Write-path rules (api-cloudrun#1210): the price of a receipt or bill item,
+  // the per-item headroom, the status rule and its per-arm terms, and the pack
+  // expansion that runs before an item is stored (api-cloudrun#1081), plus the
+  // subrent return headroom and the three mirror authors a writer stamps
+  // (api-cloudrun#1407). A template renders a purchase that has already been
+  // written — its `total_cents` is the committed amount already summed.
   purchases: [
     "cumulativeShareCents",
+    "deriveQueryByItemTypes",
     "deriveQueryByOrders",
     "deriveQueryByProducts",
     "derivePurchaseStatus",
-    "expandPurchaseLines",
+    "expandPurchaseItems",
+    "purchaseItemCanceled",
+    "purchaseItemCommittedCents",
+    "purchaseItemProduct",
+    "purchaseItemResolved",
     "remainingToBill",
     "remainingToReceive",
     "remainingToReturn",

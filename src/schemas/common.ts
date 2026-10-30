@@ -1016,6 +1016,22 @@ export const COACostEnum: z.ZodType<COACostType> = z.union([
   z.literal(5300), z.literal(5400), z.literal(5500), z.literal(5600), z.literal(5700),
 ]);
 
+/**
+ * The inventory asset accounts a purchased unit's value can land on — a POLICY
+ * subset, for the reason {@link COA_COST_CODES} is one: a buy item's
+ * `coa_posting` is refined against it (`schemas/purchase.ts`), and a schema
+ * cannot import `utils/`. `1400` Retail Inventory (a `sale` product) and `1999`
+ * Fixed Asset Clearing (a `rental`). `XERO_ASSET_ACCOUNTS`
+ * (`@cfs/core/utils/movements`) names the same two codes for the posting
+ * builder, and a type assertion there fails to compile if the two lists ever
+ * disagree in either direction.
+ */
+export const COA_ASSET_CODES = [1400, 1999] as const;
+/** One allowed inventory asset code. See {@link COA_ASSET_CODES}. */
+export type COAAssetType = typeof COA_ASSET_CODES[number];
+/** Zod schema for COAAssetType. */
+export const COAAssetEnum: z.ZodType<COAAssetType> = z.union([z.literal(1400), z.literal(1999)]);
+
 const DOC_ITEM_TYPES = ["rental", "destination", "group", "replacement", "sale", "service", "surcharge", "transaction_fee"] as const;
 /** All item types accepted in order/invoice input schemas (includes structural dividers). */
 export type DocItemTypeType = typeof DOC_ITEM_TYPES[number];

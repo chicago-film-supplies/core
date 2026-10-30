@@ -22,6 +22,7 @@ import type {
   LocationRoleType,
   Movement,
   MovementLineType,
+  COAAssetType,
   MovementServiceType,
   MovementTypeType,
   ProductTypeType,
@@ -1042,6 +1043,14 @@ export const XERO_ASSET_ACCOUNTS = {
   /** Fixed Asset Clearing — the fleet, `product.type === "rental"`. */
   fixed_asset_clearing: 1999,
 } as const;
+// The schema-side list a buy item's `coa_posting` is refined against
+// (`COA_ASSET_CODES`, `schemas/common.ts`) must name exactly these two codes —
+// a compile error both ways, since a schema cannot import this module.
+type _AssetAccountsAreAssetCodes = typeof XERO_ASSET_ACCOUNTS[keyof typeof XERO_ASSET_ACCOUNTS] extends COAAssetType
+  ? COAAssetType extends typeof XERO_ASSET_ACCOUNTS[keyof typeof XERO_ASSET_ACCOUNTS] ? true : never
+  : never;
+const _assetAccountParity: _AssetAccountsAreAssetCodes = true;
+void _assetAccountParity;
 
 /** The counter-account a movement's value is offset against. */
 export const XERO_OFFSET_ACCOUNTS = {

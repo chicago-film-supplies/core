@@ -94,6 +94,8 @@ import {
   getSettlementMultiplier,
   INVOICE_FIELD_FREEZE,
   type InvoiceFieldClass,
+  PURCHASE_BILL_FIELD_FREEZE,
+  type PurchaseBillFieldClass,
   InvoiceSchema,
   isDividerItemType,
   isLineItemType,
@@ -344,6 +346,40 @@ export function invoiceFieldIsFrozen(
       return invoiceIsFrozen(invoice);
     case "void":
       return invoice.status === "void";
+    case "never":
+      return false;
+  }
+}
+
+/**
+ * 🔴 **Is this purchase bill frozen?** — the invoice's money predicate over the
+ * bill's totals (D10, owner 2026-10-28), so a bill freezes exactly when an
+ * invoice with the same settled money would.
+ *
+ * Not a copy: a bill's `totals` already fit {@link InvoiceSettledTotals}, so this
+ * IS {@link invoiceHasMoneySettlement}. The terms a bill lacks drop out by
+ * themselves — it has no `status` (so `amount_void_cents ≠ 0` stands in for
+ * `void`) and no `closure_count`. It tests the settled VALUE, so a payment
+ * reversed to zero unfreezes, and `xero_id` is not a term (invoice parity). A
+ * born-paid `bank_transaction` bill carries its `bill_payment` from creation, so
+ * it is frozen from birth — correctly, since the money is already settled.
+ */
+export function purchaseBillIsFrozen(bill: { totals: InvoiceSettledTotals }): boolean {
+  return invoiceHasMoneySettlement(bill);
+}
+
+/**
+ * **May an operator still change fields of this class on this bill?** — the
+ * accessor over `PURCHASE_BILL_FIELD_FREEZE` (`@cfs/core/schemas`), and the only
+ * way to read it. `true` means frozen. Nothing edits a bill yet; this is the
+ * table's one reader for when something does.
+ */
+export function purchaseBillFieldIsFrozen(bill: { totals: InvoiceSettledTotals }, cls: PurchaseBillFieldClass): boolean {
+  switch (PURCHASE_BILL_FIELD_FREEZE[cls].frozen_when) {
+    case "frozen":
+      return purchaseBillIsFrozen(bill);
+    case "void":
+      return (bill.totals.amount_void_cents ?? 0) !== 0;
     case "never":
       return false;
   }

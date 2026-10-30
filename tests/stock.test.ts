@@ -806,29 +806,61 @@ Deno.test("supply: with no demand, availability is owned + supply over the hire,
   });
 });
 
-Deno.test("supplyFromPurchase: a live subrent's line, net of canceled and returned; [] for anything else", () => {
-  // `expected_date: null`, so the buy readings below are [] for want of a date,
-  // not for being a buy — the inbound tests below cover a dated buy.
-  const line = {
+Deno.test("supplyFromPurchase: a live subrent item, net of canceled and returned; [] for anything else", () => {
+  const item = {
+    type: "subrent" as const,
     uid_product: "P",
     quantity: 10,
     quantity_canceled: 0,
-    quantity_received: 0,
     quantity_returned: 0,
-    expected_date: null,
     dates: { start: H_START, end: H_END },
   };
-  const p = { kind: "subrent" as const, status: "active" as const, lines: [line, { ...line, uid_product: "Q" }] };
+  const p = { status: "active" as const, items: [item, { ...item, uid_product: "Q" }] };
   assertEquals(supplyFromPurchase(p, "P"), [sup(H_START, H_END, 10)]);
-  assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, quantity_canceled: 4, quantity_returned: 3 }] }, "P"), [sup(H_START, H_END, 3)]);
+  assertEquals(supplyFromPurchase({ ...p, items: [{ ...item, quantity_canceled: 4, quantity_returned: 3 }] }, "P"), [sup(H_START, H_END, 3)]);
   // Liveness and zero are ONE filter.
-  assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, quantity_returned: 10 }] }, "P"), []);
+  assertEquals(supplyFromPurchase({ ...p, items: [{ ...item, quantity_returned: 10 }] }, "P"), []);
   assertEquals(supplyFromPurchase({ ...p, status: "complete" }, "P"), []);
   assertEquals(supplyFromPurchase({ ...p, status: "canceled" }, "P"), []);
-  assertEquals(supplyFromPurchase({ ...p, kind: "buy" }, "P"), []);
-  assertEquals(supplyFromPurchase({ status: "active", lines: [line] }, "P"), [], "an absent kind is a buy");
   assertEquals(supplyFromPurchase(p, "R"), []);
 });
+
+Deno.test("supplyFromPurchase: a STANDING subrent (end null) is +∞; usage and direct items supply nothing", () => {
+  const standing = {
+    type: "subrent" as const,
+    uid_product: "P",
+    quantity: 4,
+    quantity_canceled: 0,
+    quantity_returned: 0,
+    dates: { start: H_START, end: null },
+  };
+  const p = {
+    status: "active" as const,
+    items: [standing, { type: "usage" as const, uid_product: "P" }, { type: "direct" as const }],
+  };
+  assertEquals(supplyFromPurchase(p, "P"), [{ start: H_START, end: null, quantity: 4, kind: "subrent" }]);
+  const far = computeStockAvailability(stock(0, [], supplyFromPurchase(p, "P")), win("2029-01-01", "2029-12-31"));
+  assertEquals(far.quantity_supplied, 4);
+});
+
+Deno.test("supplyFromPurchase: one product on TWO items gives two entries (D2)", () => {
+  const buy = { type: "buy" as const, uid_product: "P", quantity: 3, quantity_canceled: 0, quantity_received: 0, expected_date: EXPECTED_EARLY };
+  const sub = {
+    type: "subrent" as const,
+    uid_product: "P",
+    quantity: 2,
+    quantity_canceled: 0,
+    quantity_returned: 0,
+    dates: { start: H_START, end: H_END },
+  };
+  assertEquals(supplyFromPurchase({ status: "active", items: [buy, sub, { ...buy, quantity: 5 }] }, "P"), [
+    { start: EXPECTED_EARLY, end: null, quantity: 3, kind: "inbound" },
+    sup(H_START, H_END, 2),
+    { start: EXPECTED_EARLY, end: null, quantity: 5, kind: "inbound" },
+  ]);
+});
+
+const EXPECTED_EARLY = "2026-10-20T00:00:00.000-05:00";
 
 // ── Supply: inbound from a buy (api-cloudrun#1228) ───────────────────────────
 //
@@ -838,28 +870,27 @@ Deno.test("supplyFromPurchase: a live subrent's line, net of canceled and return
 const EXPECTED = "2026-10-21T00:00:00.000-05:00";
 const inb = (start: string, quantity: number): StockSupplyEntry => ({ start, end: null, quantity, kind: "inbound" });
 
-Deno.test("supplyFromPurchase: a live buy line is open-ended inbound for its unreceived remainder", () => {
-  const line = {
+Deno.test("supplyFromPurchase: a live buy item is open-ended inbound for its unreceived remainder", () => {
+  const item = {
+    type: "buy" as const,
     uid_product: "P",
     quantity: 10,
     quantity_canceled: 0,
     quantity_received: 0,
     expected_date: EXPECTED,
   };
-  const p = { kind: "buy" as const, status: "active" as const, lines: [line, { ...line, uid_product: "Q" }] };
+  const p = { status: "active" as const, items: [item, { ...item, uid_product: "Q" }] };
   assertEquals(supplyFromPurchase(p, "P"), [inb(EXPECTED, 10)]);
   // A partial receipt moves units out of inbound (and into held).
-  assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, quantity_received: 4 }] }, "P"), [inb(EXPECTED, 6)]);
+  assertEquals(supplyFromPurchase({ ...p, items: [{ ...item, quantity_received: 4 }] }, "P"), [inb(EXPECTED, 6)]);
   // A short close of the remainder drops the entry; so does a full receipt.
-  assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, quantity_received: 4, quantity_canceled: 6 }] }, "P"), []);
-  assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, quantity_received: 10 }] }, "P"), []);
+  assertEquals(supplyFromPurchase({ ...p, items: [{ ...item, quantity_received: 4, quantity_canceled: 6 }] }, "P"), []);
+  assertEquals(supplyFromPurchase({ ...p, items: [{ ...item, quantity_received: 10 }] }, "P"), []);
   // No expected date, nothing to promise from.
-  assertEquals(supplyFromPurchase({ ...p, lines: [{ ...line, expected_date: null }] }, "P"), []);
+  assertEquals(supplyFromPurchase({ ...p, items: [{ ...item, expected_date: null }] }, "P"), []);
   // Liveness.
   assertEquals(supplyFromPurchase({ ...p, status: "complete" }, "P"), []);
   assertEquals(supplyFromPurchase({ ...p, status: "canceled" }, "P"), []);
-  // An absent kind is a buy.
-  assertEquals(supplyFromPurchase({ status: "active", lines: [line] }, "P"), [inb(EXPECTED, 10)]);
   assertEquals(supplyFromPurchase(p, "R"), []);
 });
 
@@ -882,11 +913,11 @@ Deno.test("inbound: an open-ended entry counts in every window from its start on
 });
 
 Deno.test("inbound: a partial receipt leaves held + inbound unchanged", () => {
-  const line = { uid_product: "P", quantity: 10, quantity_canceled: 0, quantity_received: 0, expected_date: EXPECTED };
-  const p = { kind: "buy" as const, status: "active" as const, lines: [line] };
+  const item = { type: "buy" as const, uid_product: "P", quantity: 10, quantity_canceled: 0, quantity_received: 0, expected_date: EXPECTED };
+  const p = { status: "active" as const, items: [item] };
   const w = win("2026-10-22", "2026-10-24");
   const ordered = stock(10, [iv(B_START, B_END, 15)], supplyFromPurchase(p, "P"));
-  const received = stock(14, [iv(B_START, B_END, 15)], supplyFromPurchase({ ...p, lines: [{ ...line, quantity_received: 4 }] }, "P"));
+  const received = stock(14, [iv(B_START, B_END, 15)], supplyFromPurchase({ ...p, items: [{ ...item, quantity_received: 4 }] }, "P"));
   assertEquals(computeStockAvailability(ordered, w).quantity_available, 5);
   assertEquals(computeStockAvailability(received, w).quantity_available, 5);
 });

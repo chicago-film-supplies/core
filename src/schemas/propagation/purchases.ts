@@ -8,6 +8,10 @@
  * `quantity_returned`, moved by its `subrent_out` returns and by the
  * `return_to_supplier` settles an out-of-service record's PUT writes).
  *
+ * ⚠️ **The arm is per ITEM since api-cloudrun#1407** — there is no document
+ * `kind`, so "a buy" and "a subrent" below mean a buy ITEM and a subrent ITEM,
+ * and one purchase may carry both. A "line" is an item.
+ *
  * ## What a receipt reuses, and what it adds
  *
  * Receiving folds onto the ledger, the shelves and the unit roster EXACTLY as a
@@ -86,7 +90,7 @@ const receivePurchaseRules: CollectionRule[] = [
     fields: [
       {
         source: ["quantity"],
-        target: ["lines", "quantity_received"],
+        target: ["items", "quantity_received"],
         transform: "+ quantity on the line whose uid_product is the movement's",
       },
       {
@@ -96,13 +100,13 @@ const receivePurchaseRules: CollectionRule[] = [
       },
       {
         source: ["cost", "amount_cents"],
-        target: ["lines", "amount_cents"],
+        target: ["items", "amount_cents"],
         transform:
           "a buy only: the goods' half of purchaseLineReceiptTargetCents(line, received_before + quantity) − Σ the journal's cost for the product — read from the line, never written to it. A subrent_in has no cost object.",
       },
       {
         source: ["cost", "amount_cents"],
-        target: ["lines", "landed_costs", "amount_cents"],
+        target: ["items", "landed_costs", "amount_cents"],
         transform:
           "a buy only: each landed cost adds cumulativeShareCents(entry.amount_cents, entry.quantity, 0, clamp(received_after − entry.received_at_entry, 0, entry.quantity)) to the same cumulative target — read, never written (api-cloudrun#1227)",
       },
@@ -113,7 +117,7 @@ const receivePurchaseRules: CollectionRule[] = [
 /** The return bucket, bounded by what came in — refused by the line refine. */
 const RETURN_BOUNDED: EnforcementRef = {
   kind: "zod",
-  ref: "core/src/schemas/purchase.ts::line.quantity_returned > line.quantity_received",
+  ref: "core/src/schemas/purchase.ts::item.quantity_returned > item.quantity_received",
   clause: "`quantity_returned ≤ quantity_received` — a unit can only go back once it has come in",
   gates: true,
 };
@@ -140,13 +144,13 @@ const returnPurchaseRules: CollectionRule[] = [
     target: "purchases",
     mode: "co-write",
     invariant:
-      "A subrent's units go back to the supplier as ONE `subrent_out` movement per product naming the purchase in sources[] (exactly one), written in ONE commit with the purchase line's `quantity_returned` bump, so the bucket is the sum of the returns naming it by construction. Returning is refused past `quantity_received − quantity_returned`, and on a buy. A return carries no cost — the units were never owned — and posts nothing to Xero.",
+      "A subrent's units go back to the supplier as ONE `subrent_out` movement per product naming the purchase in sources[] (exactly one), written in ONE commit with the purchase line's `quantity_returned` bump, so the bucket is the sum of the returns naming it by construction. Returning is refused past `quantity_received − quantity_returned`, and on any item that is not a subrent. A return carries no cost — the units were never owned — and posts nothing to Xero.",
     enforced_by: [RETURN_BOUNDED, RETURN_MOVES_THE_BUCKET],
     transaction: "return-purchase",
     fields: [
       {
         source: ["quantity"],
-        target: ["lines", "quantity_returned"],
+        target: ["items", "quantity_returned"],
         transform: "+ quantity on the line whose uid_product is the movement's",
       },
       {
@@ -171,7 +175,7 @@ const reversePurchaseReturnRules: CollectionRule[] = [
     fields: [
       {
         source: ["quantity"],
-        target: ["lines", "quantity_returned"],
+        target: ["items", "quantity_returned"],
         transform: "− the reversed return's quantity",
       },
       {
@@ -211,13 +215,13 @@ const settleToPurchaseRules: CollectionRule[] = [
     target: "purchases",
     mode: "co-write",
     invariant:
-      "A rise in a record's `returned_to_supplier` settles that many RENTED units to the subrent purchase the save names (`uid_purchase`, input-only): one `return_to_supplier` naming the record, the purchase (exactly one) and its supplier, written in ONE commit with the purchase line's `quantity_returned` bump and its return card — so `quantity_returned` stays the sum of the returns and settles naming it. Refused on a buy, on a purchase with no line for the record's product, past `quantity_received − quantity_returned`, and past the ledger's `quantity_rented_in`. Lowering the bucket reverses the newest settles, each naming its original and ITS purchase, and lowers that purchase's `quantity_returned` in the same commit. A settle carries no cost and posts nothing to Xero; what the supplier charges for the unit is a line on its bill.",
+      "A rise in a record's `returned_to_supplier` settles that many RENTED units to the subrent purchase the save names (`uid_purchase`, input-only): one `return_to_supplier` naming the record, the purchase (exactly one) and its supplier, written in ONE commit with the purchase line's `quantity_returned` bump and its return card — so `quantity_returned` stays the sum of the returns and settles naming it. Refused on an item that is not a subrent, on a purchase with no subrent item for the record's product, past `quantity_received − quantity_returned`, and past the ledger's `quantity_rented_in`. Lowering the bucket reverses the newest settles, each naming its original and ITS purchase, and lowers that purchase's `quantity_returned` in the same commit. A settle carries no cost and posts nothing to Xero; what the supplier charges for the unit is a line on its bill.",
     enforced_by: [RETURN_BOUNDED, SETTLE_MOVES_THE_PURCHASE],
     transaction: "update-out-of-service-record",
     fields: [
       {
         source: ["breakdown", "returned_to_supplier"],
-        target: ["lines", "quantity_returned"],
+        target: ["items", "quantity_returned"],
         transform: "± the bucket's change, on the line whose uid_product is the record's",
       },
       {
@@ -252,13 +256,13 @@ const purchaseCardRules: CollectionRule[] = [
     target: "cards",
     mode: "co-write",
     invariant:
-      "Every SUBRENT purchase has exactly one \"return to supplier\" card, id `derivedDocId(\"purchase-return-card:\" + uid)`, written in the SAME commit as every write of the purchase that could move it (create, update, close, receive, return and their reversals) and never by a client. Its status, action and date are derived from the purchase's buckets by `computeCardStatusFromPurchase` / `computeCardActionFromPurchase` / `purchaseCardDue` (@cfs/core/utils/cards); its kind is the `purchases` source PAYLOAD (`isPurchaseCard`), not the bare source, so a hand-authored to-do that links a PO is never taken over. A buy has no card.",
+      "Every purchase holding a SUBRENT item has exactly one \"return to supplier\" card, id `derivedDocId(\"purchase-return-card:\" + uid)`, written in the SAME commit as every write of the purchase that could move it (create, update, close, receive, return and their reversals) and never by a client. Its status, action and date are derived from its subrent items' buckets by `computeCardStatusFromPurchase` / `computeCardActionFromPurchase` / `purchaseCardDue` (@cfs/core/utils/cards); its kind is the `purchases` source PAYLOAD (`isPurchaseCard`), not the bare source, so a hand-authored to-do that links a PO is never taken over. A purchase with no subrent item has no card.",
     enforced_by: [PURCHASE_CARD_TABLE, PURCHASE_CARD_SHAPE],
     fields: [
       { source: ["status"], target: ["status"], transform: "computeCardStatusFromPurchase(purchase, card.status)" },
-      { source: ["lines", "quantity_received"], target: ["status"], transform: "see status — received > returned on any line is `active`" },
-      { source: ["lines", "quantity_returned"], target: ["action"], transform: "computeCardActionFromPurchase — return_to_supplier while any unit is in custody" },
-      { source: ["lines", "dates", "end"], target: ["dates", "start"], transform: "purchaseCardDue — the earliest due-back among open lines" },
+      { source: ["items", "quantity_received"], target: ["status"], transform: "see status — received > returned on any line is `active`" },
+      { source: ["items", "quantity_returned"], target: ["action"], transform: "computeCardActionFromPurchase — return_to_supplier while any unit is in custody" },
+      { source: ["items", "dates", "end"], target: ["dates", "start"], transform: "purchaseCardDue — the earliest due-back among open lines" },
       { source: ["number"], target: ["purchases", "number"] },
       { source: ["supplier"], target: ["purchases", "supplier"] },
       { source: ["uid"], target: ["sources"], transform: "[{ collection: \"purchases\", uid }]" },
@@ -279,7 +283,7 @@ const reversePurchaseReceiptRules: CollectionRule[] = [
     fields: [
       {
         source: ["quantity"],
-        target: ["lines", "quantity_received"],
+        target: ["items", "quantity_received"],
         transform: "− the reversed receipt's quantity",
       },
       {
@@ -323,8 +327,8 @@ const createPurchaseBillRules: CollectionRule[] = [
     transaction: "create-purchase-bill",
     fields: [
       {
-        source: ["lines", "quantity"],
-        target: ["lines", "quantity_billed"],
+        source: ["items", "quantity"],
+        target: ["items", "quantity_billed"],
         transform: "+ quantity on the purchase line whose uid_product is the bill line's",
       },
       {
@@ -333,8 +337,8 @@ const createPurchaseBillRules: CollectionRule[] = [
         transform: "the bill names its purchase",
       },
       {
-        source: ["lines", "amount_cents"],
-        target: ["lines", "amount_cents"],
+        source: ["items", "amount_cents"],
+        target: ["items", "amount_cents"],
         transform:
           "cumulativeShareCents(line.amount_cents, line.quantity, billed_before, billed_before + quantity) — read from the purchase line, never written to it",
       },
@@ -506,8 +510,8 @@ const voidPurchaseBillFromXeroRules: CollectionRule[] = [
     transaction: "void-purchase-bill-from-xero",
     fields: [
       {
-        source: ["lines", "quantity"],
-        target: ["lines", "quantity_billed"],
+        source: ["items", "quantity"],
+        target: ["items", "quantity_billed"],
         transform: "− quantity on the purchase line whose uid_product is the bill line's",
       },
     ],
@@ -566,8 +570,8 @@ const createPurchaseCreditRules: CollectionRule[] = [
     transaction: "create-purchase-credit",
     fields: [
       {
-        source: ["lines", "quantity"],
-        target: ["lines", "quantity_billed"],
+        source: ["items", "quantity"],
+        target: ["items", "quantity_billed"],
         transform: "− quantity on the purchase line whose uid_product is the credit line's",
       },
       {
@@ -601,8 +605,8 @@ const closePurchaseRules: CollectionRule[] = [
     transaction: "close-purchase",
     fields: [
       {
-        source: ["lines", "quantity_billed"],
-        target: ["lines", "quantity"],
+        source: ["items", "quantity_billed"],
+        target: ["items", "quantity"],
         transform: "quantity_billed − quantity_received, for each line the close leaves over-billed",
       },
       {
@@ -839,8 +843,8 @@ const creditToPurchaseRule = (
   transaction,
   fields: [
     {
-      source: ["lines", "quantity"],
-      target: ["lines", "quantity_billed"],
+      source: ["items", "quantity"],
+      target: ["items", "quantity_billed"],
       transform: "+ quantity on the purchase line whose uid_product is the credit line's",
     },
   ],
@@ -1012,7 +1016,7 @@ const voidPurchaseCreditFromXeroTransaction: TransactionDefinition = {
 const createPurchaseTransaction: TransactionDefinition = {
   id: "create-purchase",
   description:
-    "Creates a purchase order: a supplier, a store, and one line per product with its quantity and amount, and cowrites its default thread. A purchase moves no stock and posts nothing to Xero; receipts and bills are their own writes. The document id is derived from the client's uuid_session, so a retried create lands on the same purchase. Every line is supply from this moment — a subrent over its hire window, a dated buy line as inbound from its expected date — so the create bumps `stock-locks/{P}` and rebuilds `stock/{P}` via STOCK_STEPS. On a SUBRENT only it also writes the purchase's return card, with its own default thread, as a card's first write does.",
+    "Creates a purchase order: a supplier, a store, and items of any arm (buy, subrent, usage, direct — one purchase may mix them, and one product may sit on two items), and cowrites its default thread. A purchase moves no stock and posts nothing to Xero; receipts and bills are their own writes. The document id is derived from the client's uuid_session, so a retried create lands on the same purchase. Every subrent and dated buy item is supply from this moment — a subrent over its hire window, a buy as inbound from its expected date — so the create bumps `stock-locks/{P}` and rebuilds `stock/{P}` via STOCK_STEPS. When it holds a SUBRENT item it also writes the purchase's return card, with its own default thread, as a card's first write does.",
   steps: [
     "cowrite-thread:purchases-to-thread",
     "cowrite-thread:thread-to-purchases",
@@ -1026,14 +1030,14 @@ const createPurchaseTransaction: TransactionDefinition = {
 const updatePurchaseTransaction: TransactionDefinition = {
   id: "update-purchase",
   description:
-    "Amends a purchase's date, reference, notes or lines. On a BUY a line's quantity may not fall below what is received or billed, and its amount may not change once it has any receipt or bill — a price that moved after goods arrived is a short close plus a new purchase, because every receipt already carries its share of the old price; the update fires STOCK_STEPS, since a line's expected_date and unreceived quantity are inbound supply. On a SUBRENT a receipt carries no cost, so the amount and the hire end stay editable after receipt (a paid extension), and the update fires STOCK_STEPS and the return card, since the hire window is supply.",
+    "Amends a purchase's date, reference, notes or items, matched by item uid. On a BUY item the quantity may not fall below what is received or billed, and its amount may not change once it has any receipt or bill — a price that moved after goods arrived is a short close plus a new purchase, because every receipt already carries its share of the old price; the update fires STOCK_STEPS, since a buy item's expected_date and unreceived quantity are inbound supply. On a SUBRENT item a receipt carries no cost, so the amount and the hire end stay editable after receipt (a paid extension), and the update fires STOCK_STEPS and the return card, since the hire window is supply.",
   steps: [...STOCK_STEPS, "purchase-card:purchases-to-card"],
 };
 
 const closePurchaseTransaction: TransactionDefinition = {
   id: "close-purchase",
   description:
-    "Short-closes (or, with nothing received, cancels) some or all of a purchase's lines: `quantity_canceled = quantity − quantity_received`. When that leaves a line billed beyond what it received, the same commit raises a pushed supplier credit (`short_close`) for the excess and lowers `quantity_billed` to `quantity_received`; after the commit the credit is pushed to Xero and allocated to the purchase's bills, newest first, one `allocate-purchase-credit` per bill. The raised credit gets its default thread in the same commit, as an operator-raised one does. Fires on: a close of an over-billed line. Every close lowers the closed line's supply, so it fires STOCK_STEPS: on a BUY the short-closed remainder stops being inbound. A SUBRENT's close is refused while units are unreturned; when it is allowed it also fires the return card, on a subrent only.",
+    "Short-closes (or, with nothing received, cancels) some or all of a purchase's buy and subrent items: `quantity_canceled = quantity − quantity_received`. When that leaves a line billed beyond what it received, the same commit raises a pushed supplier credit (`short_close`) for the excess and lowers `quantity_billed` to `quantity_received`; after the commit the credit is pushed to Xero and allocated to the purchase's bills, newest first, one `allocate-purchase-credit` per bill. The raised credit gets its default thread in the same commit, as an operator-raised one does. Fires on: a close of an over-billed line. Every close lowers the closed line's supply, so it fires STOCK_STEPS: on a BUY item the short-closed remainder stops being inbound. A SUBRENT item's close is refused while units are unreturned; when it is allowed it also fires the return card, for a subrent item only.",
   steps: [
     "close-purchase:excess-to-credit",
     "cowrite-thread:purchase-credits-to-thread",
@@ -1046,7 +1050,7 @@ const closePurchaseTransaction: TransactionDefinition = {
 const receivePurchaseTransaction: TransactionDefinition = {
   id: "receive-purchase",
   description:
-    "Receives goods against a purchase: one movement per product naming the purchase in sources[] — a `purchase` costing its cumulative share of the line on a buy, a cost-forbidden `subrent_in` landing at the arrivals inbox on a subrent (which raises `quantity_rented_in` with `quantity_held`) — folded onto the ledger and the shelves through the one ledger writer, with the purchase's `quantity_received` moved in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: every receipt, since a receipt always moves quantity_held. The unit roster steps fire whenever the receipt names units — a buy or a subrent of a seeded serialized product, where a `subrent_in`'s opened history entry carries the purchase's `supplier`; the return card on a SUBRENT only.",
+    "Receives goods against a purchase: one movement per item naming the purchase in sources[] — a `purchase` costing its cumulative share of the line on a buy, a cost-forbidden `subrent_in` landing at the arrivals inbox on a subrent (which raises `quantity_rented_in` with `quantity_held`) — folded onto the ledger and the shelves through the one ledger writer, with the purchase's `quantity_received` moved in the same commit. Posts nothing to Xero. Rebuilds `stock/{P}` via {@link STOCK_STEPS} — fires on: every receipt, since a receipt always moves quantity_held. The unit roster steps fire whenever the receipt names units — a buy or a subrent of a seeded serialized product, where a `subrent_in`'s opened history entry carries the purchase's `supplier`; the return card on a SUBRENT item only.",
   steps: [
     "receive-purchase:receipt-to-purchase",
     "create-transaction:transaction-to-ledger",
@@ -1076,7 +1080,7 @@ const reversePurchaseReceiptTransaction: TransactionDefinition = {
 const returnPurchaseTransaction: TransactionDefinition = {
   id: "return-purchase",
   description:
-    "Returns a subrent's units to the supplier (`POST /purchases/{uid}/returns`): one cost-forbidden `subrent_out` per product, from the shelves, naming the purchase in sources[] and folded through the one ledger writer — which lowers `quantity_held` and `quantity_rented_in` together and leaves owned basis untouched — with the purchase's `quantity_returned` moved in the same commit. Refused on a buy. Posts nothing to Xero. Rebuilds `stock/{P}` via STOCK_STEPS and moves the return card — fires on: every return. The unit roster steps fire whenever the return names units, each of which must be vendor-owned by this purchase's supplier.",
+    "Returns a subrent's units to the supplier (`POST /purchases/{uid}/returns`): one cost-forbidden `subrent_out` per subrent item, from the shelves, naming the purchase in sources[] and folded through the one ledger writer — which lowers `quantity_held` and `quantity_rented_in` together and leaves owned basis untouched — with the purchase's `quantity_returned` moved in the same commit. Refused on any item that is not a subrent. Posts nothing to Xero. Rebuilds `stock/{P}` via STOCK_STEPS and moves the return card — fires on: every return. The unit roster steps fire whenever the return names units, each of which must be vendor-owned by this purchase's supplier.",
   steps: [
     "return-purchase:return-to-purchase",
     "create-transaction:transaction-to-ledger",

@@ -135,6 +135,10 @@ function diff(found: Set<string>): { added: string[]; removed: string[] } {
  * Open rulings the conversion campaign must settle rather than sweep:
  * - the order/invoice divider arms (`items[](type=…)`) are strict ON PURPOSE —
  *   a divider carrying line fields is refused, and API tests pin the 400;
+ * - the purchase bill and credit push inputs' `direct_items[]` (renamed from
+ *   `direct_lines[]` by api-cloudrun#1407) are strict ON PURPOSE, pinned in
+ *   `tests/purchases.test.ts`: an api predating an attribution field must refuse
+ *   it rather than store a direct item with it stripped (api-cloudrun#1360);
  * - the out-of-service destination arm and the store-transfer `oos` block are
  *   each pinned by a single test, so whether strictness there is a ruling or an
  *   accident is unrecorded.
@@ -189,8 +193,8 @@ const FROZEN: ReadonlySet<string> = new Set([
   "CreateOutOfServiceInput destination(kind=address).address.user_coordinates",
   "CreateOutOfServiceInput destination(kind=uid)",
   "CreateOutOfServiceInput sources[]",
-  "CreatePurchaseBillInput (mode=push).direct_lines[]",
-  "CreatePurchaseCreditInput (mode=push).direct_lines[]",
+  "CreatePurchaseBillInput (mode=push).direct_items[]",
+  "CreatePurchaseCreditInput (mode=push).direct_items[]",
   "CreateRecurrenceInput prototype.attachments[]",
   "CreateRecurrenceInput prototype.destination",
   "CreateRecurrenceInput prototype.destination.address",

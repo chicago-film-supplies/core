@@ -13,7 +13,7 @@
  *    {@link windowMs}. The rules that are easy to get subtly wrong.
  * 2. **Reducers** — {@link unavailableFromBooking}, {@link unavailableFromOOS}:
  *    one source document → the pre-reduced anonymous interval stored in
- *    `stock/{P}.unavailable[]`; and {@link supplyFromPurchase}, a subrent →
+ *    `stock/{P}.unavailable[]`; and {@link supplyFromPurchase}, a purchase →
  *    the SUPPLY intervals stored in `stock/{P}.supply[]`.
  * 3. **The folds** — {@link computeStockAvailability}: that array + a window →
  *    the numbers. {@link peakStockConsumption}: that array alone → the instant
@@ -92,7 +92,6 @@ import type {
   OOSBreakdown,
   OOSBreakdownTerminalKeyType,
   OOSStatusType,
-  PurchaseKindType,
   PurchaseStatusType,
   Stock,
   StockSupplyEntry,
@@ -433,70 +432,98 @@ export function unavailableFromOOS(o: StockOOSSource): StockUnavailableEntry | n
 }
 
 /**
- * Just enough of a purchase to reduce it to the supply it adds.
+ * Just enough of a purchase ITEM to reduce it to the supply it adds, per arm.
  *
- * `quantity_received` and `expected_date` are REQUIRED, as they are on a stored
- * line, because a buy's inbound reads them: a caller that builds its own rows
- * and leaves them out must fail to compile rather than count every received
- * unit as still inbound.
+ * `quantity_received` and `expected_date` are REQUIRED on the buy arm, as they
+ * are on a stored item, because a buy's inbound reads them: a caller that builds
+ * its own rows and leaves them out must fail to compile rather than count every
+ * received unit as still inbound. A stored `PurchaseItem` is assignable as is.
  */
-export interface StockPurchaseSource {
-  kind?: PurchaseKindType;
-  status: PurchaseStatusType;
-  lines: readonly {
+export type StockPurchaseItemSource =
+  | {
+    type: "buy";
     uid_product: string;
     quantity: number;
     quantity_canceled: number;
     quantity_received: number;
-    quantity_returned?: number;
     expected_date: string | null;
-    dates?: { start: string; end: string };
-  }[];
+  }
+  | {
+    type: "subrent";
+    uid_product: string;
+    quantity: number;
+    quantity_canceled: number;
+    quantity_returned: number;
+    dates: { start: string; end: string | null };
+  }
+  | { type: "usage"; uid_product: string }
+  | { type: "direct" };
+
+/** Just enough of a purchase to reduce it to the supply it adds. */
+export interface StockPurchaseSource {
+  status: PurchaseStatusType;
+  items: readonly StockPurchaseItemSource[];
 }
 
 /**
  * Reduce a purchase to the supply intervals it adds for ONE product — one
- * entry per live line naming it (a purchase holds one line per product, so at
- * most one), and `[]` otherwise. The kind decides the interval:
+ * entry per live item naming it, and `[]` otherwise. One product may sit on two
+ * items (a buy plus a re-order, two hire windows), so there may be several.
+ * The item's ARM decides the interval:
  *
- * | purchase | entry | quantity |
+ * | item | entry | quantity |
  * |---|---|---|
- * | `subrent` | `[dates.start, dates.end]`, kind `subrent` | `quantity − canceled − returned` |
+ * | `subrent` | `[dates.start, dates.end]` (`end: null` is +∞), kind `subrent` | `quantity − canceled − returned` |
  * | `buy` | `[expected_date, +∞)`, kind `inbound` | `quantity − canceled − received` |
+ * | `usage`, `direct` | none — neither brings a unit into custody | — |
  *
  * Liveness is the reducers' one filter, as for bookings and out-of-service:
- * only an `active` purchase supplies anything, and a line supplying nothing is
+ * only an `active` purchase supplies anything, and an item supplying nothing is
  * dropped rather than stored as a zero.
  *
  * On a SUBRENT, RECEIPT does not enter — supply counts from the moment the
- * purchase exists (owner, 2026-10-24); receipt is custody only. ⚠️ A unit that
- * has not gone back by `dates.end` stops counting as supply at `end` while it
- * is still in CFS's custody (`quantity_rented_in`). That is the conservative
- * direction — late but valid; the return card shows it overdue.
+ * purchase exists (owner, 2026-10-24); receipt is custody only. Its billing
+ * basis does not enter either: an activation-billed unit is supplied exactly
+ * as a fixed one is. ⚠️ A unit that has not gone back by `dates.end` stops
+ * counting as supply at `end` while it is still in CFS's custody
+ * (`quantity_rented_in`). That is the conservative direction — late but valid;
+ * the return card shows it overdue.
  *
  * On a BUY, receipt is the whole point: a received unit leaves the inbound
  * entry and enters `quantity_held` as owned stock, so a partial receipt leaves
  * `held + inbound` unchanged. ⚠️ An OVERDUE delivery stays `[expected_date, +∞)`
  * until it is received or short-closed (owner, 2026-10-27) — dropping it would
- * need a clock-driven rebuild and hide stock CFS knows is coming. A line with
+ * need a clock-driven rebuild and hide stock CFS knows is coming. An item with
  * no `expected_date` contributes nothing: there is no date to promise from.
+ *
+ * An exhaustive switch with a `never` default (D7): a fifth item type is a
+ * compile error here, never a silent fall into the buy branch — which is how a
+ * purchase written before `kind` existed used to be read.
  */
 export function supplyFromPurchase(p: StockPurchaseSource, uidProduct: string): StockSupplyEntry[] {
   if (p.status !== "active") return [];
   const entries: StockSupplyEntry[] = [];
-  for (const line of p.lines) {
-    if (line.uid_product !== uidProduct) continue;
-    if (p.kind === "subrent") {
-      if (!line.dates) continue;
-      const quantity = line.quantity - line.quantity_canceled - (line.quantity_returned ?? 0);
-      if (quantity <= 0) continue;
-      entries.push({ start: line.dates.start, end: line.dates.end, quantity, kind: "subrent" });
-    } else {
-      // A buy — or a purchase written before `kind` existed, which was one.
-      if (line.expected_date === null) continue;
-      const quantity = remainingToReceive(line);
-      if (quantity <= 0) continue;
-      entries.push({ start: line.expected_date, end: null, quantity, kind: "inbound" });
+  for (const item of p.items) {
+    switch (item.type) {
+      case "subrent": {
+        if (item.uid_product !== uidProduct) break;
+        const quantity = item.quantity - item.quantity_canceled - item.quantity_returned;
+        if (quantity > 0) entries.push({ start: item.dates.start, end: item.dates.end, quantity, kind: "subrent" });
+        break;
+      }
+      case "buy": {
+        if (item.uid_product !== uidProduct || item.expected_date === null) break;
+        const quantity = remainingToReceive(item);
+        if (quantity > 0) entries.push({ start: item.expected_date, end: null, quantity, kind: "inbound" });
+        break;
+      }
+      case "usage":
+      case "direct":
+        break;
+      default: {
+        const unreachable: never = item;
+        throw new Error(`supplyFromPurchase: unknown purchase item ${JSON.stringify(unreachable)}`);
+      }
     }
   }
   return entries;

@@ -14,7 +14,7 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * out of `query_by` and every search returns zero rows with no error. The same
  * line in `typesense/suppliers.ts` carries the full argument.
  *
- * `lines.name` is indexed so "which PO has product X" is one query. `notes` is
+ * `items.name` is indexed so "which PO has product X" is one query. `notes` is
  * deliberately NOT declared — free text no list column needs; add it when
  * someone wants to search on it.
  *
@@ -22,27 +22,30 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * the translate path omits a null rather than sending one, and a non-optional
  * declaration over a nullable leaf is a permanent, invisible sync 400.
  *
- * v2 (subrent purchase orders): `kind` (a facet, so the list can split buys
- * from subrents) and `lines.quantity_returned`. Both `optional: true` because
- * both storage leaves are optional — `kind` until the backfill stamps the
- * pre-subrent purchases and the field becomes required, `quantity_returned`
- * for good, since a buy line never carries it.
+ * v2 (subrent purchase orders) added a `kind` facet and
+ * `lines.quantity_returned`.
+ *
+ * v3 (api-cloudrun#1407, the invoice shape): `lines` → `items` and the document
+ * `kind` is retired. The buy/subrent split is now the `items.type` facet — the
+ * invoice's `items.type`, nested rather than a top-level mirror, so there is no
+ * derived Typesense field to declare. Every `items.*` field is `optional: true`
+ * because the arms disagree: a direct item names no product, and only a subrent
+ * item carries `quantity_returned`.
  */
 export const purchases: TypesenseCollectionConfig = {
   alias: "purchases",
-  version: 2,
+  version: 3,
   firestoreCollection: "purchases",
-  collectionName: "purchases_v2",
+  collectionName: "purchases_v3",
   enabled: true,
   schema: {
-    name: "purchases_v2",
+    name: "purchases_v3",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
       { name: "number", type: "int64", sort: true, index: true, facet: false },
       { name: "number_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "status", type: "string", facet: true },
-      { name: "kind", type: "string", facet: true, optional: true },
       { name: "supplier", type: "object" },
       { name: "supplier.uid", type: "string", facet: false, optional: true },
       { name: "supplier.name", type: "string", sort: true, stem: true, facet: false },
@@ -50,10 +53,11 @@ export const purchases: TypesenseCollectionConfig = {
       { name: "store.uid", type: "string", facet: false, optional: true },
       { name: "store.name", type: "string", facet: true },
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
-      { name: "lines", type: "object[]", optional: true },
-      { name: "lines.uid_product", type: "string[]", facet: false, optional: true },
-      { name: "lines.name", type: "string[]", stem: true, optional: true },
-      { name: "lines.quantity_returned", type: "int32[]", facet: false, optional: true },
+      { name: "items", type: "object[]", optional: true },
+      { name: "items.type", type: "string[]", facet: true, optional: true },
+      { name: "items.uid_product", type: "string[]", facet: false, optional: true },
+      { name: "items.name", type: "string[]", stem: true, optional: true },
+      { name: "items.quantity_returned", type: "int32[]", facet: false, optional: true },
       { name: "total_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "created_by", type: "object", optional: true },

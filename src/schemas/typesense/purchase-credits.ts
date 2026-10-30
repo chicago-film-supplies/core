@@ -6,10 +6,9 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  * purchase.
  *
  * ⚠️ **Not the purchase skeleton**, for the same reasons as
- * `typesense/purchase-bills.ts`: no `store`, and `lines` are
- * `PurchaseDocumentLine` with no `name`. Unlike a bill, a credit's `lines` may
- * be EMPTY (a direct-lines-only credit), which is one more reason every
- * `lines*` field is optional.
+ * `typesense/purchase-bills.ts`: no `store`. v2 moved `lines` + `direct_lines`
+ * to one `items` array, as on the bill. A credit's `items` may be EMPTY (a $0
+ * credit), which is one more reason every `items*` field is optional.
  *
  * `remaining_credit_cents` is the "what credit is left" column; `reason` is
  * faceted for the same reporting reason it is on `credit-notes`.
@@ -20,12 +19,12 @@ import type { TypesenseCollectionConfig } from "./types.ts";
  */
 export const purchaseCredits: TypesenseCollectionConfig = {
   alias: "purchase-credits",
-  version: 1,
+  version: 2,
   firestoreCollection: "purchase-credits",
-  collectionName: "purchase-credits_v1",
+  collectionName: "purchase-credits_v2",
   enabled: true,
   schema: {
-    name: "purchase-credits_v1",
+    name: "purchase-credits_v2",
     enable_nested_fields: true,
     fields: [
       { name: "uid", type: "string", sort: true, facet: false },
@@ -40,8 +39,10 @@ export const purchaseCredits: TypesenseCollectionConfig = {
       { name: "status", type: "string", facet: true },
       { name: "xero_id", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "reference", type: "string", stem: true, sort: true, optional: true },
-      { name: "lines", type: "object[]", optional: true },
-      { name: "lines.uid_product", type: "string[]", facet: false, optional: true },
+      { name: "items", type: "object[]", optional: true },
+      { name: "items.type", type: "string[]", facet: true, optional: true },
+      { name: "items.uid_product", type: "string[]", facet: false, optional: true },
+      { name: "items.name", type: "string[]", stem: true, optional: true },
       { name: "total_cents", type: "int64", sort: true, optional: true, money: true },
       { name: "total_cents_str", type: "string", index: true, sort: false, facet: false, optional: true },
       { name: "remaining_credit_cents", type: "int64", sort: true, optional: true, money: true },

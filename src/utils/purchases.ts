@@ -7,14 +7,22 @@
  * @module
  */
 import {
+  type BuyItem,
+  type BuyItemInputType,
   derivePurchaseStatus,
+  deriveQueryByItemTypes,
   deriveQueryByOrders,
   deriveQueryByProducts,
   type ProductTypeType,
+  purchaseItemCanceled,
+  purchaseItemCommittedCents,
+  purchaseItemProduct,
+  purchaseItemResolved,
+  type PurchaseItemInputType,
   type PurchaseLandedCost,
-  type PurchaseLine,
-  type PurchaseLineInputType,
   type StockMethodType,
+  type SubrentItem,
+  type SubrentItemInputType,
 } from "../schemas/mod.ts";
 import { apportionCents, roundDivHalfUp } from "./money.ts";
 import { componentQuantities, type ComponentRowForWalk } from "./order-lines.ts";
@@ -25,8 +33,19 @@ import { derivePurchaseCreditStatus, purchaseCreditRemainingFromJournal, recompu
 // `utils/invoices.ts`, which owns the one fold; re-exported here so a purchase
 // writer finds them in its own namespace.
 export { derivePurchaseCreditStatus, derivePurchaseStatus, purchaseCreditRemainingFromJournal, recomputePurchaseBillTotals };
-// The two mirror authors live beside the refine that checks them.
-export { deriveQueryByOrders, deriveQueryByProducts };
+// The mirror authors and the per-arm rules live beside the refine that checks them.
+export {
+  deriveQueryByItemTypes,
+  deriveQueryByOrders,
+  deriveQueryByProducts,
+  purchaseItemCanceled,
+  purchaseItemCommittedCents,
+  purchaseItemProduct,
+  purchaseItemResolved,
+};
+
+/** The co-written receipt buckets — a buy or subrent item. */
+type ReceivableItem = Pick<BuyItem, "quantity" | "quantity_received" | "quantity_canceled">;
 
 /**
  * The cents a line's units `(before, after]` cost — the k-th receipt or the
@@ -123,14 +142,14 @@ export function landedPricedCents(
  * Only a cumulative target survives the subtraction, and it keeps a reversal
  * exact as well, since the target at a count does not depend on the path.
  *
- * Absent `landed_costs` reads as `[]`, which reduces this to the goods' share,
- * the pre-#1227 formula.
+ * An empty `landed_costs` reduces this to the goods' share, the pre-#1227
+ * formula.
  */
 export function purchaseLineReceiptTargetCents(
-  line: Pick<PurchaseLine, "amount_cents" | "quantity" | "landed_costs">,
+  line: Pick<BuyItem, "amount_cents" | "quantity" | "landed_costs">,
   quantityReceived: number,
 ): number {
-  return (line.landed_costs ?? []).reduce(
+  return line.landed_costs.reduce(
     (sum, entry) => sum + landedPricedCents(entry, quantityReceived),
     cumulativeShareCents(line.amount_cents, line.quantity, 0, quantityReceived),
   );
@@ -139,7 +158,7 @@ export function purchaseLineReceiptTargetCents(
 /** Is a landed cost frozen? A receipt has priced part of it once `received > received_at_entry`. */
 export function isLandedCostFrozen(
   entry: Pick<PurchaseLandedCost, "received_at_entry">,
-  line: Pick<PurchaseLine, "quantity_received">,
+  line: Pick<BuyItem, "quantity_received">,
 ): boolean {
   return line.quantity_received > entry.received_at_entry;
 }
@@ -154,10 +173,10 @@ export function isLandedCostFrozen(
  * post-receipt re-base, which is designed with depreciation (api-cloudrun#1388).
  */
 export function strandedLandedCents(
-  line: Pick<PurchaseLine, "quantity" | "quantity_received" | "quantity_canceled" | "landed_costs">,
+  line: Pick<BuyItem, "quantity" | "quantity_received" | "quantity_canceled" | "landed_costs">,
 ): number {
   if (remainingToReceive(line) > 0) return 0;
-  return (line.landed_costs ?? []).reduce(
+  return line.landed_costs.reduce(
     (sum, entry) => sum + entry.amount_cents - landedPricedCents(entry, line.quantity_received),
     0,
   );
@@ -170,7 +189,7 @@ export function strandedLandedCents(
  * entry only ever prices units received after it.
  */
 export function landedCostWeightCents(
-  line: Pick<PurchaseLine, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">,
+  line: Pick<BuyItem, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">,
 ): number {
   return cumulativeShareCents(line.amount_cents, line.quantity, line.quantity_received, line.quantity - line.quantity_canceled);
 }
@@ -189,33 +208,41 @@ export function landedCostWeightCents(
  */
 export function allocateLandedCostCents(
   amountCents: number,
-  lines: readonly Pick<PurchaseLine, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">[],
+  lines: readonly Pick<BuyItem, "amount_cents" | "quantity" | "quantity_received" | "quantity_canceled">[],
 ): number[] {
   return apportionCents(BigInt(amountCents), lines.map((l) => BigInt(landedCostWeightCents(l)))).map(Number);
 }
 
-/** Units of a line still to be received: `quantity − canceled − received`. */
-export function remainingToReceive(line: Pick<PurchaseLine, "quantity" | "quantity_received" | "quantity_canceled">): number {
-  return line.quantity - line.quantity_canceled - line.quantity_received;
-}
-
-/** Units of a line still to be billed: `quantity − canceled − billed`. */
-export function remainingToBill(line: Pick<PurchaseLine, "quantity" | "quantity_billed" | "quantity_canceled">): number {
-  return line.quantity - line.quantity_canceled - line.quantity_billed;
+/** Units of a buy or subrent item still to be received: `quantity − canceled − received`. */
+export function remainingToReceive(item: ReceivableItem): number {
+  return item.quantity - item.quantity_canceled - item.quantity_received;
 }
 
 /**
- * Units of a SUBRENT line still to go back to the supplier: `received − returned`.
- * Bounded by what came in, not by what was ordered — an unreceived unit owes no
- * return. `0` on a buy line, which carries no `quantity_returned`.
+ * Units of a buy or FIXED-basis subrent item still to be billed:
+ * `quantity − canceled − billed`.
+ *
+ * ⚠️ **Not for an activation-billed subrent or a usage item**, whose billable
+ * quantity is PERIODS derived from activation spans — `remainingUsageToBill`
+ * (serialized-subrent § 7b), a separate util by design, since six callers share
+ * this one. A direct item bills once: `1 − quantity_billed`.
  */
-export function remainingToReturn(line: Pick<PurchaseLine, "quantity_received" | "quantity_returned">): number {
-  return line.quantity_returned === undefined ? 0 : line.quantity_received - line.quantity_returned;
+export function remainingToBill(item: Pick<BuyItem, "quantity" | "quantity_billed" | "quantity_canceled">): number {
+  return item.quantity - item.quantity_canceled - item.quantity_billed;
+}
+
+/**
+ * Units of a SUBRENT item still to go back to the supplier: `received − returned`.
+ * Bounded by what came in, not by what was ordered — an unreceived unit owes no
+ * return.
+ */
+export function remainingToReturn(item: Pick<SubrentItem, "quantity_received" | "quantity_returned">): number {
+  return item.quantity_received - item.quantity_returned;
 }
 
 // ── Pack expansion (api-cloudrun#1081) ───────────────────────────
 
-/** A catalog `components[]` row as {@link expandPurchaseLines} reads it. */
+/** A catalog `components[]` row as {@link expandPurchaseItems} reads it. */
 export interface PurchaseExpansionComponent extends ComponentRowForWalk {
   uid: string;
   name?: string;
@@ -223,7 +250,7 @@ export interface PurchaseExpansionComponent extends ComponentRowForWalk {
   stock_method: StockMethodType;
 }
 
-/** The product facts {@link expandPurchaseLines} reads, keyed by uid in its map. */
+/** The product facts {@link expandPurchaseItems} reads, keyed by uid in its map. */
 export interface PurchaseExpansionProduct {
   uid: string;
   name: string;
@@ -232,27 +259,27 @@ export interface PurchaseExpansionProduct {
   components?: readonly PurchaseExpansionComponent[];
 }
 
-/** Why a line could not be expanded into one stockable line. */
+/** Why an item could not be expanded into one stockable item. */
 export interface PurchaseExpansionRefusal {
   uid_product: string;
-  reason: "no_stocked_component" | "several_stocked_components" | "different_hire_windows";
+  reason: "no_stocked_component" | "several_stocked_components";
   message: string;
 }
 
-/** The result of {@link expandPurchaseLines}. */
+/** The result of {@link expandPurchaseItems}. */
 export type PurchaseExpansionResult =
-  | { ok: true; lines: PurchaseLineInputType[] }
+  | { ok: true; items: PurchaseItemInputType[] }
   | { ok: false; refusal: PurchaseExpansionRefusal };
 
 /**
- * Replace every pack line with the stocked product it is a pack of, so a stored
- * purchase only ever names a product that can be RECEIVED.
+ * Replace every pack on a buy or subrent item with the stocked product it is a
+ * pack of, so a stored purchase only ever names a product that can be RECEIVED.
  *
  * A pack is a `stock_method: "none"` product with `components` — the same
  * relation a sale already draws through (`118 Hot Hands (40 Pairs)` →
  * `410 (1 Pair) × 40`). Sales keep the pack as a priced parent over $0
  * component lines; a purchase deliberately does NOT (owner, 2026-10-22): the
- * line's money is the stocked product's cost, so it must sit on the line the
+ * item's money is the stocked product's cost, so it must sit on the item the
  * receipt lands on. `118 × 12 @ $360` becomes `410 × 480 @ $360`, the ratio
  * applied once, here, through {@link componentQuantities} — the one quantity
  * rule the order expander uses.
@@ -264,35 +291,36 @@ export type PurchaseExpansionResult =
  * refusal (buying it would receive nothing), and several is a refusal too —
  * one amount has no rule for splitting across two products' cost.
  *
- * Lines that land on one product MERGE — quantities and amounts summed, the
- * earliest `expected_date` kept — because a purchase holds one line per product
- * and the ledger averages the cost anyway (owner, 2026-10-22).
- *
- * A SUBRENT line expands exactly as a buy line does, carrying its `dates` and
- * `uid_orders` onto the stocked product. Two subrent lines merge only when they
- * name the SAME hire window (their `uid_orders` union): one product has one
- * window per purchase, so a second window is a second purchase — the rule a
- * second price already follows — and that merge is a refusal.
+ * ⚠️ **Expanded items no longer MERGE** (api-cloudrun#1407 D2). They merged —
+ * quantities and amounts summed, one hire window per product — only because a
+ * purchase held one line per product. Items carry their own row identity now,
+ * so a pack item keeps its `uid` and becomes its own item even when the stocked
+ * product already has one; the ledger averages the cost either way.
+ * Usage and direct items pass through untouched.
  *
  * Returns rather than throws: a refusal is an operator-facing 400, and core
  * throws plain `Error`, which a consumer's middleware reads as a 500.
  *
- * @throws when a line names a product absent from `products` — the caller reads
- *   them first, so a miss is its bug, not the operator's.
+ * @throws when an item names a product absent from `products` — the caller
+ *   reads them first, so a miss is its bug, not the operator's.
  */
-export function expandPurchaseLines(
-  lines: readonly PurchaseLineInputType[],
+export function expandPurchaseItems(
+  items: readonly PurchaseItemInputType[],
   products: ReadonlyMap<string, PurchaseExpansionProduct>,
 ): PurchaseExpansionResult {
-  const expanded: PurchaseLineInputType[] = [];
-  for (const line of lines) {
-    const product = products.get(line.uid_product);
-    if (!product) throw new Error(`expandPurchaseLines: product ${line.uid_product} was not read`);
-    if (product.stock_method !== "none") {
-      expanded.push(line);
+  const expanded: PurchaseItemInputType[] = [];
+  for (const item of items) {
+    if (item.type !== "buy" && item.type !== "subrent") {
+      expanded.push(item);
       continue;
     }
-    const frontier = stockedFrontier(product, line.quantity);
+    const product = products.get(item.uid_product);
+    if (!product) throw new Error(`expandPurchaseItems: product ${item.uid_product} was not read`);
+    if (product.stock_method !== "none") {
+      expanded.push(item);
+      continue;
+    }
+    const frontier = stockedFrontier(product, item.quantity);
     if (frontier.length !== 1) {
       return {
         ok: false,
@@ -307,22 +335,37 @@ export function expandPurchaseLines(
             uid_product: product.uid,
             reason: "several_stocked_components",
             message: `${product.name} contains several stocked products (` +
-              frontier.map((f) => f.name).join(", ") + "). Buy each as its own line.",
+              frontier.map((f) => f.name).join(", ") + "). Buy each as its own item.",
           },
       };
     }
     const [leaf] = frontier;
-    expanded.push({
-      uid_product: leaf.uid,
-      quantity: leaf.quantity,
-      amount_cents: line.amount_cents,
-      ...(line.expected_date !== undefined ? { expected_date: line.expected_date } : {}),
-      ...(line.dates !== undefined ? { dates: { ...line.dates } } : {}),
-      ...(line.uid_orders !== undefined ? { uid_orders: [...line.uid_orders] } : {}),
-      ...(line.landed_costs !== undefined ? { landed_costs: line.landed_costs.map((e) => ({ ...e })) } : {}),
-    });
+    expanded.push(expandOnto(item, leaf.uid, leaf.quantity));
   }
-  return mergeByProduct(expanded, products);
+  return { ok: true, items: expanded };
+}
+
+function expandOnto(
+  item: BuyItemInputType | SubrentItemInputType,
+  uidProduct: string,
+  quantity: number,
+): BuyItemInputType | SubrentItemInputType {
+  if (item.type === "buy") {
+    return {
+      ...item,
+      uid_product: uidProduct,
+      quantity,
+      ...(item.landed_costs !== undefined ? { landed_costs: item.landed_costs.map((e) => ({ ...e })) } : {}),
+    };
+  }
+  return {
+    ...item,
+    uid_product: uidProduct,
+    quantity,
+    billing: { ...item.billing },
+    dates: { ...item.dates },
+    ...(item.uid_orders !== undefined ? { uid_orders: [...item.uid_orders] } : {}),
+  };
 }
 
 function stockedFrontier(
@@ -338,53 +381,4 @@ function stockedFrontier(
     frontier.push({ uid: component.uid, name: component.name ?? component.uid, quantity: qty });
   }
   return frontier;
-}
-
-function sameHire(a: PurchaseLineInputType["dates"], b: PurchaseLineInputType["dates"]): boolean {
-  if (a === undefined || b === undefined) return a === b;
-  return Date.parse(a.start) === Date.parse(b.start) && Date.parse(a.end) === Date.parse(b.end);
-}
-
-function mergeByProduct(
-  lines: readonly PurchaseLineInputType[],
-  products: ReadonlyMap<string, PurchaseExpansionProduct>,
-): PurchaseExpansionResult {
-  const byProduct = new Map<string, PurchaseLineInputType>();
-  for (const line of lines) {
-    const prev = byProduct.get(line.uid_product);
-    if (!prev) {
-      byProduct.set(line.uid_product, {
-        ...line,
-        ...(line.dates !== undefined ? { dates: { ...line.dates } } : {}),
-        ...(line.uid_orders !== undefined ? { uid_orders: [...line.uid_orders] } : {}),
-        ...(line.landed_costs !== undefined ? { landed_costs: line.landed_costs.map((e) => ({ ...e })) } : {}),
-      });
-      continue;
-    }
-    if (!sameHire(prev.dates, line.dates)) {
-      const name = products.get(line.uid_product)?.name ?? line.uid_product;
-      return {
-        ok: false,
-        refusal: {
-          uid_product: line.uid_product,
-          reason: "different_hire_windows",
-          message: `${name} is named twice with different hire windows. ` +
-            "A purchase holds one window per product — raise the second window as its own subrent.",
-        },
-      };
-    }
-    if (prev.uid_orders !== undefined || line.uid_orders !== undefined) {
-      prev.uid_orders = [...new Set([...(prev.uid_orders ?? []), ...(line.uid_orders ?? [])])];
-    }
-    // Each merged line's landed costs keep their own amounts; absent on both
-    // stays absent, so a merge cannot turn "keep what is stored" into "erase".
-    if (prev.landed_costs !== undefined || line.landed_costs !== undefined) {
-      prev.landed_costs = [...(prev.landed_costs ?? []), ...(line.landed_costs ?? []).map((e) => ({ ...e }))];
-    }
-    prev.quantity += line.quantity;
-    prev.amount_cents += line.amount_cents;
-    const dates = [prev.expected_date, line.expected_date].filter((d): d is string => typeof d === "string");
-    if (dates.length > 0) prev.expected_date = dates.reduce((a, b) => (Date.parse(b) < Date.parse(a) ? b : a));
-  }
-  return { ok: true, lines: [...byProduct.values()] };
 }

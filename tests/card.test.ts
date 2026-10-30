@@ -9,7 +9,7 @@ import {
   PURCHASE_CARD_LOCKED,
   purchaseCardDue,
 } from "../src/utils/cards.ts";
-import type { PurchaseLine } from "../src/schemas/purchase.ts";
+import type { BuyItem, SubrentItem } from "../src/schemas/purchase.ts";
 
 /**
  * A genuine ORDER-DERIVED EVENT CARD — `sources` names an order, so
@@ -472,23 +472,48 @@ Deno.test("purchase card: a purchase action sits only on a purchase card, and a 
   assertEquals(cardPaths({ ...purchaseCard(), action: null }), []);
 });
 
-const pline = (over: Partial<PurchaseLine> = {}): PurchaseLine => ({
-  uid_product: "testprod100000000000",
-  name: "J-2000",
-  quantity: 10,
-  amount_cents: 50_000,
+const pline = (over: Partial<SubrentItem> = {}): SubrentItem => {
+  const uid = over.uid ?? "9a1b2c3d-0000-4000-8000-000000000002";
+  return {
+    type: "subrent",
+    uid,
+    path: [uid],
+    uid_product: "testprod100000000000",
+    name: "J-2000",
+    quantity: 10,
+    coa_posting: 5100,
+    uid_tracking_category: null,
+    billing: { basis: "fixed", amount_cents: 50_000 },
+    quantity_received: 0,
+    quantity_billed: 0,
+    quantity_canceled: 0,
+    dates: { start: "2026-10-18T09:00:00.000-05:00", end: "2026-10-25T17:00:00.000-05:00" },
+    quantity_returned: 0,
+    uid_orders: [],
+    ...over,
+  };
+};
+
+/** A buy item on the same purchase — a return card never reads it (D3). */
+const bline: BuyItem = {
+  type: "buy",
+  uid: "9a1b2c3d-0000-4000-8000-000000000001",
+  path: ["9a1b2c3d-0000-4000-8000-000000000001"],
+  uid_product: "testprod200000000000",
+  name: "Gaff tape",
+  quantity: 5,
+  amount_cents: 1_000,
+  coa_posting: 1400,
+  uid_tracking_category: null,
   expected_date: null,
   quantity_received: 0,
   quantity_billed: 0,
   quantity_canceled: 0,
-  dates: { start: "2026-10-18T09:00:00.000-05:00", end: "2026-10-25T17:00:00.000-05:00" },
-  quantity_returned: 0,
-  uid_orders: [],
-  ...over,
-});
+  landed_costs: [],
+};
 
 Deno.test("computeCardStatusFromPurchase / computeCardActionFromPurchase — the table", () => {
-  const cases: [string, "active" | "canceled" | "complete", Partial<PurchaseLine>, string, string | null][] = [
+  const cases: [string, "active" | "canceled" | "complete", Partial<SubrentItem>, string, string | null][] = [
     ["nothing received", "active", {}, "planned", null],
     ["received, none returned", "active", { quantity_received: 10 }, "active", "return_to_supplier"],
     ["partly returned", "active", { quantity_received: 10, quantity_returned: 4 }, "active", "return_to_supplier"],
@@ -498,19 +523,24 @@ Deno.test("computeCardStatusFromPurchase / computeCardActionFromPurchase — the
     ["canceled outright", "canceled", { quantity_canceled: 10 }, "canceled", null],
   ];
   for (const [name, status, over, want, action] of cases) {
-    const p = { status, lines: [pline(over)] };
+    const p = { status, items: [pline(over)] };
     assertEquals(computeCardStatusFromPurchase(p, "planned"), want, name);
     assertEquals(computeCardActionFromPurchase(p)?.value ?? null, action, name);
+    // A buy item beside it changes nothing: the card is about the subrent items.
+    assertEquals(computeCardStatusFromPurchase({ status, items: [bline, pline(over)] }, "planned"), want, `${name} + buy`);
   }
   // An operator's `blocked` is theirs.
-  assertEquals(computeCardStatusFromPurchase({ status: "active", lines: [pline({ quantity_received: 10 })] }, "blocked"), "blocked");
+  assertEquals(computeCardStatusFromPurchase({ status: "active", items: [pline({ quantity_received: 10 })] }, "blocked"), "blocked");
 });
 
-Deno.test("purchaseCardDue: the earliest due-back among OPEN lines, else among all", () => {
+Deno.test("purchaseCardDue: the earliest due-back among OPEN subrent items, else among all; null when none is due", () => {
   const early = "2026-10-22T17:00:00.000-05:00";
   const late = "2026-10-25T17:00:00.000-05:00";
-  const a = pline({ uid_product: "a", dates: { start: early, end: early }, quantity_received: 3, quantity_returned: 3, quantity_canceled: 7 });
-  const b = pline({ uid_product: "b", dates: { start: early, end: late }, quantity_received: 10 });
-  assertEquals(purchaseCardDue({ lines: [a, b] }), late, "a is settled, so b's date leads");
-  assertEquals(purchaseCardDue({ lines: [a, { ...b, quantity_returned: 10 }] }), early, "nothing open: the earliest of all");
+  const a = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000a", dates: { start: early, end: early }, quantity_received: 3, quantity_returned: 3, quantity_canceled: 7 });
+  const b = pline({ uid: "9a1b2c3d-0000-4000-8000-00000000000b", dates: { start: early, end: late }, quantity_received: 10 });
+  assertEquals(purchaseCardDue({ items: [a, b] }), late, "a is settled, so b's date leads");
+  assertEquals(purchaseCardDue({ items: [a, { ...b, quantity_returned: 10 }] }), early, "nothing open: the earliest of all");
+  // A standing subrent is due back on nothing; a buy item never enters.
+  assertEquals(purchaseCardDue({ items: [pline({ dates: { start: early, end: null } }), bline] }), null);
+  assertEquals(purchaseCardDue({ items: [bline] }), null);
 });

@@ -641,10 +641,11 @@ export interface SubrentMarginCostLine {
    */
   hire_start: string;
   /**
-   * What the purchase line was ordered at — `PurchaseLine.amount_cents`.
-   * INFORMATIONAL and never part of `cost_cents`: a hire not billed yet costs
-   * nothing here, and this is how a reader sees that. `null` on a `purchase`
-   * line.
+   * What the subrent item was ordered at — `SubrentItem.billing.amount_cents`
+   * on a fixed basis. INFORMATIONAL and never part of `cost_cents`: a hire not
+   * billed yet costs nothing here, and this is how a reader sees that. `null`
+   * on a `purchase` line and on an activation-billed item, which commits no
+   * amount.
    */
   ordered_cents: number | null;
   /** Bills net of supplier credits. May be negative when a credit exceeds its bills. */

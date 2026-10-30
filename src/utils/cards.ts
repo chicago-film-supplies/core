@@ -21,6 +21,7 @@ import {
   isPurchaseCard,
   ownsKey,
   type Purchase,
+  type SubrentItem,
 } from "../schemas/mod.ts";
 import { sumBreakdownKeys, terminalQuantity } from "./bookings.ts";
 
@@ -303,12 +304,24 @@ export { isEventCard, isPurchaseCard };
  */
 export const PURCHASE_CARD_LOCKED: readonly CardLockKey[] = ["card", "subject", "sources", "attachments", "status_auto"];
 
+/** The purchase's subrent items — the only ones a return card is about. */
+function subrentItems(purchase: Pick<Purchase, "items">): SubrentItem[] {
+  return purchase.items.filter((i): i is SubrentItem => i.type === "subrent");
+}
+
+/** Does any subrent item hold units received and not yet returned? */
+function unitsInCustody(purchase: Pick<Purchase, "items">): boolean {
+  return subrentItems(purchase).some((i) => i.quantity_received > i.quantity_returned);
+}
+
 /**
- * A subrent return card's status, from its purchase's buckets.
+ * A subrent return card's status, from its purchase's SUBRENT items. A purchase
+ * holding a subrent item has one card (whatever else it holds, D3); its buy,
+ * usage and direct items have nothing to return and do not enter.
  *
  * - `canceled` — the purchase is canceled (closed with nothing received).
- * - `active` — some line holds units received and not yet returned: there is a
- *   return to make.
+ * - `active` — some subrent item holds units received and not yet returned:
+ *   there is a return to make.
  * - `complete` — nothing is in custody and nothing more is coming: every unit
  *   ordered was received or canceled, and every unit received went back.
  * - `planned` otherwise — waiting on the supplier's delivery.
@@ -318,14 +331,13 @@ export const PURCHASE_CARD_LOCKED: readonly CardLockKey[] = ["card", "subject", 
  * purchase's own `active`.
  */
 export function computeCardStatusFromPurchase(
-  purchase: Pick<Purchase, "status" | "lines">,
+  purchase: Pick<Purchase, "status" | "items">,
   current: CardStatus,
 ): CardStatus {
   if (current === "blocked") return current;
   if (purchase.status === "canceled") return "canceled";
-  const out = purchase.lines.some((l) => l.quantity_received > (l.quantity_returned ?? 0));
-  if (out) return "active";
-  const settled = purchase.lines.every((l) => l.quantity_received + l.quantity_canceled === l.quantity);
+  if (unitsInCustody(purchase)) return "active";
+  const settled = subrentItems(purchase).every((i) => i.quantity_received + i.quantity_canceled === i.quantity);
   return settled ? "complete" : "planned";
 }
 
@@ -335,23 +347,26 @@ export function computeCardStatusFromPurchase(
  * {@link computeCardStatusFromPurchase}, so the two cannot disagree about
  * whether there is a return to make.
  */
-export function computeCardActionFromPurchase(purchase: Pick<Purchase, "lines">): CardAction | null {
-  const out = purchase.lines.some((l) => l.quantity_received > (l.quantity_returned ?? 0));
-  return out ? { source: "purchase", value: "return_to_supplier" } : null;
+export function computeCardActionFromPurchase(purchase: Pick<Purchase, "items">): CardAction | null {
+  return unitsInCustody(purchase) ? { source: "purchase", value: "return_to_supplier" } : null;
 }
 
 /**
  * The instant a subrent return card is dated at: the EARLIEST due-back
- * (`dates.end`) among lines still OPEN — units in custody, or units still to
- * arrive — or, once nothing is open, the earliest due-back of any line, so a
- * completed card keeps a stable date. `null` only for a purchase whose lines
- * carry no hire, which is not a subrent.
+ * (`dates.end`) among subrent items still OPEN — units in custody, or units
+ * still to arrive — or, once nothing is open, the earliest due-back of any
+ * subrent item, so a completed card keeps a stable date.
+ *
+ * `null` when no subrent item states a due-back: a purchase with no subrent
+ * item, or one whose subrents are all STANDING (`dates.end: null`), which are
+ * due back on nothing.
  */
-export function purchaseCardDue(purchase: Pick<Purchase, "lines">): string | null {
-  const open = purchase.lines.filter((l) =>
-    l.quantity_received > (l.quantity_returned ?? 0) || l.quantity_received + l.quantity_canceled < l.quantity
+export function purchaseCardDue(purchase: Pick<Purchase, "items">): string | null {
+  const items = subrentItems(purchase);
+  const open = items.filter((i) =>
+    i.quantity_received > i.quantity_returned || i.quantity_received + i.quantity_canceled < i.quantity
   );
-  const pool = (open.length > 0 ? open : purchase.lines).map((l) => l.dates?.end).filter((d): d is string => d !== undefined);
+  const pool = (open.length > 0 ? open : items).map((i) => i.dates.end).filter((d): d is string => d !== null);
   if (pool.length === 0) return null;
   return pool.reduce((a, b) => (Date.parse(b) < Date.parse(a) ? b : a));
 }
