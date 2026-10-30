@@ -173,7 +173,7 @@ export interface Stock {
    * A copy of `inventory-ledgers/{P}.quantity_rented_in` — the part of
    * {@link quantity_held} that is rented in, so a reader can take OWNED units
    * (`held − rented_in`) without a second document. Required since beta B: every
-   * projection was rebuilt by `api-cloudrun/scripts/backfill-purchase-kind.ts`
+   * projection was rebuilt by `api-cloudrun/scripts/backfill-purchase-kind.ts` (since deleted)
    * on 2026-10-24.
    */
   quantity_rented_in: number;

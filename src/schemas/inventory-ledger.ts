@@ -68,7 +68,8 @@ export interface InventoryLedger {
    * product is refused).
    *
    * Required since beta B: every pre-subrent ledger was stamped `0` by
-   * `api-cloudrun/scripts/backfill-purchase-kind.ts` on 2026-10-24.
+   * `api-cloudrun/scripts/backfill-purchase-kind.ts` (a one-shot, since deleted) on
+   * 2026-10-24.
    */
   quantity_rented_in: number;
   quantity_out_of_service: number;
