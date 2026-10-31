@@ -200,6 +200,24 @@ const COUNT_BOUNDARY_TESTED: EnforcementRef = {
   gates: true,
 };
 
+const LINKED_TWIN_TESTED: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts::PUT active on a rental writes its replacement twin",
+  clause:
+    "both directions of the `active` copy and the replacement's `base_cents` reaching its rental's `replacement_cents`, each asserted on the twin document after the PUT; the unlink and reuse arms are asserted in `products.test.ts`'s replacement-twin steps",
+  gates: true,
+};
+
+const LINKED_TWIN_WEBSHOP_TESTED: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/products/updateProductPropagation.test.ts::PUT active on a replacement writes its rental and the rental's webshop mirror",
+  clause:
+    "a replacement's `active` flip reaches its webshop-listed rental AND that rental's mirror in the same transaction — the edited product's own mirror is `update-product:to-webshop`'s, and the twin's was the hole",
+  gates: true,
+};
+
 const WEBSHOP_MIRROR_TESTED: EnforcementRef = {
   kind: "test",
   ref:
@@ -681,6 +699,59 @@ const updateProductRules: CollectionRule[] = [
     ],
   },
   {
+    id: "update-product:to-linked-twin",
+    source: "products",
+    target: "products",
+    mode: "co-write",
+    invariant:
+      "A counted rental and its replacement twin (`uid_linked_replacement` on the rental, `uid_linked_rental` on the replacement) are written together inside `update-product`. `active` is copied in BOTH directions — a rental's flip reaches its twin and a replacement's flip reaches its rental — and a replacement's own `price.base_cents` is the rental's `price.replacement_cents`. A write that stops the rental counting (the stock_method or type unlink arm) deactivates the twin and drops the rental's link fields; one that makes it a counted rental again reuses the twin found by `uid_linked_rental` (renamed, repriced, `active` following the rental) or mints one. ⚠️ The pair is keyed by each side's OWN link field, so a one-way link (api-cloudrun#1374) lets this cascade write a twin that does not point back. ⚠️ Superseding a product forces `active: false` through this same edge.",
+    enforced_by: [LINKED_TWIN_TESTED],
+    transaction: "update-product",
+    fields: [
+      { source: ["active"], target: ["active"], transform: "rental → its replacement, and replacement → its rental" },
+      {
+        source: ["price", "base_cents"],
+        target: ["price", "replacement_cents"],
+        transform: "a replacement's own base price onto its rental",
+      },
+      {
+        source: ["stock_method"],
+        target: ["active"],
+        transform:
+          "an unlink arm (the product stops being a counted rental, by stock_method or by type) sets the twin's `active: false` and unsets the rental's `uid_linked_replacement` / `crms_linked_replacement_id` / `crms_linked_replacement_rate_id`",
+      },
+      {
+        source: ["type"],
+        target: ["active"],
+        transform: "the type branch's unlink arm, same write as the stock_method one",
+      },
+      {
+        source: ["name"],
+        target: ["name"],
+        transform:
+          "the reuse arm (the product becomes a counted rental and a twin already names it) renames the twin `Replacement: <name>`; the mint arm stages a new twin through `mintReplacementTwin`",
+      },
+      {
+        source: ["price", "replacement_cents"],
+        target: ["price", "base_cents"],
+        transform: "the reuse arm reprices the twin from the rental's replacement price",
+      },
+    ],
+  },
+  {
+    id: "update-product:linked-twin-to-webshop",
+    source: "products",
+    target: "webshop-products",
+    mode: "co-write",
+    invariant:
+      "When `update-product:to-linked-twin` copies `active` onto a twin that is webshop-listed (`webshop.available === true`), the TWIN's mirror takes the same `active` in the same transaction. The edited product's own mirror is `update-product:to-webshop`'s; this is the other end of the pair. No replacement is webshop-listed today, so in practice it is a replacement's flip reaching its rental's mirror.",
+    enforced_by: [LINKED_TWIN_WEBSHOP_TESTED],
+    transaction: "update-product",
+    fields: [
+      { source: ["active"], target: ["active"], transform: "written onto the TWIN's mirror, only when the twin is webshop-listed" },
+    ],
+  },
+  {
     id: "update-product:tags-to-tags",
     source: "products",
     target: "tags",
@@ -971,6 +1042,8 @@ const updateProductTransaction: TransactionDefinition = {
     "update-product:name-to-tracking-categories",
     "update-product:name-to-out-of-service",
     "update-product:to-webshop",
+    "update-product:to-linked-twin",
+    "update-product:linked-twin-to-webshop",
     "update-product:tags-to-tags",
     "update-product:tracking-category-change",
     "update-product:stock-method-change",
