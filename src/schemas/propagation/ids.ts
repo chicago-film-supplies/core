@@ -299,6 +299,7 @@ export type RuleId =
   | "update-product:to-webshop"
   | "update-product:to-linked-twin"
   | "update-product:linked-twin-to-webshop"
+  | "update-product:linked-twin-to-tracking-categories"
   | "update-product:tags-to-tags"
   | "update-product:tracking-category-change"
   | "update-product:tracking-category-to-components"

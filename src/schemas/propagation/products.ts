@@ -218,6 +218,15 @@ const LINKED_TWIN_WEBSHOP_TESTED: EnforcementRef = {
   gates: true,
 };
 
+const LINKED_TWIN_MINT_REGISTRATION_TESTED: EnforcementRef = {
+  kind: "test",
+  ref:
+    "api-cloudrun/tests/integration/products/products.test.ts::PUT - a rental flipped none → bulk gets a twin, linked both ways, with a crms_id",
+  clause:
+    "a twin minted by an UPDATE carries the Replacements category's `uid_tracking_category`, is present in that category's `products{}` under its own uid and name, and the PUT reports this rule — the update-time half of `REPLACEMENT_REGISTRATION`",
+  gates: true,
+};
+
 const WEBSHOP_MIRROR_TESTED: EnforcementRef = {
   kind: "test",
   ref:
@@ -740,6 +749,29 @@ const updateProductRules: CollectionRule[] = [
     ],
   },
   {
+    id: "update-product:linked-twin-to-tracking-categories",
+    source: "products",
+    target: "tracking-categories",
+    mode: "co-write",
+    invariant:
+      "When `update-product` MINTS a replacement twin (the product becomes a counted rental and no twin names it), the twin is registered in the Replacements category exactly as `create-product:product-to-tracking-categories` registers one minted at create time: present in `products{}` and counted, and carrying that category's three tracking fields. A twin REUSED by the same arm is already registered and writes nothing here. When the Replacements category is absent the mint degrades to an unclassified twin (and warns), and this rule is not reported.",
+    enforced_by: [
+      LINKED_TWIN_MINT_REGISTRATION_TESTED,
+      XERO_TRACKING_MEMBERSHIP,
+      DENORM_COUNT,
+    ],
+    transaction: "update-product",
+    fields: [
+      {
+        source: ["uid_linked_replacement"],
+        target: ["products"],
+        transform:
+          "the minted twin is registered under its own uid and name in the Replacements category, and carries uid_tracking_category + tracking_category_name + xero_tracking_option_id read from that category doc",
+      },
+      { source: [], target: ["count"], transform: "FieldValue.increment(1)" },
+    ],
+  },
+  {
     id: "update-product:linked-twin-to-webshop",
     source: "products",
     target: "webshop-products",
@@ -1045,6 +1077,7 @@ const updateProductTransaction: TransactionDefinition = {
     "update-product:to-webshop",
     "update-product:to-linked-twin",
     "update-product:linked-twin-to-webshop",
+    "update-product:linked-twin-to-tracking-categories",
     "update-product:tags-to-tags",
     "update-product:tracking-category-change",
     "update-product:stock-method-change",
